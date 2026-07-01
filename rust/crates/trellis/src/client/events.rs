@@ -1,9 +1,8 @@
 use async_nats::header::HeaderMap;
 use bytes::Bytes;
-use futures_util::TryStreamExt;
 use postgres::Client as PostgresClient;
 use rusqlite::{params, types::Type as SqliteType, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -155,9 +154,9 @@ pub enum EventStoreError {
     /// Postgres storage failed.
     #[error("postgres error: {0}")]
     Postgres(#[from] postgres::Error),
-    /// NATS KV storage failed.
-    #[error("nats kv error: {0}")]
-    NatsKv(String),
+    /// Runtime KV storage failed.
+    #[error("runtime kv error: {0}")]
+    RuntimeKv(String),
     /// A publisher failed while dispatching an outbox event.
     #[error("publish error: {0}")]
     Publish(String),
@@ -656,218 +655,6 @@ impl InboxStore for PostgresInboxStore<'_> {
             Ok(InboxReceipt::Duplicate)
         } else {
             Ok(InboxReceipt::Accepted)
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct StoredPreparedEvent {
-    subject: String,
-    payload: Vec<u8>,
-    headers: HeaderMap,
-    event_id: String,
-    event_time: String,
-    attempts: u32,
-    last_error: Option<String>,
-    status: String,
-}
-
-impl StoredPreparedEvent {
-    fn from_prepared(event: &PreparedTrellisEvent) -> Self {
-        Self {
-            subject: event.subject().to_string(),
-            payload: event.payload().to_vec(),
-            headers: event.headers().clone(),
-            event_id: event.event_id().to_string(),
-            event_time: event.event_time().to_string(),
-            attempts: 0,
-            last_error: None,
-            status: OUTBOX_STATUS_PENDING.to_string(),
-        }
-    }
-
-    fn into_record(self, id: String) -> OutboxEventRecord {
-        OutboxEventRecord {
-            id,
-            event: PreparedTrellisEvent::from_parts(
-                self.subject,
-                Bytes::from(self.payload),
-                self.headers,
-                self.event_id,
-                self.event_time,
-            ),
-            attempts: self.attempts,
-            last_error: self.last_error,
-        }
-    }
-}
-
-/// NATS KV-backed outbox adapter using KV create/update revision checks.
-#[derive(Clone, Debug)]
-pub struct NatsKvOutboxStore {
-    store: async_nats::jetstream::kv::Store,
-    prefix: String,
-}
-
-impl NatsKvOutboxStore {
-    /// Wrap an existing NATS KV bucket with a key prefix.
-    pub fn new(store: async_nats::jetstream::kv::Store, prefix: impl Into<String>) -> Self {
-        Self {
-            store,
-            prefix: prefix.into(),
-        }
-    }
-
-    fn key(&self, id: &str) -> String {
-        format!("{}outbox/{id}", self.prefix)
-    }
-}
-
-impl OutboxStore for NatsKvOutboxStore {
-    async fn enqueue(
-        &mut self,
-        id: &str,
-        event: &PreparedTrellisEvent,
-    ) -> Result<(), EventStoreError> {
-        let value = serde_json::to_vec(&StoredPreparedEvent::from_prepared(event))?;
-        match self.store.create(self.key(id), Bytes::from(value)).await {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let message = error.to_string();
-                if message.contains("already exists") {
-                    Ok(())
-                } else {
-                    Err(EventStoreError::NatsKv(message))
-                }
-            }
-        }
-    }
-
-    async fn claim_next(&mut self) -> Result<Option<OutboxEventRecord>, EventStoreError> {
-        let mut keys = self
-            .store
-            .keys()
-            .await
-            .map_err(|error| EventStoreError::NatsKv(error.to_string()))?;
-        while let Some(key) = keys
-            .try_next()
-            .await
-            .map_err(|error| EventStoreError::NatsKv(error.to_string()))?
-        {
-            if !key.starts_with(&format!("{}outbox/", self.prefix)) {
-                continue;
-            }
-            let Some(entry) = self
-                .store
-                .entry(key.clone())
-                .await
-                .map_err(|error| EventStoreError::NatsKv(error.to_string()))?
-            else {
-                continue;
-            };
-            let mut stored: StoredPreparedEvent = serde_json::from_slice(&entry.value)?;
-            if stored.status != OUTBOX_STATUS_PENDING {
-                continue;
-            }
-            stored.status = OUTBOX_STATUS_IN_FLIGHT.to_string();
-            stored.attempts = stored.attempts.saturating_add(1);
-            let value = serde_json::to_vec(&stored)?;
-            if self
-                .store
-                .update(key.clone(), Bytes::from(value), entry.revision)
-                .await
-                .is_err()
-            {
-                continue;
-            }
-            let id = key
-                .strip_prefix(&format!("{}outbox/", self.prefix))
-                .unwrap_or(&key)
-                .to_string();
-            return Ok(Some(stored.into_record(id)));
-        }
-        Ok(None)
-    }
-
-    async fn mark_published(&mut self, id: &str) -> Result<(), EventStoreError> {
-        let key = self.key(id);
-        if let Some(entry) = self
-            .store
-            .entry(key.clone())
-            .await
-            .map_err(|error| EventStoreError::NatsKv(error.to_string()))?
-        {
-            let mut stored: StoredPreparedEvent = serde_json::from_slice(&entry.value)?;
-            stored.status = OUTBOX_STATUS_PUBLISHED.to_string();
-            self.store
-                .update(
-                    key,
-                    Bytes::from(serde_json::to_vec(&stored)?),
-                    entry.revision,
-                )
-                .await
-                .map_err(|error| EventStoreError::NatsKv(error.to_string()))?;
-        }
-        Ok(())
-    }
-
-    async fn mark_failed(&mut self, id: &str, error: &str) -> Result<(), EventStoreError> {
-        let key = self.key(id);
-        if let Some(entry) = self
-            .store
-            .entry(key.clone())
-            .await
-            .map_err(|error| EventStoreError::NatsKv(error.to_string()))?
-        {
-            let mut stored: StoredPreparedEvent = serde_json::from_slice(&entry.value)?;
-            stored.status = OUTBOX_STATUS_PENDING.to_string();
-            stored.last_error = Some(error.to_string());
-            self.store
-                .update(
-                    key,
-                    Bytes::from(serde_json::to_vec(&stored)?),
-                    entry.revision,
-                )
-                .await
-                .map_err(|error| EventStoreError::NatsKv(error.to_string()))?;
-        }
-        Ok(())
-    }
-}
-
-/// NATS KV-backed inbox adapter using KV create as duplicate suppression.
-#[derive(Clone, Debug)]
-pub struct NatsKvInboxStore {
-    store: async_nats::jetstream::kv::Store,
-    prefix: String,
-}
-
-impl NatsKvInboxStore {
-    /// Wrap an existing NATS KV bucket with a key prefix.
-    pub fn new(store: async_nats::jetstream::kv::Store, prefix: impl Into<String>) -> Self {
-        Self {
-            store,
-            prefix: prefix.into(),
-        }
-    }
-
-    fn key(&self, event_id: &str) -> String {
-        format!("{}inbox/{event_id}", self.prefix)
-    }
-}
-
-impl InboxStore for NatsKvInboxStore {
-    async fn record_received(&mut self, event_id: &str) -> Result<InboxReceipt, EventStoreError> {
-        match self.store.create(self.key(event_id), Bytes::new()).await {
-            Ok(_) => Ok(InboxReceipt::Accepted),
-            Err(error) => {
-                let message = error.to_string();
-                if message.contains("already exists") {
-                    Ok(InboxReceipt::Duplicate)
-                } else {
-                    Err(EventStoreError::NatsKv(message))
-                }
-            }
         }
     }
 }

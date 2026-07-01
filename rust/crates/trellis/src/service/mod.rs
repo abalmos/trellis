@@ -46,8 +46,7 @@ pub use request_validator_adapter::{
     AuthRequestValidatorClientPort as DefaultRequestValidatorClientPort,
 };
 pub use resources::{
-    KvResourceClient, KvResourceEntry, KvResourceHandle, KvResourceOperation, NatsKvResourceClient,
-    NatsKvWatch, NatsStoreResourceClient, ResourceRuntimeClient, StoreResourceClient,
+    KvResourceClient, KvResourceEntry, KvResourceHandle, KvResourceOperation, StoreResourceClient,
     StoreResourceHandle, StoreWaitOptions,
 };
 pub use router::{RequestContext, Router};
@@ -80,9 +79,5 @@ pub mod internal {
     pub use super::request_loop::{
         dispatch_one, encode_error_reply, encode_success_reply, HandlerResponse, InboundRequest,
         OutboundReply, RequestHandler, ResponseStream,
-    };
-    pub use super::runtime::{
-        bootstrap_and_run_single_subject_service, run_multi_subject_service,
-        run_single_subject_service, subscribe_subject,
     };
 }

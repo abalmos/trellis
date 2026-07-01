@@ -259,7 +259,8 @@ struct DeviceConnectInfoTransports {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeviceConnectInfoNatsTransport {
-    nats_servers: Vec<String>,
+    #[serde(rename = "natsServers")]
+    servers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -381,7 +382,8 @@ struct ServiceBootstrapTransports {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ServiceBootstrapNatsTransport {
-    nats_servers: Vec<String>,
+    #[serde(rename = "natsServers")]
+    servers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -850,7 +852,7 @@ async fn connect_bootstrapped_service(
         .transports
         .native
         .ok_or_else(|| TrellisClientError::Bootstrap("missing native NATS transport".into()))?;
-    if native.nats_servers.is_empty() {
+    if native.servers.is_empty() {
         return Err(TrellisClientError::Bootstrap(
             "native NATS transport has no servers".into(),
         ));
@@ -887,7 +889,7 @@ async fn connect_bootstrapped_service(
         }
     })
     .custom_inbox_prefix(inbox_prefix)
-    .connect(native.nats_servers)
+    .connect(native.servers)
     .await
     .map_err(|error| {
         TrellisClientError::NatsConnect(format!(
@@ -941,11 +943,6 @@ pub struct TrellisClient {
 
 impl TrellisClient {
     pub(crate) fn nats(&self) -> &async_nats::Client {
-        &self.nats
-    }
-
-    #[doc(hidden)]
-    pub fn internal_nats(&self) -> &async_nats::Client {
         &self.nats
     }
 
@@ -1035,7 +1032,7 @@ impl TrellisClient {
             response.connect_info.transports.native.ok_or_else(|| {
                 TrellisClientError::Bootstrap("missing native NATS transport".into())
             })?;
-        if native.nats_servers.is_empty() {
+        if native.servers.is_empty() {
             return Err(TrellisClientError::Bootstrap(
                 "native NATS transport has no servers".into(),
             ));
@@ -1073,7 +1070,7 @@ impl TrellisClient {
             }
         })
         .custom_inbox_prefix(inbox_prefix)
-        .connect(native.nats_servers)
+        .connect(native.servers)
         .await
         .map_err(|error| {
             TrellisClientError::NatsConnect(format!(
@@ -1743,7 +1740,7 @@ mod tests {
             contract_digest: contract_digest.to_string(),
             transports: DeviceConnectInfoTransports {
                 native: Some(DeviceConnectInfoNatsTransport {
-                    nats_servers: vec!["nats://127.0.0.1:4222".to_string()],
+                    servers: vec!["nats://127.0.0.1:4222".to_string()],
                 }),
             },
             transport: DeviceConnectInfoTransport {

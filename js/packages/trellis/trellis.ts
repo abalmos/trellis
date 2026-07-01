@@ -2140,9 +2140,9 @@ export class Trellis<
   readonly contractId?: string;
   readonly contractDigest?: string;
 
-  protected nats: NatsConnection;
-  protected js: JetStreamClient;
-  protected auth: TrellisAuth;
+  #nats: NatsConnection;
+  #js: JetStreamClient;
+  #auth: TrellisAuth;
   readonly api: TA;
   #log: LoggerLike;
   #tasks: TrellisTasks;
@@ -2167,9 +2167,9 @@ export class Trellis<
     const api = opts?.api;
 
     this.name = name;
-    this.nats = nats;
-    this.js = jetstream(this.nats);
-    this.auth = auth as TrellisAuth;
+    this.#nats = nats;
+    this.#js = jetstream(this.#nats);
+    this.#auth = auth as TrellisAuth;
     this.api = (api ?? EMPTY_TRELLIS_API) as TA;
     this.#log = (opts?.log ?? logger).child({ lib: "trellis" });
     this.timeout = opts?.timeout ?? 3000;
@@ -2195,6 +2195,18 @@ export class Trellis<
     this.event = this.#createEventFacade();
     this.feed = this.#createFeedFacade();
     this.operation = this.#createOperationFacade();
+  }
+
+  protected get nats(): NatsConnection {
+    return this.#nats;
+  }
+
+  protected get js(): JetStreamClient {
+    return this.#js;
+  }
+
+  protected get auth(): TrellisAuth {
+    return this.#auth;
   }
 
   #createStateFacade(state: TState | undefined): StateFacade<TState> {
@@ -2462,10 +2474,10 @@ export class Trellis<
     TypedKV<typeof DurableOperationRecordSchema>
   > {
     if (!this.#operationStore) {
-      const bucket = `trellis_operations_${this.auth.sessionKey.slice(0, 16)}`;
+      const bucket = `trellis_operations_${this.#auth.sessionKey.slice(0, 16)}`;
       this.#operationStore = (async () => {
         const result = await TypedKV.open(
-          this.nats,
+          this.#nats,
           bucket,
           DurableOperationRecordSchema,
           {
@@ -2615,7 +2627,7 @@ export class Trellis<
         const authHeaders = await this.#createProof(subject, msg);
 
         const headers = natsHeaders();
-        headers.set("session-key", this.auth.sessionKey);
+        headers.set("session-key", this.#auth.sessionKey);
         headers.set("proof", authHeaders.proof);
         headers.set("iat", String(authHeaders.iat));
         headers.set("request-id", authHeaders.requestId);
@@ -2953,21 +2965,21 @@ export class Trellis<
 
       const authHeaders = await this.#createProof(subject, payload);
       const headers = natsHeaders();
-      headers.set("session-key", this.auth.sessionKey);
+      headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
       injectTraceContext(createNatsHeaderCarrier(headers));
 
-      const inbox = createInbox(`_INBOX.${this.auth.sessionKey.slice(0, 16)}`);
-      const sub = this.nats.subscribe(inbox);
+      const inbox = createInbox(`_INBOX.${this.#auth.sessionKey.slice(0, 16)}`);
+      const sub = this.#nats.subscribe(inbox);
       const iterator = sub[Symbol.asyncIterator]();
       const abort = () => sub.unsubscribe();
       opts?.signal?.addEventListener("abort", abort, { once: true });
 
       try {
-        this.nats.publish(subject, payload, { headers, reply: inbox });
-        await this.nats.flush();
+        this.#nats.publish(subject, payload, { headers, reply: inbox });
+        await this.#nats.flush();
       } catch (cause) {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
@@ -3144,8 +3156,8 @@ export class Trellis<
     if (isErr(subject)) throw subject.error;
     let sub: ReturnType<NatsConnection["subscribe"]>;
     try {
-      sub = this.nats.subscribe(subject);
-      await this.nats.flush();
+      sub = this.#nats.subscribe(subject);
+      await this.#nats.flush();
     } catch (cause) {
       const error = createTransportError({
         code: "trellis.feed.listen_failed",
@@ -3260,8 +3272,8 @@ export class Trellis<
     }
     const readyHeaders = natsHeaders();
     readyHeaders.set("feed-status", "ready");
-    this.nats.publish(msg.reply, new Uint8Array(), { headers: readyHeaders });
-    await this.nats.flush();
+    this.#nats.publish(msg.reply, new Uint8Array(), { headers: readyHeaders });
+    await this.#nats.flush();
 
     const controller = new AbortController();
     try {
@@ -3294,8 +3306,8 @@ export class Trellis<
               return err(error);
             }
             try {
-              this.nats.publish(msg.reply, payload);
-              await this.nats.flush();
+              this.#nats.publish(msg.reply, payload);
+              await this.#nats.flush();
             } catch (cause) {
               const error = new UnexpectedError({
                 cause,
@@ -3356,8 +3368,8 @@ export class Trellis<
       ): AsyncResult<FileInfo, TransferError> =>
         AsyncResult.from((async () => {
           const handle = createTransferHandle(
-            this.nats,
-            this.auth,
+            this.#nats,
+            this.#auth,
             this.timeout,
             grant,
           );
@@ -3385,7 +3397,7 @@ export class Trellis<
   transfer(grant: SendTransferGrant): SendTransferHandle;
   transfer(grant: ReceiveTransferGrant): ReceiveTransferHandle;
   transfer(grant: TransferGrant): ReturnType<typeof createTransferHandle> {
-    return createTransferHandle(this.nats, this.auth, this.timeout, grant);
+    return createTransferHandle(this.#nats, this.#auth, this.timeout, grant);
   }
 
   /*
@@ -3430,7 +3442,7 @@ export class Trellis<
       { method: String(method) },
       `Mounting ${method.toString()} RPC handler`,
     );
-    const sub = this.nats.subscribe(subject);
+    const sub = this.#nats.subscribe(subject, { queue: subject });
 
     return AsyncResult.try(async () => {
       for await (const msg of sub) {
@@ -4130,7 +4142,9 @@ export class Trellis<
           { subject: event.subject },
           `Publishing ${event.event} event.`,
         );
-        await this.js.publish(event.subject, event.encodedPayload, { headers });
+        await this.#js.publish(event.subject, event.encodedPayload, {
+          headers,
+        });
         return ok(undefined);
       } catch (cause) {
         const error = new UnexpectedError({
@@ -4237,7 +4251,7 @@ export class Trellis<
   ): Promise<Result<void, ValidationError | UnexpectedError>> {
     let sub: ReturnType<NatsConnection["subscribe"]> | undefined;
     try {
-      sub = this.nats.subscribe(subject);
+      sub = this.#nats.subscribe(subject);
       if (signal) {
         if (signal.aborted) {
           sub.unsubscribe();
@@ -4247,7 +4261,7 @@ export class Trellis<
           once: true,
         });
       }
-      await this.nats.flush();
+      await this.#nats.flush();
     } catch (cause) {
       if (sub) {
         sub.unsubscribe();
@@ -4502,7 +4516,7 @@ export class Trellis<
 
       try {
         const infoResult = await AsyncResult.try(async () => {
-          const jsm = await jetstreamManager(this.nats);
+          const jsm = await jetstreamManager(this.#nats);
           return await jsm.consumers.info(binding.stream, binding.consumerName);
         });
         const info = infoResult.take();
@@ -4524,7 +4538,7 @@ export class Trellis<
           return info;
         }
 
-        const consumer = this.js.consumers.getConsumerFromInfo(info);
+        const consumer = this.#js.consumers.getConsumerFromInfo(info);
         while (
           !this.#durableEventListenersStopped &&
           this.#durableEventConsumerGroupReady(group, loop)
@@ -4786,7 +4800,7 @@ export class Trellis<
   }
 
   #currentIat(): number {
-    return this.auth.currentIat?.() ?? Math.floor(Date.now() / 1000);
+    return this.#auth.currentIat?.() ?? Math.floor(Date.now() / 1000);
   }
 
   async #createProof(
@@ -4798,14 +4812,14 @@ export class Trellis<
     const iat = this.#currentIat();
     const requestId = ulid();
     const input = buildProofInput(
-      this.auth.sessionKey,
+      this.#auth.sessionKey,
       subject,
       payloadHash,
       iat,
       requestId,
     );
     const digest = await sha256(input);
-    const sigBytes = await this.auth.sign(digest);
+    const sigBytes = await this.#auth.sign(digest);
     return { proof: base64urlEncode(sigBytes), iat, requestId };
   }
 
@@ -4819,7 +4833,7 @@ export class Trellis<
   }): Promise<Result<Msg, TransportError>> {
     for (let retry = 0; retry <= this.#noResponderMaxRetries; retry++) {
       const result = await AsyncResult.try(() =>
-        this.nats.request(args.subject, args.payload, {
+        this.#nats.request(args.subject, args.payload, {
           headers: args.headers,
           timeout: args.timeout,
         })
@@ -4881,7 +4895,7 @@ export class Trellis<
           const authHeaders = await this.#createProof(subject, payload);
 
           const headers = natsHeaders();
-          headers.set("session-key", this.auth.sessionKey);
+          headers.set("session-key", this.#auth.sessionKey);
           headers.set("proof", authHeaders.proof);
           headers.set("iat", String(authHeaders.iat));
           headers.set("request-id", authHeaders.requestId);
@@ -4965,20 +4979,20 @@ export class Trellis<
       const authHeaders = await this.#createProof(subject, payload);
 
       const headers = natsHeaders();
-      headers.set("session-key", this.auth.sessionKey);
+      headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
 
-      const inbox = createInbox(`_INBOX.${this.auth.sessionKey.slice(0, 16)}`);
-      const sub = this.nats.subscribe(inbox);
+      const inbox = createInbox(`_INBOX.${this.#auth.sessionKey.slice(0, 16)}`);
+      const sub = this.#nats.subscribe(inbox);
 
       try {
-        this.nats.publish(subject, payload, {
+        this.#nats.publish(subject, payload, {
           headers,
           reply: inbox,
         });
-        await this.nats.flush();
+        await this.#nats.flush();
       } catch (cause) {
         sub.unsubscribe();
         const error = createTransportError({

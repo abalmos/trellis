@@ -28,9 +28,9 @@ pub use error::{
 };
 pub use events::{
     dispatch_outbox_once, prepare_event, prepare_event_value, EventStoreError, InboxReceipt,
-    InboxStore, MemoryInboxStore, MemoryOutboxStore, NatsKvInboxStore, NatsKvOutboxStore,
-    OutboxDispatchResult, OutboxEventRecord, OutboxStore, PostgresInboxStore, PostgresOutboxStore,
-    PreparedTrellisEvent, SqliteInboxStore, SqliteOutboxStore,
+    InboxStore, MemoryInboxStore, MemoryOutboxStore, OutboxDispatchResult, OutboxEventRecord,
+    OutboxStore, PostgresInboxStore, PostgresOutboxStore, PreparedTrellisEvent, SqliteInboxStore,
+    SqliteOutboxStore,
 };
 pub use operations::{
     control_subject, OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker,

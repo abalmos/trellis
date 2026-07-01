@@ -124,13 +124,13 @@ impl JobCancellationToken {
 
 /// [`JobEventPublisher`] backed by a NATS client.
 #[derive(Clone)]
-pub struct NatsJobEventPublisher {
+pub(crate) struct NatsJobEventPublisher {
     nats: async_nats::Client,
 }
 
 impl NatsJobEventPublisher {
     /// Create a publisher that writes encoded job events to NATS.
-    pub fn new(nats: async_nats::Client) -> Self {
+    pub(crate) fn new(nats: async_nats::Client) -> Self {
         Self { nats }
     }
 }

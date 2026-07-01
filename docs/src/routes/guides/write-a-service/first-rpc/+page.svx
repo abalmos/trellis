@@ -190,7 +190,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use trellis_sdk_orders_service::types::{CreateOrderRequest, CreateOrderResponse};
-use trellis_rs::service::{HandlerResult, NatsKvResourceClient, ServiceHandlerContext};
+use trellis_rs::service::{HandlerResult, KvResourceClient, ServiceHandlerContext};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,8 +203,8 @@ struct Order {
 }
 
 #[derive(Debug, Clone)]
-pub struct AppContext {
-    pub orders: NatsKvResourceClient,
+pub struct AppContext<TOrders> {
+    pub orders: TOrders,
 }
 
 fn now_iso() -> String {
@@ -213,11 +213,14 @@ fn now_iso() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-pub async fn create_order(
-    context: Arc<AppContext>,
+pub async fn create_order<TOrders>(
+    context: Arc<AppContext<TOrders>>,
     _ctx: ServiceHandlerContext,
     input: CreateOrderRequest,
-) -> HandlerResult<CreateOrderResponse> {
+) -> HandlerResult<CreateOrderResponse>
+where
+    TOrders: KvResourceClient,
+{
     let order_id = ulid::Ulid::new().to_string();
     let order = Order {
         order_id: order_id.clone(),

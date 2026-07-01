@@ -9,8 +9,7 @@ use tokio::io::AsyncReadExt;
 
 use super::{KvResourceBinding, ServerError, StoreResourceBinding};
 
-/// Runtime seam used to open service-owned resources from bootstrap bindings.
-pub trait ResourceRuntimeClient {
+pub(crate) trait ResourceRuntimeClient {
     /// KV client type returned for a bound KV resource.
     type Kv: KvResourceClient;
     /// Object-store client type returned for a bound store resource.
@@ -389,26 +388,26 @@ where
     }
 }
 
-/// Concrete async-nats KV client used by `ConnectedService::kv`.
+/// Concrete KV client used by connected service resources.
 #[derive(Debug, Clone)]
-pub struct NatsKvResourceClient {
+pub(crate) struct BoundKvResourceClient {
     store: async_nats::jetstream::kv::Store,
 }
 
-/// Watch stream for async-nats-backed KV resources.
-pub struct NatsKvWatch {
+/// Watch stream for connected KV resources.
+pub(crate) struct BoundKvWatch {
     inner: async_nats::jetstream::kv::Watch,
 }
 
-impl fmt::Debug for NatsKvWatch {
+impl fmt::Debug for BoundKvWatch {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("NatsKvWatch")
+            .debug_struct("BoundKvWatch")
             .finish_non_exhaustive()
     }
 }
 
-impl Stream for NatsKvWatch {
+impl Stream for BoundKvWatch {
     type Item = Result<KvResourceEntry, ServerError>;
 
     fn poll_next(
@@ -421,8 +420,8 @@ impl Stream for NatsKvWatch {
     }
 }
 
-impl KvResourceClient for NatsKvResourceClient {
-    type Watch = NatsKvWatch;
+impl KvResourceClient for BoundKvResourceClient {
+    type Watch = BoundKvWatch;
 
     async fn get(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         self.store.get(key.to_string()).await.map_err(nats_error)
@@ -482,12 +481,12 @@ impl KvResourceClient for NatsKvResourceClient {
         self.store
             .watch(key)
             .await
-            .map(|inner| NatsKvWatch { inner })
+            .map(|inner| BoundKvWatch { inner })
             .map_err(nats_error)
     }
 }
 
-impl NatsKvResourceClient {
+impl BoundKvResourceClient {
     async fn kv_revision_mismatch(&self, key: &str, expected: u64) -> ServerError {
         let actual = self
             .store
@@ -525,21 +524,21 @@ fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> KvResourceEntr
     }
 }
 
-/// Concrete async-nats object-store client used by `ConnectedService::store`.
+/// Concrete object-store client used by connected service resources.
 #[derive(Clone)]
-pub struct NatsStoreResourceClient {
+pub(crate) struct BoundStoreResourceClient {
     store: async_nats::jetstream::object_store::ObjectStore,
 }
 
-impl fmt::Debug for NatsStoreResourceClient {
+impl fmt::Debug for BoundStoreResourceClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("NatsStoreResourceClient")
+            .debug_struct("BoundStoreResourceClient")
             .finish_non_exhaustive()
     }
 }
 
-impl StoreResourceClient for NatsStoreResourceClient {
+impl StoreResourceClient for BoundStoreResourceClient {
     async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         let mut object = match self.store.get(key).await {
             Ok(object) => object,
@@ -574,8 +573,8 @@ impl StoreResourceClient for NatsStoreResourceClient {
 }
 
 impl ResourceRuntimeClient for async_nats::Client {
-    type Kv = NatsKvResourceClient;
-    type Store = NatsStoreResourceClient;
+    type Kv = BoundKvResourceClient;
+    type Store = BoundStoreResourceClient;
 
     async fn open_kv(&self, binding: &KvResourceBinding) -> Result<Self::Kv, ServerError> {
         let context = async_nats::jetstream::new(self.clone());
@@ -583,7 +582,7 @@ impl ResourceRuntimeClient for async_nats::Client {
             .get_key_value(binding.bucket.clone())
             .await
             .map_err(nats_error)?;
-        Ok(NatsKvResourceClient { store })
+        Ok(BoundKvResourceClient { store })
     }
 
     async fn open_store(&self, binding: &StoreResourceBinding) -> Result<Self::Store, ServerError> {
@@ -592,7 +591,7 @@ impl ResourceRuntimeClient for async_nats::Client {
             .get_object_store(&binding.name)
             .await
             .map_err(nats_error)?;
-        Ok(NatsStoreResourceClient { store })
+        Ok(BoundStoreResourceClient { store })
     }
 }
 

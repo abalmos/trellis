@@ -22,6 +22,7 @@ use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
 use super::request_loop::RequestHandler;
+use super::resources::{validate_kv_binding, validate_store_binding, ResourceRuntimeClient};
 use super::runtime::run_multi_subject_service;
 use super::transfer::{
     spawn_download_transfer_endpoint, spawn_upload_transfer_endpoint_with_completion,
@@ -30,11 +31,11 @@ use super::transfer::{
 use super::{
     bootstrap_service_host, control_subject, AcceptedOperation, BootstrapBindingInfo,
     DownloadTransferGrantPlan, EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding,
-    KvResourceBinding, NatsKvResourceClient, NatsStoreResourceClient, OperationDescriptor,
-    OperationProvider, OperationSignalAccepted, OperationSnapshot, OperationTransferProgress,
-    RequestContext, RequestValidation, RequestValidator, ResourceRuntimeClient, Router,
-    RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
-    UploadTransferCompletion, UploadTransferSession,
+    KvResourceBinding, KvResourceClient, OperationDescriptor, OperationProvider,
+    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext,
+    RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
+    ServiceResourceBindings, StoreResourceBinding, StoreResourceClient, UploadTransferCompletion,
+    UploadTransferSession,
 };
 use crate::client::{
     EventMessage, EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode,
@@ -564,15 +565,17 @@ impl ServiceHandle {
         .await
     }
 
-    /// Open a NATS-backed KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<NatsKvResourceClient, ServerError> {
+    /// Open a bound KV resource client by contract-local resource name.
+    pub async fn kv_client(&self, name: &str) -> Result<impl KvResourceClient, ServerError> {
         let binding = self.kv_binding(name)?;
+        validate_kv_binding(self.service_name(), name, binding)?;
         self.client().nats().open_kv(binding).await
     }
 
-    /// Open a NATS-backed object-store resource client by contract-local resource name.
-    pub async fn store_client(&self, name: &str) -> Result<NatsStoreResourceClient, ServerError> {
+    /// Open a bound object-store resource client by contract-local resource name.
+    pub async fn store_client(&self, name: &str) -> Result<impl StoreResourceClient, ServerError> {
         let binding = self.store_binding(name)?;
+        validate_store_binding(self.service_name(), name, binding)?;
         self.client().nats().open_store(binding).await
     }
 
@@ -797,15 +800,17 @@ impl<C> ConnectedServiceRuntime<C> {
         .await
     }
 
-    /// Open a NATS-backed KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<NatsKvResourceClient, ServerError> {
+    /// Open a bound KV resource client by contract-local resource name.
+    pub async fn kv_client(&self, name: &str) -> Result<impl KvResourceClient, ServerError> {
         let binding = self.kv_binding(name)?;
+        validate_kv_binding(self.service_name(), name, binding)?;
         self.client().nats().open_kv(binding).await
     }
 
-    /// Open a NATS-backed object-store resource client by contract-local resource name.
-    pub async fn store_client(&self, name: &str) -> Result<NatsStoreResourceClient, ServerError> {
+    /// Open a bound object-store resource client by contract-local resource name.
+    pub async fn store_client(&self, name: &str) -> Result<impl StoreResourceClient, ServerError> {
         let binding = self.store_binding(name)?;
+        validate_store_binding(self.service_name(), name, binding)?;
         self.client().nats().open_store(binding).await
     }
 

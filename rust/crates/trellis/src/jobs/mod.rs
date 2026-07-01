@@ -14,12 +14,12 @@ pub mod active_job;
 pub mod api;
 pub mod bindings;
 pub mod events;
-pub mod keys;
+mod keys;
 pub mod manager;
 pub mod projection;
 pub mod publisher;
 pub mod registry;
-pub mod runtime_ref;
+pub mod runtime;
 mod runtime_worker;
 pub mod subjects;
 pub mod types;
@@ -46,9 +46,8 @@ pub use registry::{
     new_worker_heartbeat, publish_worker_heartbeat, start_worker_heartbeat_loop,
     ActiveJobCancellationRegistry, WorkerHeartbeatHandle,
 };
-pub use runtime_worker::{
-    JobCancellationToken, NatsJobEventPublisher, WorkerHostHandle, WorkerHostOptions,
-};
+pub use runtime::{JobsRuntime, JobsRuntimeMessage, JobsRuntimeMessageStream};
+pub use runtime_worker::{JobCancellationToken, WorkerHostHandle, WorkerHostOptions};
 pub use subjects::{job_event_subject, worker_heartbeat_subject, WORKER_HEARTBEATS_WILDCARD};
 pub use types::{
     Job, JobConcurrency, JobContext, JobEvent, JobEventType, JobLogEntry, JobLogLevel, JobProgress,

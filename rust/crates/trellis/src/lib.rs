@@ -17,8 +17,8 @@
 //! Prepared event and outbox/inbox support lives under [`client`]:
 //! `PreparedTrellisEvent`, `prepare_event::<Descriptor>(...)`,
 //! `publish_prepared`, `dispatch_outbox_once`, `OutboxStore`, `InboxStore`,
-//! `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`,
-//! `PostgresInboxStore`, `NatsKvOutboxStore`, and `NatsKvInboxStore`.
+//! `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and
+//! `PostgresInboxStore`.
 
 /// Authenticated outbound client runtime types for generated SDKs and normal clients.
 pub mod client;

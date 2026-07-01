@@ -510,7 +510,7 @@ pub fn new_key_state(policy: &JobKeyPolicy, timestamp: &str) -> JobKeyState {
 
 /// Errors returned by the NATS KV-backed keyed coordinator.
 #[derive(Debug, thiserror::Error)]
-pub enum NatsKeyCoordinatorError {
+pub(crate) enum NatsKeyCoordinatorError {
     #[error("failed to open keyed jobs KV bucket: {0}")]
     Open(String),
     #[error("failed to read key state '{key}': {details}")]
@@ -527,12 +527,12 @@ pub enum NatsKeyCoordinatorError {
 
 /// NATS KV-backed keyed-concurrency coordinator using compare-and-set writes.
 #[derive(Clone)]
-pub struct NatsKeyCoordinator {
+pub(crate) struct NatsKeyCoordinator {
     store: async_nats::jetstream::kv::Store,
 }
 
 /// Keyed-concurrency coordinator used by managers and workers.
-pub trait JobKeyCoordinator: std::fmt::Debug + Send + Sync {
+pub(crate) trait JobKeyCoordinator: std::fmt::Debug + Send + Sync {
     /// Apply admission with compare-and-set semantics.
     fn admit(
         &self,
@@ -546,16 +546,6 @@ pub trait JobKeyCoordinator: std::fmt::Debug + Send + Sync {
         policy: JobKeyPolicy,
         input: AcquireSlotInput,
     ) -> BoxFuture<'static, Result<AcquireSlotOutcome, NatsKeyCoordinatorError>>;
-
-    /// Renew an active slot with compare-and-set semantics.
-    fn renew(
-        &self,
-        policy: JobKeyPolicy,
-        job_id: String,
-        slot_token: String,
-        heartbeat_at: String,
-        lease_expires_at: String,
-    ) -> BoxFuture<'static, Result<LeaseMutationOutcome, NatsKeyCoordinatorError>>;
 
     /// Release an active slot with compare-and-set semantics.
     fn release(
@@ -622,36 +612,6 @@ impl JobKeyCoordinator for NatsKeyCoordinator {
                     let policy = policy.clone();
                     let input = input.clone();
                     move |current| acquire_active_slot_from_state(current, &policy, input.clone())
-                })
-                .await
-        })
-    }
-
-    fn renew(
-        &self,
-        policy: JobKeyPolicy,
-        job_id: String,
-        slot_token: String,
-        heartbeat_at: String,
-        lease_expires_at: String,
-    ) -> BoxFuture<'static, Result<LeaseMutationOutcome, NatsKeyCoordinatorError>> {
-        let coordinator = self.clone();
-        Box::pin(async move {
-            coordinator
-                .update_key(&policy, {
-                    let policy_for_missing = policy.clone();
-                    move |current| match current {
-                        Some(state) => renew_active_slot(
-                            state,
-                            &job_id,
-                            &slot_token,
-                            &heartbeat_at,
-                            &lease_expires_at,
-                        ),
-                        None => LeaseMutationOutcome::Lost {
-                            state: new_key_state(&policy_for_missing, &heartbeat_at),
-                        },
-                    }
                 })
                 .await
         })
@@ -737,7 +697,7 @@ impl JobKeyCoordinator for NatsKeyCoordinator {
 
 impl NatsKeyCoordinator {
     /// Open the service-scoped Trellis keyed jobs KV bucket.
-    pub async fn open_for_service(
+    pub(crate) async fn open_for_service(
         nats: async_nats::Client,
         service: &str,
     ) -> Result<Self, NatsKeyCoordinatorError> {
@@ -750,7 +710,7 @@ impl NatsKeyCoordinator {
     }
 
     /// Read-modify-write one key state value with NATS KV compare-and-set retries.
-    pub async fn update_key<T>(
+    pub(crate) async fn update_key<T>(
         &self,
         policy: &JobKeyPolicy,
         mut update: impl FnMut(Option<JobKeyState>) -> T,
@@ -814,7 +774,7 @@ impl NatsKeyCoordinator {
 }
 
 /// Reducer output that can expose the next key state for CAS persistence.
-pub trait KeyStateUpdate {
+pub(crate) trait KeyStateUpdate {
     fn next_state(&self) -> Option<&JobKeyState>;
 }
 

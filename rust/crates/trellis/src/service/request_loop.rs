@@ -753,7 +753,7 @@ fn panic_to_server_error(panic: Box<dyn Any + Send>) -> ServerError {
 }
 
 /// Run an inbound NATS request loop until the subscriber closes.
-pub async fn run_nats_request_loop<H>(
+pub(crate) async fn run_nats_request_loop<H>(
     client: async_nats::Client,
     subscriber: impl futures_util::Stream<Item = async_nats::Message>,
     handler: H,

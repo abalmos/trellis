@@ -189,23 +189,6 @@ impl<P, M> JobManager<P, M> {
         }
     }
 
-    /// Create a manager that coordinates keyed admission through `JOBS_KEYS`.
-    pub fn new_with_key_coordinator(
-        publisher: P,
-        bindings: JobsBinding,
-        meta: M,
-        key_coordinator: Arc<dyn JobKeyCoordinator>,
-    ) -> Self {
-        Self {
-            inner: Arc::new(JobManagerInner {
-                publisher,
-                bindings,
-                meta,
-                key_coordinator: Some(key_coordinator),
-            }),
-        }
-    }
-
     pub fn publisher(&self) -> &P {
         &self.inner.publisher
     }
@@ -215,7 +198,7 @@ impl<P, M> JobManager<P, M> {
     }
 
     /// Return the optional keyed-concurrency coordinator used by this manager.
-    pub fn key_coordinator(&self) -> Option<Arc<dyn JobKeyCoordinator>> {
+    pub(crate) fn key_coordinator(&self) -> Option<Arc<dyn JobKeyCoordinator>> {
         self.inner.key_coordinator.clone()
     }
 }

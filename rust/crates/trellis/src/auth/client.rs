@@ -63,7 +63,7 @@ pub async fn connect_admin_client_async(
     state: &AdminSessionState,
 ) -> Result<TrellisClient, TrellisAuthError> {
     Ok(TrellisClient::connect_user(UserConnectOptions {
-        servers: &state.nats_servers,
+        servers: &state.servers,
         sentinel_jwt: &state.sentinel_jwt,
         sentinel_seed: &state.sentinel_seed,
         session_key_seed_base64url: &state.session_seed,

@@ -10,17 +10,18 @@ use crate::client::SessionAuth;
 pub struct AdminSessionState {
     /// Base URL for the Trellis deployment.
     pub trellis_url: String,
-    /// Comma-separated NATS server list returned by Trellis.
-    pub nats_servers: String,
+    /// Comma-separated runtime server list returned by Trellis.
+    #[serde(rename = "nats_servers", alias = "servers")]
+    pub servers: String,
     /// Session-key seed used to sign subsequent Trellis requests.
     pub session_seed: String,
     /// Public session key derived from `session_seed`.
     pub session_key: String,
     /// Current delegated contract digest for admin runtime auth.
     pub contract_digest: String,
-    /// Sentinel JWT used for NATS authentication.
+    /// Sentinel JWT used for runtime authentication.
     pub sentinel_jwt: String,
-    /// Sentinel seed used for NATS authentication.
+    /// Sentinel seed used for runtime authentication.
     pub sentinel_seed: String,
     /// RFC3339 expiry timestamp for the current delegated agent grant.
     pub expires: String,
@@ -34,8 +35,9 @@ pub struct BoundSession {
     pub inbox_prefix: String,
     /// RFC3339 expiry timestamp for this binding.
     pub expires: String,
-    /// Comma-separated native NATS transport endpoints for the session.
-    pub nats_servers: String,
+    /// Comma-separated native transport endpoints for the session.
+    #[serde(rename = "nats_servers", alias = "servers")]
+    pub servers: String,
     /// Sentinel credentials returned alongside the binding.
     pub sentinel: SentinelCredsRecord,
 }
@@ -145,11 +147,11 @@ pub struct DeviceConnectInfoRequest {
     pub sig: String,
 }
 
-/// Native NATS transport endpoints returned for an activated device.
+/// Native transport endpoints returned for an activated device.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct DeviceConnectInfoNativeTransport {
-    pub nats_servers: Vec<String>,
+    #[serde(rename = "natsServers")]
+    pub servers: Vec<String>,
 }
 
 /// Transport endpoints returned for an activated device.

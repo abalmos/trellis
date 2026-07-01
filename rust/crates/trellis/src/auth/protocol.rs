@@ -61,10 +61,10 @@ pub struct SentinelCredsRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 /// One named transport endpoint family returned alongside a successful bind.
 pub struct ClientTransportRecord {
-    pub nats_servers: Vec<String>,
+    #[serde(rename = "natsServers")]
+    pub servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

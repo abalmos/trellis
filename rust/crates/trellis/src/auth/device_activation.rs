@@ -596,10 +596,10 @@ fn validate_device_connect_info_response(
         .transports
         .native
         .as_ref()
-        .ok_or_else(|| TrellisAuthError::InvalidArgument("missing native NATS transport".into()))?;
-    if native.nats_servers.is_empty() {
+        .ok_or_else(|| TrellisAuthError::InvalidArgument("missing native transport".into()))?;
+    if native.servers.is_empty() {
         return Err(TrellisAuthError::InvalidArgument(
-            "native NATS transport has no servers".into(),
+            "native transport has no servers".into(),
         ));
     }
 

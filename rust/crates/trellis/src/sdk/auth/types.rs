@@ -818,10 +818,10 @@ pub struct AuthDeploymentAuthorityReconcileResponseAuthority {
 pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsCapabilitiesItem {
     pub capability: String,
 }
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItem`.
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItemSurface`.
+/// Generated schema type `AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItem`.
+/// Generated schema type `AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItemSurface`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItemSurface {
+pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItemSurface {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
     #[serde(rename = "contractId")]
@@ -830,7 +830,7 @@ pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNa
     pub name: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItem {
+pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItem {
     pub direction: String,
     #[serde(rename = "grantSource")]
     pub grant_source: String,
@@ -838,8 +838,9 @@ pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNa
     pub required_capabilities: Vec<String>,
     pub subject: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub surface:
-        Option<AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItemSurface>,
+    pub surface: Option<
+        AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItemSurface,
+    >,
 }
 /// Generated schema type `AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsSurfacesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -856,7 +857,9 @@ pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsSu
 pub struct AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrants {
     pub capabilities:
         Vec<AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsCapabilitiesItem>,
-    pub nats: Vec<AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsNatsItem>,
+    #[serde(rename = "nats")]
+    pub transport_rules:
+        Vec<AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsTransportItem>,
     pub surfaces:
         Vec<AuthDeploymentAuthorityReconcileResponseMaterializedAuthorityGrantsSurfacesItem>,
 }
@@ -1223,13 +1226,13 @@ pub struct AuthDevicesConnectInfoGetResponseConnectInfoTransport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDevicesConnectInfoGetResponseConnectInfoTransportsNative {
     #[serde(rename = "natsServers")]
-    pub nats_servers: Vec<String>,
+    pub servers: Vec<String>,
 }
 /// Generated schema type `AuthDevicesConnectInfoGetResponseConnectInfoTransportsWebsocket`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDevicesConnectInfoGetResponseConnectInfoTransportsWebsocket {
     #[serde(rename = "natsServers")]
-    pub nats_servers: Vec<String>,
+    pub servers: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDevicesConnectInfoGetResponseConnectInfoTransports {

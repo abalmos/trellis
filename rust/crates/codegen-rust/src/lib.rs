@@ -684,10 +684,10 @@ fn push_rust_prepared_events(lines: &mut Vec<String>) {
         "Prepared events and outbox/inbox:".to_string(),
         "- Generated event structs are event bodies only; runtime metadata is separate from the body payload.".to_string(),
         "- `PreparedTrellisEvent` captures a validated subject, encoded body payload, preserved transport headers, event id, and event time.".to_string(),
-        "- Published prepared events send `Nats-Msg-Id` from `event_id()` and `Trellis-Event-Time` from `event_time()`.".to_string(),
+        "- Published prepared events send the runtime event id from `event_id()` and `Trellis-Event-Time` from `event_time()`.".to_string(),
         "- Use `subscribe_messages::<Descriptor>(...)` and `EventMessage::event_id()` / `event_time()` when subscribers need metadata.".to_string(),
         "- Use `prepare_event::<Descriptor>(...)`, `publish_prepared(...)`, and `dispatch_outbox_once(...)` for durable publish flows.".to_string(),
-        "- Runtime stores include `OutboxStore`, `InboxStore`, `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, `PostgresInboxStore`, `NatsKvOutboxStore`, and `NatsKvInboxStore`.".to_string(),
+        "- Runtime stores include `OutboxStore`, `InboxStore`, `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and `PostgresInboxStore`.".to_string(),
         String::new(),
     ]);
 }
@@ -2551,10 +2551,10 @@ fn render_service_connect_rs(loaded: &trellis_contracts::LoadedManifest) -> Stri
         "    pub fn client(&self) -> &std::sync::Arc<trellis_rs::client::TrellisClient> { self.inner.client() }".to_string(),
         String::new(),
         "    /// Open a NATS-backed KV resource client by contract-local resource name.".to_string(),
-        "    pub async fn kv_client(&self, name: &str) -> Result<trellis_rs::service::NatsKvResourceClient, trellis_rs::service::ServerError> { self.inner.kv_client(name).await }".to_string(),
+        "    pub async fn kv_client(&self, name: &str) -> Result<impl trellis_rs::service::KvResourceClient, trellis_rs::service::ServerError> { self.inner.kv_client(name).await }".to_string(),
         String::new(),
         "    /// Open a NATS-backed object-store resource client by contract-local resource name.".to_string(),
-        "    pub async fn store_client(&self, name: &str) -> Result<trellis_rs::service::NatsStoreResourceClient, trellis_rs::service::ServerError> { self.inner.store_client(name).await }".to_string(),
+        "    pub async fn store_client(&self, name: &str) -> Result<impl trellis_rs::service::StoreResourceClient, trellis_rs::service::ServerError> { self.inner.store_client(name).await }".to_string(),
         String::new(),
         "    /// Return an event publisher backed by the connected NATS client.".to_string(),
         "    pub fn event_publisher(&self) -> trellis_rs::service::EventPublisher { self.inner.event_publisher() }".to_string(),
@@ -2949,6 +2949,18 @@ fn rust_ident(value: &str) -> String {
     }
 }
 
+fn rust_schema_type_segment(value: &str) -> String {
+    key_to_pascal(value).replace("Nats", "Transport")
+}
+
+fn rust_schema_field_base(value: &str) -> String {
+    match key_to_snake(value).as_str() {
+        "nats" => "transport_rules".to_string(),
+        "nats_servers" => "servers".to_string(),
+        other => other.replace("nats", "transport"),
+    }
+}
+
 #[derive(Default)]
 struct TypeRenderer {
     rendered: std::collections::BTreeSet<String>,
@@ -2968,7 +2980,7 @@ impl TypeRenderer {
         if let Some(fields) = object_fields(schema) {
             let mut field_lines = Vec::new();
             for (field_name, field_schema) in fields {
-                let rust_field_base = key_to_snake(field_name);
+                let rust_field_base = rust_schema_field_base(field_name);
                 let rust_field = rust_ident(&rust_field_base);
                 if rust_field_base != *field_name {
                     field_lines.push(format!(
@@ -2977,7 +2989,8 @@ impl TypeRenderer {
                     ));
                 }
                 let required = schema_required(schema, field_name);
-                let field_type_name = format!("{type_name}{}", key_to_pascal(field_name));
+                let field_type_name =
+                    format!("{type_name}{}", rust_schema_type_segment(field_name));
                 let ty = self.type_expr(&field_type_name, field_schema);
                 if required {
                     field_lines.push(format!("    pub {rust_field}: {ty},"));

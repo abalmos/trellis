@@ -54,8 +54,8 @@ such as `.rpc().group().method(...)`, and service registration through
 Prepared event support includes `PreparedTrellisEvent`,
 `prepare_event::<Descriptor>(...)`, `publish_prepared`, and
 `dispatch_outbox_once`. Durable stores include `OutboxStore`, `InboxStore`,
-`SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`,
-`PostgresInboxStore`, `NatsKvOutboxStore`, and `NatsKvInboxStore`.
+`SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and
+`PostgresInboxStore`.
 
 Rust client event subscriptions are live/ephemeral by default. Service-level
 durable event processing is a contract/resource concern: declare

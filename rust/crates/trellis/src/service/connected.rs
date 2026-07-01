@@ -1,9 +1,5 @@
 use std::future::Future;
 
-use super::resources::{
-    validate_kv_binding, validate_store_binding, KvResourceHandle, ResourceRuntimeClient,
-    StoreResourceHandle,
-};
 use super::runtime::run_single_subject_service;
 use super::{
     bootstrap_service_host, resolve_bootstrap_binding, AuthenticatedRouter, BootstrapBinding,
@@ -185,33 +181,6 @@ where
                 resource_kind: "jobs".to_string(),
                 resource_name: "jobs".to_string(),
             })
-    }
-
-    /// Open a high-level KV resource handle by contract-local resource name.
-    pub async fn kv(&self, name: &str) -> Result<KvResourceHandle<Rc::Kv>, ServerError>
-    where
-        Rc: ResourceRuntimeClient,
-    {
-        let binding = self.kv_binding(name)?;
-        validate_kv_binding(self.service_name, name, binding)?;
-        let client = self.runtime_client.open_kv(binding).await?;
-        Ok(KvResourceHandle::new(name, binding.clone(), client))
-    }
-
-    /// Open a high-level object-store resource handle by contract-local resource name.
-    pub async fn store(&self, name: &str) -> Result<StoreResourceHandle<Rc::Store>, ServerError>
-    where
-        Rc: ResourceRuntimeClient,
-    {
-        let binding = self.store_binding(name)?;
-        validate_store_binding(self.service_name, name, binding)?;
-        let client = self.runtime_client.open_store(binding).await?;
-        Ok(StoreResourceHandle::new(
-            self.service_name,
-            name,
-            binding.clone(),
-            client,
-        ))
     }
 }
 

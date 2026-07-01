@@ -69,15 +69,13 @@ pub(crate) fn build_auth_start_signature_payload(
     ))
 }
 
-fn join_native_nats_servers(
-    transports: &ClientTransportsRecord,
-) -> Result<String, TrellisAuthError> {
+fn join_native_servers(transports: &ClientTransportsRecord) -> Result<String, TrellisAuthError> {
     let Some(native) = &transports.native else {
         return Err(TrellisAuthError::UnexpectedBindStatus(
             "missing_native_transport".to_string(),
         ));
     };
-    let servers = &native.nats_servers;
+    let servers = &native.servers;
     if servers.is_empty() {
         return Err(TrellisAuthError::UnexpectedBindStatus(
             "missing_native_transport".to_string(),
@@ -260,7 +258,7 @@ async fn bind_session(
         }) => Ok(BoundSession {
             inbox_prefix,
             expires,
-            nats_servers: join_native_nats_servers(&transports)?,
+            servers: join_native_servers(&transports)?,
             sentinel,
         }),
         BindResponse::ApprovalRequired { approval } => Err(TrellisAuthError::UnexpectedBindStatus(
@@ -303,7 +301,7 @@ impl AgentLoginChallenge {
         let bound = bind_session(trellis_url, &auth, &flow_id).await?;
         let state = AdminSessionState {
             trellis_url: trellis_url.to_string(),
-            nats_servers: bound.nats_servers.clone(),
+            servers: bound.servers.clone(),
             session_seed,
             session_key: auth.session_key.clone(),
             contract_digest,
@@ -375,7 +373,7 @@ pub async fn start_admin_reauth(
         } => {
             let next_state = AdminSessionState {
                 trellis_url: state.trellis_url.clone(),
-                nats_servers: join_native_nats_servers(&transports)?,
+                servers: join_native_servers(&transports)?,
                 session_seed: state.session_seed.clone(),
                 session_key: auth.session_key.clone(),
                 contract_digest: contract_digest(contract_json)?,

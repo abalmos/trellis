@@ -177,7 +177,7 @@ use trellis_rs::client::{InboxReceipt, InboxStore, SqliteInboxStore};
 
 let mut inbox = SqliteInboxStore::new(&sqlite);
 let Some(event_id) = message.event_id() else {
-    return Err(anyhow::anyhow!("event message missing Nats-Msg-Id"));
+    return Err(anyhow::anyhow!("event message missing id"));
 };
 
 match inbox.record_received(event_id).await? {
@@ -187,8 +187,6 @@ match inbox.record_received(event_id).await? {
 ```
 
 Use `PostgresOutboxStore` and `PostgresInboxStore` for Postgres-backed services.
-Use `NatsKvOutboxStore` and `NatsKvInboxStore` for NATS KV durability when no SQL
-transaction must include the outbox or inbox record.
 
 ## Schema validation UX
 

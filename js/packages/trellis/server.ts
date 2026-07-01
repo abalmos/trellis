@@ -238,6 +238,7 @@ function recordOperationServerError(
 }
 
 export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
+  #nats: NatsConnection;
   #version?: string;
   #log: LoggerLike;
   #operations = new Map<string, RuntimeOperationRecord>();
@@ -253,6 +254,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
     opts?: TrellisServiceRuntimeOpts<TrellisAPI>,
   ) {
     super(name, nats, auth, { ...opts, log: opts?.log ?? serverLogger });
+    this.#nats = nats;
     this.#version = opts?.version;
     this.#log = (opts?.log ?? serverLogger).child({ lib: "trellis-server" });
     this.#transferSupport = opts?.transferSupport;
@@ -423,13 +425,13 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
         },
       };
       for (const reply of runtime.watchers) {
-        await this.nats.publish(reply, JSON.stringify(frame));
+        await this.#nats.publish(reply, JSON.stringify(frame));
       }
 
       if (runtime.terminal) {
         const terminalFrame = { kind: "snapshot", snapshot: runtime.snapshot };
         for (const reply of runtime.waiters) {
-          await this.nats.publish(reply, JSON.stringify(terminalFrame));
+          await this.#nats.publish(reply, JSON.stringify(terminalFrame));
         }
         runtime.waiters.clear();
         this.#rejectSignalWaiters(runtime);
@@ -945,7 +947,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
     this.#mountedOperationControls.add(controlSubject);
 
     const publishFrame = async (reply: string, frame: unknown) => {
-      await this.nats.publish(reply, JSON.stringify(frame));
+      await this.#nats.publish(reply, JSON.stringify(frame));
     };
 
     const publishSnapshot = async (
@@ -969,7 +971,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
       }));
     };
 
-    const controlSub = this.nats.subscribe(controlSubject);
+    const controlSub = this.#nats.subscribe(controlSubject);
     void (async () => {
       for await (const msg of controlSub) {
         const request = safeJson(msg).take();
@@ -1109,10 +1111,10 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
             },
           };
           for (const reply of runtime.watchers) {
-            await this.nats.publish(reply, JSON.stringify(frame));
+            await this.#nats.publish(reply, JSON.stringify(frame));
           }
           for (const reply of runtime.waiters) {
-            await this.nats.publish(
+            await this.#nats.publish(
               reply,
               JSON.stringify({ kind: "snapshot", snapshot: runtime.snapshot }),
             );
@@ -1230,7 +1232,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
         const now = () => new Date().toISOString();
 
         const publishFrame = async (reply: string, frame: unknown) => {
-          await this.nats.publish(reply, JSON.stringify(frame));
+          await this.#nats.publish(reply, JSON.stringify(frame));
         };
 
         const publishSnapshot = async (
@@ -1558,8 +1560,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
         );
 
         this.#ensureOperationControlLoop(String(operation), ctx);
-        const startSub = this.nats.subscribe(startSubject);
-        await this.nats.flush();
+        const startSub = this.#nats.subscribe(startSubject);
+        await this.#nats.flush();
 
         void (async () => {
           for await (const msg of startSub) {
@@ -1806,12 +1808,12 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
 
   async stop(): Promise<void> {
     this.#stopPromise ??= (async () => {
-      if (this.nats.isClosed()) {
+      if (this.#nats.isClosed()) {
         return;
       }
 
       try {
-        await this.nats.drain();
+        await this.#nats.drain();
       } catch (cause) {
         if (
           !(cause instanceof Error) ||
@@ -1820,7 +1822,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
           throw cause;
         }
 
-        await this.nats.closed().catch(() => undefined);
+        await this.#nats.closed().catch(() => undefined);
       }
     })();
 

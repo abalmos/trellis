@@ -229,7 +229,7 @@ use trellis_rs::client::{InboxReceipt, InboxStore, SqliteInboxStore};
 
 let mut inbox = SqliteInboxStore::new(&sqlite);
 let Some(event_id) = message.event_id() else {
-    return Err(anyhow::anyhow!("event message missing Nats-Msg-Id"));
+    return Err(anyhow::anyhow!("event message missing id"));
 };
 
 match inbox.record_received(event_id).await? {
@@ -238,10 +238,8 @@ match inbox.record_received(event_id).await? {
 }
 ```
 
-`NatsKvOutboxStore` and `NatsKvInboxStore` are durable NATS KV queue and dedupe
-helpers for services that do not have SQL state. They are not transactional with
-unrelated database side effects, so do not use them to claim that an arbitrary DB
-write and an event enqueue committed atomically.
+Services without SQL state should publish directly. Use SQL-backed outbox/inbox
+stores only when event publication must be atomic with local database writes.
 
 ### Feeds
 
