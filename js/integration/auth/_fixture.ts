@@ -31,11 +31,16 @@ export function createAuthLocalLoginFixture(caseId: string) {
     }),
   } as const;
 
+  const serviceContractId = caseScopedContractId(
+    "trellis.integration.auth-local-login-service",
+    caseId,
+  );
+  const pingCapability = serviceContractId.replace(/@v\d+$/, "") +
+    "::authLocalLoginPing";
+  const deploymentId = caseScopedName("auth-local-login-deployment", caseId);
+
   const serviceContract = defineServiceContract({ schemas }, (ref) => ({
-    id: caseScopedContractId(
-      "trellis.integration.auth-local-login-service",
-      caseId,
-    ),
+    id: serviceContractId,
     displayName: `Trellis Integration Auth Local Login Service (${slug})`,
     description:
       "Service RPC used to prove an approved local-login app session can call services.",
@@ -145,9 +150,28 @@ export function createAuthLocalLoginFixture(caseId: string) {
           rpc: {
             call: [
               "Auth.Connections.List",
+              "Auth.CapabilityGroups.Delete",
+              "Auth.CapabilityGroups.Get",
+              "Auth.CapabilityGroups.List",
+              "Auth.CapabilityGroups.Put",
+              "Auth.DeploymentAuthority.GrantOverrides.List",
+              "Auth.DeploymentAuthority.GrantOverrides.Put",
+              "Auth.DeploymentAuthority.GrantOverrides.Remove",
+              "Auth.IdentityGrants.List",
+              "Auth.IdentityGrants.Revoke",
+              "Auth.Portals.LoginSettings.Update",
+              "Auth.Portals.List",
+              "Auth.Portals.Put",
+              "Auth.Portals.Remove",
+              "Auth.Portals.Routes.Put",
+              "Auth.Portals.Routes.Remove",
               "Auth.Sessions.List",
               "Auth.Sessions.Revoke",
+              "Auth.UserIdentities.List",
+              "Auth.UserIdentities.Unlink",
               "Auth.Users.Create",
+              "Auth.Users.Get",
+              "Auth.Users.List",
               "Auth.Users.PasswordReset.Create",
               "Auth.Users.Update",
             ],
@@ -163,10 +187,14 @@ export function createAuthLocalLoginFixture(caseId: string) {
   );
   const clientName = caseScopedName("auth-local-login-fixture-client", caseId);
 
-  async function setupServiceWithKey(runtime: LiveTrellisRuntime) {
+  async function setupServiceWithKey(
+    runtime: LiveTrellisRuntime,
+    deployment = deploymentId,
+  ) {
     const serviceKey = await runtime.registerService({
       name: serviceName,
       contract: serviceContract,
+      deployment,
     });
     const service = await TrellisService.connect({
       trellisUrl: runtime.trellisUrl,
@@ -197,8 +225,11 @@ export function createAuthLocalLoginFixture(caseId: string) {
     return { service, serviceKey };
   }
 
-  async function setupService(runtime: LiveTrellisRuntime) {
-    const { service } = await setupServiceWithKey(runtime);
+  async function setupService(
+    runtime: LiveTrellisRuntime,
+    deployment = deploymentId,
+  ) {
+    const { service } = await setupServiceWithKey(runtime, deployment);
     return service;
   }
 
@@ -223,11 +254,15 @@ export function createAuthLocalLoginFixture(caseId: string) {
     clientContract,
     clientDisplayName,
     clientName,
+    deploymentId,
     pingMessage: caseScopedName("auth-local-login", caseId),
+    pingCapability,
+    serviceContractId,
     setupClientRegistration,
     setupSessionAdmin,
     setupService,
     setupServiceWithKey,
+    sessionAdminContract,
     updatedClientContract,
     updatedClientDisplayName,
   };

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::task::JoinHandle;
@@ -9,8 +10,8 @@ use trellis_rs::client::{
 };
 use trellis_rs::sdk::auth::types::{
     AuthDeploymentAuthorityAcceptMigrationRequest, AuthDeploymentAuthorityAcceptUpdateRequest,
-    AuthDeploymentAuthorityPlansListRequest, AuthDeploymentAuthorityRejectRequest,
-    AuthServiceInstancesProvisionRequest,
+    AuthDeploymentAuthorityGetRequest, AuthDeploymentAuthorityPlansListRequest,
+    AuthDeploymentAuthorityRejectRequest, AuthServiceInstancesProvisionRequest,
 };
 use trellis_rs::service::{ConnectedServiceRuntime, KvResourceClient};
 
@@ -886,6 +887,159 @@ async fn authority_plan_resource_change_migration_approved_and_bound() {
     service_task.abort_and_wait().await;
 }
 
+#[tokio::test]
+async fn authority_plan_acceptance_rejects_wrong_classification_expired_and_version_mismatch() {
+    assert_case_registered(
+        "authority-plan.acceptance-rejects-wrong-classification-expired-and-version-mismatch",
+        "authority-plan",
+        "authority_plan",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let base_contract = service_contract("base");
+    let incompatible_contract = service_contract("incompatible");
+    let additive_contract = service_contract("additive");
+    approve_base(
+        &mut admin,
+        &bootstrap_url,
+        &base_contract,
+        STRICT_DEPLOYMENT,
+        false,
+    )
+    .await;
+    let base_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let mut base_service = connect_service(
+        runtime.trellis_url(),
+        "authority-plan-base-service",
+        SERVICE_CONTRACT_ID,
+        &base_contract,
+        &base_key.seed,
+    )
+    .await;
+    let base_task = AbortOnDrop::new(tokio::spawn(async move { base_service.run().await }));
+    let before = deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+
+    let replacement_key =
+        provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let mut replacement_connect = spawn_service_connect(
+        runtime.trellis_url(),
+        "authority-plan-replacement-service",
+        SERVICE_CONTRACT_ID,
+        incompatible_contract.clone(),
+        replacement_key.seed,
+    );
+    let migration = wait_for_plan(
+        &mut admin,
+        &bootstrap_url,
+        STRICT_DEPLOYMENT,
+        "pending",
+        "migration",
+        incompatible_contract.digest(),
+    )
+    .await;
+
+    assert_validation_error(
+        accept_update_raw(&mut admin, &bootstrap_url, &migration.plan_id, None).await,
+    );
+    assert_validation_error(
+        accept_migration_missing_ack_raw(&mut admin, &bootstrap_url, &migration.plan_id).await,
+    );
+    assert_validation_error(
+        accept_migration_raw(
+            &mut admin,
+            &bootstrap_url,
+            &migration.plan_id,
+            Some("stale-version".to_string()),
+        )
+        .await,
+    );
+    assert_eq!(
+        deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await,
+        before
+    );
+    assert_eq!(
+        wait_for_plan(
+            &mut admin,
+            &bootstrap_url,
+            STRICT_DEPLOYMENT,
+            "pending",
+            "migration",
+            incompatible_contract.digest(),
+        )
+        .await
+        .plan_id,
+        migration.plan_id
+    );
+
+    let rejected = reject_plan(
+        &mut admin,
+        &bootstrap_url,
+        &migration,
+        "invalid acceptance test",
+    )
+    .await;
+    assert_validation_error(
+        accept_migration_raw(&mut admin, &bootstrap_url, &migration.plan_id, None).await,
+    );
+    assert_eq!(rejected.state.as_deref(), Some("rejected"));
+    assert_eq!(
+        deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await,
+        before
+    );
+    expect_connect_pending(&mut replacement_connect).await;
+    replacement_connect.abort();
+    let _ = replacement_connect.await;
+
+    let update_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let mut update_connect = spawn_service_connect(
+        runtime.trellis_url(),
+        "authority-plan-additive-service",
+        SERVICE_CONTRACT_ID,
+        additive_contract.clone(),
+        update_key.seed,
+    );
+    let update = wait_for_plan(
+        &mut admin,
+        &bootstrap_url,
+        STRICT_DEPLOYMENT,
+        "pending",
+        "update",
+        additive_contract.digest(),
+    )
+    .await;
+    runtime
+        .control_plane_sqlite()
+        .execute(
+            "UPDATE deployment_authority_plans SET expires_at = ? WHERE plan_id = ?",
+            params!["2020-01-01T00:00:00.000Z", &update.plan_id],
+        )
+        .expect("expire authority plan");
+    assert_validation_error(
+        accept_update_raw(&mut admin, &bootstrap_url, &update.plan_id, None).await,
+    );
+    assert_eq!(
+        deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await,
+        before
+    );
+    assert_eq!(
+        wait_for_plan(
+            &mut admin,
+            &bootstrap_url,
+            STRICT_DEPLOYMENT,
+            "pending",
+            "update",
+            additive_contract.digest(),
+        )
+        .await
+        .plan_id,
+        update.plan_id
+    );
+    expect_connect_pending(&mut update_connect).await;
+    update_connect.abort();
+    let _ = update_connect.await;
+    base_task.abort_and_wait().await;
+}
+
 async fn start_runtime() -> (
     trellis_test::TrellisTestRuntime,
     String,
@@ -1120,6 +1274,109 @@ async fn accept_plan(
         .reconcile(bootstrap_url, &plan.deployment_id)
         .await
         .expect("reconcile deployment authority");
+}
+
+async fn deployment_authority_snapshot(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    deployment: &str,
+) -> (String, Value) {
+    let client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let current = auth
+        .rpc()
+        .auth()
+        .deployment_authority_get(&AuthDeploymentAuthorityGetRequest {
+            deployment_id: deployment.to_string(),
+        })
+        .await
+        .expect("get deployment authority");
+    (
+        current.authority.version,
+        serde_json::to_value(current.authority.desired_state)
+            .expect("serialize desired authority state"),
+    )
+}
+
+async fn accept_update_raw(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    plan_id: &str,
+    expected_desired_version: Option<String>,
+) -> Result<
+    trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
+    TrellisClientError,
+> {
+    let client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    auth.rpc()
+        .auth()
+        .deployment_authority_accept_update(&AuthDeploymentAuthorityAcceptUpdateRequest {
+            plan_id: plan_id.to_string(),
+            expected_desired_version,
+        })
+        .await
+}
+
+async fn accept_migration_raw(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    plan_id: &str,
+    expected_desired_version: Option<String>,
+) -> Result<
+    trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationResponse,
+    TrellisClientError,
+> {
+    let client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    auth.rpc()
+        .auth()
+        .deployment_authority_accept_migration(&AuthDeploymentAuthorityAcceptMigrationRequest {
+            plan_id: plan_id.to_string(),
+            expected_desired_version,
+            acknowledgement: "Accepted by invalid Rust authority-plan test.".to_string(),
+        })
+        .await
+}
+
+async fn accept_migration_missing_ack_raw(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    plan_id: &str,
+) -> Result<Value, TrellisClientError> {
+    let client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    client
+        .request_json_value(
+            "rpc.v1.Auth.DeploymentAuthority.AcceptMigration",
+            &json!({ "planId": plan_id }),
+        )
+        .await
+}
+
+fn assert_validation_error<T>(result: Result<T, TrellisClientError>) {
+    match result {
+        Err(TrellisClientError::RpcError(payload)) => {
+            let error = payload
+                .decode_validation()
+                .expect("decode ValidationError payload")
+                .expect("expected ValidationError payload");
+            assert_eq!(error.error_type, "ValidationError");
+        }
+        Ok(_) => panic!("expected deployment authority accept validation error"),
+        Err(error) => panic!("expected deployment authority accept ValidationError, got {error}"),
+    }
 }
 
 async fn reject_plan(

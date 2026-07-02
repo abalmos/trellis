@@ -299,6 +299,20 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "state.migration-required-is-returned-live",
+    file: "state/migration_required_is_returned_live.integration_test.ts",
+    testName:
+      "state.migration-required-is-returned-live returns migration-required for old state versions",
+    runtime: "live-trellis",
+  },
+  {
+    id: "state.ttl-expiry-is-absent-live",
+    file: "state/ttl_expiry_is_absent_live.integration_test.ts",
+    testName:
+      "state.ttl-expiry-is-absent-live treats expired TTL entries as absent",
+    runtime: "live-trellis",
+  },
+  {
     id: "transfer.client-uploads-file-via-operation",
     file: "transfer/client_uploads_file_via_operation.integration_test.ts",
     testName:
@@ -426,6 +440,14 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "jobs.admin-list-services-filters-stale-worker-heartbeats",
+    file:
+      "jobs/admin_list_services_filters_stale_worker_heartbeats.integration_test.ts",
+    testName:
+      "jobs.admin-list-services-filters-stale-worker-heartbeats reports fresh workers only",
+    runtime: "live-trellis",
+  },
+  {
     id: "health.client-subscribes-to-heartbeats",
     file: "health/client_subscribes_to_heartbeats.integration_test.ts",
     testName:
@@ -530,6 +552,15 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
       "authority-plan/resource_change_migration_approved_and_bound.integration_test.ts",
     testName:
       "authority-plan.resource-change-migration-approved-and-bound accepts resource migration and binds resource",
+    runtime: "live-trellis",
+  },
+  {
+    id:
+      "authority-plan.acceptance-rejects-wrong-classification-expired-and-version-mismatch",
+    file:
+      "authority-plan/acceptance_rejects_wrong_classification_expired_and_version_mismatch.integration_test.ts",
+    testName:
+      "authority-plan.acceptance-rejects-wrong-classification-expired-and-version-mismatch rejects invalid acceptances without mutation",
     runtime: "live-trellis",
   },
   {
@@ -718,6 +749,54 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "auth.grant-overrides-bind-without-user-capability",
+    file:
+      "auth/grant_overrides_bind_without_user_capability.integration_test.ts",
+    testName:
+      "auth.grant-overrides-bind-without-user-capability binds through grant override without user capability",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.identity-grants-revoke-removes-authority-and-live-sessions",
+    file:
+      "auth/identity_grants_revoke_removes_authority_and_live_sessions.integration_test.ts",
+    testName:
+      "auth.identity-grants-revoke-removes-authority-and-live-sessions revokes grant sessions and denies old calls",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.portal-route-selection-and-policy-drive-browser-flow",
+    file:
+      "auth/portal_route_selection_and_policy_drive_browser_flow.integration_test.ts",
+    testName:
+      "auth.portal-route-selection-and-policy-drive-browser-flow selects portal routes and exposes portal policy",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.portal-admin-protects-built-in-and-route-conflicts",
+    file:
+      "auth/portal_admin_protects_built_in_and_route_conflicts.integration_test.ts",
+    testName:
+      "auth.portal-admin-protects-built-in-and-route-conflicts rejects protected portal mutations and active selector conflicts",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.capability-groups-and-last-admin-guard-are-enforced",
+    file:
+      "auth/capability_groups_and_last_admin_guard_are_enforced.integration_test.ts",
+    testName:
+      "auth.capability-groups-and-last-admin-guard-are-enforced validates capability groups and last-admin guardrails",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.users-identities-admin-surfaces-page-and-scope",
+    file:
+      "auth/users_identities_admin_surfaces_page_and_scope.integration_test.ts",
+    testName:
+      "auth.users-identities-admin-surfaces-page-and-scope exercises user and identity admin RPC surfaces",
+    runtime: "live-trellis",
+  },
+  {
     id: "device-activation.admin-provisions-known-device",
     file: "device-activation/admin_provisions_known_device.integration_test.ts",
     testName:
@@ -776,6 +855,31 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
       "device-activation/activated_device_authority_is_listed.integration_test.ts",
     testName:
       "device-activation.activated-device-authority-is-listed appears in authority list",
+    runtime: "live-trellis",
+  },
+  {
+    id: "device-activation.connect-info-admin-reviewed-before-activation",
+    file:
+      "device-activation/connect_info_admin_reviewed_before_activation.integration_test.ts",
+    testName:
+      "device-activation.connect-info-admin-reviewed-before-activation returns admin-reviewed connect info before user activation",
+    runtime: "live-trellis",
+  },
+  {
+    id:
+      "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats",
+    file:
+      "device-activation/wait_and_connect_info_reject_bad_proofs_and_stale_iats.integration_test.ts",
+    testName:
+      "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats rejects bad pre-auth proofs",
+    runtime: "live-trellis",
+  },
+  {
+    id: "device-activation.review-capability-is-deployment-scoped",
+    file:
+      "device-activation/review_capability_is_deployment_scoped.integration_test.ts",
+    testName:
+      "device-activation.review-capability-is-deployment-scoped limits review RPCs to scoped deployment",
     runtime: "live-trellis",
   },
   {

@@ -4331,6 +4331,493 @@
     },
     {
       "kind": "client",
+      "id": "auth.grant-overrides-bind-without-user-capability",
+      "fixture": "auth",
+      "title": "Grant overrides bind an app identity without direct user capability",
+      "coverage": [
+        "app-identity-grant-approval",
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "cross-runtime-rpc"
+      ],
+      "description": "Deployment authority grant overrides authorize a matching app identity bind for a local-login user without direct user capabilities, while mismatched origin or session identities remain denied.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.auth-local-login-client@v1"
+          }
+        ],
+        "given": [
+          "a local user exists without direct capabilities",
+          "a service handles an RPC required by the app client contract"
+        ],
+        "when": [
+          "an admin writes exact deployment authority grant override rows",
+          "the local user completes matching and mismatched app identity bind attempts"
+        ],
+        "then": [
+          "Put, List, and Remove reflect the exact override rows",
+          "matching origin and session grant overrides allow bind and service RPC access",
+          "mismatched origin and session identities fail with insufficient capabilities"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "auth.identity-grants-revoke-removes-authority-and-live-sessions",
+      "fixture": "auth",
+      "title": "Identity grant revoke removes authority and live sessions",
+      "coverage": [
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "cross-runtime-rpc"
+      ],
+      "description": "Auth.IdentityGrants.Revoke deletes the grant, removes matching app sessions and connection presence, denies old runtime calls, and rejects unauthorized revoke attempts.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.auth-local-login-client@v1"
+          }
+        ],
+        "given": [
+          "two app sessions share an identity grant"
+        ],
+        "when": [
+          "a non-owner attempts revoke",
+          "an admin revokes the identity grant"
+        ],
+        "then": [
+          "the non-owner revoke is denied",
+          "the grant, sessions, and connection presence disappear",
+          "old runtime calls fail"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "auth.portal-route-selection-and-policy-drive-browser-flow",
+      "fixture": "auth",
+      "title": "Portal route selection and policy drive browser auth flow",
+      "coverage": [
+        "auth-protocol-matrix",
+        "capability-permission-matrix"
+      ],
+      "description": "Auth.Portals.Put, portal login settings, and route selectors select the login portal for /auth/requests and /auth/flow/:flowId, expose selected portal policy, and fall back when a route is disabled or removed.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.auth-local-login-client@v1"
+          }
+        ],
+        "given": [
+          "a default login portal route and a custom contract/origin route exist"
+        ],
+        "when": [
+          "the client starts browser auth and the flow state is fetched",
+          "the custom route is disabled and removed"
+        ],
+        "then": [
+          "the custom route wins while active",
+          "the loginUrl and flow state reflect the custom portal policy",
+          "disabled and removed routes fall back to the default portal"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "auth.portal-admin-protects-built-in-and-route-conflicts",
+      "fixture": "auth",
+      "title": "Portal admin protects built-in login portal and active route selectors",
+      "coverage": [
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "cross-runtime-rpc"
+      ],
+      "description": "Generated Auth.Portals admin RPCs reject built-in portal mutation, active selector conflicts, and removal of portals still targeted by routes.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          }
+        ],
+        "given": [
+          "the built-in login portal and two custom portals exist"
+        ],
+        "when": [
+          "the admin mutates the built-in portal, creates conflicting routes, and removes a targeted portal"
+        ],
+        "then": [
+          "protected mutations return validation errors",
+          "removing the route first allows portal removal"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "auth.capability-groups-and-last-admin-guard-are-enforced",
+      "fixture": "auth",
+      "title": "Capability groups and last-admin guardrails are enforced",
+      "coverage": [
+        "auth-protocol-matrix",
+        "capability-permission-matrix"
+      ],
+      "description": "Auth capability group CRUD affects resolved user authority, rejects unknown capabilities and built-in group mutation, and protects the last active admin until another active admin exists.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          }
+        ],
+        "given": [
+          "an authenticated local admin session exists"
+        ],
+        "when": [
+          "the admin manages capability groups and attempts last-admin mutations"
+        ],
+        "then": [
+          "custom groups affect resolved authority",
+          "invalid group mutations fail",
+          "last-admin mutations fail until a second admin exists"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "auth.users-identities-admin-surfaces-page-and-scope",
+      "fixture": "auth",
+      "title": "Auth user and identity admin surfaces paginate and enforce scope",
+      "coverage": [
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "cross-runtime-rpc"
+      ],
+      "description": "Admin clients list and get users, list and unlink identities, observe pagination metadata, receive identity_not_found for a missing identity unlink, and non-admin users cannot bind the admin-scoped surface.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          }
+        ],
+        "given": [
+          "an admin creates target and observer users with local identities"
+        ],
+        "when": [
+          "the admin lists users, gets one user, lists identities, and unlinks a missing identity"
+        ],
+        "then": [
+          "pagination metadata and identities are returned",
+          "missing unlink returns identity_not_found",
+          "non-admin access is denied"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "device-activation.connect-info-admin-reviewed-before-activation",
+      "fixture": "device-activation",
+      "title": "Preregistered no-review device receives admin-reviewed connect info before activation",
+      "coverage": [
+        "device-activation-end-to-end",
+        "auth-protocol-matrix",
+        "observability-trace-matrix"
+      ],
+      "description": "A preregistered device in a no-review deployment fetches connect info before user activation, receives admin-reviewed authority, connects as a device, and does not create an activation review record.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "trellis.integration.device-activation-device@v1"
+          }
+        ],
+        "given": [
+          "a preregistered no-review device has not been user activated"
+        ],
+        "when": [
+          "the device requests connect info"
+        ],
+        "then": [
+          "connect info is ready with admin_reviewed authority",
+          "the device can connect and Auth.Sessions.Me works",
+          "no activation review record is created"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats",
+      "fixture": "device-activation",
+      "title": "Device activation pre-auth endpoints reject bad proofs and stale iats",
+      "coverage": [
+        "device-activation-end-to-end",
+        "auth-protocol-matrix",
+        "capability-permission-matrix"
+      ],
+      "description": "Device activation wait and connect-info HTTP endpoints reject stale iat values, invalid signatures, mismatched flow nonce or key, expired or missing flows, and unauthorized contract digests.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "device",
+            "kind": "device",
+            "contract": "trellis.integration.device-activation-device@v1"
+          }
+        ],
+        "given": [
+          "a known device is provisioned and an activation flow exists"
+        ],
+        "when": [
+          "the device calls pre-auth endpoints with bad proofs or stale flow state"
+        ],
+        "then": [
+          "stale iat, bad signature, wrong nonce/key, missing or expired flow, and unauthorized digest return public errors"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "device-activation.review-capability-is-deployment-scoped",
+      "fixture": "device-activation",
+      "title": "Device activation review capability is deployment scoped",
+      "coverage": [
+        "device-activation-end-to-end",
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "observability-trace-matrix"
+      ],
+      "description": "A reviewer with trellis.auth::device.review.<deployment> can list and decide only reviews for that deployment while a broad reviewer can review all deployments.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.integration.device-activation-admin@v1"
+          }
+        ],
+        "given": [
+          "two device deployments require activation review"
+        ],
+        "when": [
+          "a reviewer scoped to one deployment lists and decides reviews"
+        ],
+        "then": [
+          "the scoped reviewer sees and decides only that deployment",
+          "the admin sees both deployment reviews"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "state.migration-required-is-returned-live",
+      "fixture": "state",
+      "title": "State migration-required is returned for accepted old state versions",
+      "coverage": [
+        "state-parity",
+        "state-migration",
+        "state-admin",
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "observability-trace-matrix"
+      ],
+      "description": "A v1 app contract writes value and map state, and a new digest with the same contract id and accepted old state versions reads the entries as migration-required through generated runtime and admin surfaces.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client-v1",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          },
+          {
+            "name": "client-v2",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "two app contract digests share a contract id and state store lineage"
+        ],
+        "when": [
+          "the v1 client writes value and map state and the v2 client reads them"
+        ],
+        "then": [
+          "runtime and admin reads return migration-required metadata and old values"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "state.ttl-expiry-is-absent-live",
+      "fixture": "state",
+      "title": "Expired TTL state entries are treated as absent",
+      "coverage": [
+        "state-parity",
+        "observability-trace-matrix"
+      ],
+      "description": "Entries written with ttlMs disappear from get, list, create-if-absent, and revision delete behavior through live State RPCs after expiry.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "value and map entries were written with ttlMs"
+        ],
+        "when": [
+          "the entries expire"
+        ],
+        "then": [
+          "get and list treat them as absent",
+          "create-if-absent and delete behave over expired entries as absent"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "authority-plan.acceptance-rejects-wrong-classification-expired-and-version-mismatch",
+      "fixture": "authority-plan",
+      "title": "Invalid authority plan acceptance attempts do not mutate desired authority",
+      "coverage": [
+        "deployment-authority",
+        "contract-planning",
+        "strict-compatibility",
+        "plan-approval"
+      ],
+      "description": "Invalid AcceptUpdate and AcceptMigration calls return validation errors and leave deployment authority desired state, version, and plan state unchanged.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.integration.authority-plan.acceptance-admin@v1"
+          }
+        ],
+        "given": [
+          "pending migration and update plans exist"
+        ],
+        "when": [
+          "the admin attempts wrong-classification, missing-acknowledgement, stale-version, rejected, and expired acceptances"
+        ],
+        "then": [
+          "each invalid acceptance returns a validation error",
+          "desired state and plan state remain unchanged"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.admin-list-services-filters-stale-worker-heartbeats",
+      "fixture": "jobs",
+      "title": "Jobs admin ListServices filters stale worker heartbeats",
+      "coverage": [
+        "jobs-admin-list-services",
+        "jobs-worker-presence",
+        "jobs-service-local-parity"
+      ],
+      "description": "Jobs admin ListServices reports fresh worker presence and omits worker heartbeats older than the freshness window.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-admin-client@v1"
+          }
+        ],
+        "given": [
+          "fresh and stale worker heartbeats have been published"
+        ],
+        "when": [
+          "an admin client calls Jobs.ListServices"
+        ],
+        "then": [
+          "the fresh heartbeat appears",
+          "the stale heartbeat is omitted",
+          "paginated responses advance with stable offsets"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
       "id": "outbox.commits-event-through-sql-outbox",
       "fixture": "outbox",
       "title": "SQL outbox commits event through service-owned database transaction and delivers to NATS",
@@ -6076,6 +6563,70 @@
         "rust": {
           "module": "control_plane_jobs_admin",
           "function": "control_plane_jobs_admin_lists_and_cancels_job"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "control-plane.service-admin-removal-rejects-unsafe-purge-and-noncascade-in-use",
+      "fixture": "control-plane",
+      "title": "Auth admin rejects unsafe service deployment removal while in use",
+      "coverage": [
+        "auth-admin",
+        "deployments",
+        "service-instances",
+        "validation",
+        "generated-rpc",
+        "runtime-access"
+      ],
+      "description": "Uses generated Auth admin RPCs and a live service/client to verify unsafe service deployment removal requests return validation errors without deleting deployment, instance, authority, or session records.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis Auth admin RPC"
+          },
+          {
+            "name": "local admin",
+            "kind": "admin",
+            "contract": "Trellis built-in admin identity"
+          },
+          {
+            "name": "removal probe service",
+            "kind": "service",
+            "contract": "case-scoped ping service"
+          },
+          {
+            "name": "removal probe client",
+            "kind": "app",
+            "contract": "case-scoped ping client"
+          }
+        ],
+        "given": [
+          "A live Trellis control plane has an enabled service deployment with a connected service instance and connected client."
+        ],
+        "when": [
+          "The admin attempts service deployment removal with purgeResources, purgeUnusedContracts without cascade, and non-cascade while in use."
+        ],
+        "then": [
+          "Each remove returns a validation error.",
+          "Deployment, instance, authority, and session records remain listed.",
+          "The connected client can still call the connected service."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/service_admin_removal_rejects_unsafe_purge_and_noncascade_in_use.integration_test.ts",
+          "testName": "control-plane.service-admin-removal-rejects-unsafe-purge-and-noncascade-in-use rejects unsafe removes without changing live service records"
+        },
+        "rust": {
+          "module": "control_plane",
+          "function": "control_plane_service_admin_removal_rejects_unsafe_purge_and_noncascade_in_use"
         }
       },
       "completion": {

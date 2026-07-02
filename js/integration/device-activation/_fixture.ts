@@ -186,6 +186,8 @@ export function createDeviceActivationFixture(caseId: string) {
               "Auth.Sessions.List",
               "Auth.Sessions.Me",
               "Auth.Sessions.Revoke",
+              "Auth.Users.Create",
+              "Auth.Users.PasswordReset.Create",
             ],
           },
           operations: { call: ["Auth.DeviceUserAuthorities.Resolve"] },

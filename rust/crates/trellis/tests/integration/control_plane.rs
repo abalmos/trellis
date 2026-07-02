@@ -15,15 +15,15 @@ use trellis_rs::client::{
     ServiceConnectWithContractOptions, TrellisClient,
 };
 use trellis_rs::sdk::auth::types::{
-    AuthConnectionsKickRequest, AuthConnectionsListRequest, AuthDeploymentAuthorityPlanRequest,
-    AuthDeploymentsCreateRequest, AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest,
-    AuthDeploymentsListRequest, AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest,
-    AuthDevicesEnableRequest, AuthDevicesListRequest, AuthDevicesProvisionRequest,
-    AuthDevicesRemoveRequest, AuthServiceInstancesDisableRequest,
-    AuthServiceInstancesEnableRequest, AuthServiceInstancesListRequest,
-    AuthServiceInstancesProvisionRequest, AuthServiceInstancesRemoveRequest,
-    AuthSessionsListRequest, AuthUsersCreateRequest, AuthUsersListRequest,
-    AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
+    AuthConnectionsKickRequest, AuthConnectionsListRequest, AuthDeploymentAuthorityGetRequest,
+    AuthDeploymentAuthorityPlanRequest, AuthDeploymentsCreateRequest,
+    AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest, AuthDeploymentsListRequest,
+    AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest, AuthDevicesEnableRequest,
+    AuthDevicesListRequest, AuthDevicesProvisionRequest, AuthDevicesRemoveRequest,
+    AuthServiceInstancesDisableRequest, AuthServiceInstancesEnableRequest,
+    AuthServiceInstancesListRequest, AuthServiceInstancesProvisionRequest,
+    AuthServiceInstancesRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
+    AuthUsersListRequest, AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
 };
 use trellis_rs::service::{
     ConnectedServiceRuntime, GeneratedServiceContract, KvResourceClient, StoreResourceClient,
@@ -175,6 +175,8 @@ const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_ADMIN_CLIENT_ID: &str =
     "trellis.integration.control-plane.admin-service-deployment-lifecycle-admin@v1";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT: &str =
     "admin-service-deployment-control-plane-admin-service-deployment-lifecycle";
+const SERVICE_ADMIN_REMOVAL_REJECTS_CASE_ID: &str =
+    "control-plane.service-admin-removal-rejects-unsafe-purge-and-noncascade-in-use";
 const ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_CASE_ID: &str =
     "control-plane.admin-service-deployment-rollback-fault";
 const ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_ADMIN_CLIENT_ID: &str =
@@ -2937,6 +2939,148 @@ async fn control_plane_admin_service_deployment_validate_before_persist_kick() {
 }
 
 #[tokio::test]
+async fn control_plane_service_admin_removal_rejects_unsafe_purge_and_noncascade_in_use() {
+    assert_service_case_registered(
+        SERVICE_ADMIN_REMOVAL_REJECTS_CASE_ID,
+        "control-plane",
+        "control_plane",
+    );
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+    let deployment_id = SERVICE_ADMIN_REMOVAL_REJECTS_CASE_ID;
+
+    let service_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        CATALOG_RESTART_SERVICE_CONTRACT_JSON,
+    )
+    .expect("build service admin removal probe contract");
+    let service_key = admin
+        .provision_service_instance(&bootstrap_url, &service_contract, Some(deployment_id), None)
+        .await
+        .expect("provision live service admin removal probe");
+    let service_task = start_catalog_restart_service(
+        runtime.trellis_url(),
+        &service_contract,
+        &service_key,
+        1,
+        true,
+    )
+    .await;
+
+    let client_contract = catalog_restart_client_contract().expect("build service removal client");
+    let client_seed = trellis_rs::auth::generate_session_keypair().0;
+    let client = admin
+        .connect_client_with_session_seed(&bootstrap_url, &client_contract, client_seed)
+        .await
+        .expect("connect live Rust service removal client");
+    let client_session_key = client.auth().session_key.clone();
+    assert_eq!(
+        call_catalog_restart_with_retry(&client, "before").await,
+        CatalogRestartPingOutput {
+            message: "before".to_string(),
+            generation: 1,
+        }
+    );
+
+    let admin_contract = admin_refresh_rollback_contract(
+        SERVICE_ADMIN_REMOVAL_REJECTS_CASE_ID,
+        &[
+            "Auth.DeploymentAuthority.Get",
+            "Auth.Deployments.List",
+            "Auth.Deployments.Remove",
+            "Auth.ServiceInstances.List",
+            "Auth.Sessions.List",
+        ],
+    )
+    .expect("build service admin removal contract");
+    let admin_client = admin
+        .connect_client(&bootstrap_url, &admin_contract)
+        .await
+        .expect("connect live Rust service admin removal admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth_rpc = auth.rpc().auth();
+
+    assert_deployments_remove_validation_error(
+        &admin_client,
+        json!({
+            "kind": "service",
+            "deploymentId": deployment_id,
+            "cascade": true,
+            "purgeResources": true,
+        }),
+    )
+    .await;
+    assert_deployments_remove_validation_error(
+        &admin_client,
+        json!({
+            "kind": "service",
+            "deploymentId": deployment_id,
+            "purgeUnusedContracts": true,
+        }),
+    )
+    .await;
+    assert_deployments_remove_validation_error(
+        &admin_client,
+        json!({
+            "kind": "service",
+            "deploymentId": deployment_id,
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        deployment_disabled(&auth_rpc, "service", deployment_id).await,
+        Some(false)
+    );
+    let service_instances = auth_rpc
+        .service_instances_list(&AuthServiceInstancesListRequest {
+            deployment_id: Some(deployment_id.to_string()),
+            disabled: None,
+            limit: 500,
+            offset: None,
+        })
+        .await
+        .expect("list service instances after rejected removes");
+    assert!(service_instances
+        .entries
+        .iter()
+        .any(|entry| entry.instance_key == service_key.session_key && !entry.disabled));
+
+    let authority = auth_rpc
+        .deployment_authority_get(&AuthDeploymentAuthorityGetRequest {
+            deployment_id: deployment_id.to_string(),
+        })
+        .await
+        .expect("get deployment authority after rejected removes");
+    assert_eq!(authority.authority.deployment_id, deployment_id);
+    assert!(!authority.authority.disabled);
+
+    let sessions = auth_rpc
+        .sessions_list(&auth_sessions_list_request())
+        .await
+        .expect("list sessions after rejected removes");
+    assert_session_listed_with_kind(&sessions, &service_key.session_key, "service");
+    assert_session_listed_with_kind(&sessions, &client_session_key, "app");
+
+    assert_eq!(
+        call_catalog_restart_with_retry(&client, "after").await,
+        CatalogRestartPingOutput {
+            message: "after".to_string(),
+            generation: 1,
+        }
+    );
+
+    service_task.abort_and_wait().await;
+}
+
+#[tokio::test]
 async fn control_plane_admin_service_deployment_disable_refresh_rollback() {
     let case_id = "control-plane.admin-service-deployment-disable-refresh-rollback";
     assert_rust_service_case_registered(case_id);
@@ -5018,6 +5162,26 @@ async fn assert_catalog_surface_status_validation_error(
     }
 }
 
+async fn assert_deployments_remove_validation_error(
+    client: &trellis_rs::client::TrellisClient,
+    input: Value,
+) {
+    let result = client
+        .request_json_value("rpc.v1.Auth.Deployments.Remove", &input)
+        .await;
+    match result {
+        Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => {
+            let error = payload
+                .decode_validation()
+                .expect("decode ValidationError payload")
+                .expect("expected ValidationError payload");
+            assert_eq!(error.error_type, "ValidationError");
+        }
+        Ok(output) => panic!("expected Deployments.Remove validation error, got {output:?}"),
+        Err(error) => panic!("expected Deployments.Remove ValidationError, got {error}"),
+    }
+}
+
 async fn assert_catalog_surface_status_contract_get(
     core: &trellis_rs::sdk::core::CoreClient<'_>,
     digest: &str,
@@ -5405,6 +5569,14 @@ fn assert_session_listed(
     sessions: &trellis_rs::sdk::auth::types::AuthSessionsListResponse,
     session_key: &str,
 ) {
+    assert_session_listed_with_kind(sessions, session_key, "app");
+}
+
+fn assert_session_listed_with_kind(
+    sessions: &trellis_rs::sdk::auth::types::AuthSessionsListResponse,
+    session_key: &str,
+    participant_kind: &str,
+) {
     let session = sessions
         .entries
         .iter()
@@ -5414,7 +5586,7 @@ fn assert_session_listed(
 
     assert_eq!(
         session.get("participantKind").and_then(Value::as_str),
-        Some("app")
+        Some(participant_kind)
     );
 }
 
@@ -5854,7 +6026,7 @@ async fn connect_with_local_password(
             "bind response missing native transport",
         )
     })?;
-    let servers = native.nats_servers.join(",");
+    let servers = native.servers.join(",");
     Ok(
         trellis_rs::client::TrellisClient::connect_user(trellis_rs::client::UserConnectOptions {
             servers: &servers,

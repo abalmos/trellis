@@ -20,6 +20,19 @@ export function createStateFixture(caseId: string) {
       body: Type.String(),
     }),
   } as const;
+  const stateSchemasV2 = {
+    ...stateSchemas,
+    PreferencesV2: Type.Object({
+      theme: Type.String(),
+      density: Type.String(),
+      contrast: Type.String(),
+    }),
+    DraftV2: Type.Object({
+      title: Type.String(),
+      body: Type.String(),
+      status: Type.String(),
+    }),
+  } as const;
 
   const clientContract = defineAppContract(
     { schemas: stateSchemas },
@@ -37,6 +50,30 @@ export function createStateFixture(caseId: string) {
           kind: "map",
           schema: ref.schema("Draft"),
           stateVersion: "drafts.v1",
+        },
+      },
+    }),
+  );
+
+  const clientContractV2 = defineAppContract(
+    { schemas: stateSchemasV2 },
+    (ref) => ({
+      id: clientContract.CONTRACT_ID,
+      displayName: `Trellis Integration State Client v2 (${slug})`,
+      description:
+        "Exercises generated contract-owned state store migration surfaces.",
+      state: {
+        preferences: {
+          kind: "value",
+          schema: ref.schema("PreferencesV2"),
+          stateVersion: "preferences.v2",
+          acceptedVersions: { "preferences.v1": ref.schema("Preferences") },
+        },
+        drafts: {
+          kind: "map",
+          schema: ref.schema("DraftV2"),
+          stateVersion: "drafts.v2",
+          acceptedVersions: { "drafts.v1": ref.schema("Draft") },
         },
       },
     }),
@@ -68,7 +105,9 @@ export function createStateFixture(caseId: string) {
     adminContract,
     adminName: caseScopedName("state-fixture-admin", caseId),
     clientContract,
+    clientContractV2,
     clientName: caseScopedName("state-fixture-client", caseId),
+    clientV2Name: caseScopedName("state-fixture-client-v2", caseId),
     draftPrefix: caseScopedName("inspection", caseId),
     draftKey: caseScopedName("state-draft", caseId),
     limitPrefix: caseScopedName("limit-test", caseId),
