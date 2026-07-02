@@ -15,10 +15,10 @@ repositories.
   `<trellis-repo-root>/docs/static/llms-full.txt`, and the relevant
   language-specific guide under `<trellis-repo-root>/docs/static/`.
 - If no local Trellis path is linked, read the same files from the matching
-  Trellis release branch, where `<release-tag>` is the Trellis version tag such
-  as `v0.11.0-rc.2`:
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms.txt`,
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms-full.txt`,
+  Trellis release branch, where `<version-tag>` is the Trellis version tag,
+  including the leading `v`, such as `v0.11.0-rc.3`:
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms.txt`,
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-full.txt`,
   and the matching `llms-typescript.txt` or `llms-rust.txt` guide.
 - Read the short guide at the start of any Trellis task. Read the full guide
   before changing contracts, service handlers, events, operations, generated

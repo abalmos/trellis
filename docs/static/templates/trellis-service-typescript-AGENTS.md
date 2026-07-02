@@ -14,12 +14,12 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
   `<trellis-repo-root>/docs/static/llms-full.txt`, and
   `<trellis-repo-root>/docs/static/llms-typescript.txt`.
 - If no local Trellis path is linked, read the same files from the matching
-  Trellis release branch, where `<release-tag>` is the Trellis version tag such
-  as `v0.11.0-rc.2`:
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms.txt`,
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms-full.txt`,
+  Trellis release branch, where `<version-tag>` is the Trellis version tag,
+  including the leading `v`, such as `v0.11.0-rc.3`:
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms.txt`,
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-full.txt`,
   and
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms-typescript.txt`.
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-typescript.txt`.
 - Read the short guide for every Trellis task. Read the full and TypeScript
   guides before changing contracts, service handlers, events, operations,
   generated SDKs, outbox/inbox code, or browser app wiring.

@@ -14,12 +14,12 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
   `<trellis-repo-root>/docs/static/llms-full.txt`, and
   `<trellis-repo-root>/docs/static/llms-rust.txt`.
 - If no local Trellis path is linked, read the same files from the matching
-  Trellis release branch, where `<release-tag>` is the Trellis version tag such
-  as `v0.11.0-rc.2`:
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms.txt`,
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms-full.txt`,
+  Trellis release branch, where `<version-tag>` is the Trellis version tag,
+  including the leading `v`, such as `v0.11.0-rc.3`:
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms.txt`,
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-full.txt`,
   and
-  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<release-tag>/docs/static/llms-rust.txt`.
+  `https://raw.githubusercontent.com/Qlever-LLC/trellis/refs/heads/release/<version-tag>/docs/static/llms-rust.txt`.
 - Read the short guide for every Trellis task. Read the full and Rust guides
   before changing contracts, service handlers, events, operations, generated
   SDKs, or outbox/inbox code.
@@ -62,8 +62,8 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 - Use public `trellis` runtime facades and `trellis-contracts` contract-model
   APIs. Do not depend on unpublished low-level runtime crates from application
   code.
-- Do not extract or construct raw `async_nats::Client` handles for normal
-  application communication.
+- Do not extract or construct raw transport handles for normal application
+  communication.
 - Direct descriptor publish is the default. Use prepared events only when event
   publication must be coupled to local durable state.
 - Use SQL outbox/inbox stores when they must participate in a SQL transaction.
