@@ -662,6 +662,7 @@ impl InboxStore for PostgresInboxStore<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
     use serde_json::Value;
 
     #[derive(Debug, Deserialize, Serialize)]

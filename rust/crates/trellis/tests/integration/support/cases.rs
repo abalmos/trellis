@@ -250,6 +250,16 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "state_admin_inspect_and_delete_state",
     ),
     IntegrationCase::live(
+        "state.migration-required-is-returned-live",
+        "state",
+        "state_migration_required_is_returned_live",
+    ),
+    IntegrationCase::live(
+        "state.ttl-expiry-is-absent-live",
+        "state",
+        "state_ttl_expiry_is_absent_live",
+    ),
+    IntegrationCase::live(
         "transfer.client-uploads-file-via-operation",
         "transfer",
         "transfer_client_uploads_file_via_operation",
@@ -305,9 +315,24 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "jobs_keyed_jobs_serialize_same_key",
     ),
     IntegrationCase::live(
+        "jobs.keyed-jobs-reject-queue-full",
+        "jobs",
+        "jobs_keyed_jobs_reject_queue_full",
+    ),
+    IntegrationCase::live(
         "jobs.service-creates-local-job-from-client-rpc",
         "jobs",
         "jobs_service_creates_local_job_from_client_rpc",
+    ),
+    IntegrationCase::live(
+        "jobs.submitted-job-can-be-cancelled",
+        "jobs",
+        "jobs_submitted_job_can_be_cancelled",
+    ),
+    IntegrationCase::live(
+        "jobs.failed-job-retries-then-dead",
+        "jobs",
+        "jobs_failed_job_retries_then_dead",
     ),
     IntegrationCase::live(
         "jobs.job-progress-and-log-are-published",
@@ -323,6 +348,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "jobs.job-context-propagates-request-and-trace",
         "jobs",
         "jobs_job_context_propagates_request_and_trace",
+    ),
+    IntegrationCase::live(
+        "jobs.admin-list-services-filters-stale-worker-heartbeats",
+        "jobs",
+        "jobs_admin_list_services_filters_stale_worker_heartbeats",
     ),
     IntegrationCase::live(
         "health.client-subscribes-to-heartbeats",
@@ -393,6 +423,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "authority-plan.resource-change-migration-approved-and-bound",
         "authority_plan",
         "authority_plan_resource_change_migration_approved_and_bound",
+    ),
+    IntegrationCase::live(
+        "authority-plan.acceptance-rejects-wrong-classification-expired-and-version-mismatch",
+        "authority_plan",
+        "authority_plan_acceptance_rejects_wrong_classification_expired_and_version_mismatch",
     ),
     IntegrationCase::live(
         "outbox.commits-event-through-sql-outbox",
@@ -530,6 +565,36 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "auth_sessions_revoke_revokes_device_and_service_access",
     ),
     IntegrationCase::live(
+        "auth.grant-overrides-bind-without-user-capability",
+        "app_identity_approval",
+        "auth_grant_overrides_bind_without_user_capability",
+    ),
+    IntegrationCase::live(
+        "auth.identity-grants-revoke-removes-authority-and-live-sessions",
+        "app_identity_approval",
+        "auth_identity_grants_revoke_removes_authority_and_live_sessions",
+    ),
+    IntegrationCase::live(
+        "auth.portal-route-selection-and-policy-drive-browser-flow",
+        "app_identity_approval",
+        "auth_portal_route_selection_and_policy_drive_browser_flow",
+    ),
+    IntegrationCase::live(
+        "auth.portal-admin-protects-built-in-and-route-conflicts",
+        "app_identity_approval",
+        "auth_portal_admin_protects_built_in_and_route_conflicts",
+    ),
+    IntegrationCase::live(
+        "auth.capability-groups-and-last-admin-guard-are-enforced",
+        "app_identity_approval",
+        "auth_capability_groups_and_last_admin_guard_are_enforced",
+    ),
+    IntegrationCase::live(
+        "auth.users-identities-admin-surfaces-page-and-scope",
+        "app_identity_approval",
+        "auth_users_identities_admin_surfaces_page_and_scope",
+    ),
+    IntegrationCase::live(
         "device-activation.admin-provisions-known-device",
         "device_activation",
         "device_activation_admin_provisions_known_device",
@@ -568,6 +633,21 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "device-activation.activated-device-authority-is-listed",
         "device_activation",
         "device_activation_activated_device_authority_is_listed",
+    ),
+    IntegrationCase::live(
+        "device-activation.connect-info-admin-reviewed-before-activation",
+        "device_activation",
+        "device_activation_connect_info_admin_reviewed_before_activation",
+    ),
+    IntegrationCase::live(
+        "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats",
+        "device_activation",
+        "device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iats",
+    ),
+    IntegrationCase::live(
+        "device-activation.review-capability-is-deployment-scoped",
+        "device_activation",
+        "device_activation_review_capability_is_deployment_scoped",
     ),
 ];
 
@@ -771,6 +851,11 @@ pub(crate) const RUST_SERVICE_INTEGRATION_CASES: &[IntegrationCase] = &[
         "control-plane.jobs-admin-lists-and-cancels-job",
         "control_plane_jobs_admin",
         "control_plane_jobs_admin_lists_and_cancels_job",
+    ),
+    IntegrationCase::live(
+        "control-plane.service-admin-removal-rejects-unsafe-purge-and-noncascade-in-use",
+        "control_plane",
+        "control_plane_service_admin_removal_rejects_unsafe_purge_and_noncascade_in_use",
     ),
     IntegrationCase::live(
         "event-consumers.durable-listen-without-declared-group-returns-err",

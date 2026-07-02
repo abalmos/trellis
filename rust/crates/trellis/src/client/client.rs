@@ -946,6 +946,11 @@ impl TrellisClient {
         &self.nats
     }
 
+    #[doc(hidden)]
+    pub fn internal_nats(&self) -> &async_nats::Client {
+        self.nats()
+    }
+
     /// Return the session auth helper used by this client.
     pub fn auth(&self) -> &SessionAuth {
         &self.auth

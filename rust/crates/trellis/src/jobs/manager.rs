@@ -189,6 +189,23 @@ impl<P, M> JobManager<P, M> {
         }
     }
 
+    #[doc(hidden)]
+    pub fn new_with_key_coordinator(
+        publisher: P,
+        bindings: JobsBinding,
+        meta: M,
+        key_coordinator: Arc<dyn JobKeyCoordinator>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(JobManagerInner {
+                publisher,
+                bindings,
+                meta,
+                key_coordinator: Some(key_coordinator),
+            }),
+        }
+    }
+
     pub fn publisher(&self) -> &P {
         &self.inner.publisher
     }

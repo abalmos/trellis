@@ -509,8 +509,9 @@ pub fn new_key_state(policy: &JobKeyPolicy, timestamp: &str) -> JobKeyState {
 }
 
 /// Errors returned by the NATS KV-backed keyed coordinator.
+#[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum NatsKeyCoordinatorError {
+pub enum NatsKeyCoordinatorError {
     #[error("failed to open keyed jobs KV bucket: {0}")]
     Open(String),
     #[error("failed to read key state '{key}': {details}")]
@@ -527,12 +528,13 @@ pub(crate) enum NatsKeyCoordinatorError {
 
 /// NATS KV-backed keyed-concurrency coordinator using compare-and-set writes.
 #[derive(Clone)]
-pub(crate) struct NatsKeyCoordinator {
+pub struct NatsKeyCoordinator {
     store: async_nats::jetstream::kv::Store,
 }
 
 /// Keyed-concurrency coordinator used by managers and workers.
-pub(crate) trait JobKeyCoordinator: std::fmt::Debug + Send + Sync {
+#[doc(hidden)]
+pub trait JobKeyCoordinator: std::fmt::Debug + Send + Sync {
     /// Apply admission with compare-and-set semantics.
     fn admit(
         &self,
@@ -697,7 +699,7 @@ impl JobKeyCoordinator for NatsKeyCoordinator {
 
 impl NatsKeyCoordinator {
     /// Open the service-scoped Trellis keyed jobs KV bucket.
-    pub(crate) async fn open_for_service(
+    pub async fn open_for_service(
         nats: async_nats::Client,
         service: &str,
     ) -> Result<Self, NatsKeyCoordinatorError> {

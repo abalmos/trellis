@@ -14,12 +14,15 @@ pub mod active_job;
 pub mod api;
 pub mod bindings;
 pub mod events;
-mod keys;
+#[doc(hidden)]
+pub mod keys;
 pub mod manager;
 pub mod projection;
 pub mod publisher;
 pub mod registry;
 pub mod runtime;
+#[doc(hidden)]
+pub mod runtime_ref;
 mod runtime_worker;
 pub mod subjects;
 pub mod types;
@@ -55,6 +58,9 @@ pub use types::{
 };
 
 #[doc(hidden)]
+pub type NatsJobEventPublisher = TrellisJobEventPublisher;
+
+#[doc(hidden)]
 pub mod internal {
     pub use super::runtime_worker::{
         process_work_payload, process_work_payload_with_context,
@@ -66,6 +72,13 @@ pub mod internal {
 #[derive(Debug, Clone)]
 pub struct TrellisJobEventPublisher {
     nats: async_nats::Client,
+}
+
+impl TrellisJobEventPublisher {
+    #[doc(hidden)]
+    pub fn new(nats: async_nats::Client) -> Self {
+        Self { nats }
+    }
 }
 
 impl JobEventPublisher for TrellisJobEventPublisher {

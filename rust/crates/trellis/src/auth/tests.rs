@@ -103,6 +103,50 @@ fn auth_start_signature_payload_uses_empty_provider_and_null_context_when_absent
 }
 
 #[test]
+fn auth_start_signature_payload_canonicalizes_json_payloads() {
+    let left_contract = serde_json::json!({
+        "z": ["first", { "b": false, "a": true }],
+        "a": { "nested": [1, null, 2] },
+    });
+    let right_contract = serde_json::json!({
+        "a": { "nested": [1, null, 2] },
+        "z": ["first", { "a": true, "b": false }],
+    });
+    let reversed_contract = serde_json::json!({
+        "a": { "nested": [2, null, 1] },
+        "z": ["first", { "a": true, "b": false }],
+    });
+    let left_context = serde_json::json!({ "z": { "b": 2, "a": 1 }, "a": ["x", "y"] });
+    let right_context = serde_json::json!({ "a": ["x", "y"], "z": { "a": 1, "b": 2 } });
+    let reversed_context = serde_json::json!({ "a": ["y", "x"], "z": { "a": 1, "b": 2 } });
+
+    let left = build_auth_start_signature_payload(
+        "https://trellis.example.test/_trellis/portal/users/login",
+        Some("github"),
+        &left_contract,
+        Some(&left_context),
+    )
+    .expect("build left payload");
+    let right = build_auth_start_signature_payload(
+        "https://trellis.example.test/_trellis/portal/users/login",
+        Some("github"),
+        &right_contract,
+        Some(&right_context),
+    )
+    .expect("build right payload");
+    let reversed_array = build_auth_start_signature_payload(
+        "https://trellis.example.test/_trellis/portal/users/login",
+        Some("github"),
+        &reversed_contract,
+        Some(&reversed_context),
+    )
+    .expect("build reversed payload");
+
+    assert_eq!(left, right);
+    assert_ne!(left, reversed_array);
+}
+
+#[test]
 fn contract_digest_matches_canonical_json_not_raw_text() {
     let compact = r#"{"format":"trellis.contract.v1","id":"trellis.agent@v1","kind":"agent","displayName":"Trellis Agent","description":"Admin agent"}"#;
     let reordered_pretty = r#"
@@ -335,7 +379,7 @@ async fn start_admin_reauth_flow_uses_detached_portal_redirect_target() {
     let (session_seed, session_key) = super::generate_session_keypair();
     let state = AdminSessionState {
         trellis_url: format!("http://{address}"),
-        nats_servers: "nats://127.0.0.1:4222".to_string(),
+        servers: "nats://127.0.0.1:4222".to_string(),
         session_seed,
         session_key,
         contract_digest: "digest".to_string(),
@@ -487,7 +531,7 @@ fn admin_session_round_trips_through_private_file() {
 
     let state = AdminSessionState {
         trellis_url: "http://localhost:3000".to_string(),
-        nats_servers: "localhost".to_string(),
+        servers: "localhost".to_string(),
         session_seed: "seed".to_string(),
         session_key: "key".to_string(),
         contract_digest: "digest".to_string(),
@@ -1072,7 +1116,7 @@ async fn device_connect_info_posts_signed_connect_info_request_and_parses_ready_
             .transports
             .native
             .expect("native transport")
-            .nats_servers,
+            .servers,
         vec!["nats://127.0.0.1:4222".to_string()]
     );
 
