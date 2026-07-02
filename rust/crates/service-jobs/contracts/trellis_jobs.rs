@@ -14,7 +14,7 @@ const NOT_FOUND_ERROR: &str = "NotFoundError";
 
 /// Build the canonical Jobs admin contract manifest.
 pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+    let mut manifest = ContractManifestBuilder::new(
         "trellis.jobs@v1",
         "Trellis Jobs",
         "Trellis-managed background job administration API.",
@@ -23,16 +23,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .docs_with_summary(
         "Background job administration APIs.",
         "Provides health, service, job, retry, cancel, and dead-letter queue RPCs for Trellis-managed background work.",
-    )
-    .use_ref(
-        "core",
-        trellis_contracts::use_contract("trellis.core@v1")
-            .with_rpc_call(["Trellis.Bindings.Get", "Trellis.Catalog"]),
-    )
-    .use_ref(
-        "auth",
-        trellis_contracts::use_contract("trellis.auth@v1")
-            .with_rpc_call(["Auth.Requests.Validate"]),
     )
     .capability(
         READ_CAPABILITY,
@@ -202,7 +192,15 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         .docs_with_summary("Dismiss a dead-letter job.", "Marks one dead-letter job as dismissed.")
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR, NOT_FOUND_ERROR]),
     )
-    .build()
+    .build()?;
+
+    // Jobs admin bootstrap dependencies are runtime internals, not contract uses.
+    manifest.uses.required_mut().remove("core");
+    manifest.uses.required_mut().remove("auth");
+    manifest.uses.optional_mut().remove("core");
+    manifest.uses.optional_mut().remove("auth");
+
+    Ok(manifest)
 }
 
 fn admin_rpc(
@@ -231,6 +229,8 @@ fn job_state_schema() -> Value {
             { "const": "completed", "type": "string" },
             { "const": "failed", "type": "string" },
             { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
             { "const": "expired", "type": "string" },
             { "const": "dead", "type": "string" },
             { "const": "dismissed", "type": "string" }

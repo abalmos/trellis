@@ -73,6 +73,7 @@ Options:
   --fixture <id>       Select cases by fixture id. May be repeated.
   --case <id>          Select a case id. May be repeated.
   --coverage <id>      Select cases by coverage id. May be repeated.
+  --coverage-dir <dir> Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
   --parallel           Run behavior tests in parallel using one shared
                        Trellis runtime.
   --jobs <n>           Max parallel worker count via DENO_JOBS.

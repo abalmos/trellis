@@ -443,7 +443,18 @@ liveTrellisTest({
           .orThrow(),
         { success: true },
       );
+      await connectedService.stop();
+      service = undefined;
       await runtime.waitFor(async () => {
+        const liveUserNkey = await connectionUserNkey(
+          client,
+          providerKey.sessionKey,
+        );
+        if (liveUserNkey) {
+          await client.rpc.auth.connectionsKick({ userNkey: liveUserNkey })
+            .orThrow();
+          return false;
+        }
         const status = await providerStatus(client);
         return status.state === "available" &&
             status.runtime === "no_live_implementer"

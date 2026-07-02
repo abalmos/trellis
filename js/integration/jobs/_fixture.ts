@@ -4,6 +4,7 @@ import {
   defineServiceContract,
   Result,
 } from "@qlever-llc/trellis";
+import { RetryJobError } from "@qlever-llc/trellis/jobs";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
@@ -96,6 +97,8 @@ export function createJobsFixture(caseId: string) {
       traceId: Type.String(),
     }),
     JobPayload: Type.Object({ documentId: Type.String() }),
+    LongJobPayload: Type.Object({ documentId: Type.String() }),
+    FailingJobPayload: Type.Object({ documentId: Type.String() }),
     JobResult: Type.Object({
       documentId: Type.String(),
       processedBy: Type.String(),
@@ -127,6 +130,16 @@ export function createJobsFixture(caseId: string) {
         processDocument: {
           payload: ref.schema("JobPayload"),
           result: ref.schema("JobResult"),
+        },
+        longProcessDocument: {
+          payload: ref.schema("LongJobPayload"),
+          result: ref.schema("JobResult"),
+        },
+        failingProcessDocument: {
+          payload: ref.schema("FailingJobPayload"),
+          result: ref.schema("JobResult"),
+          maxDeliver: 2,
+          backoffMs: [0],
         },
         keyedProcessDocument: {
           payload: ref.schema("KeyedJobPayload"),
@@ -170,6 +183,18 @@ export function createJobsFixture(caseId: string) {
           capabilities: { call: [] },
           errors: [],
         },
+        "Documents.SubmitLongProcess": {
+          version: "v1",
+          subject: caseScopedSubject(
+            "rpc.v1.Integration.Jobs",
+            caseId,
+            "Documents.SubmitLongProcess",
+          ),
+          input: ref.schema("WorkflowInput"),
+          output: ref.schema("WorkflowOutput"),
+          capabilities: { call: [] },
+          errors: [],
+        },
       },
     }),
   );
@@ -181,7 +206,13 @@ export function createJobsFixture(caseId: string) {
     uses: {
       required: {
         jobsService: serviceContract.use({
-          rpc: { call: ["Documents.Process", "Documents.KeyedProcess"] },
+          rpc: {
+            call: [
+              "Documents.Process",
+              "Documents.KeyedProcess",
+              "Documents.SubmitLongProcess",
+            ],
+          },
         }),
       },
     },
@@ -323,6 +354,67 @@ export function createJobsFixture(caseId: string) {
     };
   }
 
+  async function mountLongRunningWorkflow(
+    service: Awaited<ReturnType<typeof connectService>>,
+  ) {
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+
+    service.jobs.longProcessDocument.handle(async ({ job }) => {
+      resolveStarted();
+      while (!job.cancelled) {
+        await job.heartbeat().orThrow();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return Result.ok({
+        documentId: job.payload.documentId,
+        processedBy: "ts-service-long-job",
+        requestId: job.context.requestId,
+        traceId: job.context.traceId,
+      });
+    });
+
+    await service.handle.rpc.documents.submitLongProcess(
+      async ({ input, client }) => {
+        const ref = await client.jobs.longProcessDocument.create({
+          documentId: input.documentId,
+        }).orThrow();
+        await started;
+        const cancelled = await ref.cancel().orThrow();
+        const terminal = await ref.wait().orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          jobId: ref.id,
+          processedBy: terminal.state,
+          requestId: cancelled.context.requestId,
+          traceId: cancelled.context.traceId,
+        });
+      },
+    );
+
+    return { started };
+  }
+
+  async function mountRetryThenDeadWorkflow(
+    service: Awaited<ReturnType<typeof connectService>>,
+  ) {
+    const attempts: number[] = [];
+
+    service.jobs.failingProcessDocument.handle(async ({ job }) => {
+      attempts.push(job.redeliveryCount());
+      return Result.err(
+        new RetryJobError({
+          message: `retry ${job.payload.documentId}`,
+          context: { documentId: job.payload.documentId },
+        }),
+      );
+    });
+
+    return { attempts: () => [...attempts] };
+  }
+
   return {
     slug,
     serviceContract,
@@ -333,5 +425,7 @@ export function createJobsFixture(caseId: string) {
     connectService,
     mountWorkflow,
     mountKeyedSerializationWorkflow,
+    mountLongRunningWorkflow,
+    mountRetryThenDeadWorkflow,
   };
 }

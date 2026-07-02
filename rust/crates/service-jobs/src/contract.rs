@@ -6,6 +6,7 @@ use trellis_rs::sdk::jobs::rpc::{
     JobsListRpc, JobsListServicesRpc, JobsReplayDLQRpc, JobsRetryRpc,
 };
 use trellis_rs::service::BootstrapContractRef;
+use trellis_rs::service::GeneratedServiceContract;
 use trellis_rs::service::RpcDescriptor;
 
 /// Runtime service name for the Jobs admin host.
@@ -26,6 +27,16 @@ pub const JOBS_RPC_SUBJECTS: &[&str] = &[
 
 pub use generated_contract::{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON};
 pub use trellis_rs::sdk::jobs::rpc;
+
+/// Generated contract marker used by the Rust Trellis service runtime facade.
+#[derive(Debug, Clone, Copy)]
+pub struct JobsContract;
+
+impl GeneratedServiceContract for JobsContract {
+    const CONTRACT_ID: &'static str = generated_contract::CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = generated_contract::CONTRACT_DIGEST;
+    const CONTRACT_JSON: &'static str = generated_contract::CONTRACT_JSON;
+}
 
 /// Return the contract id/digest pair expected by the Jobs admin service.
 pub fn expected_contract() -> BootstrapContractRef {

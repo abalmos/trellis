@@ -66,6 +66,8 @@ Rules:
   worker-count concurrency. Keyed queues default to clear failure
   (`stalePolicy: "fail-stale"`, `whenFull: "reject"`); coalescing or replacing
   queued jobs should be explicit policy.
+- Rust job handlers classify failures with `JobProcessError::retryable(...)` for
+  JetStream redelivery or `JobProcessError::failed(...)` for terminal failure.
 
 ## Use generated descriptors and facades
 

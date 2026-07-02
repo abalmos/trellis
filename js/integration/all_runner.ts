@@ -1,14 +1,18 @@
 import { main as runClientIntegration } from "./runner.ts";
+import { fromFileUrl, isAbsolute, resolve } from "@std/path";
 import { jsIntegrationCases } from "./_support/cases.ts";
 import { loadClientTestMatrix } from "./_support/matrix.ts";
 import { main as runServiceIntegration } from "../services/trellis/integration/runner.ts";
 import { controlPlaneIntegrationCases } from "../services/trellis/integration/_support/cases.ts";
 import { serviceTestMatrix } from "../services/trellis/integration/_support/matrix.ts";
 
+const repoRoot = fromFileUrl(new URL("../../", import.meta.url));
+
 type ParsedArgs = {
   readonly fixtureFilters: readonly string[];
   readonly caseFilters: readonly string[];
   readonly coverageFilters: readonly string[];
+  readonly coverageDir: string | undefined;
   readonly passthrough: readonly string[];
   readonly help: boolean;
 };
@@ -45,15 +49,36 @@ export async function main(args: readonly string[]): Promise<number> {
       throw new Error("no TypeScript integration cases selected");
     }
 
+    const splitCoverage = parsed.coverageDir !== undefined &&
+      clientIds.length > 0 && serviceIds.length > 0;
+
     if (clientIds.length > 0) {
-      const code = await runClientIntegration(toRunnerArgs(clientIds, parsed));
+      const code = await runClientIntegration(
+        toRunnerArgs(
+          clientIds,
+          parsed,
+          splitCoverage ? resolve(parsed.coverageDir!, "client") : undefined,
+        ),
+      );
       if (code !== 0) return code;
     }
     if (serviceIds.length > 0) {
       const code = await runServiceIntegration(
-        toRunnerArgs(serviceIds, parsed),
+        toRunnerArgs(
+          serviceIds,
+          parsed,
+          splitCoverage ? resolve(parsed.coverageDir!, "service") : undefined,
+        ),
       );
-      if (code !== 0) return code;
+      if (code !== 0) {
+        if (splitCoverage) {
+          await combineLcovReports(parsed.coverageDir!);
+        }
+        return code;
+      }
+    }
+    if (splitCoverage) {
+      await combineLcovReports(parsed.coverageDir!);
     }
 
     return 0;
@@ -72,6 +97,7 @@ function parseArgs(args: readonly string[]): ParsedArgs {
   const caseFilters: string[] = [];
   const coverageFilters: string[] = [];
   const passthrough: string[] = [];
+  let coverageDir: string | undefined;
   let help = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -93,6 +119,19 @@ function parseArgs(args: readonly string[]): ParsedArgs {
       index += 1;
     } else if (arg.startsWith("--coverage=")) {
       coverageFilters.push(readInlineFlagValue(arg, "--coverage"));
+    } else if (arg === "--coverage-dir") {
+      coverageDir = setSingleValue(
+        coverageDir,
+        resolveCoverageDir(readFlagValue(args, index, arg)),
+        arg,
+      );
+      index += 1;
+    } else if (arg.startsWith("--coverage-dir=")) {
+      coverageDir = setSingleValue(
+        coverageDir,
+        resolveCoverageDir(readInlineFlagValue(arg, "--coverage-dir")),
+        "--coverage-dir",
+      );
     } else if (arg === "--") {
       passthrough.push(arg, ...args.slice(index + 1));
       break;
@@ -101,7 +140,14 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     }
   }
 
-  return { fixtureFilters, caseFilters, coverageFilters, passthrough, help };
+  return {
+    fixtureFilters,
+    caseFilters,
+    coverageFilters,
+    coverageDir,
+    passthrough,
+    help,
+  };
 }
 
 function selectCaseIds(
@@ -139,9 +185,17 @@ function matchesFilters(caseEntry: MatrixCase, args: ParsedArgs): boolean {
   return true;
 }
 
-function toRunnerArgs(caseIds: readonly string[], args: ParsedArgs): string[] {
+function toRunnerArgs(
+  caseIds: readonly string[],
+  args: ParsedArgs,
+  coverageDirOverride?: string,
+): string[] {
   const selected = caseIds.flatMap((caseId) => ["--case", caseId]);
-  return [...selected, ...args.passthrough];
+  const coverageDir = coverageDirOverride ?? args.coverageDir;
+  const coverageArgs = coverageDir === undefined
+    ? []
+    : ["--coverage-dir", coverageDir];
+  return [...selected, ...coverageArgs, ...args.passthrough];
 }
 
 function readFlagValue(
@@ -164,6 +218,30 @@ function readInlineFlagValue(arg: string, flag: string): string {
   return value;
 }
 
+function resolveCoverageDir(value: string): string {
+  return isAbsolute(value) ? value : resolve(repoRoot, value);
+}
+
+function setSingleValue(
+  previous: string | undefined,
+  value: string,
+  flag: string,
+): string {
+  if (previous !== undefined) {
+    throw new Error(`${flag} may only be provided once`);
+  }
+  return value;
+}
+
+async function combineLcovReports(coverageDir: string): Promise<void> {
+  const lcov = await Promise.all([
+    Deno.readTextFile(resolve(coverageDir, "client", "lcov.info")),
+    Deno.readTextFile(resolve(coverageDir, "service", "lcov.info")),
+  ]);
+  await Deno.mkdir(coverageDir, { recursive: true });
+  await Deno.writeTextFile(resolve(coverageDir, "lcov.info"), lcov.join("\n"));
+}
+
 function helpText(): string {
   return `Run all TypeScript integration tests from integration/test-matrix.json.
 
@@ -174,6 +252,7 @@ Options:
   --fixture <id>       Select matrix cases by fixture id. May be repeated.
   --case <id>          Select a matrix case id. May be repeated.
   --coverage <id>      Select matrix cases by coverage id. May be repeated.
+  --coverage-dir <dir> Collect Deno coverage and write <dir>/lcov.info.
   --parallel           Pass through to each physical runner.
   --jobs <n>           Pass through to each physical runner.
   --skip-conformance   Pass through to each physical runner.

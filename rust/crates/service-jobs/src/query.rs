@@ -1,15 +1,15 @@
 //! SQLite-backed query and mutation helpers for the Jobs admin service.
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::Path;
 use std::time::Duration;
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::jobs::types::{Job, JobEvent, JobState};
+use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{
-    cancelled_event, dismissed_event, job_event_subject, reduce_job_event, retried_event,
+    cancelled_event, dismissed_event, is_terminal, job_event_subject, reduce_job_event,
+    retried_event,
 };
 
 use trellis_rs::sdk::jobs::types::{
@@ -25,15 +25,13 @@ use trellis_rs::sdk::jobs::types::{
 mod resources;
 mod state;
 mod wire;
-use crate::paths::jobs_db_path_from_env;
 use crate::storage::{
     JobProjectionMetadata, ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError,
 };
 use crate::worker_presence::WORKER_PRESENCE_FRESH_FOR;
 
-pub use resources::{
-    jobs_admin_resources_from_binding, resolve_jobs_admin_resources, JobsAdminResources,
-};
+pub(crate) use resources::jobs_admin_resources_from_binding;
+pub use resources::JobsAdminResources;
 use state::{now_timestamp_string, parse_state_filter};
 use wire::{
     job_to_cancel_item, job_to_dismiss_item, job_to_dlq_item, job_to_get_item, job_to_list_item,
@@ -43,10 +41,6 @@ use wire::{
 /// Errors returned while resolving bindings, reading projection state, or publishing admin events.
 #[derive(Debug, thiserror::Error)]
 pub enum JobsQueryError {
-    #[error("failed to fetch Trellis bindings: {0}")]
-    BindingsFetch(String),
-    #[error("missing binding in Trellis.Bindings.Get response")]
-    MissingBinding,
     #[error("job state conflict for key '{key}': expected '{expected}', found '{actual}'")]
     JobStateConflict {
         key: String,
@@ -59,8 +53,6 @@ pub enum JobsQueryError {
     EncodeEvent { key: String, details: String },
     #[error("failed to publish job event on subject '{subject}': {details}")]
     PublishEvent { subject: String, details: String },
-    #[error("timed out waiting for projection of key '{key}'")]
-    ProjectionTimeout { key: String },
     #[error("failed to read Jobs SQLite projection: {details}")]
     ProjectionStore { details: String },
     #[error("failed to convert {model} between internal and generated wire shapes: {details}")]
@@ -77,21 +69,17 @@ pub enum JobsQueryError {
 
 #[derive(Clone)]
 pub struct JobsQuery {
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     store: SqliteJobsStore,
 }
 
 impl JobsQuery {
-    /// Create a SQLite-backed Jobs query adapter from a NATS client and resolved resources.
-    pub fn new(nats: async_nats::Client) -> Self {
-        let db_path = jobs_db_path_from_env();
-        let store = open_default_store(&db_path);
-        Self::with_store(nats, store)
-    }
-
     /// Create a SQLite-backed Jobs query adapter with an already-open store.
-    pub fn with_store(nats: async_nats::Client, store: SqliteJobsStore) -> Self {
-        Self { nats, store }
+    pub fn with_store(jobs_runtime: JobsRuntime, store: SqliteJobsStore) -> Self {
+        Self {
+            jobs_runtime,
+            store,
+        }
     }
 
     /// List registered service instances grouped by service name.
@@ -423,12 +411,12 @@ impl JobsQuery {
             details: error.to_string(),
         })?;
 
-        self.nats
-            .publish_with_headers(subject.clone(), job_event_headers(&event), payload.into())
+        self.jobs_runtime
+            .publish_event_payload(subject.clone(), job_event_headers(&event), payload)
             .await
             .map_err(|error| JobsQueryError::PublishEvent {
                 subject,
-                details: error.to_string(),
+                details: error,
             })?;
 
         let predicted = reduce_job_event(Some(&job), &event).ok_or_else(|| {
@@ -438,38 +426,70 @@ impl JobsQuery {
                 actual: format!("{:?}", job.state).to_lowercase(),
             }
         })?;
-        let projected = self.await_job_projection(&key, &predicted).await?;
+        let projected = self.await_job_projection(&predicted, &event).await?;
 
         Ok(projected)
     }
 
-    async fn await_job_projection(&self, key: &str, expected: &Job) -> Result<Job, JobsQueryError> {
+    async fn await_job_projection(
+        &self,
+        predicted: &Job,
+        event: &JobEvent,
+    ) -> Result<Job, JobsQueryError> {
         for _ in 0..20 {
             if let Some(job) =
                 self.store
-                    .get_job(&expected.service, &expected.job_type, &expected.id)?
+                    .get_job(&predicted.service, &predicted.job_type, &predicted.id)?
             {
-                if job.state == expected.state && job.updated_at == expected.updated_at {
+                if plan_mutation_response(Some(&job), predicted, event, false)
+                    == MutationResponsePlan::ReturnProjected
+                {
                     return Ok(job);
                 }
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
 
-        Err(JobsQueryError::ProjectionTimeout {
-            key: key.to_string(),
-        })
+        Ok(predicted.clone())
     }
 }
 
-fn job_event_headers(event: &JobEvent) -> async_nats::header::HeaderMap {
-    let mut headers = async_nats::header::HeaderMap::new();
-    headers.insert("request-id", event.context.request_id.as_str());
-    headers.insert("traceparent", event.context.traceparent.as_str());
-    if let Some(tracestate) = event.context.tracestate.as_deref() {
-        headers.insert("tracestate", tracestate);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MutationResponsePlan {
+    ReturnProjected,
+    ReturnPredicted,
+    Wait,
+}
+
+fn plan_mutation_response(
+    projected: Option<&Job>,
+    predicted: &Job,
+    event: &JobEvent,
+    projection_lagged: bool,
+) -> MutationResponsePlan {
+    if let Some(projected) = projected {
+        if projected.state == predicted.state && projected.updated_at == predicted.updated_at {
+            return MutationResponsePlan::ReturnProjected;
+        }
+        if is_terminal_noop_projection(projected, event) {
+            return MutationResponsePlan::ReturnProjected;
+        }
     }
-    headers
+
+    if projection_lagged {
+        MutationResponsePlan::ReturnPredicted
+    } else {
+        MutationResponsePlan::Wait
+    }
+}
+
+fn is_terminal_noop_projection(projected: &Job, event: &JobEvent) -> bool {
+    is_terminal(projected.state)
+        && reduce_job_event(Some(projected), event).is_some_and(|next| next == projected.clone())
+}
+
+fn job_event_headers(event: &JobEvent) -> trellis_rs::jobs::JobEventHeaders {
+    trellis_rs::jobs::JobEventHeaders::from(&event.context)
 }
 
 impl From<SqliteJobsStoreError> for JobsQueryError {
@@ -548,99 +568,25 @@ fn projection_key(job: &Job) -> String {
     format!("{}/{}/{}", job.service, job.job_type, job.id)
 }
 
-fn open_default_store(path: &Path) -> SqliteJobsStore {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).unwrap_or_else(|error| {
-            panic!(
-                "failed to create Jobs SQLite projection directory '{}': {error}",
-                parent.display()
-            )
-        });
-    }
-    SqliteJobsStore::open(path).unwrap_or_else(|error| {
-        panic!(
-            "failed to open Jobs SQLite projection at '{}': {error}",
-            path.display()
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-
-    use futures_util::future::{ready, BoxFuture, FutureExt};
-    use trellis_rs::client::{RpcErrorPayload, TrellisClientError};
+    use serde_json::json;
+    use trellis_rs::jobs::types::{Job, JobContext, JobEvent, JobState};
     use trellis_rs::sdk::core::types::{
-        TrellisBindingsGetRequest, TrellisBindingsGetResponse, TrellisBindingsGetResponseBinding,
-        TrellisBindingsGetResponseBindingResources, TrellisCatalogResponse,
+        TrellisBindingsGetResponseBinding, TrellisBindingsGetResponseBindingResources,
     };
-    use trellis_rs::service::CoreBootstrapClientPort;
 
-    use crate::contract::expected_contract;
-
+    use super::parse_since_filter;
     use super::{
-        jobs_admin_resources_from_binding, parse_since_filter, resolve_jobs_admin_resources,
-        JobsQueryError,
+        cancelled_event, dismissed_event, jobs_admin_resources_from_binding,
+        plan_mutation_response, reduce_job_event, retried_event, JobsQueryError,
+        MutationResponsePlan,
     };
-
-    struct FakeCoreClient {
-        binding_result: Mutex<Option<Result<TrellisBindingsGetResponse, TrellisClientError>>>,
-        seen_requests: Arc<Mutex<Vec<TrellisBindingsGetRequest>>>,
-    }
-
-    impl CoreBootstrapClientPort for FakeCoreClient {
-        fn trellis_catalog<'a>(
-            &'a self,
-        ) -> BoxFuture<'a, Result<TrellisCatalogResponse, TrellisClientError>> {
-            ready(Err(TrellisClientError::RpcError(
-                RpcErrorPayload::from_message("trellis_catalog should not be called"),
-            )))
-            .boxed()
-        }
-
-        fn trellis_bindings_get<'a>(
-            &'a self,
-            input: &'a TrellisBindingsGetRequest,
-        ) -> BoxFuture<'a, Result<TrellisBindingsGetResponse, TrellisClientError>> {
-            self.seen_requests
-                .lock()
-                .expect("lock seen requests")
-                .push(input.clone());
-            let result = self
-                .binding_result
-                .lock()
-                .expect("lock binding result")
-                .take()
-                .expect("binding result should be set");
-            ready(result).boxed()
-        }
-    }
-
-    fn core_client_with_binding(
-        binding: Option<TrellisBindingsGetResponseBinding>,
-    ) -> (FakeCoreClient, Arc<Mutex<Vec<TrellisBindingsGetRequest>>>) {
-        let seen_requests = Arc::new(Mutex::new(Vec::new()));
-        (
-            FakeCoreClient {
-                binding_result: Mutex::new(Some(Ok(TrellisBindingsGetResponse {
-                    binding,
-                    event_consumers: None,
-                }))),
-                seen_requests: Arc::clone(&seen_requests),
-            },
-            seen_requests,
-        )
-    }
 
     fn sample_binding_with_resources() -> TrellisBindingsGetResponseBinding {
-        let expected = expected_contract();
         TrellisBindingsGetResponseBinding {
-            contract_id: expected.id,
-            digest: expected.digest,
+            contract_id: crate::contract::CONTRACT_ID.to_string(),
+            digest: crate::contract::CONTRACT_DIGEST.to_string(),
             resources: TrellisBindingsGetResponseBindingResources {
                 event_consumers: None,
                 jobs: None,
@@ -650,87 +596,158 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn resolve_jobs_admin_resources_reads_expected_binding_and_request_fields() {
-        let expected = expected_contract();
-        let (core_client, seen_requests) =
-            core_client_with_binding(Some(sample_binding_with_resources()));
-
-        let resources = resolve_jobs_admin_resources(&core_client, &expected)
-            .await
-            .expect("admin resources should resolve");
-
-        assert_eq!(resources.jobs_stream, "JOBS");
-        assert_eq!(resources.jobs_advisories_stream, "JOBS_ADVISORIES");
-
-        let seen = seen_requests.lock().expect("lock seen requests");
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].contract_id.as_deref(), Some(expected.id.as_str()));
-        assert_eq!(seen[0].digest.as_deref(), Some(expected.digest.as_str()));
-    }
-
-    #[tokio::test]
-    async fn resolve_jobs_admin_resources_errors_when_binding_missing() {
-        let expected = expected_contract();
-        let (core_client, _) = core_client_with_binding(None);
-
-        let error = resolve_jobs_admin_resources(&core_client, &expected)
-            .await
-            .expect_err("missing binding should fail");
-
-        assert!(matches!(error, JobsQueryError::MissingBinding));
-    }
-
-    #[tokio::test]
-    async fn resolve_jobs_admin_resources_does_not_require_kv_resources() {
-        let expected = expected_contract();
-        let (core_client, _) = core_client_with_binding(Some(sample_binding_with_resources()));
-
-        let resources = resolve_jobs_admin_resources(&core_client, &expected)
-            .await
-            .expect("admin resources should not require kv resources");
+    #[test]
+    fn jobs_admin_resources_from_binding_uses_builtin_stream_names() {
+        let resources = jobs_admin_resources_from_binding(&sample_binding_with_resources());
 
         assert_eq!(resources.jobs_stream, "JOBS");
         assert_eq!(resources.jobs_advisories_stream, "JOBS_ADVISORIES");
     }
 
-    #[tokio::test]
-    async fn resolve_jobs_admin_resources_errors_when_bindings_request_fails() {
-        let expected = expected_contract();
-        let core_client = FakeCoreClient {
-            binding_result: Mutex::new(Some(Err(TrellisClientError::RpcError(
-                RpcErrorPayload::from_message("bindings failed"),
-            )))),
-            seen_requests: Arc::new(Mutex::new(Vec::new())),
-        };
-
-        let error = resolve_jobs_admin_resources(&core_client, &expected)
-            .await
-            .expect_err("bindings fetch failure should fail");
-
-        assert!(matches!(error, JobsQueryError::BindingsFetch(_)));
+    fn sample_job(state: JobState) -> Job {
+        Job {
+            id: "job-1".to_string(),
+            context: JobContext {
+                request_id: "request-job-1".to_string(),
+                trace_id: "0123456789abcdef0123456789abcdef".to_string(),
+                traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01".to_string(),
+                tracestate: None,
+            },
+            service: "documents".to_string(),
+            job_type: "import".to_string(),
+            state,
+            payload: json!({ "documentId": "doc-1" }),
+            result: None,
+            created_at: "2026-03-28T12:00:00Z".to_string(),
+            updated_at: "2026-03-28T12:00:00Z".to_string(),
+            started_at: None,
+            completed_at: None,
+            tries: 1,
+            max_tries: 5,
+            last_error: None,
+            deadline: Some("2026-03-29T12:00:00Z".to_string()),
+            progress: None,
+            logs: None,
+            concurrency: None,
+            queue_policy: None,
+        }
     }
 
-    #[tokio::test]
-    async fn resolve_jobs_admin_resources_uses_builtin_stream_names() {
-        let expected = expected_contract();
-        let (core_client, _) = core_client_with_binding(Some(sample_binding_with_resources()));
-
-        let resources = resolve_jobs_admin_resources(&core_client, &expected)
-            .await
-            .expect("admin resources should resolve");
-
-        assert_eq!(resources.jobs_stream, "JOBS");
-        assert_eq!(resources.jobs_advisories_stream, "JOBS_ADVISORIES");
+    fn predicted_job(job: &Job, event: &JobEvent) -> Job {
+        reduce_job_event(Some(job), event).expect("admin event should reduce")
     }
 
     #[test]
-    fn jobs_admin_resources_from_binding_uses_builtin_stream_names() {
-        let resources = jobs_admin_resources_from_binding(&sample_binding_with_resources())
-            .expect("admin resources should not require stream aliases");
+    fn cancel_response_plan_returns_predicted_job_when_projection_lags() {
+        let job = sample_job(JobState::Pending);
+        let event = cancelled_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.state,
+            job.tries,
+            "2026-03-28T12:01:00Z",
+        );
+        let predicted = predicted_job(&job, &event);
 
-        assert_eq!(resources.jobs_stream, "JOBS");
-        assert_eq!(resources.jobs_advisories_stream, "JOBS_ADVISORIES");
+        assert_eq!(predicted.state, JobState::Cancelled);
+        assert_eq!(
+            plan_mutation_response(None, &predicted, &event, true),
+            MutationResponsePlan::ReturnPredicted
+        );
+    }
+
+    #[test]
+    fn retry_response_plan_returns_predicted_job_when_projection_lags() {
+        let job = sample_job(JobState::Failed);
+        let event = retried_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.state,
+            "2026-03-28T12:01:00Z",
+            Some(job.payload.clone()),
+            Some(job.max_tries),
+            job.deadline.as_deref(),
+        );
+        let predicted = predicted_job(&job, &event);
+
+        assert_eq!(predicted.state, JobState::Pending);
+        assert_eq!(
+            plan_mutation_response(None, &predicted, &event, true),
+            MutationResponsePlan::ReturnPredicted
+        );
+    }
+
+    #[test]
+    fn replay_response_plan_returns_predicted_job_when_projection_lags() {
+        let job = sample_job(JobState::Dead);
+        let event = retried_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.state,
+            "2026-03-28T12:01:00Z",
+            Some(job.payload.clone()),
+            Some(job.max_tries),
+            job.deadline.as_deref(),
+        );
+        let predicted = predicted_job(&job, &event);
+
+        assert_eq!(predicted.state, JobState::Pending);
+        assert_eq!(
+            plan_mutation_response(None, &predicted, &event, true),
+            MutationResponsePlan::ReturnPredicted
+        );
+    }
+
+    #[test]
+    fn dismiss_response_plan_returns_predicted_job_when_projection_lags() {
+        let job = sample_job(JobState::Dead);
+        let event = dismissed_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            JobState::Dead,
+            job.tries,
+            "2026-03-28T12:01:00Z",
+            job.last_error.as_deref(),
+        );
+        let predicted = predicted_job(&job, &event);
+
+        assert_eq!(predicted.state, JobState::Dismissed);
+        assert_eq!(
+            plan_mutation_response(None, &predicted, &event, true),
+            MutationResponsePlan::ReturnPredicted
+        );
+    }
+
+    #[test]
+    fn terminal_projection_race_returns_projected_terminal_job() {
+        let job = sample_job(JobState::Pending);
+        let event = cancelled_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.state,
+            job.tries,
+            "2026-03-28T12:01:00Z",
+        );
+        let predicted = predicted_job(&job, &event);
+        let mut projected = job.clone();
+        projected.state = JobState::Completed;
+        projected.updated_at = "2026-03-28T12:00:30Z".to_string();
+        projected.completed_at = Some(projected.updated_at.clone());
+
+        assert_eq!(
+            plan_mutation_response(Some(&projected), &predicted, &event, false),
+            MutationResponsePlan::ReturnProjected
+        );
     }
 
     #[test]

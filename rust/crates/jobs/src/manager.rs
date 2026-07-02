@@ -30,17 +30,26 @@ use crate::types::{
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
+/// Explicit handler failure classification for service-local job processing.
+///
+/// Returning [`JobProcessError::Retryable`] asks the worker to publish a
+/// `retry` lifecycle event and NAK the work message for JetStream redelivery.
+/// Returning [`JobProcessError::Failed`] publishes terminal `failed` and ACKs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobProcessError<E> {
+    /// Transient handler failure that should be redelivered by JetStream.
     Retryable(E),
+    /// Terminal handler failure that should not be redelivered automatically.
     Failed(E),
 }
 
 impl<E> JobProcessError<E> {
+    /// Mark a handler error as retryable by the jobs worker runtime.
     pub fn retryable(error: E) -> Self {
         Self::Retryable(error)
     }
 
+    /// Mark a handler error as terminal for the current job attempt.
     pub fn failed(error: E) -> Self {
         Self::Failed(error)
     }

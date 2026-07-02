@@ -31,8 +31,6 @@ import type {
 } from "../../../index.ts";
 import type { API, Api } from "./api.ts";
 import type * as Types from "./types.ts";
-import type * as AuthSdk from "../auth/mod.ts";
-import type * as CoreSdk from "../core/mod.ts";
 import type * as HealthSdk from "../health/mod.ts";
 
 type EventCallback<TMessage> = {
@@ -58,12 +56,6 @@ export interface TrellisJobsClient {
   transfer(grant: SendTransferGrant): SendTransferHandle;
   transfer(grant: ReceiveTransferGrant): ReceiveTransferHandle;
   readonly rpc: {
-    readonly auth: {
-      requestsValidate(
-        input: AuthSdk.AuthRequestsValidateInput,
-        opts?: RequestOpts,
-      ): AsyncResult<AuthSdk.AuthRequestsValidateOutput, BaseError>;
-    };
     readonly jobs: {
       cancel(
         input: Types.JobsCancelInput,
@@ -105,12 +97,6 @@ export interface TrellisJobsClient {
         input: Types.JobsRetryInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsRetryOutput, BaseError>;
-    };
-    readonly trellis: {
-      catalog(
-        input: CoreSdk.TrellisCatalogInput,
-        opts?: RequestOpts,
-      ): AsyncResult<CoreSdk.TrellisCatalogOutput, BaseError>;
     };
   };
   readonly event: {

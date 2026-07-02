@@ -1,8 +1,8 @@
-use async_nats::jetstream::{self, consumer};
 use futures_util::StreamExt;
 use serde_json::Value;
 use trellis_rs::jobs::reduce_job_event;
 use trellis_rs::jobs::types::{Job, JobEvent};
+use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::service::ServerError;
 
 use crate::storage::{
@@ -45,34 +45,12 @@ impl JobsProjectorHandle {
 }
 
 pub async fn start_jobs_projector(
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     store: SqliteJobsStore,
     jobs_stream: String,
 ) -> Result<JobsProjectorHandle, ServerError> {
-    let jetstream = jetstream::new(nats);
-    let stream = jetstream.get_stream(&jobs_stream).await.map_err(|error| {
-        ServerError::Nats(format!(
-            "failed to open jobs projector stream '{jobs_stream}': {error}"
-        ))
-    })?;
-    let consumer = stream
-        .get_or_create_consumer(
-            PROJECTOR_CONSUMER_NAME,
-            consumer::pull::Config {
-                durable_name: Some(PROJECTOR_CONSUMER_NAME.to_string()),
-                filter_subject: JOBS_EVENTS_SUBJECT_WILDCARD.to_string(),
-                ack_policy: consumer::AckPolicy::Explicit,
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|error| {
-            ServerError::Nats(format!(
-                "failed to create jobs projector consumer '{PROJECTOR_CONSUMER_NAME}' on stream '{jobs_stream}': {error}"
-            ))
-        })?;
-    let mut messages = consumer
-        .messages()
+    let mut messages = jobs_runtime
+        .filtered_messages(&jobs_stream, PROJECTOR_CONSUMER_NAME, JOBS_EVENTS_SUBJECT_WILDCARD)
         .await
         .map_err(|error| {
             ServerError::Nats(format!(
@@ -87,7 +65,7 @@ pub async fn start_jobs_projector(
                     "jobs projector failed to pull from consumer '{PROJECTOR_CONSUMER_NAME}' on stream '{jobs_stream}': {error}"
                 ))
             })?;
-            let raw_event = match serde_json::from_slice::<Value>(&message.payload) {
+            let raw_event = match serde_json::from_slice::<Value>(message.payload()) {
                 Ok(raw_event) => raw_event,
                 Err(_) => {
                     let _ = message.ack().await;
@@ -116,7 +94,8 @@ pub async fn start_jobs_projector(
     Ok(JobsProjectorHandle { task: Some(task) })
 }
 
-pub fn project_job_event(
+#[cfg(test)]
+fn project_job_event(
     store: &SqliteJobsStore,
     event: &JobEvent,
 ) -> Result<Option<Job>, SqliteJobsStoreError> {

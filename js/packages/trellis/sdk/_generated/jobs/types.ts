@@ -17,7 +17,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "xDigtrlrF3n3ZNgHVdwDJFcwi0PEJBiDyBG6FnzFzM8" as const;
+  "DPoUeZ9fiDUZspXj-EqWOc5I0fKRuWoUCtI2URyr-2I" as const;
 
 export type JobsCancelInput = { id: string };
 export type JobsCancelOutput = {
@@ -67,6 +67,8 @@ export type JobsCancelOutput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed";
@@ -124,6 +126,8 @@ export type JobsDismissDLQOutput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed";
@@ -181,6 +185,8 @@ export type JobsGetOutput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed";
@@ -233,6 +239,8 @@ export type JobsListInput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed"
@@ -289,6 +297,8 @@ export type JobsListOutput = {
         | "completed"
         | "failed"
         | "cancelled"
+        | "skipped"
+        | "stale"
         | "expired"
         | "dead"
         | "dismissed";
@@ -358,6 +368,8 @@ export type JobsListDLQOutput = {
         | "completed"
         | "failed"
         | "cancelled"
+        | "skipped"
+        | "stale"
         | "expired"
         | "dead"
         | "dismissed";
@@ -443,6 +455,8 @@ export type JobsReplayDLQOutput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed";
@@ -500,6 +514,8 @@ export type JobsRetryOutput = {
       | "completed"
       | "failed"
       | "cancelled"
+      | "skipped"
+      | "stale"
       | "expired"
       | "dead"
       | "dismissed";

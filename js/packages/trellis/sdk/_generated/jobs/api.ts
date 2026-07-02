@@ -1,7 +1,5 @@
 // Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
 import { OWNED_API } from "./owned_api.ts";
-import { OWNED_API as AuthApi } from "../auth/mod.ts";
-import { OWNED_API as CoreApi } from "../core/mod.ts";
 import { OWNED_API as HealthApi } from "../health/mod.ts";
 
 export { OWNED_API };
@@ -26,12 +24,7 @@ type __TrellisGeneratedOperationApi<TApi> = {
 };
 
 export type UsedApi = {
-  rpc: {
-    readonly "Auth.Requests.Validate":
-      typeof AuthApi.rpc["Auth.Requests.Validate"];
-    readonly "Trellis.Bindings.Get": typeof CoreApi.rpc["Trellis.Bindings.Get"];
-    readonly "Trellis.Catalog": typeof CoreApi.rpc["Trellis.Catalog"];
-  };
+  rpc: {};
   operations: {};
   events: {
     readonly "Health.Heartbeat": typeof HealthApi.events["Health.Heartbeat"];
@@ -41,17 +34,7 @@ export type UsedApi = {
 };
 
 export const USED_API: UsedApi = {
-  rpc: {
-    get "Auth.Requests.Validate"() {
-      return AuthApi.rpc["Auth.Requests.Validate"];
-    },
-    get "Trellis.Bindings.Get"() {
-      return CoreApi.rpc["Trellis.Bindings.Get"];
-    },
-    get "Trellis.Catalog"() {
-      return CoreApi.rpc["Trellis.Catalog"];
-    },
-  },
+  rpc: {},
   operations: {},
   events: {
     get "Health.Heartbeat"() {

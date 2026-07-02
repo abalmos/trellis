@@ -107,6 +107,7 @@ Options:
   --fixture <id>       Select matrix cases by fixture id. May be repeated.
   --case <id>          Select a matrix case id. May be repeated.
   --coverage <id>      Select matrix cases by coverage id. May be repeated.
+  --coverage-dir <dir> Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
   --parallel           Run behavior tests in parallel using one shared
                        Trellis runtime. Conformance always runs serially.
   --jobs <n>           Max parallel worker count via DENO_JOBS.

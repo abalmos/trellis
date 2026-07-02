@@ -10,21 +10,91 @@ use trellis_rs::sdk::jobs::types::{
     JobsHealthResponse, JobsListDLQRequest, JobsListRequest, JobsListServicesRequest,
     JobsReplayDLQRequest, JobsRetryRequest,
 };
-use trellis_rs::service::{DeclaredRpcError, Router, ServerError};
+use trellis_rs::service::{ConnectedServiceRuntime, DeclaredRpcError, Router, ServerError};
 
-use crate::contract::SERVICE_NAME;
+use crate::contract::JobsContract;
 use crate::query::{JobsQuery, JobsQueryError};
+
+const JOBS_HEALTH_SERVICE: &str = "trellis.jobs";
+
+/// Register Jobs admin RPC handlers on the high-level Trellis service runtime.
+pub fn register_jobs_rpc_handlers(
+    runtime: &mut ConnectedServiceRuntime<JobsContract>,
+    query: JobsQuery,
+) {
+    runtime.register_rpc::<JobsHealthRpc, _, _>(|_ctx, _input: Empty| async move {
+        Ok(jobs_health_response())
+    });
+    runtime.register_rpc::<JobsListServicesRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsListServicesRequest| {
+            let query = query.clone();
+            async move { query.list_services(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsListRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsListRequest| {
+            let query = query.clone();
+            async move { query.list_jobs(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsGetRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsGetRequest| {
+            let query = query.clone();
+            async move { query.get_job(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsGetKeyRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsGetKeyRequest| {
+            let query = query.clone();
+            async move { query.get_key(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsCancelRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsCancelRequest| {
+            let query = query.clone();
+            async move { query.cancel_job(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsRetryRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsRetryRequest| {
+            let query = query.clone();
+            async move { query.retry_job(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsListDLQRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsListDLQRequest| {
+            let query = query.clone();
+            async move { query.list_dlq(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsReplayDLQRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsReplayDLQRequest| {
+            let query = query.clone();
+            async move { query.replay_dlq(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsDismissDLQRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsDismissDLQRequest| {
+            let query = query.clone();
+            async move { query.dismiss_dlq(&input).await.map_err(map_query_error) }
+        }
+    });
+}
 
 /// Build the Jobs admin RPC router backed by a SQL projection query adapter.
 pub fn build_router_with_query(query: JobsQuery) -> Router {
     let mut router = Router::new();
     router.register_rpc::<JobsHealthRpc, _, _>(|_ctx, _input: Empty| async move {
-        Ok(JobsHealthResponse {
-            checks: Vec::new(),
-            service: SERVICE_NAME.to_string(),
-            status: Value::String("ok".to_string()),
-            timestamp: now_timestamp_string(),
-        })
+        Ok(jobs_health_response())
     });
     router.register_rpc::<JobsListServicesRpc, _, _>({
         let query = query.clone();
@@ -144,4 +214,31 @@ fn now_timestamp_string() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn jobs_health_response() -> JobsHealthResponse {
+    JobsHealthResponse {
+        checks: Vec::new(),
+        service: JOBS_HEALTH_SERVICE.to_string(),
+        status: Value::String("healthy".to_string()),
+        timestamp: now_timestamp_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use time::format_description::well_known::Rfc3339;
+
+    use super::jobs_health_response;
+
+    #[test]
+    fn jobs_health_response_uses_jobs_wire_values() {
+        let response = jobs_health_response();
+
+        assert_eq!(response.service, "trellis.jobs");
+        assert_eq!(response.status, serde_json::json!("healthy"));
+        assert!(response.checks.is_empty());
+        time::OffsetDateTime::parse(&response.timestamp, &Rfc3339)
+            .expect("timestamp should be RFC3339");
+    }
 }

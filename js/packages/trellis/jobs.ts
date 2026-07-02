@@ -72,6 +72,14 @@ export type JobNotEnqueuedErrorData = {
   traceId?: string;
 };
 
+export type RetryJobErrorData = {
+  id: string;
+  type: "RetryJobError";
+  message: string;
+  context?: Record<string, unknown>;
+  traceId?: string;
+};
+
 /** Error returned when keyed job admission does not create a new job. */
 export class JobNotEnqueuedError extends BaseError<JobNotEnqueuedErrorData> {
   override readonly name = "JobNotEnqueuedError" as const;
@@ -136,6 +144,27 @@ export class JobNotEnqueuedError extends BaseError<JobNotEnqueuedErrorData> {
       ...(base.context !== undefined ? { context: base.context } : {}),
       ...(base.traceId !== undefined ? { traceId: base.traceId } : {}),
     };
+  }
+}
+
+/** Error returned or thrown by a job handler to request JetStream redelivery. */
+export class RetryJobError extends BaseError<RetryJobErrorData> {
+  override readonly name = "RetryJobError" as const;
+
+  constructor(
+    options: ErrorOptions & {
+      message?: string;
+      context?: Record<string, unknown>;
+      id?: string;
+      traceId?: string;
+    } = {},
+  ) {
+    super(options.message ?? "Retry job", options);
+  }
+
+  /** Serializes the retry signal for worker lifecycle logging. */
+  override toSerializable(): RetryJobErrorData {
+    return this.baseSerializable() as RetryJobErrorData;
   }
 }
 

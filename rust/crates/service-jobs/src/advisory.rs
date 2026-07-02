@@ -1,8 +1,9 @@
-use async_nats::jetstream::{self, consumer};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use trellis_rs::jobs::types::{Job, JobEvent};
-use trellis_rs::jobs::{dead_event, is_terminal, job_event_subject, job_from_work_event};
+use trellis_rs::jobs::{
+    dead_event, is_terminal, job_event_subject, job_from_work_event, JobsRuntime,
+};
 use trellis_rs::service::ServerError;
 
 use crate::storage::SqliteJobsStore;
@@ -99,37 +100,16 @@ pub fn map_dead_event_from_advisory_job(
 }
 
 pub async fn start_advisory_loop(
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     store: SqliteJobsStore,
     jobs_advisories_stream: String,
 ) -> Result<AdvisoryHandle, ServerError> {
-    let jetstream = jetstream::new(nats.clone());
-    let stream = jetstream
-        .get_stream(&jobs_advisories_stream)
-        .await
-        .map_err(|error| {
-            ServerError::Nats(format!(
-                "failed to open jobs advisory stream '{jobs_advisories_stream}': {error}"
-            ))
-        })?;
-    let consumer = stream
-        .get_or_create_consumer(
+    let mut messages = jobs_runtime
+        .filtered_messages(
+            &jobs_advisories_stream,
             ADVISORY_CONSUMER_NAME,
-            consumer::pull::Config {
-                durable_name: Some(ADVISORY_CONSUMER_NAME.to_string()),
-                filter_subject: MAX_DELIVERIES_ADVISORY_SUBJECT_WILDCARD.to_string(),
-                ack_policy: consumer::AckPolicy::Explicit,
-                ..Default::default()
-            },
+            MAX_DELIVERIES_ADVISORY_SUBJECT_WILDCARD,
         )
-        .await
-        .map_err(|error| {
-            ServerError::Nats(format!(
-                "failed to create jobs advisory consumer '{ADVISORY_CONSUMER_NAME}' on stream '{jobs_advisories_stream}': {error}"
-            ))
-        })?;
-    let mut messages = consumer
-        .messages()
         .await
         .map_err(|error| {
             ServerError::Nats(format!(
@@ -144,32 +124,22 @@ pub async fn start_advisory_loop(
                     "jobs advisory loop failed to pull from consumer '{ADVISORY_CONSUMER_NAME}' on stream '{jobs_advisories_stream}': {error}"
                 ))
             })?;
-            let Ok(advisory) = serde_json::from_slice::<MaxDeliveriesAdvisory>(&message.payload)
+            let Ok(advisory) = serde_json::from_slice::<MaxDeliveriesAdvisory>(message.payload())
             else {
                 let _ = message.ack().await;
                 continue;
             };
 
-            let stream = jetstream
-                .get_stream(&advisory.stream)
+            let raw_payload = jobs_runtime
+                .raw_payload(&advisory.stream, advisory.stream_seq)
                 .await
                 .map_err(|error| {
                     ServerError::Nats(format!(
-                        "jobs advisory loop failed to open work stream '{}': {error}",
-                        advisory.stream
+                        "jobs advisory loop failed to read stream '{}' sequence {}: {error}",
+                        advisory.stream, advisory.stream_seq
                     ))
                 })?;
-            let raw_message =
-                stream
-                    .get_raw_message(advisory.stream_seq)
-                    .await
-                    .map_err(|error| {
-                        ServerError::Nats(format!(
-                            "jobs advisory loop failed to read stream '{}' sequence {}: {error}",
-                            advisory.stream, advisory.stream_seq
-                        ))
-                    })?;
-            let Ok(work_event) = serde_json::from_slice::<JobEvent>(&raw_message.payload) else {
+            let Ok(work_event) = serde_json::from_slice::<JobEvent>(&raw_payload) else {
                 let _ = message.ack().await;
                 continue;
             };
@@ -190,37 +160,20 @@ pub async fn start_advisory_loop(
                 continue;
             };
 
-            let Ok(payload) = serde_json::to_vec(&mapped.event) else {
-                let _ = message.ack().await;
-                continue;
-            };
-            nats.publish_with_headers(
-                mapped.subject,
-                job_event_headers(&mapped.event),
-                payload.into(),
-            )
-            .await
-            .map_err(|error| {
-                ServerError::Nats(format!(
-                    "jobs advisory loop failed to publish dead event: {error}"
-                ))
-            })?;
+            jobs_runtime
+                .publish_event(mapped.subject, &mapped.event)
+                .await
+                .map_err(|error| {
+                    ServerError::Nats(format!(
+                        "jobs advisory loop failed to publish dead event: {error}"
+                    ))
+                })?;
             let _ = message.ack().await;
         }
         Ok(())
     });
 
     Ok(AdvisoryHandle { task: Some(task) })
-}
-
-fn job_event_headers(event: &JobEvent) -> async_nats::header::HeaderMap {
-    let mut headers = async_nats::header::HeaderMap::new();
-    headers.insert("request-id", event.context.request_id.as_str());
-    headers.insert("traceparent", event.context.traceparent.as_str());
-    if let Some(tracestate) = event.context.tracestate.as_deref() {
-        headers.insert("tracestate", tracestate);
-    }
-    headers
 }
 
 fn map_dead_event_from_store(

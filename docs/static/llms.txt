@@ -59,6 +59,9 @@ commands.
   job `keyConcurrency` instead of building ad hoc scheduler dedupe. Defaults
   should fail clearly (`stalePolicy: "fail-stale"`, `whenFull: "reject"`);
   coalescing or replacing queued work must be explicit.
+- TypeScript job handlers that need JetStream redelivery should return or throw
+  `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary errors remain
+  terminal job failures.
 - Operations support declared typed errors, following the same error-declaration
   rules as RPC errors on the operation descriptor.
 - Model expected public failures with declared errors or `Result`-style values.

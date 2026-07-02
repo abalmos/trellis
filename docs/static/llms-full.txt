@@ -60,6 +60,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   defaults should fail clearly (`stalePolicy: "fail-stale"`,
   `whenFull: "reject"`); coalescing and replacing queued jobs must be explicit
   queue policy choices.
+- TypeScript job handlers request automatic redelivery by returning or throwing
+  `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary handler errors are
+  terminal job failures.
 - Public expected failures should be modeled in the contract or as Result-style
   values. Reserve thrown exceptions or panics for unexpected boundary failures.
 - Operations support declared typed errors via `errors` on the operation descriptor,

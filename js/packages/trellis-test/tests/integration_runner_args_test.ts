@@ -254,6 +254,48 @@ Deno.test("runner filters serial runs and passes child deno test arguments", asy
   ]);
 });
 
+Deno.test("runner collects Deno coverage only when requested", async () => {
+  const cwd = Deno.cwd();
+  const commands: RunnerCommand[] = [];
+  const reports: { rawDir: string; lcovPath: string }[] = [];
+
+  const code = await runTrellisIntegrationTests({
+    args: ["--coverage-dir", "coverage/live-integration"],
+    config: {
+      runtime,
+      cases: [
+        {
+          id: "billing.invoice-created",
+          fixture: "billing",
+          file: "integration/billing/invoice_created.integration_test.ts",
+          testName: "billing.invoice-created publishes an invoice event",
+        },
+      ],
+    },
+    commandRunner(command) {
+      commands.push(command);
+      return Promise.resolve(7);
+    },
+    coverageReporter(coverage) {
+      reports.push(coverage);
+      return Promise.resolve();
+    },
+  });
+
+  assertEquals(code, 7);
+  assertEquals(commands[0].args, [
+    "test",
+    `--coverage=${join(cwd, "coverage", "live-integration", "raw")}`,
+    "--filter",
+    "/^(?:billing\\.invoice-created publishes an invoice event)$/",
+    join(cwd, "integration", "billing", "invoice_created.integration_test.ts"),
+  ]);
+  assertEquals(reports, [{
+    rawDir: join(cwd, "coverage", "live-integration", "raw"),
+    lcovPath: join(cwd, "coverage", "live-integration", "lcov.info"),
+  }]);
+});
+
 Deno.test("runner constructs parallel commands with shared host env and DENO_JOBS", async () => {
   const commands: RunnerCommand[] = [];
   const startedRuntime: TrellisIntegrationRunnerConfig["runtime"][] = [];

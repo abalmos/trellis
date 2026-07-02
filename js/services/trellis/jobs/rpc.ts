@@ -1,3 +1,4 @@
+import { jetstreamManager } from "@nats-io/jetstream";
 import {
   headers as natsHeaders,
   type NatsConnection,
@@ -98,9 +99,28 @@ const WorkerHeartbeatSchema = Type.Object({
   version: Type.Optional(Type.String({ minLength: 1 })),
   timestamp: Type.String({ format: "date-time" }),
 });
+const MaxDeliveriesAdvisorySchema = Type.Object({
+  stream: Type.String({ minLength: 1 }),
+  consumer: Type.String({ minLength: 1 }),
+  stream_seq: Type.Optional(Type.Integer({ minimum: 1 })),
+  streamSeq: Type.Optional(Type.Integer({ minimum: 1 })),
+  deliveries: Type.Optional(Type.Integer({ minimum: 1 })),
+  num_deliveries: Type.Optional(Type.Integer({ minimum: 1 })),
+  timestamp: Type.String({ format: "date-time" }),
+});
 
 type JobEvent = StaticDecode<typeof JobEventSchema>;
 type WorkerHeartbeat = StaticDecode<typeof WorkerHeartbeatSchema>;
+type RawMaxDeliveriesAdvisory = StaticDecode<
+  typeof MaxDeliveriesAdvisorySchema
+>;
+type MaxDeliveriesAdvisory = {
+  stream: string;
+  consumer: string;
+  streamSeq: number;
+  deliveries: number;
+  timestamp: string;
+};
 
 type AdminJob = JobsListOutput["entries"][number];
 type AdminJobState = AdminJob["state"];
@@ -116,6 +136,13 @@ type JobsAdminProjection = {
   readonly cancelSubjects: Map<string, string>;
   readonly workers: Map<string, AdminWorker>;
   readonly stop: () => void;
+};
+
+type DirectMessageReader = {
+  getMessage(
+    stream: string,
+    query: { seq: number },
+  ): Promise<{ data: Uint8Array } | null>;
 };
 
 type JobsGetError = NotFoundError;
@@ -143,6 +170,23 @@ function isJobEvent(value: unknown): value is JobEvent {
 
 function isWorkerHeartbeat(value: unknown): value is WorkerHeartbeat {
   return Value.Check(WorkerHeartbeatSchema, value);
+}
+
+function parseMaxDeliveriesAdvisory(
+  value: unknown,
+): MaxDeliveriesAdvisory | undefined {
+  if (!Value.Check(MaxDeliveriesAdvisorySchema, value)) return undefined;
+  const raw = value as RawMaxDeliveriesAdvisory;
+  const streamSeq = raw.stream_seq ?? raw.streamSeq;
+  const deliveries = raw.deliveries ?? raw.num_deliveries;
+  if (streamSeq === undefined || deliveries === undefined) return undefined;
+  return {
+    stream: raw.stream,
+    consumer: raw.consumer,
+    streamSeq,
+    deliveries,
+    timestamp: raw.timestamp,
+  };
 }
 
 function parseJsonPayload(data: Uint8Array): unknown {
@@ -284,6 +328,38 @@ function notFound(jobId: string): NotFoundError {
   });
 }
 
+function headersFromJobContext(context: JobEvent["context"]) {
+  const headers = natsHeaders();
+  headers.set("request-id", context.requestId);
+  headers.set("traceparent", context.traceparent);
+  if (context.tracestate) {
+    headers.set("tracestate", context.tracestate);
+  }
+  return headers;
+}
+
+function mapDeadEventFromAdvisory(
+  current: AdminJob | undefined,
+  workEvent: JobEvent,
+  advisory: MaxDeliveriesAdvisory,
+): JobEvent | undefined {
+  if (current && isTerminalState(current.state)) return undefined;
+  return {
+    jobId: workEvent.jobId,
+    service: workEvent.service,
+    jobType: workEvent.jobType,
+    eventType: "dead",
+    state: "dead",
+    previousState: current?.state ?? workEvent.state,
+    context: workEvent.context,
+    tries: Math.max(current?.tries ?? workEvent.tries, advisory.deliveries),
+    maxTries: current?.maxTries ?? workEvent.maxTries,
+    error:
+      `max deliveries exceeded: stream=${advisory.stream} consumer=${advisory.consumer} deliveries=${advisory.deliveries}`,
+    timestamp: advisory.timestamp,
+  };
+}
+
 function validateSince(
   since: string | undefined,
 ): Result<void, ValidationError> {
@@ -380,6 +456,12 @@ function createProjection(nats: NatsConnection): JobsAdminProjection {
   const cancelSubjects = new Map<string, string>();
   const workers = new Map<string, AdminWorker>();
   const subscription: Subscription = nats.subscribe("trellis.jobs.>");
+  const advisorySubscription: Subscription = nats.subscribe(
+    "$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.JOBS_WORK.>",
+  );
+  const direct = jetstreamManager(nats)
+    .then((manager) => manager.direct as DirectMessageReader | undefined)
+    .catch(() => undefined);
   void (async () => {
     for await (const msg of subscription) {
       const payload = parseJsonPayload(msg.data);
@@ -401,12 +483,48 @@ function createProjection(nats: NatsConnection): JobsAdminProjection {
       }
     }
   })();
+  void (async () => {
+    for await (const msg of advisorySubscription) {
+      const advisory = parseMaxDeliveriesAdvisory(parseJsonPayload(msg.data));
+      if (!advisory) continue;
+      const reader = await direct;
+      if (!reader) continue;
+      let workMessage: { data: Uint8Array } | null;
+      try {
+        workMessage = await reader.getMessage(advisory.stream, {
+          seq: advisory.streamSeq,
+        });
+      } catch {
+        continue;
+      }
+      if (!workMessage) continue;
+      const workEvent = parseJsonPayload(workMessage.data);
+      if (!isJobEvent(workEvent)) continue;
+      const key = jobKey(workEvent.service, workEvent.jobType, workEvent.jobId);
+      const event = mapDeadEventFromAdvisory(
+        jobs.get(key),
+        workEvent,
+        advisory,
+      );
+      if (!event) continue;
+      nats.publish(
+        `trellis.jobs.${event.service}.${event.jobType}.${event.jobId}.dead`,
+        textEncoder.encode(JSON.stringify(event)),
+        { headers: headersFromJobContext(event.context) },
+      );
+      await nats.flush();
+      applyJobEvent(jobs, jobKeysById, event);
+    }
+  })();
   return {
     jobs,
     jobKeysById,
     cancelSubjects,
     workers,
-    stop: () => subscription.unsubscribe(),
+    stop: () => {
+      subscription.unsubscribe();
+      advisorySubscription.unsubscribe();
+    },
   };
 }
 
@@ -457,19 +575,13 @@ export function createJobsAdminHandlers(nats: NatsConnection) {
         error: "cancelled",
         timestamp: new Date().toISOString(),
       };
-      const headers = natsHeaders();
-      headers.set("request-id", event.context.requestId);
-      headers.set("traceparent", event.context.traceparent);
-      if (event.context.tracestate) {
-        headers.set("tracestate", event.context.tracestate);
-      }
       const cancelSubject = projection.cancelSubjects.get(
         jobKey(job.service, job.type, job.id),
       ) ?? `trellis.jobs.${job.service}.${job.type}.${job.id}.cancelled`;
       nats.publish(
         cancelSubject,
         textEncoder.encode(JSON.stringify(event)),
-        { headers },
+        { headers: headersFromJobContext(event.context) },
       );
       await nats.flush();
       return Result.ok<JobsCancelOutput, JobsCancelError>({

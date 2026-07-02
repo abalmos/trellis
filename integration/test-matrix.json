@@ -2040,6 +2040,45 @@
     },
     {
       "kind": "client",
+      "id": "jobs.keyed-jobs-reject-queue-full",
+      "fixture": "jobs",
+      "title": "Keyed jobs reject when the per-key queue is full",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-keyed-queue-policy"
+      ],
+      "description": "A service submits keyed jobs with the same concurrency key; with one active job and one queued job, a third same-key submission is rejected by the per-key queue limit.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "a service is connected with a keyed jobs queue whose per-key active limit is one",
+          "the keyed jobs queue rejects when more than one same-key job is queued"
+        ],
+        "when": [
+          "the service submits one same-key job that is held active",
+          "the service submits a second same-key job that queues",
+          "the service submits a third same-key job while the first is active and the second is queued"
+        ],
+        "then": [
+          "the third job submission is rejected by keyed admission",
+          "the second job does not run before the first releases",
+          "the accepted jobs complete in deterministic first-then-second order"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "client",
       "id": "jobs.service-creates-local-job-from-client-rpc",
       "fixture": "jobs",
       "title": "Service creates a local job in response to a client RPC",
@@ -2075,6 +2114,86 @@
       "completion": {
         "typescript": "implemented",
         "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.submitted-job-can-be-cancelled",
+      "fixture": "jobs",
+      "title": "Submitted service-local job can be cancelled",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-cancellation"
+      ],
+      "description": "A service RPC submits long-running local work, cancels the job reference, and observes a cancelled terminal snapshot.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "a service RPC creates a long-running local job"
+        ],
+        "when": [
+          "the RPC cancels the submitted job after it starts"
+        ],
+        "then": [
+          "the observed terminal job state is cancelled"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.failed-job-retries-then-dead",
+      "fixture": "jobs",
+      "title": "Failed job retries until max delivery and becomes dead",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-retry-dlq"
+      ],
+      "description": "A service-local job handler explicitly requests retry; the runtime redelivers the job, exhausts the low max-delivery policy, and the Jobs admin projection observes terminal dead state from the max-deliver advisory.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          },
+          {
+            "name": "admin",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-admin-client@v1"
+          }
+        ],
+        "given": [
+          "a service is connected with a job queue configured for two deliveries",
+          "the job handler explicitly returns RetryJobError"
+        ],
+        "when": [
+          "the service creates the failing job"
+        ],
+        "then": [
+          "the handler is attempted more than once",
+          "the Jobs admin projection observes terminal dead state"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
       }
     },
     {
@@ -5372,6 +5491,98 @@
     },
     {
       "kind": "service",
+      "id": "control-plane.service-resource-removal-purges-old-binding",
+      "fixture": "control-plane",
+      "title": "Service resource removal purges obsolete bindings",
+      "coverage": [
+        "authority",
+        "resources",
+        "resource-bindings"
+      ],
+      "description": "After accepting a migration that removes a service-owned resource, the replacement service no longer has the old handle and authority no longer reports the old binding.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis resource binding runtime"
+          },
+          {
+            "name": "service provider",
+            "kind": "service",
+            "contract": "case-scoped service resource contract"
+          }
+        ],
+        "given": [
+          "A service deployment has a resolved required KV resource binding."
+        ],
+        "when": [
+          "A migration replacing the service contract with one that removes the KV resource is accepted."
+        ],
+        "then": [
+          "The replacement service does not expose the removed KV handle.",
+          "Deployment authority desired and materialized resource bindings no longer include the removed resource."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/service_resource_removal_purges_old_binding.integration_test.ts",
+          "testName": "control-plane.service-resource-removal-purges-old-binding removes obsolete service resource binding"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "control-plane.authority-plan-migration-replaces-desired-state",
+      "fixture": "control-plane",
+      "title": "Authority migration replaces desired state",
+      "coverage": [
+        "authority",
+        "authority-plans",
+        "migration"
+      ],
+      "description": "Accepting an authority migration replaces the deployment desired state with the proposed contract state rather than merging legacy surfaces.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis deployment authority"
+          },
+          {
+            "name": "service provider",
+            "kind": "service",
+            "contract": "case-scoped migration contracts"
+          }
+        ],
+        "given": [
+          "A service deployment has base desired authority with a legacy surface."
+        ],
+        "when": [
+          "An incompatible migration plan with a replacement surface is accepted."
+        ],
+        "then": [
+          "The legacy surface is absent from desired state.",
+          "The replacement surface is present in desired state."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/authority_plan_migration_replaces_desired_state.integration_test.ts",
+          "testName": "control-plane.authority-plan-migration-replaces-desired-state replaces desired state on accepted migration"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "service",
       "id": "control-plane.sessions-survive-control-plane-restart",
       "fixture": "control-plane",
       "title": "Sessions survive control-plane restart",
@@ -5628,6 +5839,63 @@
       "completion": {
         "typescript": "implemented",
         "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "control-plane.catalog-active-use-issue-is-reported",
+      "fixture": "control-plane",
+      "title": "Catalog active-use issue is reported",
+      "coverage": [
+        "catalog",
+        "catalog-issues",
+        "dependency-resolution",
+        "authority"
+      ],
+      "description": "Expires an accepted provider implementation offer while a consumer remains active, then verifies the public catalog reports an invalid active uses issue for the consumer.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis catalog active-use validator"
+          },
+          {
+            "name": "service provider",
+            "kind": "service",
+            "contract": "case-scoped active-use provider contract"
+          },
+          {
+            "name": "service consumer",
+            "kind": "service",
+            "contract": "case-scoped active-use consumer contract"
+          },
+          {
+            "name": "catalog admin",
+            "kind": "app",
+            "contract": "case-scoped catalog admin app contract"
+          }
+        ],
+        "given": [
+          "A provider service and a consumer service with a required provider use are active."
+        ],
+        "when": [
+          "The provider's accepted implementation offer is expired in control-plane SQLite while the consumer remains active."
+        ],
+        "then": [
+          "The public catalog reports an invalid active contract uses issue for the consumer deployment.",
+          "Restoring the provider offer clears the issue."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/catalog_active_use_issue_is_reported.integration_test.ts",
+          "testName": "control-plane.catalog-active-use-issue-is-reported reports invalid active uses when a required provider becomes inactive"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
       }
     },
     {

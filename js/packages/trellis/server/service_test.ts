@@ -276,6 +276,7 @@ async function connectJobsHandlerTestService(opts?: {
 
 async function connectHandlerSurfaceTestService(opts?: {
   published?: PublishedNatsMessage[];
+  subscriptions?: Array<{ subject: string; queue?: string }>;
 }) {
   const originalFetch = globalThis.fetch;
 
@@ -319,7 +320,10 @@ async function connectHandlerSurfaceTestService(opts?: {
     )) as typeof fetch;
 
   try {
-    const connection = createFakeNatsConnection({ published: opts?.published });
+    const connection = createFakeNatsConnection({
+      published: opts?.published,
+      subscriptions: opts?.subscriptions,
+    });
     const service = await connectTrellisServiceWithRuntimeDeps({
       trellisUrl: "https://trellis.example.com",
       contract: handlerSurfaceTestContract,
@@ -456,6 +460,7 @@ function createFakeNatsConnection(args: {
   deferClosed?: boolean;
   requestJson?: (subject: string) => unknown;
   published?: PublishedNatsMessage[];
+  subscriptions?: Array<{ subject: string; queue?: string }>;
   jetstreamJobs?: boolean;
 } = {}): NatsConnection {
   type TestNatsConnection = NatsConnection & {
@@ -536,7 +541,10 @@ function createFakeNatsConnection(args: {
   };
   const createSubscription = (
     subject: string,
-    opts?: { callback?: (err: Error | null, msg: Msg) => void },
+    opts?: {
+      callback?: (err: Error | null, msg: Msg) => void;
+      queue?: string;
+    },
   ): BufferedSubscription => {
     const queue: Msg[] = [];
     let closed = false;
@@ -593,6 +601,7 @@ function createFakeNatsConnection(args: {
       },
     };
     subscriptions.push(subscription);
+    args.subscriptions?.push({ subject, queue: opts?.queue });
     return subscription;
   };
 
@@ -719,7 +728,10 @@ function createFakeNatsConnection(args: {
     respondMessage: () => true,
     subscribe: (
       subject: string,
-      opts?: { callback?: (err: Error | null, msg: Msg) => void },
+      opts?: {
+        callback?: (err: Error | null, msg: Msg) => void;
+        queue?: string;
+      },
     ) => createSubscription(subject, opts),
     request: async (
       subject: string,
@@ -2195,8 +2207,9 @@ Deno.test("bound service event listeners receive object args with deps", async (
 });
 
 Deno.test("bound service RPC handlers receive isolated deps", async () => {
+  const subscriptions: Array<{ subject: string; queue?: string }> = [];
   const { connection, service, restore } =
-    await connectHandlerSurfaceTestService();
+    await connectHandlerSurfaceTestService({ subscriptions });
   const observed: string[] = [];
   let unboundHadDeps = true;
 
@@ -2234,6 +2247,16 @@ Deno.test("bound service RPC handlers receive isolated deps", async () => {
     assertEquals(first.json(), { ok: true });
     assertEquals(second.json(), { ok: true });
     assertEquals(unbound.json(), { ok: true });
+    assertEquals(
+      subscriptions.filter((subscription) =>
+        subscription.subject.startsWith("rpc.v1.Test.")
+      ),
+      [
+        { subject: "rpc.v1.Test.BoundOne", queue: "rpc.v1.Test.BoundOne" },
+        { subject: "rpc.v1.Test.BoundTwo", queue: "rpc.v1.Test.BoundTwo" },
+        { subject: "rpc.v1.Test.Unbound", queue: "rpc.v1.Test.Unbound" },
+      ],
+    );
     assertEquals(observed, ["one:a", "two:b"]);
     assertEquals(unboundHadDeps, false);
   } finally {

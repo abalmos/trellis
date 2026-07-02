@@ -141,6 +141,7 @@ export {
   JobQueue,
   JobRef,
   JobWorkerHostAdapter,
+  RetryJobError,
 } from "./jobs.ts";
 export type {
   Job,
@@ -155,6 +156,7 @@ export type {
   JobState,
   JobTypeMetadata,
   JobWorkerHost,
+  RetryJobErrorData,
   ServiceInfo,
   TerminalJob,
   WorkerInfo,

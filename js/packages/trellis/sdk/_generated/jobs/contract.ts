@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "xDigtrlrF3n3ZNgHVdwDJFcwi0PEJBiDyBG6FnzFzM8" as const;
+  "DPoUeZ9fiDUZspXj-EqWOc5I0fKRuWoUCtI2URyr-2I" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.jobs::admin.mutate": {
@@ -261,6 +261,8 @@ export const CONTRACT = {
             { "const": "completed", "type": "string" },
             { "const": "failed", "type": "string" },
             { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
             { "const": "expired", "type": "string" },
             { "const": "dead", "type": "string" },
             { "const": "dismissed", "type": "string" },
@@ -349,6 +351,8 @@ export const CONTRACT = {
         { "const": "completed", "type": "string" },
         { "const": "failed", "type": "string" },
         { "const": "cancelled", "type": "string" },
+        { "const": "skipped", "type": "string" },
+        { "const": "stale", "type": "string" },
         { "const": "expired", "type": "string" },
         { "const": "dead", "type": "string" },
         { "const": "dismissed", "type": "string" },
@@ -444,6 +448,8 @@ export const CONTRACT = {
                 { "const": "completed", "type": "string" },
                 { "const": "failed", "type": "string" },
                 { "const": "cancelled", "type": "string" },
+                { "const": "skipped", "type": "string" },
+                { "const": "stale", "type": "string" },
                 { "const": "expired", "type": "string" },
                 { "const": "dead", "type": "string" },
                 { "const": "dismissed", "type": "string" },
@@ -561,6 +567,8 @@ export const CONTRACT = {
                 { "const": "completed", "type": "string" },
                 { "const": "failed", "type": "string" },
                 { "const": "cancelled", "type": "string" },
+                { "const": "skipped", "type": "string" },
+                { "const": "stale", "type": "string" },
                 { "const": "expired", "type": "string" },
                 { "const": "dead", "type": "string" },
                 { "const": "dismissed", "type": "string" },
@@ -742,6 +750,8 @@ export const CONTRACT = {
                 { "const": "completed", "type": "string" },
                 { "const": "failed", "type": "string" },
                 { "const": "cancelled", "type": "string" },
+                { "const": "skipped", "type": "string" },
+                { "const": "stale", "type": "string" },
                 { "const": "expired", "type": "string" },
                 { "const": "dead", "type": "string" },
                 { "const": "dismissed", "type": "string" },
@@ -878,6 +888,8 @@ export const CONTRACT = {
                   { "const": "completed", "type": "string" },
                   { "const": "failed", "type": "string" },
                   { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
                   { "const": "expired", "type": "string" },
                   { "const": "dead", "type": "string" },
                   { "const": "dismissed", "type": "string" },
@@ -925,6 +937,8 @@ export const CONTRACT = {
               { "const": "completed", "type": "string" },
               { "const": "failed", "type": "string" },
               { "const": "cancelled", "type": "string" },
+              { "const": "skipped", "type": "string" },
+              { "const": "stale", "type": "string" },
               { "const": "expired", "type": "string" },
               { "const": "dead", "type": "string" },
               { "const": "dismissed", "type": "string" },
@@ -1022,6 +1036,8 @@ export const CONTRACT = {
                   { "const": "completed", "type": "string" },
                   { "const": "failed", "type": "string" },
                   { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
                   { "const": "expired", "type": "string" },
                   { "const": "dead", "type": "string" },
                   { "const": "dismissed", "type": "string" },
@@ -1188,6 +1204,8 @@ export const CONTRACT = {
                 { "const": "completed", "type": "string" },
                 { "const": "failed", "type": "string" },
                 { "const": "cancelled", "type": "string" },
+                { "const": "skipped", "type": "string" },
+                { "const": "stale", "type": "string" },
                 { "const": "expired", "type": "string" },
                 { "const": "dead", "type": "string" },
                 { "const": "dismissed", "type": "string" },
@@ -1305,6 +1323,8 @@ export const CONTRACT = {
                 { "const": "completed", "type": "string" },
                 { "const": "failed", "type": "string" },
                 { "const": "cancelled", "type": "string" },
+                { "const": "skipped", "type": "string" },
+                { "const": "stale", "type": "string" },
                 { "const": "expired", "type": "string" },
                 { "const": "dead", "type": "string" },
                 { "const": "dismissed", "type": "string" },
@@ -1348,14 +1368,6 @@ export const CONTRACT = {
   },
   "uses": {
     "required": {
-      "auth": {
-        "contract": "trellis.auth@v1",
-        "rpc": { "call": ["Auth.Requests.Validate"] },
-      },
-      "core": {
-        "contract": "trellis.core@v1",
-        "rpc": { "call": ["Trellis.Bindings.Get", "Trellis.Catalog"] },
-      },
       "health": {
         "contract": "trellis.health@v1",
         "events": { "publish": ["Health.Heartbeat"] },

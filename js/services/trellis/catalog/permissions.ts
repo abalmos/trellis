@@ -476,6 +476,8 @@ export function jobsAdminRuntimePublishSubjects(): string[] {
       `$JS.ACK.${stream}.>`,
     ]),
     `$JS.API.STREAM.INFO.${JOBS_WORK_STREAM}`,
+    `$JS.API.DIRECT.GET.${JOBS_WORK_STREAM}`,
+    `$JS.API.DIRECT.GET.${JOBS_WORK_STREAM}.>`,
     `$JS.API.STREAM.MSG.GET.${JOBS_WORK_STREAM}`,
     ...getKvPermissionGrants(JOBS_WORKER_PRESENCE_BUCKET, {
       allowCreate: true,

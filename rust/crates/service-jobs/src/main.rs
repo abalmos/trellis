@@ -1,7 +1,7 @@
 use std::env;
 
-use trellis_rs::client::ServiceConnectOptions;
-use trellis_service_jobs::{connect_service, JobsServiceMode, CONTRACT_DIGEST, CONTRACT_ID};
+use trellis_rs::service::ServiceConnectOptions;
+use trellis_service_jobs::{connect_service, JobsServiceMode, SERVICE_NAME};
 
 fn required_env(name: &str) -> Result<String, String> {
     env::var(name).map_err(|_| format!("missing required env var: {name}"))
@@ -23,14 +23,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(2_000);
 
-    let service = connect_service(ServiceConnectOptions {
-        trellis_url: &trellis_url,
-        contract_id: CONTRACT_ID,
-        contract_digest: CONTRACT_DIGEST,
-        session_key_seed_base64url: &session_key_seed_base64url,
-        timeout_ms,
-    })
-    .await?;
+    let mut options =
+        ServiceConnectOptions::new(&trellis_url, SERVICE_NAME, &session_key_seed_base64url);
+    options.timeout_ms = timeout_ms;
+
+    let service = connect_service(options).await?;
 
     service.run_with_mode(service_mode()).await?;
 

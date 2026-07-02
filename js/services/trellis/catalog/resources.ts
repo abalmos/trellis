@@ -499,6 +499,7 @@ const BUILTIN_JOBS_STREAMS: Record<string, BuiltinStreamBinding> = {
     retention: "workqueue",
     storage: "file",
     numReplicas: 3,
+    allowDirect: true,
     subjects: ["trellis.work.>"],
     sources: [
       {

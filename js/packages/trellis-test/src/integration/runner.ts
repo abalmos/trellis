@@ -53,6 +53,13 @@ export type TrellisIntegrationRunnerOptions = {
     /** Environment overrides for the child test process. */
     readonly env?: Record<string, string>;
   }) => Promise<number>;
+  /** Writes an LCOV report from Deno coverage output. Defaults to `deno coverage --lcov`. */
+  readonly coverageReporter?: (coverage: {
+    /** Directory containing raw Deno coverage profiles. */
+    readonly rawDir: string;
+    /** LCOV file to write. */
+    readonly lcovPath: string;
+  }) => Promise<void>;
   /**
    * Starts the shared runtime host used by `--parallel`.
    *
@@ -75,6 +82,7 @@ type ParsedRunnerArgs = {
   readonly fixtureFilters: readonly string[];
   readonly caseFilters: readonly string[];
   readonly coverageFilters: readonly string[];
+  readonly coverageDir: string | undefined;
   readonly skipConformance: boolean;
   readonly parallel: boolean;
   readonly jobs: number | undefined;
@@ -136,6 +144,15 @@ export async function runTrellisIntegrationTests(
     ...(options.denoTestArgs ?? []),
     ...args.denoTestArgs,
   ];
+  const coverage = args.coverageDir === undefined
+    ? undefined
+    : coveragePaths(args.coverageDir, cwd);
+  if (coverage !== undefined) {
+    await removeIfExists(coverage.rawDir, { recursive: true });
+    await removeIfExists(coverage.lcovPath);
+    await Deno.mkdir(coverage.dir, { recursive: true });
+    childDenoTestArgs.push(`--coverage=${coverage.rawDir}`);
+  }
   if (args.parallel) {
     const startHost = options.sharedRuntimeHostStarter ??
       startTrellisIntegrationSharedRuntimeHost;
@@ -146,7 +163,7 @@ export async function runTrellisIntegrationTests(
     }
 
     try {
-      return await commandRunner({
+      const code = await commandRunner({
         executable: Deno.execPath(),
         args: denoTestArgs({
           parallel: true,
@@ -157,12 +174,14 @@ export async function runTrellisIntegrationTests(
         cwd,
         env,
       });
+      await writeCoverageReport(coverage, options.coverageReporter);
+      return code;
     } finally {
       await host.stop();
     }
   }
 
-  return await commandRunner({
+  const code = await commandRunner({
     executable: Deno.execPath(),
     args: denoTestArgs({
       parallel: false,
@@ -172,6 +191,8 @@ export async function runTrellisIntegrationTests(
     }),
     cwd,
   });
+  await writeCoverageReport(coverage, options.coverageReporter);
+  return code;
 }
 
 /**
@@ -200,6 +221,7 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
   const fixtureFilters: string[] = [];
   const caseFilters: string[] = [];
   const coverageFilters: string[] = [];
+  let coverageDir: string | undefined;
   let configPath: string | undefined;
   let skipConformance = false;
   let parallel = false;
@@ -242,6 +264,19 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
       index += 1;
     } else if (arg.startsWith("--coverage=")) {
       coverageFilters.push(readInlineFlagValue(arg, "--coverage"));
+    } else if (arg === "--coverage-dir") {
+      coverageDir = setSingleValue(
+        coverageDir,
+        readFlagValue(args, index, arg),
+        arg,
+      );
+      index += 1;
+    } else if (arg.startsWith("--coverage-dir=")) {
+      coverageDir = setSingleValue(
+        coverageDir,
+        readInlineFlagValue(arg, "--coverage-dir"),
+        "--coverage-dir",
+      );
     } else if (arg === "--parallel") {
       parallel = true;
     } else if (arg === "--jobs") {
@@ -266,12 +301,70 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     fixtureFilters,
     caseFilters,
     coverageFilters,
+    coverageDir,
     skipConformance,
     parallel,
     jobs,
     denoTestArgs,
     help,
   };
+}
+
+function coveragePaths(
+  dir: string,
+  cwd: string,
+): {
+  readonly dir: string;
+  readonly rawDir: string;
+  readonly lcovPath: string;
+} {
+  const resolvedDir = isAbsolute(dir) ? dir : resolve(cwd, dir);
+  return {
+    dir: resolvedDir,
+    rawDir: resolve(resolvedDir, "raw"),
+    lcovPath: resolve(resolvedDir, "lcov.info"),
+  };
+}
+
+async function writeCoverageReport(
+  coverage: ReturnType<typeof coveragePaths> | undefined,
+  reporter: TrellisIntegrationRunnerOptions["coverageReporter"],
+): Promise<void> {
+  if (coverage === undefined) return;
+  const writeReport = reporter ?? runDenoCoverageCommand;
+  await writeReport({ rawDir: coverage.rawDir, lcovPath: coverage.lcovPath });
+}
+
+async function runDenoCoverageCommand(coverage: {
+  readonly rawDir: string;
+  readonly lcovPath: string;
+}): Promise<void> {
+  const process = new Deno.Command(Deno.execPath(), {
+    args: [
+      "coverage",
+      "--lcov",
+      `--output=${coverage.lcovPath}`,
+      coverage.rawDir,
+    ],
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  const status = await process.spawn().status;
+  if (status.code !== 0) {
+    throw new Error(`deno coverage failed with exit code ${status.code}`);
+  }
+}
+
+async function removeIfExists(
+  path: string,
+  options?: Deno.RemoveOptions,
+): Promise<void> {
+  try {
+    await Deno.remove(path, options);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
 }
 
 function readFlagValue(
@@ -517,6 +610,7 @@ Options:
   --fixture <fixture>   Select cases by fixture. May be repeated.
   --case <case-id>      Select a case id. May be repeated.
   --coverage <tag>      Select cases by coverage tag. May be repeated.
+  --coverage-dir <dir>  Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
   --parallel            Run selected tests with one shared Trellis runtime.
   --jobs <n>            Max parallel worker count via DENO_JOBS.
   --deno-test-arg <arg> Pass one argument through to child deno test. May be repeated.

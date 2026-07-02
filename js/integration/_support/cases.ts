@@ -377,6 +377,27 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "jobs.keyed-jobs-reject-queue-full",
+    file: "jobs/keyed_jobs_reject_queue_full.integration_test.ts",
+    testName:
+      "jobs.keyed-jobs-reject-queue-full rejects same-key job when queue is full",
+    runtime: "live-trellis",
+  },
+  {
+    id: "jobs.submitted-job-can-be-cancelled",
+    file: "jobs/submitted_job_can_be_cancelled.integration_test.ts",
+    testName:
+      "jobs.submitted-job-can-be-cancelled submits a long-running job and cancels it",
+    runtime: "live-trellis",
+  },
+  {
+    id: "jobs.failed-job-retries-then-dead",
+    file: "jobs/failed_job_retries_then_dead.integration_test.ts",
+    testName:
+      "jobs.failed-job-retries-then-dead retries explicit retry requests until dead",
+    runtime: "live-trellis",
+  },
+  {
     id: "jobs.service-creates-local-job-from-client-rpc",
     file: "jobs/service_creates_local_job_from_client_rpc.integration_test.ts",
     testName:

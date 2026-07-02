@@ -112,6 +112,7 @@ import {
   type JobSnapshot,
   type JobSubmitOutcome,
   JobWorkerHostAdapter,
+  RetryJobError,
   type TerminalJob,
 } from "../jobs.ts";
 import { ulid } from "ulid";
@@ -2723,7 +2724,10 @@ function createJobsFacade<
                     cause,
                     jobErrorContext,
                   );
-                  throw InternalJobProcessError.failed(
+                  const signal = annotatedError instanceof RetryJobError
+                    ? InternalJobProcessError.retryable
+                    : InternalJobProcessError.failed;
+                  throw signal(
                     serializeJobHandlerError(annotatedError),
                   );
                 }
@@ -2732,7 +2736,10 @@ function createJobsFacade<
                     handled.error,
                     jobErrorContext,
                   );
-                  throw InternalJobProcessError.failed(
+                  const signal = annotatedError instanceof RetryJobError
+                    ? InternalJobProcessError.retryable
+                    : InternalJobProcessError.failed;
+                  throw signal(
                     serializeJobHandlerError(annotatedError),
                   );
                 }

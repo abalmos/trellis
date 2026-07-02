@@ -70,17 +70,56 @@ fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
 }
 
 #[test]
-fn generated_jobs_contract_declares_runtime_core_bootstrap_uses() {
+fn generated_jobs_contract_keeps_baseline_health_without_runtime_bootstrap_uses() {
     let contract = generated_contract::contract_manifest();
-    let core_use = contract.uses.get("core").expect("core use");
 
-    assert_eq!(core_use.contract, "trellis.core@v1");
+    assert!(contract.uses.contains_key("health"));
     assert_eq!(
-        core_use.rpc.as_ref().and_then(|rpc| rpc.call.as_ref()),
-        Some(&vec![
-            "Trellis.Bindings.Get".to_string(),
-            "Trellis.Catalog".to_string(),
-        ])
+        contract
+            .uses
+            .get("health")
+            .expect("baseline health use")
+            .contract,
+        "trellis.health@v1"
+    );
+    assert!(!contract.uses.contains_key("core"));
+    assert!(!contract.uses.contains_key("auth"));
+}
+
+#[test]
+fn generated_jobs_contract_declares_full_job_state_set() {
+    let contract = generated_contract::contract_manifest();
+    let schema = contract.schemas.get("JobState").expect("JobState schema");
+    let states = schema
+        .get("anyOf")
+        .and_then(|value| value.as_array())
+        .expect("JobState anyOf")
+        .iter()
+        .map(|variant| {
+            variant
+                .get("const")
+                .and_then(|value| value.as_str())
+                .expect("state const")
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(
+        states,
+        [
+            "active",
+            "cancelled",
+            "completed",
+            "dead",
+            "dismissed",
+            "expired",
+            "failed",
+            "pending",
+            "retry",
+            "skipped",
+            "stale",
+        ]
+        .into_iter()
+        .collect()
     );
 }
 

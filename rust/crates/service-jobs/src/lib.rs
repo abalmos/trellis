@@ -21,20 +21,16 @@ pub use advisory::{
     MaxDeliveriesAdvisory,
 };
 pub use bootstrap::{
-    bootstrap_jobs_service_host_from_client, bootstrap_jobs_service_host_with_clients,
-    connect_and_run, connect_service, run_jobs_service_from_client,
-    run_jobs_service_from_client_with_mode, run_jobs_service_with_clients,
-    run_jobs_service_with_clients_with_mode, ConnectedJobsService, JobsServiceError,
-    JobsServiceHost, JobsServiceHostWithValidator, JobsServiceMode,
+    connect_and_run, connect_service, ConnectedJobsService, JobsServiceError, JobsServiceMode,
 };
 pub use contract::{
-    contract_manifest, expected_contract, rpc, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON,
-    JOBS_RPC_SUBJECTS, SERVICE_NAME,
+    contract_manifest, expected_contract, rpc, JobsContract, CONTRACT_DIGEST, CONTRACT_ID,
+    CONTRACT_JSON, JOBS_RPC_SUBJECTS, SERVICE_NAME,
 };
 pub use janitor::{
     plan_expired_events, run_janitor_once, start_janitor_loop, JanitorError, JanitorHandle,
     JanitorRunStats, PlannedExpiredEvent,
 };
-pub use query::{resolve_jobs_admin_resources, JobsAdminResources, JobsQuery, JobsQueryError};
-pub use router::build_router_with_query;
+pub use query::{JobsAdminResources, JobsQuery, JobsQueryError};
+pub use router::{build_router_with_query, register_jobs_rpc_handlers};
 pub use storage::{ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError};

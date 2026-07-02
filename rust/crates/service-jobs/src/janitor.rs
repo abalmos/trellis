@@ -1,6 +1,7 @@
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::jobs::types::{Job, JobEvent};
+use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{expired_event, is_terminal, job_event_subject, job_key};
 use trellis_rs::service::ServerError;
 
@@ -101,7 +102,7 @@ pub fn plan_expired_events(
 }
 
 pub async fn run_janitor_once(
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     store: &SqliteJobsStore,
     now_iso: &str,
 ) -> Result<JanitorRunStats, JanitorError> {
@@ -110,21 +111,13 @@ pub async fn run_janitor_once(
 
     let mut published = 0usize;
     for plan in planned {
-        let payload =
-            serde_json::to_vec(&plan.event).map_err(|error| JanitorError::EncodeEvent {
-                key: plan.key.clone(),
-                details: error.to_string(),
+        jobs_runtime
+            .publish_event(plan.subject.clone(), &plan.event)
+            .await
+            .map_err(|error| JanitorError::Publish {
+                subject: plan.subject,
+                details: error,
             })?;
-        nats.publish_with_headers(
-            plan.subject.clone(),
-            job_event_headers(&plan.event),
-            payload.into(),
-        )
-        .await
-        .map_err(|error| JanitorError::Publish {
-            subject: plan.subject,
-            details: error.to_string(),
-        })?;
         published += 1;
     }
 
@@ -133,16 +126,6 @@ pub async fn run_janitor_once(
         eligible,
         published,
     })
-}
-
-fn job_event_headers(event: &JobEvent) -> async_nats::header::HeaderMap {
-    let mut headers = async_nats::header::HeaderMap::new();
-    headers.insert("request-id", event.context.request_id.as_str());
-    headers.insert("traceparent", event.context.traceparent.as_str());
-    if let Some(tracestate) = event.context.tracestate.as_deref() {
-        headers.insert("tracestate", tracestate);
-    }
-    headers
 }
 
 fn plan_expired_events_from_store(
@@ -277,7 +260,7 @@ mod tests {
 }
 
 pub async fn start_janitor_loop(
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     store: SqliteJobsStore,
     interval: std::time::Duration,
 ) -> Result<JanitorHandle, ServerError> {
@@ -288,7 +271,7 @@ pub async fn start_janitor_loop(
             let now = time::OffsetDateTime::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
-            run_janitor_once(nats.clone(), &store, &now)
+            run_janitor_once(jobs_runtime.clone(), &store, &now)
                 .await
                 .map_err(|error| {
                     ServerError::Nats(format!(

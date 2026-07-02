@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer};
 use futures_util::StreamExt;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::jobs::{WorkerHeartbeat, WORKER_HEARTBEATS_WILDCARD};
+use trellis_rs::jobs::{JobsRuntime, WorkerHeartbeat, WORKER_HEARTBEATS_WILDCARD};
 use trellis_rs::service::ServerError;
 
 use crate::storage::{SqliteJobsStore, SqliteJobsStoreError};
@@ -86,34 +85,12 @@ pub fn worker_presence_is_fresh(record: &WorkerPresenceRecord, now: OffsetDateTi
 }
 
 pub async fn start_worker_presence_projector(
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     jobs_stream: String,
     store: SqliteJobsStore,
 ) -> Result<WorkerPresenceProjectorHandle, ServerError> {
-    let jetstream = jetstream::new(nats);
-    let stream = jetstream.get_stream(&jobs_stream).await.map_err(|error| {
-        ServerError::Nats(format!(
-            "failed to open worker presence stream '{jobs_stream}': {error}"
-        ))
-    })?;
-    let consumer = stream
-        .get_or_create_consumer(
-            WORKER_PRESENCE_CONSUMER_NAME,
-            consumer::pull::Config {
-                durable_name: Some(WORKER_PRESENCE_CONSUMER_NAME.to_string()),
-                filter_subject: WORKER_HEARTBEATS_WILDCARD.to_string(),
-                ack_policy: consumer::AckPolicy::Explicit,
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|error| {
-            ServerError::Nats(format!(
-                "failed to create worker presence consumer '{WORKER_PRESENCE_CONSUMER_NAME}' on stream '{jobs_stream}': {error}"
-            ))
-        })?;
-    let mut messages = consumer
-        .messages()
+    let mut messages = jobs_runtime
+        .filtered_messages(&jobs_stream, WORKER_PRESENCE_CONSUMER_NAME, WORKER_HEARTBEATS_WILDCARD)
         .await
         .map_err(|error| {
             ServerError::Nats(format!(
@@ -129,12 +106,12 @@ pub async fn start_worker_presence_projector(
                 ))
             })?;
             let Some((service, job_type, instance_id)) =
-                parse_worker_heartbeat_subject(&message.subject)
+                parse_worker_heartbeat_subject(message.subject())
             else {
                 let _ = message.ack().await;
                 continue;
             };
-            let heartbeat = match serde_json::from_slice::<WorkerHeartbeat>(&message.payload) {
+            let heartbeat = match serde_json::from_slice::<WorkerHeartbeat>(message.payload()) {
                 Ok(heartbeat)
                     if heartbeat.service == service
                         && heartbeat.job_type == job_type
