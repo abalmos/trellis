@@ -27,6 +27,9 @@ commands.
 - Caller-visible communication is contract-driven and runs through generated
   RPC, event, feed, and operation surfaces. Resources, state, files, and jobs are
   contract-declared runtime surfaces; jobs are service-private background work.
+- Browser apps that already hold record references to Trellis user ids can
+  declare `Auth.Users.Resolve` to render minimal labels. Do not use
+  `Auth.Users.List` or invent app-local user tables for basic display labels.
 - Normal TypeScript contract authoring imports `define*Contract(...)` helpers from
   the browser-safe `@qlever-llc/trellis` root. Runtime-specific helpers,
   generated SDKs, browser auth, device activation, telemetry, and advanced

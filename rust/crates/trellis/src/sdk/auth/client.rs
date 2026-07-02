@@ -625,6 +625,15 @@ impl<'a> AuthRpc<'a> {
             .call::<super::rpc::AuthUsersPasswordResetCreateRpc>(input)
             .await
     }
+    /// Call `Auth.Users.Resolve`.
+    pub async fn users_resolve(
+        &self,
+        input: &super::types::AuthUsersResolveRequest,
+    ) -> Result<super::types::AuthUsersResolveResponse, TrellisClientError> {
+        self.inner
+            .call::<super::rpc::AuthUsersResolveRpc>(input)
+            .await
+    }
     /// Call `Auth.Users.Update`.
     pub async fn users_update(
         &self,

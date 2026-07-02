@@ -138,6 +138,8 @@ import {
   AuthUsersPasswordChangeRequestSchema,
   AuthUsersPasswordChangeResponseSchema,
   AuthUsersPasswordResetCreateRequestSchema,
+  AuthUsersResolveRequestSchema,
+  AuthUsersResolveResponseSchema,
   AuthUsersUpdateRequestSchema,
   AuthUsersUpdateResponseSchema,
   HealthRequestSchema,
@@ -1123,6 +1125,20 @@ export const OWNED_API = {
         AuthUsersAccountFlowCreateResponseSchema,
       ),
       callerCapabilities: ["admin"] as const,
+      errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+      declaredErrorTypes: [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError",
+      ] as const,
+    },
+    "Auth.Users.Resolve": {
+      subject: "rpc.v1.Auth.Users.Resolve",
+      input: schema<Types.AuthUsersResolveInput>(AuthUsersResolveRequestSchema),
+      output: schema<Types.AuthUsersResolveOutput>(
+        AuthUsersResolveResponseSchema,
+      ),
+      callerCapabilities: [] as const,
       errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
       declaredErrorTypes: [
         "AuthError",

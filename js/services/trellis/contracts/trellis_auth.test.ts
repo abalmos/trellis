@@ -16,6 +16,7 @@ const app = defineAppContract(
               "Auth.Identities.List",
               "Auth.Sessions.Logout",
               "Auth.Sessions.Me",
+              "Auth.Users.Resolve",
             ],
           },
         }),
@@ -35,6 +36,7 @@ Deno.test("trellisAuth.use records explicit auth rpc uses", () => {
         "Auth.Identities.List",
         "Auth.Sessions.Logout",
         "Auth.Sessions.Me",
+        "Auth.Users.Resolve",
       ],
     },
   });
@@ -53,6 +55,10 @@ Deno.test("trellisAuth.use exposes explicit rpc api surface", () => {
     app.API.used.rpc["Auth.Identities.List"].subject,
     "rpc.v1.Auth.Identities.List",
   );
+  assertEquals(
+    app.API.used.rpc["Auth.Users.Resolve"].subject,
+    "rpc.v1.Auth.Users.Resolve",
+  );
 });
 
 Deno.test("trellis auth contract exposes portal-scoped routes only", () => {
@@ -62,4 +68,18 @@ Deno.test("trellis auth contract exposes portal-scoped routes only", () => {
   assert(!("Auth.Portals.LoginRoutes.List" in trellisAuth.API.owned.rpc));
   assert(!("Auth.Portals.LoginRoutes.Put" in trellisAuth.API.owned.rpc));
   assert(!("Auth.Portals.LoginRoutes.Remove" in trellisAuth.API.owned.rpc));
+});
+
+Deno.test("trellis auth resolves users without adding directory search", () => {
+  assertEquals(
+    trellisAuth.API.owned.rpc["Auth.Users.Resolve"].callerCapabilities,
+    [],
+  );
+  assertEquals(
+    trellisAuth.API.owned.rpc["Auth.Users.List"].callerCapabilities,
+    [
+      "admin",
+    ],
+  );
+  assert(!("Auth.Users.Search" in trellisAuth.API.owned.rpc));
 });

@@ -2914,6 +2914,30 @@ pub struct AuthUsersPasswordResetCreateResponse {
     pub flow_id: String,
     pub url: String,
 }
+/// Generated schema type `AuthUsersResolveRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthUsersResolveRequest {
+    #[serde(rename = "userIds")]
+    pub user_ids: Vec<String>,
+}
+/// Generated schema type `AuthUsersResolveResponse`.
+/// Generated schema type `AuthUsersResolveResponseUsersItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthUsersResolveResponseUsersItem {
+    #[serde(rename = "displayName")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(rename = "userId")]
+    pub user_id: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthUsersResolveResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing: Option<Vec<String>>,
+    pub users: Vec<AuthUsersResolveResponseUsersItem>,
+}
 /// Generated schema type `AuthUsersUpdateRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthUsersUpdateRequest {

@@ -123,6 +123,11 @@ service.handle().feed().orders().live(orders_live_stream);
 service.handle().operation().orders().process(orders_process_provider);
 ```
 
+Apps or services that already received Trellis user ids on authorized records can
+call generated `Auth.Users.Resolve` to render minimal labels. Do not use admin
+directory RPCs such as `Auth.Users.List` or keep service-local profile tables for
+basic labels.
+
 Do not hand-build NATS subjects or JSON envelopes in application service code.
 Use generated descriptors and runtime helpers.
 

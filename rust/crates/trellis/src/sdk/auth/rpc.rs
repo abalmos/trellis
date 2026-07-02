@@ -881,6 +881,18 @@ impl RpcDescriptor for AuthUsersPasswordResetCreateRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
+/// Descriptor for `Auth.Users.Resolve`.
+pub struct AuthUsersResolveRpc;
+impl RpcDescriptor for AuthUsersResolveRpc {
+    type Input = super::types::AuthUsersResolveRequest;
+    type Output = super::types::AuthUsersResolveResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_RESOLVE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_RESOLVE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Users.Resolve";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Users.Resolve";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
 /// Descriptor for `Auth.Users.Update`.
 pub struct AuthUsersUpdateRpc;
 impl RpcDescriptor for AuthUsersUpdateRpc {

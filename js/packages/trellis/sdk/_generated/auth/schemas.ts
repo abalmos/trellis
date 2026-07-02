@@ -6765,6 +6765,41 @@ export const AuthUsersPasswordResetCreateRequestSchema = {
   "type": "object",
 } as const;
 
+export const AuthUsersResolveRequestSchema = {
+  "properties": {
+    "userIds": {
+      "items": { "minLength": 1, "type": "string" },
+      "maxItems": 500,
+      "type": "array",
+    },
+  },
+  "required": ["userIds"],
+  "type": "object",
+} as const;
+
+export const AuthUsersResolveResponseSchema = {
+  "properties": {
+    "missing": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array",
+    },
+    "users": {
+      "items": {
+        "properties": {
+          "displayName": { "type": "string" },
+          "email": { "type": "string" },
+          "userId": { "minLength": 1, "type": "string" },
+        },
+        "required": ["userId"],
+        "type": "object",
+      },
+      "type": "array",
+    },
+  },
+  "required": ["users"],
+  "type": "object",
+} as const;
+
 export const AuthUsersUpdateRequestSchema = {
   "properties": {
     "active": { "type": "boolean" },

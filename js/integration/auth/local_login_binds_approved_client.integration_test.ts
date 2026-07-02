@@ -1,10 +1,22 @@
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
-import { TrellisClient } from "@qlever-llc/trellis";
+import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
+import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createAuthLocalLoginFixture } from "./_fixture.ts";
 
 const CASE_ID = "auth.local-login-binds-approved-client" as const;
 const fixture = createAuthLocalLoginFixture(CASE_ID);
+const resolveOnlyContract = defineAppContract(() => ({
+  id: caseScopedContractId("trellis.integration.auth-user-resolve", CASE_ID),
+  displayName: "Trellis Integration Auth User Resolve",
+  description: "Resolves explicit auth user ids without directory access.",
+  uses: {
+    required: {
+      auth: trellisAuth.use({ rpc: { call: ["Auth.Users.Resolve"] } }),
+    },
+  },
+}));
 
 liveTrellisTest({
   name:
@@ -40,6 +52,30 @@ liveTrellisTest({
           message: fixture.pingMessage,
         }).orThrow();
         assertEquals(ping, { message: fixture.pingMessage, accepted: true });
+
+        const resolveClient = await runtime.connectClient({
+          name: caseScopedName("auth-users-resolve-client", CASE_ID),
+          contract: resolveOnlyContract,
+        });
+        try {
+          assert(
+            !("Auth.Users.List" in resolveOnlyContract.API.used.rpc),
+            "resolve-only contract must not receive directory access",
+          );
+          const resolved = await resolveClient.rpc.auth.usersResolve({
+            userIds: [me.user.userId, "usr_missing", me.user.userId],
+          }).orThrow();
+          assertEquals(resolved, {
+            users: [{
+              userId: me.user.userId,
+              displayName: me.user.name,
+              email: me.user.email,
+            }],
+            missing: ["usr_missing"],
+          });
+        } finally {
+          await resolveClient.connection.close();
+        }
       } finally {
         await client.connection.close();
       }

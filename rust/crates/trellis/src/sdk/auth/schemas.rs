@@ -146,6 +146,8 @@ pub const AUTH_USERS_PASSWORD_CHANGE_OUTPUT_SCHEMA_JSON: &str =
     r#"{"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}"#;
 pub const AUTH_USERS_PASSWORD_RESET_CREATE_INPUT_SCHEMA_JSON: &str = r#"{"properties":{"expiresInSeconds":{"maximum":2592000,"minimum":60,"type":"integer"},"userId":{"minLength":1,"type":"string"}},"required":["userId"],"type":"object"}"#;
 pub const AUTH_USERS_PASSWORD_RESET_CREATE_OUTPUT_SCHEMA_JSON: &str = r#"{"properties":{"expiresAt":{"format":"date-time","type":"string"},"flowId":{"minLength":1,"type":"string"},"url":{"minLength":1,"type":"string"}},"required":["flowId","url","expiresAt"],"type":"object"}"#;
+pub const AUTH_USERS_RESOLVE_INPUT_SCHEMA_JSON: &str = r#"{"properties":{"userIds":{"items":{"minLength":1,"type":"string"},"maxItems":500,"type":"array"}},"required":["userIds"],"type":"object"}"#;
+pub const AUTH_USERS_RESOLVE_OUTPUT_SCHEMA_JSON: &str = r#"{"properties":{"missing":{"items":{"minLength":1,"type":"string"},"type":"array"},"users":{"items":{"properties":{"displayName":{"type":"string"},"email":{"type":"string"},"userId":{"minLength":1,"type":"string"}},"required":["userId"],"type":"object"},"type":"array"}},"required":["users"],"type":"object"}"#;
 pub const AUTH_USERS_UPDATE_INPUT_SCHEMA_JSON: &str = r#"{"properties":{"active":{"type":"boolean"},"capabilities":{"items":{"type":"string"},"type":"array"},"capabilityGroups":{"items":{"minLength":1,"type":"string"},"type":"array"},"email":{"type":"string"},"name":{"type":"string"},"userId":{"minLength":1,"type":"string"}},"required":["userId"],"type":"object"}"#;
 pub const AUTH_USERS_UPDATE_OUTPUT_SCHEMA_JSON: &str =
     r#"{"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}"#;

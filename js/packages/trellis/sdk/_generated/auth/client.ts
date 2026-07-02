@@ -367,6 +367,10 @@ export interface TrellisAuthClient {
         input: Types.AuthUsersPasswordResetCreateInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.AuthUsersPasswordResetCreateOutput, BaseError>;
+      usersResolve(
+        input: Types.AuthUsersResolveInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.AuthUsersResolveOutput, BaseError>;
       usersUpdate(
         input: Types.AuthUsersUpdateInput,
         opts?: RequestOpts,
@@ -851,6 +855,7 @@ export interface ServiceHandle {
       usersPasswordResetCreate(
         handler: Types.AuthUsersPasswordResetCreateHandler,
       ): Promise<void>;
+      usersResolve(handler: Types.AuthUsersResolveHandler): Promise<void>;
       usersUpdate(handler: Types.AuthUsersUpdateHandler): Promise<void>;
     };
   };

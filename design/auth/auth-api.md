@@ -655,6 +655,7 @@ capabilities beyond successful authenticated user context:
 - `rpc.Auth.Sessions.Logout`
 - `rpc.Auth.Users.IdentityLink.Create`
 - `rpc.Auth.Users.Password.Change`
+- `rpc.Auth.Users.Resolve`
 
 ### rpc.Auth.Sessions.Logout
 
@@ -753,6 +754,38 @@ Rules:
   available, the activating user in `user`
 - service sessions receive service materialized authority context and null
   user/device entries
+
+### rpc.Auth.Users.Resolve
+
+Request:
+
+```ts
+{
+  userIds: string[];
+}
+```
+
+Response:
+
+```ts
+{
+  users: Array<{
+    userId: string;
+    displayName?: string;
+    email?: string;
+  }>;
+  missing?: string[];
+}
+```
+
+Rules:
+
+- this is a zero-capability authenticated RPC for resolving explicit user ids
+  that an app or service already saw on records it is authorized to read
+- the RPC is not a directory; unknown ids are returned in `missing`, duplicate
+  inputs are collapsed, and there is no search or page/list behavior
+- only minimal label fields are returned; broader profile and directory access
+  remains behind `Auth.Users.List`/admin surfaces
 
 ### rpc.Auth.Requests.Validate
 

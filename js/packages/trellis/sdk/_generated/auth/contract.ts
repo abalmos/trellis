@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "1YrFqkuEcvzJykFCGnDkhNE4ot_Lbt0T1QBDHabTHMo" as const;
+  "mYTkP38a_qMbmA5a0t9z7zddGzSeQ4JR4pve5jvUWks" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -1085,6 +1085,21 @@ export const CONTRACT = {
       "input": { "schema": "AuthUsersPasswordResetCreateRequest" },
       "output": { "schema": "AuthUsersAccountFlowCreateResponse" },
       "subject": "rpc.v1.Auth.Users.PasswordReset.Create",
+      "version": "v1",
+    },
+    "Auth.Users.Resolve": {
+      "capabilities": { "call": [] },
+      "docs": {
+        "markdown":
+          "Resolves explicit user ids to minimal display labels without directory browsing.",
+        "summary": "Resolve user labels.",
+      },
+      "errors": [{ "type": "AuthError" }, { "type": "UnexpectedError" }, {
+        "type": "ValidationError",
+      }],
+      "input": { "schema": "AuthUsersResolveRequest" },
+      "output": { "schema": "AuthUsersResolveResponse" },
+      "subject": "rpc.v1.Auth.Users.Resolve",
       "version": "v1",
     },
     "Auth.Users.Update": {
@@ -7974,6 +7989,39 @@ export const CONTRACT = {
         "userId": { "minLength": 1, "type": "string" },
       },
       "required": ["userId"],
+      "type": "object",
+    },
+    "AuthUsersResolveRequest": {
+      "properties": {
+        "userIds": {
+          "items": { "minLength": 1, "type": "string" },
+          "maxItems": 500,
+          "type": "array",
+        },
+      },
+      "required": ["userIds"],
+      "type": "object",
+    },
+    "AuthUsersResolveResponse": {
+      "properties": {
+        "missing": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "users": {
+          "items": {
+            "properties": {
+              "displayName": { "type": "string" },
+              "email": { "type": "string" },
+              "userId": { "minLength": 1, "type": "string" },
+            },
+            "required": ["userId"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": ["users"],
       "type": "object",
     },
     "AuthUsersUpdateRequest": {

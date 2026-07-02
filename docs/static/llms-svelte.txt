@@ -78,6 +78,10 @@ inside the app's source contract and call the other contract SDK's `sdk.use(spec
 helper there. Do not depend on broad generated surfaces just to make client types
 appear.
 
+If the app needs labels for Trellis user ids already present on authorized
+records, declare `Auth.Users.Resolve` and resolve explicit ids. Do not request
+`Auth.Users.List` or create a Svelte-app user table just for display labels.
+
 ```ts
 import { defineAppContract } from "@qlever-llc/trellis";
 import { sdk as orders } from "#trellis-generated-sdk/orders";

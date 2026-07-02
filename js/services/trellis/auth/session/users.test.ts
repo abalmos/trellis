@@ -16,6 +16,7 @@ import {
   createAuthUsersCreateHandler,
   createAuthUsersGetHandler,
   createAuthUsersListHandler,
+  createAuthUsersResolveHandler,
   createAuthUsersUpdateHandler,
 } from "./users.ts";
 import { identityIdForProviderSubject } from "../identity.ts";
@@ -361,6 +362,38 @@ Deno.test("Auth.Users.List returns account users with linked identities", async 
     offset: 0,
     limit: 10,
     nextOffset: undefined,
+  });
+});
+
+Deno.test("Auth.Users.Resolve resolves explicit ids and reports unknown ids once", async () => {
+  const accounts = new Map([
+    ["usr_ada", makeAccount()],
+    [
+      "usr_no_profile",
+      makeAccount({
+        userId: "usr_no_profile",
+        name: null,
+        email: null,
+      }),
+    ],
+  ]);
+
+  const result = await createAuthUsersResolveHandler({
+    get: (userId) => Promise.resolve(accounts.get(userId)),
+  }, logger)({
+    input: {
+      userIds: ["usr_ada", "usr_missing", "usr_ada", "usr_no_profile"],
+    },
+    context: { caller: { type: "user", userId: "usr_viewer" } },
+  });
+
+  assertEquals(result.take(), {
+    users: [{
+      userId: "usr_ada",
+      displayName: "Ada Lovelace",
+      email: "ada@example.com",
+    }, { userId: "usr_no_profile" }],
+    missing: ["usr_missing"],
   });
 });
 

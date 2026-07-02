@@ -20,6 +20,7 @@ import {
   createAuthUsersCreateHandler,
   createAuthUsersGetHandler,
   createAuthUsersListHandler,
+  createAuthUsersResolveHandler,
   createAuthUsersUpdateHandler,
 } from "../session/users.ts";
 import type { IdentityGrantRecord } from "../schemas.ts";
@@ -119,6 +120,9 @@ export async function registerApprovalAndUserRpcs(deps: {
       deps.userIdentityStorage,
       deps.logger,
     ),
+  );
+  await deps.trellis.handle.rpc.auth.usersResolve(
+    createAuthUsersResolveHandler(deps.accountStorage, deps.logger),
   );
   await deps.trellis.handle.rpc.auth.usersGet(
     createAuthUsersGetHandler(

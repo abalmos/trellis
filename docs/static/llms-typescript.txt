@@ -116,6 +116,10 @@ Do not call `Auth.Sessions.Logout` from the active app connection for normal
 browser logout, and let Trellis validate `returnTo` and build provider logout
 URLs instead of hard-coding IdP endpoints.
 
+For user labels on records that already contain Trellis user ids, declare
+`Auth.Users.Resolve` and pass the explicit ids. Do not request `Auth.Users.List`
+or build app-local profile tables for basic display labels.
+
 For integration tests, prefer `@qlever-llc/trellis-test/integration` over raw
 NATS subjects or hand-built bootstrap responses. Serial runs isolate each
 selected test with the `runtime` option passed to `trellisIntegrationTest(...)`,

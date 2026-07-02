@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "1YrFqkuEcvzJykFCGnDkhNE4ot_Lbt0T1QBDHabTHMo" as const;
+  "mYTkP38a_qMbmA5a0t9z7zddGzSeQ4JR4pve5jvUWks" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -2316,6 +2316,12 @@ export type AuthUsersPasswordResetCreateOutput = {
   url: string;
 };
 
+export type AuthUsersResolveInput = { userIds: Array<string> };
+export type AuthUsersResolveOutput = {
+  missing?: Array<string>;
+  users: Array<{ displayName?: string; email?: string; userId: string }>;
+};
+
 export type AuthUsersUpdateInput = {
   active?: boolean;
   capabilities?: Array<string>;
@@ -2774,6 +2780,10 @@ export interface RpcMap {
   "Auth.Users.PasswordReset.Create": {
     input: AuthUsersPasswordResetCreateInput;
     output: AuthUsersPasswordResetCreateOutput;
+  };
+  "Auth.Users.Resolve": {
+    input: AuthUsersResolveInput;
+    output: AuthUsersResolveOutput;
   };
   "Auth.Users.Update": {
     input: AuthUsersUpdateInput;
@@ -3664,6 +3674,18 @@ export type AuthUsersPasswordResetCreateHandler = (
 ) =>
   | AuthUsersPasswordResetCreateHandlerResult
   | Promise<AuthUsersPasswordResetCreateHandlerResult>;
+export type AuthUsersResolveHandlerError = TrellisErrorInstance;
+export type AuthUsersResolveHandlerResult = Result<
+  AuthUsersResolveOutput,
+  AuthUsersResolveHandlerError
+>;
+export type AuthUsersResolveHandler = (
+  args: {
+    input: AuthUsersResolveInput;
+    context: RpcHandlerContext;
+    client: HandlerClient;
+  },
+) => AuthUsersResolveHandlerResult | Promise<AuthUsersResolveHandlerResult>;
 export type AuthUsersUpdateHandlerError = TrellisErrorInstance;
 export type AuthUsersUpdateHandlerResult = Result<
   AuthUsersUpdateOutput,

@@ -1649,6 +1649,20 @@ export const UserViewSchema = Type.Object({
   identities: Type.Array(UserIdentityViewSchema),
 });
 
+export const ResolvedUserLabelSchema = Type.Object({
+  userId: Type.String({ minLength: 1 }),
+  displayName: Type.Optional(Type.String()),
+  email: Type.Optional(Type.String()),
+});
+
+export const AuthUsersResolveSchema = Type.Object({
+  userIds: Type.Array(Type.String({ minLength: 1 }), { maxItems: 500 }),
+});
+export const AuthUsersResolveResponseSchema = Type.Object({
+  users: Type.Array(ResolvedUserLabelSchema),
+  missing: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+});
+
 export const AuthUsersListSchema = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0 })),
   limit: Type.Integer({ minimum: 0, maximum: 500 }),

@@ -30,6 +30,8 @@ import {
   AuthUsersPasswordChangeResponseSchema,
   AuthUsersPasswordChangeSchema,
   AuthUsersPasswordResetCreateSchema,
+  AuthUsersResolveResponseSchema,
+  AuthUsersResolveSchema,
   AuthUsersUpdateResponseSchema,
   AuthUsersUpdateSchema,
   PortalFlowStateSchema,
@@ -320,6 +322,8 @@ const schemas = {
   AuthUsersPasswordChangeResponse: AuthUsersPasswordChangeResponseSchema,
   AuthUsersPasswordResetCreateRequest: AuthUsersPasswordResetCreateSchema,
   AuthUsersAccountFlowCreateResponse: AuthUsersAccountFlowCreateResponseSchema,
+  AuthUsersResolveRequest: AuthUsersResolveSchema,
+  AuthUsersResolveResponse: AuthUsersResolveResponseSchema,
   AuthUsersListRequest: AuthUsersListSchema,
   AuthUsersListResponse: AuthUsersListResponseSchema,
   AuthUsersGetRequest: AuthUsersGetSchema,
@@ -718,6 +722,13 @@ export const TRELLIS_AUTH_RPC = {
     input: schemaRef("AuthUsersListRequest"),
     output: schemaRef("AuthUsersListResponse"),
     capabilities: { call: ["admin"] },
+    errors: ["AuthError", "ValidationError", "UnexpectedError"],
+  },
+  "Auth.Users.Resolve": {
+    version: "v1",
+    input: schemaRef("AuthUsersResolveRequest"),
+    output: schemaRef("AuthUsersResolveResponse"),
+    capabilities: { call: [] },
     errors: ["AuthError", "ValidationError", "UnexpectedError"],
   },
   "Auth.Users.Get": {
@@ -1138,6 +1149,11 @@ const TRELLIS_AUTH_RPC_DOCS = {
   "Auth.Users.List": {
     summary: "List users.",
     markdown: "Lists user accounts.",
+  },
+  "Auth.Users.Resolve": {
+    summary: "Resolve user labels.",
+    markdown:
+      "Resolves explicit user ids to minimal display labels without directory browsing.",
   },
   "Auth.Users.Get": {
     summary: "Read user.",

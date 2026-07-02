@@ -205,6 +205,18 @@ function userView(entry: UserAccount, identities: UserIdentity[]) {
   };
 }
 
+function userLabel(entry: UserAccount): {
+  userId: string;
+  displayName?: string;
+  email?: string;
+} {
+  return {
+    userId: entry.userId,
+    ...(entry.name === null ? {} : { displayName: entry.name }),
+    ...(entry.email === null ? {} : { email: entry.email }),
+  };
+}
+
 async function hasOtherActiveAdmin(
   accountStorage: ActiveAdminAccountStorage,
   userId: string,
@@ -267,6 +279,44 @@ export function createAuthUsersListHandler(
 
     users.sort((a, b) => a.userId.localeCompare(b.userId));
     return Result.ok({ ...page, entries: users });
+  };
+}
+
+/** Creates the Auth.Users.Resolve RPC handler backed by SQL user storage. */
+export function createAuthUsersResolveHandler(
+  accountStorage: UserReadAccountStorage,
+  logger: Pick<AuthLogger, "trace">,
+) {
+  return async (
+    {
+      input: req,
+      context: { caller },
+    }: {
+      input: { userIds: string[] };
+      context: { caller: { type: string; userId?: string } };
+    },
+  ) => {
+    const user = requireUserCaller(caller);
+    logger.trace(
+      {
+        rpc: "Auth.Users.Resolve",
+        caller: user.userId,
+        count: req.userIds.length,
+      },
+      "RPC request",
+    );
+
+    const users: ReturnType<typeof userLabel>[] = [];
+    const missing: string[] = [];
+    for (const userId of new Set(req.userIds)) {
+      const account = await accountStorage.get(userId);
+      if (account === undefined) {
+        missing.push(userId);
+      } else {
+        users.push(userLabel(account));
+      }
+    }
+    return Result.ok({ users, ...(missing.length === 0 ? {} : { missing }) });
   };
 }
 

@@ -132,6 +132,10 @@ Rules:
   the active app connection. Trellis owns provider logout URL construction and
   return-target validation; apps should not hard-code IdP logout endpoints or
   arbitrary post-logout return URLs.
+- Browser apps that already received Trellis user ids on authorized records can
+  declare `Auth.Users.Resolve` to render minimal display labels. It is not a
+  directory; do not request `Auth.Users.List` or denormalize user profile tables
+  just to show labels.
 - Rust service repos should expose Trellis generation as `cargo xtask prepare`
 - Deno-first TypeScript service repos can use
   `@qlever-llc/trellis-test/integration` and
