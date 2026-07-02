@@ -507,11 +507,21 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
     }
   }
 
+  function trellisPortalOrigin(): string | null {
+    const base = config.web.publicOrigin ?? config.oauth.redirectBase;
+    try {
+      return new URL(base).origin;
+    } catch {
+      return null;
+    }
+  }
+
   function requireSelectedPortalOrigin(
     selected: SelectedLoginPortal,
     requestOrigin: string | undefined,
   ): void {
     if (!requestOrigin) return;
+    if (requestOrigin === trellisPortalOrigin()) return;
     if (!selected.portal.entryUrl) return;
     const expectedOrigin = portalEntryOrigin(selected);
     if (!expectedOrigin || requestOrigin !== expectedOrigin) {

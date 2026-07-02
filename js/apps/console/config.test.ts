@@ -4,6 +4,7 @@ import {
   APP_CONFIG,
   buildAppCallbackUrl,
   buildAppLoginUrl,
+  getCanonicalLoopbackUrl,
   getSelectedAuthUrl,
   persistSelectedAuthUrl,
 } from "./src/lib/config.ts";
@@ -34,6 +35,14 @@ Deno.test("selected auth url prefers query param and persists it", () => {
   assertEquals(
     storage.getItem("trellis.console.authUrl"),
     "http://localhost:4000",
+  );
+});
+
+Deno.test("canonical loopback urls use localhost", () => {
+  assertEquals(
+    getCanonicalLoopbackUrl(new URL("http://127.0.0.1:5173/login?flowId=1"))
+      .toString(),
+    "http://localhost:5173/login?flowId=1",
   );
 });
 

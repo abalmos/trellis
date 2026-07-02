@@ -68,22 +68,32 @@
   onMount(() => {
     if (!browser) return;
 
+    const canonicalRedirect = getCanonicalLoopbackRedirectUrl();
+    if (canonicalRedirect) {
+      window.location.replace(canonicalRedirect);
+      return;
+    }
+
     const queryAuthError = page.url.searchParams.get("authError");
     authError = queryAuthError ? formatConsoleAuthError(queryAuthError) : null;
     selectedAuthUrl = getSelectedAuthUrl(page.url) ?? "";
 
     if (page.url.searchParams.has("flowId")) {
+      if (selectedAuthUrl) {
+        const portalUrl = new URL(
+          "/_trellis/portal/users/login",
+          selectedAuthUrl,
+        );
+        portalUrl.search = page.url.search;
+        window.location.href = portalUrl.toString();
+        return;
+      }
+
       const bridgeCardTimer = globalThis.setTimeout(() => {
         showBridgeCard = true;
       }, 500);
       void goto(resolveConsolePath(`/callback${page.url.search}`, page.url));
       return () => globalThis.clearTimeout(bridgeCardTimer);
-    }
-
-    const canonicalRedirect = getCanonicalLoopbackRedirectUrl();
-    if (canonicalRedirect) {
-      window.location.replace(canonicalRedirect);
-      return;
     }
 
     void (async () => {

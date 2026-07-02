@@ -9,7 +9,12 @@ import {
 } from "@qlever-llc/trellis/auth/browser";
 import { startAuthRequest } from "@qlever-llc/trellis/auth";
 import contract from "../../contract.ts";
-import { APP_CONFIG, buildAppCallbackUrl, buildAppLoginUrl } from "./config.ts";
+import {
+  APP_CONFIG,
+  buildAppCallbackUrl,
+  buildAppLoginUrl,
+  getCanonicalLoopbackUrl,
+} from "./config.ts";
 
 type AuthCallbackResult =
   | BindResponse
@@ -90,7 +95,9 @@ class ConsoleAuthState {
     });
 
     if (response.status === "flow_started") {
-      window.location.href = response.loginUrl;
+      window.location.href = getCanonicalLoopbackUrl(
+        new URL(response.loginUrl, window.location.href),
+      ).toString();
       throw new Error("Redirecting to auth for provider selection");
     }
 

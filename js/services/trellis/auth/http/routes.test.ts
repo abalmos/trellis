@@ -2064,6 +2064,31 @@ Deno.test({
 });
 
 Deno.test({
+  name: "auth HTTP approval route accepts Trellis built-in portal origin",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerTestRoutes({}, {}, {}, {
+      loginPortalStorage: externalLoginPortalStorage(),
+    });
+
+    const response = await app.request(
+      "http://trellis/auth/flow/missing/approval",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify({ decision: "approved" }),
+      },
+    );
+
+    assertEquals(response.status, 400);
+    assertEquals(await response.json(), { error: "Invalid approval request" });
+  },
+});
+
+Deno.test({
   name: "auth HTTP bind route does not allow portal-origin CORS",
   sanitizeResources: false,
   fn: async () => {
