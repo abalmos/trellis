@@ -17,6 +17,7 @@ import type {
 } from "../schemas.ts";
 import {
   createDeviceConnectInfoHandler,
+  deviceConnectInfoHttpError,
   verifyDeviceConnectInfoIdentityProof,
 } from "./device.ts";
 
@@ -243,6 +244,42 @@ function authorityDesiredState(
     ),
   };
 }
+
+// Pure public error mapping; no runtime fixture needed.
+Deno.test("device connect-info maps failure reasons to stable HTTP errors", () => {
+  for (
+    const [reason, expected] of [
+      ["authority_reconciliation_pending", {
+        status: 202,
+        reason: "authority_reconciliation_pending",
+      }],
+      ["authority_reconciliation_failed", {
+        status: 202,
+        reason: "authority_reconciliation_failed",
+      }],
+      ["contract_digest_not_allowed", {
+        status: 403,
+        reason: "contract_digest_not_allowed",
+      }],
+      ["authority_needs_not_authorized", {
+        status: 403,
+        reason: "authority_needs_not_authorized",
+      }],
+      ["authority_needs_not_materialized", {
+        status: 403,
+        reason: "authority_needs_not_materialized",
+      }],
+      ["device_deployment_not_found", {
+        status: 404,
+        reason: "device_deployment_not_found",
+      }],
+      ["unknown_device", { status: 404, reason: "unknown_device" }],
+      ["invalid_request", { status: 400, reason: "invalid_request" }],
+    ] as const
+  ) {
+    assertEquals(deviceConnectInfoHttpError(reason), expected);
+  }
+});
 
 async function createAuthorityMiss(): Promise<DeploymentAuthority> {
   return {

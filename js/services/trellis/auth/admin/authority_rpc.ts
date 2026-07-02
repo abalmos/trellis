@@ -325,37 +325,6 @@ function desiredStateFromProposal(
   };
 }
 
-function isEmptyAuthorityNeedSet(needs: AuthorityNeedSet): boolean {
-  return needs.contracts.length === 0 && needs.surfaces.length === 0 &&
-    needs.capabilities.length === 0 && needs.resources.length === 0;
-}
-
-function proposalScopedReplacementAllowed(
-  authority: DeploymentAuthority,
-  plan: DeploymentAuthorityPlan,
-): boolean {
-  const allowedContractIds = new Set<string>([plan.proposal.contractId]);
-  for (const need of plan.proposal.requestedNeeds.contracts) {
-    allowedContractIds.add(need.contractId);
-  }
-  for (const need of plan.proposal.requestedNeeds.surfaces) {
-    allowedContractIds.add(need.contractId);
-  }
-  for (const surface of plan.proposal.providedSurfaces) {
-    allowedContractIds.add(surface.contractId);
-  }
-
-  const currentContractIds = [
-    ...authority.desiredState.needs.contracts.map((need) => need.contractId),
-    ...authority.desiredState.needs.surfaces.map((need) => need.contractId),
-    ...authority.desiredState.surfaces.map((surface) => surface.contractId),
-  ];
-  return currentContractIds.length > 0 &&
-    currentContractIds.every((contractId) =>
-      allowedContractIds.has(contractId)
-    );
-}
-
 function desiredStateForAcceptedPlan(
   authority: DeploymentAuthority,
   plan: DeploymentAuthorityPlan,
@@ -372,22 +341,6 @@ function desiredStateForAcceptedPlan(
         desiredChange,
         plan.proposal.providedSurfaces,
       ),
-    };
-  }
-  if (!proposalScopedReplacementAllowed(authority, plan)) {
-    return {
-      ok: false,
-      error: invalid(
-        "/planId",
-        "migration replacement is outside the proposal contract scope",
-        { planId: plan.planId, contractId: plan.proposal.contractId },
-      ),
-    };
-  }
-  if (isEmptyAuthorityNeedSet(desiredChange)) {
-    return {
-      ok: true,
-      desiredState: desiredStateFromProposal(plan.proposal),
     };
   }
   return {

@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 
 import {
   buildAuthStartSignaturePayload,
@@ -505,6 +505,70 @@ Deno.test("buildAuthStartSignaturePayload supports digest-only presentation", ()
   });
 
   assertEquals(digestOnly === fullManifest, false);
+});
+
+Deno.test("buildAuthStartSignaturePayload canonicalizes JSON payloads", () => {
+  const left = buildAuthStartSignaturePayload({
+    redirectTo: "https://console.example.com/callback",
+    sessionKey: "A".repeat(43),
+    sig: "B".repeat(86),
+    contract: {
+      z: ["first", { b: false, a: true }],
+      a: { nested: [1, null, 2] },
+    },
+    context: { z: { b: 2, a: 1 }, a: ["x", "y"] },
+  });
+  const right = buildAuthStartSignaturePayload({
+    redirectTo: "https://console.example.com/callback",
+    sessionKey: "A".repeat(43),
+    sig: "B".repeat(86),
+    contract: {
+      a: { nested: [1, null, 2] },
+      z: ["first", { a: true, b: false }],
+    },
+    context: { a: ["x", "y"], z: { a: 1, b: 2 } },
+  });
+  const reversedArray = buildAuthStartSignaturePayload({
+    redirectTo: "https://console.example.com/callback",
+    sessionKey: "A".repeat(43),
+    sig: "B".repeat(86),
+    contract: {
+      a: { nested: [2, null, 1] },
+      z: ["first", { a: true, b: false }],
+    },
+    context: { a: ["y", "x"], z: { a: 1, b: 2 } },
+  });
+
+  assertEquals(left, right);
+  assertEquals(left === reversedArray, false);
+  assertEquals(
+    buildAuthStartSignaturePayload({
+      redirectTo: "https://console.example.com/callback",
+      sessionKey: "A".repeat(43),
+      sig: "B".repeat(86),
+      contractDigest: "digest-known",
+    }),
+    'https://console.example.com/callback::"digest-known":null',
+  );
+
+  for (const value of [NaN, Infinity, -Infinity]) {
+    assertThrows(() =>
+      buildAuthStartSignaturePayload({
+        redirectTo: "https://console.example.com/callback",
+        sessionKey: "A".repeat(43),
+        sig: "B".repeat(86),
+        contract: { value },
+      })
+    );
+  }
+  assertThrows(() =>
+    buildAuthStartSignaturePayload({
+      redirectTo: "https://console.example.com/callback",
+      sessionKey: "A".repeat(43),
+      sig: "B".repeat(86),
+      contract: { value: undefined },
+    })
+  );
 });
 
 Deno.test("auth start resolves known digest without requiring a manifest", async () => {

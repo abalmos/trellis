@@ -38,6 +38,7 @@ export async function resolveUserReconnectSession(args: {
     args.capabilityGroupStorage,
   );
   if (
+    args.session.approvalSource !== "deployment_grant" &&
     !args.session.delegatedCapabilities.every((capability) =>
       resolvedCapabilities.includes(capability)
     )

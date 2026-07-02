@@ -1240,7 +1240,7 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration replaces desired state from 
   ]);
 });
 
-Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects out-of-scope replacement", async () => {
+Deno.test("Auth.DeploymentAuthority.AcceptMigration accepts dependency removal", async () => {
   const authorities = new InMemoryDeploymentAuthorityStorage(
     deploymentAuthority({
       desiredState: {
@@ -1257,7 +1257,6 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects out-of-scope replace
       },
     }),
   );
-  const original = authorities.getValue();
   const plans = new InMemoryDeploymentAuthorityPlanStorage([{
     ...deploymentAuthorityPlan(),
     classification: "migration",
@@ -1278,9 +1277,24 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects out-of-scope replace
     deploymentAuthorityStorage: authorities,
     deploymentAuthorityPlanStorage: plans,
     authorityReconciler: {
-      reconcileDeployment: async () => {
-        throw new Error("should not reconcile");
-      },
+      reconcileDeployment: async (deploymentId, opts) => ({
+        authority: authorities.getValue() ?? deploymentAuthority(),
+        materializedAuthority: {
+          deploymentId,
+          desiredVersion: opts?.desiredVersion ?? "v1",
+          status: "current",
+          resourceBindings: [],
+          grants: emptyMaterializedGrants(),
+          reconciledAt: "2026-01-01T00:00:02.000Z",
+        },
+        reconciliation: {
+          deploymentId,
+          desiredVersion: opts?.desiredVersion ?? "v1",
+          state: "succeeded",
+          startedAt: "2026-01-01T00:00:02.000Z",
+          finishedAt: "2026-01-01T00:00:03.000Z",
+        },
+      }),
     },
     logger: { trace: () => {} },
   });
@@ -1290,12 +1304,14 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects out-of-scope replace
     context: adminContext,
   });
 
-  assert(result.isErr());
-  assertEquals(authorities.getValue(), original);
-  assertEquals(plans.getValue("plan-a")?.state, "pending");
+  assert(result.isOk());
+  assertEquals(plans.getValue("plan-a")?.state, "accepted");
+  assertEquals(authorities.getValue()?.desiredState.needs.contracts, [
+    { contractId: "svc.contract@v1", required: true },
+  ]);
 });
 
-Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects replacement with out-of-scope surfaces", async () => {
+Deno.test("Auth.DeploymentAuthority.AcceptMigration accepts surface removal", async () => {
   const authorities = new InMemoryDeploymentAuthorityStorage(
     deploymentAuthority({
       desiredState: {
@@ -1319,7 +1335,6 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects replacement with out
       },
     }),
   );
-  const original = authorities.getValue();
   const plans = new InMemoryDeploymentAuthorityPlanStorage([{
     ...deploymentAuthorityPlan(),
     classification: "migration",
@@ -1340,9 +1355,24 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects replacement with out
     deploymentAuthorityStorage: authorities,
     deploymentAuthorityPlanStorage: plans,
     authorityReconciler: {
-      reconcileDeployment: async () => {
-        throw new Error("should not reconcile");
-      },
+      reconcileDeployment: async (deploymentId, opts) => ({
+        authority: authorities.getValue() ?? deploymentAuthority(),
+        materializedAuthority: {
+          deploymentId,
+          desiredVersion: opts?.desiredVersion ?? "v1",
+          status: "current",
+          resourceBindings: [],
+          grants: emptyMaterializedGrants(),
+          reconciledAt: "2026-01-01T00:00:02.000Z",
+        },
+        reconciliation: {
+          deploymentId,
+          desiredVersion: opts?.desiredVersion ?? "v1",
+          state: "succeeded",
+          startedAt: "2026-01-01T00:00:02.000Z",
+          finishedAt: "2026-01-01T00:00:03.000Z",
+        },
+      }),
     },
     logger: { trace: () => {} },
   });
@@ -1352,9 +1382,10 @@ Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects replacement with out
     context: adminContext,
   });
 
-  assert(result.isErr());
-  assertEquals(authorities.getValue(), original);
-  assertEquals(plans.getValue("plan-a")?.state, "pending");
+  assert(result.isOk());
+  assertEquals(plans.getValue("plan-a")?.state, "accepted");
+  assertEquals(authorities.getValue()?.desiredState.needs.surfaces, []);
+  assertEquals(authorities.getValue()?.desiredState.surfaces, []);
 });
 
 Deno.test("Auth.DeploymentAuthority.AcceptMigration rejects missing acknowledgement", async () => {

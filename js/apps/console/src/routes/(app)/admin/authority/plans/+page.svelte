@@ -28,7 +28,7 @@
   };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityPlansRequest = {
-    (method: "Auth.DeploymentAuthority.Plans.List", input: PlanListInput): RpcTakeable<{ entries?: DeploymentAuthorityPlan[]; total?: number }>;
+    (method: "Auth.DeploymentAuthority.Plans.List", input: PlanListInput): RpcTakeable<{ entries?: DeploymentAuthorityPlan[]; count?: number }>;
   };
 
   const trellis = getTrellis();
@@ -43,7 +43,7 @@
   let plans = $state.raw<DeploymentAuthorityPlan[]>([]);
   let total = $state(0);
   let offset = $state(0);
-  let stateFilter = $state<PlanState | "">("");
+  let stateFilter = $state<PlanState | "">("pending");
   let classificationFilter = $state<PlanClassification | "">("");
   let kindFilter = $state<AuthorityKind | "">("");
   let search = $state("");
@@ -108,7 +108,7 @@
       const plansResponse = await request("Auth.DeploymentAuthority.Plans.List", input).take();
       if (isErr(plansResponse)) { error = errorMessage(plansResponse); return; }
       plans = plansResponse.entries ?? [];
-      total = plansResponse.total ?? plans.length;
+      total = plansResponse.count ?? plans.length;
     } catch (cause) {
       error = errorMessage(cause);
     } finally {

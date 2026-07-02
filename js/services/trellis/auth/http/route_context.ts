@@ -754,8 +754,9 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
       ...(args.resolution.requestedAuthority
         ? { identityAuthorityNeeds: args.resolution.requestedAuthority }
         : {}),
-      delegatedCapabilities: approvalCapabilityKeys(
-        args.resolution.plan.approval,
+      delegatedCapabilities: delegatedCapabilitiesForApproval(
+        approvalCapabilityKeys(args.resolution.plan.approval),
+        args.resolution.effectiveCapabilities,
       ),
       delegatedPublishSubjects: args.resolution.plan.publishSubjects,
       delegatedSubscribeSubjects: args.resolution.plan.subscribeSubjects,
@@ -936,4 +937,19 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
     createFlowStartResponse,
     completePendingBind,
   };
+}
+
+function delegatedCapabilitiesForApproval(
+  requiredCapabilities: string[],
+  effectiveCapabilities: string[],
+): string[] {
+  return [
+    ...new Set(requiredCapabilities.flatMap((capability) => {
+      if (capability !== "trellis.auth::device.review") return [capability];
+      const scoped = effectiveCapabilities.filter((candidate) =>
+        candidate.startsWith("trellis.auth::device.review.")
+      );
+      return scoped.length > 0 ? scoped : [capability];
+    })),
+  ].sort();
 }

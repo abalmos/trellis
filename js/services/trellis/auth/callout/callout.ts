@@ -394,7 +394,7 @@ function materializedNatsSubjectsForPermissions(args: {
       if (grant.direction !== args.direction) return [];
       if (
         !grant.requiredCapabilities.every((capability) =>
-          capabilities.has(capability)
+          capabilitySatisfied(capabilities, capability)
         )
       ) {
         return [];
@@ -411,6 +411,17 @@ function materializedNatsSubjectsForPermissions(args: {
       return [grant.subject];
     }),
   );
+}
+
+function capabilitySatisfied(
+  capabilities: ReadonlySet<string>,
+  required: string,
+): boolean {
+  if (capabilities.has(required)) return true;
+  return required === "trellis.auth::device.review" &&
+    [...capabilities].some((capability) =>
+      capability.startsWith("trellis.auth::device.review.")
+    );
 }
 
 function serviceOperationStorePublishSubjects(

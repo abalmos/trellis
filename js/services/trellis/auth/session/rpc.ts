@@ -911,7 +911,7 @@ export function createAuthRequestsValidateHandler(deps: {
     const subjectAllowed = sessionCanPublishSubject(session, req.subject);
     const allowed = subjectAllowed && (required.length === 0 ||
       required.every((capability) =>
-        principal.value.capabilities.includes(capability)
+        capabilitySatisfied(principal.value.capabilities, capability)
       ));
 
     return Result.ok({
@@ -920,6 +920,17 @@ export function createAuthRequestsValidateHandler(deps: {
       caller: formatCaller(session, principal.value),
     });
   };
+}
+
+function capabilitySatisfied(
+  capabilities: string[],
+  required: string,
+): boolean {
+  if (capabilities.includes(required)) return true;
+  return required === "trellis.auth::device.review" &&
+    capabilities.some((capability) =>
+      capability.startsWith("trellis.auth::device.review.")
+    );
 }
 
 export function createAuthSessionsLogoutHandler(deps: {

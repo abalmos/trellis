@@ -35,8 +35,19 @@ export function missingCapabilities(args: {
   effectiveCapabilities: string[];
 }): string[] {
   return args.requiredCapabilities.filter((capability) =>
-    !args.effectiveCapabilities.includes(capability)
+    !capabilitySatisfied(args.effectiveCapabilities, capability)
   );
+}
+
+function capabilitySatisfied(
+  effectiveCapabilities: string[],
+  required: string,
+) {
+  if (effectiveCapabilities.includes(required)) return true;
+  return required === "trellis.auth::device.review" &&
+    effectiveCapabilities.some((capability) =>
+      capability.startsWith("trellis.auth::device.review.")
+    );
 }
 
 export function userDelegationAllowed(args: {

@@ -293,6 +293,7 @@ export async function resolveSessionPrincipal(
     deps.capabilityGroupStorage,
   );
   if (
+    session.approvalSource !== "deployment_grant" &&
     !session.delegatedCapabilities.every((capability) =>
       currentCapabilities.includes(capability)
     )

@@ -112,6 +112,33 @@ export type DeviceConnectInfoResult =
   | { status: "activation_required" }
   | { status: "not_ready"; reason: string };
 
+/** Public HTTP error mapping for device connect-info failures. */
+export function deviceConnectInfoHttpError(reason: string): {
+  status: 202 | 400 | 403 | 404;
+  reason: string;
+} {
+  if (
+    reason === "contract_digest_not_allowed" ||
+    reason === "authority_needs_not_authorized" ||
+    reason === "authority_needs_not_materialized"
+  ) {
+    return { status: 403, reason };
+  }
+  if (
+    reason === "authority_reconciliation_pending" ||
+    reason === "authority_reconciliation_failed"
+  ) {
+    return { status: 202, reason };
+  }
+  if (reason === "device_deployment_not_found") {
+    return { status: 404, reason };
+  }
+  if (reason === "invalid_request") {
+    return { status: 400, reason };
+  }
+  return { status: 404, reason: "unknown_device" };
+}
+
 export type DeviceConnectInfoResolverDeps = {
   contracts: Pick<
     ContractsModule,
@@ -479,7 +506,8 @@ export function createDeviceConnectInfoHandler(deps: DeviceConnectInfoDeps) {
 
     const body = bodyResult.take();
     if (!Value.Check(DeviceConnectInfoRequestSchema, body)) {
-      return c.json({ reason: "invalid_request" }, 400);
+      const error = deviceConnectInfoHttpError("invalid_request");
+      return c.json({ reason: error.reason }, error.status);
     }
 
     const request = body;
@@ -500,26 +528,12 @@ export function createDeviceConnectInfoHandler(deps: DeviceConnectInfoDeps) {
 
     const result = await resolveDeviceConnectInfo(deps, request);
     if (result.status === "activation_required") {
-      return c.json({ reason: "unknown_device" }, 404);
+      const error = deviceConnectInfoHttpError("unknown_device");
+      return c.json({ reason: error.reason }, error.status);
     }
     if (result.status === "not_ready") {
-      if (
-        result.reason === "contract_digest_not_allowed" ||
-        result.reason === "authority_needs_not_authorized" ||
-        result.reason === "authority_needs_not_materialized"
-      ) {
-        return c.json({ reason: result.reason }, 403);
-      }
-      if (
-        result.reason === "authority_reconciliation_pending" ||
-        result.reason === "authority_reconciliation_failed"
-      ) {
-        return c.json({ reason: result.reason }, 202);
-      }
-      if (result.reason === "device_deployment_not_found") {
-        return c.json({ reason: result.reason }, 404);
-      }
-      return c.json({ reason: "unknown_device" }, 404);
+      const error = deviceConnectInfoHttpError(result.reason);
+      return c.json({ reason: error.reason }, error.status);
     }
     return c.json(result);
   };
