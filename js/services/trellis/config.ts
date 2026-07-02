@@ -157,7 +157,8 @@ const rawSchema = z.object({
   }),
   trellisTest: z.object({
     failOnce: z.array(z.string().min(1)).default([]),
-  }).default({ failOnce: [] }),
+    disableJobsAdmin: z.boolean().default(false),
+  }).default({ failOnce: [], disableJobsAdmin: false }),
 }).superRefine((raw, context) => {
   if (
     !raw.auth.localIdentity.enabled &&
@@ -259,6 +260,7 @@ export type Config = {
   };
   trellisTest?: {
     failOnce: string[];
+    disableJobsAdmin: boolean;
   };
 };
 

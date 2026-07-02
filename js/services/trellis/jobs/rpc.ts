@@ -172,7 +172,8 @@ function isWorkerHeartbeat(value: unknown): value is WorkerHeartbeat {
   return Value.Check(WorkerHeartbeatSchema, value);
 }
 
-function parseMaxDeliveriesAdvisory(
+/** Parses a NATS max-deliveries advisory into the Jobs admin projection shape. */
+export function parseMaxDeliveriesAdvisory(
   value: unknown,
 ): MaxDeliveriesAdvisory | undefined {
   if (!Value.Check(MaxDeliveriesAdvisorySchema, value)) return undefined;
@@ -338,7 +339,8 @@ function headersFromJobContext(context: JobEvent["context"]) {
   return headers;
 }
 
-function mapDeadEventFromAdvisory(
+/** Maps an exhausted-delivery advisory to a Jobs lifecycle dead event. */
+export function mapDeadEventFromAdvisory(
   current: AdminJob | undefined,
   workEvent: JobEvent,
   advisory: MaxDeliveriesAdvisory,

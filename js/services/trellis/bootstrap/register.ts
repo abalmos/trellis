@@ -116,7 +116,9 @@ export async function registerControlPlane(deps: {
     state: new StateStore({ kv: stateKV }),
     contracts,
   });
-  const jobsAdminHandlers = createJobsAdminHandlers(natsTrellis);
+  const jobsAdminHandlers = config.trellisTest?.disableJobsAdmin
+    ? undefined
+    : createJobsAdminHandlers(natsTrellis);
 
   await registerCatalog({
     trellis,
@@ -134,7 +136,9 @@ export async function registerControlPlane(deps: {
 
   await registerState({ trellis, stateHandlers });
 
-  await registerJobsAdmin({ trellis, handlers: jobsAdminHandlers });
+  if (jobsAdminHandlers) {
+    await registerJobsAdmin({ trellis, handlers: jobsAdminHandlers });
+  }
 
   await registerAuth({
     app,
@@ -220,7 +224,7 @@ export async function registerControlPlane(deps: {
     async stop() {
       const results = await Promise.allSettled([
         backgroundTasks.stop(),
-        Promise.resolve().then(() => jobsAdminHandlers.stop()),
+        Promise.resolve().then(() => jobsAdminHandlers?.stop()),
       ]);
       const failures = results.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []

@@ -36,6 +36,60 @@ fn context(id: &str) -> JobContext {
 }
 
 #[test]
+fn max_deliveries_advisory_parses_supported_spellings() {
+    let expected = MaxDeliveriesAdvisory {
+        stream: "JOBS_WORK".to_string(),
+        consumer: "documents-document-process".to_string(),
+        stream_seq: 41,
+        deliveries: 3,
+        timestamp: "2026-03-28T12:05:00.000Z".to_string(),
+    };
+
+    assert!(serde_json::from_value::<MaxDeliveriesAdvisory>(json!({
+        "stream": "JOBS_WORK",
+        "consumer": "documents-document-process",
+        "timestamp": "2026-03-28T12:05:00.000Z"
+    }))
+    .is_err());
+
+    for raw in [
+        json!({
+            "stream": "JOBS_WORK",
+            "consumer": "documents-document-process",
+            "stream_seq": 41,
+            "deliveries": 3,
+            "timestamp": "2026-03-28T12:05:00.000Z"
+        }),
+        json!({
+            "stream": "JOBS_WORK",
+            "consumer": "documents-document-process",
+            "streamSeq": 41,
+            "deliveries": 3,
+            "timestamp": "2026-03-28T12:05:00.000Z"
+        }),
+        json!({
+            "stream": "JOBS_WORK",
+            "consumer": "documents-document-process",
+            "stream_seq": 41,
+            "num_deliveries": 3,
+            "timestamp": "2026-03-28T12:05:00.000Z"
+        }),
+        json!({
+            "stream": "JOBS_WORK",
+            "consumer": "documents-document-process",
+            "streamSeq": 41,
+            "num_deliveries": 3,
+            "timestamp": "2026-03-28T12:05:00.000Z"
+        }),
+    ] {
+        let advisory =
+            serde_json::from_value::<MaxDeliveriesAdvisory>(raw).expect("advisory should parse");
+
+        assert_eq!(advisory, expected);
+    }
+}
+
+#[test]
 fn map_dead_event_from_advisory_job_uses_current_state_and_max_tries() {
     let advisory = MaxDeliveriesAdvisory {
         stream: "JOBS_WORK".to_string(),

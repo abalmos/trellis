@@ -329,6 +329,8 @@ pub struct TrellisTestRuntimeOptions {
     pub oauth_providers: Map<String, Value>,
     /// Named fail-once hooks injected into the isolated test control-plane config.
     pub fail_once_hooks: Vec<String>,
+    /// Disable the built-in JS Jobs admin RPC handlers for tests that host Jobs elsewhere.
+    pub disable_jobs_admin: bool,
 }
 
 impl TrellisTestRuntimeOptions {
@@ -347,6 +349,7 @@ impl TrellisTestRuntimeOptions {
             admin_password: None,
             oauth_providers: Map::new(),
             fail_once_hooks: Vec::new(),
+            disable_jobs_admin: false,
         }
     }
 }
@@ -1897,13 +1900,13 @@ fn bound_flow_session_from_parts(
             "bound auth flow did not include native NATS transport".to_string(),
         )
     })?;
-    if native.nats_servers.is_empty() {
+    if native.servers.is_empty() {
         return Err(TrellisTestError::UnexpectedResponse(
             "bound auth flow native transport has no NATS servers".to_string(),
         ));
     }
     Ok(BoundFlowSession {
-        nats_servers: native.nats_servers.join(","),
+        nats_servers: native.servers.join(","),
         sentinel_jwt: sentinel.jwt,
         sentinel_seed: sentinel.seed,
         expires,
@@ -2346,15 +2349,16 @@ fn render_test_trellis_config(
             1,
         )
     };
-    if runtime_options.fail_once_hooks.is_empty() {
+    if runtime_options.fail_once_hooks.is_empty() && !runtime_options.disable_jobs_admin {
         return config;
     }
     config.replacen(
         "  \"oauth\": {",
         &format!(
-            "  \"trellisTest\": {{\n    \"failOnce\": {}\n  }},\n  \"oauth\": {{",
+            "  \"trellisTest\": {{\n    \"failOnce\": {},\n    \"disableJobsAdmin\": {}\n  }},\n  \"oauth\": {{",
             serde_json::to_string_pretty(&runtime_options.fail_once_hooks)
-                .expect("serialize test fail-once hooks")
+                .expect("serialize test fail-once hooks"),
+            runtime_options.disable_jobs_admin
         ),
         1,
     )
@@ -2943,7 +2947,7 @@ mod tests {
             },
             trellis_rs::auth::ClientTransportsRecord {
                 native: Some(trellis_rs::auth::ClientTransportRecord {
-                    nats_servers: vec![
+                    servers: vec![
                         "nats://127.0.0.1:4222".to_string(),
                         "nats://127.0.0.1:4223".to_string(),
                     ],

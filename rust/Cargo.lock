@@ -4179,7 +4179,6 @@ dependencies = [
 name = "trellis-service-jobs"
 version = "0.11.0"
 dependencies = [
- "async-nats",
  "futures-util",
  "rusqlite",
  "serde",
@@ -4189,6 +4188,7 @@ dependencies = [
  "tokio",
  "trellis-contracts",
  "trellis-rs",
+ "trellis-test",
 ]
 
 [[package]]

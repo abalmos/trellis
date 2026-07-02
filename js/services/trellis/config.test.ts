@@ -124,6 +124,7 @@ Deno.test("auth config loads structured provider map from file", async () => {
       assertEquals(cfg.httpRateLimit.windowMs, 1234);
       assertEquals(cfg.httpRateLimit.max, 55);
       assertEquals(cfg.storage.dbPath, "/var/lib/trellis/trellis.sqlite");
+      assertEquals(cfg.trellisTest?.disableJobsAdmin, false);
       assertEquals(cfg.ttlMs.deviceFlow, 1800000);
       assertEquals(
         cfg.sessionKeySeed,
@@ -167,6 +168,37 @@ Deno.test("auth config loads structured provider map from file", async () => {
         mode: "auth0",
         allowFederated: true,
       });
+    },
+  );
+});
+
+Deno.test("auth config parses trellis test Jobs admin switch", async () => {
+  await withTempConfig(
+    `{
+      "nats": {
+        "servers": "localhost",
+        "auth": { "credsPath": "/tmp/auth.creds" },
+        "system": { "credsPath": "/tmp/system.creds" },
+        "trellis": { "credsPath": "/tmp/trellis.creds" },
+        "sentinelCredsPath": "/tmp/sentinel.creds",
+        "authCallout": {
+          "issuer": { "nkey": "AAAUZNB6EFNV5BTZEE3FUNQIZ2OFAD7NALJZ3RQY3TCOSFREMANAGSER", "signingSeedFile": "./issuer.seed" },
+          "target": { "nkey": "ADQCP2XPU3CAS2PLQKLSHQXWR64JEMOXLV53ABO7ERDTDV5QHJ4RUCSY", "signingSeedFile": "./target.seed" },
+          "sxSeedFile": "./sx.seed"
+        }
+      },
+      "sessionKeySeedFile": "./session.seed",
+      "client": { "natsServers": ["ws://localhost:8080"] },
+      "trellisTest": { "disableJobsAdmin": true },
+      "oauth": {
+        "redirectBase": "http://localhost:3000/auth/callback",
+        "providers": {}
+      }
+    }`,
+    async (configPath) => {
+      const cfg = await loadAuthConfigFromFile(configPath);
+      assertEquals(cfg.trellisTest?.failOnce, []);
+      assertEquals(cfg.trellisTest?.disableJobsAdmin, true);
     },
   );
 });
