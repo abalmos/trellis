@@ -1176,7 +1176,7 @@ async fn device_connect_info_rejects_missing_native_transport() {
 
     assert!(matches!(
         error,
-        TrellisAuthError::InvalidArgument(message) if message.contains("missing native NATS transport")
+        TrellisAuthError::InvalidArgument(message) if message.contains("missing native transport")
     ));
 }
 
@@ -1196,7 +1196,7 @@ async fn device_connect_info_rejects_empty_native_transport() {
 
     assert!(matches!(
         error,
-        TrellisAuthError::InvalidArgument(message) if message.contains("native NATS transport has no servers")
+        TrellisAuthError::InvalidArgument(message) if message.contains("native transport has no servers")
     ));
 }
 

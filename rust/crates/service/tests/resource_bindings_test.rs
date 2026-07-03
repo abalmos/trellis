@@ -13,9 +13,9 @@ use tokio::sync::{mpsc, Mutex};
 use trellis_service::internal::ConnectedService;
 use trellis_service::{
     BootstrapBinding, BootstrapBindingInfo, JobsQueueResourceBinding, JobsResourceBinding,
-    JobsSchemaRef, KvResourceBinding, KvResourceClient, KvResourceEntry, KvResourceOperation,
-    ResourceRuntimeClient, ServerError, ServiceResourceBindings, StoreResourceBinding,
-    StoreResourceClient, StoreWaitOptions,
+    JobsSchemaRef, KvResourceBinding, KvResourceClient, KvResourceEntry, KvResourceHandle,
+    KvResourceOperation, ServerError, ServiceResourceBindings, StoreResourceBinding,
+    StoreResourceClient, StoreResourceHandle, StoreWaitOptions,
 };
 
 #[derive(Debug, Clone)]
@@ -103,43 +103,29 @@ fn connected_service() -> ConnectedService<'static, BoundService, (), ()> {
     )
 }
 
-fn connected_service_with_runtime(
-    runtime: FakeRuntime,
-) -> ConnectedService<'static, BoundService, (), FakeRuntime> {
-    let binding = BootstrapBinding {
-        contract_id: "field-ops@v1".to_string(),
-        digest: "sha256:fieldops".to_string(),
-    };
-    ConnectedService::new(
-        "field-ops-service",
-        BoundService {
-            binding,
-            resources: resources(),
-        },
-        runtime,
-        (),
+fn kv_handle(client: FakeKvClient) -> KvResourceHandle<FakeKvClient> {
+    KvResourceHandle::new(
+        "drafts",
+        resources()
+            .kv
+            .get("drafts")
+            .expect("drafts binding")
+            .clone(),
+        client,
     )
 }
 
-#[derive(Debug, Clone, Default)]
-struct FakeRuntime {
-    kv: FakeKvClient,
-    store: FakeStoreClient,
-}
-
-impl ResourceRuntimeClient for FakeRuntime {
-    type Kv = FakeKvClient;
-    type Store = FakeStoreClient;
-
-    async fn open_kv(&self, binding: &KvResourceBinding) -> Result<Self::Kv, ServerError> {
-        assert_eq!(binding.bucket, "svc_drafts");
-        Ok(self.kv.clone())
-    }
-
-    async fn open_store(&self, binding: &StoreResourceBinding) -> Result<Self::Store, ServerError> {
-        assert_eq!(binding.name, "svc_evidence");
-        Ok(self.store.clone())
-    }
+fn store_handle(client: FakeStoreClient) -> StoreResourceHandle<FakeStoreClient> {
+    StoreResourceHandle::new(
+        "field-ops-service",
+        "evidence",
+        resources()
+            .store
+            .get("evidence")
+            .expect("evidence binding")
+            .clone(),
+        client,
+    )
 }
 
 #[derive(Debug, Clone, Default)]
@@ -357,167 +343,8 @@ fn connected_service_resource_lookup_reports_missing_resources() {
 }
 
 #[tokio::test]
-async fn connected_service_resource_open_reports_missing_alias() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-
-    let error = connected.store("missing").await.expect_err("missing store");
-    assert!(matches!(
-        error,
-        ServerError::MissingResourceBinding { service_name, resource_kind, resource_name }
-            if service_name == "field-ops-service"
-                && resource_kind == "store"
-                && resource_name == "missing"
-    ));
-}
-
-#[tokio::test]
-async fn connected_service_resource_open_reports_invalid_kv_binding() {
-    let mut bindings = resources();
-    bindings.kv.insert(
-        "broken".to_string(),
-        KvResourceBinding {
-            bucket: "".to_string(),
-            history: 1,
-            max_value_bytes: None,
-            ttl_ms: 0,
-        },
-    );
-    let connected = ConnectedService::new(
-        "field-ops-service",
-        BoundService {
-            binding: BootstrapBinding {
-                contract_id: "field-ops@v1".to_string(),
-                digest: "sha256:fieldops".to_string(),
-            },
-            resources: bindings,
-        },
-        FakeRuntime::default(),
-        (),
-    );
-
-    let error = connected.kv("broken").await.expect_err("invalid kv");
-    assert!(matches!(
-        error,
-        ServerError::InvalidResourceBinding { service_name, resource_kind, resource_name, reason }
-            if service_name == "field-ops-service"
-                && resource_kind == "kv"
-                && resource_name == "broken"
-                && reason == "bucket name is empty"
-    ));
-}
-
-#[tokio::test]
-async fn connected_service_resource_open_rejects_invalid_kv_bucket_name() {
-    let mut bindings = resources();
-    bindings.kv.insert(
-        "broken".to_string(),
-        KvResourceBinding {
-            bucket: "svc drafts".to_string(),
-            history: 1,
-            max_value_bytes: None,
-            ttl_ms: 0,
-        },
-    );
-    let connected = ConnectedService::new(
-        "field-ops-service",
-        BoundService {
-            binding: BootstrapBinding {
-                contract_id: "field-ops@v1".to_string(),
-                digest: "sha256:fieldops".to_string(),
-            },
-            resources: bindings,
-        },
-        FakeRuntime::default(),
-        (),
-    );
-
-    let error = connected.kv("broken").await.expect_err("invalid kv");
-    assert!(matches!(
-        error,
-        ServerError::InvalidResourceBinding { service_name, resource_kind, resource_name, reason }
-            if service_name == "field-ops-service"
-                && resource_kind == "kv"
-                && resource_name == "broken"
-                && reason.contains("ASCII letters")
-    ));
-}
-
-#[tokio::test]
-async fn connected_service_resource_open_reports_invalid_store_binding() {
-    let mut bindings = resources();
-    bindings.store.insert(
-        "broken".to_string(),
-        StoreResourceBinding {
-            name: "svc_broken".to_string(),
-            max_object_bytes: Some(-1),
-            max_total_bytes: None,
-            ttl_ms: 0,
-        },
-    );
-    let connected = ConnectedService::new(
-        "field-ops-service",
-        BoundService {
-            binding: BootstrapBinding {
-                contract_id: "field-ops@v1".to_string(),
-                digest: "sha256:fieldops".to_string(),
-            },
-            resources: bindings,
-        },
-        FakeRuntime::default(),
-        (),
-    );
-
-    let error = connected.store("broken").await.expect_err("invalid store");
-    assert!(matches!(
-        error,
-        ServerError::InvalidResourceBinding { service_name, resource_kind, resource_name, reason }
-            if service_name == "field-ops-service"
-                && resource_kind == "store"
-                && resource_name == "broken"
-                && reason == "max_object_bytes must not be negative"
-    ));
-}
-
-#[tokio::test]
-async fn connected_service_resource_open_rejects_invalid_store_name() {
-    let mut bindings = resources();
-    bindings.store.insert(
-        "broken".to_string(),
-        StoreResourceBinding {
-            name: "svc.evidence".to_string(),
-            max_object_bytes: None,
-            max_total_bytes: None,
-            ttl_ms: 0,
-        },
-    );
-    let connected = ConnectedService::new(
-        "field-ops-service",
-        BoundService {
-            binding: BootstrapBinding {
-                contract_id: "field-ops@v1".to_string(),
-                digest: "sha256:fieldops".to_string(),
-            },
-            resources: bindings,
-        },
-        FakeRuntime::default(),
-        (),
-    );
-
-    let error = connected.store("broken").await.expect_err("invalid store");
-    assert!(matches!(
-        error,
-        ServerError::InvalidResourceBinding { service_name, resource_kind, resource_name, reason }
-            if service_name == "field-ops-service"
-                && resource_kind == "store"
-                && resource_name == "broken"
-                && reason.contains("ASCII letters")
-    ));
-}
-
-#[tokio::test]
 async fn kv_resource_handle_reads_writes_lists_and_deletes_bytes() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let drafts = kv_handle(FakeKvClient::default());
 
     drafts
         .put("report", Bytes::from_static(b"draft"))
@@ -537,8 +364,7 @@ async fn kv_resource_handle_reads_writes_lists_and_deletes_bytes() {
 
 #[tokio::test]
 async fn kv_resource_handle_reads_entry_metadata() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let drafts = kv_handle(FakeKvClient::default());
 
     drafts
         .put("report", Bytes::from_static(b"draft"))
@@ -558,8 +384,7 @@ async fn kv_resource_handle_reads_entry_metadata() {
 
 #[tokio::test]
 async fn kv_resource_handle_watches_updates_and_deletes() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let drafts = kv_handle(FakeKvClient::default());
     let mut watch = drafts.watch("report").await.expect("watch");
 
     drafts
@@ -587,8 +412,7 @@ async fn kv_resource_handle_watches_updates_and_deletes() {
 
 #[tokio::test]
 async fn kv_resource_handle_supports_revision_checked_update_and_delete() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let drafts = kv_handle(FakeKvClient::default());
 
     drafts
         .put("report", Bytes::from_static(b"draft"))
@@ -629,8 +453,7 @@ async fn kv_resource_handle_supports_revision_checked_update_and_delete() {
 
 #[tokio::test]
 async fn kv_resource_handle_reports_revision_checked_delete_failure() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let drafts = kv_handle(FakeKvClient::default());
 
     drafts
         .put("report", Bytes::from_static(b"draft"))
@@ -650,9 +473,8 @@ async fn kv_resource_handle_reports_revision_checked_delete_failure() {
 
 #[tokio::test]
 async fn kv_resource_watch_drop_unsubscribes_fake_watcher() {
-    let runtime = FakeRuntime::default();
-    let connected = connected_service_with_runtime(runtime.clone());
-    let drafts = connected.kv("drafts").await.expect("kv handle");
+    let client = FakeKvClient::default();
+    let drafts = kv_handle(client.clone());
     let watch = drafts.watch("report").await.expect("watch");
     drop(watch);
 
@@ -661,8 +483,7 @@ async fn kv_resource_watch_drop_unsubscribes_fake_watcher() {
         .await
         .expect("put");
 
-    assert!(runtime
-        .kv
+    assert!(client
         .state
         .lock()
         .await
@@ -674,8 +495,7 @@ async fn kv_resource_watch_drop_unsubscribes_fake_watcher() {
 
 #[tokio::test]
 async fn store_resource_handle_reads_writes_lists_and_deletes_bytes() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let evidence = connected.store("evidence").await.expect("store handle");
+    let evidence = store_handle(FakeStoreClient::default());
 
     evidence
         .write("photo.jpg", Bytes::from_static(b"jpeg"))
@@ -695,14 +515,12 @@ async fn store_resource_handle_reads_writes_lists_and_deletes_bytes() {
 
 #[tokio::test]
 async fn store_resource_handle_waits_for_object_bytes() {
-    let runtime = FakeRuntime::default();
-    let connected = connected_service_with_runtime(runtime.clone());
-    let evidence = connected.store("evidence").await.expect("store handle");
+    let client = FakeStoreClient::default();
+    let evidence = store_handle(client.clone());
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(20)).await;
-        runtime
-            .store
+        client
             .write("delayed.txt", Bytes::from_static(b"ready"))
             .await
             .expect("write delayed object");
@@ -723,8 +541,7 @@ async fn store_resource_handle_waits_for_object_bytes() {
 
 #[tokio::test]
 async fn store_resource_handle_wait_times_out_for_missing_object() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let evidence = connected.store("evidence").await.expect("store handle");
+    let evidence = store_handle(FakeStoreClient::default());
 
     let error = evidence
         .wait_for(
@@ -748,8 +565,7 @@ async fn store_resource_handle_wait_times_out_for_missing_object() {
 
 #[tokio::test]
 async fn store_resource_handle_zero_timeout_still_reads_existing_object() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let evidence = connected.store("evidence").await.expect("store handle");
+    let evidence = store_handle(FakeStoreClient::default());
     evidence
         .write("present.txt", Bytes::from_static(b"ready"))
         .await
@@ -771,8 +587,7 @@ async fn store_resource_handle_zero_timeout_still_reads_existing_object() {
 
 #[tokio::test]
 async fn store_resource_handle_wait_can_be_canceled() {
-    let connected = connected_service_with_runtime(FakeRuntime::default());
-    let evidence = connected.store("evidence").await.expect("store handle");
+    let evidence = store_handle(FakeStoreClient::default());
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
 
     tokio::spawn(async move {

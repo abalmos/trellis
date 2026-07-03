@@ -3026,6 +3026,50 @@
     },
     {
       "kind": "client",
+      "id": "service-approval.service-bootstrap-denies-missing-disabled-and-digest-drift",
+      "fixture": "service-approval",
+      "title": "Service bootstrap denies disabled, missing manifest, digest drift, and reconciliation gaps",
+      "coverage": [
+        "service-bootstrap-authority",
+        "auth-protocol-matrix",
+        "observability-trace-matrix"
+      ],
+      "description": "Service bootstrap fails closed for disabled deployments, disabled instances, missing manifests, stale manifest digest drift, and non-current authority reconciliation without mutating stored service state.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.integration.service-approval-admin@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.service-approval-service@v1"
+          }
+        ],
+        "given": [
+          "an approved service deployment and provisioned service instance exist"
+        ],
+        "when": [
+          "service bootstrap is attempted while the deployment or instance is disabled",
+          "service bootstrap is attempted without a required stored manifest",
+          "service bootstrap is attempted with a manifest whose digest has drifted",
+          "service bootstrap is attempted while materialized authority is pending or failed"
+        ],
+        "then": [
+          "each invalid bootstrap returns a modeled denial",
+          "stored service deployment and instance state are unchanged by the failed bootstrap",
+          "bootstrap or reconnect succeeds again after re-enable, full manifest presentation, or authority restoration"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
       "id": "app-identity-approval.connect-requires-auth-flow",
       "fixture": "app-identity-approval",
       "title": "App client connect triggers auth-required callback before approval",
@@ -4383,7 +4427,7 @@
         "capability-permission-matrix",
         "cross-runtime-rpc"
       ],
-      "description": "Auth.IdentityGrants.Revoke deletes the grant, removes matching app sessions and connection presence, denies old runtime calls, and rejects unauthorized revoke attempts.",
+      "description": "Auth.IdentityGrants.Revoke deletes the grant, removes matching app and agent sessions plus connection presence, denies old runtime calls, and rejects unauthorized revoke attempts.",
       "scenario": {
         "participants": [
           {
@@ -4395,10 +4439,15 @@
             "name": "client",
             "kind": "app",
             "contract": "trellis.integration.auth-local-login-client@v1"
+          },
+          {
+            "name": "agent",
+            "kind": "agent",
+            "contract": "trellis.integration.auth-local-login-agent@v1"
           }
         ],
         "given": [
-          "two app sessions share an identity grant"
+          "app and agent sessions share an identity grant"
         ],
         "when": [
           "a non-owner attempts revoke",
@@ -6509,6 +6558,72 @@
         "rust": {
           "module": "control_plane",
           "function": "control_plane_catalog_surface_status_reports_provider_runtime"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "control-plane.catalog-admin-rpc-list-status-and-issue-filters",
+      "fixture": "control-plane",
+      "title": "Catalog admin RPC list, status, and issue filters",
+      "coverage": [
+        "catalog",
+        "catalog-issues",
+        "generated-rpc",
+        "surface-status",
+        "admin-list-filters"
+      ],
+      "description": "Uses generated Core catalog/status RPCs and Auth admin list RPCs against live provider and consumer services to verify catalog entries, deployment filters, runtime status, active-use issue filtering, and provider/consumer use relationships.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis Core catalog/status and Auth admin list RPC"
+          },
+          {
+            "name": "service provider",
+            "kind": "service",
+            "contract": "case-scoped catalog admin provider contract"
+          },
+          {
+            "name": "service consumer",
+            "kind": "service",
+            "contract": "case-scoped catalog admin consumer contract"
+          },
+          {
+            "name": "catalog admin",
+            "kind": "app",
+            "contract": "case-scoped catalog admin app contract"
+          }
+        ],
+        "given": [
+          "A provider service and a consumer service with a required provider use are active."
+        ],
+        "when": [
+          "The admin lists catalog contracts and service deployments through generated RPCs.",
+          "The admin reads provider surface status and consumer contract uses through generated Core RPCs.",
+          "The provider offer is expired while the consumer remains active."
+        ],
+        "then": [
+          "Catalog and service deployment lists include the expected provider and consumer entries.",
+          "Surface.Status reports the provider as live before expiry.",
+          "Contract.Get includes the expected consumer-to-provider use relationship.",
+          "The catalog issue projection can be filtered to the invalid active-use issue for the consumer deployment."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/catalog_admin_rpc_list_status_and_issue_filters.integration_test.ts",
+          "testName": "control-plane.catalog-admin-rpc-list-status-and-issue-filters lists catalog status and filtered issues"
+        },
+        "rust": {
+          "module": "control_plane",
+          "function": "control_plane_catalog_admin_rpc_list_status_and_issue_filters"
         }
       },
       "completion": {

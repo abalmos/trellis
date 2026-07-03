@@ -66,7 +66,17 @@ export function createServiceApprovalFixture(caseId: string) {
     uses: {
       required: {
         auth: authSdk.use({
-          rpc: { call: ["Auth.ServiceInstances.Provision"] },
+          rpc: {
+            call: [
+              "Auth.ServiceInstances.Provision",
+              "Auth.ServiceInstances.List",
+              "Auth.ServiceInstances.Disable",
+              "Auth.ServiceInstances.Enable",
+              "Auth.Deployments.List",
+              "Auth.Deployments.Disable",
+              "Auth.Deployments.Enable",
+            ],
+          },
         }),
       },
     },
@@ -102,15 +112,19 @@ export function createServiceApprovalFixture(caseId: string) {
   async function provisionServiceInstance(runtime: LiveTrellisRuntime) {
     const seed = randomSessionSeed();
     const serviceAuth = await createAuth({ sessionKeySeed: seed });
-    const admin = await runtime.connectClient({
-      name: caseScopedName("service-approval-fixture-admin", caseId),
-      contract: adminContract,
-    });
+    const admin = await connectAdmin(runtime);
     await admin.rpc.auth.serviceInstancesProvision({
       deploymentId: caseScopedName("service-approval-deployment", caseId),
       instanceKey: serviceAuth.sessionKey,
     }).orThrow();
     return { seed, sessionKey: serviceAuth.sessionKey };
+  }
+
+  async function connectAdmin(runtime: LiveTrellisRuntime) {
+    return await runtime.connectClient({
+      name: caseScopedName("service-approval-fixture-admin", caseId),
+      contract: adminContract,
+    });
   }
 
   async function connectService(runtime: LiveTrellisRuntime, seed: string) {
@@ -152,6 +166,7 @@ export function createServiceApprovalFixture(caseId: string) {
     clientName: caseScopedName("service-approval-fixture-client", caseId),
     deploymentId: caseScopedName("service-approval-deployment", caseId),
     pingMessage: caseScopedName("approved-startup", caseId),
+    connectAdmin,
     provisionServiceInstance,
     connectService,
     connectServicePending,

@@ -588,6 +588,15 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id:
+      "service-approval.service-bootstrap-denies-missing-disabled-and-digest-drift",
+    file:
+      "service-approval/service_bootstrap_denies_missing_disabled_and_digest_drift.integration_test.ts",
+    testName:
+      "service-approval.service-bootstrap-denies-missing-disabled-and-digest-drift denies invalid service bootstrap without mutating state",
+    runtime: "live-trellis",
+  },
+  {
     id: "app-identity-approval.connect-requires-auth-flow",
     file:
       "app-identity-approval/connect_requires_auth_flow.integration_test.ts",

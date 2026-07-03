@@ -475,6 +475,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "service_approval_approved_service_handles_client_rpc",
     ),
     IntegrationCase::live(
+        "service-approval.service-bootstrap-denies-missing-disabled-and-digest-drift",
+        "service_approval",
+        "service_approval_service_bootstrap_denies_missing_disabled_and_digest_drift",
+    ),
+    IntegrationCase::live(
         "app-identity-approval.connect-requires-auth-flow",
         "app_identity_approval",
         "app_identity_approval_connect_requires_auth_flow",
@@ -756,6 +761,11 @@ pub(crate) const RUST_SERVICE_INTEGRATION_CASES: &[IntegrationCase] = &[
         "control-plane.catalog-surface-status-reports-provider-runtime",
         "control_plane",
         "control_plane_catalog_surface_status_reports_provider_runtime",
+    ),
+    IntegrationCase::live(
+        "control-plane.catalog-admin-rpc-list-status-and-issue-filters",
+        "control_plane",
+        "control_plane_catalog_admin_rpc_list_status_and_issue_filters",
     ),
     IntegrationCase::live(
         "control-plane.admin-service-deployment-rollback-fault",

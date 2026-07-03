@@ -7,10 +7,11 @@ use serde_json::{json, Value};
 use trellis_rs::client::{OperationState, ServiceConnectWithContractOptions};
 use trellis_rs::sdk::auth::types::{
     AuthDeploymentAuthorityPlanRequest, AuthDeploymentsCreateRequest,
-    AuthDeviceUserAuthoritiesListRequest, AuthDeviceUserAuthoritiesResolveInput,
-    AuthDeviceUserAuthoritiesReviewsDecideRequest, AuthDeviceUserAuthoritiesReviewsListRequest,
-    AuthDeviceUserAuthoritiesRevokeRequest, AuthDevicesProvisionRequest,
-    AuthServiceInstancesListRequest, AuthSessionsListRequest, AuthSessionsRevokeRequest,
+    AuthDeploymentsDisableRequest, AuthDeviceUserAuthoritiesListRequest,
+    AuthDeviceUserAuthoritiesResolveInput, AuthDeviceUserAuthoritiesReviewsDecideRequest,
+    AuthDeviceUserAuthoritiesReviewsListRequest, AuthDeviceUserAuthoritiesRevokeRequest,
+    AuthDevicesProvisionRequest, AuthServiceInstancesListRequest, AuthSessionsListRequest,
+    AuthSessionsRevokeRequest,
 };
 use trellis_rs::sdk::auth::AuthClient as GeneratedAuthClient;
 
@@ -1569,6 +1570,12 @@ async fn device_activation_connect_info_admin_reviewed_before_activation() {
 
 #[tokio::test]
 async fn device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iats() {
+    assert_case_registered(
+        "device-activation.wait-and-connect-info-reject-bad-proofs-and-stale-iats",
+        "device-activation",
+        "device_activation",
+    );
+
     let runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
@@ -1595,6 +1602,25 @@ async fn device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iat
     let identity =
         trellis_rs::auth::derive_device_identity(&root_secret).expect("derive device identity");
     let _provisioned = provision_device(&auth, &deployment_id, &identity).await;
+
+    let mut bad_payload = trellis_rs::auth::build_device_activation_payload(
+        &identity.activation_key_base64url,
+        &identity.public_identity_key,
+        &generate_nonce(),
+    )
+    .expect("build bad-MAC activation payload");
+    bad_payload.qr_mac = corrupt_signature(&bad_payload.qr_mac);
+    let (status, body) = post_auth_json(
+        &trellis_url,
+        "/auth/devices/activate/requests",
+        &json!({ "payload": bad_payload }),
+    )
+    .await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        body.get("error").and_then(Value::as_str),
+        Some("Invalid device activation payload")
+    );
 
     let nonce = generate_nonce();
     let payload = trellis_rs::auth::build_device_activation_payload(
@@ -1803,6 +1829,32 @@ async fn device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iat
     )
     .await;
     assert_auth_reason(status, &body, 403, "contract_digest_not_allowed");
+
+    auth.rpc()
+        .auth()
+        .deployments_disable(&AuthDeploymentsDisableRequest {
+            kind: "device".to_string(),
+            deployment_id: deployment_id.clone(),
+        })
+        .await
+        .expect("disable device deployment");
+    let disabled_payload = trellis_rs::auth::build_device_activation_payload(
+        &identity.activation_key_base64url,
+        &identity.public_identity_key,
+        &generate_nonce(),
+    )
+    .expect("build disabled-deployment activation payload");
+    let (status, body) = post_auth_json(
+        &trellis_url,
+        "/auth/devices/activate/requests",
+        &json!({ "payload": disabled_payload }),
+    )
+    .await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        body.get("error").and_then(Value::as_str),
+        Some("Device deployment not found")
+    );
 }
 
 #[tokio::test]

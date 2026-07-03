@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import { Kvm } from "@nats-io/kv";
 import { connect, credsAuthenticator } from "@nats-io/transport-deno";
 import {
+  buildDeviceActivationPayload,
   deriveDeviceIdentity,
   signDeviceWaitRequest,
 } from "@qlever-llc/trellis/auth";
@@ -26,6 +27,20 @@ liveTrellisTest({
       admin,
       deploymentId,
     );
+    const badPayload = await buildDeviceActivationPayload({
+      activationKey: identity.activationKey,
+      publicIdentityKey: identity.publicIdentityKey,
+      nonce: crypto.randomUUID(),
+    });
+    const badQrMac = await postActivationRequest(runtime.trellisUrl, {
+      payload: {
+        ...badPayload,
+        qrMac: corruptSignature(badPayload.qrMac),
+      },
+    });
+    assertEquals(badQrMac.status, 400);
+    assertEquals(badQrMac.body.error, "Invalid device activation payload");
+
     const { nonce, flowId } = await fixture.setupActivationRequest(
       runtime,
       identity,
@@ -173,6 +188,21 @@ liveTrellisTest({
       403,
       "contract_digest_not_allowed",
     );
+
+    await admin.rpc.auth.deploymentsDisable({
+      kind: "device",
+      deploymentId,
+    }).orThrow();
+    const disabledPayload = await buildDeviceActivationPayload({
+      activationKey: identity.activationKey,
+      publicIdentityKey: identity.publicIdentityKey,
+      nonce: crypto.randomUUID(),
+    });
+    const disabledDeployment = await postActivationRequest(runtime.trellisUrl, {
+      payload: disabledPayload,
+    });
+    assertEquals(disabledDeployment.status, 404);
+    assertEquals(disabledDeployment.body.error, "Device deployment not found");
   },
 });
 
@@ -186,6 +216,13 @@ async function postWait(
   body: unknown,
 ): Promise<JsonResponse> {
   return await postJson(trellisUrl, "/auth/devices/activate/wait", body);
+}
+
+async function postActivationRequest(
+  trellisUrl: string,
+  body: unknown,
+): Promise<JsonResponse> {
+  return await postJson(trellisUrl, "/auth/devices/activate/requests", body);
 }
 
 async function postConnectInfo(

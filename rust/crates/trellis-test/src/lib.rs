@@ -46,6 +46,7 @@ const ADMIN_RPC_CALLS: &[&str] = &[
     "Auth.DeploymentAuthority.Reject",
     "Auth.DeploymentAuthority.Reconcile",
     "Auth.Deployments.Create",
+    "Auth.Deployments.Disable",
     "Auth.DeviceUserAuthorities.List",
     "Auth.DeviceUserAuthorities.Reviews.Decide",
     "Auth.DeviceUserAuthorities.Reviews.List",
@@ -1652,7 +1653,7 @@ async fn complete_first_admin_bootstrap(
     password: &str,
 ) -> Result<(), TrellisTestError> {
     let flow_id = flow_id_from_url(bootstrap_url)?;
-    let response: FirstAdminBootstrapResponse = post_json(
+    let response: FirstAdminBootstrapResponse = match post_json(
         &format!(
             "{}/auth/account-flow/{}/local-password",
             trim_url(trellis_url),
@@ -1660,7 +1661,16 @@ async fn complete_first_admin_bootstrap(
         ),
         &first_admin_bootstrap_body(password),
     )
-    .await?;
+    .await
+    {
+        Ok(response) => response,
+        Err(TrellisTestError::HttpStatus {
+            status: 409, body, ..
+        }) if body.contains("flow_already_consumed") => {
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
     if response.status == "created" {
         Ok(())
     } else {

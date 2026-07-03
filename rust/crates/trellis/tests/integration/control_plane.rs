@@ -169,6 +169,16 @@ const CATALOG_SURFACE_STATUS_OBSERVER_USERNAME: &str =
     "catalog-surface-status-observer-user-control-plane-catalog-surface-status-reports-provider-runtime";
 const CATALOG_SURFACE_STATUS_OBSERVER_PASSWORD: &str =
     "trellis-integration-control-plane-catalog-surface-status-reports-provider-runtime-observer-password-2026";
+const CATALOG_ADMIN_RPC_CASE_ID: &str =
+    "control-plane.catalog-admin-rpc-list-status-and-issue-filters";
+const CATALOG_ADMIN_CONSUMER_ID: &str =
+    "trellis.integration.control-plane.catalog-admin-consumer.control-plane-catalog-admin-rpc-list-status-and-issue-filters@v1";
+const CATALOG_ADMIN_CLIENT_ID: &str =
+    "trellis.integration.control-plane.catalog-admin-client.control-plane-catalog-admin-rpc-list-status-and-issue-filters@v1";
+const CATALOG_ADMIN_PROVIDER_DEPLOYMENT: &str =
+    "catalog-admin-provider-deployment-control-plane-catalog-admin-rpc-list-status-and-issue-filters";
+const CATALOG_ADMIN_CONSUMER_DEPLOYMENT: &str =
+    "catalog-admin-consumer-deployment-control-plane-catalog-admin-rpc-list-status-and-issue-filters";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_CASE_ID: &str =
     "control-plane.admin-service-deployment-lifecycle";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_ADMIN_CLIENT_ID: &str =
@@ -2348,6 +2358,150 @@ async fn control_plane_catalog_surface_status_reports_provider_runtime() {
 }
 
 #[tokio::test]
+async fn control_plane_catalog_admin_rpc_list_status_and_issue_filters() {
+    assert_service_case_registered(CATALOG_ADMIN_RPC_CASE_ID, "control-plane", "control_plane");
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+
+    admin
+        .create_deployment(
+            &bootstrap_url,
+            Some(CATALOG_ADMIN_PROVIDER_DEPLOYMENT),
+            Some(false),
+        )
+        .await
+        .expect("create strict catalog admin provider deployment");
+    admin
+        .create_deployment(
+            &bootstrap_url,
+            Some(CATALOG_ADMIN_CONSUMER_DEPLOYMENT),
+            Some(false),
+        )
+        .await
+        .expect("create strict catalog admin consumer deployment");
+
+    let provider_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        CATALOG_SURFACE_STATUS_PROVIDER_CONTRACT_JSON,
+    )
+    .expect("build catalog admin provider contract");
+    let consumer_contract =
+        catalog_admin_consumer_contract().expect("build catalog admin consumer contract");
+    let admin_contract =
+        catalog_admin_rpc_client_contract().expect("build catalog admin RPC client contract");
+    let provider_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &provider_contract,
+            Some(CATALOG_ADMIN_PROVIDER_DEPLOYMENT),
+            None,
+        )
+        .await
+        .expect("provision catalog admin provider service instance");
+    let consumer_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &consumer_contract,
+            Some(CATALOG_ADMIN_CONSUMER_DEPLOYMENT),
+            None,
+        )
+        .await
+        .expect("provision catalog admin consumer service instance");
+    let provider_service = start_catalog_surface_status_provider_service(
+        runtime.trellis_url(),
+        provider_contract.digest(),
+        &provider_key,
+    )
+    .await;
+    let consumer_contract_json = serde_json::to_string(consumer_contract.manifest())
+        .expect("serialize catalog admin consumer contract");
+    let _consumer_client =
+        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+            trellis_url: runtime.trellis_url(),
+            contract_id: CATALOG_ADMIN_CONSUMER_ID,
+            contract_digest: consumer_contract.digest(),
+            contract_json: &consumer_contract_json,
+            session_key_seed_base64url: &consumer_key.seed,
+            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
+            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
+            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+        })
+        .await
+        .expect("connect catalog admin consumer service");
+    let admin_client = admin
+        .connect_client(&bootstrap_url, &admin_contract)
+        .await
+        .expect("connect catalog admin RPC client");
+    let core = trellis_rs::sdk::core::CoreClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+
+    wait_for_catalog_contracts(
+        &core,
+        provider_contract.digest(),
+        consumer_contract.digest(),
+    )
+    .await;
+
+    let service_deployments = auth
+        .rpc()
+        .auth()
+        .deployments_list(&AuthDeploymentsListRequest {
+            kind: Some("service".to_string()),
+            disabled: Some(false),
+            offset: None,
+            limit: 500,
+        })
+        .await
+        .expect("list active service deployments through generated Auth RPC");
+    assert!(listed_deployment(
+        &service_deployments.entries,
+        CATALOG_ADMIN_PROVIDER_DEPLOYMENT
+    )
+    .is_some());
+    assert!(listed_deployment(
+        &service_deployments.entries,
+        CATALOG_ADMIN_CONSUMER_DEPLOYMENT
+    )
+    .is_some());
+
+    wait_for_catalog_surface_status(
+        &core,
+        json!({
+            "state": "available",
+            "liveImplementer": true,
+            "runtime": "live"
+        }),
+    )
+    .await;
+    assert_catalog_admin_consumer_uses(&core, consumer_contract.digest()).await;
+
+    provider_service.abort_and_wait().await;
+    expire_catalog_admin_provider_offer(
+        &runtime.control_plane_sqlite(),
+        provider_contract.digest(),
+    )
+    .expect("expire catalog admin provider offer");
+    let issue = wait_for_catalog_admin_active_use_issue(&core, consumer_contract.digest()).await;
+    assert_eq!(issue.kind, "invalid-active-contract-uses");
+    assert_eq!(
+        issue.contract_id.as_deref(),
+        Some(CATALOG_ADMIN_CONSUMER_ID)
+    );
+    assert!(issue
+        .deployment_ids
+        .iter()
+        .any(|deployment_id| deployment_id == CATALOG_ADMIN_CONSUMER_DEPLOYMENT));
+    assert!(issue.message.contains(CATALOG_SURFACE_STATUS_PROVIDER_ID));
+}
+
+#[tokio::test]
 async fn control_plane_admin_service_deployment_lifecycle() {
     assert_service_case_registered(
         ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_CASE_ID,
@@ -4468,6 +4622,55 @@ fn catalog_surface_status_observer_contract(
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }
 
+fn catalog_admin_consumer_contract(
+) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        CATALOG_ADMIN_CONSUMER_ID,
+        "Trellis Control-Plane Catalog Admin Consumer",
+        "Requires the provider RPC so catalog admin issue filters can inspect the relationship.",
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .use_ref(
+        "provider",
+        trellis_rs::contracts::use_contract(CATALOG_SURFACE_STATUS_PROVIDER_ID)
+            .with_rpc_call(["CatalogSurfaceStatus.Ping"]),
+    )
+    .build()?;
+
+    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+}
+
+fn catalog_admin_rpc_client_contract(
+) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        CATALOG_ADMIN_CLIENT_ID,
+        "Trellis Control-Plane Catalog Admin Client",
+        "Exercises generated catalog and admin list RPCs.",
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .use_ref(
+        "core",
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::core::CONTRACT_ID).with_rpc_call([
+            "Trellis.Catalog",
+            "Trellis.Contract.Get",
+            "Trellis.Surface.Status",
+        ]),
+    )
+    .use_ref(
+        "auth",
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::auth::CONTRACT_ID)
+            .with_rpc_call(["Auth.Deployments.List"]),
+    )
+    .use_ref(
+        "provider",
+        trellis_rs::contracts::use_contract(CATALOG_SURFACE_STATUS_PROVIDER_ID)
+            .with_rpc_call(["CatalogSurfaceStatus.Ping"]),
+    )
+    .build()?;
+
+    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+}
+
 fn admin_service_deployment_lifecycle_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
@@ -5478,6 +5681,127 @@ async fn wait_for_catalog_force_replace_resolved(
         assert!(
             Instant::now() < deadline,
             "timed out waiting for catalog force-replace resolution"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_catalog_contracts(
+    core: &trellis_rs::sdk::core::CoreClient<'_>,
+    provider_digest: &str,
+    consumer_digest: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let catalog = core
+            .rpc()
+            .trellis()
+            .catalog()
+            .await
+            .expect("load catalog while waiting for expected contracts");
+        let has_provider = catalog
+            .catalog
+            .contracts
+            .iter()
+            .any(|contract| contract.digest == provider_digest);
+        let has_consumer = catalog
+            .catalog
+            .contracts
+            .iter()
+            .any(|contract| contract.digest == consumer_digest);
+        if has_provider && has_consumer {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for provider and consumer catalog entries"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn assert_catalog_admin_consumer_uses(
+    core: &trellis_rs::sdk::core::CoreClient<'_>,
+    consumer_digest: &str,
+) {
+    let contract_get = core
+        .rpc()
+        .trellis()
+        .contract_get(&trellis_rs::sdk::core::types::TrellisContractGetRequest {
+            digest: consumer_digest.to_string(),
+        })
+        .await
+        .expect("get catalog admin consumer contract through generated Core RPC");
+    assert_eq!(
+        contract_get
+            .contract
+            .uses
+            .expect("consumer contract should include uses")
+            .get("required")
+            .and_then(|uses| uses.get("provider")),
+        Some(&json!({
+            "contract": CATALOG_SURFACE_STATUS_PROVIDER_ID,
+            "rpc": { "call": ["CatalogSurfaceStatus.Ping"] }
+        }))
+    );
+}
+
+fn expire_catalog_admin_provider_offer(
+    sqlite: &trellis_test::TrellisControlPlaneSqlite,
+    provider_digest: &str,
+) -> Result<(), trellis_test::TrellisTestError> {
+    let timestamp = "2026-01-01T00:00:00.000Z";
+    let result = sqlite.execute(
+        "UPDATE implementation_offers
+          SET stale_at = ?, expires_at = ?
+          WHERE deployment_kind = 'service'
+            AND deployment_id = ?
+            AND contract_digest = ?
+            AND status = 'accepted'",
+        params![
+            timestamp,
+            timestamp,
+            CATALOG_ADMIN_PROVIDER_DEPLOYMENT,
+            provider_digest
+        ],
+    )?;
+    assert_eq!(result.rows_affected, 1);
+    Ok(())
+}
+
+async fn wait_for_catalog_admin_active_use_issue(
+    core: &trellis_rs::sdk::core::CoreClient<'_>,
+    consumer_digest: &str,
+) -> trellis_rs::sdk::core::types::TrellisCatalogResponseCatalogIssuesItem {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let catalog = core
+            .rpc()
+            .trellis()
+            .catalog()
+            .await
+            .expect("load catalog while waiting for active-use issue");
+        if let Some(issue) = catalog
+            .catalog
+            .issues
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .find(|issue| {
+                issue.kind == "invalid-active-contract-uses"
+                    && issue.contract_id.as_deref() == Some(CATALOG_ADMIN_CONSUMER_ID)
+                    && issue.digest.as_deref() == Some(consumer_digest)
+                    && issue
+                        .deployment_ids
+                        .iter()
+                        .any(|deployment_id| deployment_id == CATALOG_ADMIN_CONSUMER_DEPLOYMENT)
+            })
+        {
+            return issue.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for catalog admin active-use issue"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

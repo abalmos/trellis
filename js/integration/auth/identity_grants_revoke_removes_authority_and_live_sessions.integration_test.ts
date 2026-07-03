@@ -40,19 +40,35 @@ liveTrellisTest({
       name: `${fixture.clientName}-sibling`,
       contract: fixture.clientContract,
     });
+    const firstAgentRegistration = await runtime.registerClient({
+      name: `${fixture.clientName}-agent`,
+      contract: fixture.agentContract,
+    });
+    const secondAgentRegistration = await runtime.registerClient({
+      name: `${fixture.clientName}-agent-sibling`,
+      contract: fixture.agentContract,
+    });
     const secondAuth = runtime.clientAuth(secondRegistration);
-    let first:
+    const firstAgentAuth = runtime.clientAuth(firstAgentRegistration);
+    const secondAgentAuth = runtime.clientAuth(secondAgentRegistration);
+    let firstApp:
       | ConnectedTrellisClient<typeof fixture.clientContract>
       | undefined;
-    let second:
+    let secondApp:
       | ConnectedTrellisClient<typeof fixture.clientContract>
+      | undefined;
+    let firstAgent:
+      | ConnectedTrellisClient<typeof fixture.agentContract>
+      | undefined;
+    let secondAgent:
+      | ConnectedTrellisClient<typeof fixture.agentContract>
       | undefined;
     let nonOwner:
       | ConnectedTrellisClient<typeof fixture.sessionAdminContract>
       | undefined;
 
     try {
-      first = await TrellisClient.connect({
+      firstApp = await TrellisClient.connect({
         trellisUrl: runtime.trellisUrl,
         name: fixture.clientName,
         contract: fixture.clientContract,
@@ -60,64 +76,123 @@ liveTrellisTest({
         onAuthRequired: async (ctx) =>
           await firstRegistration.clientAuth.onAuthRequired(ctx),
       }).orThrow();
-      second = await TrellisClient.connect({
+      secondApp = await TrellisClient.connect({
         trellisUrl: runtime.trellisUrl,
         name: `${fixture.clientName}-sibling`,
         contract: fixture.clientContract,
         auth: secondAuth.auth,
         onAuthRequired: async (ctx) => await secondAuth.onAuthRequired(ctx),
       }).orThrow();
+      firstAgent = await TrellisClient.connect({
+        trellisUrl: runtime.trellisUrl,
+        name: `${fixture.clientName}-agent`,
+        contract: fixture.agentContract,
+        auth: firstAgentAuth.auth,
+        onAuthRequired: async (ctx) => await firstAgentAuth.onAuthRequired(ctx),
+      }).orThrow();
+      secondAgent = await TrellisClient.connect({
+        trellisUrl: runtime.trellisUrl,
+        name: `${fixture.clientName}-agent-sibling`,
+        contract: fixture.agentContract,
+        auth: secondAgentAuth.auth,
+        onAuthRequired: async (ctx) =>
+          await secondAgentAuth.onAuthRequired(ctx),
+      }).orThrow();
 
-      await first.rpc.authLogin.ping({ message: `${fixture.pingMessage}-1` })
+      await firstApp.rpc.authLogin.ping({ message: `${fixture.pingMessage}-1` })
         .orThrow();
-      await second.rpc.authLogin.ping({ message: `${fixture.pingMessage}-2` })
+      await secondApp.rpc.authLogin.ping({
+        message: `${fixture.pingMessage}-2`,
+      })
         .orThrow();
-      await appSessionFor(admin, firstRegistration.clientKey.sessionKey);
-      await appSessionFor(admin, secondRegistration.sessionKey);
+      await firstAgent.rpc.authLogin.ping({
+        message: `${fixture.pingMessage}-agent-1`,
+      })
+        .orThrow();
+      await secondAgent.rpc.authLogin.ping({
+        message: `${fixture.pingMessage}-agent-2`,
+      })
+        .orThrow();
+      await userSessionFor(
+        admin,
+        firstRegistration.clientKey.sessionKey,
+        "app",
+      );
+      await userSessionFor(admin, secondRegistration.sessionKey, "app");
+      await userSessionFor(admin, firstAgentRegistration.sessionKey, "agent");
+      await userSessionFor(admin, secondAgentRegistration.sessionKey, "agent");
       await waitForConnection(admin, firstRegistration.clientKey.sessionKey);
       await waitForConnection(admin, secondRegistration.sessionKey);
+      await waitForConnection(admin, firstAgentRegistration.sessionKey);
+      await waitForConnection(admin, secondAgentRegistration.sessionKey);
 
-      const identityGrantId = await sharedIdentityGrantId(
+      const appIdentityGrantId = await sharedIdentityGrantId(
         sqlite,
         firstRegistration.clientKey.sessionKey,
         secondRegistration.sessionKey,
       );
-      assert(await grantExists(sqlite, identityGrantId));
+      const agentIdentityGrantId = await sharedIdentityGrantId(
+        sqlite,
+        firstAgentRegistration.sessionKey,
+        secondAgentRegistration.sessionKey,
+      );
+      assert(await grantExists(sqlite, appIdentityGrantId));
+      assert(await grantExists(sqlite, agentIdentityGrantId));
       assertGrantListed(
-        await listGrant(admin, identityGrantId),
-        identityGrantId,
+        await listGrant(admin, appIdentityGrantId),
+        appIdentityGrantId,
+      );
+      assertGrantListed(
+        await listGrant(admin, agentIdentityGrantId),
+        agentIdentityGrantId,
       );
 
       nonOwner = await connectNonOwnerAdmin(runtime, admin);
       const denied = await nonOwner.rpc.auth.identityGrantsRevoke({
-        identityGrantId,
+        identityGrantId: appIdentityGrantId,
       });
       assert(denied.isErr(), "expected non-owner grant revoke to be denied");
 
-      const revoked = await admin.rpc.auth.identityGrantsRevoke({
-        identityGrantId,
+      const appRevoked = await admin.rpc.auth.identityGrantsRevoke({
+        identityGrantId: appIdentityGrantId,
       }).orThrow();
-      assertEquals(revoked.success, true);
+      assertEquals(appRevoked.success, true);
+      const agentRevoked = await admin.rpc.auth.identityGrantsRevoke({
+        identityGrantId: agentIdentityGrantId,
+      }).orThrow();
+      assertEquals(agentRevoked.success, true);
 
       await waitForSessionAbsent(admin, firstRegistration.clientKey.sessionKey);
       await waitForSessionAbsent(admin, secondRegistration.sessionKey);
+      await waitForSessionAbsent(admin, firstAgentRegistration.sessionKey);
+      await waitForSessionAbsent(admin, secondAgentRegistration.sessionKey);
       await waitForConnectionsAbsent(
         admin,
         firstRegistration.clientKey.sessionKey,
       );
       await waitForConnectionsAbsent(admin, secondRegistration.sessionKey);
-      await waitFor(async () => !(await grantExists(sqlite, identityGrantId)));
+      await waitForConnectionsAbsent(admin, firstAgentRegistration.sessionKey);
+      await waitForConnectionsAbsent(admin, secondAgentRegistration.sessionKey);
       await waitFor(async () =>
-        await listGrant(admin, identityGrantId) === undefined
+        !(await grantExists(sqlite, appIdentityGrantId)) &&
+        !(await grantExists(sqlite, agentIdentityGrantId))
       );
       await waitFor(async () =>
-        (await first!.rpc.auth.sessionsMe({})).isErr() &&
-        (await second!.rpc.auth.sessionsMe({})).isErr()
+        await listGrant(admin, appIdentityGrantId) === undefined &&
+        await listGrant(admin, agentIdentityGrantId) === undefined
+      );
+      await waitFor(async () =>
+        (await firstApp!.rpc.auth.sessionsMe({})).isErr() &&
+        (await secondApp!.rpc.auth.sessionsMe({})).isErr() &&
+        (await firstAgent!.rpc.auth.sessionsMe({})).isErr() &&
+        (await secondAgent!.rpc.auth.sessionsMe({})).isErr()
       );
     } finally {
       await nonOwner?.connection.close().catch(() => undefined);
-      await first?.connection.close().catch(() => undefined);
-      await second?.connection.close().catch(() => undefined);
+      await firstApp?.connection.close().catch(() => undefined);
+      await secondApp?.connection.close().catch(() => undefined);
+      await firstAgent?.connection.close().catch(() => undefined);
+      await secondAgent?.connection.close().catch(() => undefined);
       await admin.connection.close().catch(() => undefined);
       await service.stop();
     }
@@ -179,15 +254,19 @@ async function connectNonOwnerAdmin(
   }).orThrow();
 }
 
-async function appSessionFor(
+async function userSessionFor(
   admin: SessionAdminClient,
   sessionKey: string,
+  participantKind: "app" | "agent",
 ) {
   const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry) =>
-    entry.participantKind === "app" && entry.sessionKey === sessionKey
+    entry.participantKind === participantKind && entry.sessionKey === sessionKey
   );
-  assert(session, "expected Auth.Sessions.List to include app session");
+  assert(
+    session,
+    `expected Auth.Sessions.List to include ${participantKind} session`,
+  );
   return session;
 }
 

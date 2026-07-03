@@ -263,7 +263,7 @@ mod tests {
     fn test_admin_session_state() -> AdminSessionState {
         AdminSessionState {
             trellis_url: "http://localhost:3000".to_string(),
-            nats_servers: "localhost".to_string(),
+            servers: "localhost".to_string(),
             session_seed: "seed".to_string(),
             session_key: "key".to_string(),
             contract_digest: "digest".to_string(),

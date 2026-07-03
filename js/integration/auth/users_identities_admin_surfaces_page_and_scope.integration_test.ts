@@ -8,6 +8,7 @@ import {
 } from "@qlever-llc/trellis";
 import { isErr } from "@qlever-llc/result";
 import { caseScopedName } from "../_support/names.ts";
+import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createAuthLocalLoginFixture } from "./_fixture.ts";
 
@@ -24,12 +25,16 @@ const observerPassword =
 type SessionAdminAppClient = ConnectedTrellisClient<
   typeof fixture.sessionAdminContract
 >;
+type ControlPlaneSqlite = NonNullable<
+  LiveTrellisRuntime["controlPlane"]
+>["sqlite"];
 
 liveTrellisTest({
   name:
     "auth.users-identities-admin-surfaces-page-and-scope exercises user and identity admin RPC surfaces",
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
+    const sqlite = requireControlPlaneSqlite(runtime);
     const service = await fixture.setupService(runtime);
     const admin = await fixture.setupSessionAdmin(runtime);
 
@@ -55,6 +60,7 @@ liveTrellisTest({
         username: observerUsername,
         password: observerPassword,
       });
+      await seedExtraIdentity(sqlite, target.user.userId);
 
       const firstPage = await admin.rpc.auth.usersList({ limit: 1 }).orThrow();
       assert(firstPage.count >= 3, "expected bootstrap and created users");
@@ -62,22 +68,53 @@ liveTrellisTest({
       assertEquals(firstPage.limit, 1);
       assertEquals(firstPage.entries.length, 1);
       assertEquals(firstPage.nextOffset, 1);
+      const repeatedFirstPage = await admin.rpc.auth.usersList({ limit: 1 })
+        .orThrow();
+      assertEquals(repeatedFirstPage.entries[0], firstPage.entries[0]);
+      const secondPage = await admin.rpc.auth.usersList({ offset: 1, limit: 1 })
+        .orThrow();
+      assertEquals(secondPage.offset, 1);
+      assertEquals(secondPage.limit, 1);
+      assertEquals(secondPage.entries.length, 1);
+      assert(
+        firstPage.entries[0].userId.localeCompare(
+          secondPage.entries[0].userId,
+        ) <
+          0,
+        "expected Auth.Users.List pages to preserve stable userId ordering",
+      );
 
       const got = await admin.rpc.auth.usersGet({
         userId: target.user.userId,
       }).orThrow();
       assertEquals(got.user.userId, target.user.userId);
-      assert(got.user.identities.length > 0, "expected target identities");
+      assert(got.user.identities.length >= 2, "expected target identities");
 
       const identities = await admin.rpc.auth.userIdentitiesList({
         userId: target.user.userId,
-        limit: 10,
+        limit: 1,
       }).orThrow();
       assertEquals(identities.count, got.user.identities.length);
       assertEquals(identities.offset, 0);
+      assertEquals(identities.limit, 1);
+      assertEquals(identities.entries.length, 1);
+      assertEquals(identities.nextOffset, 1);
       assertEquals(
         identities.entries[0]?.identityId,
         got.user.identities[0]?.identityId,
+      );
+      const nextIdentities = await admin.rpc.auth.userIdentitiesList({
+        userId: target.user.userId,
+        offset: 1,
+        limit: 1,
+      }).orThrow();
+      assertEquals(nextIdentities.count, got.user.identities.length);
+      assertEquals(nextIdentities.offset, 1);
+      assertEquals(nextIdentities.limit, 1);
+      assertEquals(nextIdentities.entries.length, 1);
+      assertEquals(
+        nextIdentities.entries[0]?.identityId,
+        got.user.identities[1]?.identityId,
       );
 
       await assertAuthErrorReason(
@@ -106,6 +143,38 @@ liveTrellisTest({
     }
   },
 });
+
+function requireControlPlaneSqlite(
+  runtime: LiveTrellisRuntime,
+): ControlPlaneSqlite {
+  const sqlite = runtime.controlPlane?.sqlite;
+  assert(sqlite, "live runtime must expose control-plane SQLite");
+  return sqlite;
+}
+
+async function seedExtraIdentity(
+  sqlite: ControlPlaneSqlite,
+  userId: string,
+): Promise<void> {
+  const identityId = `idn_extra_${userId}`;
+  await sqlite.execute(
+    `INSERT INTO user_identities
+      (id, identity_id, user_id, provider, subject, display_name, email, email_verified, linked_at, last_login_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      identityId,
+      identityId,
+      userId,
+      "integration",
+      userId,
+      "Extra Identity",
+      `${userId}@extra.example.test`,
+      1,
+      new Date(0).toISOString(),
+      null,
+    ],
+  );
+}
 
 async function connectObserver(
   runtime: Parameters<typeof fixture.setupSessionAdmin>[0],

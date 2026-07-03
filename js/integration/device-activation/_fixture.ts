@@ -171,6 +171,7 @@ export function createDeviceActivationFixture(caseId: string) {
           rpc: {
             call: [
               "Auth.Deployments.Create",
+              "Auth.Deployments.Disable",
               "Auth.DeploymentAuthority.AcceptMigration",
               "Auth.DeploymentAuthority.AcceptUpdate",
               "Auth.DeploymentAuthority.Get",

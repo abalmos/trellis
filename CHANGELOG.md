@@ -8,6 +8,58 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.4] - 2026-07-03
+
+### Public Breaking Changes
+
+- Removed raw transport escape hatches from TypeScript and Rust runtime,
+  service, and client facades so service authors use generated clients,
+  `TrellisService.connect(...)` handles, and resource APIs instead of hand-built
+  NATS clients, subjects, or envelopes.
+
+### Added
+
+- Added the `Auth.Users.Resolve` RPC, generated TypeScript and Rust client
+  surfaces, and control-plane handling so callers can resolve explicit user IDs
+  to display labels without browsing the full user directory.
+- Added Jobs retry, cancellation, queue-full, dead-letter, stale-worker, and
+  max-deliveries advisory coverage across the shared test matrix, TypeScript
+  integration suite, Rust integration suite, and Rust Jobs admin service tests.
+- Added live TypeScript and Rust acceptance coverage for auth grant overrides,
+  identity-grant revocation, portal route and built-in portal guardrails,
+  capability groups and last-admin checks, user/identity admin pages, authority
+  plan acceptance validation, device activation proof and review scoping, state
+  migration-required responses, TTL expiry, and unsafe service-deployment
+  removal.
+
+### Changed
+
+- Updated service-author guidance templates to use `<version-tag>` with the
+  leading `v`, current `v0.11.0-rc.3` examples, and transport-neutral Rust
+  guidance.
+- Updated the integration runner to support explicit case selection and matrix
+  coverage used by the new JS Jobs and auth/device/state/control-plane cases.
+
+### Fixed
+
+- Fixed local Console login recovery so stale or missing browser session data
+  redirects through a fresh auth request instead of leaving users stranded on
+  the login page.
+- Fixed deployment-authority migration acceptance so plans can remove obsolete
+  dependency or provided-surface authority state, and fixed the Console
+  authority plans page to use the current `count` response and pending default
+  filter.
+- Fixed device-review authorization so deployment-scoped
+  `trellis.auth::device.review.*` capabilities satisfy review RPCs, delegated
+  sessions preserve those scoped capabilities, and connect-info failures return
+  stable HTTP status/reason mappings.
+- Fixed deployment-grant sessions so reconnect and principal refresh do not drop
+  sessions that were intentionally bound without direct user capabilities.
+- Fixed auth start-request signature payload canonicalization for JSON contract
+  and context presentations.
+- Fixed Jobs admin advisory projection parsing and exposed the small parser and
+  mapping helpers needed by Rust/TypeScript parity tests.
+
 ## [0.11.0-rc.3] - 2026-06-30
 
 ### Fixed

@@ -1667,29 +1667,59 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
     let mut fixture = setup_app_identity_environment().await;
     let client_contract = auth_local_login_client_contract()
         .expect("build auth identity grants revoke client contract");
+    let agent_contract = auth_local_login_agent_contract()
+        .expect("build auth identity grants revoke agent contract");
     let admin_contract = auth_session_revoke_admin_contract()
         .expect("build auth identity grants revoke admin contract");
-    let first_seed = trellis_rs::auth::generate_session_keypair().0;
-    let first_session_key = trellis_rs::client::SessionAuth::from_seed_base64url(&first_seed)
-        .expect("derive first identity grant revoke session key")
-        .session_key;
-    let second_seed = trellis_rs::auth::generate_session_keypair().0;
-    let second_session_key = trellis_rs::client::SessionAuth::from_seed_base64url(&second_seed)
-        .expect("derive second identity grant revoke session key")
-        .session_key;
+    let first_app_seed = trellis_rs::auth::generate_session_keypair().0;
+    let first_app_session_key =
+        trellis_rs::client::SessionAuth::from_seed_base64url(&first_app_seed)
+            .expect("derive first identity grant revoke session key")
+            .session_key;
+    let second_app_seed = trellis_rs::auth::generate_session_keypair().0;
+    let second_app_session_key =
+        trellis_rs::client::SessionAuth::from_seed_base64url(&second_app_seed)
+            .expect("derive second identity grant revoke session key")
+            .session_key;
+    let first_agent_seed = trellis_rs::auth::generate_session_keypair().0;
+    let first_agent_session_key =
+        trellis_rs::client::SessionAuth::from_seed_base64url(&first_agent_seed)
+            .expect("derive first agent identity grant revoke session key")
+            .session_key;
+    let second_agent_seed = trellis_rs::auth::generate_session_keypair().0;
+    let second_agent_session_key =
+        trellis_rs::client::SessionAuth::from_seed_base64url(&second_agent_seed)
+            .expect("derive second agent identity grant revoke session key")
+            .session_key;
 
-    let first_client = fixture
+    let first_app_client = fixture
         .admin
-        .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, first_seed)
+        .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, first_app_seed)
         .await
         .expect("connect first live Rust auth identity grant revoke client");
-    let second_client = fixture
+    let second_app_client = fixture
         .admin
-        .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, second_seed)
+        .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, second_app_seed)
         .await
         .expect("connect second live Rust auth identity grant revoke client");
-    call_grant_ping_with_retry(&first_client, "auth-identity-grant-revoke-1").await;
-    call_grant_ping_with_retry(&second_client, "auth-identity-grant-revoke-2").await;
+    let first_agent_client = fixture
+        .admin
+        .connect_client_with_session_seed(&fixture.bootstrap_url, &agent_contract, first_agent_seed)
+        .await
+        .expect("connect first live Rust auth identity grant revoke agent");
+    let second_agent_client = fixture
+        .admin
+        .connect_client_with_session_seed(
+            &fixture.bootstrap_url,
+            &agent_contract,
+            second_agent_seed,
+        )
+        .await
+        .expect("connect second live Rust auth identity grant revoke agent");
+    call_grant_ping_with_retry(&first_app_client, "auth-identity-grant-revoke-app-1").await;
+    call_grant_ping_with_retry(&second_app_client, "auth-identity-grant-revoke-app-2").await;
+    call_grant_ping_with_retry(&first_agent_client, "auth-identity-grant-revoke-agent-1").await;
+    call_grant_ping_with_retry(&second_agent_client, "auth-identity-grant-revoke-agent-2").await;
 
     let admin_client = fixture
         .admin
@@ -1697,16 +1727,24 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
         .await
         .expect("connect live Rust auth identity grant revoke admin client");
     let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
-    app_session_for_key(&admin_auth, &first_session_key).await;
-    app_session_for_key(&admin_auth, &second_session_key).await;
-    wait_for_single_connection(&admin_auth, &first_session_key).await;
-    wait_for_single_connection(&admin_auth, &second_session_key).await;
+    app_session_for_key(&admin_auth, &first_app_session_key).await;
+    app_session_for_key(&admin_auth, &second_app_session_key).await;
+    user_session_for_key(&admin_auth, &first_agent_session_key, "agent").await;
+    user_session_for_key(&admin_auth, &second_agent_session_key, "agent").await;
+    wait_for_single_connection(&admin_auth, &first_app_session_key).await;
+    wait_for_single_connection(&admin_auth, &second_app_session_key).await;
+    wait_for_single_connection_for_kind(&admin_auth, &first_agent_session_key, "agent").await;
+    wait_for_single_connection_for_kind(&admin_auth, &second_agent_session_key, "agent").await;
 
     let sqlite = fixture.runtime.control_plane_sqlite();
-    let identity_grant_id =
-        shared_identity_grant_id(&sqlite, &first_session_key, &second_session_key);
-    assert!(identity_grant_exists(&sqlite, &identity_grant_id));
-    assert!(identity_grant_listed(&admin_auth, &identity_grant_id).await);
+    let app_identity_grant_id =
+        shared_identity_grant_id(&sqlite, &first_app_session_key, &second_app_session_key);
+    let agent_identity_grant_id =
+        shared_identity_grant_id(&sqlite, &first_agent_session_key, &second_agent_session_key);
+    assert!(identity_grant_exists(&sqlite, &app_identity_grant_id));
+    assert!(identity_grant_exists(&sqlite, &agent_identity_grant_id));
+    assert!(identity_grant_listed(&admin_auth, &app_identity_grant_id).await);
+    assert!(identity_grant_listed(&admin_auth, &agent_identity_grant_id).await);
 
     let non_owner = admin_auth
         .rpc()
@@ -1756,34 +1794,57 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
         .auth()
         .identity_grants_revoke(
             &trellis_rs::sdk::auth::types::AuthIdentityGrantsRevokeRequest {
-                identity_grant_id: identity_grant_id.clone(),
+                identity_grant_id: app_identity_grant_id.clone(),
                 user: None,
             },
         )
         .await
         .is_err());
 
-    let revoked = admin_auth
+    let app_revoked = admin_auth
         .rpc()
         .auth()
         .identity_grants_revoke(
             &trellis_rs::sdk::auth::types::AuthIdentityGrantsRevokeRequest {
-                identity_grant_id: identity_grant_id.clone(),
+                identity_grant_id: app_identity_grant_id.clone(),
                 user: None,
             },
         )
         .await
-        .expect("revoke identity grant through Auth.IdentityGrants.Revoke");
-    assert!(revoked.success);
+        .expect("revoke app identity grant through Auth.IdentityGrants.Revoke");
+    assert!(app_revoked.success);
+    let agent_revoked = admin_auth
+        .rpc()
+        .auth()
+        .identity_grants_revoke(
+            &trellis_rs::sdk::auth::types::AuthIdentityGrantsRevokeRequest {
+                identity_grant_id: agent_identity_grant_id.clone(),
+                user: None,
+            },
+        )
+        .await
+        .expect("revoke agent identity grant through Auth.IdentityGrants.Revoke");
+    assert!(agent_revoked.success);
 
-    wait_for_session_absent(&admin_auth, &first_session_key).await;
-    wait_for_session_absent(&admin_auth, &second_session_key).await;
-    wait_for_connections_absent(&admin_auth, &first_session_key).await;
-    wait_for_connections_absent(&admin_auth, &second_session_key).await;
-    wait_for_identity_grant_absent(&admin_auth, &identity_grant_id).await;
-    assert!(!identity_grant_exists(&sqlite, &identity_grant_id));
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_client)).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&second_client)).await;
+    wait_for_session_absent(&admin_auth, &first_app_session_key).await;
+    wait_for_session_absent(&admin_auth, &second_app_session_key).await;
+    wait_for_session_absent(&admin_auth, &first_agent_session_key).await;
+    wait_for_session_absent(&admin_auth, &second_agent_session_key).await;
+    wait_for_connections_absent(&admin_auth, &first_app_session_key).await;
+    wait_for_connections_absent(&admin_auth, &second_app_session_key).await;
+    wait_for_connections_absent(&admin_auth, &first_agent_session_key).await;
+    wait_for_connections_absent(&admin_auth, &second_agent_session_key).await;
+    wait_for_identity_grant_absent(&admin_auth, &app_identity_grant_id).await;
+    wait_for_identity_grant_absent(&admin_auth, &agent_identity_grant_id).await;
+    assert!(!identity_grant_exists(&sqlite, &app_identity_grant_id));
+    assert!(!identity_grant_exists(&sqlite, &agent_identity_grant_id));
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_app_client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&second_app_client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_agent_client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        &second_agent_client,
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -2063,6 +2124,27 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
         "trellis-integration-rust-auth-users-identities-observer-password-2026",
     )
     .await;
+    let sqlite = fixture.runtime.control_plane_sqlite();
+    let extra_identity_id = format!("idn_extra_{}", target.user.user_id);
+    sqlite
+        .execute(
+            "INSERT INTO user_identities
+                (id, identity_id, user_id, provider, subject, display_name, email, email_verified, linked_at, last_login_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                extra_identity_id.as_str(),
+                extra_identity_id.as_str(),
+                target.user.user_id.as_str(),
+                "integration",
+                target.user.user_id.as_str(),
+                "Extra Identity",
+                "rust-auth-users-identities-extra@example.test",
+                1,
+                "1970-01-01T00:00:00.000Z",
+                Option::<String>::None,
+            ],
+        )
+        .expect("seed extra target identity");
 
     let first_page = auth
         .rpc()
@@ -2078,6 +2160,29 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
     assert_eq!(first_page.limit, 1);
     assert_eq!(first_page.entries.len(), 1);
     assert_eq!(first_page.next_offset, Some(1));
+    let repeated_first_page = auth
+        .rpc()
+        .auth()
+        .users_list(&trellis_rs::sdk::auth::types::AuthUsersListRequest {
+            limit: 1,
+            offset: None,
+        })
+        .await
+        .expect("repeat first user page");
+    assert_eq!(repeated_first_page.entries[0], first_page.entries[0]);
+    let second_page = auth
+        .rpc()
+        .auth()
+        .users_list(&trellis_rs::sdk::auth::types::AuthUsersListRequest {
+            limit: 1,
+            offset: Some(1),
+        })
+        .await
+        .expect("list second user page");
+    assert_eq!(second_page.offset, 1);
+    assert_eq!(second_page.limit, 1);
+    assert_eq!(second_page.entries.len(), 1);
+    assert!(first_page.entries[0].user_id < second_page.entries[0].user_id);
 
     let got = auth
         .rpc()
@@ -2088,14 +2193,14 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
         .await
         .expect("get target user");
     assert_eq!(got.user.user_id, target.user.user_id);
-    assert!(!got.user.identities.is_empty());
+    assert!(got.user.identities.len() >= 2);
 
     let identities = auth
         .rpc()
         .auth()
         .user_identities_list(
             &trellis_rs::sdk::auth::types::AuthUserIdentitiesListRequest {
-                limit: 10,
+                limit: 1,
                 offset: None,
                 user_id: target.user.user_id.clone(),
             },
@@ -2104,6 +2209,9 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
         .expect("list target identities");
     assert_eq!(identities.count as usize, got.user.identities.len());
     assert_eq!(identities.offset, 0);
+    assert_eq!(identities.limit, 1);
+    assert_eq!(identities.entries.len(), 1);
+    assert_eq!(identities.next_offset, Some(1));
     assert_eq!(
         identities
             .entries
@@ -2112,6 +2220,32 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
         got.user
             .identities
             .first()
+            .map(|identity| &identity.identity_id)
+    );
+    let next_identities = auth
+        .rpc()
+        .auth()
+        .user_identities_list(
+            &trellis_rs::sdk::auth::types::AuthUserIdentitiesListRequest {
+                limit: 1,
+                offset: Some(1),
+                user_id: target.user.user_id.clone(),
+            },
+        )
+        .await
+        .expect("list second target identity page");
+    assert_eq!(next_identities.count as usize, got.user.identities.len());
+    assert_eq!(next_identities.offset, 1);
+    assert_eq!(next_identities.limit, 1);
+    assert_eq!(next_identities.entries.len(), 1);
+    assert_eq!(
+        next_identities
+            .entries
+            .first()
+            .map(|identity| &identity.identity_id),
+        got.user
+            .identities
+            .get(1)
             .map(|identity| &identity.identity_id)
     );
 
@@ -2360,6 +2494,7 @@ fn auth_session_revoke_admin_contract(
             "Auth.Portals.Routes.Put",
             "Auth.Portals.Routes.Remove",
             "Auth.Sessions.List",
+            "Auth.Sessions.Me",
             "Auth.Sessions.Revoke",
             "Auth.UserIdentities.List",
             "Auth.UserIdentities.Unlink",
