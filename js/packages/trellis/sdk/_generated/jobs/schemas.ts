@@ -1,6 +1,4 @@
 // Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
-export const EmptySchema = { "properties": {}, "type": "object" } as const;
-
 export const JobsCancelRequestSchema = {
   "description":
     "Jobs admin ids are globally addressable; callers identify jobs by id only.",
@@ -418,20 +416,6 @@ export const JobsGetKeyResponseSchema = {
     "queuedDepth",
     "staleTakeoverCount",
   ],
-  "type": "object",
-} as const;
-
-export const JobsHealthResponseSchema = {
-  "properties": {
-    "checks": {
-      "items": { "patternProperties": { "^.*$": {} }, "type": "object" },
-      "type": "array",
-    },
-    "service": { "minLength": 1, "type": "string" },
-    "status": {},
-    "timestamp": { "format": "date-time", "type": "string" },
-  },
-  "required": ["service", "status", "timestamp", "checks"],
   "type": "object",
 } as const;
 

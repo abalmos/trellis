@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "Bn4oqFEEZ39V53Xswubi6qsCocPSyG_kzR_vAm9A2qc" as const;
+  "Iln89UGlHZLnM2ZjaOvdA2NvRgcfYI02IXJun3mkhqc" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.jobs::admin.mutate": {
@@ -23,8 +23,7 @@ export const CONTRACT = {
       "displayName": "Mutate jobs admin data",
     },
     "trellis.jobs::admin.read": {
-      "description":
-        "View Jobs service health, services, jobs, and dead-letter queues.",
+      "description": "View Jobs services, jobs, and dead-letter queues.",
       "displayName": "Read jobs admin data",
     },
     "trellis.jobs::admin.stream": {
@@ -36,7 +35,7 @@ export const CONTRACT = {
   "displayName": "Trellis Jobs",
   "docs": {
     "markdown":
-      "Provides health, service, job, retry, cancel, and dead-letter queue RPCs for Trellis-managed background work.",
+      "Provides service, job, retry, cancel, and dead-letter queue RPCs for Trellis-managed background work.",
     "summary": "Background job administration APIs.",
   },
   "errors": {
@@ -104,18 +103,6 @@ export const CONTRACT = {
       "input": { "schema": "JobsGetKeyRequest" },
       "output": { "schema": "JobsGetKeyResponse" },
       "subject": "rpc.v1.Jobs.GetKey",
-      "version": "v1",
-    },
-    "Jobs.Health": {
-      "capabilities": { "call": ["trellis.jobs::admin.read"] },
-      "docs": {
-        "markdown": "Returns Jobs service health and worker status details.",
-        "summary": "Read jobs health.",
-      },
-      "errors": [{ "type": "UnexpectedError" }],
-      "input": { "schema": "Empty" },
-      "output": { "schema": "JobsHealthResponse" },
-      "subject": "rpc.v1.Jobs.Health",
       "version": "v1",
     },
     "Jobs.Inspect": {
@@ -1000,19 +987,6 @@ export const CONTRACT = {
         "queuedDepth",
         "staleTakeoverCount",
       ],
-      "type": "object",
-    },
-    "JobsHealthResponse": {
-      "properties": {
-        "checks": {
-          "items": { "patternProperties": { "^.*$": {} }, "type": "object" },
-          "type": "array",
-        },
-        "service": { "minLength": 1, "type": "string" },
-        "status": {},
-        "timestamp": { "format": "date-time", "type": "string" },
-      },
-      "required": ["service", "status", "timestamp", "checks"],
       "type": "object",
     },
     "JobsInspectRequest": {

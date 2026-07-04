@@ -2,7 +2,7 @@
 
 use trellis_rs::sdk::jobs::contract as generated_contract;
 use trellis_rs::sdk::jobs::rpc::{
-    JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsHealthRpc, JobsInspectRpc, JobsListDLQRpc,
+    JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsInspectRpc, JobsListDLQRpc,
     JobsListServicesRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
 };
 use trellis_rs::service::BootstrapContractRef;
@@ -13,7 +13,6 @@ use trellis_rs::service::RpcDescriptor;
 pub const SERVICE_NAME: &str = "trellis-service-jobs";
 /// Exact RPC subjects served by the Jobs admin service.
 pub const JOBS_RPC_SUBJECTS: &[&str] = &[
-    <JobsHealthRpc as RpcDescriptor>::SUBJECT,
     <JobsListServicesRpc as RpcDescriptor>::SUBJECT,
     <JobsQueryRpc as RpcDescriptor>::SUBJECT,
     <JobsInspectRpc as RpcDescriptor>::SUBJECT,

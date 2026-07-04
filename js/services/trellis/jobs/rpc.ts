@@ -8,7 +8,6 @@ import { Result } from "@qlever-llc/trellis";
 import type {
   JobsCancelInput,
   JobsCancelOutput,
-  JobsHealthOutput,
   JobsInspectInput,
   JobsInspectOutput,
   JobsListServicesInput,
@@ -710,13 +709,6 @@ export function createJobsAdminHandlers(nats: NatsConnection) {
   const projection = createProjection(nats);
   return {
     stop: projection.stop,
-    health: () =>
-      Result.ok<JobsHealthOutput, never>({
-        status: "healthy",
-        service: "trellis.jobs",
-        timestamp: new Date().toISOString(),
-        checks: [],
-      }),
     query: ({ input }: { input: JobsQueryInput }) =>
       queryJobs(projection.jobs, input),
     inspect: ({ input }: { input: JobsInspectInput }) =>

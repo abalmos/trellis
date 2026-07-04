@@ -85,11 +85,11 @@ impl RequestHandler for RecordingHandler {
 
 fn request(reply_to: Option<&str>) -> InboundRequest {
     InboundRequest {
-        subject: "rpc.v1.Jobs.Health".to_string(),
+        subject: "rpc.v1.Workspaces.Get".to_string(),
         payload: Bytes::from_static(b"{}"),
         reply_to: reply_to.map(ToString::to_string),
         context: RequestContext {
-            subject: "rpc.v1.Jobs.Health".to_string(),
+            subject: "rpc.v1.Workspaces.Get".to_string(),
             session_key: Some("svc_session".to_string()),
             proof: Some("proof".to_string()),
             iat: None,
@@ -114,7 +114,7 @@ async fn dispatch_one_passes_subject_payload_and_context_to_handler() {
 
     let seen = handler.seen.lock().expect("lock seen");
     assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].0, "rpc.v1.Jobs.Health");
+    assert_eq!(seen[0].0, "rpc.v1.Workspaces.Get");
     assert_eq!(seen[0].1, Bytes::from_static(b"{}"));
     assert_eq!(seen[0].2.session_key.as_deref(), Some("svc_session"));
     assert_eq!(seen[0].2.proof.as_deref(), Some("proof"));
@@ -142,7 +142,7 @@ async fn dispatch_one_returns_success_reply_when_handler_succeeds() {
 
 #[tokio::test]
 async fn dispatch_one_returns_error_reply_when_handler_fails() {
-    let handler = RecordingHandler::deny_request("rpc.v1.Jobs.Health", "svc_session");
+    let handler = RecordingHandler::deny_request("rpc.v1.Workspaces.Get", "svc_session");
     let incoming = request(Some("_INBOX.1"));
 
     let reply = dispatch_one(&handler, incoming)
@@ -160,7 +160,7 @@ async fn dispatch_one_returns_error_reply_when_handler_fails() {
     assert_eq!(body["message"], "An unexpected error has occurred");
     assert_eq!(
         body["context"]["causeMessage"],
-        "request denied for subject 'rpc.v1.Jobs.Health' and session 'svc_session'"
+        "request denied for subject 'rpc.v1.Workspaces.Get' and session 'svc_session'"
     );
 }
 

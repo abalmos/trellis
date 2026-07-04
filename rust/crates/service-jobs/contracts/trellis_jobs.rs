@@ -23,14 +23,13 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     )
     .docs_with_summary(
         "Background job administration APIs.",
-        "Provides health, service, job, retry, cancel, and dead-letter queue RPCs for Trellis-managed background work.",
+        "Provides service, job, retry, cancel, and dead-letter queue RPCs for Trellis-managed background work.",
     )
     .capability(
         READ_CAPABILITY,
         ContractCapabilityMetadata {
             display_name: "Read jobs admin data".to_string(),
-            description: "View Jobs service health, services, jobs, and dead-letter queues."
-                .to_string(),
+            description: "View Jobs services, jobs, and dead-letter queues.".to_string(),
             consequence: None,
         },
     )
@@ -61,7 +60,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("JobTrigger", job_trigger_schema())
     .schema("JobLineage", job_lineage_schema())
     .schema("Job", job_schema())
-    .schema("JobsHealthResponse", jobs_health_response_schema())
     .schema("JobsListServicesRequest", page_request_schema())
     .schema(
         "JobsListServicesResponse",
@@ -91,20 +89,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("JobsDismissDLQResponse", job_response_schema())
     .schema("NotFoundErrorData", not_found_error_schema())
     .error(NOT_FOUND_ERROR, NOT_FOUND_ERROR, "NotFoundErrorData")
-    .rpc(
-        "Jobs.Health",
-        admin_rpc(
-            "Jobs.Health",
-            "Empty",
-            "JobsHealthResponse",
-            READ_CAPABILITY,
-        )
-        .docs_with_summary(
-            "Read jobs health.",
-            "Returns Jobs service health and worker status details.",
-        )
-        .with_error_types([UNEXPECTED_ERROR]),
-    )
     .rpc(
         "Jobs.ListServices",
         admin_rpc(
@@ -589,25 +573,6 @@ fn worker_schema() -> Value {
             "timestamp": { "type": "string", "format": "date-time" },
             "concurrency": { "type": "integer", "minimum": 1 },
             "version": { "type": "string", "minLength": 1 }
-        }
-    })
-}
-
-fn jobs_health_response_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["service", "status", "timestamp", "checks"],
-        "properties": {
-            "service": { "type": "string", "minLength": 1 },
-            "status": {},
-            "timestamp": { "type": "string", "format": "date-time" },
-            "checks": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "patternProperties": { "^.*$": {} }
-                }
-            }
         }
     })
 }

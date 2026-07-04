@@ -4,7 +4,6 @@ import type { Config } from "../../config.ts";
 import {
   createAuthConnectionsKickHandler,
   createAuthConnectionsListHandler,
-  createAuthHealthHandler,
   createAuthRequestsValidateHandler,
   createAuthSessionsListHandler,
   createAuthSessionsLogoutHandler,
@@ -82,9 +81,6 @@ export async function registerSessionRpcs(deps: {
     },
   });
 
-  await deps.trellis.handle.rpc.auth.health(
-    createAuthHealthHandler({ logger: deps.logger }),
-  );
   await deps.trellis.handle.rpc.auth.sessionsMe(
     createAuthSessionsMeHandler({
       logger: deps.logger,

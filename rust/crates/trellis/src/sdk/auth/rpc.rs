@@ -484,18 +484,6 @@ impl RpcDescriptor for AuthDevicesRemoveRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
-/// Descriptor for `Auth.Health`.
-pub struct AuthHealthRpc;
-impl RpcDescriptor for AuthHealthRpc {
-    type Input = Empty;
-    type Output = super::types::AuthHealthResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_HEALTH_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_HEALTH_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.Health";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Health";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &["UnexpectedError"];
-}
 /// Descriptor for `Auth.Identities.List`.
 pub struct AuthIdentitiesListRpc;
 impl RpcDescriptor for AuthIdentitiesListRpc {

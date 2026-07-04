@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "mYTkP38a_qMbmA5a0t9z7zddGzSeQ4JR4pve5jvUWks" as const;
+  "GJaxa9eLvCBahgub__QH6vCrMMZM4qEdtcVU-OsjQ7A" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -1464,23 +1464,6 @@ export type AuthDevicesProvisionOutput = {
 export type AuthDevicesRemoveInput = { instanceId: string };
 export type AuthDevicesRemoveOutput = { success: boolean };
 
-export type AuthHealthInput = {};
-export type AuthHealthOutput = {
-  checks: Array<
-    {
-      error?: string;
-      info?: { [k: string]: unknown };
-      latencyMs: number;
-      name: string;
-      status: "ok" | "failed";
-      summary?: string;
-    }
-  >;
-  service: string;
-  status: "healthy" | "unhealthy" | "degraded";
-  timestamp: string;
-};
-
 export type AuthIdentitiesListInput = {
   limit: number;
   offset?: number;
@@ -2670,7 +2653,6 @@ export interface RpcMap {
     input: AuthDevicesRemoveInput;
     output: AuthDevicesRemoveOutput;
   };
-  "Auth.Health": { input: AuthHealthInput; output: AuthHealthOutput };
   "Auth.Identities.List": {
     input: AuthIdentitiesListInput;
     output: AuthIdentitiesListOutput;
@@ -3280,18 +3262,6 @@ export type AuthDevicesRemoveHandler = (
     client: HandlerClient;
   },
 ) => AuthDevicesRemoveHandlerResult | Promise<AuthDevicesRemoveHandlerResult>;
-export type AuthHealthHandlerError = TrellisErrorInstance;
-export type AuthHealthHandlerResult = Result<
-  AuthHealthOutput,
-  AuthHealthHandlerError
->;
-export type AuthHealthHandler = (
-  args: {
-    input: AuthHealthInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => AuthHealthHandlerResult | Promise<AuthHealthHandlerResult>;
 export type AuthIdentitiesListHandlerError = TrellisErrorInstance;
 export type AuthIdentitiesListHandlerResult = Result<
   AuthIdentitiesListOutput,

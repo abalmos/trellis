@@ -21,7 +21,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "Bn4oqFEEZ39V53Xswubi6qsCocPSyG_kzR_vAm9A2qc" as const;
+  "Iln89UGlHZLnM2ZjaOvdA2NvRgcfYI02IXJun3mkhqc" as const;
 
 export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {
@@ -235,14 +235,6 @@ export type JobsGetKeyOutput = {
   service: string;
   staleTakeoverCount: number;
   type: string;
-};
-
-export type JobsHealthInput = {};
-export type JobsHealthOutput = {
-  checks: Array<{ [k: string]: unknown }>;
-  service: string;
-  status: unknown;
-  timestamp: string;
 };
 
 export type JobsInspectInput = { id: string };
@@ -1132,7 +1124,6 @@ export interface RpcMap {
     output: JobsDismissDLQOutput;
   };
   "Jobs.GetKey": { input: JobsGetKeyInput; output: JobsGetKeyOutput };
-  "Jobs.Health": { input: JobsHealthInput; output: JobsHealthOutput };
   "Jobs.Inspect": { input: JobsInspectInput; output: JobsInspectOutput };
   "Jobs.ListDLQ": { input: JobsListDLQInput; output: JobsListDLQOutput };
   "Jobs.ListServices": {
@@ -1186,18 +1177,6 @@ export type JobsGetKeyHandler = (
     client: HandlerClient;
   },
 ) => JobsGetKeyHandlerResult | Promise<JobsGetKeyHandlerResult>;
-export type JobsHealthHandlerError = TrellisErrorInstance;
-export type JobsHealthHandlerResult = Result<
-  JobsHealthOutput,
-  JobsHealthHandlerError
->;
-export type JobsHealthHandler = (
-  args: {
-    input: JobsHealthInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsHealthHandlerResult | Promise<JobsHealthHandlerResult>;
 export type JobsInspectHandlerError =
   | TrellisErrorInstance
   | BaseError<NotFoundErrorData>;

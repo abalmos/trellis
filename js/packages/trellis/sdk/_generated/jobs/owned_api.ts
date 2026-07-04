@@ -3,14 +3,12 @@ import type { TrellisAPI } from "../../../contracts.ts";
 import { schema } from "../../../contracts.ts";
 import * as Types from "./types.ts";
 import {
-  EmptySchema,
   JobsCancelRequestSchema,
   JobsCancelResponseSchema,
   JobsDismissDLQRequestSchema,
   JobsDismissDLQResponseSchema,
   JobsGetKeyRequestSchema,
   JobsGetKeyResponseSchema,
-  JobsHealthResponseSchema,
   JobsInspectRequestSchema,
   JobsInspectResponseSchema,
   JobsListDLQRequestSchema,
@@ -86,14 +84,6 @@ export const OWNED_API = {
           fromSerializable: Types.NotFoundError.fromSerializable,
         },
       ] as const,
-    },
-    "Jobs.Health": {
-      subject: "rpc.v1.Jobs.Health",
-      input: schema<Types.JobsHealthInput>(EmptySchema),
-      output: schema<Types.JobsHealthOutput>(JobsHealthResponseSchema),
-      callerCapabilities: ["trellis.jobs::admin.read"] as const,
-      errors: ["UnexpectedError"] as const,
-      declaredErrorTypes: ["UnexpectedError"] as const,
     },
     "Jobs.Inspect": {
       subject: "rpc.v1.Jobs.Inspect",

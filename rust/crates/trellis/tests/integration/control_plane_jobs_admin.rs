@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
 use trellis_rs::jobs::keys::NatsKeyCoordinator;
 use trellis_rs::jobs::{
@@ -172,15 +171,6 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
         .await
         .expect("worker should start the holdOpen job");
 
-    let health = jobs_admin
-        .rpc()
-        .jobs()
-        .health()
-        .await
-        .expect("call generated Jobs.Health");
-    assert_eq!(health.service, "trellis.jobs");
-    assert_eq!(health.status, json!("healthy"));
-
     let listed_service = wait_for_listed_service(&jobs_admin, &job.service, &job.job_type).await;
     assert!(
         listed_service
@@ -217,19 +207,18 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest =
-        trellis_rs::contracts::ContractManifestBuilder::new(
-            ADMIN_CLIENT_CONTRACT_ID,
-            "Trellis Control-Plane Jobs Admin Probe Client",
-            "Uses the generated Jobs admin SDK surface.",
-            trellis_rs::contracts::ContractKind::App,
-        )
-        .use_ref(
-            "jobs",
-            trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Health", "Jobs.Cancel", "Jobs.ListServices"]),
-        )
-        .build()?;
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        ADMIN_CLIENT_CONTRACT_ID,
+        "Trellis Control-Plane Jobs Admin Probe Client",
+        "Uses the generated Jobs admin SDK surface.",
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .use_ref(
+        "jobs",
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
+            .with_rpc_call(["Jobs.Cancel", "Jobs.ListServices"]),
+    )
+    .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }

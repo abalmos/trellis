@@ -142,8 +142,6 @@ import {
   AuthUsersResolveResponseSchema,
   AuthUsersUpdateRequestSchema,
   AuthUsersUpdateResponseSchema,
-  HealthRequestSchema,
-  HealthResponseSchema,
 } from "./schemas.ts";
 
 export const OWNED_API = {
@@ -701,14 +699,6 @@ export const OWNED_API = {
         "UnexpectedError",
         "ValidationError",
       ] as const,
-    },
-    "Auth.Health": {
-      subject: "rpc.v1.Auth.Health",
-      input: schema<Types.AuthHealthInput>(HealthRequestSchema),
-      output: schema<Types.AuthHealthOutput>(HealthResponseSchema),
-      callerCapabilities: [] as const,
-      errors: ["UnexpectedError"] as const,
-      declaredErrorTypes: ["UnexpectedError"] as const,
     },
     "Auth.Identities.List": {
       subject: "rpc.v1.Auth.Identities.List",

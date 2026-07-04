@@ -135,12 +135,12 @@ Rules:
 ### Application dependencies
 
 Trellis does not inject application dependencies into handlers. Handler
-arguments contain only Trellis-owned runtime data. Application resources
-such as databases, loggers, repositories, schedulers, search indexes, and
-SQL outbox instances are supplied by normal JavaScript closure or factory
-patterns. Trellis runtime context remains separate from application
-dependencies — do not merge app dependencies into `context`, and do not
-pass dependency bags as handler registration options.
+arguments contain only Trellis-owned runtime data. Application resources such as
+databases, loggers, repositories, schedulers, search indexes, and SQL outbox
+instances are supplied by normal JavaScript closure or factory patterns. Trellis
+runtime context remains separate from application dependencies — do not merge
+app dependencies into `context`, and do not pass dependency bags as handler
+registration options.
 
 Example:
 
@@ -183,28 +183,28 @@ Rules:
   publication must be coupled to service-local SQL state
 - TypeScript services create a SQL outbox helper with
   `service.createSqlOutbox(...)` using generic SQL executor and
-  transaction-runner options; the returned object is a plain dependency
-  that handlers close over at registration
-- handlers receive Trellis-owned args only; SQL outbox access comes from
-  the closed-over dependency
-- `outbox.transaction(...)` is the boundary for application SQL writes and
-  all event enqueues that must commit atomically; service code owns the
-  database lifecycle and transaction boundaries
+  transaction-runner options; the returned object is a plain dependency that
+  handlers close over at registration
+- handlers receive Trellis-owned args only; SQL outbox access comes from the
+  closed-over dependency
+- `outbox.transaction(...)` is the boundary for application SQL writes and all
+  event enqueues that must commit atomically; service code owns the database
+  lifecycle and transaction boundaries
 - transaction-scoped `event.*.*.enqueue(...)` prepares and validates events,
   then writes prepared event rows into Trellis helper tables through the
   transaction-scoped executor
-- Trellis owns the SQL outbox/inbox helper-table schema and versioned
-  migration artifacts exposed by `getSqlOutboxMigrations(...)`; services
-  own table names and run the migrations with their normal migration tooling
-- after a successful transaction commit, Trellis notifies the dispatcher
-  only when at least one row was enqueued; no dispatcher notification
-  happens for a rolled-back or rejected transaction
-- outbox dispatcher wakeups should be debounced and single-flight, but they
-  are latency optimizations only; durable retry and recovery depend on
-  persisted outbox state plus explicit dispatch or recovery scans
-- NATS KV outbox/inbox helpers remain non-SQL durable helpers for dedupe
-  and queue storage, but they are not transactional with unrelated database
-  side effects
+- Trellis owns the SQL outbox/inbox helper-table schema and versioned migration
+  artifacts exposed by `getSqlOutboxMigrations(...)`; services own table names
+  and run the migrations with their normal migration tooling
+- after a successful transaction commit, Trellis notifies the dispatcher only
+  when at least one row was enqueued; no dispatcher notification happens for a
+  rolled-back or rejected transaction
+- outbox dispatcher wakeups should be debounced and single-flight, but they are
+  latency optimizations only; durable retry and recovery depend on persisted
+  outbox state plus explicit dispatch or recovery scans
+- NATS KV outbox/inbox helpers remain non-SQL durable helpers for dedupe and
+  queue storage, but they are not transactional with unrelated database side
+  effects
 
 Example:
 
@@ -248,8 +248,9 @@ await service.handle.rpc.partner.update(createPartnerUpdateHandler(deps));
 ```
 
 **With job creation:**
+
 ```ts
-async ({ input, deps }) => {
+const handler = async ({ input, deps }) => {
   const updated = await deps.outbox.transaction(async ({ tx, event, job }) => {
     await deps.partnerRepo.update(tx, input.partner);
 
@@ -271,14 +272,11 @@ async ({ input, deps }) => {
 ```ts
 import { defineServiceContract, Result } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import {
-  HealthResponseSchema,
-  HealthRpcSchema,
-} from "@qlever-llc/trellis/health";
+import { Type } from "typebox";
 
 const schemas = {
-  HealthRequest: HealthRpcSchema,
-  HealthResponse: HealthResponseSchema,
+  EchoRequest: Type.Object({ message: Type.String() }),
+  EchoResponse: Type.Object({ message: Type.String() }),
 } as const;
 
 export const serviceContract = defineServiceContract(
@@ -288,10 +286,10 @@ export const serviceContract = defineServiceContract(
     displayName: "Echo Service",
     description: "A minimal installable Trellis service example.",
     rpc: {
-      "Echo.Health": {
+      "Echo.Ping": {
         version: "v1",
-        input: ref.schema("HealthRequest"),
-        output: ref.schema("HealthResponse"),
+        input: ref.schema("EchoRequest"),
+        output: ref.schema("EchoResponse"),
         capabilities: { call: [] },
         errors: [ref.error("UnexpectedError")],
       },
@@ -309,16 +307,14 @@ const service = await TrellisService.connect({
   server: {},
 });
 
-export async function health() {
-  return Result.ok({
-    status: "healthy",
-    service: "echo",
-    timestamp: new Date().toISOString(),
-    checks: [],
-  });
+export async function ping({ input }) {
+  return Result.ok({ message: input.message });
 }
 
-await service.handle.rpc.echo.health(health);
+await service.handle.rpc.echo.ping(ping);
+
+service.health.setInfo({ version: "1.0.0" });
+service.health.add("readiness", () => ({ status: "ok" }));
 ```
 
 Rules:
@@ -332,7 +328,7 @@ Rules:
   handles in service-author code
 - the optional `server` block configures service-runtime concerns such as
   logging, default request timeout, event-consumer stream selection,
-  no-responder retry behavior, and extra health checks
+  no-responder retry behavior, and health heartbeat interval
 - `TrellisService.connect(...)` does not run service-owned database migrations,
   including Trellis SQL outbox helper-table migrations; services run those with
   their normal migration tooling before handlers depend on the tables

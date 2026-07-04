@@ -25,6 +25,8 @@ const AGENT_CONTRACT_JSON: &str = r#"{
             "Auth.DeploymentAuthority.GrantOverrides.Remove",
             "Auth.DeploymentAuthority.List",
             "Auth.DeploymentAuthority.Plan",
+            "Auth.DeploymentAuthority.Plans.Get",
+            "Auth.DeploymentAuthority.Plans.List",
             "Auth.DeploymentAuthority.Reconcile",
             "Auth.DeploymentAuthority.Reject",
             "Auth.ServiceInstances.Disable",

@@ -8,22 +8,11 @@
  * @module
  */
 
-import { type Result } from "@qlever-llc/result";
 import type { JsonValue } from "../contracts.ts";
-import { type TrellisError } from "../errors/index.ts";
 import { ulid } from "ulid";
 
 type MaybePromise<T> = T | Promise<T>;
-
-/**
- * A health check function that returns a Result indicating health status.
- *
- * The function should return:
- * - `Result.ok(true)` when the check passes
- * - `Result.ok(false)` when the check fails without an error
- * - `Result.err(error)` when the check fails with an error
- */
-export type HealthCheckFn = () => Promise<Result<boolean, TrellisError>>;
+type HealthStatus = "healthy" | "unhealthy" | "degraded";
 
 /**
  * Result of a single health check.
@@ -74,14 +63,14 @@ export type HealthHeartbeat = {
     version?: string;
     info?: Record<string, JsonValue>;
   };
-  status: HealthResponse["status"];
+  status: HealthStatus;
   summary?: string;
   checks: HealthCheckResult[];
 };
 
 function summarizeHealthStatus(
   results: readonly Pick<HealthCheckResult, "status">[],
-): HealthResponse["status"] {
+): HealthStatus {
   const allOk = results.every((r) => r.status === "ok");
   const anyOk = results.some((r) => r.status === "ok");
   return allOk ? "healthy" : anyOk ? "degraded" : "unhealthy";
@@ -117,27 +106,6 @@ function annotateServiceHealthCheck(
   };
 }
 
-function normalizeLegacyHealthCheck(
-  check: HealthCheckFn,
-): ServiceHealthCheckFn {
-  return async () => {
-    const result = await check();
-    if (result.isErr()) {
-      return {
-        status: "failed",
-        error: result.error.message,
-        summary: result.error.message,
-        info: {
-          errorType: result.error.name,
-          errorId: result.error.id,
-        },
-      };
-    }
-
-    return { status: result.take() ? "ok" : "failed" };
-  };
-}
-
 function detectRuntime(): {
   runtime: HealthHeartbeat["service"]["runtime"];
   runtimeVersion?: string;
@@ -159,46 +127,7 @@ function detectRuntime(): {
   return { runtime: "unknown" };
 }
 
-/**
- * Aggregated health response for a service.
- */
-export type HealthResponse = {
-  /** Overall status: "healthy" if all pass, "unhealthy" if all fail, "degraded" if mixed */
-  status: "healthy" | "unhealthy" | "degraded";
-  /** Name of the service */
-  service: string;
-  /** ISO timestamp of when the health check was performed */
-  timestamp: string;
-  /** Individual health check results */
-  checks: HealthCheckResult[];
-};
-
-/**
- * Runs a single health check and returns the result.
- *
- * @param name - Name to identify this health check
- * @param check - The health check function to run
- * @returns A HealthCheckResult with status, latency, and optional error
- *
- * @example
- * ```typescript
- * const result = await runHealthCheck("database", async () => {
- *   const connected = await db.ping();
- *   return Result.ok(connected);
- * });
- *
- * if (result.status === "ok") {
- *   console.log(`Database check passed in ${result.latencyMs}ms`);
- * }
- * ```
- */
-export async function runHealthCheck(
-  name: string,
-  check: HealthCheckFn,
-): Promise<HealthCheckResult> {
-  return await runServiceHealthCheck(name, normalizeLegacyHealthCheck(check));
-}
-
+/** Runs one service health check and records latency/error details. */
 export async function runServiceHealthCheck(
   name: string,
   check: ServiceHealthCheckFn,
@@ -231,58 +160,16 @@ export async function runServiceHealthCheck(
   }
 }
 
-/**
- * Runs all health checks and returns an aggregated health response.
- *
- * @param service - Name of the service being checked
- * @param checks - Record of check names to check functions
- * @returns A HealthResponse with overall status and individual check results
- *
- * @example
- * ```typescript
- * const health = await runAllHealthChecks("api-service", {
- *   database: async () => Result.ok(await db.ping()),
- *   cache: async () => Result.ok(await redis.ping()),
- *   queue: async () => Result.ok(await rabbit.ping()),
- * });
- *
- * if (health.status === "healthy") {
- *   console.log("All systems operational");
- * } else if (health.status === "degraded") {
- *   console.warn("Some systems are failing");
- * } else {
- *   console.error("Service is unhealthy");
- * }
- * ```
- */
-export async function runAllHealthChecks(
-  service: string,
-  checks: Record<string, HealthCheckFn>,
-): Promise<HealthResponse> {
-  const normalizedChecks = Object.fromEntries(
-    Object.entries(checks).map((
-      [name, check],
-    ) => [name, normalizeLegacyHealthCheck(check)]),
-  );
-  return await runAllServiceHealthChecks(service, normalizedChecks);
-}
-
+/** Runs service health checks and returns individual heartbeat check entries. */
 export async function runAllServiceHealthChecks(
-  service: string,
   checks: Record<string, ServiceHealthCheckFn>,
-): Promise<HealthResponse> {
-  const results = await Promise.all(
+): Promise<HealthCheckResult[]> {
+  return await Promise.all(
     Object.entries(checks).map(([name, fn]) => runServiceHealthCheck(name, fn)),
   );
-
-  return {
-    status: summarizeHealthStatus(results),
-    service,
-    timestamp: new Date().toISOString(),
-    checks: results,
-  };
 }
 
+/** Builds a `Health.Heartbeat` event payload from service metadata and checks. */
 export function createHealthHeartbeat(args: {
   serviceName: string;
   kind?: HealthHeartbeat["service"]["kind"];
@@ -319,6 +206,7 @@ export function createHealthHeartbeat(args: {
   };
 }
 
+/** Mutable health heartbeat state owned by a connected service or device. */
 export class ServiceHealth {
   readonly serviceName: string;
   readonly kind: HealthHeartbeat["service"]["kind"];
@@ -338,7 +226,6 @@ export class ServiceHealth {
     contractId: string;
     contractDigest: string;
     publishIntervalMs: number;
-    checks?: Record<string, HealthCheckFn>;
   }) {
     this.serviceName = args.serviceName;
     this.kind = args.kind ?? "service";
@@ -347,10 +234,6 @@ export class ServiceHealth {
     this.contractDigest = args.contractDigest;
     this.startedAt = new Date().toISOString();
     this.publishIntervalMs = args.publishIntervalMs;
-
-    for (const [name, check] of Object.entries(args.checks ?? {})) {
-      this.#checks.set(name, normalizeLegacyHealthCheck(check));
-    }
   }
 
   setInfo(info: ServiceHealthInfo | ServiceHealthInfoFn): void {
@@ -370,10 +253,8 @@ export class ServiceHealth {
   }
 
   async checks(): Promise<HealthCheckResult[]> {
-    const results = await Promise.all(
-      Array.from(this.#checks.entries()).map(([name, check]) =>
-        runServiceHealthCheck(name, check)
-      ),
+    const results = await runAllServiceHealthChecks(
+      Object.fromEntries(this.#checks),
     );
     return results.map((result) =>
       annotateServiceHealthCheck(result, {
@@ -382,16 +263,6 @@ export class ServiceHealth {
         contractDigest: this.contractDigest,
       })
     );
-  }
-
-  async response(): Promise<HealthResponse> {
-    const results = await this.checks();
-    return {
-      status: summarizeHealthStatus(results),
-      service: this.serviceName,
-      timestamp: new Date().toISOString(),
-      checks: results,
-    };
   }
 
   async heartbeat(): Promise<HealthHeartbeat> {

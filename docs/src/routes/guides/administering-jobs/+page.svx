@@ -13,7 +13,7 @@ runtime is Trellis infrastructure that implements its admin behavior:
   the `JOBS` JetStream source of truth
 - **Global RPCs** — `Jobs.Query`, `Jobs.Inspect`, `Jobs.GetKey`,
   `Jobs.Cancel`, `Jobs.Retry`, `Jobs.ReplayDLQ`, `Jobs.DismissDLQ`,
-  `Jobs.ListDLQ`, `Jobs.ListServices`, `Jobs.Health`
+  `Jobs.ListDLQ`, `Jobs.ListServices`
 - **Workbench feed** — `Jobs.Watch` invalidation frames for live query and
   inspection views
 - **Janitor** — background cleanup of expired jobs and stale projection entries

@@ -194,7 +194,6 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .await
         .expect("connect Jobs admin client");
     let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(&admin_client);
-    wait_for_jobs_health(&jobs_admin).await;
 
     let job = manager
         .create(JOB_TYPE, json!({ "marker": MARKER }))
@@ -255,29 +254,11 @@ fn jobs_admin_client_contract(
         .use_ref(
             "jobs",
             trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Health", "Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"]),
+                .with_rpc_call(["Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"]),
         )
         .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
-}
-
-async fn wait_for_jobs_health(jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        match jobs_admin.rpc().jobs().health().await {
-            Ok(health) => {
-                assert_eq!(health.service, "trellis.jobs");
-                assert_eq!(health.status, json!("healthy"));
-                return;
-            }
-            Err(error) if tokio::time::Instant::now() < deadline => {
-                let _ = error;
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            Err(error) => panic!("Jobs.Health did not succeed before timeout: {error}"),
-        }
-    }
 }
 
 async fn wait_for_listed_job(

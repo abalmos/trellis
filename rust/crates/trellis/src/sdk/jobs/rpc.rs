@@ -43,18 +43,6 @@ impl RpcDescriptor for JobsGetKeyRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
-/// Descriptor for `Jobs.Health`.
-pub struct JobsHealthRpc;
-impl RpcDescriptor for JobsHealthRpc {
-    type Input = Empty;
-    type Output = super::types::JobsHealthResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_HEALTH_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_HEALTH_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Jobs.Health";
-    const SUBJECT: &'static str = "rpc.v1.Jobs.Health";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
-    const ERRORS: &'static [&'static str] = &["UnexpectedError"];
-}
 /// Descriptor for `Jobs.Inspect`.
 pub struct JobsInspectRpc;
 impl RpcDescriptor for JobsInspectRpc {

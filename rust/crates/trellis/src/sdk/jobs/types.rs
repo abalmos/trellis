@@ -425,14 +425,6 @@ pub struct JobsGetKeyResponse {
     pub stale_takeover_count: i64,
     pub r#type: String,
 }
-/// Generated schema type `JobsHealthResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JobsHealthResponse {
-    pub checks: Vec<BTreeMap<String, Value>>,
-    pub service: String,
-    pub status: Value,
-    pub timestamp: String,
-}
 /// Generated schema type `JobsInspectRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsInspectRequest {

@@ -159,11 +159,11 @@ fn builder_supports_uses_rpc_kv_store_and_job_queue_resources() {
         ContractKind::Service,
     )
     .schema(
-        "HealthRequest",
+        "JobsQueryRequest",
         json!({ "type": "object", "properties": {} }),
     )
     .schema(
-        "HealthResponse",
+        "JobsQueryResponse",
         json!({
             "type": "object",
             "required": ["ok"],
@@ -191,12 +191,12 @@ fn builder_supports_uses_rpc_kv_store_and_job_queue_resources() {
         },
     )
     .rpc(
-        "Jobs.Health",
+        "Jobs.Query",
         trellis_contracts::rpc(
             "v1",
-            "rpc.v1.Jobs.Health",
-            "HealthRequest",
-            "HealthResponse",
+            "rpc.v1.Jobs.Query",
+            "JobsQueryRequest",
+            "JobsQueryResponse",
         )
         .with_call_capabilities(["admin.read", "service"])
         .with_error_types(["UnexpectedError"]),
@@ -212,22 +212,22 @@ fn builder_supports_uses_rpc_kv_store_and_job_queue_resources() {
     .job_queue(
         "document-process",
         trellis_contracts::job_queue(
-            schema_ref("HealthRequest"),
-            Some(schema_ref("HealthResponse")),
+            schema_ref("JobsQueryRequest"),
+            Some(schema_ref("JobsQueryResponse")),
         ),
     )
     .build()
     .expect("builder should produce a valid manifest");
 
     assert!(manifest.uses.contains_key("core"));
-    assert!(manifest.rpc.contains_key("Jobs.Health"));
+    assert!(manifest.rpc.contains_key("Jobs.Query"));
     assert!(manifest
         .capabilities
         .contains_key("example.jobs::admin.read"));
     assert_eq!(
         manifest
             .rpc
-            .get("Jobs.Health")
+            .get("Jobs.Query")
             .and_then(|rpc| rpc.capabilities.as_ref())
             .and_then(|capabilities| capabilities.call.as_ref()),
         Some(&vec![

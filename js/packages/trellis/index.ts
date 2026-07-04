@@ -30,10 +30,8 @@ export type { InferSchemaType, JsonValue, TrellisAPI } from "./contracts.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
 export type {
-  HealthCheckFn,
   HealthCheckResult,
   HealthHeartbeat,
-  HealthResponse,
   ServiceHealthCheck,
   ServiceHealthCheckFn,
   ServiceHealthInfo,
@@ -45,11 +43,7 @@ export {
   HealthHeartbeatSchema,
   HealthHeartbeatServiceSchema,
   HealthInfoSchema,
-  HealthResponseSchema,
-  HealthRpcSchema,
-  runAllHealthChecks,
   runAllServiceHealthChecks,
-  runHealthCheck,
   runServiceHealthCheck,
   ServiceHealth,
 } from "./health.ts";
@@ -151,7 +145,6 @@ export type {
   JobProgress,
   JobsFacade,
   JobsFacadeOf,
-  JobsHealth,
   JobSnapshot,
   JobState,
   JobTypeMetadata,

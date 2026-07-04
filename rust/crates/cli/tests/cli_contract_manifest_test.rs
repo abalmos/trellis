@@ -49,6 +49,8 @@ fn agent_contract_manifest_validates_and_declares_expected_auth_and_core_surface
         "Auth.DeploymentAuthority.GrantOverrides.Remove",
         "Auth.DeploymentAuthority.List",
         "Auth.DeploymentAuthority.Plan",
+        "Auth.DeploymentAuthority.Plans.Get",
+        "Auth.DeploymentAuthority.Plans.List",
         "Auth.DeploymentAuthority.Reconcile",
         "Auth.DeploymentAuthority.Reject",
     ] {
@@ -118,6 +120,6 @@ fn agent_contract_digest_matches_js_projection() {
     assert_eq!(
         trellis_rs::auth::contract_digest(trellis_cli::agent_contract::agent_contract_json())
             .expect("agent contract digest"),
-        "w9BQTqdBuMPnq1uq_JO1BSw391uZE3ITyGUUx1BIy_w"
+        "GxoBJuhtgVIv4FlFu13fzzfJrGCSrisIqD4OlRm59kY"
     );
 }

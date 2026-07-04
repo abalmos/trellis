@@ -22,7 +22,6 @@ request-correlation patterns.
 
 Every service exposes:
 
-- `<Service>.Health` RPC
 - baseline `Health.Heartbeat` event publishing through the shared Trellis health
   contract
 - optional `<Service>.Stats` RPC
@@ -45,9 +44,6 @@ const service = await TrellisService.connect({
   sessionKeySeed: config.sessionKeySeed,
   server: {
     log,
-    healthChecks: {
-      db: () => db.ping(),
-    },
   },
 });
 

@@ -1,5 +1,6 @@
 export {
   HealthCheckResultSchema,
-  HealthResponseSchema,
-  HealthRpcSchema,
+  HealthHeartbeatSchema,
+  HealthHeartbeatServiceSchema,
+  HealthInfoSchema,
 } from "./health_schemas.ts";

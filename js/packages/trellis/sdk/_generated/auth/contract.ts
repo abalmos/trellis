@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "mYTkP38a_qMbmA5a0t9z7zddGzSeQ4JR4pve5jvUWks" as const;
+  "GJaxa9eLvCBahgub__QH6vCrMMZM4qEdtcVU-OsjQ7A" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -674,18 +674,6 @@ export const CONTRACT = {
       "input": { "schema": "AuthDevicesRemoveRequest" },
       "output": { "schema": "AuthDevicesRemoveResponse" },
       "subject": "rpc.v1.Auth.Devices.Remove",
-      "version": "v1",
-    },
-    "Auth.Health": {
-      "capabilities": { "call": [] },
-      "docs": {
-        "markdown": "Returns auth service health details.",
-        "summary": "Check auth service health.",
-      },
-      "errors": [{ "type": "UnexpectedError" }],
-      "input": { "schema": "HealthRequest" },
-      "output": { "schema": "HealthResponse" },
-      "subject": "rpc.v1.Auth.Health",
       "version": "v1",
     },
     "Auth.Identities.List": {
@@ -9434,41 +9422,6 @@ export const CONTRACT = {
         },
       },
       "required": ["deploymentId", "disabled"],
-      "type": "object",
-    },
-    "HealthRequest": { "properties": {}, "type": "object" },
-    "HealthResponse": {
-      "properties": {
-        "checks": {
-          "items": {
-            "properties": {
-              "error": { "type": "string" },
-              "info": { "patternProperties": { "^.*$": {} }, "type": "object" },
-              "latencyMs": { "type": "number" },
-              "name": { "type": "string" },
-              "status": {
-                "anyOf": [{ "const": "ok", "type": "string" }, {
-                  "const": "failed",
-                  "type": "string",
-                }],
-              },
-              "summary": { "type": "string" },
-            },
-            "required": ["name", "status", "latencyMs"],
-            "type": "object",
-          },
-          "type": "array",
-        },
-        "service": { "type": "string" },
-        "status": {
-          "anyOf": [{ "const": "healthy", "type": "string" }, {
-            "const": "unhealthy",
-            "type": "string",
-          }, { "const": "degraded", "type": "string" }],
-        },
-        "timestamp": { "format": "date-time", "type": "string" },
-      },
-      "required": ["status", "service", "timestamp", "checks"],
       "type": "object",
     },
     "ImplementationOffer": {

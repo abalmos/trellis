@@ -155,10 +155,6 @@ import {
 } from "@qlever-llc/trellis/auth";
 import { defineServiceContract } from "@qlever-llc/trellis/contracts";
 import {
-  HealthResponseSchema,
-  HealthRpcSchema,
-} from "@qlever-llc/trellis/health";
-import {
   type AuthConnectionsClosedEvent,
   AuthConnectionsClosedEventSchema,
   type AuthConnectionsKickedEvent,
@@ -361,8 +357,6 @@ const schemas = {
   AuthDevicesRemoveResponse: AuthDevicesRemoveResponseSchema,
   AuthRequestsValidateRequest: AuthRequestsValidateSchema,
   AuthRequestsValidateResponse: AuthRequestsValidateResponseSchema,
-  HealthRequest: HealthRpcSchema,
-  HealthResponse: HealthResponseSchema,
   AuthConnectionsOpenedEvent: AuthConnectionsOpenedEventSchema,
   AuthConnectionsKickedEvent: AuthConnectionsKickedEventSchema,
   AuthConnectionsClosedEvent: AuthConnectionsClosedEventSchema,
@@ -407,13 +401,6 @@ function attachDocs<const TSurfaces extends Record<string, object>>(
 }
 
 export const TRELLIS_AUTH_RPC = {
-  "Auth.Health": {
-    version: "v1",
-    input: schemaRef("HealthRequest"),
-    output: schemaRef("HealthResponse"),
-    capabilities: { call: [] },
-    errors: ["UnexpectedError"],
-  },
   "Auth.Connections.Kick": {
     version: "v1",
     input: schemaRef("AuthConnectionsKickRequest"),
@@ -963,10 +950,6 @@ export const TRELLIS_AUTH_EVENTS = {
 } as const;
 
 const TRELLIS_AUTH_RPC_DOCS = {
-  "Auth.Health": {
-    summary: "Check auth service health.",
-    markdown: "Returns auth service health details.",
-  },
   "Auth.Connections.Kick": {
     summary: "Kick one connection.",
     markdown: "Disconnects an active authenticated connection.",

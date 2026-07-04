@@ -1410,28 +1410,6 @@ pub struct AuthDevicesRemoveRequest {
 pub struct AuthDevicesRemoveResponse {
     pub success: bool,
 }
-/// Generated schema type `AuthHealthResponse`.
-/// Generated schema type `AuthHealthResponseChecksItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthHealthResponseChecksItem {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<BTreeMap<String, Value>>,
-    #[serde(rename = "latencyMs")]
-    pub latency_ms: f64,
-    pub name: String,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthHealthResponse {
-    pub checks: Vec<AuthHealthResponseChecksItem>,
-    pub service: String,
-    pub status: String,
-    pub timestamp: String,
-}
 /// Generated schema type `AuthIdentitiesListRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthIdentitiesListRequest {

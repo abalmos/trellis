@@ -1,8 +1,6 @@
 export type {
-  HealthCheckFn,
   HealthCheckResult,
   HealthHeartbeat,
-  HealthResponse,
   ServiceHealthCheck,
   ServiceHealthCheckFn,
   ServiceHealthInfo,
@@ -10,9 +8,7 @@ export type {
 } from "./server/health.ts";
 export {
   createHealthHeartbeat,
-  runAllHealthChecks,
   runAllServiceHealthChecks,
-  runHealthCheck,
   runServiceHealthCheck,
   ServiceHealth,
 } from "./server/health.ts";
@@ -21,6 +17,4 @@ export {
   HealthHeartbeatSchema,
   HealthHeartbeatServiceSchema,
   HealthInfoSchema,
-  HealthResponseSchema,
-  HealthRpcSchema,
 } from "./server/health_schemas.ts";

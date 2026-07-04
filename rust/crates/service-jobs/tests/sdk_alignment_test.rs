@@ -1,5 +1,4 @@
 use trellis_rs::sdk::jobs::contract as generated_contract;
-use trellis_rs::sdk::jobs::rpc as generated_rpc;
 use trellis_service_jobs as service_contract;
 
 #[path = "../contracts/trellis_jobs.rs"]
@@ -15,12 +14,6 @@ fn service_contract_constants_match_generated_jobs_sdk() {
         service_contract::CONTRACT_DIGEST,
         generated_contract::CONTRACT_DIGEST
     );
-}
-
-#[test]
-fn service_contract_reexports_generated_rpc_module() {
-    let _: std::marker::PhantomData<service_contract::rpc::JobsHealthRpc> =
-        std::marker::PhantomData::<generated_rpc::JobsHealthRpc>;
 }
 
 #[test]

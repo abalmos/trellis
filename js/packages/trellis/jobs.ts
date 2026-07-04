@@ -251,18 +251,6 @@ export type ServiceInfo = {
   healthy: boolean;
 };
 
-export type JobsHealth = {
-  status: "healthy" | "unhealthy" | "degraded";
-  service: string;
-  timestamp: string;
-  checks: Array<{
-    name: string;
-    status: "ok" | "failed";
-    latencyMs: number;
-    error?: string;
-  }>;
-};
-
 export type JobTypeMetadata = {
   payload: unknown;
   result: unknown;

@@ -1,12 +1,9 @@
 import { assertEquals } from "@std/assert";
 import { AsyncResult, isErr, UnexpectedError } from "@qlever-llc/result";
-import {
-  createAuthHealthHandler,
-  createAuthSessionsListHandler,
-} from "./rpc.ts";
+import { createAuthSessionsListHandler } from "./rpc.ts";
 import type { Session } from "../schemas.ts";
 
-// Retained unit coverage: pure health response shaping and injected logger use.
+// Retained unit coverage: pure session list filtering and injected logger use.
 function matchFilter(filter: string, key: string): boolean {
   const filterParts = filter.split(".");
   const keyParts = key.split(".");
@@ -75,30 +72,6 @@ function createTestLogger(logs: CapturedLog[] = []) {
     },
   };
 }
-
-Deno.test("Auth.Health returns the auth control-plane health response", async () => {
-  const handler = createAuthHealthHandler({
-    logger: createTestLogger(),
-    now: () => new Date("2026-01-01T00:00:00.000Z"),
-  });
-
-  const value = (await handler({ context: { sessionKey: "sk_health" } }))
-    .take();
-
-  assertEquals(value, {
-    status: "healthy",
-    service: "trellis",
-    timestamp: "2026-01-01T00:00:00.000Z",
-    checks: [
-      {
-        name: "auth-rpc",
-        status: "ok",
-        summary: "Auth RPC handlers are mounted.",
-        latencyMs: 0,
-      },
-    ],
-  });
-});
 
 function sessionStorageFromKV(kv: InMemoryKV<Session>) {
   async function entries(filter: string) {

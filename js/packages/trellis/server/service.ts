@@ -49,12 +49,10 @@ import {
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
-  type HealthCheckFn,
   ServiceHealth,
   type ServiceHealthCheckFn,
   type ServiceHealthInfoFn,
 } from "./health.ts";
-import { mountStandardHealthRpc } from "./health_rpc.ts";
 import type { EventDesc, RPCDesc } from "../contracts.ts";
 import type {
   AcceptedOperation,
@@ -369,7 +367,6 @@ type TrellisServiceRuntimeCreateOpts<
   trellisApi?: TTrellisApi;
   version?: string;
   health?: TrellisServiceHealthOpts;
-  healthChecks?: Record<string, HealthCheckFn>;
 };
 
 export type TrellisServiceHealthOpts = {
@@ -382,7 +379,6 @@ export type TrellisServiceServerOpts = {
   stream?: string;
   noResponderRetry?: { maxAttempts?: number; baseDelayMs?: number };
   health?: TrellisServiceHealthOpts;
-  healthChecks?: Record<string, HealthCheckFn>;
 };
 
 function resolveServiceLogger(log?: LoggerLike | false): LoggerLike {
@@ -1770,16 +1766,11 @@ export async function createConnectedService<
     contractId: args.contractId ?? "unknown",
     contractDigest: args.contractDigest ?? "unknown",
     publishIntervalMs: args.server.health?.publishIntervalMs ?? 30_000,
-    checks: args.server.healthChecks,
   });
   health.add("nats", () => ({
     status: args.nc.isClosed() ? "failed" : "ok",
     ...(args.nc.isClosed() ? { summary: "NATS connection closed" } : {}),
   }));
-
-  await mountStandardHealthRpc(server, {
-    response: () => health.response(),
-  });
 
   const heartbeatEventEnabled = Boolean(
     (currentApi.events as Record<string, unknown> | undefined)

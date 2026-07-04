@@ -19,11 +19,9 @@ import type { TypedStore } from "../store.ts";
 // Import the module under test
 import {
   type EventContext,
-  type HealthCheckFn,
   type HealthCheckHandler,
   type HealthCheckResult,
   type HealthInfoHandler,
-  type HealthResponse,
   type OperationHandler,
   type OrderingGroup,
   type RpcHandler,
@@ -254,19 +252,14 @@ Deno.test("TrellisServiceRuntime export exists", () => {
 Deno.test("Health types are re-exported", () => {
   // Verify type exports by creating typed variables
   // If these compile, the types are properly exported
-  const healthCheck: HealthCheckFn = async () => {
-    const { Result } = await import("@qlever-llc/result");
-    return Result.ok(true);
-  };
+  const healthCheck: HealthCheckHandler = () => ({ status: "ok" });
   assertExists(healthCheck);
 
-  const healthResponse: HealthResponse = {
-    status: "healthy",
-    service: "test",
-    timestamp: new Date().toISOString(),
-    checks: [],
-  };
-  assertEquals(healthResponse.status, "healthy");
+  const healthInfo: HealthInfoHandler = () => ({
+    version: "1.0.0",
+    info: { region: "test" },
+  });
+  assertExists(healthInfo);
 
   const healthCheckResult: HealthCheckResult = {
     name: "test-check",

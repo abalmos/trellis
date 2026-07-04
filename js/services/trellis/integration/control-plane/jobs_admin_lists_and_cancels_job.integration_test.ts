@@ -48,7 +48,6 @@ const adminClientContract = defineAppContract(() => ({
       jobs: trellisJobs.use({
         rpc: {
           call: [
-            "Jobs.Health",
             "Jobs.Query",
             "Jobs.Inspect",
             "Jobs.Cancel",
@@ -112,7 +111,6 @@ liveTrellisTest({
       assertEquals(activeJob.id, ref.id);
       assertEquals(activeJob.payload.marker, marker);
 
-      await adminClient.rpc.jobs.health({}).orThrow();
       const listedJob = await runtime.waitFor(async () => {
         const page = await adminClient.rpc.jobs.query({
           service: ref.service,

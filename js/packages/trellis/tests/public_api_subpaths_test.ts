@@ -33,8 +33,7 @@ Deno.test("service, health, and SDK subpaths expose the canonical wrapper API", 
   assertEquals(typeof NodeTrellisService, "function");
   assertEquals("connectInternal" in DenoTrellisService, false);
   assertEquals("connectInternal" in NodeTrellisService, false);
-  assertEquals(typeof healthSurface.HealthRpcSchema, "object");
-  assertEquals(typeof healthSurface.runAllHealthChecks, "function");
+  assertEquals(typeof healthSurface.HealthHeartbeatSchema, "object");
   assertEquals(typeof authSdk.sdk?.use, "function");
   assertEquals(typeof coreSdk.use, "function");
   assertEquals(typeof healthSdk.use, "function");

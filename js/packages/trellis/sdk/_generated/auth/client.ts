@@ -247,10 +247,6 @@ export interface TrellisAuthClient {
         input: Types.AuthDevicesRemoveInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.AuthDevicesRemoveOutput, BaseError>;
-      health(
-        input: Types.AuthHealthInput,
-        opts?: RequestOpts,
-      ): AsyncResult<Types.AuthHealthOutput, BaseError>;
       identitiesList(
         input: Types.AuthIdentitiesListInput,
         opts?: RequestOpts,
@@ -791,7 +787,6 @@ export interface ServiceHandle {
         handler: Types.AuthDevicesProvisionHandler,
       ): Promise<void>;
       devicesRemove(handler: Types.AuthDevicesRemoveHandler): Promise<void>;
-      health(handler: Types.AuthHealthHandler): Promise<void>;
       identitiesList(handler: Types.AuthIdentitiesListHandler): Promise<void>;
       identityGrantsList(
         handler: Types.AuthIdentityGrantsListHandler,

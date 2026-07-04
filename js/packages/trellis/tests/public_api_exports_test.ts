@@ -15,8 +15,7 @@ import {
   err,
   FileInfoSchema,
   HealthCheckResultSchema,
-  HealthResponseSchema,
-  HealthRpcSchema,
+  HealthHeartbeatSchema,
   isErr,
   isOk,
   normalizeCursorQuery,
@@ -90,8 +89,7 @@ Deno.test("root public API includes core runtime, contracts, and result helpers"
   assertEquals(typeof TransferError, "function");
   assertEquals(typeof FileInfoSchema, "object");
   assertEquals(typeof HealthCheckResultSchema, "object");
-  assertEquals(typeof HealthResponseSchema, "object");
-  assertEquals(typeof HealthRpcSchema, "object");
+  assertEquals(typeof HealthHeartbeatSchema, "object");
   assertEquals(typeof ok, "function");
   assertEquals(typeof err, "function");
   assertEquals(typeof isOk, "function");
@@ -182,7 +180,6 @@ Deno.test("root public API stays browser-safe and excludes server runtime export
   assertEquals("OperationTransport" in trellis, false);
   assertEquals("observeNatsTrellisConnection" in trellis, false);
   assertEquals("observeTrellisConnection" in trellis, false);
-  assertEquals("runAllHealthChecks" in trellis, true);
   assertEquals("buildLoginUrl" in trellis, false);
   assertEquals("fetchPortalFlowState" in trellis, false);
   assertEquals("portalFlowIdFromUrl" in trellis, false);

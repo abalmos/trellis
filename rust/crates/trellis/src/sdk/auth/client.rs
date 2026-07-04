@@ -364,12 +364,6 @@ impl<'a> AuthRpc<'a> {
             .call::<super::rpc::AuthDevicesRemoveRpc>(input)
             .await
     }
-    /// Call `Auth.Health`.
-    pub async fn health(&self) -> Result<super::types::AuthHealthResponse, TrellisClientError> {
-        self.inner
-            .call::<super::rpc::AuthHealthRpc>(&super::rpc::Empty {})
-            .await
-    }
     /// Call `Auth.Identities.List`.
     pub async fn identities_list(
         &self,

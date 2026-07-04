@@ -32,7 +32,7 @@ connection walkthroughs, and exact public signatures belong in:
 | Library                               | Purpose                                                                                                                         | Use when                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `@qlever-llc/trellis`                 | Canonical core Trellis runtime package: client/device helpers, Result helpers, transfer helpers, and everyday contract builders | Frontend apps, services, CLI tools                     |
-| `@qlever-llc/trellis/health`          | Health schemas, helper functions, and health-check result types                                                                 | Contracts, devices, services, lightweight clients      |
+| `@qlever-llc/trellis/health`          | Health heartbeat schemas, helper functions, and health-check result types                                                       | Contracts, devices, services, lightweight clients      |
 | `@qlever-llc/trellis/service`         | Service-side runtime facade, extracted handler types, and service-only helpers                                                  | Backend services                                       |
 | `@qlever-llc/trellis/service/drizzle` | Optional Drizzle adapters for service-side SQL helpers                                                                          | Services that use Drizzle                              |
 | `@qlever-llc/trellis/service/node`    | Node service adapter                                                                                                            | External Node services                                 |
@@ -53,8 +53,8 @@ connection walkthroughs, and exact public signatures belong in:
 - server helpers live on explicit Trellis subpaths
 - first-party SDKs for Trellis-owned contracts live under explicit
   `@qlever-llc/trellis/sdk/*` subpaths
-- contract modules that only need health schemas should prefer root health
-  re-exports or `@qlever-llc/trellis/health`
+- contract modules that only need health heartbeat schemas should prefer root
+  health re-exports or `@qlever-llc/trellis/health`
 - framework adapters such as `@qlever-llc/trellis-svelte` remain separate
   packages
 - platform packages should expose stable ergonomic surfaces and hide

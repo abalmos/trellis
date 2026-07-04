@@ -6,7 +6,6 @@ type JobsRpcRegistrar = {
   handle: {
     rpc: {
       jobs: {
-        health(handler: JobsAdminHandlers["health"]): Promise<void>;
         query(handler: JobsAdminHandlers["query"]): Promise<void>;
         inspect(handler: JobsAdminHandlers["inspect"]): Promise<void>;
         cancel(handler: JobsAdminHandlers["cancel"]): Promise<void>;
@@ -23,7 +22,6 @@ export async function registerJobsAdmin(deps: {
   trellis: JobsRpcRegistrar;
   handlers: JobsAdminHandlers;
 }): Promise<void> {
-  await deps.trellis.handle.rpc.jobs.health(deps.handlers.health);
   await deps.trellis.handle.rpc.jobs.query(deps.handlers.query);
   await deps.trellis.handle.rpc.jobs.inspect(deps.handlers.inspect);
   await deps.trellis.handle.rpc.jobs.cancel(deps.handlers.cancel);

@@ -77,18 +77,6 @@ type AuthSessionsMeResponse = {
   service: AuthenticatedService | null;
 };
 
-type AuthHealthResponse = {
-  status: "healthy";
-  service: "trellis";
-  timestamp: string;
-  checks: Array<{
-    name: string;
-    status: "ok";
-    summary: string;
-    latencyMs: number;
-  }>;
-};
-
 type UserProjectionStorage = Pick<SqlUserProjectionRepository, "get">;
 type CapabilityGroupStorage = CapabilityGroupLoader;
 type DeviceActivationStorage = Pick<SqlDeviceActivationRepository, "get">;
@@ -172,33 +160,6 @@ type SessionContext = {
   };
   sessionKey: string;
 };
-
-/** Creates the Auth.Health RPC handler for the auth control plane. */
-export function createAuthHealthHandler(deps: {
-  logger: Pick<SessionRpcLogger, "trace">;
-  now?: () => Date;
-}) {
-  return async ({ context }: { context?: Partial<SessionContext> }) => {
-    deps.logger.trace(
-      { rpc: "Auth.Health", sessionKey: context?.sessionKey },
-      "RPC request",
-    );
-    const now = deps.now ?? (() => new Date());
-    return Result.ok<AuthHealthResponse>({
-      status: "healthy",
-      service: "trellis",
-      timestamp: now().toISOString(),
-      checks: [
-        {
-          name: "auth-rpc",
-          status: "ok",
-          summary: "Auth RPC handlers are mounted.",
-          latencyMs: 0,
-        },
-      ],
-    });
-  };
-}
 
 type ValidateRequestInput = {
   sessionKey: string;

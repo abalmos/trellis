@@ -10,10 +10,6 @@ import {
   defineServiceContract,
   Result,
 } from "@qlever-llc/trellis";
-import {
-  HealthResponseSchema,
-  HealthRpcSchema,
-} from "@qlever-llc/trellis/health";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { TrellisTestRuntime } from "../index.ts";
 import { Type } from "typebox";
@@ -35,27 +31,11 @@ Deno.test("TrellisTestRuntime.start requires explicit trellis command", async ()
   );
 });
 
-const runtimeProcessContract = defineServiceContract(
-  {
-    schemas: {
-      HealthRequest: HealthRpcSchema,
-      HealthResponse: HealthResponseSchema,
-    },
-  },
-  (ref) => ({
-    id: "trellis.test.runtime-process@v1",
-    displayName: "Trellis Test Runtime Process Service",
-    description: "Verifies public service bootstrap against a spawned runtime.",
-    rpc: {
-      "RuntimeProcess.Health": {
-        version: "v1",
-        input: ref.schema("HealthRequest"),
-        output: ref.schema("HealthResponse"),
-        errors: [],
-      },
-    },
-  }),
-);
+const runtimeProcessContract = defineServiceContract({}, () => ({
+  id: "trellis.test.runtime-process@v1",
+  displayName: "Trellis Test Runtime Process Service",
+  description: "Verifies public service bootstrap against a spawned runtime.",
+}));
 
 const entitySchemas = {
   Empty: Type.Object({}),

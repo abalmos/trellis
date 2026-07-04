@@ -6,7 +6,6 @@ mod connected;
 mod core_bootstrap;
 mod descriptor;
 mod error;
-mod health;
 mod operations;
 mod publisher;
 mod request_loop;
@@ -32,7 +31,6 @@ pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{
     DeclaredRpcError, HandlerResult, SchemaValidationIssue, ServerError, ValidationIssue,
 };
-pub use health::{HealthCheck, HealthReport};
 pub use operations::{
     control_subject, AcceptedOperation, InMemoryOperationRuntime, OperationControl,
     OperationControlRequest, OperationDescriptor, OperationError, OperationFailure,

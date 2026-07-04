@@ -1069,10 +1069,9 @@ mutate projected job state directly.
 
 | RPC                 | Input                                                           | Output                      | Description                                |
 | ------------------- | --------------------------------------------------------------- | --------------------------- | ------------------------------------------ |
-| `Jobs.Health`       | `{}`                                                            | health payload              | Check jobs admin service health            |
 | `Jobs.ListServices` | `{ offset?: number; limit: number }`                            | `PageResponse<ServiceInfo>` | List services and observed worker presence |
 | `Jobs.Query`        | workbench filters/search/sort/group/page                        | workbench rows/groups/stats | Query jobs for admin workbenches           |
-| `Jobs.Inspect`  | `{ id }`                                                        | inspection payload            | Get job, timeline, attempts, and relations |
+| `Jobs.Inspect`      | `{ id }`                                                        | inspection payload          | Get job, timeline, attempts, and relations |
 | `Jobs.GetKey`       | `{ service, type, key }`                                        | key status payload          | Inspect keyed concurrency state            |
 | `Jobs.Retry`        | `{ id, reason? }`                                               | `{ job: Job }`              | Manually retry an eligible job             |
 | `Jobs.Cancel`       | `{ id, reason? }`                                               | `{ job: Job }`              | Request cooperative cancellation           |
@@ -1080,8 +1079,8 @@ mutate projected job state directly.
 | `Jobs.ReplayDLQ`    | `{ id, reason? }`                                               | `{ job: Job }`              | Replay job from DLQ                        |
 | `Jobs.DismissDLQ`   | `{ id, reason? }`                                               | `{ job: Job }`              | Dismiss dead-letter job                    |
 
-| Feed         | Input                | Frames                                                          | Description                         |
-| ------------ | -------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| Feed         | Input                | Frames                                                         | Description                           |
+| ------------ | -------------------- | -------------------------------------------------------------- | ------------------------------------- |
 | `Jobs.Watch` | `{ jobId?, query? }` | `ready`, `jobChanged`, `jobInspectChanged`, `queryInvalidated` | Invalidate workbench/inspection views |
 
 `Jobs.Query` performs server-side search, sort, grouping, and stats for the

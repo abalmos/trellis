@@ -165,9 +165,9 @@ const jobsContract: TrellisContractV1 = {
   kind: "service",
   schemas: { Empty: { type: "object" } },
   rpc: {
-    "Jobs.Health": {
+    "Jobs.Query": {
       version: "v1",
-      subject: "rpc.v1.Jobs.Health",
+      subject: "rpc.v1.Jobs.Query",
       input: { schema: "Empty" },
       output: { schema: "Empty" },
     },
@@ -474,7 +474,7 @@ Deno.test("accepted-offer NATS materializer adds Jobs runtime grants", async () 
         surfaces: [{
           contractId: jobsContract.id,
           kind: "rpc",
-          name: "Jobs.Health",
+          name: "Jobs.Query",
           action: "call",
         }],
       },

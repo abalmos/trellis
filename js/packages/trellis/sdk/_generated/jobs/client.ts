@@ -69,10 +69,6 @@ export interface TrellisJobsClient {
         input: Types.JobsGetKeyInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsGetKeyOutput, BaseError>;
-      health(
-        input: Types.JobsHealthInput,
-        opts?: RequestOpts,
-      ): AsyncResult<Types.JobsHealthOutput, BaseError>;
       inspect(
         input: Types.JobsInspectInput,
         opts?: RequestOpts,
@@ -162,7 +158,6 @@ export interface ServiceHandle {
       cancel(handler: Types.JobsCancelHandler): Promise<void>;
       dismissDLQ(handler: Types.JobsDismissDLQHandler): Promise<void>;
       getKey(handler: Types.JobsGetKeyHandler): Promise<void>;
-      health(handler: Types.JobsHealthHandler): Promise<void>;
       inspect(handler: Types.JobsInspectHandler): Promise<void>;
       listDLQ(handler: Types.JobsListDLQHandler): Promise<void>;
       listServices(handler: Types.JobsListServicesHandler): Promise<void>;
