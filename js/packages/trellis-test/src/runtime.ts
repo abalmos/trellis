@@ -1,4 +1,4 @@
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { Kvm } from "@nats-io/kv";
 import type { ConsumerInfo } from "@nats-io/jetstream";
 import { connect, credsAuthenticator } from "@nats-io/transport-deno";
@@ -38,6 +38,10 @@ import {
   type TrellisProcessHandle,
 } from "./trellis_process.ts";
 import { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
+import {
+  removeStaleMarkedDirectories,
+  writeTrellisTestOwnerMarker,
+} from "./cleanup.ts";
 import type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
@@ -48,6 +52,7 @@ import type {
   TrellisTestContractLike,
   TrellisTestControlPlane,
   TrellisTestRawAuthConnectionPresence,
+  TrellisTestRawStateEntry,
   TrellisTestRuntimeStartOptions,
   TrellisTestServiceKey,
   WaitForOptions,
@@ -69,6 +74,9 @@ type RuntimeTimeouts = {
   waitForMs: number;
   shutdownMs: number;
 };
+
+const WORKDIR_PREFIX = "trellis-test-";
+const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
 
 /** Runs an isolated Trellis control plane and NATS server for integration tests. */
 export class TrellisTestRuntime implements AsyncDisposable {
@@ -216,7 +224,13 @@ export class TrellisTestRuntime implements AsyncDisposable {
     if (options.nats !== undefined && options.nats !== "container") {
       throw new Error("TrellisTestRuntime only supports nats: 'container'");
     }
-    const workdir = await Deno.makeTempDir({ prefix: "trellis-test-" });
+    const workdir = await Deno.makeTempDir({ prefix: WORKDIR_PREFIX });
+    await writeTrellisTestOwnerMarker(workdir, WORKDIR_OWNER_MARKER);
+    await removeStaleMarkedDirectories({
+      parent: dirname(workdir),
+      prefix: WORKDIR_PREFIX,
+      markerName: WORKDIR_OWNER_MARKER,
+    });
     let nats: NatsTestContainer | undefined;
     let controlPlane: TrellisProcessHandle | undefined;
     try {
@@ -441,6 +455,24 @@ export class TrellisTestRuntime implements AsyncDisposable {
     });
     try {
       const kv = await new Kvm(nc).open("trellis_connections");
+      await kv.put(args.key, JSON.stringify(args.value));
+    } finally {
+      await nc.close().catch(() => undefined);
+    }
+  }
+
+  /** Seeds one raw state KV entry for malformed-entry tests. */
+  async seedRawStateEntry(args: TrellisTestRawStateEntry): Promise<void> {
+    const nc = await connect({
+      servers: this.#nats.natsUrl,
+      authenticator: credsAuthenticator(
+        await Deno.readFile(
+          join(this.workdir, "nats", "creds", "auth-auth.creds"),
+        ),
+      ),
+    });
+    try {
+      const kv = await new Kvm(nc).open("trellis_state");
       await kv.put(args.key, JSON.stringify(args.value));
     } finally {
       await nc.close().catch(() => undefined);

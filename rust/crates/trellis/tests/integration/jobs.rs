@@ -16,7 +16,7 @@ use trellis_rs::jobs::{
 };
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
-    JobsListDLQRequest, JobsListServicesRequest, JobsListServicesResponse,
+    JobsListServicesRequest, JobsListServicesResponse, JobsQueryRequest,
 };
 use trellis_rs::service::{ConnectedServiceRuntime, ServerError};
 
@@ -1189,27 +1189,34 @@ async fn wait_for_admin_services(
 async fn wait_for_admin_dlq_job(
     jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
     job_id: &str,
-) -> trellis_rs::sdk::jobs::types::JobsListDLQResponseEntriesItem {
+) -> trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let page = jobs_admin
             .rpc()
             .jobs()
-            .list_dlq(&JobsListDLQRequest {
+            .query(&JobsQueryRequest {
+                group_by: None,
+                queue_key: None,
+                runtime_band: None,
+                search: None,
                 service: None,
+                sort: None,
+                state: Some(vec!["dead".to_string()]),
+                trigger: None,
                 r#type: None,
-                since: None,
                 offset: None,
                 limit: 20,
+                window: None,
             })
             .await
-            .expect("call generated Jobs.ListDLQ");
+            .expect("call generated Jobs.Query");
         if let Some(job) = page.entries.into_iter().find(|entry| entry.id == job_id) {
             return job;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.ListDLQ did not return job {job_id} before timeout"
+            "Jobs.Query did not return dead job {job_id} before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1233,7 +1240,7 @@ fn jobs_admin_client_contract(
         .use_ref(
             "jobs",
             trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Cancel", "Jobs.ListDLQ", "Jobs.ListServices"]),
+                .with_rpc_call(["Jobs.Cancel", "Jobs.Query", "Jobs.ListServices"]),
         )
         .build()?;
 

@@ -1,5 +1,6 @@
 import type { AuthorizationServer, Client } from "oauth4webapi";
 import {
+  allowInsecureRequests,
   authorizationCodeGrantRequest,
   calculatePKCECodeChallenge,
   ClientSecretPost,
@@ -24,12 +25,20 @@ export type IdpFlowParams = {
   codeVerifier: string;
 };
 
+function oauthRequestOptions(provider: Provider) {
+  const issuer = new URL(provider.issuer);
+  return issuer.protocol === "http:" &&
+      (issuer.hostname === "127.0.0.1" || issuer.hostname === "localhost")
+    ? { [allowInsecureRequests]: true }
+    : undefined;
+}
+
 export async function discoverProviderConfiguration(
   provider: Provider,
 ): Promise<AuthorizationServer> {
   if (provider.supportsDiscovery) {
     const issuer = new URL(provider.issuer);
-    return discoveryRequest(issuer).then((r) =>
+    return discoveryRequest(issuer, oauthRequestOptions(provider)).then((r) =>
       processDiscoveryResponse(issuer, r)
     );
   }
@@ -87,6 +96,7 @@ export async function OAuth2CodeResponse(
     params,
     provider.getRedirectUri(),
     codeVerifier,
+    oauthRequestOptions(provider),
   );
 
   const tokens = await processAuthorizationCodeResponse(as, client, response);

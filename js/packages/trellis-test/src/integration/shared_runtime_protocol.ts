@@ -5,6 +5,7 @@ import type {
 import type {
   TrellisTestAuthorityPlanClassification,
   TrellisTestRawAuthConnectionPresence,
+  TrellisTestRawStateEntry,
   TrellisTestServiceKey,
 } from "../types.ts";
 
@@ -94,6 +95,10 @@ export type TrellisIntegrationCoordinatorEndpoints = {
   };
   "/auth/connection-presence/seed-raw": {
     request: TrellisTestRawAuthConnectionPresence;
+    response: { readonly ok: true };
+  };
+  "/state/seed-raw": {
+    request: TrellisTestRawStateEntry;
     response: { readonly ok: true };
   };
   "/authority/plans/list": {

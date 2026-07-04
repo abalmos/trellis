@@ -30,7 +30,7 @@ const clientContract = defineAppContract(() => ({
 
 liveTrellisTest({
   name:
-    "control-plane.session-logout-uses-provider-logout-redirect returns provider logout redirect and deletes the session",
+    "control-plane.session-logout-uses-provider-logout-redirect returns provider logout redirect and falls back when absent",
   scope: runtimeScopeForCase(CASE_ID),
   runtime: {
     oauthProviders: {
@@ -87,6 +87,32 @@ liveTrellisTest({
     assertEquals(response.status, 200);
     assertEquals(body, { success: true, redirectTo: expected.href });
     assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+
+    const noLogoutKey = await runtime.registerClient({
+      name: caseScopedName("session-logout-no-provider-url-client", CASE_ID),
+      contract: clientContract,
+    });
+    const noLogoutAuth = runtime.clientAuth(noLogoutKey);
+    const noLogoutClient = await TrellisClient.connect({
+      trellisUrl: runtime.trellisUrl,
+      name: caseScopedName("session-logout-no-provider-url-client", CASE_ID),
+      contract: clientContract,
+      auth: noLogoutAuth.auth,
+      onAuthRequired: noLogoutAuth.onAuthRequired,
+    }).orThrow();
+    await noLogoutClient.connection.close();
+
+    const noLogout = await fetchSessionLogout(
+      runtime.trellisUrl,
+      noLogoutKey.seed,
+      { providerLogout: true, returnTo },
+    );
+    assertEquals(noLogout.status, 200);
+    assertEquals(await noLogout.json(), {
+      success: true,
+      redirectTo: returnTo,
+    });
+    assertEquals(await sessionExists(sqlite, noLogoutKey.sessionKey), false);
   },
 });
 

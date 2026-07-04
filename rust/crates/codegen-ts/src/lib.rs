@@ -3892,9 +3892,9 @@ mod tests {
                 },
                 "exports": { "schemas": ["Empty", "JobStatus"] },
                 "rpc": {
-                    "Jobs.Get": {
+                    "Jobs.Query": {
                         "version": "v1",
-                        "subject": "rpc.v1.Jobs.Get",
+                        "subject": "rpc.v1.Jobs.Query",
                         "input": { "schema": "Empty" },
                         "output": { "schema": "JobStatus" },
                         "transfer": { "direction": "receive" }
@@ -3964,7 +3964,7 @@ mod tests {
                     "required": {
                         "jobs": {
                             "contract": "trellis.jobs@v1",
-                            "rpc": { "call": ["Jobs.Get"] },
+                            "rpc": { "call": ["Jobs.Query"] },
                             "operations": { "call": ["Jobs.Run"] },
                             "events": {
                                 "publish": ["Jobs.Updated"],
@@ -4005,7 +4005,7 @@ mod tests {
         assert!(client.contains("\"profiles\": MapStateStoreClient<Types.Settings>;"));
         assert!(client.contains("readonly state: TrellisDemoAppState;"));
         assert!(client.contains(
-            "get(input: JobsSdk.JobsGetInput, opts?: RequestOpts): AsyncResult<JobsSdk.JobsGetOutput, BaseError>;"
+            "query(input: JobsSdk.JobsQueryInput, opts?: RequestOpts): AsyncResult<JobsSdk.JobsQueryOutput, BaseError>;"
         ));
         assert!(client.contains("export interface JobsJobsRunOperation {"));
         assert!(client.contains(
@@ -4033,11 +4033,11 @@ mod tests {
             api.contains("import { OWNED_API as JobsApi } from \"@qlever-llc/trellis/sdk/jobs\";")
         );
         assert!(api.contains("export const USED_API: UsedApi = {"));
-        assert!(api.contains("\"Jobs.Get\": typeof JobsApi.rpc[\"Jobs.Get\"]"));
+        assert!(api.contains("\"Jobs.Query\": typeof JobsApi.rpc[\"Jobs.Query\"]"));
         assert!(api.contains(
             "\"Jobs.Run\": __TrellisGeneratedOptionalOperationIO<typeof JobsApi.operations[\"Jobs.Run\"]>"
         ));
-        assert!(api.contains("\"Jobs.Get\"() { return JobsApi.rpc[\"Jobs.Get\"]"));
+        assert!(api.contains("\"Jobs.Query\"() { return JobsApi.rpc[\"Jobs.Query\"]"));
         assert!(api.contains("\"Jobs.Run\"() { return JobsApi.operations[\"Jobs.Run\"]"));
         assert!(api.contains("\"Jobs.Updated\"() { return JobsApi.events[\"Jobs.Updated\"]"));
         assert!(api.contains("\"Jobs.Live\"() { return JobsApi.feeds[\"Jobs.Live\"]"));

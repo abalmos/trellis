@@ -9,9 +9,11 @@ import {
   type LocalNatsBootstrapManifest,
   resolveContainerRuntime,
 } from "./nats_bootstrap.ts";
+import { removeStalePidNamedResources } from "./cleanup.ts";
 
 const NATS_IMAGE = "docker.io/library/nats:2-alpine";
 const TRELLIS_STREAM = "trellis";
+const CONTAINER_PREFIX = "trellis-test-nats-";
 
 type StartedNatsContainer = {
   runtime: ContainerRuntime;
@@ -105,6 +107,22 @@ async function bestEffortRemoveContainer(
     stdout: "null",
     stderr: "null",
   }).output().catch(() => undefined);
+}
+
+async function bestEffortRemoveStaleContainers(
+  runtime: ContainerRuntime,
+): Promise<void> {
+  const names = await commandOutput(runtime, [
+    "ps",
+    "-a",
+    "--format",
+    "{{.Names}}",
+  ]).catch(() => "");
+  await removeStalePidNamedResources({
+    names: names.split("\n").map((name) => name.trim()).filter(Boolean),
+    prefix: CONTAINER_PREFIX,
+    remove: (name) => bestEffortRemoveContainer(runtime, name),
+  });
 }
 
 function parsePublishedPort(output: string): number {
@@ -206,6 +224,7 @@ export class NatsTestContainer implements AsyncDisposable {
     options: StartNatsTestContainerOptions = {},
   ): Promise<NatsTestContainer> {
     const runtime = await resolveContainerRuntime();
+    await bestEffortRemoveStaleContainers(runtime);
     const natsDir = join(workdir, "nats");
     const dataDir = join(natsDir, "data");
     await Deno.mkdir(dataDir, { recursive: true });
@@ -213,15 +232,20 @@ export class NatsTestContainer implements AsyncDisposable {
       outDir: natsDir,
       runtime,
     });
-    const containerName = `trellis-test-nats-${Deno.pid}-${Date.now()}`;
+    const containerName = `${CONTAINER_PREFIX}${Deno.pid}-${Date.now()}`;
     let nc: NatsConnection | undefined;
 
     try {
       await commandOutput(runtime, [
         "run",
         "--detach",
+        "--rm",
         "--name",
         containerName,
+        "--label",
+        "io.trellis.test=nats",
+        "--label",
+        `io.trellis.test.pid=${Deno.pid}`,
         "--publish",
         "127.0.0.1::4222",
         "--publish",

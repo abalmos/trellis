@@ -163,7 +163,7 @@ export type {
 } from "./jobs.ts";
 export { TypedKVEntry } from "./kv.ts";
 export type { WatchEvent, WatchOptions } from "./kv.ts";
-export { TypedStoreEntry } from "./store.ts";
+export { TypedStoreEntry } from "./store_entry.ts";
 export type {
   StoreBody,
   StoreInfo,

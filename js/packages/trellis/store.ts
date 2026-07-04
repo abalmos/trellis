@@ -1,6 +1,5 @@
 import {
   type ObjectInfo,
-  type ObjectResult,
   type ObjectStore,
   type ObjectStoreStatus,
   Objm,
@@ -13,6 +12,8 @@ import {
 } from "@qlever-llc/result";
 import { StoreError } from "./errors/index.ts";
 import type { PageResponse } from "./models/trellis/Page.ts";
+import { TypedStoreEntry } from "./store_entry.ts";
+export { TypedStoreEntry } from "./store_entry.ts";
 
 const INTERNAL_CONTENT_TYPE_METADATA_KEY = "__trellis_content_type";
 const DEFAULT_STORE_WAIT_POLL_INTERVAL_MS = 250;
@@ -560,95 +561,6 @@ function storeStatusFromObjectStoreStatus(
       ? { maxTotalBytes: options.maxTotalBytes }
       : {}),
   };
-}
-
-export class TypedStoreEntry {
-  readonly key: string;
-  readonly info: StoreInfo;
-  readonly #store: ObjectStore;
-
-  constructor(store: ObjectStore, info: StoreInfo) {
-    this.#store = store;
-    this.key = info.key;
-    this.info = info;
-  }
-
-  stream(): AsyncResult<ReadableStream<Uint8Array>, StoreError> {
-    return AsyncResult.from((async () => {
-      try {
-        const result = await this.#store.get(this.key);
-        if (result === null) {
-          return Result.err(
-            new StoreError({
-              operation: "stream",
-              context: { key: this.key, reason: "not_found" },
-            }),
-          );
-        }
-
-        return Result.ok(streamWithErrorCheck(result));
-      } catch (cause) {
-        return Result.err(
-          new StoreError({
-            operation: "stream",
-            cause,
-            context: { key: this.key },
-          }),
-        );
-      }
-    })());
-  }
-
-  bytes(): AsyncResult<Uint8Array, StoreError> {
-    return AsyncResult.from((async () => {
-      try {
-        const bytes = await this.#store.getBlob(this.key);
-        if (bytes === null) {
-          return Result.err(
-            new StoreError({
-              operation: "bytes",
-              context: { key: this.key, reason: "not_found" },
-            }),
-          );
-        }
-        return Result.ok(bytes);
-      } catch (cause) {
-        return Result.err(
-          new StoreError({
-            operation: "bytes",
-            cause,
-            context: { key: this.key },
-          }),
-        );
-      }
-    })());
-  }
-}
-
-function streamWithErrorCheck(
-  result: ObjectResult,
-): ReadableStream<Uint8Array> {
-  const reader = result.data.getReader();
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const next = await reader.read();
-      if (next.done) {
-        const error = await result.error;
-        if (error) {
-          controller.error(error);
-          return;
-        }
-        controller.close();
-        return;
-      }
-
-      controller.enqueue(next.value);
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-    },
-  });
 }
 
 export async function bytesFromStoreStream(

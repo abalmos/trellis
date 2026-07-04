@@ -1,4 +1,3 @@
-import type { ServiceHandle } from "@qlever-llc/trellis/sdk/jobs";
 import type { createJobsAdminHandlers } from "./rpc.ts";
 
 type JobsAdminHandlers = ReturnType<typeof createJobsAdminHandlers>;
@@ -6,10 +5,15 @@ type JobsAdminHandlers = ReturnType<typeof createJobsAdminHandlers>;
 type JobsRpcRegistrar = {
   handle: {
     rpc: {
-      jobs: Pick<
-        ServiceHandle["rpc"]["jobs"],
-        "health" | "query" | "inspect" | "cancel" | "listServices"
-      >;
+      jobs: {
+        health(handler: JobsAdminHandlers["health"]): Promise<void>;
+        query(handler: JobsAdminHandlers["query"]): Promise<void>;
+        inspect(handler: JobsAdminHandlers["inspect"]): Promise<void>;
+        cancel(handler: JobsAdminHandlers["cancel"]): Promise<void>;
+        listServices(
+          handler: JobsAdminHandlers["listServices"],
+        ): Promise<void>;
+      };
     };
   };
 };

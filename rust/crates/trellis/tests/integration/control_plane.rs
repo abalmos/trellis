@@ -15,15 +15,17 @@ use trellis_rs::client::{
     ServiceConnectWithContractOptions, TrellisClient,
 };
 use trellis_rs::sdk::auth::types::{
-    AuthConnectionsKickRequest, AuthConnectionsListRequest, AuthDeploymentAuthorityGetRequest,
-    AuthDeploymentAuthorityPlanRequest, AuthDeploymentsCreateRequest,
-    AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest, AuthDeploymentsListRequest,
-    AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest, AuthDevicesEnableRequest,
-    AuthDevicesListRequest, AuthDevicesProvisionRequest, AuthDevicesRemoveRequest,
-    AuthServiceInstancesDisableRequest, AuthServiceInstancesEnableRequest,
-    AuthServiceInstancesListRequest, AuthServiceInstancesProvisionRequest,
-    AuthServiceInstancesRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
-    AuthUsersListRequest, AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
+    AuthConnectionsKickRequest, AuthConnectionsListRequest,
+    AuthDeploymentAuthorityAcceptMigrationRequest, AuthDeploymentAuthorityGetRequest,
+    AuthDeploymentAuthorityPlanRequest, AuthDeploymentAuthorityPlansListRequest,
+    AuthDeploymentsCreateRequest, AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest,
+    AuthDeploymentsListRequest, AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest,
+    AuthDevicesEnableRequest, AuthDevicesListRequest, AuthDevicesProvisionRequest,
+    AuthDevicesRemoveRequest, AuthServiceInstancesDisableRequest,
+    AuthServiceInstancesEnableRequest, AuthServiceInstancesListRequest,
+    AuthServiceInstancesProvisionRequest, AuthServiceInstancesRemoveRequest,
+    AuthSessionsListRequest, AuthUsersCreateRequest, AuthUsersListRequest,
+    AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
 };
 use trellis_rs::service::{
     ConnectedServiceRuntime, GeneratedServiceContract, KvResourceClient, StoreResourceClient,
@@ -179,6 +181,19 @@ const CATALOG_ADMIN_PROVIDER_DEPLOYMENT: &str =
     "catalog-admin-provider-deployment-control-plane-catalog-admin-rpc-list-status-and-issue-filters";
 const CATALOG_ADMIN_CONSUMER_DEPLOYMENT: &str =
     "catalog-admin-consumer-deployment-control-plane-catalog-admin-rpc-list-status-and-issue-filters";
+const CATALOG_BINDING_PROJECTION_CASE_ID: &str =
+    "control-plane.catalog-resource-binding-projection";
+const CATALOG_ACTIVE_USE_ISSUE_CASE_ID: &str = "control-plane.catalog-active-use-issue-is-reported";
+const CATALOG_BINDING_PROJECTION_SERVICE_ID: &str =
+    "trellis.integration.control-plane.binding-projection-service.control-plane-catalog-resource-binding-projection@v1";
+const CATALOG_BINDING_PROJECTION_CLIENT_ID: &str =
+    "trellis.integration.control-plane.binding-projection-client.control-plane-catalog-resource-binding-projection@v1";
+const CATALOG_BINDING_PROJECTION_DEPLOYMENT: &str =
+    "binding-projection-control-plane-catalog-resource-binding-projection";
+const CATALOG_BINDING_PROJECTION_SERVICE_NAME: &str =
+    "binding-projection-service-control-plane-catalog-resource-binding-projection";
+const CATALOG_BINDING_PROJECTION_RPC_SUBJECT: &str =
+    "rpc.v1.integration.control-plane.binding-projection.control-plane-catalog-resource-binding-projection.BindingProjection.Get";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_CASE_ID: &str =
     "control-plane.admin-service-deployment-lifecycle";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_ADMIN_CLIENT_ID: &str =
@@ -497,6 +512,94 @@ const CATALOG_SURFACE_STATUS_OLD_PROVIDER_CONTRACT_JSON: &str = r#"{
     }
   }
 }"#;
+const CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON: &str = r#"{
+  "format": "trellis.contract.v1",
+  "id": "trellis.integration.control-plane.binding-projection-service.control-plane-catalog-resource-binding-projection@v1",
+  "displayName": "Trellis Control-Plane Binding Projection Service",
+  "description": "Projects KV, store, and jobs bindings through Trellis.Bindings.Get.",
+  "kind": "service",
+  "uses": {
+    "required": {
+      "core": {
+        "contract": "trellis.core@v1",
+        "rpc": { "call": ["Trellis.Bindings.Get"] }
+      }
+    }
+  },
+  "schemas": {
+    "Empty": { "type": "object", "properties": {} },
+    "Record": {
+      "type": "object",
+      "required": ["message"],
+      "properties": { "message": { "type": "string" } }
+    },
+    "Bindings": { "type": "object" }
+  },
+  "resources": {
+    "kv": {
+      "records": {
+        "purpose": "Binding projection KV bucket.",
+        "schema": { "schema": "Record" },
+        "required": true,
+        "history": 1,
+        "ttlMs": 0
+      }
+    },
+    "store": {
+      "blobs": {
+        "purpose": "Binding projection object store.",
+        "required": true,
+        "ttlMs": 0,
+        "maxObjectBytes": 1048576,
+        "maxTotalBytes": 4194304
+      }
+    }
+  },
+  "jobs": {
+    "syncRecords": {
+      "payload": { "schema": "Record" },
+      "result": { "schema": "Record" },
+      "concurrency": 1
+    }
+  },
+  "rpc": {
+    "BindingProjection.Get": {
+      "version": "v1",
+      "subject": "rpc.v1.integration.control-plane.binding-projection.control-plane-catalog-resource-binding-projection.BindingProjection.Get",
+      "input": { "schema": "Empty" },
+      "output": { "schema": "Bindings" },
+      "errors": []
+    }
+  }
+}"#;
+const CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON: &str = r#"{
+  "format": "trellis.contract.v1",
+  "id": "trellis.integration.control-plane.binding-projection-service.control-plane-catalog-resource-binding-projection@v1",
+  "displayName": "Trellis Control-Plane Binding Projection Service",
+  "description": "Replacement contract with resources removed.",
+  "kind": "service",
+  "uses": {
+    "required": {
+      "core": {
+        "contract": "trellis.core@v1",
+        "rpc": { "call": ["Trellis.Bindings.Get"] }
+      }
+    }
+  },
+  "schemas": {
+    "Empty": { "type": "object", "properties": {} },
+    "Bindings": { "type": "object" }
+  },
+  "rpc": {
+    "BindingProjection.Get": {
+      "version": "v1",
+      "subject": "rpc.v1.integration.control-plane.binding-projection.control-plane-catalog-resource-binding-projection.BindingProjection.Get",
+      "input": { "schema": "Empty" },
+      "output": { "schema": "Bindings" },
+      "errors": []
+    }
+  }
+}"#;
 const RESOURCES_RESTART_SERVICE_CONTRACT_JSON: &str = r#"{
   "format": "trellis.contract.v1",
   "id": "trellis.integration.control-plane.resources-restart-service@v1",
@@ -631,6 +734,28 @@ impl GeneratedServiceContract for CatalogSurfaceStatusProviderContract {
 
 type CatalogSurfaceStatusProviderRuntime =
     ConnectedServiceRuntime<CatalogSurfaceStatusProviderContract>;
+
+struct CatalogBindingProjectionResourceContract;
+
+impl GeneratedServiceContract for CatalogBindingProjectionResourceContract {
+    const CONTRACT_ID: &'static str = CATALOG_BINDING_PROJECTION_SERVICE_ID;
+    const CONTRACT_DIGEST: &'static str = "";
+    const CONTRACT_JSON: &'static str = CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON;
+}
+
+type CatalogBindingProjectionResourceRuntime =
+    ConnectedServiceRuntime<CatalogBindingProjectionResourceContract>;
+
+struct CatalogBindingProjectionRemovedContract;
+
+impl GeneratedServiceContract for CatalogBindingProjectionRemovedContract {
+    const CONTRACT_ID: &'static str = CATALOG_BINDING_PROJECTION_SERVICE_ID;
+    const CONTRACT_DIGEST: &'static str = "";
+    const CONTRACT_JSON: &'static str = CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON;
+}
+
+type CatalogBindingProjectionRemovedRuntime =
+    ConnectedServiceRuntime<CatalogBindingProjectionRemovedContract>;
 
 struct ResourcesRestartServiceContract;
 
@@ -770,6 +895,26 @@ impl RpcDescriptor for CatalogSurfaceStatusPingRpc {
     const INPUT_SCHEMA_JSON: &'static str =
         r#"{"type":"object","required":["message"],"properties":{"message":{"type":"string"}}}"#;
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","servedBy"],"properties":{"message":{"type":"string"},"servedBy":{"type":"string"}}}"#;
+}
+
+struct BindingProjectionGetRpc;
+
+impl RpcDescriptor for BindingProjectionGetRpc {
+    type Input = Value;
+    type Output = Value;
+
+    const KEY: &'static str = "BindingProjection.Get";
+    const SUBJECT: &'static str = CATALOG_BINDING_PROJECTION_RPC_SUBJECT;
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &[];
+    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","properties":{}}"#;
+    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BindingProjectionPlan {
+    plan_id: String,
+    deployment_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -2499,6 +2644,227 @@ async fn control_plane_catalog_admin_rpc_list_status_and_issue_filters() {
         .iter()
         .any(|deployment_id| deployment_id == CATALOG_ADMIN_CONSUMER_DEPLOYMENT));
     assert!(issue.message.contains(CATALOG_SURFACE_STATUS_PROVIDER_ID));
+}
+
+#[tokio::test]
+async fn control_plane_catalog_active_use_issue_is_reported() {
+    assert_service_case_registered(
+        CATALOG_ACTIVE_USE_ISSUE_CASE_ID,
+        "control-plane",
+        "control_plane",
+    );
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+
+    admin
+        .create_deployment(
+            &bootstrap_url,
+            Some(CATALOG_ADMIN_PROVIDER_DEPLOYMENT),
+            Some(false),
+        )
+        .await
+        .expect("create strict catalog active-use provider deployment");
+    admin
+        .create_deployment(
+            &bootstrap_url,
+            Some(CATALOG_ADMIN_CONSUMER_DEPLOYMENT),
+            Some(false),
+        )
+        .await
+        .expect("create strict catalog active-use consumer deployment");
+
+    let provider_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        CATALOG_SURFACE_STATUS_PROVIDER_CONTRACT_JSON,
+    )
+    .expect("build catalog active-use provider contract");
+    let consumer_contract =
+        catalog_admin_consumer_contract().expect("build catalog active-use consumer contract");
+    let admin_contract =
+        catalog_force_replace_admin_contract().expect("build catalog active-use admin contract");
+    let provider_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &provider_contract,
+            Some(CATALOG_ADMIN_PROVIDER_DEPLOYMENT),
+            None,
+        )
+        .await
+        .expect("provision catalog active-use provider service instance");
+    let consumer_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &consumer_contract,
+            Some(CATALOG_ADMIN_CONSUMER_DEPLOYMENT),
+            None,
+        )
+        .await
+        .expect("provision catalog active-use consumer service instance");
+    let provider_service = start_catalog_surface_status_provider_service(
+        runtime.trellis_url(),
+        provider_contract.digest(),
+        &provider_key,
+    )
+    .await;
+    let consumer_contract_json = serde_json::to_string(consumer_contract.manifest())
+        .expect("serialize catalog active-use consumer contract");
+    let _consumer_client =
+        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+            trellis_url: runtime.trellis_url(),
+            contract_id: CATALOG_ADMIN_CONSUMER_ID,
+            contract_digest: consumer_contract.digest(),
+            contract_json: &consumer_contract_json,
+            session_key_seed_base64url: &consumer_key.seed,
+            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
+            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
+            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+        })
+        .await
+        .expect("connect catalog active-use consumer service");
+    let admin_client = admin
+        .connect_client(&bootstrap_url, &admin_contract)
+        .await
+        .expect("connect catalog active-use admin client");
+    let core = trellis_rs::sdk::core::CoreClient::new(&admin_client);
+
+    wait_for_catalog_contracts(
+        &core,
+        provider_contract.digest(),
+        consumer_contract.digest(),
+    )
+    .await;
+
+    provider_service.abort_and_wait().await;
+    set_catalog_admin_provider_offer_active(
+        &runtime.control_plane_sqlite(),
+        provider_contract.digest(),
+        false,
+    )
+    .expect("expire catalog active-use provider offer");
+    let issue = wait_for_catalog_admin_active_use_issue(&core, consumer_contract.digest()).await;
+    assert_eq!(
+        issue.contract_id.as_deref(),
+        Some(CATALOG_ADMIN_CONSUMER_ID)
+    );
+    assert_eq!(issue.digest.as_deref(), Some(consumer_contract.digest()));
+    assert!(issue
+        .deployment_ids
+        .iter()
+        .any(|deployment_id| deployment_id == CATALOG_ADMIN_CONSUMER_DEPLOYMENT));
+    assert!(issue.message.contains(CATALOG_SURFACE_STATUS_PROVIDER_ID));
+    assert!(issue.message.contains("inactive contract"));
+
+    set_catalog_admin_provider_offer_active(
+        &runtime.control_plane_sqlite(),
+        provider_contract.digest(),
+        true,
+    )
+    .expect("restore catalog active-use provider offer");
+    wait_for_catalog_admin_active_use_issue_cleared(&core, consumer_contract.digest()).await;
+}
+
+#[tokio::test]
+async fn control_plane_catalog_resource_binding_projection() {
+    assert_service_case_registered(
+        CATALOG_BINDING_PROJECTION_CASE_ID,
+        "control-plane",
+        "control_plane",
+    );
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+    admin
+        .create_deployment(
+            &bootstrap_url,
+            Some(CATALOG_BINDING_PROJECTION_DEPLOYMENT),
+            Some(false),
+        )
+        .await
+        .expect("create strict binding projection deployment");
+
+    let resource_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON,
+    )
+    .expect("build binding projection resource contract");
+    let removed_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON,
+    )
+    .expect("build binding projection removed contract");
+    let client_contract = catalog_binding_projection_client_contract()
+        .expect("build binding projection client contract");
+    let service_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &resource_contract,
+            Some(CATALOG_BINDING_PROJECTION_DEPLOYMENT),
+            None,
+        )
+        .await
+        .expect("provision binding projection service instance");
+    let service = connect_catalog_binding_projection_resource_service(
+        runtime.trellis_url(),
+        resource_contract.digest(),
+        &service_key,
+    )
+    .await;
+    assert!(service.resources().kv.contains_key("records"));
+    let resource_task = start_catalog_binding_projection_resource_service(service);
+    let client = admin
+        .connect_client(&bootstrap_url, &client_contract)
+        .await
+        .expect("connect binding projection client");
+
+    let projected = call_binding_projection_with_retry(&client, "before removal").await;
+    assert_binding_projection(&projected, resource_contract.digest(), true);
+    resource_task.abort_and_wait().await;
+
+    let removed_key = provision_binding_projection_instance_only(
+        &mut admin,
+        &bootstrap_url,
+        CATALOG_BINDING_PROJECTION_DEPLOYMENT,
+    )
+    .await;
+    let mut connect_handle = spawn_catalog_binding_projection_removed_connect(
+        runtime.trellis_url(),
+        removed_contract.digest(),
+        removed_key.seed,
+    );
+    let plan = wait_for_binding_projection_migration_plan(
+        &mut admin,
+        &bootstrap_url,
+        removed_contract.digest(),
+    )
+    .await;
+    accept_binding_projection_migration(&mut admin, &bootstrap_url, &plan).await;
+    admin
+        .wait_ready(&bootstrap_url, CATALOG_BINDING_PROJECTION_DEPLOYMENT)
+        .await
+        .expect("deployment authority ready after binding projection migration");
+    let removed_service = connect_handle
+        .await
+        .expect("removed binding projection connect task panicked")
+        .expect("removed binding projection service connects");
+    assert!(removed_service.resources().kv.is_empty());
+    let removed_task = start_catalog_binding_projection_removed_service(removed_service);
+
+    let removed_projection = call_binding_projection_with_retry(&client, "after removal").await;
+    assert_binding_projection(&removed_projection, removed_contract.digest(), false);
+
+    removed_task.abort_and_wait().await;
 }
 
 #[tokio::test]
@@ -4671,6 +5037,24 @@ fn catalog_admin_rpc_client_contract(
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }
 
+fn catalog_binding_projection_client_contract(
+) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        CATALOG_BINDING_PROJECTION_CLIENT_ID,
+        "Trellis Control-Plane Binding Projection Client",
+        "Calls the binding projection service RPC.",
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .use_ref(
+        "service",
+        trellis_rs::contracts::use_contract(CATALOG_BINDING_PROJECTION_SERVICE_ID)
+            .with_rpc_call(["BindingProjection.Get"]),
+    )
+    .build()?;
+
+    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+}
+
 fn admin_service_deployment_lifecycle_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
@@ -5146,6 +5530,271 @@ async fn start_catalog_surface_status_provider_service(
     });
 
     AbortOnDrop::new(tokio::spawn(async move { service.run().await }))
+}
+
+async fn connect_catalog_binding_projection_resource_service(
+    trellis_url: &str,
+    contract_digest: &str,
+    service_key: &trellis_test::TrellisTestServiceKey,
+) -> CatalogBindingProjectionResourceRuntime {
+    let client = TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+        trellis_url,
+        contract_id: CATALOG_BINDING_PROJECTION_SERVICE_ID,
+        contract_digest,
+        contract_json: CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON,
+        session_key_seed_base64url: &service_key.seed,
+        timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
+        retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
+        authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+    })
+    .await
+    .expect("connect live Rust binding projection resource service");
+    ConnectedServiceRuntime::from_connected_client(
+        CATALOG_BINDING_PROJECTION_SERVICE_NAME,
+        Arc::new(client),
+    )
+    .expect("build binding projection resource service runtime")
+}
+
+fn start_catalog_binding_projection_resource_service(
+    mut service: CatalogBindingProjectionResourceRuntime,
+) -> AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>> {
+    service.register_rpc::<BindingProjectionGetRpc, _, _>(|context, _input| async move {
+        let output = context
+            .handle()
+            .client()
+            .call::<trellis_rs::sdk::core::rpc::TrellisBindingsGetRpc>(
+                &trellis_rs::sdk::core::types::TrellisBindingsGetRequest {
+                    contract_id: None,
+                    digest: None,
+                },
+            )
+            .await
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
+        serde_json::to_value(output).map_err(trellis_rs::service::ServerError::Json)
+    });
+    AbortOnDrop::new(tokio::spawn(async move { service.run().await }))
+}
+
+fn spawn_catalog_binding_projection_removed_connect(
+    trellis_url: &str,
+    contract_digest: &str,
+    seed: String,
+) -> JoinHandle<
+    Result<CatalogBindingProjectionRemovedRuntime, trellis_rs::service::ServiceRuntimeError>,
+> {
+    let trellis_url = trellis_url.to_string();
+    let contract_digest = contract_digest.to_string();
+    tokio::spawn(async move {
+        let client =
+            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+                trellis_url: &trellis_url,
+                contract_id: CATALOG_BINDING_PROJECTION_SERVICE_ID,
+                contract_digest: &contract_digest,
+                contract_json: CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON,
+                session_key_seed_base64url: &seed,
+                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
+                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
+                authority_pending_timeout_ms:
+                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+            })
+            .await?;
+        ConnectedServiceRuntime::from_connected_client(
+            CATALOG_BINDING_PROJECTION_SERVICE_NAME,
+            Arc::new(client),
+        )
+    })
+}
+
+fn start_catalog_binding_projection_removed_service(
+    mut service: CatalogBindingProjectionRemovedRuntime,
+) -> AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>> {
+    service.register_rpc::<BindingProjectionGetRpc, _, _>(|context, _input| async move {
+        let output = context
+            .handle()
+            .client()
+            .call::<trellis_rs::sdk::core::rpc::TrellisBindingsGetRpc>(
+                &trellis_rs::sdk::core::types::TrellisBindingsGetRequest {
+                    contract_id: None,
+                    digest: None,
+                },
+            )
+            .await
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
+        serde_json::to_value(output).map_err(trellis_rs::service::ServerError::Json)
+    });
+    AbortOnDrop::new(tokio::spawn(async move { service.run().await }))
+}
+
+async fn provision_binding_projection_instance_only(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    deployment: &str,
+) -> trellis_test::TrellisTestServiceKey {
+    let seed = trellis_rs::auth::generate_session_keypair().0;
+    let auth_material = trellis_rs::client::SessionAuth::from_seed_base64url(&seed)
+        .expect("build binding projection session auth from seed");
+    let admin_client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    auth.rpc()
+        .auth()
+        .service_instances_provision(&AuthServiceInstancesProvisionRequest {
+            deployment_id: deployment.to_string(),
+            instance_key: auth_material.session_key.clone(),
+        })
+        .await
+        .expect("provision binding projection service instance key");
+    trellis_test::TrellisTestServiceKey {
+        seed,
+        session_key: auth_material.session_key,
+    }
+}
+
+async fn wait_for_binding_projection_migration_plan(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    digest: &str,
+) -> BindingProjectionPlan {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let client = admin
+            .connect_admin(bootstrap_url)
+            .await
+            .expect("get admin client");
+        let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+        let plans = auth
+            .rpc()
+            .auth()
+            .deployment_authority_plans_list(&AuthDeploymentAuthorityPlansListRequest {
+                deployment_id: Some(CATALOG_BINDING_PROJECTION_DEPLOYMENT.to_string()),
+                state: Some("pending".to_string()),
+                classification: Some("migration".to_string()),
+                kind: None,
+                limit: 20,
+                offset: None,
+            })
+            .await
+            .expect("list binding projection migration plans");
+        if let Some(plan) = plans.entries.into_iter().find(|entry| {
+            entry
+                .get("proposal")
+                .and_then(Value::as_object)
+                .and_then(|proposal| proposal.get("contractDigest"))
+                .and_then(Value::as_str)
+                == Some(digest)
+        }) {
+            return BindingProjectionPlan {
+                plan_id: plan
+                    .get("planId")
+                    .and_then(Value::as_str)
+                    .expect("planId")
+                    .to_string(),
+                deployment_id: plan
+                    .get("deploymentId")
+                    .and_then(Value::as_str)
+                    .expect("deploymentId")
+                    .to_string(),
+            };
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for binding projection migration plan"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn accept_binding_projection_migration(
+    admin: &mut trellis_test::TrellisTestAdmin,
+    bootstrap_url: &str,
+    plan: &BindingProjectionPlan,
+) {
+    let client = admin
+        .connect_admin(bootstrap_url)
+        .await
+        .expect("get admin client");
+    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    auth.rpc()
+        .auth()
+        .deployment_authority_accept_migration(&AuthDeploymentAuthorityAcceptMigrationRequest {
+            plan_id: plan.plan_id.clone(),
+            expected_desired_version: None,
+            acknowledgement: "Accepted by Rust binding projection integration test.".to_string(),
+        })
+        .await
+        .expect("accept binding projection migration plan");
+    admin
+        .reconcile(bootstrap_url, &plan.deployment_id)
+        .await
+        .expect("reconcile binding projection deployment authority");
+}
+
+async fn call_binding_projection_with_retry(client: &TrellisClient, label: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        match client.call::<BindingProjectionGetRpc>(&json!({})).await {
+            Ok(output) => return output,
+            Err(error)
+                if is_retryable_service_startup_error(&error) && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => panic!("call binding projection {label}: {error}"),
+        }
+    }
+}
+
+fn assert_binding_projection(output: &Value, digest: &str, has_resources: bool) {
+    let binding = output
+        .get("binding")
+        .and_then(Value::as_object)
+        .expect("binding projection should include binding");
+    assert_eq!(
+        binding.get("contractId").and_then(Value::as_str),
+        Some(CATALOG_BINDING_PROJECTION_SERVICE_ID)
+    );
+    assert_eq!(binding.get("digest").and_then(Value::as_str), Some(digest));
+    let resources = binding
+        .get("resources")
+        .and_then(Value::as_object)
+        .expect("binding projection should include resources object");
+    if !has_resources {
+        assert!(resources.is_empty(), "expected no projected resources");
+        return;
+    }
+    assert!(resources
+        .get("kv")
+        .and_then(Value::as_object)
+        .and_then(|kv| kv.get("records"))
+        .and_then(Value::as_object)
+        .and_then(|records| records.get("bucket"))
+        .and_then(Value::as_str)
+        .is_some());
+    assert!(resources
+        .get("store")
+        .and_then(Value::as_object)
+        .and_then(|store| store.get("blobs"))
+        .and_then(Value::as_object)
+        .and_then(|blobs| blobs.get("name"))
+        .and_then(Value::as_str)
+        .is_some());
+    assert!(resources
+        .get("jobs")
+        .and_then(Value::as_object)
+        .and_then(|jobs| jobs.get("namespace"))
+        .and_then(Value::as_str)
+        .is_some());
+    assert!(resources
+        .get("jobs")
+        .and_then(Value::as_object)
+        .and_then(|jobs| jobs.get("queues"))
+        .and_then(Value::as_object)
+        .and_then(|queues| queues.get("syncRecords"))
+        .and_then(Value::as_object)
+        .is_some());
 }
 
 async fn start_outbox_restart_service(
@@ -5750,7 +6399,19 @@ fn expire_catalog_admin_provider_offer(
     sqlite: &trellis_test::TrellisControlPlaneSqlite,
     provider_digest: &str,
 ) -> Result<(), trellis_test::TrellisTestError> {
-    let timestamp = "2026-01-01T00:00:00.000Z";
+    set_catalog_admin_provider_offer_active(sqlite, provider_digest, false)
+}
+
+fn set_catalog_admin_provider_offer_active(
+    sqlite: &trellis_test::TrellisControlPlaneSqlite,
+    provider_digest: &str,
+    active: bool,
+) -> Result<(), trellis_test::TrellisTestError> {
+    let timestamp = if active {
+        None
+    } else {
+        Some("2026-01-01T00:00:00.000Z")
+    };
     let result = sqlite.execute(
         "UPDATE implementation_offers
           SET stale_at = ?, expires_at = ?
@@ -5802,6 +6463,40 @@ async fn wait_for_catalog_admin_active_use_issue(
         assert!(
             Instant::now() < deadline,
             "timed out waiting for catalog admin active-use issue"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_catalog_admin_active_use_issue_cleared(
+    core: &trellis_rs::sdk::core::CoreClient<'_>,
+    consumer_digest: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let catalog = core
+            .rpc()
+            .trellis()
+            .catalog()
+            .await
+            .expect("load catalog while waiting for active-use issue to clear");
+        let has_issue = catalog
+            .catalog
+            .issues
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .any(|issue| {
+                issue.kind == "invalid-active-contract-uses"
+                    && issue.contract_id.as_deref() == Some(CATALOG_ADMIN_CONSUMER_ID)
+                    && issue.digest.as_deref() == Some(consumer_digest)
+            });
+        if !has_issue {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for catalog admin active-use issue to clear"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

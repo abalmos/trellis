@@ -29,12 +29,13 @@ export const __testing__ = {
 
 async function discoverUserInfoEndpoint(issuer: string): Promise<string> {
   const config = await discoverOIDCConfiguration(issuer);
-  return Value.Parse(
+  const endpoint = Value.Parse(
     Type.Object({
-      userinfo_endpoint: Type.String({ format: "url" }),
+      userinfo_endpoint: Type.String(),
     }),
     config,
   ).userinfo_endpoint;
+  return new URL(endpoint).toString();
 }
 
 async function discoverOIDCConfiguration(issuer: string): Promise<unknown> {

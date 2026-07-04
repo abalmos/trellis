@@ -182,6 +182,160 @@ async fn state_value_store_stale_revision_rejected() {
 }
 
 #[tokio::test]
+async fn state_value_and_map_conflict_shapes_live() {
+    assert_case_registered("state.value-and-map-conflict-shapes-live", "state", "state");
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+
+    let contract = state_client_contract().expect("build state client test contract");
+
+    let client = admin
+        .connect_client(&bootstrap_url, &contract)
+        .await
+        .expect("connect live Rust state client");
+
+    let preferences =
+        trellis_rs::client::ValueStateStore::<_, Preferences>::new(&client, "preferences");
+    let drafts = trellis_rs::client::MapStateStore::<_, Draft>::new(&client, "drafts")
+        .prefix("conflict-shapes");
+
+    let created_preferences = preferences
+        .put_with_options(
+            &Preferences {
+                theme: "dark".to_string(),
+                density: "comfortable".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create preferences");
+    assert!(created_preferences.applied);
+
+    let value_create_conflict = preferences
+        .put_with_options(
+            &Preferences {
+                theme: "light".to_string(),
+                density: "compact".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("value create conflict should not error");
+    assert!(!value_create_conflict.applied);
+    match value_create_conflict.entry {
+        Some(trellis_rs::client::StateValue::Current(entry)) => {
+            assert_eq!(entry.value.theme, "dark");
+            assert_eq!(entry.value.density, "comfortable");
+        }
+        other => panic!("expected current value create conflict entry, got {other:?}"),
+    }
+
+    let value_stale_conflict = preferences
+        .put_with_options(
+            &Preferences {
+                theme: "light".to_string(),
+                density: "compact".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::Revision(
+                    "stale-revision".to_string(),
+                ),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("value stale conflict should not error");
+    assert!(!value_stale_conflict.applied);
+    match value_stale_conflict.entry {
+        Some(trellis_rs::client::StateValue::Current(entry)) => {
+            assert_eq!(entry.value.theme, "dark");
+            assert_eq!(entry.value.density, "comfortable");
+        }
+        other => panic!("expected current value stale conflict entry, got {other:?}"),
+    }
+
+    let created_draft = drafts
+        .put_with_options(
+            "state-draft",
+            &Draft {
+                title: "Conflict Draft".to_string(),
+                body: "from Rust".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create draft");
+    assert!(created_draft.applied);
+
+    let map_create_conflict = drafts
+        .put_with_options(
+            "state-draft",
+            &Draft {
+                title: "Replacement Draft".to_string(),
+                body: "should not apply".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("map create conflict should not error");
+    assert!(!map_create_conflict.applied);
+    match map_create_conflict.entry {
+        Some(trellis_rs::client::StateValue::Current(entry)) => {
+            assert_eq!(entry.key, "conflict-shapes/state-draft");
+            assert_eq!(entry.value.title, "Conflict Draft");
+            assert_eq!(entry.value.body, "from Rust");
+        }
+        other => panic!("expected current map create conflict entry, got {other:?}"),
+    }
+
+    let map_stale_conflict = drafts
+        .put_with_options(
+            "state-draft",
+            &Draft {
+                title: "Replacement Draft".to_string(),
+                body: "should not apply".to_string(),
+            },
+            &trellis_rs::client::PutStateOptions {
+                expected_revision: trellis_rs::client::ExpectedPutRevision::Revision(
+                    "stale-revision".to_string(),
+                ),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("map stale conflict should not error");
+    assert!(!map_stale_conflict.applied);
+    match map_stale_conflict.entry {
+        Some(trellis_rs::client::StateValue::Current(entry)) => {
+            assert_eq!(entry.key, "conflict-shapes/state-draft");
+            assert_eq!(entry.value.title, "Conflict Draft");
+            assert_eq!(entry.value.body, "from Rust");
+        }
+        other => panic!("expected current map stale conflict entry, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn state_ttl_expiry_is_absent_live() {
     assert_case_registered("state.ttl-expiry-is-absent-live", "state", "state");
 
@@ -803,6 +957,100 @@ async fn state_admin_inspect_and_delete_state() {
     );
 }
 
+#[tokio::test]
+async fn state_admin_deletes_corrupt_state_entry() {
+    assert_case_registered("state.admin-deletes-corrupt-state-entry", "state", "state");
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+
+    let client_contract = state_client_contract().expect("build state client test contract");
+    let admin_contract = state_admin_contract().expect("build state admin test contract");
+
+    let client = admin
+        .connect_client(&bootstrap_url, &client_contract)
+        .await
+        .expect("connect live Rust state client");
+    let admin_client = admin
+        .connect_client(&bootstrap_url, &admin_contract)
+        .await
+        .expect("connect live Rust state admin client");
+
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let target_user = find_user_target_for_contract(
+        &admin_auth
+            .rpc()
+            .auth()
+            .sessions_list(&auth_sessions_list_request())
+            .await
+            .expect("list sessions for state admin target"),
+        "trellis.integration.state-client@v1",
+    )
+    .expect("Auth.Sessions.List should include state client session");
+    let user_id = target_user["userId"]
+        .as_str()
+        .expect("state admin target should include userId");
+
+    let storage_key = [
+        encode_state_component("user"),
+        encode_state_component(user_id),
+        encode_state_component("trellis.integration.state-client@v1"),
+        encode_state_component("preferences"),
+        "=value".to_string(),
+    ]
+    .join(".");
+    runtime
+        .seed_raw_state_entry(trellis_test::TrellisRawStateEntry {
+            key: storage_key,
+            value: json!({
+                "value": { "theme": "dark", "density": "comfortable" },
+                "updatedAt": "2026-01-01T00:00:00.000Z",
+                "stateVersion": "preferences.v1"
+            }),
+        })
+        .await
+        .expect("seed corrupt raw state entry");
+
+    let preferences =
+        trellis_rs::client::ValueStateStore::<_, Preferences>::new(&client, "preferences");
+    assert!(
+        preferences.get().await.is_err(),
+        "corrupt raw state entry should fail public read"
+    );
+
+    let admin_state = trellis_rs::sdk::state::StateClient::new(&admin_client);
+    let deleted = admin_state
+        .rpc()
+        .state()
+        .admin_delete(&trellis_rs::sdk::state::types::StateAdminDeleteRequest(
+            json!({
+                "scope": "userApp",
+                "contractId": "trellis.integration.state-client@v1",
+                "contractDigest": client_contract.digest(),
+                "user": target_user,
+                "store": "preferences"
+            }),
+        ))
+        .await
+        .expect("admin delete corrupt preferences");
+    assert!(deleted.deleted);
+
+    assert_eq!(
+        preferences
+            .get()
+            .await
+            .expect("read admin-deleted corrupt preferences"),
+        trellis_rs::client::StateGetResult::Missing { found: false }
+    );
+}
+
 fn state_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
@@ -1028,6 +1276,21 @@ fn assert_state_migration(
     assert_eq!(actual["stateVersion"], json!(state_version));
     assert_eq!(actual["currentStateVersion"], json!(current_state_version));
     assert_eq!(actual["writerContractDigest"], json!(writer_digest));
+}
+
+fn encode_state_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '-') {
+            encoded.push(ch);
+            continue;
+        }
+        let mut buffer = [0; 4];
+        for byte in ch.encode_utf8(&mut buffer).bytes() {
+            encoded.push_str(&format!("={byte:02X}"));
+        }
+    }
+    encoded
 }
 
 async fn call_state_get_missing_with_retry(

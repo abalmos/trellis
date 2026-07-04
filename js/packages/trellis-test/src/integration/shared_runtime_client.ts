@@ -3,7 +3,10 @@ import type {
   ClientAuthRequiredContext,
 } from "@qlever-llc/trellis";
 import type { TrellisTestAuthorityPlanClassification } from "../types.ts";
-import type { TrellisTestRawAuthConnectionPresence } from "../types.ts";
+import type {
+  TrellisTestRawAuthConnectionPresence,
+  TrellisTestRawStateEntry,
+} from "../types.ts";
 import {
   contractDescriptor,
   TRELLIS_TEST_SHARED_RUNTIME_ENV,
@@ -140,6 +143,11 @@ export class TrellisIntegrationSharedRuntimeCoordinatorClient {
     args: TrellisTestRawAuthConnectionPresence,
   ): Promise<void> {
     await this.#post("/auth/connection-presence/seed-raw", args);
+  }
+
+  /** Seeds one raw state KV entry in the shared runtime. */
+  async seedRawStateEntry(args: TrellisTestRawStateEntry): Promise<void> {
+    await this.#post("/state/seed-raw", args);
   }
 
   /** Lists authority plans from the shared runtime. */

@@ -224,6 +224,14 @@ async function handleCoordinatorRequest(
       return { ok: true };
     }
 
+    case "/state/seed-raw": {
+      const args = body as TrellisIntegrationCoordinatorRequest<
+        "/state/seed-raw"
+      >;
+      await runtime.seedRawStateEntry(args);
+      return { ok: true };
+    }
+
     case "/authority/plans/list": {
       const args = body as TrellisIntegrationCoordinatorRequest<
         "/authority/plans/list"

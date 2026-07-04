@@ -44,6 +44,12 @@ export type TrellisTestRawAuthConnectionPresence = {
   readonly value: Record<string, unknown>;
 };
 
+/** Raw state KV entry seeded for malformed live-runtime tests. */
+export type TrellisTestRawStateEntry = {
+  readonly key: string;
+  readonly value: Record<string, unknown>;
+};
+
 /** Local command override for the spawned Trellis control-plane process. */
 export type TrellisTestRuntimeTrellisCommand = {
   cmd: string;

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use super::matrix::{
-    load_client_test_matrix, load_service_test_matrix, matrix_case_ids, repo_root,
-    ClientTestMatrix, CompletionStatus, ServiceTestMatrix,
+    load_client_test_matrix, load_service_test_matrix, repo_root, ClientTestMatrix,
+    CompletionStatus, ServiceTestMatrix,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -235,6 +235,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "state_value_store_stale_revision_rejected",
     ),
     IntegrationCase::live(
+        "state.value-and-map-conflict-shapes-live",
+        "state",
+        "state_value_and_map_conflict_shapes_live",
+    ),
+    IntegrationCase::live(
         "state.map-store-prefix-put-get-list-delete",
         "state",
         "state_map_store_prefix_put_get_list_delete",
@@ -248,6 +253,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "state.admin-inspect-and-delete-state",
         "state",
         "state_admin_inspect_and_delete_state",
+    ),
+    IntegrationCase::live(
+        "state.admin-deletes-corrupt-state-entry",
+        "state",
+        "state_admin_deletes_corrupt_state_entry",
     ),
     IntegrationCase::live(
         "state.migration-required-is-returned-live",
@@ -768,6 +778,26 @@ pub(crate) const RUST_SERVICE_INTEGRATION_CASES: &[IntegrationCase] = &[
         "control_plane_catalog_admin_rpc_list_status_and_issue_filters",
     ),
     IntegrationCase::live(
+        "control-plane.catalog-active-use-issue-is-reported",
+        "control_plane",
+        "control_plane_catalog_active_use_issue_is_reported",
+    ),
+    IntegrationCase::live(
+        "control-plane.catalog-resource-binding-projection",
+        "control_plane",
+        "control_plane_catalog_resource_binding_projection",
+    ),
+    IntegrationCase::live(
+        "control-plane.authority-plan-migration-replaces-desired-state",
+        "authority_plan",
+        "authority_plan_migration_replaces_desired_state",
+    ),
+    IntegrationCase::live(
+        "control-plane.service-resource-removal-purges-old-binding",
+        "authority_plan",
+        "control_plane_service_resource_removal_purges_old_binding",
+    ),
+    IntegrationCase::live(
         "control-plane.admin-service-deployment-rollback-fault",
         "control_plane",
         "control_plane_admin_service_deployment_rollback_fault",
@@ -975,7 +1005,13 @@ fn build_conformance_report(
     matrix: &ClientTestMatrix,
     local_cases: &[IntegrationCase],
 ) -> Result<String, String> {
-    let matrix_ids = matrix_case_ids(matrix);
+    let mut matrix_ids = matrix
+        .cases
+        .iter()
+        .filter(|case_entry| case_entry.completion.rust == CompletionStatus::Implemented)
+        .map(|case_entry| case_entry.id.clone())
+        .collect::<Vec<_>>();
+    matrix_ids.sort();
     let mut local_ids = local_cases
         .iter()
         .map(|case_entry| case_entry.id.to_string())

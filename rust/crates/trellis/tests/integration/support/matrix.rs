@@ -54,6 +54,7 @@ pub(crate) struct RustMatrixImplementation {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum CompletionStatus {
     Implemented,
+    Pending,
     Required,
 }
 
@@ -70,6 +71,7 @@ pub(crate) struct MatrixCase {
     pub(crate) coverage: Vec<String>,
     pub(crate) description: String,
     pub(crate) scenario: Scenario,
+    pub(crate) completion: MatrixCompletion,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -138,9 +140,10 @@ impl<'de> Deserialize<'de> for CompletionStatus {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
             "implemented" => Ok(CompletionStatus::Implemented),
+            "pending" => Ok(CompletionStatus::Pending),
             "required" => Ok(CompletionStatus::Required),
             other => Err(de::Error::custom(format!(
-                "invalid completion status: {other}, expected implemented or required"
+                "invalid completion status: {other}, expected implemented, pending, or required"
             ))),
         }
     }
@@ -261,16 +264,6 @@ pub(crate) fn load_service_test_matrix() -> Result<ServiceTestMatrix, String> {
     validate_service_matrix(raw)
 }
 
-pub(crate) fn matrix_case_ids(matrix: &ClientTestMatrix) -> Vec<String> {
-    let mut ids = matrix
-        .cases
-        .iter()
-        .map(|case_entry| case_entry.id.clone())
-        .collect::<Vec<_>>();
-    ids.sort();
-    ids
-}
-
 pub(crate) fn repo_root() -> Result<PathBuf, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for ancestor in manifest_dir.ancestors() {
@@ -328,6 +321,15 @@ fn validate_matrix(raw: RawTestMatrix) -> Result<ClientTestMatrix, String> {
         }
 
         let scenario = parse_scenario(raw_case.scenario, &context, &mut errors);
+        let Some(completion) = raw_case.completion else {
+            errors.push(format!("{context} requires completion"));
+            continue;
+        };
+        if completion.typescript != CompletionStatus::Implemented {
+            errors.push(format!(
+                "{context} completion.typescript must be implemented"
+            ));
+        }
 
         let expected_prefix = format!("{}.", raw_case.fixture);
         if !raw_case.id.starts_with(&expected_prefix) {
@@ -343,6 +345,9 @@ fn validate_matrix(raw: RawTestMatrix) -> Result<ClientTestMatrix, String> {
             coverage: raw_case.coverage,
             description: raw_case.description,
             scenario,
+            completion: MatrixCompletion {
+                rust: completion.rust,
+            },
         });
     }
 
@@ -438,9 +443,9 @@ fn validate_service_matrix(raw: RawTestMatrix) -> Result<ServiceTestMatrix, Stri
                 "{context} completion.rust is implemented but implementations.rust is missing"
             ));
         }
-        if raw_case.completion.rust == CompletionStatus::Required && rust.is_some() {
+        if raw_case.completion.rust != CompletionStatus::Implemented && rust.is_some() {
             errors.push(format!(
-                "{context} completion.rust is required and must not include implementations.rust"
+                "{context} completion.rust is not implemented and must not include implementations.rust"
             ));
         }
 

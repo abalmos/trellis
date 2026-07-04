@@ -13,6 +13,7 @@ import type {
   TrellisTestConnectedClient,
   TrellisTestContractLike,
   TrellisTestRawAuthConnectionPresence,
+  TrellisTestRawStateEntry,
   TrellisTestRuntimeStartOptions,
   TrellisTestServiceKey,
   WaitForOptions,
@@ -97,6 +98,8 @@ export type TrellisIntegrationRuntime = {
   seedRawAuthConnectionPresence?(
     args: TrellisTestRawAuthConnectionPresence,
   ): Promise<void>;
+  /** Seeds one raw state KV entry in runtimes that support backing-store injection. */
+  seedRawStateEntry?(args: TrellisTestRawStateEntry): Promise<void>;
   /** Observes raw NATS messages on a runtime-owned scratch NATS server. */
   startNatsMessageObserver?(
     subject: string,

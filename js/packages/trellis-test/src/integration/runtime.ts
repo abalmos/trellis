@@ -320,6 +320,12 @@ class AttachedTrellisIntegrationRuntime implements TrellisIntegrationRuntime {
     await this.#coordinator.seedRawAuthConnectionPresence(args);
   }
 
+  async seedRawStateEntry(
+    args: { readonly key: string; readonly value: Record<string, unknown> },
+  ): Promise<void> {
+    await this.#coordinator.seedRawStateEntry(args);
+  }
+
   async stop(): Promise<void> {
     const failures: unknown[] = [];
     for (const capture of [...this.#captures]) {

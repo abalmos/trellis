@@ -690,37 +690,25 @@ Deno.test("getApprovalResolution ignores stale known dependency digests when act
       },
     },
     schemas: {
-      JobsGetRequest: {
+      JobsQueryRequest: {
         type: "object",
-        required: ["id"],
-        properties: { id: { type: "string" } },
+        required: ["limit"],
+        properties: { limit: { type: "number" } },
       },
-      JobsGetResponse: {
+      JobsQueryResponse: {
         type: "object",
-        required: ["job"],
+        required: ["entries"],
         properties: {
-          job: {
-            type: "object",
-            required: ["id", "state"],
-            properties: {
-              id: { type: "string" },
-              state: {
-                anyOf: [
-                  { const: "pending", type: "string" },
-                  { const: "dismissed", type: "string" },
-                ],
-              },
-            },
-          },
+          entries: { type: "array", items: { type: "object" } },
         },
       },
     },
     rpc: {
-      "Jobs.Get": {
+      "Jobs.Query": {
         version: "v1",
-        subject: "rpc.v1.Jobs.Get",
-        input: { schema: "JobsGetRequest" },
-        output: { schema: "JobsGetResponse" },
+        subject: "rpc.v1.Jobs.Query",
+        input: { schema: "JobsQueryRequest" },
+        output: { schema: "JobsQueryResponse" },
         capabilities: { call: ["trellis.jobs::admin.read"] },
       },
     },
@@ -729,18 +717,11 @@ Deno.test("getApprovalResolution ignores stale known dependency digests when act
     ...activeJobs,
     schemas: {
       ...activeJobs.schemas,
-      JobsGetResponse: {
+      JobsQueryResponse: {
         type: "object",
-        required: ["job"],
+        required: ["entries"],
         properties: {
-          job: {
-            type: "object",
-            required: ["id", "state"],
-            properties: {
-              id: { type: "string" },
-              state: { anyOf: [{ const: "pending", type: "string" }] },
-            },
-          },
+          entries: { type: "array", items: { type: "string" } },
         },
       },
     },
@@ -775,7 +756,7 @@ Deno.test("getApprovalResolution ignores stale known dependency digests when act
         required: {
           jobs: {
             contract: "trellis.jobs@v1",
-            rpc: { call: ["Jobs.Get"] },
+            rpc: { call: ["Jobs.Query"] },
           },
         },
       },
@@ -793,7 +774,7 @@ Deno.test("getApprovalResolution ignores stale known dependency digests when act
     }),
   });
 
-  assertEquals(resolution.plan.publishSubjects, ["rpc.v1.Jobs.Get"]);
+  assertEquals(resolution.plan.publishSubjects, ["rpc.v1.Jobs.Query"]);
   assertEquals(resolution.missingCapabilities, ["trellis.jobs::admin.read"]);
 });
 

@@ -402,7 +402,7 @@ export function createStateAdminDeleteHandler(deps: RpcDeps) {
     if (isErr(admin)) return admin;
     const target = await resolveAdminStore(req, deps);
     if (isErr(target)) return target;
-    return await deps.state.delete(target.orThrow(), {
+    return await deps.state.deleteRaw(target.orThrow(), {
       key: req.key,
       expectedRevision: req.expectedRevision,
     });

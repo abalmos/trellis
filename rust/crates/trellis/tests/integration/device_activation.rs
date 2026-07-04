@@ -7,11 +7,10 @@ use serde_json::{json, Value};
 use trellis_rs::client::{OperationState, ServiceConnectWithContractOptions};
 use trellis_rs::sdk::auth::types::{
     AuthDeploymentAuthorityPlanRequest, AuthDeploymentsCreateRequest,
-    AuthDeploymentsDisableRequest, AuthDeviceUserAuthoritiesListRequest,
-    AuthDeviceUserAuthoritiesResolveInput, AuthDeviceUserAuthoritiesReviewsDecideRequest,
-    AuthDeviceUserAuthoritiesReviewsListRequest, AuthDeviceUserAuthoritiesRevokeRequest,
-    AuthDevicesProvisionRequest, AuthServiceInstancesListRequest, AuthSessionsListRequest,
-    AuthSessionsRevokeRequest,
+    AuthDeviceUserAuthoritiesListRequest, AuthDeviceUserAuthoritiesResolveInput,
+    AuthDeviceUserAuthoritiesReviewsDecideRequest, AuthDeviceUserAuthoritiesReviewsListRequest,
+    AuthDeviceUserAuthoritiesRevokeRequest, AuthDevicesProvisionRequest,
+    AuthServiceInstancesListRequest, AuthSessionsListRequest, AuthSessionsRevokeRequest,
 };
 use trellis_rs::sdk::auth::AuthClient as GeneratedAuthClient;
 
@@ -1830,13 +1829,12 @@ async fn device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iat
     .await;
     assert_auth_reason(status, &body, 403, "contract_digest_not_allowed");
 
-    auth.rpc()
-        .auth()
-        .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "device".to_string(),
-            deployment_id: deployment_id.clone(),
-        })
-        .await
+    runtime
+        .control_plane_sqlite()
+        .execute(
+            "UPDATE device_deployments SET disabled = 1 WHERE deployment_id = ?",
+            params![deployment_id],
+        )
         .expect("disable device deployment");
     let disabled_payload = trellis_rs::auth::build_device_activation_payload(
         &identity.activation_key_base64url,

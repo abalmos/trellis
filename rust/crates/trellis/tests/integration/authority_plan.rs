@@ -15,7 +15,7 @@ use trellis_rs::sdk::auth::types::{
 };
 use trellis_rs::service::{ConnectedServiceRuntime, KvResourceClient};
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_service_case_registered};
 
 const SERVICE_CONTRACT_ID: &str = "trellis.integration.authority-plan.service@v1";
 const RESOURCE_SERVICE_CONTRACT_ID: &str = "trellis.integration.authority-plan.resource-service@v1";
@@ -530,6 +530,78 @@ async fn authority_plan_incompatible_migration_approved_replaces_contract() {
 }
 
 #[tokio::test]
+async fn authority_plan_migration_replaces_desired_state() {
+    assert_service_case_registered(
+        "control-plane.authority-plan-migration-replaces-desired-state",
+        "control-plane",
+        "authority_plan",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let base_contract = service_contract("additive");
+    let incompatible_contract = service_contract("incompatible");
+    approve_base(
+        &mut admin,
+        &bootstrap_url,
+        &base_contract,
+        STRICT_DEPLOYMENT,
+        false,
+    )
+    .await;
+    let base_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let base_service = connect_service(
+        runtime.trellis_url(),
+        "authority-plan-replace-base-service",
+        SERVICE_CONTRACT_ID,
+        &base_contract,
+        &base_key.seed,
+    )
+    .await;
+    let before = deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    assert!(desired_surfaces(&before.1).contains(&"Plan.AddedPing"));
+    drop(base_service);
+
+    let replacement_key =
+        provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let mut connect_handle = spawn_service_connect(
+        runtime.trellis_url(),
+        "authority-plan-replacement-service",
+        SERVICE_CONTRACT_ID,
+        incompatible_contract.clone(),
+        replacement_key.seed,
+    );
+    let plan = wait_for_plan(
+        &mut admin,
+        &bootstrap_url,
+        STRICT_DEPLOYMENT,
+        "pending",
+        "migration",
+        incompatible_contract.digest(),
+    )
+    .await;
+    expire_authority_plan_offer(
+        &runtime.control_plane_sqlite(),
+        STRICT_DEPLOYMENT,
+        base_contract.digest(),
+    );
+    accept_plan(&mut admin, &bootstrap_url, &plan).await;
+    admin
+        .wait_ready(&bootstrap_url, STRICT_DEPLOYMENT)
+        .await
+        .expect("deployment authority ready after accepting migration");
+    let replacement = connect_handle
+        .await
+        .expect("replacement connect task panicked")
+        .expect("replacement connects after migration approval");
+
+    let after = deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let surfaces = desired_surfaces(&after.1);
+    assert!(surfaces.contains(&"Plan.Ping"));
+    assert!(!surfaces.contains(&"Plan.AddedPing"));
+    drop(replacement);
+}
+
+#[tokio::test]
 async fn authority_plan_incompatible_migration_rejected_keeps_old_contract() {
     assert_case_registered(
         "authority-plan.incompatible-migration-rejected-keeps-old-contract",
@@ -885,6 +957,70 @@ async fn authority_plan_resource_change_migration_approved_and_bound() {
     assert_eq!(output.history, 2);
     assert_eq!(output.message, "resource-bound");
     service_task.abort_and_wait().await;
+}
+
+#[tokio::test]
+async fn control_plane_service_resource_removal_purges_old_binding() {
+    assert_service_case_registered(
+        "control-plane.service-resource-removal-purges-old-binding",
+        "control-plane",
+        "authority_plan",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let resource_contract = resource_service_contract(1);
+    let removed_contract = resource_removed_service_contract();
+    approve_base(
+        &mut admin,
+        &bootstrap_url,
+        &resource_contract,
+        STRICT_DEPLOYMENT,
+        false,
+    )
+    .await;
+    let service_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let resource_service = connect_service(
+        runtime.trellis_url(),
+        "authority-plan-resource-service",
+        RESOURCE_SERVICE_CONTRACT_ID,
+        &resource_contract,
+        &service_key.seed,
+    )
+    .await;
+    assert!(resource_service.resources().kv.contains_key("records"));
+    drop(resource_service);
+
+    let removed_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    let mut connect_handle = spawn_service_connect(
+        runtime.trellis_url(),
+        "authority-plan-resource-removed-service",
+        RESOURCE_SERVICE_CONTRACT_ID,
+        removed_contract.clone(),
+        removed_key.seed,
+    );
+    let plan = wait_for_plan(
+        &mut admin,
+        &bootstrap_url,
+        STRICT_DEPLOYMENT,
+        "pending",
+        "migration",
+        removed_contract.digest(),
+    )
+    .await;
+    accept_plan(&mut admin, &bootstrap_url, &plan).await;
+    admin
+        .wait_ready(&bootstrap_url, STRICT_DEPLOYMENT)
+        .await
+        .expect("deployment authority ready after resource removal");
+    let removed_service = connect_handle
+        .await
+        .expect("removed resource service connect task panicked")
+        .expect("removed resource service connects after migration approval");
+    assert!(!removed_service.resources().kv.contains_key("records"));
+
+    let authority =
+        deployment_authority_snapshot(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
+    assert!(!desired_resources(&authority.1).contains(&"records"));
 }
 
 #[tokio::test]
@@ -1301,6 +1437,26 @@ async fn deployment_authority_snapshot(
     )
 }
 
+fn expire_authority_plan_offer(
+    sqlite: &trellis_test::TrellisControlPlaneSqlite,
+    deployment: &str,
+    digest: &str,
+) {
+    let timestamp = "2026-01-01T00:00:00.000Z";
+    let result = sqlite
+        .execute(
+            "UPDATE implementation_offers
+              SET stale_at = ?, expires_at = ?
+              WHERE deployment_kind = 'service'
+                AND deployment_id = ?
+                AND contract_digest = ?
+                AND status = 'accepted'",
+            params![timestamp, timestamp, deployment, digest],
+        )
+        .expect("expire authority-plan implementation offer");
+    assert_eq!(result.rows_affected, 1);
+}
+
 async fn accept_update_raw(
     admin: &mut trellis_test::TrellisTestAdmin,
     bootstrap_url: &str,
@@ -1577,6 +1733,41 @@ fn resource_service_contract(history: i64) -> trellis_test::TrellisTestContract 
         }
     }))
     .expect("build authority-plan resource service contract")
+}
+
+fn resource_removed_service_contract() -> trellis_test::TrellisTestContract {
+    trellis_test::TrellisTestContract::from_manifest_value(json!({
+        "format": "trellis.contract.v1",
+        "id": RESOURCE_SERVICE_CONTRACT_ID,
+        "displayName": "Authority Plan Resource Removed Service",
+        "description": "Resource authority-plan service contract with resources removed.",
+        "kind": "service",
+        "schemas": resource_schemas(),
+        "rpc": {
+            "Plan.ResourcePing": rpc_shape(ResourcePingRpc::SUBJECT, "ResourcePingInput", "ResourcePingOutput", &[]),
+        }
+    }))
+    .expect("build authority-plan resource-removed service contract")
+}
+
+fn desired_surfaces(authority: &Value) -> Vec<&str> {
+    authority
+        .pointer("/surfaces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|surface| surface.get("name").and_then(Value::as_str))
+        .collect()
+}
+
+fn desired_resources(authority: &Value) -> Vec<&str> {
+    authority
+        .pointer("/resources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|resource| resource.get("alias").and_then(Value::as_str))
+        .collect()
 }
 
 fn base_schemas() -> Value {

@@ -28,6 +28,16 @@ and this project adheres to
 - Added live TypeScript and Rust coverage for the new Jobs admin workbench API,
   terminal job inspection, keyed queue policies, retry-to-dead projection,
   worker presence, and control-plane Jobs admin registration.
+- Added live release-gate coverage for account-flow OAuth callbacks, operation
+  callback/resume behavior, state conflict and corrupt-entry handling, catalog
+  resource binding projection, and login portal browser smoke behavior.
+
+### Fixed
+
+- Fixed state admin deletion so malformed backing state entries can be removed
+  without first deserializing the corrupt value.
+- Fixed local HTTP OAuth/OIDC account-flow callback handling for provider
+  errors, provider mismatch, and successful account linking.
 
 ## [0.11.0-rc.4] - 2026-07-03
 

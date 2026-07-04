@@ -4,6 +4,9 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
+const env = (name) =>
+  globalThis.Deno?.env.get(name) ??
+    globalThis.process?.env?.[name];
 
 function manualChunks(id) {
   if (!id.includes("node_modules")) return undefined;
@@ -28,6 +31,7 @@ const config = {
   plugins: [tailwindcss(), sveltekit()],
   build: {
     chunkSizeWarningLimit: 450,
+    sourcemap: env("TRELLIS_BROWSER_COVERAGE_SOURCEMAP") === "1",
     rollupOptions: {
       output: {
         manualChunks,

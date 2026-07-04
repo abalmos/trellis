@@ -107,6 +107,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "operations.callback-terminal-and-resume-live",
+    file: "operations/callback_terminal_and_resume_live.integration_test.ts",
+    testName:
+      "operations.callback-terminal-and-resume-live observes callbacks, terminal states, and resumed refs",
+    runtime: "live-trellis",
+  },
+  {
     id: "operations.client-cancels-operation",
     file: "operations/client_cancels_operation.integration_test.ts",
     testName:
@@ -313,6 +320,20 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "state.value-and-map-conflict-shapes-live",
+    file: "state/value_and_map_conflict_shapes_live.integration_test.ts",
+    testName:
+      "state.value-and-map-conflict-shapes-live differentiates create and stale conflicts",
+    runtime: "live-trellis",
+  },
+  {
+    id: "state.admin-deletes-corrupt-state-entry",
+    file: "state/admin_deletes_corrupt_state_entry.integration_test.ts",
+    testName:
+      "state.admin-deletes-corrupt-state-entry removes a malformed backing KV entry",
+    runtime: "live-trellis",
+  },
+  {
     id: "transfer.client-uploads-file-via-operation",
     file: "transfer/client_uploads_file_via_operation.integration_test.ts",
     testName:
@@ -398,6 +419,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "jobs.keyed-jobs-queue-policies-live",
+    file: "jobs/keyed_jobs_queue_policies_live.integration_test.ts",
+    testName:
+      "jobs.keyed-jobs-queue-policies-live coalesces, replaces, and removes queued keyed jobs",
+    runtime: "live-trellis",
+  },
+  {
     id: "jobs.submitted-job-can-be-cancelled",
     file: "jobs/submitted_job_can_be_cancelled.integration_test.ts",
     testName:
@@ -437,6 +465,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     file: "jobs/job_context_propagates_request_and_trace.integration_test.ts",
     testName:
       "jobs.job-context-propagates-request-and-trace propagates requestId and traceId",
+    runtime: "live-trellis",
+  },
+  {
+    id: "jobs.terminal-local-job-edges-and-admin-rpcs",
+    file: "jobs/terminal_local_job_edges_and_admin_rpcs.integration_test.ts",
+    testName:
+      "jobs.terminal-local-job-edges-and-admin-rpcs observes terminal local refs and admin RPCs",
     runtime: "live-trellis",
   },
   {
@@ -803,6 +838,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
       "auth/users_identities_admin_surfaces_page_and_scope.integration_test.ts",
     testName:
       "auth.users-identities-admin-surfaces-page-and-scope exercises user and identity admin RPC surfaces",
+    runtime: "live-trellis",
+  },
+  {
+    id: "auth.account-flow-oauth-callback-runtime",
+    file: "auth/account_flow_oauth_callback_runtime.integration_test.ts",
+    testName:
+      "auth.account-flow-oauth-callback-runtime handles provider errors, provider mismatch, and link success",
     runtime: "live-trellis",
   },
   {

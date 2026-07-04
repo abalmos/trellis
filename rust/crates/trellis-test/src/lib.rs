@@ -36,6 +36,8 @@ const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_ADMIN_RPC_TIMEOUT_MS: u64 = 5_000;
 const NATS_IMAGE: &str = "docker.io/library/nats:2-alpine";
+const NATS_CONTAINER_PREFIX: &str = "trellis-test-nats-";
+const WORKDIR_OWNER_MARKER: &str = ".trellis-test-owner";
 const ADMIN_USERNAME: &str = "admin";
 const ADMIN_RPC_CALLS: &[&str] = &[
     "Auth.DeploymentAuthority.AcceptMigration",
@@ -553,6 +555,15 @@ pub struct TrellisRawAuthConnectionPresence {
     pub value: Value,
 }
 
+/// Raw state entry seeded for malformed live-runtime tests.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrellisRawStateEntry {
+    /// Raw key in the `trellis_state` KV bucket.
+    pub key: String,
+    /// Raw JSON value written to the `trellis_state` KV bucket.
+    pub value: Value,
+}
+
 /// Live NATS observer for JetStream acknowledgement protocol frames.
 pub struct TrellisJetStreamAckObserver {
     _client: async_nats::Client,
@@ -663,6 +674,10 @@ impl TrellisTestRuntime {
         bootstrap_options.public_origin = trellis_url.clone();
         let manifest =
             trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?;
+        fs::write(
+            workdir.path().join(WORKDIR_OWNER_MARKER),
+            format!("{}\n", std::process::id()),
+        )?;
 
         let mut nats = None;
         let mut trellis = None;
@@ -919,6 +934,28 @@ impl TrellisTestRuntime {
         let js = jetstream::new(client);
         let kv = js
             .get_key_value("trellis_connections")
+            .await
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+        kv.put(entry.key, entry.value.to_string().into())
+            .await
+            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+        Ok(())
+    }
+
+    /// Seeds one raw state KV entry for malformed-entry tests.
+    pub async fn seed_raw_state_entry(
+        &self,
+        entry: TrellisRawStateEntry,
+    ) -> Result<(), TrellisTestError> {
+        let client = ConnectOptions::new()
+            .credentials_file(auth_creds_path(self.workdir.path()))
+            .await?
+            .connect(&self.nats_url)
+            .await
+            .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
+        let js = jetstream::new(client);
+        let kv = js
+            .get_key_value("trellis_state")
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
         kv.put(entry.key, entry.value.to_string().into())
@@ -2045,10 +2082,13 @@ impl IntegrationWorkdir {
             .and_then(|name| name.to_str())
             .unwrap_or("trellis")
             .to_owned();
-        let temp_dir = tempfile::Builder::new()
-            .prefix(&format!("{repo_name}-rust-test-"))
-            .tempdir()?;
+        let prefix = format!("{repo_name}-rust-test-");
+        remove_stale_marked_workdirs(&std::env::temp_dir(), &prefix);
+        let temp_dir = tempfile::Builder::new().prefix(&prefix).tempdir()?;
         let path = temp_dir.path().to_path_buf();
+        if let Some(parent) = path.parent() {
+            remove_stale_marked_workdirs(parent, &prefix);
+        }
         Ok(Self {
             temp_dir: Some(temp_dir),
             path,
@@ -2105,14 +2145,20 @@ impl NatsContainer {
         runtime: ResolvedContainerRuntime,
         workdir: &IntegrationWorkdir,
     ) -> Result<Self, TrellisTestError> {
+        remove_stale_nats_containers(runtime);
         let nats_dir = workdir.path().join("nats");
         fs::create_dir_all(nats_dir.join("data"))?;
         let name = unique_container_name("nats")?;
         let spec = CommandSpec::new(runtime.program())
             .arg("run")
             .arg("--detach")
+            .arg("--rm")
             .arg("--name")
             .arg(&name)
+            .arg("--label")
+            .arg("io.trellis.test=nats")
+            .arg("--label")
+            .arg(format!("io.trellis.test.pid={}", std::process::id()))
             .arg("--publish")
             .arg("127.0.0.1::4222")
             .arg("--publish")
@@ -2624,11 +2670,72 @@ fn remove_container(runtime: ResolvedContainerRuntime, name: &str) -> Result<(),
     if output.status.success() {
         return Ok(());
     }
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    if stderr.contains("no such container")
+        || stderr.contains("no container with name")
+        || stderr.contains("does not exist")
+    {
+        return Ok(());
+    }
     Err(command_failed(
         "failed to remove NATS container",
         &spec,
         output,
     ))
+}
+
+fn remove_stale_nats_containers(runtime: ResolvedContainerRuntime) {
+    let spec = CommandSpec::new(runtime.program())
+        .arg("ps")
+        .arg("-a")
+        .arg("--format")
+        .arg("{{.Names}}");
+    let Ok(output) = run_output(&spec) else {
+        return;
+    };
+    if !output.status.success() {
+        return;
+    }
+    for name in String::from_utf8_lossy(&output.stdout).lines() {
+        if pid_from_prefixed_name(name, NATS_CONTAINER_PREFIX).is_some_and(process_is_gone) {
+            let _ = remove_container(runtime, name);
+        }
+    }
+}
+
+fn remove_stale_marked_workdirs(parent: &Path, prefix: &str) {
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(prefix) || !path.is_dir() {
+            continue;
+        }
+        let marker_path = path.join(WORKDIR_OWNER_MARKER);
+        let owner_pid = fs::read_to_string(marker_path)
+            .ok()
+            .and_then(|value| value.trim().parse::<u32>().ok());
+        if owner_pid.is_some_and(process_is_gone) {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn pid_from_prefixed_name(name: &str, prefix: &str) -> Option<u32> {
+    name.strip_prefix(prefix)?
+        .split_once('-')?
+        .0
+        .parse::<u32>()
+        .ok()
+}
+
+fn process_is_gone(pid: u32) -> bool {
+    let proc = Path::new("/proc");
+    proc.is_dir() && !proc.join(pid.to_string()).exists()
 }
 
 fn container_mount(
@@ -2757,12 +2864,14 @@ mod tests {
         admin_contract, auth_deployments_create_request_shape, auth_start_signature_payload,
         bound_flow_session_from_parts, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
-        parse_published_port, parse_trellis_bootstrap_url, repo_trellis_command,
-        AuthorityPlanClassification, AuthorityPlanSummary, ContainerRuntime, MountMode,
-        ResolvedContainerRuntime, TrellisControlPlaneSqlite,
+        parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
+        remove_stale_marked_workdirs, repo_trellis_command, AuthorityPlanClassification,
+        AuthorityPlanSummary, ContainerRuntime, MountMode, ResolvedContainerRuntime,
+        TrellisControlPlaneSqlite, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
+    use std::fs;
 
     #[test]
     fn container_mount_relabels_podman_volumes() {
@@ -2786,6 +2895,44 @@ mod tests {
             ),
             "/tmp/trellis/nats.conf:/etc/nats/nats.conf:ro"
         );
+    }
+
+    #[test]
+    fn pid_from_prefixed_name_parses_owner_pid() {
+        assert_eq!(
+            pid_from_prefixed_name("trellis-test-nats-123-456", "trellis-test-nats-"),
+            Some(123)
+        );
+        assert_eq!(
+            pid_from_prefixed_name("other-123-456", "trellis-test-nats-"),
+            None
+        );
+    }
+
+    #[test]
+    fn stale_marked_workdir_cleanup_keeps_live_and_unmarked_dirs() {
+        if !std::path::Path::new("/proc").is_dir() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("create cleanup tempdir");
+        let live = temp.path().join("trellis-test-live");
+        let dead = temp.path().join("trellis-test-dead");
+        let unmarked = temp.path().join("trellis-test-unmarked");
+        fs::create_dir(&live).expect("create live dir");
+        fs::create_dir(&dead).expect("create dead dir");
+        fs::create_dir(&unmarked).expect("create unmarked dir");
+        fs::write(
+            live.join(WORKDIR_OWNER_MARKER),
+            format!("{}\n", std::process::id()),
+        )
+        .expect("write live marker");
+        fs::write(dead.join(WORKDIR_OWNER_MARKER), "999999999\n").expect("write dead marker");
+
+        remove_stale_marked_workdirs(temp.path(), "trellis-test-");
+
+        assert!(live.exists());
+        assert!(!dead.exists());
+        assert!(unmarked.exists());
     }
 
     #[test]

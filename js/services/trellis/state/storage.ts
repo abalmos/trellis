@@ -57,6 +57,7 @@ type StateStoreDeps = {
 type StateKvLike = {
   create(key: string, value: unknown): AsyncResult<void, KVError>;
   put(key: string, value: unknown): AsyncResult<void, KVError>;
+  delete(key: string): AsyncResult<void, KVError>;
   get(key: string): AsyncResult<StateKvEntryLike, KVError | ValidationError>;
   keys(filter?: string | string[]): AsyncResult<AsyncIterable<string>, KVError>;
 };
@@ -368,6 +369,28 @@ export class StateStore {
       return Result.err(new UnexpectedError({ cause: deleteResult.error }));
     }
 
+    return Result.ok({ deleted: true });
+  }
+
+  /** Deletes a state entry without reading its value, for admin cleanup of corrupt rows. */
+  async deleteRaw(
+    target: ResolvedStateStore,
+    input: StateDelete,
+  ): Promise<Result<StateDeleteResponse, ValidationError | UnexpectedError>> {
+    const keyResult = this.#resolveKey(target, input.key);
+    if (isErr(keyResult)) return keyResult;
+
+    if (input.expectedRevision !== undefined) {
+      return await this.delete(target, input);
+    }
+
+    const deleteResult = await this.#kv.delete(
+      this.#storageKey(target, keyResult.orThrow()),
+    );
+    if (isErr(deleteResult)) {
+      if (isNotFound(deleteResult.error)) return Result.ok({ deleted: false });
+      return Result.err(new UnexpectedError({ cause: deleteResult.error }));
+    }
     return Result.ok({ deleted: true });
   }
 

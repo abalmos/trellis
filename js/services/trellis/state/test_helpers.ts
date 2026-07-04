@@ -58,6 +58,20 @@ export class FakeStateKV {
     })());
   }
 
+  delete(key: string) {
+    return AsyncResult.from((async () => {
+      if (!this.#values.delete(key)) {
+        return Result.err(
+          new KVError({
+            operation: "delete",
+            context: { key, reason: "not found" },
+          }),
+        );
+      }
+      return Result.ok(undefined);
+    })());
+  }
+
   get(key: string) {
     return AsyncResult.from((async () => {
       const current = this.#values.get(key);

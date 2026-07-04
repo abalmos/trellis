@@ -221,37 +221,25 @@ Deno.test("planUserContractApproval prefers active dependency digest over stale 
       },
     },
     schemas: {
-      JobsGetRequest: {
+      JobsQueryRequest: {
         type: "object",
-        required: ["id"],
-        properties: { id: { type: "string" } },
+        required: ["limit"],
+        properties: { limit: { type: "number" } },
       },
-      JobsGetResponse: {
+      JobsQueryResponse: {
         type: "object",
-        required: ["job"],
+        required: ["entries"],
         properties: {
-          job: {
-            type: "object",
-            required: ["id", "state"],
-            properties: {
-              id: { type: "string" },
-              state: {
-                anyOf: [
-                  { const: "pending", type: "string" },
-                  { const: "dismissed", type: "string" },
-                ],
-              },
-            },
-          },
+          entries: { type: "array", items: { type: "object" } },
         },
       },
     },
     rpc: {
-      "Jobs.Get": {
+      "Jobs.Query": {
         version: "v1",
-        subject: "rpc.v1.example.Jobs.Get",
-        input: { schema: "JobsGetRequest" },
-        output: { schema: "JobsGetResponse" },
+        subject: "rpc.v1.example.Jobs.Query",
+        input: { schema: "JobsQueryRequest" },
+        output: { schema: "JobsQueryResponse" },
         capabilities: { call: ["jobs:read"] },
       },
     },
@@ -260,20 +248,11 @@ Deno.test("planUserContractApproval prefers active dependency digest over stale 
     ...activeDependency,
     schemas: {
       ...activeDependency.schemas,
-      JobsGetResponse: {
+      JobsQueryResponse: {
         type: "object",
-        required: ["job"],
+        required: ["entries"],
         properties: {
-          job: {
-            type: "object",
-            required: ["id", "state"],
-            properties: {
-              id: { type: "string" },
-              state: {
-                anyOf: [{ const: "pending", type: "string" }],
-              },
-            },
-          },
+          entries: { type: "array", items: { type: "string" } },
         },
       },
     },
@@ -297,7 +276,7 @@ Deno.test("planUserContractApproval prefers active dependency digest over stale 
       required: {
         jobs: {
           contract: "example.jobs@v1",
-          rpc: { call: ["Jobs.Get"] },
+          rpc: { call: ["Jobs.Query"] },
         },
       },
     },
@@ -309,7 +288,7 @@ Deno.test("planUserContractApproval prefers active dependency digest over stale 
       description: "Read job data.",
     },
   });
-  assertEquals(plan.publishSubjects, ["rpc.v1.example.Jobs.Get"]);
+  assertEquals(plan.publishSubjects, ["rpc.v1.example.Jobs.Query"]);
 });
 
 Deno.test("planUserContractApproval rejects app contracts with raw subjects", async () => {

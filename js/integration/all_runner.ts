@@ -239,7 +239,49 @@ async function combineLcovReports(coverageDir: string): Promise<void> {
     Deno.readTextFile(resolve(coverageDir, "service", "lcov.info")),
   ]);
   await Deno.mkdir(coverageDir, { recursive: true });
-  await Deno.writeTextFile(resolve(coverageDir, "lcov.info"), lcov.join("\n"));
+  await Deno.writeTextFile(
+    resolve(coverageDir, "lcov.info"),
+    filterProductLcov(lcov.join("\n")),
+  );
+}
+
+/** Removes non-product source records from the combined live integration LCOV. */
+export function filterProductLcov(lcov: string): string {
+  const records: string[][] = [];
+  let record: string[] = [];
+  for (const line of lcov.split("\n")) {
+    record.push(line);
+    if (line === "end_of_record") {
+      records.push(record);
+      record = [];
+    }
+  }
+  if (record.some((line) => line !== "")) {
+    records.push(record);
+  }
+
+  const filtered = records.filter((record) =>
+    !record.some((line) =>
+      line.startsWith("SF:") && excludedProductCoveragePath(line.slice(3))
+    )
+  );
+  return filtered.map((record) => record.join("\n")).join("\n") +
+    (lcov.endsWith("\n") && filtered.length > 0 ? "\n" : "");
+}
+
+function excludedProductCoveragePath(sourcePath: string): boolean {
+  const normalized =
+    (sourcePath.startsWith("file:") ? fromFileUrl(sourcePath) : sourcePath)
+      .replaceAll("\\", "/");
+  const normalizedRoot = repoRoot.replaceAll("\\", "/").replace(/\/$/, "");
+  const relativePath = normalized.startsWith(`${normalizedRoot}/`)
+    ? normalized.slice(normalizedRoot.length + 1)
+    : normalized;
+  return [
+    "js/packages/trellis-test/",
+    "js/integration/",
+    "js/packages/result/",
+  ].some((prefix) => relativePath.startsWith(prefix));
 }
 
 function helpText(): string {
