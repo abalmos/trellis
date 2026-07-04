@@ -10,7 +10,7 @@ use trellis_rs::jobs::{
 };
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
-    JobsCancelRequest, JobsGetRequest, JobsListRequest, JobsListResponseEntriesItem,
+    JobsCancelRequest, JobsInspectRequest, JobsQueryRequest, JobsQueryResponseEntriesItem,
 };
 use trellis_rs::service::ConnectedServiceRuntime;
 
@@ -211,18 +211,25 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
     let detail = jobs_admin
         .rpc()
         .jobs()
-        .get(&JobsGetRequest { id: job.id.clone() })
+        .inspect(&JobsInspectRequest { id: job.id.clone() })
         .await
-        .expect("call generated Jobs.Get");
+        .expect("call generated Jobs.Inspect");
     assert_eq!(detail.job.id, job.id);
     assert_eq!(detail.job.service, job.service);
     assert_eq!(detail.job.r#type, job.job_type);
     assert_eq!(detail.job.payload, json!({ "marker": MARKER }));
+    assert!(detail
+        .timeline
+        .iter()
+        .any(|event| event.r#type == "started"));
 
     let cancelled = jobs_admin
         .rpc()
         .jobs()
-        .cancel(&JobsCancelRequest { id: job.id.clone() })
+        .cancel(&JobsCancelRequest {
+            id: job.id.clone(),
+            reason: None,
+        })
         .await
         .expect("call generated Jobs.Cancel");
     assert_eq!(cancelled.job.id, job.id);
@@ -248,7 +255,7 @@ fn jobs_admin_client_contract(
         .use_ref(
             "jobs",
             trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Health", "Jobs.List", "Jobs.Get", "Jobs.Cancel"]),
+                .with_rpc_call(["Jobs.Health", "Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"]),
         )
         .build()?;
 
@@ -278,28 +285,34 @@ async fn wait_for_listed_job(
     service: &str,
     job_type: &str,
     job_id: &str,
-) -> JobsListResponseEntriesItem {
+) -> JobsQueryResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let page = jobs_admin
             .rpc()
             .jobs()
-            .list(&JobsListRequest {
+            .query(&JobsQueryRequest {
                 service: Some(service.to_string()),
                 r#type: Some(job_type.to_string()),
                 state: None,
-                since: None,
+                search: None,
+                queue_key: None,
+                trigger: None,
+                runtime_band: None,
+                group_by: None,
+                sort: None,
+                window: None,
                 offset: None,
                 limit: 20,
             })
             .await
-            .expect("call generated Jobs.List");
+            .expect("call generated Jobs.Query");
         if let Some(entry) = page.entries.into_iter().find(|entry| entry.id == job_id) {
             return entry;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.List did not return job before timeout"
+            "Jobs.Query did not return job before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -309,23 +322,23 @@ async fn wait_for_job_state(
     jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
     job_id: &str,
     state: &str,
-) -> trellis_rs::sdk::jobs::types::JobsGetResponseJob {
+) -> trellis_rs::sdk::jobs::types::JobsInspectResponseJob {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
         let current = jobs_admin
             .rpc()
             .jobs()
-            .get(&JobsGetRequest {
+            .inspect(&JobsInspectRequest {
                 id: job_id.to_string(),
             })
             .await
-            .expect("call generated Jobs.Get while polling state");
+            .expect("call generated Jobs.Inspect while polling state");
         if current.job.state == state {
             return current.job;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.Get did not reach {state} before timeout"
+            "Jobs.Inspect did not reach {state} before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

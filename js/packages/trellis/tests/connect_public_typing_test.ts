@@ -69,7 +69,7 @@ const selectionContract = defineServiceContract(
 const appUses = {
   required: {
     jobs: jobs.use({
-      rpc: { call: ["Jobs.List", "Jobs.ListServices"] },
+      rpc: { call: ["Jobs.Query", "Jobs.ListServices"] },
     }),
     selection: selectionContract.use({
       rpc: { call: ["Selection.Selected"] },
@@ -259,7 +259,7 @@ async function typecheckClientConnectRequestSurface() {
   // @ts-expect-error selected output must be concrete, not any.
   const selectedOutputCheck: number = selected;
 
-  const jobsResult = await connected.request("Jobs.List", { limit: 8 })
+  const jobsResult = await connected.request("Jobs.Query", { limit: 8 })
     .orThrow();
   const jobCount: number = jobsResult.entries.length;
   // @ts-expect-error generated SDK request output must be concrete, not any.
@@ -331,7 +331,7 @@ async function typecheckTrellisClientConnectRequestSurface() {
   // @ts-expect-error selected output must be concrete, not any.
   const selectedOutputCheck: number = selected;
 
-  const jobsResult = await connected.request("Jobs.List", { limit: 8 })
+  const jobsResult = await connected.request("Jobs.Query", { limit: 8 })
     .orThrow();
   const jobCount: number = jobsResult.entries.length;
   // @ts-expect-error generated SDK request output must be concrete, not any.

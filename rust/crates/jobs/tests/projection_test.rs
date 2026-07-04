@@ -29,6 +29,7 @@ fn event(
         tries: 0,
         max_tries: None,
         error: None,
+        error_detail: None,
         progress: None,
         logs: None,
         payload: None,
@@ -36,6 +37,9 @@ fn event(
         deadline: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
+        admin_action: None,
         timestamp: "2026-03-28T12:00:00.000Z".to_string(),
     };
     overrides(&mut value);
@@ -223,11 +227,14 @@ fn reduce_job_event_rejects_started_when_previous_state_does_not_match_current()
         tries: 1,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
 
     let started = event(JobEventType::Started, JobState::Active, |value| {
@@ -379,11 +386,14 @@ fn reduce_job_event_preserves_terminal_state_for_non_retried_event() {
         tries: 1,
         max_tries: 3,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
 
     let too_late_failed = event(JobEventType::Failed, JobState::Failed, |value| {
@@ -414,6 +424,7 @@ fn reduce_job_event_allows_retried_from_terminal_and_clears_runtime_fields() {
         tries: 3,
         max_tries: 3,
         last_error: Some("boom".to_string()),
+        error_detail: None,
         deadline: None,
         progress: Some(JobProgress {
             step: Some("finalize".to_string()),
@@ -428,6 +439,8 @@ fn reduce_job_event_allows_retried_from_terminal_and_clears_runtime_fields() {
         }]),
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
 
     let retried = event(JobEventType::Retried, JobState::Pending, |value| {
@@ -443,6 +456,7 @@ fn reduce_job_event_allows_retried_from_terminal_and_clears_runtime_fields() {
     assert_eq!(updated.completed_at, None);
     assert_eq!(updated.started_at, None);
     assert_eq!(updated.last_error, None);
+    assert_eq!(updated.error_detail, None);
     assert_eq!(updated.progress, None);
     assert_eq!(updated.payload, json!({ "documentId": "doc-1" }));
     assert_eq!(updated.logs, None);
@@ -495,6 +509,12 @@ fn reduce_job_event_sets_last_error_for_retry_failed_expired_and_dead() {
         let next =
             reduce_job_event(Some(current_job), &update).expect("job should stay materialized");
         assert_eq!(next.last_error.as_deref(), Some("boom"));
+        assert_eq!(
+            next.error_detail
+                .as_ref()
+                .map(|detail| detail.message.as_str()),
+            Some("boom")
+        );
     }
 
     let failed = reduce_job_event(
@@ -570,11 +590,14 @@ fn reduce_job_event_rejects_non_retried_transitions_from_all_terminal_states() {
             tries: 1,
             max_tries: 3,
             last_error: None,
+            error_detail: None,
             deadline: None,
             progress: None,
             logs: None,
             concurrency: None,
             queue_policy: None,
+            trigger: None,
+            lineage: None,
         };
 
         let started = event(JobEventType::Started, JobState::Active, |value| {

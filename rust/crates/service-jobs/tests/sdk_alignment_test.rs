@@ -59,7 +59,10 @@ fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
         Some(&vec!["trellis.jobs::admin.mutate".to_string()])
     );
 
-    let jobs_get = contract.rpc.get("Jobs.Get").expect("Jobs.Get rpc");
+    assert!(!contract.rpc.contains_key("Jobs.List"));
+    assert!(!contract.rpc.contains_key("Jobs.Get"));
+
+    let jobs_get = contract.rpc.get("Jobs.Inspect").expect("Jobs.Inspect rpc");
     assert_eq!(
         jobs_get
             .capabilities

@@ -30,19 +30,6 @@ impl RpcDescriptor for JobsDismissDLQRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
-/// Descriptor for `Jobs.Get`.
-pub struct JobsGetRpc;
-impl RpcDescriptor for JobsGetRpc {
-    type Input = super::types::JobsGetRequest;
-    type Output = super::types::JobsGetResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_GET_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_GET_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Jobs.Get";
-    const SUBJECT: &'static str = "rpc.v1.Jobs.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
-    const ERRORS: &'static [&'static str] =
-        &["UnexpectedError", "ValidationError", "NotFoundError"];
-}
 /// Descriptor for `Jobs.GetKey`.
 pub struct JobsGetKeyRpc;
 impl RpcDescriptor for JobsGetKeyRpc {
@@ -68,17 +55,18 @@ impl RpcDescriptor for JobsHealthRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError"];
 }
-/// Descriptor for `Jobs.List`.
-pub struct JobsListRpc;
-impl RpcDescriptor for JobsListRpc {
-    type Input = super::types::JobsListRequest;
-    type Output = super::types::JobsListResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_LIST_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Jobs.List";
-    const SUBJECT: &'static str = "rpc.v1.Jobs.List";
+/// Descriptor for `Jobs.Inspect`.
+pub struct JobsInspectRpc;
+impl RpcDescriptor for JobsInspectRpc {
+    type Input = super::types::JobsInspectRequest;
+    type Output = super::types::JobsInspectResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_INSPECT_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_INSPECT_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Jobs.Inspect";
+    const SUBJECT: &'static str = "rpc.v1.Jobs.Inspect";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
-    const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+    const ERRORS: &'static [&'static str] =
+        &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
 /// Descriptor for `Jobs.ListDLQ`.
 pub struct JobsListDLQRpc;
@@ -101,6 +89,18 @@ impl RpcDescriptor for JobsListServicesRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_LIST_SERVICES_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Jobs.ListServices";
     const SUBJECT: &'static str = "rpc.v1.Jobs.ListServices";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Descriptor for `Jobs.Query`.
+pub struct JobsQueryRpc;
+impl RpcDescriptor for JobsQueryRpc {
+    type Input = super::types::JobsQueryRequest;
+    type Output = super::types::JobsQueryResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_QUERY_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_QUERY_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Jobs.Query";
+    const SUBJECT: &'static str = "rpc.v1.Jobs.Query";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }

@@ -2,12 +2,12 @@
 
 use serde_json::Value;
 use trellis_rs::sdk::jobs::rpc::{
-    Empty, JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsGetRpc, JobsHealthRpc,
-    JobsListDLQRpc, JobsListRpc, JobsListServicesRpc, JobsReplayDLQRpc, JobsRetryRpc,
+    Empty, JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsHealthRpc, JobsInspectRpc,
+    JobsListDLQRpc, JobsListServicesRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
 };
 use trellis_rs::sdk::jobs::types::{
-    JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsGetRequest,
-    JobsHealthResponse, JobsListDLQRequest, JobsListRequest, JobsListServicesRequest,
+    JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsHealthResponse,
+    JobsInspectRequest, JobsListDLQRequest, JobsListServicesRequest, JobsQueryRequest,
     JobsReplayDLQRequest, JobsRetryRequest,
 };
 use trellis_rs::service::{ConnectedServiceRuntime, DeclaredRpcError, Router, ServerError};
@@ -32,18 +32,18 @@ pub fn register_jobs_rpc_handlers(
             async move { query.list_services(&input).await.map_err(map_query_error) }
         }
     });
-    runtime.register_rpc::<JobsListRpc, _, _>({
+    runtime.register_rpc::<JobsQueryRpc, _, _>({
         let query = query.clone();
-        move |_ctx, input: JobsListRequest| {
+        move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
-            async move { query.list_jobs(&input).await.map_err(map_query_error) }
+            async move { query.query_jobs(&input).await.map_err(map_query_error) }
         }
     });
-    runtime.register_rpc::<JobsGetRpc, _, _>({
+    runtime.register_rpc::<JobsInspectRpc, _, _>({
         let query = query.clone();
-        move |_ctx, input: JobsGetRequest| {
+        move |_ctx, input: JobsInspectRequest| {
             let query = query.clone();
-            async move { query.get_job(&input).await.map_err(map_query_error) }
+            async move { query.inspect(&input).await.map_err(map_query_error) }
         }
     });
     runtime.register_rpc::<JobsGetKeyRpc, _, _>({
@@ -103,18 +103,18 @@ pub fn build_router_with_query(query: JobsQuery) -> Router {
             async move { query.list_services(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsListRpc, _, _>({
+    router.register_rpc::<JobsQueryRpc, _, _>({
         let query = query.clone();
-        move |_ctx, input: JobsListRequest| {
+        move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
-            async move { query.list_jobs(&input).await.map_err(map_query_error) }
+            async move { query.query_jobs(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsGetRpc, _, _>({
+    router.register_rpc::<JobsInspectRpc, _, _>({
         let query = query.clone();
-        move |_ctx, input: JobsGetRequest| {
+        move |_ctx, input: JobsInspectRequest| {
             let query = query.clone();
-            async move { query.get_job(&input).await.map_err(map_query_error) }
+            async move { query.inspect(&input).await.map_err(map_query_error) }
         }
     });
     router.register_rpc::<JobsGetKeyRpc, _, _>({

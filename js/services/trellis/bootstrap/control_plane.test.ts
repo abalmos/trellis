@@ -31,6 +31,6 @@ Deno.test("console approval resolves Jobs access from built-in contracts", async
       "trellis.jobs::admin.read",
     ),
   );
-  assert(plan.publishSubjects.includes("rpc.v1.Jobs.List"));
+  assert(plan.publishSubjects.includes("rpc.v1.Jobs.Query"));
   assert(plan.publishSubjects.includes("rpc.v1.Jobs.ListServices"));
 });

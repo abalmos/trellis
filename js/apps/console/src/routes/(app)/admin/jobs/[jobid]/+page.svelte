@@ -2,7 +2,7 @@
   import { resolve } from "$app/paths";
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import DataTable from "../../../../../lib/components/DataTable.svelte";
   import EmptyState from "../../../../../lib/components/EmptyState.svelte";
   import LoadingState from "../../../../../lib/components/LoadingState.svelte";
@@ -17,12 +17,13 @@
     loadJobDetailData,
     replayDlqJob,
     retryJob,
+    type JobInspection,
   } from "../../../../../lib/jobs_page.ts";
-  import type { JobsGetOutput } from "@qlever-llc/trellis/sdk/jobs";
   import { getTrellis } from "../../../../../lib/trellis";
 
   const trellis = getTrellis();
-  type Job = NonNullable<JobsGetOutput["job"]>;
+  type Inspection = JobInspection;
+  type Job = Inspection["job"];
 
   const jobId = $derived(page.params.jobid);
   const currentJobId = $derived(jobId ?? "");
@@ -30,9 +31,16 @@
   let actionBusy = $state<string | null>(null);
   let error = $state<string | null>(null);
   let unavailableMessage = $state<string | null>(null);
-  let job = $state.raw<Job | undefined>(undefined);
+  let inspection = $state.raw<Inspection | undefined>(undefined);
   let loadedJobId = $state<string | null>(null);
+  let watchController: AbortController | undefined;
+  let watchReloadTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const job = $derived(inspection?.job);
+  const attempts = $derived(inspection?.attempts ?? []);
+  const errors = $derived(inspection?.errors ?? []);
+  const related = $derived(inspection?.related ?? []);
+  const timeline = $derived(inspection?.timeline ?? []);
   const canCancel = $derived(job?.state === "pending" || job?.state === "retry" || job?.state === "active");
   const canRetry = $derived(job?.state === "failed");
   const canDlq = $derived(job?.state === "dead");
@@ -76,24 +84,26 @@
     return `${Math.floor(minutes / 60)}h`;
   }
 
-  async function load(id = currentJobId) {
+  async function load(id = currentJobId, showLoading = true) {
     loadedJobId = id;
-    loading = true;
+    stopJobsWatch();
+    if (showLoading) loading = true;
     error = null;
     unavailableMessage = null;
 
     try {
       const data = await loadJobDetailData({
-        getJob: (input) => trellis.request("Jobs.Get", input),
+        inspect: (input) => trellis.request("Jobs.Inspect", input),
       }, id);
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
-      job = data.job;
+      inspection = data.inspection;
+      if (data.available) startJobsWatch(id);
     } catch (e) {
       error = errorMessage(e);
       unavailableMessage = null;
-      job = undefined;
+      inspection = undefined;
     } finally {
-      loading = false;
+      if (showLoading) loading = false;
     }
   }
 
@@ -124,12 +134,54 @@
     }
   }
 
+  function clearWatchReload() {
+    if (!watchReloadTimer) return;
+    clearTimeout(watchReloadTimer);
+    watchReloadTimer = undefined;
+  }
+
+  function scheduleWatchReload(id: string) {
+    clearWatchReload();
+    watchReloadTimer = setTimeout(() => {
+      watchReloadTimer = undefined;
+      void load(id, false);
+    }, 350);
+  }
+
+  function stopJobsWatch() {
+    watchController?.abort();
+    watchController = undefined;
+    clearWatchReload();
+  }
+
+  function startJobsWatch(id: string) {
+    stopJobsWatch();
+    const controller = new AbortController();
+    watchController = controller;
+
+    void (async () => {
+      try {
+        const stream = await trellis.feed.jobs.watch({ includeInitial: false, jobId: id }, { signal: controller.signal }).orThrow();
+        for await (const event of stream) {
+          if (controller.signal.aborted) return;
+          if (event.kind !== "ready") scheduleWatchReload(id);
+        }
+      } catch {
+        // Jobs.Watch is optional; manual refresh remains available.
+      }
+    })();
+  }
+
   onMount(() => {
     loadCurrentJobIfNeeded();
   });
 
   afterNavigate(() => {
     loadCurrentJobIfNeeded();
+  });
+
+  onDestroy(() => {
+    stopJobsWatch();
   });
 </script>
 
@@ -201,6 +253,26 @@
               <p class="text-sm text-base-content/60">No logs recorded.</p>
             {/if}
           </div>
+
+          <div>
+            <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Timeline</h2>
+            {#if timeline.length > 0}
+              <DataTable>
+                  <thead><tr><th>Time</th><th>State</th><th>Message</th></tr></thead>
+                  <tbody>
+                    {#each timeline as event (event.sequence)}
+                      <tr>
+                        <td class="text-xs text-base-content/60">{formatDate(event.timestamp)}</td>
+                        <td><StatusBadge label={event.state} status={stateStatus(event.state)} /></td>
+                        <td>{event.message ?? event.reason ?? event.error ?? event.type}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+              </DataTable>
+            {:else}
+              <p class="text-sm text-base-content/60">No timeline entries recorded.</p>
+            {/if}
+          </div>
         </div>
 
         <div class="space-y-4">
@@ -219,6 +291,21 @@
             <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Progress</h2>
             <pre class="max-h-48 overflow-auto rounded-box bg-base-200 p-3 text-xs">{jsonBlock(job.progress)}</pre>
           </div>
+
+          <div>
+            <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Attempts</h2>
+            {#if attempts.length > 0}
+              <DataTable size="xs">
+                  <tbody>
+                    {#each attempts as attempt (attempt.try)}
+                      <tr><th>Try {attempt.try}</th><td>{attempt.state ?? "-"}</td><td>{durationLabel(attempt.startedAt, attempt.endedAt)}</td></tr>
+                    {/each}
+                  </tbody>
+              </DataTable>
+            {:else}
+              <p class="text-sm text-base-content/60">No attempts recorded.</p>
+            {/if}
+          </div>
         </div>
       </div>
 
@@ -230,6 +317,17 @@
         <div>
           <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Result</h2>
           <pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-3 text-xs">{jsonBlock(job.result)}</pre>
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Errors</h2>
+          <pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-3 text-xs">{jsonBlock(errors)}</pre>
+        </div>
+        <div>
+          <h2 class="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-base-content/50">Related</h2>
+          <pre class="max-h-96 overflow-auto rounded-box bg-base-200 p-3 text-xs">{jsonBlock(related)}</pre>
         </div>
       </div>
     </Panel>

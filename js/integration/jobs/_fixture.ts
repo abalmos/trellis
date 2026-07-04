@@ -28,6 +28,14 @@ export type KeyedJobsWorkflowOutput = JobsWorkflowOutput & {
   readonly sequence: number;
 };
 
+export type TerminalJobEdgesOutput = {
+  readonly documentId: string;
+  readonly jobId: string;
+  readonly waitState: string;
+  readonly getState: string;
+  readonly cancelState: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -71,6 +79,28 @@ export function requireKeyedJobsWorkflowOutput(
   };
 }
 
+export function requireTerminalJobEdgesOutput(
+  value: unknown,
+): TerminalJobEdgesOutput {
+  if (!isRecord(value)) {
+    throw new Error("expected terminal job edges output");
+  }
+  if (
+    typeof value.documentId !== "string" || typeof value.jobId !== "string" ||
+    typeof value.waitState !== "string" || typeof value.getState !== "string" ||
+    typeof value.cancelState !== "string"
+  ) {
+    throw new Error("expected terminal job edges output fields");
+  }
+  return {
+    documentId: value.documentId,
+    jobId: value.jobId,
+    waitState: value.waitState,
+    getState: value.getState,
+    cancelState: value.cancelState,
+  };
+}
+
 export function createJobsFixture(caseId: string) {
   const slug = integrationSlug(caseId);
   const jobsSchemas = {
@@ -95,6 +125,13 @@ export function createJobsFixture(caseId: string) {
       processedBy: Type.String(),
       requestId: Type.String(),
       traceId: Type.String(),
+    }),
+    TerminalJobEdgesOutput: Type.Object({
+      documentId: Type.String(),
+      jobId: Type.String(),
+      waitState: Type.String(),
+      getState: Type.String(),
+      cancelState: Type.String(),
     }),
     JobPayload: Type.Object({ documentId: Type.String() }),
     LongJobPayload: Type.Object({ documentId: Type.String() }),
@@ -157,6 +194,38 @@ export function createJobsFixture(caseId: string) {
             whenFull: "reject",
           },
         },
+        keyedCoalesceProcessDocument: {
+          payload: ref.schema("KeyedJobPayload"),
+          result: ref.schema("KeyedJobResult"),
+          concurrency: 2,
+          keyConcurrency: {
+            key: ["document", "/groupKey"],
+            maxActive: 1,
+            heartbeatIntervalMs: 1_000,
+            heartbeatTtlMs: 10_000,
+            stalePolicy: "fail-stale",
+          },
+          queue: {
+            maxQueuedPerKey: 1,
+            whenFull: "coalesce",
+          },
+        },
+        keyedReplaceProcessDocument: {
+          payload: ref.schema("KeyedJobPayload"),
+          result: ref.schema("KeyedJobResult"),
+          concurrency: 2,
+          keyConcurrency: {
+            key: ["document", "/groupKey"],
+            maxActive: 1,
+            heartbeatIntervalMs: 1_000,
+            heartbeatTtlMs: 10_000,
+            stalePolicy: "fail-stale",
+          },
+          queue: {
+            maxQueuedPerKey: 1,
+            whenFull: "replace-oldest",
+          },
+        },
       },
       rpc: {
         "Documents.Process": {
@@ -195,6 +264,18 @@ export function createJobsFixture(caseId: string) {
           capabilities: { call: [] },
           errors: [],
         },
+        "Documents.TerminalLocalEdges": {
+          version: "v1",
+          subject: caseScopedSubject(
+            "rpc.v1.Integration.Jobs",
+            caseId,
+            "Documents.TerminalLocalEdges",
+          ),
+          input: ref.schema("WorkflowInput"),
+          output: ref.schema("TerminalJobEdgesOutput"),
+          capabilities: { call: [] },
+          errors: [],
+        },
       },
     }),
   );
@@ -211,6 +292,7 @@ export function createJobsFixture(caseId: string) {
               "Documents.Process",
               "Documents.KeyedProcess",
               "Documents.SubmitLongProcess",
+              "Documents.TerminalLocalEdges",
             ],
           },
         }),
@@ -415,6 +497,37 @@ export function createJobsFixture(caseId: string) {
     return { attempts: () => [...attempts] };
   }
 
+  async function mountTerminalLocalEdgesWorkflow(
+    service: Awaited<ReturnType<typeof connectService>>,
+  ) {
+    service.jobs.processDocument.handle(async ({ job }) => {
+      return Result.ok({
+        documentId: job.payload.documentId,
+        processedBy: "ts-service-job",
+        requestId: job.context.requestId,
+        traceId: job.context.traceId,
+      });
+    });
+
+    await service.handle.rpc.documents.terminalLocalEdges(
+      async ({ input, client }) => {
+        const ref = await client.jobs.processDocument.create({
+          documentId: input.documentId,
+        }).orThrow();
+        const terminal = await ref.wait().orThrow();
+        const snapshot = await ref.get().orThrow();
+        const cancelAfterTerminal = await ref.cancel().orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          jobId: ref.id,
+          waitState: terminal.state,
+          getState: snapshot.state,
+          cancelState: cancelAfterTerminal.state,
+        });
+      },
+    );
+  }
+
   return {
     slug,
     serviceContract,
@@ -427,5 +540,6 @@ export function createJobsFixture(caseId: string) {
     mountKeyedSerializationWorkflow,
     mountLongRunningWorkflow,
     mountRetryThenDeadWorkflow,
+    mountTerminalLocalEdgesWorkflow,
   };
 }

@@ -4,17 +4,17 @@ import {
   type NatsConnection,
   type Subscription,
 } from "@nats-io/nats-core";
-import { Result, ValidationError } from "@qlever-llc/trellis";
+import { Result } from "@qlever-llc/trellis";
 import type {
   JobsCancelInput,
   JobsCancelOutput,
-  JobsGetInput,
-  JobsGetOutput,
   JobsHealthOutput,
-  JobsListInput,
-  JobsListOutput,
+  JobsInspectInput,
+  JobsInspectOutput,
   JobsListServicesInput,
   JobsListServicesOutput,
+  JobsQueryInput,
+  JobsQueryOutput,
 } from "@qlever-llc/trellis/sdk/jobs";
 import { NotFoundError } from "@qlever-llc/trellis/sdk/jobs";
 import { type StaticDecode, Type } from "typebox";
@@ -122,9 +122,10 @@ type MaxDeliveriesAdvisory = {
   timestamp: string;
 };
 
-type AdminJob = JobsListOutput["entries"][number];
+type AdminJob = JobsCancelOutput["job"];
 type AdminJobState = AdminJob["state"];
 type AdminWorker = JobsListServicesOutput["entries"][number]["workers"][number];
+type WorkbenchRow = JobsQueryOutput["entries"][number];
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -145,8 +146,8 @@ type DirectMessageReader = {
   ): Promise<{ data: Uint8Array } | null>;
 };
 
-type JobsGetError = NotFoundError;
 type JobsCancelError = NotFoundError;
+type JobsInspectError = NotFoundError;
 
 function jobKey(service: string, type: string, id: string): string {
   return `${service}\u001f${type}\u001f${id}`;
@@ -207,12 +208,11 @@ function toAdminJobState(state: JobEvent["state"]): AdminJobState | undefined {
     case "failed":
     case "cancelled":
     case "expired":
+    case "skipped":
+    case "stale":
     case "dead":
     case "dismissed":
       return state;
-    case "skipped":
-    case "stale":
-      return undefined;
   }
 }
 
@@ -362,30 +362,108 @@ export function mapDeadEventFromAdvisory(
   };
 }
 
-function validateSince(
-  since: string | undefined,
-): Result<void, ValidationError> {
-  if (since === undefined || !Number.isNaN(Date.parse(since))) {
-    return Result.ok(undefined);
-  }
-  return Result.err(
-    new ValidationError({
-      errors: [{ path: "/since", message: "since must be a date-time string" }],
-    }),
-  );
+function jobRuntimeMs(job: AdminJob): number | undefined {
+  if (!job.startedAt) return undefined;
+  const start = Date.parse(job.startedAt);
+  const end = job.completedAt ? Date.parse(job.completedAt) : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return undefined;
+  return end - start;
 }
 
-function listJobs(
+function runtimeBand(job: AdminJob): string {
+  if (job.state === "pending" || job.state === "retry") return "queued";
+  if (job.state === "active") {
+    return (jobRuntimeMs(job) ?? 0) >= 300_000 ? "slow" : "running";
+  }
+  return "terminal";
+}
+
+function toWorkbenchRow(job: AdminJob): WorkbenchRow {
+  const runtimeMs = jobRuntimeMs(job);
+  return {
+    completedAt: job.completedAt,
+    context: job.context,
+    createdAt: job.createdAt,
+    errorFingerprint: job.errorDetail?.fingerprint,
+    id: job.id,
+    lastError: job.lastError,
+    lineage: job.lineage,
+    maxTries: job.maxTries,
+    progress: job.progress,
+    queueAgeMs: Date.now() - Date.parse(job.createdAt),
+    queueKey: job.concurrency?.key,
+    runtimeBand: runtimeBand(job),
+    runtimeMs,
+    service: job.service,
+    startedAt: job.startedAt,
+    state: job.state,
+    tries: job.tries,
+    trigger: job.trigger,
+    type: job.type,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function compareJobs(
+  left: AdminJob,
+  right: AdminJob,
+  sort: JobsQueryInput["sort"],
+): number {
+  const direction = sort?.direction ?? "desc";
+  const field = sort?.field ?? "updatedAt";
+  const multiplier = direction === "asc" ? 1 : -1;
+  const value = field === "queueAge"
+    ? Date.parse(left.createdAt) - Date.parse(right.createdAt)
+    : field === "runtime"
+    ? (jobRuntimeMs(left) ?? 0) - (jobRuntimeMs(right) ?? 0)
+    : field === "retries"
+    ? left.tries - right.tries
+    : Date.parse(left.updatedAt) - Date.parse(right.updatedAt);
+  return value === 0 ? left.id.localeCompare(right.id) : multiplier * value;
+}
+
+function groupJobs(
+  jobs: AdminJob[],
+  groupBy: NonNullable<JobsQueryInput["groupBy"]>,
+): JobsQueryOutput["groups"] {
+  const groups = new Map<string, AdminJob[]>();
+  for (const job of jobs) {
+    const key = groupBy === "type"
+      ? job.type
+      : groupBy === "state"
+      ? job.state
+      : groupBy === "queueKey"
+      ? job.concurrency?.key ?? "unkeyed"
+      : groupBy === "trigger"
+      ? job.trigger?.kind ?? "unknown"
+      : groupBy === "runtimeBand"
+      ? runtimeBand(job)
+      : job.service;
+    groups.set(key, [...groups.get(key) ?? [], job]);
+  }
+  return [...groups.entries()].map(([key, entries]) => {
+    const failures = entries.filter((job) =>
+      job.state === "failed" || job.state === "dead"
+    ).length;
+    return {
+      count: entries.length,
+      depth: entries.length,
+      failureRate: entries.length === 0 ? 0 : failures / entries.length,
+      key,
+      label: key,
+      latestUpdatedAt: entries.map((job) => job.updatedAt).sort().at(-1),
+      oldestCreatedAt: entries.map((job) => job.createdAt).sort()[0],
+      ...(groupBy === "state" ? { state: key as AdminJobState } : {}),
+    };
+  });
+}
+
+function queryJobs(
   jobs: Map<string, AdminJob>,
-  input: JobsListInput,
-): Result<JobsListOutput, ValidationError> {
-  const since = validateSince(input.since);
-  if (since.isErr()) return since;
-  const sinceTimestamp = input.since === undefined
-    ? undefined
-    : Date.parse(input.since);
+  input: JobsQueryInput,
+): Result<JobsQueryOutput, never> {
   const states = input.state ? new Set<AdminJobState>(input.state) : undefined;
-  const offset = input.offset ?? 0;
+  const search = input.search?.trim().toLowerCase();
   const filtered = [...jobs.values()]
     .filter((job) =>
       input.service === undefined || job.service === input.service
@@ -393,21 +471,118 @@ function listJobs(
     .filter((job) => input.type === undefined || job.type === input.type)
     .filter((job) => states === undefined || states.has(job.state))
     .filter((job) =>
-      sinceTimestamp === undefined ||
-      Date.parse(job.updatedAt) >= sinceTimestamp
+      input.runtimeBand === undefined || runtimeBand(job) === input.runtimeBand
     )
-    .sort((left, right) =>
-      Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
-    );
-  const entries = filtered.slice(offset, offset + input.limit);
+    .filter((job) =>
+      input.queueKey === undefined || job.concurrency?.key === input.queueKey
+    )
+    .filter((job) =>
+      input.trigger === undefined || job.trigger?.kind === input.trigger
+    )
+    .filter((job) =>
+      search === undefined || [
+        job.id,
+        job.service,
+        job.type,
+        job.state,
+        job.context.requestId,
+        job.context.traceId,
+        job.context.traceparent,
+        job.concurrency?.key,
+        job.lastError,
+        job.errorDetail?.message,
+      ].filter(Boolean).join(" ").toLowerCase().includes(search)
+    )
+    .sort((left, right) => compareJobs(left, right, input.sort));
+  const offset = input.offset ?? 0;
+  const entries = filtered.slice(offset, offset + input.limit).map(
+    toWorkbenchRow,
+  );
+  const byState: Record<string, number> = {};
+  for (const job of filtered) {
+    byState[job.state] = (byState[job.state] ?? 0) + 1;
+  }
   return Result.ok({
-    entries,
     count: filtered.length,
-    offset,
+    entries,
+    groups: groupJobs(filtered, input.groupBy ?? "service"),
     limit: input.limit,
-    ...(offset + entries.length < filtered.length
-      ? { nextOffset: offset + entries.length }
-      : {}),
+    nextOffset: offset + entries.length < filtered.length
+      ? offset + entries.length
+      : undefined,
+    offset,
+    stats: {
+      byState,
+      dead: byState.dead ?? 0,
+      failed: byState.failed ?? 0,
+      queued: (byState.pending ?? 0) + (byState.retry ?? 0),
+      running: byState.active ?? 0,
+      slow: filtered.filter((job) => runtimeBand(job) === "slow").length,
+      total: filtered.length,
+    },
+  });
+}
+
+function inspect(
+  jobs: Map<string, AdminJob>,
+  jobKeysById: Map<string, string>,
+  id: string,
+): Result<JobsInspectOutput, JobsInspectError> {
+  const job = findJobById(jobs, jobKeysById, id);
+  if (!job) return Result.err(notFound(id));
+  const timeline: JobsInspectOutput["timeline"] = [{
+    sequence: 1,
+    state: job.state,
+    timestamp: job.createdAt,
+    tries: job.tries,
+    type: "created",
+  }];
+  if (job.startedAt) {
+    timeline.push({
+      sequence: timeline.length + 1,
+      state: job.state,
+      timestamp: job.startedAt,
+      tries: job.tries,
+      type: "started",
+    });
+  }
+  if (job.lastError || job.errorDetail) {
+    timeline.push({
+      error: job.lastError,
+      errorDetail: job.errorDetail,
+      sequence: timeline.length + 1,
+      state: job.state,
+      timestamp: job.updatedAt,
+      tries: job.tries,
+      type: "error",
+    });
+  }
+  const related = [...jobs.values()]
+    .filter((candidate) => candidate.id !== job.id)
+    .filter((candidate) =>
+      candidate.context.traceId === job.context.traceId ||
+      (job.concurrency?.key !== undefined &&
+        candidate.concurrency?.key === job.concurrency.key) ||
+      (candidate.service === job.service && candidate.type === job.type)
+    )
+    .slice(0, 10)
+    .map(toWorkbenchRow);
+  return Result.ok({
+    attempts: job.startedAt
+      ? [{
+        endedAt: job.completedAt,
+        error: job.errorDetail,
+        startedAt: job.startedAt,
+        state: job.state,
+        try: job.tries,
+      }]
+      : [],
+    errors: job.errorDetail ? [job.errorDetail] : [],
+    job,
+    lineage: job.lineage,
+    related,
+    timeline,
+    trigger: job.trigger,
   });
 }
 
@@ -542,18 +717,10 @@ export function createJobsAdminHandlers(nats: NatsConnection) {
         timestamp: new Date().toISOString(),
         checks: [],
       }),
-    list: ({ input }: { input: JobsListInput }) =>
-      listJobs(projection.jobs, input),
-    get: ({ input }: { input: JobsGetInput }) => {
-      const job = findJobById(
-        projection.jobs,
-        projection.jobKeysById,
-        input.id,
-      );
-      return job
-        ? Result.ok<JobsGetOutput, JobsGetError>({ job })
-        : Result.err(notFound(input.id));
-    },
+    query: ({ input }: { input: JobsQueryInput }) =>
+      queryJobs(projection.jobs, input),
+    inspect: ({ input }: { input: JobsInspectInput }) =>
+      inspect(projection.jobs, projection.jobKeysById, input.id),
     cancel: async ({ input }: { input: JobsCancelInput }) => {
       const job = findJobById(
         projection.jobs,

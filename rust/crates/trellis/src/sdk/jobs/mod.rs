@@ -2,11 +2,13 @@
 pub mod client;
 pub mod contract;
 pub mod events;
+pub mod feeds;
 pub mod operations;
 pub mod rpc;
 pub mod schemas;
 pub mod types;
 pub use client::JobsClient;
 pub use contract::{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME};
+pub use feeds::*;
 pub use rpc::*;
 pub use types::*;

@@ -65,10 +65,6 @@ export interface TrellisJobsClient {
         input: Types.JobsDismissDLQInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsDismissDLQOutput, BaseError>;
-      get(
-        input: Types.JobsGetInput,
-        opts?: RequestOpts,
-      ): AsyncResult<Types.JobsGetOutput, BaseError>;
       getKey(
         input: Types.JobsGetKeyInput,
         opts?: RequestOpts,
@@ -77,10 +73,10 @@ export interface TrellisJobsClient {
         input: Types.JobsHealthInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsHealthOutput, BaseError>;
-      list(
-        input: Types.JobsListInput,
+      inspect(
+        input: Types.JobsInspectInput,
         opts?: RequestOpts,
-      ): AsyncResult<Types.JobsListOutput, BaseError>;
+      ): AsyncResult<Types.JobsInspectOutput, BaseError>;
       listDLQ(
         input: Types.JobsListDLQInput,
         opts?: RequestOpts,
@@ -89,6 +85,10 @@ export interface TrellisJobsClient {
         input: Types.JobsListServicesInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsListServicesOutput, BaseError>;
+      query(
+        input: Types.JobsQueryInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.JobsQueryOutput, BaseError>;
       replayDLQ(
         input: Types.JobsReplayDLQInput,
         opts?: RequestOpts,
@@ -119,7 +119,14 @@ export interface TrellisJobsClient {
       };
     };
   };
-  readonly feed: {};
+  readonly feed: {
+    readonly jobs: {
+      watch(
+        input: Types.JobsWatchInput,
+        opts?: FeedSubscribeOpts,
+      ): AsyncResult<FeedSubscription<Types.JobsWatchEvent>, BaseError>;
+    };
+  };
   readonly operation: {};
   wait(): AsyncResult<void, BaseError>;
 }
@@ -154,17 +161,21 @@ export interface ServiceHandle {
     readonly jobs: {
       cancel(handler: Types.JobsCancelHandler): Promise<void>;
       dismissDLQ(handler: Types.JobsDismissDLQHandler): Promise<void>;
-      get(handler: Types.JobsGetHandler): Promise<void>;
       getKey(handler: Types.JobsGetKeyHandler): Promise<void>;
       health(handler: Types.JobsHealthHandler): Promise<void>;
-      list(handler: Types.JobsListHandler): Promise<void>;
+      inspect(handler: Types.JobsInspectHandler): Promise<void>;
       listDLQ(handler: Types.JobsListDLQHandler): Promise<void>;
       listServices(handler: Types.JobsListServicesHandler): Promise<void>;
+      query(handler: Types.JobsQueryHandler): Promise<void>;
       replayDLQ(handler: Types.JobsReplayDLQHandler): Promise<void>;
       retry(handler: Types.JobsRetryHandler): Promise<void>;
     };
   };
-  readonly feed: {};
+  readonly feed: {
+    readonly jobs: {
+      watch(handler: Types.JobsWatchFeedHandler): Promise<void>;
+    };
+  };
   readonly operation: {};
 }
 

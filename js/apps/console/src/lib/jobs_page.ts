@@ -2,45 +2,54 @@ import { AsyncResult, BaseError, isErr } from "@qlever-llc/result";
 import {
   type JobsCancelOutput,
   type JobsDismissDLQOutput,
-  type JobsGetOutput,
-  type JobsListInput,
-  type JobsListOutput,
+  type JobsInspectInput,
+  type JobsInspectOutput,
   type JobsListServicesInput,
   type JobsListServicesOutput,
+  type JobsQueryInput,
+  type JobsQueryOutput,
   type JobsReplayDLQOutput,
   type JobsRetryOutput,
 } from "@qlever-llc/trellis/sdk/jobs";
+
+export type JobInspection = JobsInspectOutput;
 
 export type JobsPageData = {
   available: boolean;
   message?: string;
   services: JobsListServicesOutput["entries"];
-  jobs: JobsListOutput["entries"];
-  count: JobsListOutput["count"];
-  offset: JobsListOutput["offset"];
-  limit: JobsListOutput["limit"];
-  nextOffset?: JobsListOutput["nextOffset"];
+  jobs: JobsQueryOutput["entries"];
+  groups: JobsQueryOutput["groups"];
+  stats: JobsQueryOutput["stats"];
+  count: JobsQueryOutput["count"];
+  offset: JobsQueryOutput["offset"];
+  limit: JobsQueryOutput["limit"];
+  nextOffset?: JobsQueryOutput["nextOffset"];
 };
 
 export type JobsDetailData = {
   available: boolean;
   message?: string;
-  job?: NonNullable<JobsGetOutput["job"]>;
+  inspection?: JobInspection;
 };
 
 type JobsPageRpc = {
   listServices(
     input: JobsListServicesInput,
   ): AsyncResult<JobsListServicesOutput, BaseError>;
-  listJobs(filter: JobsListInput): AsyncResult<JobsListOutput, BaseError>;
+  queryJobs(filter: JobsQueryInput): AsyncResult<JobsQueryOutput, BaseError>;
 };
 
 type JobsDetailRpc = {
-  getJob(input: { id: string }): AsyncResult<JobsGetOutput, BaseError>;
+  inspect(
+    input: JobsInspectInput,
+  ): AsyncResult<JobsInspectOutput, BaseError>;
 };
 
 type JobsActionRpc<TOutput> = {
-  action(input: { id: string }): AsyncResult<TOutput, BaseError>;
+  action(
+    input: { id: string; reason?: string },
+  ): AsyncResult<TOutput, BaseError>;
 };
 
 function unavailableResult<T extends { available: false; message: string }>(
@@ -91,14 +100,22 @@ async function takeOrThrow<T>(result: AsyncResult<T, BaseError>): Promise<T> {
   return value;
 }
 
+/** Queries Jobs workbench data through the typed Jobs.Query RPC boundary. */
+export function queryJobs(
+  rpc: Pick<JobsPageRpc, "queryJobs">,
+  filter: JobsQueryInput,
+): AsyncResult<JobsQueryOutput, BaseError> {
+  return rpc.queryJobs(filter);
+}
+
 /** Loads the Jobs list page data and normalizes unavailable Jobs runtime errors. */
 export async function loadJobsPageData(
   rpc: JobsPageRpc,
-  filter: JobsListInput = { limit: 50 },
+  filter: JobsQueryInput = { limit: 50 },
 ): Promise<JobsPageData> {
   try {
     const servicesResponse = rpc.listServices({ limit: 500 });
-    const jobsResponse = rpc.listJobs(filter);
+    const jobsResponse = queryJobs(rpc, filter);
     const [servicesValue, jobsValue] = await Promise.all([
       takeOrThrow(servicesResponse),
       takeOrThrow(jobsResponse),
@@ -108,6 +125,8 @@ export async function loadJobsPageData(
       available: true,
       services: servicesValue.entries,
       jobs: jobsValue.entries,
+      groups: jobsValue.groups,
+      stats: jobsValue.stats,
       count: jobsValue.count,
       offset: jobsValue.offset,
       limit: jobsValue.limit,
@@ -121,6 +140,8 @@ export async function loadJobsPageData(
         message,
         services: [],
         jobs: [],
+        groups: [],
+        stats: { byState: {}, total: 0 },
         count: 0,
         offset: 0,
         limit: filter.limit,
@@ -136,8 +157,8 @@ export async function loadJobDetailData(
   id: string,
 ): Promise<JobsDetailData> {
   try {
-    const value = await takeOrThrow(rpc.getJob({ id }));
-    return { available: true, job: value.job };
+    const value = await takeOrThrow(rpc.inspect({ id }));
+    return { available: true, inspection: value };
   } catch (error) {
     const message = normalizedJobsUnavailable(error);
     if (message) {

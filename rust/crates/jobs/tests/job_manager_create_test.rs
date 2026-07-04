@@ -5,7 +5,7 @@ use serde_json::json;
 use trellis_jobs::bindings::{JobsBinding, JobsQueueBinding};
 use trellis_jobs::manager::{JobManager, JobManagerError, JobMetaSource, TrellisJobMetaSource};
 use trellis_jobs::publisher::{JobEventHeaders, JobEventPublisher};
-use trellis_jobs::types::{JobEvent, JobEventType, JobState};
+use trellis_jobs::types::{JobEvent, JobEventType, JobState, JobTriggerKind};
 
 #[derive(Default)]
 struct RecordingPublisher {
@@ -127,6 +127,10 @@ async fn create_returns_pending_job_with_namespace_and_max_deliver() {
     assert_eq!(job.state, JobState::Pending);
     assert_eq!(job.tries, 0);
     assert_eq!(job.max_tries, 5);
+    assert_eq!(
+        job.trigger.as_ref().map(|trigger| trigger.kind),
+        Some(JobTriggerKind::ServiceCode)
+    );
 }
 
 #[tokio::test]
@@ -189,6 +193,10 @@ async fn create_publishes_created_event_payload_with_expected_fields() {
     assert_eq!(event.context.traceparent, calls[0].1.traceparent);
     assert_eq!(event.max_tries, Some(5));
     assert_eq!(event.payload, Some(json!({ "documentId": "doc-1" })));
+    assert_eq!(
+        event.trigger.as_ref().map(|trigger| trigger.kind),
+        Some(JobTriggerKind::ServiceCode)
+    );
 }
 
 #[tokio::test]

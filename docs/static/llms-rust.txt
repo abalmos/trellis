@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-06-16).
+Last verified against Trellis main (2026-07-04).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -68,6 +68,12 @@ Rules:
   queued jobs should be explicit policy.
 - Rust job handlers classify failures with `JobProcessError::retryable(...)` for
   JetStream redelivery or `JobProcessError::failed(...)` for terminal failure.
+- Jobs admin clients use `Jobs.Query` for server-side search/sort/group/stats and
+  `Jobs.Inspect` for one-job detail, timeline, attempts, related jobs,
+  errors, trigger, and lineage. `Jobs.List` and `Jobs.Get` are removed.
+  `Jobs.Watch` is an invalidation feed only; rerun query/inspection reads after
+  invalidation frames. Admin mutations accept optional `reason`, and active
+  cancellation remains cooperative through `Jobs.Cancel`.
 
 ## Use generated descriptors and facades
 

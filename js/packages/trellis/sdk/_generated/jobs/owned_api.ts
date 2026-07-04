@@ -10,19 +10,21 @@ import {
   JobsDismissDLQResponseSchema,
   JobsGetKeyRequestSchema,
   JobsGetKeyResponseSchema,
-  JobsGetRequestSchema,
-  JobsGetResponseSchema,
   JobsHealthResponseSchema,
+  JobsInspectRequestSchema,
+  JobsInspectResponseSchema,
   JobsListDLQRequestSchema,
   JobsListDLQResponseSchema,
-  JobsListRequestSchema,
-  JobsListResponseSchema,
   JobsListServicesRequestSchema,
   JobsListServicesResponseSchema,
+  JobsQueryRequestSchema,
+  JobsQueryResponseSchema,
   JobsReplayDLQRequestSchema,
   JobsReplayDLQResponseSchema,
   JobsRetryRequestSchema,
   JobsRetryResponseSchema,
+  JobsWatchFrameSchema,
+  JobsWatchRequestSchema,
   NotFoundErrorDataSchema,
 } from "./schemas.ts";
 
@@ -66,25 +68,6 @@ export const OWNED_API = {
         },
       ] as const,
     },
-    "Jobs.Get": {
-      subject: "rpc.v1.Jobs.Get",
-      input: schema<Types.JobsGetInput>(JobsGetRequestSchema),
-      output: schema<Types.JobsGetOutput>(JobsGetResponseSchema),
-      callerCapabilities: ["trellis.jobs::admin.read"] as const,
-      errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
-      declaredErrorTypes: [
-        "UnexpectedError",
-        "ValidationError",
-        "NotFoundError",
-      ] as const,
-      runtimeErrors: [
-        {
-          type: "NotFoundError",
-          schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
-          fromSerializable: Types.NotFoundError.fromSerializable,
-        },
-      ] as const,
-    },
     "Jobs.GetKey": {
       subject: "rpc.v1.Jobs.GetKey",
       input: schema<Types.JobsGetKeyInput>(JobsGetKeyRequestSchema),
@@ -112,13 +95,24 @@ export const OWNED_API = {
       errors: ["UnexpectedError"] as const,
       declaredErrorTypes: ["UnexpectedError"] as const,
     },
-    "Jobs.List": {
-      subject: "rpc.v1.Jobs.List",
-      input: schema<Types.JobsListInput>(JobsListRequestSchema),
-      output: schema<Types.JobsListOutput>(JobsListResponseSchema),
+    "Jobs.Inspect": {
+      subject: "rpc.v1.Jobs.Inspect",
+      input: schema<Types.JobsInspectInput>(JobsInspectRequestSchema),
+      output: schema<Types.JobsInspectOutput>(JobsInspectResponseSchema),
       callerCapabilities: ["trellis.jobs::admin.read"] as const,
-      errors: ["UnexpectedError", "ValidationError"] as const,
-      declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+      errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+      declaredErrorTypes: [
+        "UnexpectedError",
+        "ValidationError",
+        "NotFoundError",
+      ] as const,
+      runtimeErrors: [
+        {
+          type: "NotFoundError",
+          schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
+          fromSerializable: Types.NotFoundError.fromSerializable,
+        },
+      ] as const,
     },
     "Jobs.ListDLQ": {
       subject: "rpc.v1.Jobs.ListDLQ",
@@ -134,6 +128,14 @@ export const OWNED_API = {
       output: schema<Types.JobsListServicesOutput>(
         JobsListServicesResponseSchema,
       ),
+      callerCapabilities: ["trellis.jobs::admin.read"] as const,
+      errors: ["UnexpectedError", "ValidationError"] as const,
+      declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    },
+    "Jobs.Query": {
+      subject: "rpc.v1.Jobs.Query",
+      input: schema<Types.JobsQueryInput>(JobsQueryRequestSchema),
+      output: schema<Types.JobsQueryOutput>(JobsQueryResponseSchema),
       callerCapabilities: ["trellis.jobs::admin.read"] as const,
       errors: ["UnexpectedError", "ValidationError"] as const,
       declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
@@ -179,6 +181,13 @@ export const OWNED_API = {
   },
   operations: {},
   events: {},
-  feeds: {},
+  feeds: {
+    "Jobs.Watch": {
+      subject: "feeds.v1.Jobs.Watch",
+      input: schema<Types.JobsWatchInput>(JobsWatchRequestSchema),
+      event: schema<Types.JobsWatchEvent>(JobsWatchFrameSchema),
+      subscribeCapabilities: ["trellis.jobs::admin.stream"] as const,
+    },
+  },
   subjects: {},
 } satisfies TrellisAPI;

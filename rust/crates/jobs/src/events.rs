@@ -1,9 +1,15 @@
 use serde_json::Value;
 
 use crate::types::{
-    JobConcurrency, JobContext, JobEvent, JobEventType, JobLogEntry, JobProgress, JobQueuePolicy,
-    JobState,
+    JobAdminAction, JobConcurrency, JobContext, JobErrorDetail, JobEvent, JobEventType,
+    JobLogEntry, JobProgress, JobQueuePolicy, JobState,
 };
+
+fn admin_action(reason: Option<&str>) -> Option<JobAdminAction> {
+    reason.map(|reason| JobAdminAction {
+        reason: Some(reason.to_string()),
+    })
+}
 
 fn base_event(
     service: &str,
@@ -27,6 +33,7 @@ fn base_event(
         tries,
         max_tries: None,
         error: None,
+        error_detail: None,
         progress: None,
         logs: None,
         payload: None,
@@ -34,6 +41,9 @@ fn base_event(
         deadline: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
+        admin_action: None,
         timestamp: timestamp.to_string(),
     }
 }
@@ -154,6 +164,8 @@ pub fn retry_event(
         timestamp,
     );
     event.error = error.map(ToString::to_string);
+    event.error_detail =
+        error.map(|message| JobErrorDetail::from_message(service, job_type, message));
     event
 }
 
@@ -251,6 +263,7 @@ pub fn failed_event(
         timestamp,
     );
     event.error = Some(error.to_string());
+    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
     event
 }
 
@@ -263,7 +276,29 @@ pub fn cancelled_event(
     tries: u64,
     timestamp: &str,
 ) -> JobEvent {
-    base_event(
+    cancelled_event_with_admin_reason(
+        service,
+        job_type,
+        job_id,
+        context,
+        previous_state,
+        tries,
+        timestamp,
+        None,
+    )
+}
+
+pub fn cancelled_event_with_admin_reason(
+    service: &str,
+    job_type: &str,
+    job_id: &str,
+    context: &JobContext,
+    previous_state: JobState,
+    tries: u64,
+    timestamp: &str,
+    reason: Option<&str>,
+) -> JobEvent {
+    let mut event = base_event(
         service,
         job_type,
         job_id,
@@ -273,7 +308,9 @@ pub fn cancelled_event(
         Some(previous_state),
         tries,
         timestamp,
-    )
+    );
+    event.admin_action = admin_action(reason);
+    event
 }
 
 pub fn expired_event(
@@ -298,6 +335,7 @@ pub fn expired_event(
         timestamp,
     );
     event.error = Some(error.to_string());
+    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
     event
 }
 
@@ -324,6 +362,8 @@ pub fn skipped_event(
         timestamp,
     );
     event.error = reason.map(ToString::to_string);
+    event.error_detail =
+        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
     event
 }
 
@@ -350,6 +390,8 @@ pub fn stale_event(
         timestamp,
     );
     event.error = reason.map(ToString::to_string);
+    event.error_detail =
+        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
     event.concurrency = concurrency;
     event
 }
@@ -402,6 +444,8 @@ pub fn stale_completion_ignored_event(
         timestamp,
     );
     event.error = reason.map(ToString::to_string);
+    event.error_detail =
+        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
     event.concurrency = concurrency;
     event
 }
@@ -417,6 +461,32 @@ pub fn retried_event(
     max_tries: Option<u64>,
     deadline: Option<&str>,
 ) -> JobEvent {
+    retried_event_with_admin_reason(
+        service,
+        job_type,
+        job_id,
+        context,
+        previous_state,
+        timestamp,
+        payload,
+        max_tries,
+        deadline,
+        None,
+    )
+}
+
+pub fn retried_event_with_admin_reason(
+    service: &str,
+    job_type: &str,
+    job_id: &str,
+    context: &JobContext,
+    previous_state: JobState,
+    timestamp: &str,
+    payload: Option<Value>,
+    max_tries: Option<u64>,
+    deadline: Option<&str>,
+    reason: Option<&str>,
+) -> JobEvent {
     let mut event = base_event(
         service,
         job_type,
@@ -431,6 +501,7 @@ pub fn retried_event(
     event.payload = payload;
     event.max_tries = max_tries;
     event.deadline = deadline.map(ToString::to_string);
+    event.admin_action = admin_action(reason);
     event
 }
 
@@ -456,6 +527,7 @@ pub fn dead_event(
         timestamp,
     );
     event.error = Some(error.to_string());
+    event.error_detail = Some(JobErrorDetail::from_message(service, job_type, error));
     event
 }
 
@@ -481,5 +553,8 @@ pub fn dismissed_event(
         timestamp,
     );
     event.error = reason.map(ToString::to_string);
+    event.error_detail =
+        reason.map(|message| JobErrorDetail::from_message(service, job_type, message));
+    event.admin_action = admin_action(reason);
     event
 }

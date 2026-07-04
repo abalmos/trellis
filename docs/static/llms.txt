@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-06-18).
+Last verified against Trellis main (2026-07-04).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -58,6 +58,11 @@ commands.
   lifecycle status and shutdown.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background execution.
+- Jobs admin is a clean-break workbench surface: use `Jobs.Query` for server-side
+  search/sort/group/stats and `Jobs.Inspect` for one-job detail, timeline,
+  attempts, related jobs, errors, trigger, and lineage. Do not use removed
+  `Jobs.List` or `Jobs.Get`; `Jobs.Watch` only emits invalidations, so rerun the
+  query/inspection read.
 - For service-private work that must be singleton per logical entity, declare
   job `keyConcurrency` instead of building ad hoc scheduler dedupe. Defaults
   should fail clearly (`stalePolicy: "fail-stale"`, `whenFull: "reject"`);
@@ -65,6 +70,10 @@ commands.
 - TypeScript job handlers that need JetStream redelivery should return or throw
   `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary errors remain
   terminal job failures.
+- Jobs admin mutations accept optional `reason`; active cancellation is
+  cooperative through `Jobs.Cancel`. Do not invent hard stop/kill APIs. The
+  SQLite jobs projection is disposable; the `JOBS` stream remains the source of
+  truth.
 - Operations support declared typed errors, following the same error-declaration
   rules as RPC errors on the operation descriptor.
 - Model expected public failures with declared errors or `Result`-style values.

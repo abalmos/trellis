@@ -555,6 +555,49 @@
     },
     {
       "kind": "client",
+      "id": "operations.callback-terminal-and-resume-live",
+      "fixture": "operations",
+      "title": "Operation callbacks, terminal states, and resumed references are observable live",
+      "coverage": [
+        "cross-runtime-operations",
+        "observability-trace-matrix"
+      ],
+      "description": "A live client starts operations with generated callbacks, observes start-supplied callback override, failed and cancelled terminal callbacks, and resumes an operation ref to read durable terminal state.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.operations-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.operations-service@v1"
+          }
+        ],
+        "given": [
+          "a service is connected and handles Entity.Process operation"
+        ],
+        "when": [
+          "the client starts operations with builder and start callbacks",
+          "the service completes, fails, and leaves cancellation terminal state observable",
+          "the client resumes a completed operation ref"
+        ],
+        "then": [
+          "start callbacks override rebuilt builder callbacks for progress",
+          "terminal failed callbacks run before generic failed events",
+          "terminal cancelled callbacks run before generic cancelled events",
+          "the resumed ref reads the durable terminal snapshot"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "client",
       "id": "operations.client-cancels-operation",
       "fixture": "operations",
       "title": "Client cancels a running operation through public operation APIs",
@@ -2074,6 +2117,45 @@
       },
       "completion": {
         "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.keyed-jobs-queue-policies-live",
+      "fixture": "jobs",
+      "title": "Keyed jobs coalesce, replace, and remove queued reservations live",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-keyed-queue-policy"
+      ],
+      "description": "A service submits same-key jobs through live service-local queues configured for coalesce, replace-oldest, and reject; queue-full coalesces to an existing queued job, replace-oldest skips the replaced queued job, and cancelling a queued job frees capacity for a later submission.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "a service is connected with keyed jobs queues whose per-key active limit is one",
+          "the keyed queues use coalesce, replace-oldest, and reject queue-full policies"
+        ],
+        "when": [
+          "same-key submissions fill the coalesce queue",
+          "same-key submissions fill the replace-oldest queue",
+          "a queued reject-policy job is cancelled before it starts"
+        ],
+        "then": [
+          "the full coalesce queue returns the existing queued job id",
+          "the full replace-oldest queue skips the replaced queued job and runs the replacement",
+          "cancelling a queued job removes its keyed reservation and a later same-key submission is accepted"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
         "rust": "required"
       }
     },
@@ -2152,7 +2234,7 @@
       },
       "completion": {
         "typescript": "implemented",
-        "rust": "required"
+        "rust": "implemented"
       }
     },
     {
@@ -2193,7 +2275,7 @@
       },
       "completion": {
         "typescript": "implemented",
-        "rust": "required"
+        "rust": "implemented"
       }
     },
     {
@@ -2315,6 +2397,57 @@
       "completion": {
         "typescript": "implemented",
         "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.terminal-local-job-edges-and-admin-rpcs",
+      "fixture": "jobs",
+      "title": "Terminal service-local job refs and Jobs admin RPCs are observable",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-admin-rpc"
+      ],
+      "description": "A service-local job completes, service-local wait/get/cancel after terminal all report completed state, and generated Jobs admin list/get/cancel RPCs observe the same terminal job.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          },
+          {
+            "name": "admin",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-admin-client@v1"
+          }
+        ],
+        "given": [
+          "a service is connected and handles jobs",
+          "an admin client can call Jobs.Query, Jobs.Inspect, and Jobs.Cancel"
+        ],
+        "when": [
+          "a service-local job completes",
+          "the service checks wait, get, and cancel after terminal",
+          "the admin lists, gets, and cancels the completed job"
+        ],
+        "then": [
+          "service-local wait returns completed",
+          "service-local get after terminal returns completed",
+          "service-local cancel after terminal returns completed",
+          "admin list and get include the completed job",
+          "admin cancel of the terminal job returns the completed job"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
       }
     },
     {
@@ -4613,6 +4746,50 @@
     },
     {
       "kind": "client",
+      "id": "auth.account-flow-oauth-callback-runtime",
+      "fixture": "auth",
+      "title": "Account-flow OAuth callback handles provider errors, provider mismatch, and link success",
+      "coverage": [
+        "auth-protocol-matrix",
+        "browser-auth-flow",
+        "oauth-account-flow"
+      ],
+      "description": "A live Trellis runtime starts account-flow OAuth logins, handles an IdP error through the real callback route, rejects a callback for the wrong provider, and links a provider identity to the target user on success.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          },
+          {
+            "name": "account-flow provider",
+            "kind": "service",
+            "contract": "OIDC provider"
+          }
+        ],
+        "given": [
+          "a live Trellis runtime has an account-flow OAuth provider configured",
+          "identity-link account flows exist for a target user"
+        ],
+        "when": [
+          "the provider redirects back with an authorization error",
+          "the callback is received for a different provider than the stored OAuth state",
+          "the provider redirects back with a valid authorization code"
+        ],
+        "then": [
+          "the provider error is returned through the account-flow callback route",
+          "the provider mismatch is rejected",
+          "the OAuth identity is linked to the target user and the portal completion redirect is returned"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
+      }
+    },
+    {
+      "kind": "client",
       "id": "device-activation.connect-info-admin-reviewed-before-activation",
       "fixture": "device-activation",
       "title": "Preregistered no-review device receives admin-reviewed connect info before activation",
@@ -4786,6 +4963,85 @@
         "then": [
           "get and list treat them as absent",
           "create-if-absent and delete behave over expired entries as absent"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "state.value-and-map-conflict-shapes-live",
+      "fixture": "state",
+      "title": "Value and map state stores return public create and stale conflict shapes",
+      "coverage": [
+        "state-parity",
+        "observability-trace-matrix"
+      ],
+      "description": "Existing value and map state entries reject expectedRevision null creates and stale revision writes while returning the current public conflict entry.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "value and map state entries already exist"
+        ],
+        "when": [
+          "the client writes with expectedRevision null",
+          "the client writes with a stale expectedRevision"
+        ],
+        "then": [
+          "both stores return not-applied conflict results",
+          "the conflict entries contain the current stored values"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "state.admin-deletes-corrupt-state-entry",
+      "fixture": "state",
+      "title": "State admin delete removes corrupt backing-store entries",
+      "coverage": [
+        "state-parity",
+        "state-admin",
+        "auth-protocol-matrix",
+        "capability-permission-matrix",
+        "observability-trace-matrix"
+      ],
+      "description": "A malformed raw state KV entry causes public state get to fail, and public generated State admin delete removes the corrupt entry so later public reads report missing state.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          },
+          {
+            "name": "admin",
+            "kind": "app",
+            "contract": "trellis.integration.state-admin@v1"
+          }
+        ],
+        "given": [
+          "a raw malformed state KV entry exists for the client app state target"
+        ],
+        "when": [
+          "the client reads the corrupt state through the public generated state facade",
+          "the admin deletes the corrupt state through generated State admin delete"
+        ],
+        "then": [
+          "the client read fails through the public result surface",
+          "admin delete succeeds without parsing the corrupt entry",
+          "later client reads report found false"
         ]
       },
       "completion": {
@@ -5917,14 +6173,14 @@
       "kind": "service",
       "id": "control-plane.session-logout-uses-provider-logout-redirect",
       "fixture": "control-plane",
-      "title": "HTTP session logout uses provider logout redirect",
+      "title": "HTTP session logout uses provider logout redirect and falls back when no upstream URL exists",
       "coverage": [
         "auth",
         "sessions",
         "logout",
         "provider-logout"
       ],
-      "description": "A live signed HTTP logout for a user session whose provider has logout metadata returns the upstream provider logout URL and deletes the Trellis session.",
+      "description": "Live signed HTTP logout returns the upstream provider logout URL when configured, falls back to the validated returnTo when no upstream logout URL exists, and deletes the Trellis session.",
       "scenario": {
         "participants": [
           {
@@ -5950,15 +6206,16 @@
           "The app sends a signed HTTP session logout request with providerLogout and returnTo."
         ],
         "then": [
-          "The response redirectTo is the provider logout URL.",
+          "The response redirectTo is the provider logout URL when available.",
           "The provider logout URL includes the configured client id and validated return target.",
+          "A providerLogout request without an upstream provider URL redirects to the validated returnTo.",
           "The Trellis session is deleted."
         ]
       },
       "implementations": {
         "typescript": {
           "file": "control-plane/session_logout_uses_provider_logout_redirect.integration_test.ts",
-          "testName": "control-plane.session-logout-uses-provider-logout-redirect returns provider logout redirect and deletes the session"
+          "testName": "control-plane.session-logout-uses-provider-logout-redirect returns provider logout redirect and falls back when absent"
         },
         "rust": {
           "module": "control_plane",
@@ -6064,11 +6321,15 @@
         "typescript": {
           "file": "control-plane/service_resource_removal_purges_old_binding.integration_test.ts",
           "testName": "control-plane.service-resource-removal-purges-old-binding removes obsolete service resource binding"
+        },
+        "rust": {
+          "module": "authority_plan",
+          "function": "control_plane_service_resource_removal_purges_old_binding"
         }
       },
       "completion": {
         "typescript": "implemented",
-        "rust": "required"
+        "rust": "implemented"
       }
     },
     {
@@ -6110,11 +6371,15 @@
         "typescript": {
           "file": "control-plane/authority_plan_migration_replaces_desired_state.integration_test.ts",
           "testName": "control-plane.authority-plan-migration-replaces-desired-state replaces desired state on accepted migration"
+        },
+        "rust": {
+          "module": "authority_plan",
+          "function": "authority_plan_migration_replaces_desired_state"
         }
       },
       "completion": {
         "typescript": "implemented",
-        "rust": "required"
+        "rust": "implemented"
       }
     },
     {
@@ -6260,6 +6525,63 @@
         "rust": {
           "module": "control_plane",
           "function": "control_plane_resources_survive_control_plane_restart"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "control-plane.catalog-resource-binding-projection",
+      "fixture": "control-plane",
+      "title": "Catalog resource binding projection reports current service resources",
+      "coverage": [
+        "catalog",
+        "resources",
+        "resource-bindings",
+        "generated-rpc"
+      ],
+      "description": "Uses a live service to call Trellis.Bindings.Get and return the generated projection for KV, store, and jobs bindings before and after a resource-removing migration.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "trellis control plane",
+            "kind": "control-plane",
+            "contract": "Trellis Core Bindings.Get RPC"
+          },
+          {
+            "name": "service provider",
+            "kind": "service",
+            "contract": "case-scoped resource binding contract"
+          },
+          {
+            "name": "client app",
+            "kind": "app",
+            "contract": "case-scoped binding projection client contract"
+          }
+        ],
+        "given": [
+          "A service deployment has resolved KV, store, and jobs resource bindings."
+        ],
+        "when": [
+          "The service calls Trellis.Bindings.Get through the live control plane.",
+          "A migration replacing the service contract with one that removes the resources is accepted."
+        ],
+        "then": [
+          "The generated binding projection includes KV, store, and jobs bindings before migration.",
+          "The generated binding projection has an empty resources object after migration."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "control-plane/catalog_resource_binding_projection.integration_test.ts",
+          "testName": "control-plane.catalog-resource-binding-projection projects and removes service resource bindings"
+        },
+        "rust": {
+          "module": "control_plane",
+          "function": "control_plane_catalog_resource_binding_projection"
         }
       },
       "completion": {
@@ -6427,11 +6749,15 @@
         "typescript": {
           "file": "control-plane/catalog_active_use_issue_is_reported.integration_test.ts",
           "testName": "control-plane.catalog-active-use-issue-is-reported reports invalid active uses when a required provider becomes inactive"
+        },
+        "rust": {
+          "module": "control_plane",
+          "function": "control_plane_catalog_active_use_issue_is_reported"
         }
       },
       "completion": {
         "typescript": "implemented",
-        "rust": "required"
+        "rust": "implemented"
       }
     },
     {

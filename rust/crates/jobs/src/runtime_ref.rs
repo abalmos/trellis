@@ -169,6 +169,15 @@ fn terminal_job_from_event(current: &Job, event: &JobEvent) -> Job {
         | JobEventType::Dead
         | JobEventType::Dismissed => {
             next.last_error = event.error.clone();
+            next.error_detail = event.error_detail.clone().or_else(|| {
+                event.error.as_deref().map(|message| {
+                    crate::types::JobErrorDetail::from_message(
+                        &event.service,
+                        &event.job_type,
+                        message,
+                    )
+                })
+            });
         }
         _ => {}
     }
@@ -212,11 +221,14 @@ mod tests {
             tries: 0,
             max_tries: 5,
             last_error: None,
+            error_detail: None,
             deadline: None,
             progress: None,
             logs: None,
             concurrency: None,
             queue_policy: None,
+            trigger: None,
+            lineage: None,
         }
     }
 

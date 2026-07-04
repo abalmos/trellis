@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-06-18).
+Last verified against Trellis main (2026-07-04).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -54,6 +54,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   deployment approval, resource bindings, request context, and wire validation.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background work.
+- Jobs admin workbenches use `Jobs.Query` for server-side safe-field search,
+  sorting, grouping, and stats, and `Jobs.Inspect` for one-job detail,
+  timeline, attempts, related jobs, errors, trigger, and lineage. `Jobs.List` and
+  `Jobs.Get` are removed. `Jobs.Watch` is an invalidation feed only; rerun query
+  or inspection reads after `jobChanged`, `jobInspectChanged`, or
+  `queryInvalidated` frames.
 - Use job `keyConcurrency` for service-private work that must have at most one
   active job per logical key across service instances. The existing numeric job
   `concurrency` setting remains worker-count concurrency. Keyed concurrency
@@ -63,6 +69,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 - TypeScript job handlers request automatic redelivery by returning or throwing
   `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary handler errors are
   terminal job failures.
+- Jobs admin mutation requests accept optional `reason`; reasons appear in
+  lifecycle admin metadata and inspection timelines. Active cancellation remains
+  cooperative through `Jobs.Cancel`; do not add hard stop or kill flows. The
+  SQLite jobs projection is disposable; the `JOBS` JetStream stream is the source
+  of truth.
 - Public expected failures should be modeled in the contract or as Result-style
   values. Reserve thrown exceptions or panics for unexpected boundary failures.
 - Operations support declared typed errors via `errors` on the operation descriptor,

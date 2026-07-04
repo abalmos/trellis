@@ -18,11 +18,14 @@ fn sample_job(id: &str, state: JobState, tries: u64) -> Job {
         tries,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     }
 }
 

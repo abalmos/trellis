@@ -2,12 +2,13 @@ import type { ServiceHandle } from "@qlever-llc/trellis/sdk/jobs";
 import type { createJobsAdminHandlers } from "./rpc.ts";
 
 type JobsAdminHandlers = ReturnType<typeof createJobsAdminHandlers>;
+
 type JobsRpcRegistrar = {
   handle: {
     rpc: {
       jobs: Pick<
         ServiceHandle["rpc"]["jobs"],
-        "health" | "list" | "get" | "cancel" | "listServices"
+        "health" | "query" | "inspect" | "cancel" | "listServices"
       >;
     };
   };
@@ -19,8 +20,8 @@ export async function registerJobsAdmin(deps: {
   handlers: JobsAdminHandlers;
 }): Promise<void> {
   await deps.trellis.handle.rpc.jobs.health(deps.handlers.health);
-  await deps.trellis.handle.rpc.jobs.list(deps.handlers.list);
-  await deps.trellis.handle.rpc.jobs.get(deps.handlers.get);
+  await deps.trellis.handle.rpc.jobs.query(deps.handlers.query);
+  await deps.trellis.handle.rpc.jobs.inspect(deps.handlers.inspect);
   await deps.trellis.handle.rpc.jobs.cancel(deps.handlers.cancel);
   await deps.trellis.handle.rpc.jobs.listServices(deps.handlers.listServices);
 }

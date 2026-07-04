@@ -1,10 +1,14 @@
 // Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
 import type {
+  AsyncResult,
   BaseError,
   HandlerTrellis,
   Result,
   RpcHandlerContext,
+  SessionCaller,
   TrellisErrorInstance,
+  UnexpectedError,
+  ValidationError,
 } from "../../../index.ts";
 
 import type { Api } from "./api.ts";
@@ -17,9 +21,9 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "DPoUeZ9fiDUZspXj-EqWOc5I0fKRuWoUCtI2URyr-2I" as const;
+  "Bn4oqFEEZ39V53Xswubi6qsCocPSyG_kzR_vAm9A2qc" as const;
 
-export type JobsCancelInput = { id: string };
+export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {
   job: {
     completedAt?: string;
@@ -38,8 +42,29 @@ export type JobsCancelOutput = {
     };
     createdAt: string;
     deadline?: string;
+    errorDetail?: {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    };
     id: string;
     lastError?: string;
+    lineage?: {
+      operationId?: string;
+      parentJobId?: string;
+      relatedKeys?: Array<string>;
+      rootJobId?: string;
+    };
     logs?: Array<
       { level: "info" | "warn" | "error"; message: string; timestamp: string }
     >;
@@ -73,12 +98,28 @@ export type JobsCancelOutput = {
       | "dead"
       | "dismissed";
     tries: number;
+    trigger?: {
+      id?: string;
+      kind:
+        | "schedule"
+        | "operation"
+        | "rpc"
+        | "event"
+        | "manualReplay"
+        | "serviceCode"
+        | "parentJob";
+      operationId?: string;
+      parentJobId?: string;
+      requestId?: string;
+      subject?: string;
+      traceId?: string;
+    };
     type: string;
     updatedAt: string;
   };
 };
 
-export type JobsDismissDLQInput = { id: string };
+export type JobsDismissDLQInput = { id: string; reason?: string };
 export type JobsDismissDLQOutput = {
   job: {
     completedAt?: string;
@@ -97,8 +138,29 @@ export type JobsDismissDLQOutput = {
     };
     createdAt: string;
     deadline?: string;
+    errorDetail?: {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    };
     id: string;
     lastError?: string;
+    lineage?: {
+      operationId?: string;
+      parentJobId?: string;
+      relatedKeys?: Array<string>;
+      rootJobId?: string;
+    };
     logs?: Array<
       { level: "info" | "warn" | "error"; message: string; timestamp: string }
     >;
@@ -132,65 +194,22 @@ export type JobsDismissDLQOutput = {
       | "dead"
       | "dismissed";
     tries: number;
-    type: string;
-    updatedAt: string;
-  };
-};
-
-export type JobsGetInput = { id: string };
-export type JobsGetOutput = {
-  job: {
-    completedAt?: string;
-    concurrency?: {
-      heartbeatAt?: string;
-      key: string;
-      keyHash: string;
-      leaseExpiresAt?: string;
-      staleTakeoverCount?: number;
+    trigger?: {
+      id?: string;
+      kind:
+        | "schedule"
+        | "operation"
+        | "rpc"
+        | "event"
+        | "manualReplay"
+        | "serviceCode"
+        | "parentJob";
+      operationId?: string;
+      parentJobId?: string;
+      requestId?: string;
+      subject?: string;
+      traceId?: string;
     };
-    context: {
-      requestId: string;
-      traceId: string;
-      traceparent: string;
-      tracestate?: string;
-    };
-    createdAt: string;
-    deadline?: string;
-    id: string;
-    lastError?: string;
-    logs?: Array<
-      { level: "info" | "warn" | "error"; message: string; timestamp: string }
-    >;
-    maxTries: number;
-    payload: unknown;
-    progress?: {
-      current?: number;
-      message?: string;
-      step?: string;
-      total?: number;
-    };
-    queuePolicy?: {
-      existingJobId?: string;
-      outcome: string;
-      reason?: string;
-      replacedJobId?: string;
-    };
-    result?: unknown;
-    service: string;
-    startedAt?: string;
-    state:
-      | "pending"
-      | "active"
-      | "retry"
-      | "completed"
-      | "failed"
-      | "cancelled"
-      | "skipped"
-      | "stale"
-      | "expired"
-      | "dead"
-      | "dismissed";
-    tries: number;
     type: string;
     updatedAt: string;
   };
@@ -226,13 +245,120 @@ export type JobsHealthOutput = {
   timestamp: string;
 };
 
-export type JobsListInput = {
-  limit: number;
-  offset?: number;
-  service?: string;
-  since?: string;
-  state?: Array<
-    (
+export type JobsInspectInput = { id: string };
+export type JobsInspectOutput = {
+  attempts: Array<
+    {
+      endedAt?: string;
+      error?: {
+        causes?: Array<{}>;
+        fingerprint: string;
+        firstSeen?: string;
+        message: string;
+        occurrenceCount?: number;
+        stack?: string;
+        type?: string;
+        worker?: {
+          instanceId?: string;
+          runtime?: string;
+          service?: string;
+          version?: string;
+        };
+      };
+      startedAt: string;
+      state?:
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed";
+      try: number;
+    }
+  >;
+  errors: Array<
+    {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    }
+  >;
+  job: {
+    completedAt?: string;
+    concurrency?: {
+      heartbeatAt?: string;
+      key: string;
+      keyHash: string;
+      leaseExpiresAt?: string;
+      staleTakeoverCount?: number;
+    };
+    context: {
+      requestId: string;
+      traceId: string;
+      traceparent: string;
+      tracestate?: string;
+    };
+    createdAt: string;
+    deadline?: string;
+    errorDetail?: {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    };
+    id: string;
+    lastError?: string;
+    lineage?: {
+      operationId?: string;
+      parentJobId?: string;
+      relatedKeys?: Array<string>;
+      rootJobId?: string;
+    };
+    logs?: Array<
+      { level: "info" | "warn" | "error"; message: string; timestamp: string }
+    >;
+    maxTries: number;
+    payload: unknown;
+    progress?: {
+      current?: number;
+      message?: string;
+      step?: string;
+      total?: number;
+    };
+    queuePolicy?: {
+      existingJobId?: string;
+      outcome: string;
+      reason?: string;
+      replacedJobId?: string;
+    };
+    result?: unknown;
+    service: string;
+    startedAt?: string;
+    state:
       | "pending"
       | "active"
       | "retry"
@@ -243,51 +369,63 @@ export type JobsListInput = {
       | "stale"
       | "expired"
       | "dead"
-      | "dismissed"
-    )
-  >;
-  type?: string;
-};
-export type JobsListOutput = {
-  count: number;
-  entries: Array<
+      | "dismissed";
+    tries: number;
+    trigger?: {
+      id?: string;
+      kind:
+        | "schedule"
+        | "operation"
+        | "rpc"
+        | "event"
+        | "manualReplay"
+        | "serviceCode"
+        | "parentJob";
+      operationId?: string;
+      parentJobId?: string;
+      requestId?: string;
+      subject?: string;
+      traceId?: string;
+    };
+    type: string;
+    updatedAt: string;
+  };
+  lineage?: {
+    operationId?: string;
+    parentJobId?: string;
+    relatedKeys?: Array<string>;
+    rootJobId?: string;
+  };
+  related: Array<
     {
       completedAt?: string;
-      concurrency?: {
-        heartbeatAt?: string;
-        key: string;
-        keyHash: string;
-        leaseExpiresAt?: string;
-        staleTakeoverCount?: number;
-      };
-      context: {
+      context?: {
         requestId: string;
         traceId: string;
         traceparent: string;
         tracestate?: string;
       };
       createdAt: string;
-      deadline?: string;
+      errorFingerprint?: string;
       id: string;
       lastError?: string;
-      logs?: Array<
-        { level: "info" | "warn" | "error"; message: string; timestamp: string }
-      >;
+      lineage?: {
+        operationId?: string;
+        parentJobId?: string;
+        relatedKeys?: Array<string>;
+        rootJobId?: string;
+      };
       maxTries: number;
-      payload: unknown;
       progress?: {
         current?: number;
         message?: string;
         step?: string;
         total?: number;
       };
-      queuePolicy?: {
-        existingJobId?: string;
-        outcome: string;
-        reason?: string;
-        replacedJobId?: string;
-      };
-      result?: unknown;
+      queueAgeMs?: number;
+      queueKey?: string;
+      runtimeBand?: string;
+      runtimeMs?: number;
       service: string;
       startedAt?: string;
       state:
@@ -303,13 +441,104 @@ export type JobsListOutput = {
         | "dead"
         | "dismissed";
       tries: number;
+      trigger?: {
+        id?: string;
+        kind:
+          | "schedule"
+          | "operation"
+          | "rpc"
+          | "event"
+          | "manualReplay"
+          | "serviceCode"
+          | "parentJob";
+        operationId?: string;
+        parentJobId?: string;
+        requestId?: string;
+        subject?: string;
+        traceId?: string;
+      };
       type: string;
       updatedAt: string;
     }
   >;
-  limit: number;
-  nextOffset?: number;
-  offset: number;
+  timeline: Array<
+    {
+      error?: string;
+      errorDetail?: {
+        causes?: Array<{}>;
+        fingerprint: string;
+        firstSeen?: string;
+        message: string;
+        occurrenceCount?: number;
+        stack?: string;
+        type?: string;
+        worker?: {
+          instanceId?: string;
+          runtime?: string;
+          service?: string;
+          version?: string;
+        };
+      };
+      logs?: Array<
+        { level: "info" | "warn" | "error"; message: string; timestamp: string }
+      >;
+      message?: string;
+      previousState?:
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed";
+      progress?: {
+        current?: number;
+        message?: string;
+        step?: string;
+        total?: number;
+      };
+      projected?: boolean;
+      rawEvent?: unknown;
+      reason?: string;
+      sequence: number;
+      state:
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed";
+      timestamp: string;
+      tries?: number;
+      type: string;
+      workerInstanceId?: string;
+    }
+  >;
+  trigger?: {
+    id?: string;
+    kind:
+      | "schedule"
+      | "operation"
+      | "rpc"
+      | "event"
+      | "manualReplay"
+      | "serviceCode"
+      | "parentJob";
+    operationId?: string;
+    parentJobId?: string;
+    requestId?: string;
+    subject?: string;
+    traceId?: string;
+  };
 };
 
 export type JobsListDLQInput = {
@@ -339,8 +568,29 @@ export type JobsListDLQOutput = {
       };
       createdAt: string;
       deadline?: string;
+      errorDetail?: {
+        causes?: Array<{}>;
+        fingerprint: string;
+        firstSeen?: string;
+        message: string;
+        occurrenceCount?: number;
+        stack?: string;
+        type?: string;
+        worker?: {
+          instanceId?: string;
+          runtime?: string;
+          service?: string;
+          version?: string;
+        };
+      };
       id: string;
       lastError?: string;
+      lineage?: {
+        operationId?: string;
+        parentJobId?: string;
+        relatedKeys?: Array<string>;
+        rootJobId?: string;
+      };
       logs?: Array<
         { level: "info" | "warn" | "error"; message: string; timestamp: string }
       >;
@@ -374,6 +624,22 @@ export type JobsListDLQOutput = {
         | "dead"
         | "dismissed";
       tries: number;
+      trigger?: {
+        id?: string;
+        kind:
+          | "schedule"
+          | "operation"
+          | "rpc"
+          | "event"
+          | "manualReplay"
+          | "serviceCode"
+          | "parentJob";
+        operationId?: string;
+        parentJobId?: string;
+        requestId?: string;
+        subject?: string;
+        traceId?: string;
+      };
       type: string;
       updatedAt: string;
     }
@@ -407,7 +673,154 @@ export type JobsListServicesOutput = {
   offset: number;
 };
 
-export type JobsReplayDLQInput = { id: string };
+export type JobsQueryInput = {
+  groupBy?:
+    | "service"
+    | "type"
+    | "state"
+    | "queueKey"
+    | "trigger"
+    | "runtimeBand";
+  limit: number;
+  offset?: number;
+  queueKey?: string;
+  runtimeBand?: "queued" | "running" | "slow" | "terminal";
+  search?: string;
+  service?: string;
+  sort?: {
+    direction?: "asc" | "desc";
+    field:
+      | "updatedAt"
+      | "queueAge"
+      | "runtime"
+      | "failureRate"
+      | "retries"
+      | "depth";
+  };
+  state?: Array<
+    (
+      | "pending"
+      | "active"
+      | "retry"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "skipped"
+      | "stale"
+      | "expired"
+      | "dead"
+      | "dismissed"
+    )
+  >;
+  trigger?: string;
+  type?: string;
+  window?: "1h" | "24h" | "7d";
+};
+export type JobsQueryOutput = {
+  count: number;
+  entries: Array<
+    {
+      completedAt?: string;
+      context?: {
+        requestId: string;
+        traceId: string;
+        traceparent: string;
+        tracestate?: string;
+      };
+      createdAt: string;
+      errorFingerprint?: string;
+      id: string;
+      lastError?: string;
+      lineage?: {
+        operationId?: string;
+        parentJobId?: string;
+        relatedKeys?: Array<string>;
+        rootJobId?: string;
+      };
+      maxTries: number;
+      progress?: {
+        current?: number;
+        message?: string;
+        step?: string;
+        total?: number;
+      };
+      queueAgeMs?: number;
+      queueKey?: string;
+      runtimeBand?: string;
+      runtimeMs?: number;
+      service: string;
+      startedAt?: string;
+      state:
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed";
+      tries: number;
+      trigger?: {
+        id?: string;
+        kind:
+          | "schedule"
+          | "operation"
+          | "rpc"
+          | "event"
+          | "manualReplay"
+          | "serviceCode"
+          | "parentJob";
+        operationId?: string;
+        parentJobId?: string;
+        requestId?: string;
+        subject?: string;
+        traceId?: string;
+      };
+      type: string;
+      updatedAt: string;
+    }
+  >;
+  groups: Array<
+    {
+      count: number;
+      depth?: number;
+      failureRate?: number;
+      key: string;
+      label: string;
+      latestUpdatedAt?: string;
+      oldestCreatedAt?: string;
+      state?:
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed";
+    }
+  >;
+  limit: number;
+  nextOffset?: number;
+  offset: number;
+  stats: {
+    byState: { [k: string]: number };
+    dead?: number;
+    failed?: number;
+    queued?: number;
+    running?: number;
+    slow?: number;
+    total: number;
+  };
+};
+
+export type JobsReplayDLQInput = { id: string; reason?: string };
 export type JobsReplayDLQOutput = {
   job: {
     completedAt?: string;
@@ -426,8 +839,29 @@ export type JobsReplayDLQOutput = {
     };
     createdAt: string;
     deadline?: string;
+    errorDetail?: {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    };
     id: string;
     lastError?: string;
+    lineage?: {
+      operationId?: string;
+      parentJobId?: string;
+      relatedKeys?: Array<string>;
+      rootJobId?: string;
+    };
     logs?: Array<
       { level: "info" | "warn" | "error"; message: string; timestamp: string }
     >;
@@ -461,12 +895,28 @@ export type JobsReplayDLQOutput = {
       | "dead"
       | "dismissed";
     tries: number;
+    trigger?: {
+      id?: string;
+      kind:
+        | "schedule"
+        | "operation"
+        | "rpc"
+        | "event"
+        | "manualReplay"
+        | "serviceCode"
+        | "parentJob";
+      operationId?: string;
+      parentJobId?: string;
+      requestId?: string;
+      subject?: string;
+      traceId?: string;
+    };
     type: string;
     updatedAt: string;
   };
 };
 
-export type JobsRetryInput = { id: string };
+export type JobsRetryInput = { id: string; reason?: string };
 export type JobsRetryOutput = {
   job: {
     completedAt?: string;
@@ -485,8 +935,29 @@ export type JobsRetryOutput = {
     };
     createdAt: string;
     deadline?: string;
+    errorDetail?: {
+      causes?: Array<{}>;
+      fingerprint: string;
+      firstSeen?: string;
+      message: string;
+      occurrenceCount?: number;
+      stack?: string;
+      type?: string;
+      worker?: {
+        instanceId?: string;
+        runtime?: string;
+        service?: string;
+        version?: string;
+      };
+    };
     id: string;
     lastError?: string;
+    lineage?: {
+      operationId?: string;
+      parentJobId?: string;
+      relatedKeys?: Array<string>;
+      rootJobId?: string;
+    };
     logs?: Array<
       { level: "info" | "warn" | "error"; message: string; timestamp: string }
     >;
@@ -520,10 +991,108 @@ export type JobsRetryOutput = {
       | "dead"
       | "dismissed";
     tries: number;
+    trigger?: {
+      id?: string;
+      kind:
+        | "schedule"
+        | "operation"
+        | "rpc"
+        | "event"
+        | "manualReplay"
+        | "serviceCode"
+        | "parentJob";
+      operationId?: string;
+      parentJobId?: string;
+      requestId?: string;
+      subject?: string;
+      traceId?: string;
+    };
     type: string;
     updatedAt: string;
   };
 };
+
+export type JobsWatchInput = {
+  includeInitial?: boolean;
+  jobId?: string;
+  query?: {
+    groupBy?:
+      | "service"
+      | "type"
+      | "state"
+      | "queueKey"
+      | "trigger"
+      | "runtimeBand";
+    limit: number;
+    offset?: number;
+    queueKey?: string;
+    runtimeBand?: "queued" | "running" | "slow" | "terminal";
+    search?: string;
+    service?: string;
+    sort?: {
+      direction?: "asc" | "desc";
+      field:
+        | "updatedAt"
+        | "queueAge"
+        | "runtime"
+        | "failureRate"
+        | "retries"
+        | "depth";
+    };
+    state?: Array<
+      (
+        | "pending"
+        | "active"
+        | "retry"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "skipped"
+        | "stale"
+        | "expired"
+        | "dead"
+        | "dismissed"
+      )
+    >;
+    trigger?: string;
+    type?: string;
+    window?: "1h" | "24h" | "7d";
+  };
+};
+export type JobsWatchEvent = { kind: "ready"; timestamp: string } | {
+  id: string;
+  kind: "jobChanged";
+  service: string;
+  state:
+    | "pending"
+    | "active"
+    | "retry"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "skipped"
+    | "stale"
+    | "expired"
+    | "dead"
+    | "dismissed";
+  type: string;
+  updatedAt: string;
+} | {
+  kind: "queryInvalidated";
+  reason: "matched-job-changed" | "unknown-match";
+  timestamp: string;
+} | { id: string; kind: "jobInspectChanged"; timestamp: string };
+export type JobsWatchFeedHandler = (
+  context: {
+    input: JobsWatchInput;
+    caller: SessionCaller;
+    signal: AbortSignal;
+    emit(
+      event: JobsWatchEvent,
+    ): AsyncResult<void, ValidationError | UnexpectedError>;
+    client: HandlerClient;
+  },
+) => unknown | Promise<unknown>;
 
 export type NotFoundErrorData = {
   context?: { [k: string]: unknown };
@@ -562,15 +1131,15 @@ export interface RpcMap {
     input: JobsDismissDLQInput;
     output: JobsDismissDLQOutput;
   };
-  "Jobs.Get": { input: JobsGetInput; output: JobsGetOutput };
   "Jobs.GetKey": { input: JobsGetKeyInput; output: JobsGetKeyOutput };
   "Jobs.Health": { input: JobsHealthInput; output: JobsHealthOutput };
-  "Jobs.List": { input: JobsListInput; output: JobsListOutput };
+  "Jobs.Inspect": { input: JobsInspectInput; output: JobsInspectOutput };
   "Jobs.ListDLQ": { input: JobsListDLQInput; output: JobsListDLQOutput };
   "Jobs.ListServices": {
     input: JobsListServicesInput;
     output: JobsListServicesOutput;
   };
+  "Jobs.Query": { input: JobsQueryInput; output: JobsQueryOutput };
   "Jobs.ReplayDLQ": { input: JobsReplayDLQInput; output: JobsReplayDLQOutput };
   "Jobs.Retry": { input: JobsRetryInput; output: JobsRetryOutput };
 }
@@ -603,17 +1172,6 @@ export type JobsDismissDLQHandler = (
     client: HandlerClient;
   },
 ) => JobsDismissDLQHandlerResult | Promise<JobsDismissDLQHandlerResult>;
-export type JobsGetHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsGetHandlerResult = Result<JobsGetOutput, JobsGetHandlerError>;
-export type JobsGetHandler = (
-  args: {
-    input: JobsGetInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsGetHandlerResult | Promise<JobsGetHandlerResult>;
 export type JobsGetKeyHandlerError =
   | TrellisErrorInstance
   | BaseError<NotFoundErrorData>;
@@ -640,18 +1198,20 @@ export type JobsHealthHandler = (
     client: HandlerClient;
   },
 ) => JobsHealthHandlerResult | Promise<JobsHealthHandlerResult>;
-export type JobsListHandlerError = TrellisErrorInstance;
-export type JobsListHandlerResult = Result<
-  JobsListOutput,
-  JobsListHandlerError
+export type JobsInspectHandlerError =
+  | TrellisErrorInstance
+  | BaseError<NotFoundErrorData>;
+export type JobsInspectHandlerResult = Result<
+  JobsInspectOutput,
+  JobsInspectHandlerError
 >;
-export type JobsListHandler = (
+export type JobsInspectHandler = (
   args: {
-    input: JobsListInput;
+    input: JobsInspectInput;
     context: RpcHandlerContext;
     client: HandlerClient;
   },
-) => JobsListHandlerResult | Promise<JobsListHandlerResult>;
+) => JobsInspectHandlerResult | Promise<JobsInspectHandlerResult>;
 export type JobsListDLQHandlerError = TrellisErrorInstance;
 export type JobsListDLQHandlerResult = Result<
   JobsListDLQOutput,
@@ -676,6 +1236,18 @@ export type JobsListServicesHandler = (
     client: HandlerClient;
   },
 ) => JobsListServicesHandlerResult | Promise<JobsListServicesHandlerResult>;
+export type JobsQueryHandlerError = TrellisErrorInstance;
+export type JobsQueryHandlerResult = Result<
+  JobsQueryOutput,
+  JobsQueryHandlerError
+>;
+export type JobsQueryHandler = (
+  args: {
+    input: JobsQueryInput;
+    context: RpcHandlerContext;
+    client: HandlerClient;
+  },
+) => JobsQueryHandlerResult | Promise<JobsQueryHandlerResult>;
 export type JobsReplayDLQHandlerError =
   | TrellisErrorInstance
   | BaseError<NotFoundErrorData>;
@@ -709,6 +1281,7 @@ export interface EventMap {
 }
 
 export interface FeedMap {
+  "Jobs.Watch": { input: JobsWatchInput; event: JobsWatchEvent };
 }
 
 export interface SubjectMap {

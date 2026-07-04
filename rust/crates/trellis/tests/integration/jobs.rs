@@ -16,7 +16,7 @@ use trellis_rs::jobs::{
 };
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
-    JobsGetRequest, JobsListServicesRequest, JobsListServicesResponse,
+    JobsListDLQRequest, JobsListServicesRequest, JobsListServicesResponse,
 };
 use trellis_rs::service::{ConnectedServiceRuntime, ServerError};
 
@@ -166,6 +166,14 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
       "output": { "schema": "KeyedWorkflowOutput" },
       "capabilities": { "call": [] },
       "errors": []
+    },
+    "Documents.SubmitLongProcess": {
+      "version": "v1",
+      "subject": "rpc.v1.Documents.SubmitLongProcess",
+      "input": { "schema": "WorkflowInput" },
+      "output": { "schema": "WorkflowOutput" },
+      "capabilities": { "call": [] },
+      "errors": []
     }
   }
 }"#;
@@ -268,6 +276,20 @@ impl trellis_rs::client::RpcDescriptor for DocumentsKeyedProcessRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["documentId","groupKey","sequence","jobId","processedBy","requestId","traceId"],"properties":{"documentId":{"type":"string"},"groupKey":{"type":"string"},"sequence":{"type":"number"},"jobId":{"type":"string"},"processedBy":{"type":"string"},"requestId":{"type":"string"},"traceId":{"type":"string"}}}"#;
 }
 
+struct DocumentsSubmitLongProcessRpc;
+
+impl trellis_rs::client::RpcDescriptor for DocumentsSubmitLongProcessRpc {
+    type Input = WorkflowInput;
+    type Output = WorkflowOutput;
+
+    const KEY: &'static str = "Documents.SubmitLongProcess";
+    const SUBJECT: &'static str = "rpc.v1.Documents.SubmitLongProcess";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &[];
+    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["documentId"],"properties":{"documentId":{"type":"string"}}}"#;
+    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["documentId","jobId","processedBy","requestId","traceId"],"properties":{"documentId":{"type":"string"},"jobId":{"type":"string"},"processedBy":{"type":"string"},"requestId":{"type":"string"},"traceId":{"type":"string"}}}"#;
+}
+
 struct AbortOnDrop<T> {
     handle: Option<JoinHandle<T>>,
 }
@@ -306,9 +328,7 @@ struct JobsFixture {
     client: Arc<trellis_rs::client::TrellisClient>,
     manager: JobManager<NatsJobEventPublisher, TrellisJobMetaSource>,
     keyed_waiter: NatsJobWaiter,
-    long_waiter: NatsJobWaiter,
     keyed_run_state: Arc<KeyedJobRunState>,
-    long_started: Arc<tokio::sync::Notify>,
     failing_attempts: Arc<tokio::sync::Mutex<Vec<u64>>>,
 }
 
@@ -418,7 +438,6 @@ async fn setup_jobs_fixture() -> JobsFixture {
 
     let process_manager = manager.clone();
     let fixture_keyed_waiter = keyed_waiter.clone();
-    let fixture_long_waiter = long_waiter.clone();
     service.register_rpc::<DocumentsProcessRpc, _, _>(move |_context, input| {
         let manager = process_manager.clone();
         let waiter = waiter.clone();
@@ -482,6 +501,41 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 sequence: input.sequence,
                 job_id: terminal.id,
                 processed_by: job_result.processed_by,
+                request_id: terminal.context.request_id,
+                trace_id: terminal.context.trace_id,
+            })
+        }
+    });
+
+    let long_manager = manager.clone();
+    let long_started_for_rpc = Arc::clone(&long_started);
+    service.register_rpc::<DocumentsSubmitLongProcessRpc, _, _>(move |_context, input| {
+        let manager = long_manager.clone();
+        let waiter = long_waiter.clone();
+        let started = Arc::clone(&long_started_for_rpc);
+        async move {
+            let job = manager
+                .create(
+                    "longProcessDocument",
+                    JobPayload {
+                        document_id: input.document_id.clone(),
+                    },
+                )
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            started.notified().await;
+            manager
+                .cancel(&job)
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            let terminal: trellis_rs::jobs::Job = waiter
+                .wait_for_terminal(job.clone())
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+            Ok(WorkflowOutput {
+                document_id: input.document_id,
+                job_id: job.id,
+                processed_by: job_state_name(terminal.state),
                 request_id: terminal.context.request_id,
                 trace_id: terminal.context.trace_id,
             })
@@ -609,9 +663,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
         client,
         manager,
         keyed_waiter: fixture_keyed_waiter,
-        long_waiter: fixture_long_waiter,
         keyed_run_state,
-        long_started,
         failing_attempts,
     }
 }
@@ -782,30 +834,11 @@ async fn jobs_submitted_job_can_be_cancelled() {
     assert_case_registered("jobs.submitted-job-can-be-cancelled", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
-    let job = fixture
-        .manager
-        .create(
-            "longProcessDocument",
-            JobPayload {
-                document_id: "doc-long-cancel".to_string(),
-            },
-        )
-        .await
-        .expect("create long job");
-    fixture.long_started.notified().await;
-    let wait_for_terminal = {
-        let waiter = fixture.long_waiter.clone();
-        let job = job.clone();
-        tokio::spawn(async move { waiter.wait_for_terminal(job).await })
-    };
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    fixture.manager.cancel(&job).await.expect("cancel long job");
-    let terminal = wait_for_terminal
-        .await
-        .expect("terminal waiter joins")
-        .expect("long job reaches terminal state");
+    let output =
+        call_documents_submit_long_process_with_retry(&fixture.client, "doc-long-cancel").await;
 
-    assert_eq!(terminal.state, JobState::Cancelled);
+    assert_eq!(output.document_id, "doc-long-cancel");
+    assert_eq!(output.processed_by, "cancelled");
 
     fixture.stop().await;
 }
@@ -832,7 +865,7 @@ async fn jobs_failed_job_retries_then_dead() {
         )
         .await
         .expect("create failing job");
-    let terminal = wait_for_admin_job_state(&jobs_admin, &job.id, "dead").await;
+    let terminal = wait_for_admin_dlq_job(&jobs_admin, &job.id).await;
     let attempts = fixture.failing_attempts.lock().await.clone();
 
     assert_eq!(terminal.state, "dead");
@@ -1055,6 +1088,46 @@ async fn call_documents_keyed_process_with_retry(
     }
 }
 
+async fn call_documents_submit_long_process_with_retry(
+    client: &trellis_rs::client::TrellisClient,
+    document_id: &str,
+) -> WorkflowOutput {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match client
+            .call::<DocumentsSubmitLongProcessRpc>(&WorkflowInput {
+                document_id: document_id.to_string(),
+            })
+            .await
+        {
+            Ok(output) => return output,
+            Err(error)
+                if is_retryable_service_startup_error(&error) && Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => panic!("call live Documents.SubmitLongProcess RPC: {error}"),
+        }
+    }
+}
+
+fn job_state_name(state: JobState) -> String {
+    match state {
+        JobState::Pending => "pending",
+        JobState::Active => "active",
+        JobState::Retry => "retry",
+        JobState::Completed => "completed",
+        JobState::Failed => "failed",
+        JobState::Cancelled => "cancelled",
+        JobState::Expired => "expired",
+        JobState::Skipped => "skipped",
+        JobState::Stale => "stale",
+        JobState::Dead => "dead",
+        JobState::Dismissed => "dismissed",
+    }
+    .to_string()
+}
+
 fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
     match error {
         trellis_rs::client::TrellisClientError::NatsRequest(message) => {
@@ -1113,29 +1186,30 @@ async fn wait_for_admin_services(
     }
 }
 
-async fn wait_for_admin_job_state(
+async fn wait_for_admin_dlq_job(
     jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
     job_id: &str,
-    state: &str,
-) -> trellis_rs::sdk::jobs::types::JobsGetResponseJob {
+) -> trellis_rs::sdk::jobs::types::JobsListDLQResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    let mut last_state = "missing".to_string();
     loop {
-        let current = jobs_admin
+        let page = jobs_admin
             .rpc()
             .jobs()
-            .get(&JobsGetRequest {
-                id: job_id.to_string(),
+            .list_dlq(&JobsListDLQRequest {
+                service: None,
+                r#type: None,
+                since: None,
+                offset: None,
+                limit: 20,
             })
             .await
-            .expect("call generated Jobs.Get");
-        last_state = current.job.state.clone();
-        if current.job.state == state {
-            return current.job;
+            .expect("call generated Jobs.ListDLQ");
+        if let Some(job) = page.entries.into_iter().find(|entry| entry.id == job_id) {
+            return job;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.Get did not return state {state}; last state {last_state}"
+            "Jobs.ListDLQ did not return job {job_id} before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -1149,18 +1223,19 @@ fn timestamp_seconds_ago(seconds: i64) -> String {
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
-        JOBS_ADMIN_CLIENT_ID,
-        "Trellis Integration Jobs Admin Client",
-        "Uses Jobs admin ListServices for worker-presence coverage.",
-        trellis_rs::contracts::ContractKind::App,
-    )
-    .use_ref(
-        "jobs",
-        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-            .with_rpc_call(["Jobs.Get", "Jobs.ListServices"]),
-    )
-    .build()?;
+    let manifest =
+        trellis_rs::contracts::ContractManifestBuilder::new(
+            JOBS_ADMIN_CLIENT_ID,
+            "Trellis Integration Jobs Admin Client",
+            "Uses Jobs admin ListServices for worker-presence coverage.",
+            trellis_rs::contracts::ContractKind::App,
+        )
+        .use_ref(
+            "jobs",
+            trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
+                .with_rpc_call(["Jobs.Cancel", "Jobs.ListDLQ", "Jobs.ListServices"]),
+        )
+        .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }
@@ -1175,8 +1250,11 @@ fn jobs_client_contract(
     )
     .use_ref(
         "jobsService",
-        trellis_rs::contracts::use_contract(JOBS_SERVICE_ID)
-            .with_rpc_call(["Documents.Process", "Documents.KeyedProcess"]),
+        trellis_rs::contracts::use_contract(JOBS_SERVICE_ID).with_rpc_call([
+            "Documents.Process",
+            "Documents.KeyedProcess",
+            "Documents.SubmitLongProcess",
+        ]),
     )
     .build()?;
 

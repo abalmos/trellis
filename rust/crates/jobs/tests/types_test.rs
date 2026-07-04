@@ -1,6 +1,7 @@
 use serde_json::json;
 use trellis_jobs::types::{
-    Job, JobContext, JobEvent, JobEventType, JobLogLevel, JobState, WorkerHeartbeat,
+    error_fingerprint, Job, JobContext, JobEvent, JobEventType, JobLogLevel, JobState,
+    WorkerHeartbeat,
 };
 
 fn sample_context() -> JobContext {
@@ -49,11 +50,14 @@ fn job_and_event_serde_use_expected_wire_keys() {
         tries: 0,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
     let job_json = serde_json::to_value(job).unwrap();
     assert_eq!(job_json.get("type"), Some(&json!("document-process")));
@@ -77,6 +81,7 @@ fn job_and_event_serde_use_expected_wire_keys() {
         tries: 0,
         max_tries: Some(5),
         error: None,
+        error_detail: None,
         progress: None,
         logs: None,
         payload: Some(json!({ "documentId": "doc-1" })),
@@ -84,6 +89,9 @@ fn job_and_event_serde_use_expected_wire_keys() {
         deadline: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
+        admin_action: None,
         timestamp: "2026-03-28T12:00:00.000Z".to_string(),
     };
     let event_json = serde_json::to_value(event).unwrap();
@@ -91,6 +99,18 @@ fn job_and_event_serde_use_expected_wire_keys() {
     assert_eq!(event_json.get("jobType"), Some(&json!("document-process")));
     assert_eq!(event_json.get("eventType"), Some(&json!("created")));
     assert_eq!(event_json["context"]["requestId"], json!("request-1"));
+}
+
+#[test]
+fn error_fingerprint_uses_normalized_first_line() {
+    let left = error_fingerprint("documents", "import", "Boom   happened\njob id 123");
+    let right = error_fingerprint("documents", "import", "boom happened\njob id 456");
+
+    assert_eq!(left, right);
+    assert_ne!(
+        left,
+        error_fingerprint("documents", "export", "boom happened")
+    );
 }
 
 #[test]

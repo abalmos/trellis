@@ -18,11 +18,14 @@ fn job_model_serializes_expected_wire_keys() {
         tries: 0,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
     let job_json = serde_json::to_value(job).expect("serialize job");
     assert_eq!(job_json.get("type"), Some(&json!("document-process")));

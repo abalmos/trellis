@@ -1,22 +1,23 @@
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use trellis_rs::jobs::types::{Job, JobContext, JobLogEntry, JobProgress};
+use trellis_rs::jobs::types::{Job, JobContext, JobErrorDetail, JobLogEntry, JobProgress};
 use trellis_rs::sdk::jobs::types::{
-    JobsCancelResponseJob, JobsCancelResponseJobConcurrency, JobsCancelResponseJobLogsItem,
-    JobsCancelResponseJobProgress, JobsCancelResponseJobQueuePolicy, JobsDismissDLQResponseJob,
-    JobsDismissDLQResponseJobConcurrency, JobsDismissDLQResponseJobLogsItem,
-    JobsDismissDLQResponseJobProgress, JobsDismissDLQResponseJobQueuePolicy, JobsGetResponseJob,
-    JobsGetResponseJobConcurrency, JobsGetResponseJobLogsItem, JobsGetResponseJobProgress,
-    JobsGetResponseJobQueuePolicy, JobsListDLQResponseEntriesItem,
-    JobsListDLQResponseEntriesItemConcurrency, JobsListDLQResponseEntriesItemLogsItem,
-    JobsListDLQResponseEntriesItemProgress, JobsListDLQResponseEntriesItemQueuePolicy,
-    JobsListResponseEntriesItem, JobsListResponseEntriesItemConcurrency,
-    JobsListResponseEntriesItemLogsItem, JobsListResponseEntriesItemProgress,
-    JobsListResponseEntriesItemQueuePolicy, JobsListServicesResponseEntriesItemWorkersItem,
+    JobsCancelResponseJob, JobsCancelResponseJobConcurrency, JobsCancelResponseJobErrorDetail,
+    JobsCancelResponseJobLogsItem, JobsCancelResponseJobProgress, JobsCancelResponseJobQueuePolicy,
+    JobsDismissDLQResponseJob, JobsDismissDLQResponseJobConcurrency,
+    JobsDismissDLQResponseJobErrorDetail, JobsDismissDLQResponseJobLogsItem,
+    JobsDismissDLQResponseJobProgress, JobsDismissDLQResponseJobQueuePolicy,
+    JobsInspectResponseJob, JobsInspectResponseJobConcurrency, JobsInspectResponseJobErrorDetail,
+    JobsInspectResponseJobLogsItem, JobsInspectResponseJobProgress,
+    JobsInspectResponseJobQueuePolicy, JobsListDLQResponseEntriesItem,
+    JobsListDLQResponseEntriesItemConcurrency, JobsListDLQResponseEntriesItemErrorDetail,
+    JobsListDLQResponseEntriesItemLogsItem, JobsListDLQResponseEntriesItemProgress,
+    JobsListDLQResponseEntriesItemQueuePolicy, JobsListServicesResponseEntriesItemWorkersItem,
     JobsReplayDLQResponseJob, JobsReplayDLQResponseJobConcurrency,
-    JobsReplayDLQResponseJobLogsItem, JobsReplayDLQResponseJobProgress,
-    JobsReplayDLQResponseJobQueuePolicy, JobsRetryResponseJob, JobsRetryResponseJobConcurrency,
-    JobsRetryResponseJobLogsItem, JobsRetryResponseJobProgress, JobsRetryResponseJobQueuePolicy,
+    JobsReplayDLQResponseJobErrorDetail, JobsReplayDLQResponseJobLogsItem,
+    JobsReplayDLQResponseJobProgress, JobsReplayDLQResponseJobQueuePolicy, JobsRetryResponseJob,
+    JobsRetryResponseJobConcurrency, JobsRetryResponseJobErrorDetail, JobsRetryResponseJobLogsItem,
+    JobsRetryResponseJobProgress, JobsRetryResponseJobQueuePolicy,
 };
 
 use crate::storage::JobProjectionMetadata;
@@ -38,7 +39,7 @@ pub(super) fn worker_presence_to_wire(
 }
 
 macro_rules! impl_job_to_wire {
-    ($fn_name:ident, $job_type:ident, $concurrency_type:ty, $queue_policy_type:ty, $log_type:ty, $progress_type:ty, $max_tries_model:literal, $state_model:literal, $tries_model:literal) => {
+    ($fn_name:ident, $job_type:ident, $error_type:ty, $concurrency_type:ty, $queue_policy_type:ty, $log_type:ty, $progress_type:ty, $max_tries_model:literal, $state_model:literal, $tries_model:literal) => {
         pub(super) fn $fn_name(
             job: &Job,
             metadata: &JobProjectionMetadata,
@@ -49,9 +50,11 @@ macro_rules! impl_job_to_wire {
                 concurrency: map_concurrency_metadata::<$concurrency_type>(metadata)?,
                 created_at: job.created_at.clone(),
                 deadline: job.deadline.clone(),
+                error_detail: map_error_detail::<$error_type>(&job.error_detail)?,
                 id: job.id.clone(),
                 last_error: job.last_error.clone(),
                 logs: map_logs::<$log_type>(&job.logs)?,
+                lineage: map_optional_wire(&job.lineage, "job lineage")?,
                 max_tries: map_count(job.max_tries, $max_tries_model)?,
                 payload: job.payload.clone(),
                 progress: map_progress::<$progress_type>(&job.progress)?,
@@ -60,6 +63,7 @@ macro_rules! impl_job_to_wire {
                 service: job.service.clone(),
                 started_at: job.started_at.clone(),
                 state: map_string_value(&job.state, $state_model)?,
+                trigger: map_optional_wire(&job.trigger, "job trigger")?,
                 tries: map_count(job.tries, $tries_model)?,
                 r#type: job.job_type.clone(),
                 updated_at: job.updated_at.clone(),
@@ -118,20 +122,27 @@ where
     })
 }
 
-impl_job_to_wire!(
-    job_to_list_item,
-    JobsListResponseEntriesItem,
-    JobsListResponseEntriesItemConcurrency,
-    JobsListResponseEntriesItemQueuePolicy,
-    JobsListResponseEntriesItemLogsItem,
-    JobsListResponseEntriesItemProgress,
-    "job list item maxTries",
-    "job list item state",
-    "job list item tries"
-);
+fn map_error_detail<T>(detail: &Option<JobErrorDetail>) -> Result<Option<T>, JobsQueryError>
+where
+    T: DeserializeOwned,
+{
+    detail
+        .as_ref()
+        .map(|detail| {
+            serde_json::from_value(map_json_value(detail, "job error detail")?).map_err(|error| {
+                JobsQueryError::ConvertWireModel {
+                    model: "job error detail",
+                    details: error.to_string(),
+                }
+            })
+        })
+        .transpose()
+}
+
 impl_job_to_wire!(
     job_to_dlq_item,
     JobsListDLQResponseEntriesItem,
+    JobsListDLQResponseEntriesItemErrorDetail,
     JobsListDLQResponseEntriesItemConcurrency,
     JobsListDLQResponseEntriesItemQueuePolicy,
     JobsListDLQResponseEntriesItemLogsItem,
@@ -141,19 +152,21 @@ impl_job_to_wire!(
     "job dlq list item tries"
 );
 impl_job_to_wire!(
-    job_to_get_item,
-    JobsGetResponseJob,
-    JobsGetResponseJobConcurrency,
-    JobsGetResponseJobQueuePolicy,
-    JobsGetResponseJobLogsItem,
-    JobsGetResponseJobProgress,
-    "job get response maxTries",
-    "job get response state",
-    "job get response tries"
+    job_to_inspect_item,
+    JobsInspectResponseJob,
+    JobsInspectResponseJobErrorDetail,
+    JobsInspectResponseJobConcurrency,
+    JobsInspectResponseJobQueuePolicy,
+    JobsInspectResponseJobLogsItem,
+    JobsInspectResponseJobProgress,
+    "job inspect response maxTries",
+    "job inspect response state",
+    "job inspect response tries"
 );
 impl_job_to_wire!(
     job_to_cancel_item,
     JobsCancelResponseJob,
+    JobsCancelResponseJobErrorDetail,
     JobsCancelResponseJobConcurrency,
     JobsCancelResponseJobQueuePolicy,
     JobsCancelResponseJobLogsItem,
@@ -165,6 +178,7 @@ impl_job_to_wire!(
 impl_job_to_wire!(
     job_to_retry_item,
     JobsRetryResponseJob,
+    JobsRetryResponseJobErrorDetail,
     JobsRetryResponseJobConcurrency,
     JobsRetryResponseJobQueuePolicy,
     JobsRetryResponseJobLogsItem,
@@ -176,6 +190,7 @@ impl_job_to_wire!(
 impl_job_to_wire!(
     job_to_replay_item,
     JobsReplayDLQResponseJob,
+    JobsReplayDLQResponseJobErrorDetail,
     JobsReplayDLQResponseJobConcurrency,
     JobsReplayDLQResponseJobQueuePolicy,
     JobsReplayDLQResponseJobLogsItem,
@@ -187,6 +202,7 @@ impl_job_to_wire!(
 impl_job_to_wire!(
     job_to_dismiss_item,
     JobsDismissDLQResponseJob,
+    JobsDismissDLQResponseJobErrorDetail,
     JobsDismissDLQResponseJobConcurrency,
     JobsDismissDLQResponseJobQueuePolicy,
     JobsDismissDLQResponseJobLogsItem,
@@ -301,33 +317,29 @@ macro_rules! impl_wire_queue_policy_metadata {
 impl_wire_log_item!(JobsCancelResponseJobLogsItem);
 impl_wire_log_item!(JobsDismissDLQResponseJobLogsItem);
 impl_wire_log_item!(JobsReplayDLQResponseJobLogsItem);
-impl_wire_log_item!(JobsGetResponseJobLogsItem);
 impl_wire_log_item!(JobsListDLQResponseEntriesItemLogsItem);
-impl_wire_log_item!(JobsListResponseEntriesItemLogsItem);
+impl_wire_log_item!(JobsInspectResponseJobLogsItem);
 impl_wire_log_item!(JobsRetryResponseJobLogsItem);
 
 impl_wire_progress_item!(JobsCancelResponseJobProgress);
 impl_wire_progress_item!(JobsDismissDLQResponseJobProgress);
 impl_wire_progress_item!(JobsReplayDLQResponseJobProgress);
-impl_wire_progress_item!(JobsGetResponseJobProgress);
 impl_wire_progress_item!(JobsListDLQResponseEntriesItemProgress);
-impl_wire_progress_item!(JobsListResponseEntriesItemProgress);
+impl_wire_progress_item!(JobsInspectResponseJobProgress);
 impl_wire_progress_item!(JobsRetryResponseJobProgress);
 
 impl_wire_concurrency_metadata!(JobsCancelResponseJobConcurrency);
 impl_wire_concurrency_metadata!(JobsDismissDLQResponseJobConcurrency);
 impl_wire_concurrency_metadata!(JobsReplayDLQResponseJobConcurrency);
-impl_wire_concurrency_metadata!(JobsGetResponseJobConcurrency);
 impl_wire_concurrency_metadata!(JobsListDLQResponseEntriesItemConcurrency);
-impl_wire_concurrency_metadata!(JobsListResponseEntriesItemConcurrency);
+impl_wire_concurrency_metadata!(JobsInspectResponseJobConcurrency);
 impl_wire_concurrency_metadata!(JobsRetryResponseJobConcurrency);
 
 impl_wire_queue_policy_metadata!(JobsCancelResponseJobQueuePolicy);
 impl_wire_queue_policy_metadata!(JobsDismissDLQResponseJobQueuePolicy);
 impl_wire_queue_policy_metadata!(JobsReplayDLQResponseJobQueuePolicy);
-impl_wire_queue_policy_metadata!(JobsGetResponseJobQueuePolicy);
 impl_wire_queue_policy_metadata!(JobsListDLQResponseEntriesItemQueuePolicy);
-impl_wire_queue_policy_metadata!(JobsListResponseEntriesItemQueuePolicy);
+impl_wire_queue_policy_metadata!(JobsInspectResponseJobQueuePolicy);
 impl_wire_queue_policy_metadata!(JobsRetryResponseJobQueuePolicy);
 
 fn map_logs<T>(logs: &Option<Vec<JobLogEntry>>) -> Result<Option<Vec<T>>, JobsQueryError>
@@ -377,6 +389,27 @@ fn map_count(value: u64, model: &'static str) -> Result<i64, JobsQueryError> {
     })
 }
 
+fn map_optional_wire<T, U>(
+    value: &Option<T>,
+    model: &'static str,
+) -> Result<Option<U>, JobsQueryError>
+where
+    T: serde::Serialize,
+    U: DeserializeOwned,
+{
+    value
+        .as_ref()
+        .map(|value| {
+            serde_json::from_value(map_json_value(value, model)?).map_err(|error| {
+                JobsQueryError::ConvertWireModel {
+                    model,
+                    details: error.to_string(),
+                }
+            })
+        })
+        .transpose()
+}
+
 fn map_json_value<T>(input: &T, model: &'static str) -> Result<Value, JobsQueryError>
 where
     T: serde::Serialize,
@@ -422,11 +455,14 @@ mod tests {
             tries: 1,
             max_tries: 5,
             last_error: None,
+            error_detail: None,
             deadline: None,
             progress: Some(progress),
             logs: None,
             concurrency: None,
             queue_policy: None,
+            trigger: None,
+            lineage: None,
         }
     }
 
@@ -448,7 +484,7 @@ mod tests {
             total: None,
         });
 
-        let item = job_to_list_item(&job, &JobProjectionMetadata::default()).expect("map job");
+        let item = job_to_inspect_item(&job, &JobProjectionMetadata::default()).expect("map job");
 
         let progress = item.progress.expect("progress should be present");
         assert_eq!(progress.message.as_deref(), Some("Scanning"));
@@ -465,7 +501,7 @@ mod tests {
             total: Some(10),
         });
 
-        let item = job_to_list_item(&job, &JobProjectionMetadata::default()).expect("map job");
+        let item = job_to_inspect_item(&job, &JobProjectionMetadata::default()).expect("map job");
 
         let progress = item.progress.expect("progress should be present");
         assert_eq!(progress.step.as_deref(), Some("scan"));

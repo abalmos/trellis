@@ -17,6 +17,7 @@ use crate::projector::{start_jobs_projector, JobsProjectorHandle};
 use crate::query::{jobs_admin_resources_from_binding, JobsAdminResources, JobsQuery};
 use crate::router::register_jobs_rpc_handlers;
 use crate::storage::SqliteJobsStore;
+use crate::watch::register_jobs_watch_feed;
 use crate::worker_presence::{start_worker_presence_projector, WorkerPresenceProjectorHandle};
 
 /// Controls whether this process owns background jobs-service loops or only RPC serving.
@@ -183,6 +184,11 @@ impl ConnectedJobsService {
             self.jobs_store.clone(),
         )?;
         register_jobs_rpc_handlers(&mut self.runtime, query);
+        register_jobs_watch_feed(
+            &mut self.runtime,
+            jobs_runtime.clone(),
+            resources.jobs_stream.clone(),
+        );
         run_jobs_service_runtime(jobs_runtime, resources, store, mode, async move {
             self.runtime
                 .run()

@@ -18,11 +18,14 @@ fn sample_job(id: &str, state: JobState, deadline: Option<&str>) -> Job {
         tries: 2,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: deadline.map(ToString::to_string),
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     }
 }
 

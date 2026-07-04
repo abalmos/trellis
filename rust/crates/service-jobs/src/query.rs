@@ -5,20 +5,27 @@ use std::time::Duration;
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::jobs::types::{Job, JobEvent, JobState};
+use trellis_rs::jobs::types::{
+    Job, JobAdminAction, JobErrorDetail, JobEvent, JobState, JobTrigger, JobTriggerKind,
+};
 use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{
-    cancelled_event, dismissed_event, is_terminal, job_event_subject, reduce_job_event,
-    retried_event,
+    cancelled_event_with_admin_reason, dismissed_event, is_terminal, job_event_subject,
+    reduce_job_event, retried_event_with_admin_reason,
 };
 
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsCancelResponse, JobsDismissDLQRequest, JobsDismissDLQResponse,
     JobsGetKeyRequest, JobsGetKeyResponse, JobsGetKeyResponseActiveItem,
-    JobsGetKeyResponseQueuedItem, JobsGetRequest, JobsGetResponse, JobsListDLQRequest,
-    JobsListDLQResponse, JobsListDLQResponseEntriesItem, JobsListRequest, JobsListResponse,
-    JobsListResponseEntriesItem, JobsListServicesRequest, JobsListServicesResponse,
-    JobsListServicesResponseEntriesItem, JobsListServicesResponseEntriesItemWorkersItem,
+    JobsGetKeyResponseQueuedItem, JobsInspectRequest, JobsInspectResponse,
+    JobsInspectResponseErrorsItem, JobsInspectResponseRelatedItem,
+    JobsInspectResponseRelatedItemContext, JobsInspectResponseRelatedItemProgress,
+    JobsInspectResponseTimelineItem, JobsInspectResponseTimelineItemErrorDetail,
+    JobsListDLQRequest, JobsListDLQResponse, JobsListDLQResponseEntriesItem,
+    JobsListServicesRequest, JobsListServicesResponse, JobsListServicesResponseEntriesItem,
+    JobsListServicesResponseEntriesItemWorkersItem, JobsQueryRequest, JobsQueryResponse,
+    JobsQueryResponseEntriesItem, JobsQueryResponseEntriesItemContext,
+    JobsQueryResponseEntriesItemProgress, JobsQueryResponseGroupsItem, JobsQueryResponseStats,
     JobsReplayDLQRequest, JobsReplayDLQResponse, JobsRetryRequest, JobsRetryResponse,
 };
 
@@ -26,7 +33,9 @@ mod resources;
 mod state;
 mod wire;
 use crate::storage::{
-    JobProjectionMetadata, ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError,
+    JobProjectionMetadata, JobTimelineEvent, JobsWorkbenchEntry, JobsWorkbenchFilter,
+    JobsWorkbenchGroup, JobsWorkbenchGroupBy, JobsWorkbenchSort, JobsWorkbenchSortField,
+    JobsWorkbenchStats, ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError,
 };
 use crate::worker_presence::WORKER_PRESENCE_FRESH_FOR;
 
@@ -34,7 +43,7 @@ pub(crate) use resources::jobs_admin_resources_from_binding;
 pub use resources::JobsAdminResources;
 use state::{now_timestamp_string, parse_state_filter};
 use wire::{
-    job_to_cancel_item, job_to_dismiss_item, job_to_dlq_item, job_to_get_item, job_to_list_item,
+    job_to_cancel_item, job_to_dismiss_item, job_to_dlq_item, job_to_inspect_item,
     job_to_replay_item, job_to_retry_item,
 };
 
@@ -133,43 +142,53 @@ impl JobsQuery {
         })
     }
 
-    /// List projected jobs using the generated `Jobs.List` wire shape.
-    pub async fn list_jobs(
+    /// Query projected jobs using the generated `Jobs.Query` workbench wire shape.
+    pub async fn query_jobs(
         &self,
-        request: &JobsListRequest,
-    ) -> Result<JobsListResponse, JobsQueryError> {
-        let state_filter = parse_state_filter(request.state.as_ref())?;
+        request: &JobsQueryRequest,
+    ) -> Result<JobsQueryResponse, JobsQueryError> {
         let (offset, limit) = parse_page_request(request.offset, request.limit)?;
-        let since = parse_since_filter(request.since.as_deref())?;
-        let page = self.store.list_jobs(&ListJobsFilter {
+        let since = parse_window_filter(request.window.as_deref())?;
+        let filter = JobsWorkbenchFilter {
             service: request.service.clone(),
             job_type: request.r#type.clone(),
-            states: state_filter,
+            states: parse_state_filter(request.state.as_ref())?,
             since,
-            offset: Some(offset),
+            search: request.search.clone(),
+            queue_key: request.queue_key.clone(),
+            runtime_band: request.runtime_band.clone(),
+            trigger: request.trigger.clone(),
+            sort: parse_workbench_sort(request.sort.as_ref())?,
+            group_by: parse_group_by(request.group_by.as_deref())?,
+            offset,
             limit,
-        })?;
-        Ok(JobsListResponse {
+        };
+        let page = self.store.query_jobs(&filter)?;
+        let groups = self.store.query_job_groups(&filter)?;
+
+        Ok(JobsQueryResponse {
             count: to_wire_integer(page.count),
             entries: page
-                .jobs
+                .entries
                 .iter()
-                .map(|job| {
-                    let metadata = self.job_metadata(job)?;
-                    job_to_list_item(job, &metadata)
-                })
-                .collect::<Result<Vec<JobsListResponseEntriesItem>, _>>()?,
+                .map(workbench_entry_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
+            groups: groups
+                .iter()
+                .map(workbench_group_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
             limit: to_wire_integer(page.limit),
             next_offset: page.next_offset.map(to_wire_integer),
             offset: to_wire_integer(page.offset),
+            stats: workbench_stats_to_wire(&page.stats)?,
         })
     }
 
-    /// Fetch one projected job by globally addressable admin job id.
-    pub async fn get_job(
+    /// Fetch one projected job and its timeline by globally addressable admin job id.
+    pub async fn inspect(
         &self,
-        request: &JobsGetRequest,
-    ) -> Result<JobsGetResponse, JobsQueryError> {
+        request: &JobsInspectRequest,
+    ) -> Result<JobsInspectResponse, JobsQueryError> {
         let job = self
             .store
             .get_job_by_global_id(&request.id)?
@@ -177,8 +196,26 @@ impl JobsQuery {
                 key: request.id.clone(),
             })?;
 
-        Ok(JobsGetResponse {
-            job: job_to_get_item(&job, &self.job_metadata(&job)?)?,
+        let metadata = self.job_metadata(&job)?;
+        let lineage = self.store.get_job_lineage_by_global_id(&job.id)?;
+        Ok(JobsInspectResponse {
+            attempts: Vec::new(),
+            errors: self.error_details(&job)?,
+            job: job_to_inspect_item(&job, &metadata)?,
+            lineage: map_optional_wire(&lineage.lineage, "job inspect lineage")?,
+            related: self
+                .store
+                .list_related_jobs(&job, 10)?
+                .iter()
+                .map(related_entry_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
+            timeline: self
+                .store
+                .list_timeline_events(&request.id, 200)?
+                .iter()
+                .map(timeline_event_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
+            trigger: map_optional_wire(&lineage.trigger, "job inspect trigger")?,
         })
     }
 
@@ -244,7 +281,7 @@ impl JobsQuery {
             .transition_job(&request.id, "pending|retry|active", |job, now| {
                 match job.state {
                     JobState::Pending | JobState::Retry | JobState::Active => {
-                        Some(cancelled_event(
+                        Some(cancelled_event_with_admin_reason(
                             &job.service,
                             &job.job_type,
                             &job.id,
@@ -252,6 +289,7 @@ impl JobsQuery {
                             job.state,
                             job.tries,
                             now,
+                            request.reason.as_deref(),
                         ))
                     }
                     _ => None,
@@ -271,7 +309,7 @@ impl JobsQuery {
     ) -> Result<JobsRetryResponse, JobsQueryError> {
         let job = self
             .transition_job(&request.id, "failed", |job, now| match job.state {
-                JobState::Failed => Some(retried_event(
+                JobState::Failed => Some(retried_event_with_admin_reason(
                     &job.service,
                     &job.job_type,
                     &job.id,
@@ -281,6 +319,7 @@ impl JobsQuery {
                     Some(job.payload.clone()),
                     Some(job.max_tries),
                     job.deadline.as_deref(),
+                    request.reason.as_deref(),
                 )),
                 _ => None,
             })
@@ -329,17 +368,37 @@ impl JobsQuery {
     ) -> Result<JobsReplayDLQResponse, JobsQueryError> {
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
-                JobState::Dead => Some(retried_event(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
-                    job.state,
-                    now,
-                    Some(job.payload.clone()),
-                    Some(job.max_tries),
-                    job.deadline.as_deref(),
-                )),
+                JobState::Dead => {
+                    let mut event = retried_event_with_admin_reason(
+                        &job.service,
+                        &job.job_type,
+                        &job.id,
+                        &job.context,
+                        job.state,
+                        now,
+                        Some(job.payload.clone()),
+                        Some(job.max_tries),
+                        job.deadline.as_deref(),
+                        request.reason.as_deref(),
+                    );
+                    event.trigger = Some(JobTrigger {
+                        kind: JobTriggerKind::ManualReplay,
+                        id: None,
+                        subject: None,
+                        operation_id: job
+                            .lineage
+                            .as_ref()
+                            .and_then(|lineage| lineage.operation_id.clone()),
+                        parent_job_id: job
+                            .lineage
+                            .as_ref()
+                            .and_then(|lineage| lineage.parent_job_id.clone()),
+                        trace_id: Some(job.context.trace_id.clone()),
+                        request_id: Some(job.context.request_id.clone()),
+                    });
+                    event.lineage = job.lineage.clone();
+                    Some(event)
+                }
                 _ => None,
             })
             .await?;
@@ -356,16 +415,22 @@ impl JobsQuery {
     ) -> Result<JobsDismissDLQResponse, JobsQueryError> {
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
-                JobState::Dead => Some(dismissed_event(
-                    &job.service,
-                    &job.job_type,
-                    &job.id,
-                    &job.context,
-                    JobState::Dead,
-                    job.tries,
-                    now,
-                    job.last_error.as_deref(),
-                )),
+                JobState::Dead => {
+                    let mut event = dismissed_event(
+                        &job.service,
+                        &job.job_type,
+                        &job.id,
+                        &job.context,
+                        JobState::Dead,
+                        job.tries,
+                        now,
+                        request.reason.as_deref().or(job.last_error.as_deref()),
+                    );
+                    event.admin_action = request.reason.as_ref().map(|reason| JobAdminAction {
+                        reason: Some(reason.clone()),
+                    });
+                    Some(event)
+                }
                 _ => None,
             })
             .await?;
@@ -380,6 +445,35 @@ impl JobsQuery {
             .store
             .get_job_metadata(&job.service, &job.job_type, &job.id)?
             .unwrap_or_default())
+    }
+
+    fn error_details(
+        &self,
+        job: &Job,
+    ) -> Result<Vec<JobsInspectResponseErrorsItem>, JobsQueryError> {
+        let fallback_detail = job
+            .last_error
+            .as_deref()
+            .map(|message| JobErrorDetail::from_message(&job.service, &job.job_type, message));
+        let Some(detail) = job.error_detail.as_ref().or(fallback_detail.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        let projection = self.store.get_error_projection(&detail.fingerprint)?;
+        let mut detail = detail.clone();
+        if let Some(projection) = projection {
+            detail.first_seen = Some(projection.first_seen);
+            detail.occurrence_count = Some(projection.occurrence_count);
+        }
+        Ok(vec![serde_json::from_value(
+            serde_json::to_value(detail).map_err(|error| JobsQueryError::ConvertWireModel {
+                model: "job error detail",
+                details: error.to_string(),
+            })?,
+        )
+        .map_err(|error| JobsQueryError::ConvertWireModel {
+            model: "job error detail",
+            details: error.to_string(),
+        })?])
     }
 
     async fn transition_job<F>(
@@ -495,6 +589,9 @@ fn job_event_headers(event: &JobEvent) -> trellis_rs::jobs::JobEventHeaders {
 impl From<SqliteJobsStoreError> for JobsQueryError {
     fn from(error: SqliteJobsStoreError) -> Self {
         match error {
+            SqliteJobsStoreError::Validation { field, details } => {
+                Self::Validation { field, details }
+            }
             other => Self::ProjectionStore {
                 details: other.to_string(),
             },
@@ -520,6 +617,332 @@ fn parse_since_filter(value: Option<&str>) -> Result<Option<OffsetDateTime>, Job
             })
         })
         .transpose()
+}
+
+fn parse_window_filter(value: Option<&str>) -> Result<Option<OffsetDateTime>, JobsQueryError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let duration = match value {
+        "1h" => time::Duration::hours(1),
+        "24h" => time::Duration::hours(24),
+        "7d" => time::Duration::days(7),
+        other => {
+            return Err(JobsQueryError::Validation {
+                field: "window",
+                details: format!("unsupported window '{other}'"),
+            })
+        }
+    };
+    Ok(Some(OffsetDateTime::now_utc() - duration))
+}
+
+fn parse_workbench_sort(
+    sort: Option<&trellis_rs::sdk::jobs::types::JobsQueryRequestSort>,
+) -> Result<JobsWorkbenchSort, JobsQueryError> {
+    let Some(sort) = sort else {
+        return Ok(JobsWorkbenchSort::default());
+    };
+    let field = match sort.field.as_str() {
+        "updatedAt" => JobsWorkbenchSortField::UpdatedAt,
+        "queueAge" => JobsWorkbenchSortField::QueueAge,
+        "runtime" => JobsWorkbenchSortField::Runtime,
+        "retries" => JobsWorkbenchSortField::Retries,
+        "depth" => JobsWorkbenchSortField::Depth,
+        "failureRate" => JobsWorkbenchSortField::FailureRate,
+        other => {
+            return Err(JobsQueryError::Validation {
+                field: "sort.field",
+                details: format!("unsupported sort field '{other}'"),
+            })
+        }
+    };
+    let descending = match sort.direction.as_deref().unwrap_or("desc") {
+        "asc" => false,
+        "desc" => true,
+        other => {
+            return Err(JobsQueryError::Validation {
+                field: "sort.direction",
+                details: format!("unsupported sort direction '{other}'"),
+            })
+        }
+    };
+    Ok(JobsWorkbenchSort { field, descending })
+}
+
+fn parse_group_by(value: Option<&str>) -> Result<Option<JobsWorkbenchGroupBy>, JobsQueryError> {
+    value
+        .map(|value| match value {
+            "service" => Ok(JobsWorkbenchGroupBy::Service),
+            "type" => Ok(JobsWorkbenchGroupBy::Type),
+            "state" => Ok(JobsWorkbenchGroupBy::State),
+            "queueKey" => Ok(JobsWorkbenchGroupBy::QueueKey),
+            "runtimeBand" => Ok(JobsWorkbenchGroupBy::RuntimeBand),
+            "trigger" => Ok(JobsWorkbenchGroupBy::Trigger),
+            other => Err(JobsQueryError::Validation {
+                field: "groupBy",
+                details: format!("unsupported group '{other}'"),
+            }),
+        })
+        .transpose()
+}
+
+fn workbench_entry_to_wire(
+    entry: &JobsWorkbenchEntry,
+) -> Result<JobsQueryResponseEntriesItem, JobsQueryError> {
+    let job = &entry.job;
+    Ok(JobsQueryResponseEntriesItem {
+        completed_at: job.completed_at.clone(),
+        context: Some(JobsQueryResponseEntriesItemContext {
+            request_id: job.context.request_id.clone(),
+            trace_id: job.context.trace_id.clone(),
+            traceparent: job.context.traceparent.clone(),
+            tracestate: job.context.tracestate.clone(),
+        }),
+        created_at: job.created_at.clone(),
+        error_fingerprint: entry.last_error_fingerprint.clone(),
+        id: job.id.clone(),
+        last_error: job.last_error.clone(),
+        lineage: map_optional_wire(&job.lineage, "job query lineage")?,
+        max_tries: to_wire_integer(job.max_tries),
+        progress: job
+            .progress
+            .as_ref()
+            .map(|progress| JobsQueryResponseEntriesItemProgress {
+                current: progress.current.map(to_wire_integer),
+                message: progress.message.clone(),
+                step: progress.step.clone(),
+                total: progress.total.map(to_wire_integer),
+            }),
+        queue_age_ms: entry
+            .queue_age_anchor_nanos
+            .map(|anchor| {
+                (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
+            })
+            .and_then(|millis| i64::try_from(millis.max(0)).ok()),
+        queue_key: entry.queue_key.clone(),
+        runtime_band: entry.runtime_band.clone(),
+        runtime_ms: entry.runtime_ms,
+        service: job.service.clone(),
+        started_at: job.started_at.clone(),
+        state: serde_json::from_value(serde_json::to_value(job.state).map_err(|error| {
+            JobsQueryError::ConvertWireModel {
+                model: "job query state",
+                details: error.to_string(),
+            }
+        })?)
+        .map_err(|error| JobsQueryError::ConvertWireModel {
+            model: "job query state",
+            details: error.to_string(),
+        })?,
+        tries: to_wire_integer(job.tries),
+        trigger: map_optional_wire(&job.trigger, "job query trigger")?,
+        r#type: job.job_type.clone(),
+        updated_at: job.updated_at.clone(),
+    })
+}
+
+fn related_entry_to_wire(
+    entry: &JobsWorkbenchEntry,
+) -> Result<JobsInspectResponseRelatedItem, JobsQueryError> {
+    let job = &entry.job;
+    Ok(JobsInspectResponseRelatedItem {
+        completed_at: job.completed_at.clone(),
+        context: Some(JobsInspectResponseRelatedItemContext {
+            request_id: job.context.request_id.clone(),
+            trace_id: job.context.trace_id.clone(),
+            traceparent: job.context.traceparent.clone(),
+            tracestate: job.context.tracestate.clone(),
+        }),
+        created_at: job.created_at.clone(),
+        error_fingerprint: entry.last_error_fingerprint.clone(),
+        id: job.id.clone(),
+        last_error: job.last_error.clone(),
+        lineage: map_optional_wire(&job.lineage, "job inspect related lineage")?,
+        max_tries: to_wire_integer(job.max_tries),
+        progress: job
+            .progress
+            .as_ref()
+            .map(|progress| JobsInspectResponseRelatedItemProgress {
+                current: progress.current.map(to_wire_integer),
+                message: progress.message.clone(),
+                step: progress.step.clone(),
+                total: progress.total.map(to_wire_integer),
+            }),
+        queue_age_ms: entry
+            .queue_age_anchor_nanos
+            .map(|anchor| {
+                (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
+            })
+            .and_then(|millis| i64::try_from(millis.max(0)).ok()),
+        queue_key: entry.queue_key.clone(),
+        runtime_band: entry.runtime_band.clone(),
+        runtime_ms: entry.runtime_ms,
+        service: job.service.clone(),
+        started_at: job.started_at.clone(),
+        state: serde_json::from_value(serde_json::to_value(job.state).map_err(|error| {
+            JobsQueryError::ConvertWireModel {
+                model: "job inspect related state",
+                details: error.to_string(),
+            }
+        })?)
+        .map_err(|error| JobsQueryError::ConvertWireModel {
+            model: "job inspect related state",
+            details: error.to_string(),
+        })?,
+        tries: to_wire_integer(job.tries),
+        trigger: map_optional_wire(&job.trigger, "job inspect related trigger")?,
+        r#type: job.job_type.clone(),
+        updated_at: job.updated_at.clone(),
+    })
+}
+
+fn timeline_event_to_wire(
+    event: &JobTimelineEvent,
+) -> Result<JobsInspectResponseTimelineItem, JobsQueryError> {
+    Ok(JobsInspectResponseTimelineItem {
+        error: event.error_message.clone(),
+        error_detail: timeline_error_detail(event)?,
+        logs: decode_optional_json(&event.logs_json, "job timeline logs")?,
+        message: event.message.clone(),
+        previous_state: event.previous_state.clone(),
+        progress: decode_optional_json(&event.progress_json, "job timeline progress")?,
+        projected: event.projected,
+        raw_event: Some(
+            serde_json::from_str(&event.raw_event_json).map_err(|error| {
+                JobsQueryError::ConvertWireModel {
+                    model: "job timeline raw event",
+                    details: error.to_string(),
+                }
+            })?,
+        ),
+        reason: event.reason.clone(),
+        sequence: to_wire_integer(event.sequence),
+        state: event.state.clone(),
+        timestamp: event.timestamp.clone(),
+        tries: Some(to_wire_integer(event.tries)),
+        r#type: event.event_type.clone(),
+        worker_instance_id: event.worker_instance_id.clone(),
+    })
+}
+
+fn timeline_error_detail(
+    event: &JobTimelineEvent,
+) -> Result<Option<JobsInspectResponseTimelineItemErrorDetail>, JobsQueryError> {
+    let raw_event: serde_json::Value =
+        serde_json::from_str(&event.raw_event_json).map_err(|error| {
+            JobsQueryError::ConvertWireModel {
+                model: "job timeline raw event",
+                details: error.to_string(),
+            }
+        })?;
+    if let Some(detail) = raw_event.get("errorDetail") {
+        return serde_json::from_value(detail.clone())
+            .map(Some)
+            .map_err(|error| JobsQueryError::ConvertWireModel {
+                model: "job timeline error detail",
+                details: error.to_string(),
+            });
+    }
+    let Some(message) = event.error_message.as_deref() else {
+        return Ok(None);
+    };
+    let service = raw_event
+        .get("service")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let job_type = raw_event
+        .get("jobType")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    serde_json::from_value(
+        serde_json::to_value(JobErrorDetail::from_message(service, job_type, message)).map_err(
+            |error| JobsQueryError::ConvertWireModel {
+                model: "job timeline error detail",
+                details: error.to_string(),
+            },
+        )?,
+    )
+    .map(Some)
+    .map_err(|error| JobsQueryError::ConvertWireModel {
+        model: "job timeline error detail",
+        details: error.to_string(),
+    })
+}
+
+fn decode_optional_json<T>(
+    json: &Option<String>,
+    model: &'static str,
+) -> Result<Option<T>, JobsQueryError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    json.as_ref()
+        .map(|json| {
+            serde_json::from_str(json).map_err(|error| JobsQueryError::ConvertWireModel {
+                model,
+                details: error.to_string(),
+            })
+        })
+        .transpose()
+}
+
+fn map_optional_wire<T, U>(
+    value: &Option<T>,
+    model: &'static str,
+) -> Result<Option<U>, JobsQueryError>
+where
+    T: serde::Serialize,
+    U: serde::de::DeserializeOwned,
+{
+    value
+        .as_ref()
+        .map(|value| {
+            serde_json::from_value(serde_json::to_value(value).map_err(|error| {
+                JobsQueryError::ConvertWireModel {
+                    model,
+                    details: error.to_string(),
+                }
+            })?)
+            .map_err(|error| JobsQueryError::ConvertWireModel {
+                model,
+                details: error.to_string(),
+            })
+        })
+        .transpose()
+}
+
+fn workbench_group_to_wire(
+    group: &JobsWorkbenchGroup,
+) -> Result<JobsQueryResponseGroupsItem, JobsQueryError> {
+    Ok(JobsQueryResponseGroupsItem {
+        count: to_wire_integer(group.count),
+        depth: group.depth.map(to_wire_integer),
+        failure_rate: group.failure_rate,
+        key: group.key.clone(),
+        label: group.label.clone(),
+        latest_updated_at: group.latest_updated_at.clone(),
+        oldest_created_at: group.oldest_created_at.clone(),
+        state: group.state.clone(),
+    })
+}
+
+fn workbench_stats_to_wire(
+    stats: &JobsWorkbenchStats,
+) -> Result<JobsQueryResponseStats, JobsQueryError> {
+    Ok(JobsQueryResponseStats {
+        by_state: stats
+            .by_state
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), to_wire_integer(*value))))
+            .collect::<Result<BTreeMap<_, _>, JobsQueryError>>()?,
+        dead: stats.dead.map(to_wire_integer),
+        failed: stats.failed.map(to_wire_integer),
+        queued: stats.queued.map(to_wire_integer),
+        running: stats.running.map(to_wire_integer),
+        slow: stats.slow.map(to_wire_integer),
+        total: to_wire_integer(stats.total),
+    })
 }
 
 fn heartbeat_age_ms(heartbeat_at: &str, now: OffsetDateTime) -> i64 {
@@ -572,15 +995,15 @@ fn projection_key(job: &Job) -> String {
 mod tests {
     use serde_json::json;
     use trellis_rs::jobs::types::{Job, JobContext, JobEvent, JobState};
+    use trellis_rs::jobs::{cancelled_event, retried_event};
     use trellis_rs::sdk::core::types::{
         TrellisBindingsGetResponseBinding, TrellisBindingsGetResponseBindingResources,
     };
 
     use super::parse_since_filter;
     use super::{
-        cancelled_event, dismissed_event, jobs_admin_resources_from_binding,
-        plan_mutation_response, reduce_job_event, retried_event, JobsQueryError,
-        MutationResponsePlan,
+        dismissed_event, jobs_admin_resources_from_binding, plan_mutation_response,
+        reduce_job_event, JobsQueryError, MutationResponsePlan,
     };
 
     fn sample_binding_with_resources() -> TrellisBindingsGetResponseBinding {
@@ -625,11 +1048,14 @@ mod tests {
             tries: 1,
             max_tries: 5,
             last_error: None,
+            error_detail: None,
             deadline: Some("2026-03-29T12:00:00Z".to_string()),
             progress: None,
             logs: None,
             concurrency: None,
             queue_policy: None,
+            trigger: None,
+            lineage: None,
         }
     }
 

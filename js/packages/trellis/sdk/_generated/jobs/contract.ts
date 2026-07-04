@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "DPoUeZ9fiDUZspXj-EqWOc5I0fKRuWoUCtI2URyr-2I" as const;
+  "Bn4oqFEEZ39V53Xswubi6qsCocPSyG_kzR_vAm9A2qc" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.jobs::admin.mutate": {
@@ -27,6 +27,10 @@ export const CONTRACT = {
         "View Jobs service health, services, jobs, and dead-letter queues.",
       "displayName": "Read jobs admin data",
     },
+    "trellis.jobs::admin.stream": {
+      "description": "Subscribe to Jobs live workbench updates.",
+      "displayName": "Stream jobs admin data",
+    },
   },
   "description": "Trellis-managed background job administration API.",
   "displayName": "Trellis Jobs",
@@ -39,6 +43,20 @@ export const CONTRACT = {
     "NotFoundError": {
       "schema": { "schema": "NotFoundErrorData" },
       "type": "NotFoundError",
+    },
+  },
+  "feeds": {
+    "Jobs.Watch": {
+      "capabilities": { "subscribe": ["trellis.jobs::admin.stream"] },
+      "docs": {
+        "markdown":
+          "Streams invalidation frames for Jobs workbench queries and job inspect views.",
+        "summary": "Watch jobs workbench changes.",
+      },
+      "event": { "schema": "JobsWatchFrame" },
+      "input": { "schema": "JobsWatchRequest" },
+      "subject": "feeds.v1.Jobs.Watch",
+      "version": "v1",
     },
   },
   "format": "trellis.contract.v1",
@@ -73,20 +91,6 @@ export const CONTRACT = {
       "subject": "rpc.v1.Jobs.DismissDLQ",
       "version": "v1",
     },
-    "Jobs.Get": {
-      "capabilities": { "call": ["trellis.jobs::admin.read"] },
-      "docs": {
-        "markdown": "Returns one background job by id.",
-        "summary": "Read a job.",
-      },
-      "errors": [{ "type": "UnexpectedError" }, { "type": "ValidationError" }, {
-        "type": "NotFoundError",
-      }],
-      "input": { "schema": "JobsGetRequest" },
-      "output": { "schema": "JobsGetResponse" },
-      "subject": "rpc.v1.Jobs.Get",
-      "version": "v1",
-    },
     "Jobs.GetKey": {
       "capabilities": { "call": ["trellis.jobs::admin.read"] },
       "docs": {
@@ -114,16 +118,19 @@ export const CONTRACT = {
       "subject": "rpc.v1.Jobs.Health",
       "version": "v1",
     },
-    "Jobs.List": {
+    "Jobs.Inspect": {
       "capabilities": { "call": ["trellis.jobs::admin.read"] },
       "docs": {
-        "markdown": "Lists jobs matching the requested filters.",
-        "summary": "List jobs.",
+        "markdown":
+          "Returns one job with timeline, attempts, related jobs, errors, trigger, and lineage details.",
+        "summary": "Inspect a job.",
       },
-      "errors": [{ "type": "UnexpectedError" }, { "type": "ValidationError" }],
-      "input": { "schema": "JobsListRequest" },
-      "output": { "schema": "JobsListResponse" },
-      "subject": "rpc.v1.Jobs.List",
+      "errors": [{ "type": "UnexpectedError" }, { "type": "ValidationError" }, {
+        "type": "NotFoundError",
+      }],
+      "input": { "schema": "JobsInspectRequest" },
+      "output": { "schema": "JobsInspectResponse" },
+      "subject": "rpc.v1.Jobs.Inspect",
       "version": "v1",
     },
     "Jobs.ListDLQ": {
@@ -148,6 +155,19 @@ export const CONTRACT = {
       "input": { "schema": "JobsListServicesRequest" },
       "output": { "schema": "JobsListServicesResponse" },
       "subject": "rpc.v1.Jobs.ListServices",
+      "version": "v1",
+    },
+    "Jobs.Query": {
+      "capabilities": { "call": ["trellis.jobs::admin.read"] },
+      "docs": {
+        "markdown":
+          "Returns filtered, sorted, grouped Jobs workbench rows and stats.",
+        "summary": "Query jobs workbench data.",
+      },
+      "errors": [{ "type": "UnexpectedError" }, { "type": "ValidationError" }],
+      "input": { "schema": "JobsQueryRequest" },
+      "output": { "schema": "JobsQueryResponse" },
+      "subject": "rpc.v1.Jobs.Query",
       "version": "v1",
     },
     "Jobs.ReplayDLQ": {
@@ -210,8 +230,39 @@ export const CONTRACT = {
         },
         "createdAt": { "format": "date-time", "type": "string" },
         "deadline": { "format": "date-time", "type": "string" },
+        "errorDetail": {
+          "properties": {
+            "causes": { "items": { "type": "object" }, "type": "array" },
+            "fingerprint": { "minLength": 1, "type": "string" },
+            "firstSeen": { "format": "date-time", "type": "string" },
+            "message": { "type": "string" },
+            "occurrenceCount": { "minimum": 0, "type": "integer" },
+            "stack": { "type": "string" },
+            "type": { "type": "string" },
+            "worker": {
+              "properties": {
+                "instanceId": { "type": "string" },
+                "runtime": { "type": "string" },
+                "service": { "type": "string" },
+                "version": { "type": "string" },
+              },
+              "type": "object",
+            },
+          },
+          "required": ["message", "fingerprint"],
+          "type": "object",
+        },
         "id": { "minLength": 1, "type": "string" },
         "lastError": { "type": "string" },
+        "lineage": {
+          "properties": {
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "relatedKeys": { "items": { "type": "string" }, "type": "array" },
+            "rootJobId": { "type": "string" },
+          },
+          "type": "object",
+        },
         "logs": {
           "items": {
             "properties": {
@@ -269,6 +320,29 @@ export const CONTRACT = {
           ],
         },
         "tries": { "minimum": 0, "type": "integer" },
+        "trigger": {
+          "properties": {
+            "id": { "type": "string" },
+            "kind": {
+              "anyOf": [
+                { "const": "schedule", "type": "string" },
+                { "const": "operation", "type": "string" },
+                { "const": "rpc", "type": "string" },
+                { "const": "event", "type": "string" },
+                { "const": "manualReplay", "type": "string" },
+                { "const": "serviceCode", "type": "string" },
+                { "const": "parentJob", "type": "string" },
+              ],
+            },
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "requestId": { "type": "string" },
+            "subject": { "type": "string" },
+            "traceId": { "type": "string" },
+          },
+          "required": ["kind"],
+          "type": "object",
+        },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
       },
@@ -308,6 +382,37 @@ export const CONTRACT = {
         "tracestate": { "minLength": 1, "type": "string" },
       },
       "required": ["requestId", "traceId", "traceparent"],
+      "type": "object",
+    },
+    "JobErrorDetail": {
+      "properties": {
+        "causes": { "items": { "type": "object" }, "type": "array" },
+        "fingerprint": { "minLength": 1, "type": "string" },
+        "firstSeen": { "format": "date-time", "type": "string" },
+        "message": { "type": "string" },
+        "occurrenceCount": { "minimum": 0, "type": "integer" },
+        "stack": { "type": "string" },
+        "type": { "type": "string" },
+        "worker": {
+          "properties": {
+            "instanceId": { "type": "string" },
+            "runtime": { "type": "string" },
+            "service": { "type": "string" },
+            "version": { "type": "string" },
+          },
+          "type": "object",
+        },
+      },
+      "required": ["message", "fingerprint"],
+      "type": "object",
+    },
+    "JobLineage": {
+      "properties": {
+        "operationId": { "type": "string" },
+        "parentJobId": { "type": "string" },
+        "relatedKeys": { "items": { "type": "string" }, "type": "array" },
+        "rootJobId": { "type": "string" },
+      },
       "type": "object",
     },
     "JobLogEntry": {
@@ -358,10 +463,130 @@ export const CONTRACT = {
         { "const": "dismissed", "type": "string" },
       ],
     },
+    "JobTimelineEvent": {
+      "properties": {
+        "error": { "type": "string" },
+        "errorDetail": {
+          "properties": {
+            "causes": { "items": { "type": "object" }, "type": "array" },
+            "fingerprint": { "minLength": 1, "type": "string" },
+            "firstSeen": { "format": "date-time", "type": "string" },
+            "message": { "type": "string" },
+            "occurrenceCount": { "minimum": 0, "type": "integer" },
+            "stack": { "type": "string" },
+            "type": { "type": "string" },
+            "worker": {
+              "properties": {
+                "instanceId": { "type": "string" },
+                "runtime": { "type": "string" },
+                "service": { "type": "string" },
+                "version": { "type": "string" },
+              },
+              "type": "object",
+            },
+          },
+          "required": ["message", "fingerprint"],
+          "type": "object",
+        },
+        "logs": {
+          "items": {
+            "properties": {
+              "level": {
+                "anyOf": [{ "const": "info", "type": "string" }, {
+                  "const": "warn",
+                  "type": "string",
+                }, { "const": "error", "type": "string" }],
+              },
+              "message": { "type": "string" },
+              "timestamp": { "format": "date-time", "type": "string" },
+            },
+            "required": ["timestamp", "level", "message"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "message": { "type": "string" },
+        "previousState": {
+          "anyOf": [
+            { "const": "pending", "type": "string" },
+            { "const": "active", "type": "string" },
+            { "const": "retry", "type": "string" },
+            { "const": "completed", "type": "string" },
+            { "const": "failed", "type": "string" },
+            { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
+            { "const": "expired", "type": "string" },
+            { "const": "dead", "type": "string" },
+            { "const": "dismissed", "type": "string" },
+          ],
+        },
+        "progress": {
+          "properties": {
+            "current": { "minimum": 0, "type": "integer" },
+            "message": { "type": "string" },
+            "step": { "type": "string" },
+            "total": { "minimum": 0, "type": "integer" },
+          },
+          "type": "object",
+        },
+        "projected": { "type": "boolean" },
+        "rawEvent": {},
+        "reason": { "type": "string" },
+        "sequence": { "minimum": 0, "type": "integer" },
+        "state": {
+          "anyOf": [
+            { "const": "pending", "type": "string" },
+            { "const": "active", "type": "string" },
+            { "const": "retry", "type": "string" },
+            { "const": "completed", "type": "string" },
+            { "const": "failed", "type": "string" },
+            { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
+            { "const": "expired", "type": "string" },
+            { "const": "dead", "type": "string" },
+            { "const": "dismissed", "type": "string" },
+          ],
+        },
+        "timestamp": { "format": "date-time", "type": "string" },
+        "tries": { "minimum": 0, "type": "integer" },
+        "type": { "minLength": 1, "type": "string" },
+        "workerInstanceId": { "type": "string" },
+      },
+      "required": ["sequence", "type", "state", "timestamp"],
+      "type": "object",
+    },
+    "JobTrigger": {
+      "properties": {
+        "id": { "type": "string" },
+        "kind": {
+          "anyOf": [
+            { "const": "schedule", "type": "string" },
+            { "const": "operation", "type": "string" },
+            { "const": "rpc", "type": "string" },
+            { "const": "event", "type": "string" },
+            { "const": "manualReplay", "type": "string" },
+            { "const": "serviceCode", "type": "string" },
+            { "const": "parentJob", "type": "string" },
+          ],
+        },
+        "operationId": { "type": "string" },
+        "parentJobId": { "type": "string" },
+        "requestId": { "type": "string" },
+        "subject": { "type": "string" },
+        "traceId": { "type": "string" },
+      },
+      "required": ["kind"],
+      "type": "object",
+    },
     "JobsCancelRequest": {
       "description":
         "Jobs admin ids are globally addressable; callers identify jobs by id only.",
-      "properties": { "id": { "minLength": 1, "type": "string" } },
+      "properties": {
+        "id": { "minLength": 1, "type": "string" },
+        "reason": { "minLength": 1, "type": "string" },
+      },
       "required": ["id"],
       "type": "object",
     },
@@ -397,8 +622,42 @@ export const CONTRACT = {
             },
             "createdAt": { "format": "date-time", "type": "string" },
             "deadline": { "format": "date-time", "type": "string" },
+            "errorDetail": {
+              "properties": {
+                "causes": { "items": { "type": "object" }, "type": "array" },
+                "fingerprint": { "minLength": 1, "type": "string" },
+                "firstSeen": { "format": "date-time", "type": "string" },
+                "message": { "type": "string" },
+                "occurrenceCount": { "minimum": 0, "type": "integer" },
+                "stack": { "type": "string" },
+                "type": { "type": "string" },
+                "worker": {
+                  "properties": {
+                    "instanceId": { "type": "string" },
+                    "runtime": { "type": "string" },
+                    "service": { "type": "string" },
+                    "version": { "type": "string" },
+                  },
+                  "type": "object",
+                },
+              },
+              "required": ["message", "fingerprint"],
+              "type": "object",
+            },
             "id": { "minLength": 1, "type": "string" },
             "lastError": { "type": "string" },
+            "lineage": {
+              "properties": {
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "relatedKeys": {
+                  "items": { "type": "string" },
+                  "type": "array",
+                },
+                "rootJobId": { "type": "string" },
+              },
+              "type": "object",
+            },
             "logs": {
               "items": {
                 "properties": {
@@ -456,6 +715,29 @@ export const CONTRACT = {
               ],
             },
             "tries": { "minimum": 0, "type": "integer" },
+            "trigger": {
+              "properties": {
+                "id": { "type": "string" },
+                "kind": {
+                  "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" },
+                  ],
+                },
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "requestId": { "type": "string" },
+                "subject": { "type": "string" },
+                "traceId": { "type": "string" },
+              },
+              "required": ["kind"],
+              "type": "object",
+            },
             "type": { "minLength": 1, "type": "string" },
             "updatedAt": { "format": "date-time", "type": "string" },
           },
@@ -480,7 +762,10 @@ export const CONTRACT = {
     "JobsDismissDLQRequest": {
       "description":
         "Jobs admin ids are globally addressable; callers identify jobs by id only.",
-      "properties": { "id": { "minLength": 1, "type": "string" } },
+      "properties": {
+        "id": { "minLength": 1, "type": "string" },
+        "reason": { "minLength": 1, "type": "string" },
+      },
       "required": ["id"],
       "type": "object",
     },
@@ -516,8 +801,42 @@ export const CONTRACT = {
             },
             "createdAt": { "format": "date-time", "type": "string" },
             "deadline": { "format": "date-time", "type": "string" },
+            "errorDetail": {
+              "properties": {
+                "causes": { "items": { "type": "object" }, "type": "array" },
+                "fingerprint": { "minLength": 1, "type": "string" },
+                "firstSeen": { "format": "date-time", "type": "string" },
+                "message": { "type": "string" },
+                "occurrenceCount": { "minimum": 0, "type": "integer" },
+                "stack": { "type": "string" },
+                "type": { "type": "string" },
+                "worker": {
+                  "properties": {
+                    "instanceId": { "type": "string" },
+                    "runtime": { "type": "string" },
+                    "service": { "type": "string" },
+                    "version": { "type": "string" },
+                  },
+                  "type": "object",
+                },
+              },
+              "required": ["message", "fingerprint"],
+              "type": "object",
+            },
             "id": { "minLength": 1, "type": "string" },
             "lastError": { "type": "string" },
+            "lineage": {
+              "properties": {
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "relatedKeys": {
+                  "items": { "type": "string" },
+                  "type": "array",
+                },
+                "rootJobId": { "type": "string" },
+              },
+              "type": "object",
+            },
             "logs": {
               "items": {
                 "properties": {
@@ -575,6 +894,29 @@ export const CONTRACT = {
               ],
             },
             "tries": { "minimum": 0, "type": "integer" },
+            "trigger": {
+              "properties": {
+                "id": { "type": "string" },
+                "kind": {
+                  "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" },
+                  ],
+                },
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "requestId": { "type": "string" },
+                "subject": { "type": "string" },
+                "traceId": { "type": "string" },
+              },
+              "required": ["kind"],
+              "type": "object",
+            },
             "type": { "minLength": 1, "type": "string" },
             "updatedAt": { "format": "date-time", "type": "string" },
           },
@@ -660,15 +1002,102 @@ export const CONTRACT = {
       ],
       "type": "object",
     },
-    "JobsGetRequest": {
+    "JobsHealthResponse": {
+      "properties": {
+        "checks": {
+          "items": { "patternProperties": { "^.*$": {} }, "type": "object" },
+          "type": "array",
+        },
+        "service": { "minLength": 1, "type": "string" },
+        "status": {},
+        "timestamp": { "format": "date-time", "type": "string" },
+      },
+      "required": ["service", "status", "timestamp", "checks"],
+      "type": "object",
+    },
+    "JobsInspectRequest": {
       "description":
         "Jobs admin ids are globally addressable; callers identify jobs by id only.",
       "properties": { "id": { "minLength": 1, "type": "string" } },
       "required": ["id"],
       "type": "object",
     },
-    "JobsGetResponse": {
+    "JobsInspectResponse": {
       "properties": {
+        "attempts": {
+          "items": {
+            "properties": {
+              "endedAt": { "format": "date-time", "type": "string" },
+              "error": {
+                "properties": {
+                  "causes": { "items": { "type": "object" }, "type": "array" },
+                  "fingerprint": { "minLength": 1, "type": "string" },
+                  "firstSeen": { "format": "date-time", "type": "string" },
+                  "message": { "type": "string" },
+                  "occurrenceCount": { "minimum": 0, "type": "integer" },
+                  "stack": { "type": "string" },
+                  "type": { "type": "string" },
+                  "worker": {
+                    "properties": {
+                      "instanceId": { "type": "string" },
+                      "runtime": { "type": "string" },
+                      "service": { "type": "string" },
+                      "version": { "type": "string" },
+                    },
+                    "type": "object",
+                  },
+                },
+                "required": ["message", "fingerprint"],
+                "type": "object",
+              },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "state": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "try": { "minimum": 0, "type": "integer" },
+            },
+            "required": ["try", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "errors": {
+          "items": {
+            "properties": {
+              "causes": { "items": { "type": "object" }, "type": "array" },
+              "fingerprint": { "minLength": 1, "type": "string" },
+              "firstSeen": { "format": "date-time", "type": "string" },
+              "message": { "type": "string" },
+              "occurrenceCount": { "minimum": 0, "type": "integer" },
+              "stack": { "type": "string" },
+              "type": { "type": "string" },
+              "worker": {
+                "properties": {
+                  "instanceId": { "type": "string" },
+                  "runtime": { "type": "string" },
+                  "service": { "type": "string" },
+                  "version": { "type": "string" },
+                },
+                "type": "object",
+              },
+            },
+            "required": ["message", "fingerprint"],
+            "type": "object",
+          },
+          "type": "array",
+        },
         "job": {
           "properties": {
             "completedAt": { "format": "date-time", "type": "string" },
@@ -699,8 +1128,42 @@ export const CONTRACT = {
             },
             "createdAt": { "format": "date-time", "type": "string" },
             "deadline": { "format": "date-time", "type": "string" },
+            "errorDetail": {
+              "properties": {
+                "causes": { "items": { "type": "object" }, "type": "array" },
+                "fingerprint": { "minLength": 1, "type": "string" },
+                "firstSeen": { "format": "date-time", "type": "string" },
+                "message": { "type": "string" },
+                "occurrenceCount": { "minimum": 0, "type": "integer" },
+                "stack": { "type": "string" },
+                "type": { "type": "string" },
+                "worker": {
+                  "properties": {
+                    "instanceId": { "type": "string" },
+                    "runtime": { "type": "string" },
+                    "service": { "type": "string" },
+                    "version": { "type": "string" },
+                  },
+                  "type": "object",
+                },
+              },
+              "required": ["message", "fingerprint"],
+              "type": "object",
+            },
             "id": { "minLength": 1, "type": "string" },
             "lastError": { "type": "string" },
+            "lineage": {
+              "properties": {
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "relatedKeys": {
+                  "items": { "type": "string" },
+                  "type": "array",
+                },
+                "rootJobId": { "type": "string" },
+              },
+              "type": "object",
+            },
             "logs": {
               "items": {
                 "properties": {
@@ -758,6 +1221,29 @@ export const CONTRACT = {
               ],
             },
             "tries": { "minimum": 0, "type": "integer" },
+            "trigger": {
+              "properties": {
+                "id": { "type": "string" },
+                "kind": {
+                  "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" },
+                  ],
+                },
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "requestId": { "type": "string" },
+                "subject": { "type": "string" },
+                "traceId": { "type": "string" },
+              },
+              "required": ["kind"],
+              "type": "object",
+            },
             "type": { "minLength": 1, "type": "string" },
             "updatedAt": { "format": "date-time", "type": "string" },
           },
@@ -775,21 +1261,243 @@ export const CONTRACT = {
           ],
           "type": "object",
         },
-      },
-      "required": ["job"],
-      "type": "object",
-    },
-    "JobsHealthResponse": {
-      "properties": {
-        "checks": {
-          "items": { "patternProperties": { "^.*$": {} }, "type": "object" },
+        "lineage": {
+          "properties": {
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "relatedKeys": { "items": { "type": "string" }, "type": "array" },
+            "rootJobId": { "type": "string" },
+          },
+          "type": "object",
+        },
+        "related": {
+          "items": {
+            "properties": {
+              "completedAt": { "format": "date-time", "type": "string" },
+              "context": {
+                "properties": {
+                  "requestId": { "minLength": 1, "type": "string" },
+                  "traceId": { "pattern": "^[0-9a-f]{32}$", "type": "string" },
+                  "traceparent": {
+                    "pattern":
+                      "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+                    "type": "string",
+                  },
+                  "tracestate": { "minLength": 1, "type": "string" },
+                },
+                "required": ["requestId", "traceId", "traceparent"],
+                "type": "object",
+              },
+              "createdAt": { "format": "date-time", "type": "string" },
+              "errorFingerprint": { "type": "string" },
+              "id": { "minLength": 1, "type": "string" },
+              "lastError": { "type": "string" },
+              "lineage": {
+                "properties": {
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "relatedKeys": {
+                    "items": { "type": "string" },
+                    "type": "array",
+                  },
+                  "rootJobId": { "type": "string" },
+                },
+                "type": "object",
+              },
+              "maxTries": { "minimum": 1, "type": "integer" },
+              "progress": {
+                "properties": {
+                  "current": { "minimum": 0, "type": "integer" },
+                  "message": { "type": "string" },
+                  "step": { "type": "string" },
+                  "total": { "minimum": 0, "type": "integer" },
+                },
+                "type": "object",
+              },
+              "queueAgeMs": { "minimum": 0, "type": "integer" },
+              "queueKey": { "type": "string" },
+              "runtimeBand": { "type": "string" },
+              "runtimeMs": { "minimum": 0, "type": "integer" },
+              "service": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "state": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "tries": { "minimum": 0, "type": "integer" },
+              "trigger": {
+                "properties": {
+                  "id": { "type": "string" },
+                  "kind": {
+                    "anyOf": [
+                      { "const": "schedule", "type": "string" },
+                      { "const": "operation", "type": "string" },
+                      { "const": "rpc", "type": "string" },
+                      { "const": "event", "type": "string" },
+                      { "const": "manualReplay", "type": "string" },
+                      { "const": "serviceCode", "type": "string" },
+                      { "const": "parentJob", "type": "string" },
+                    ],
+                  },
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "requestId": { "type": "string" },
+                  "subject": { "type": "string" },
+                  "traceId": { "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+              "type": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+            },
+            "required": [
+              "id",
+              "service",
+              "type",
+              "state",
+              "createdAt",
+              "updatedAt",
+              "tries",
+              "maxTries",
+            ],
+            "type": "object",
+          },
           "type": "array",
         },
-        "service": { "minLength": 1, "type": "string" },
-        "status": {},
-        "timestamp": { "format": "date-time", "type": "string" },
+        "timeline": {
+          "items": {
+            "properties": {
+              "error": { "type": "string" },
+              "errorDetail": {
+                "properties": {
+                  "causes": { "items": { "type": "object" }, "type": "array" },
+                  "fingerprint": { "minLength": 1, "type": "string" },
+                  "firstSeen": { "format": "date-time", "type": "string" },
+                  "message": { "type": "string" },
+                  "occurrenceCount": { "minimum": 0, "type": "integer" },
+                  "stack": { "type": "string" },
+                  "type": { "type": "string" },
+                  "worker": {
+                    "properties": {
+                      "instanceId": { "type": "string" },
+                      "runtime": { "type": "string" },
+                      "service": { "type": "string" },
+                      "version": { "type": "string" },
+                    },
+                    "type": "object",
+                  },
+                },
+                "required": ["message", "fingerprint"],
+                "type": "object",
+              },
+              "logs": {
+                "items": {
+                  "properties": {
+                    "level": {
+                      "anyOf": [{ "const": "info", "type": "string" }, {
+                        "const": "warn",
+                        "type": "string",
+                      }, { "const": "error", "type": "string" }],
+                    },
+                    "message": { "type": "string" },
+                    "timestamp": { "format": "date-time", "type": "string" },
+                  },
+                  "required": ["timestamp", "level", "message"],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+              "message": { "type": "string" },
+              "previousState": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "progress": {
+                "properties": {
+                  "current": { "minimum": 0, "type": "integer" },
+                  "message": { "type": "string" },
+                  "step": { "type": "string" },
+                  "total": { "minimum": 0, "type": "integer" },
+                },
+                "type": "object",
+              },
+              "projected": { "type": "boolean" },
+              "rawEvent": {},
+              "reason": { "type": "string" },
+              "sequence": { "minimum": 0, "type": "integer" },
+              "state": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "timestamp": { "format": "date-time", "type": "string" },
+              "tries": { "minimum": 0, "type": "integer" },
+              "type": { "minLength": 1, "type": "string" },
+              "workerInstanceId": { "type": "string" },
+            },
+            "required": ["sequence", "type", "state", "timestamp"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "trigger": {
+          "properties": {
+            "id": { "type": "string" },
+            "kind": {
+              "anyOf": [
+                { "const": "schedule", "type": "string" },
+                { "const": "operation", "type": "string" },
+                { "const": "rpc", "type": "string" },
+                { "const": "event", "type": "string" },
+                { "const": "manualReplay", "type": "string" },
+                { "const": "serviceCode", "type": "string" },
+                { "const": "parentJob", "type": "string" },
+              ],
+            },
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "requestId": { "type": "string" },
+            "subject": { "type": "string" },
+            "traceId": { "type": "string" },
+          },
+          "required": ["kind"],
+          "type": "object",
+        },
       },
-      "required": ["service", "status", "timestamp", "checks"],
+      "required": ["job", "timeline", "attempts", "related", "errors"],
       "type": "object",
     },
     "JobsListDLQRequest": {
@@ -837,8 +1545,42 @@ export const CONTRACT = {
               },
               "createdAt": { "format": "date-time", "type": "string" },
               "deadline": { "format": "date-time", "type": "string" },
+              "errorDetail": {
+                "properties": {
+                  "causes": { "items": { "type": "object" }, "type": "array" },
+                  "fingerprint": { "minLength": 1, "type": "string" },
+                  "firstSeen": { "format": "date-time", "type": "string" },
+                  "message": { "type": "string" },
+                  "occurrenceCount": { "minimum": 0, "type": "integer" },
+                  "stack": { "type": "string" },
+                  "type": { "type": "string" },
+                  "worker": {
+                    "properties": {
+                      "instanceId": { "type": "string" },
+                      "runtime": { "type": "string" },
+                      "service": { "type": "string" },
+                      "version": { "type": "string" },
+                    },
+                    "type": "object",
+                  },
+                },
+                "required": ["message", "fingerprint"],
+                "type": "object",
+              },
               "id": { "minLength": 1, "type": "string" },
               "lastError": { "type": "string" },
+              "lineage": {
+                "properties": {
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "relatedKeys": {
+                    "items": { "type": "string" },
+                    "type": "array",
+                  },
+                  "rootJobId": { "type": "string" },
+                },
+                "type": "object",
+              },
               "logs": {
                 "items": {
                   "properties": {
@@ -896,154 +1638,29 @@ export const CONTRACT = {
                 ],
               },
               "tries": { "minimum": 0, "type": "integer" },
-              "type": { "minLength": 1, "type": "string" },
-              "updatedAt": { "format": "date-time", "type": "string" },
-            },
-            "required": [
-              "id",
-              "context",
-              "service",
-              "type",
-              "state",
-              "payload",
-              "createdAt",
-              "updatedAt",
-              "tries",
-              "maxTries",
-            ],
-            "type": "object",
-          },
-          "type": "array",
-        },
-        "limit": { "minimum": 1, "type": "integer" },
-        "nextOffset": { "minimum": 0, "type": "integer" },
-        "offset": { "minimum": 0, "type": "integer" },
-      },
-      "required": ["entries", "count", "offset", "limit"],
-      "type": "object",
-    },
-    "JobsListRequest": {
-      "properties": {
-        "limit": { "minimum": 1, "type": "integer" },
-        "offset": { "minimum": 0, "type": "integer" },
-        "service": { "minLength": 1, "type": "string" },
-        "since": { "format": "date-time", "type": "string" },
-        "state": {
-          "items": {
-            "anyOf": [
-              { "const": "pending", "type": "string" },
-              { "const": "active", "type": "string" },
-              { "const": "retry", "type": "string" },
-              { "const": "completed", "type": "string" },
-              { "const": "failed", "type": "string" },
-              { "const": "cancelled", "type": "string" },
-              { "const": "skipped", "type": "string" },
-              { "const": "stale", "type": "string" },
-              { "const": "expired", "type": "string" },
-              { "const": "dead", "type": "string" },
-              { "const": "dismissed", "type": "string" },
-            ],
-          },
-          "type": "array",
-        },
-        "type": { "minLength": 1, "type": "string" },
-      },
-      "required": ["limit"],
-      "type": "object",
-    },
-    "JobsListResponse": {
-      "properties": {
-        "count": { "minimum": 0, "type": "integer" },
-        "entries": {
-          "items": {
-            "properties": {
-              "completedAt": { "format": "date-time", "type": "string" },
-              "concurrency": {
+              "trigger": {
                 "properties": {
-                  "heartbeatAt": { "format": "date-time", "type": "string" },
-                  "key": { "minLength": 1, "type": "string" },
-                  "keyHash": { "minLength": 1, "type": "string" },
-                  "leaseExpiresAt": { "format": "date-time", "type": "string" },
-                  "staleTakeoverCount": { "minimum": 0, "type": "integer" },
-                },
-                "required": ["key", "keyHash"],
-                "type": "object",
-              },
-              "context": {
-                "properties": {
-                  "requestId": { "minLength": 1, "type": "string" },
-                  "traceId": { "pattern": "^[0-9a-f]{32}$", "type": "string" },
-                  "traceparent": {
-                    "pattern":
-                      "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
-                    "type": "string",
+                  "id": { "type": "string" },
+                  "kind": {
+                    "anyOf": [
+                      { "const": "schedule", "type": "string" },
+                      { "const": "operation", "type": "string" },
+                      { "const": "rpc", "type": "string" },
+                      { "const": "event", "type": "string" },
+                      { "const": "manualReplay", "type": "string" },
+                      { "const": "serviceCode", "type": "string" },
+                      { "const": "parentJob", "type": "string" },
+                    ],
                   },
-                  "tracestate": { "minLength": 1, "type": "string" },
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "requestId": { "type": "string" },
+                  "subject": { "type": "string" },
+                  "traceId": { "type": "string" },
                 },
-                "required": ["requestId", "traceId", "traceparent"],
+                "required": ["kind"],
                 "type": "object",
               },
-              "createdAt": { "format": "date-time", "type": "string" },
-              "deadline": { "format": "date-time", "type": "string" },
-              "id": { "minLength": 1, "type": "string" },
-              "lastError": { "type": "string" },
-              "logs": {
-                "items": {
-                  "properties": {
-                    "level": {
-                      "anyOf": [{ "const": "info", "type": "string" }, {
-                        "const": "warn",
-                        "type": "string",
-                      }, { "const": "error", "type": "string" }],
-                    },
-                    "message": { "type": "string" },
-                    "timestamp": { "format": "date-time", "type": "string" },
-                  },
-                  "required": ["timestamp", "level", "message"],
-                  "type": "object",
-                },
-                "type": "array",
-              },
-              "maxTries": { "minimum": 1, "type": "integer" },
-              "payload": {},
-              "progress": {
-                "properties": {
-                  "current": { "minimum": 0, "type": "integer" },
-                  "message": { "type": "string" },
-                  "step": { "type": "string" },
-                  "total": { "minimum": 0, "type": "integer" },
-                },
-                "type": "object",
-              },
-              "queuePolicy": {
-                "properties": {
-                  "existingJobId": { "minLength": 1, "type": "string" },
-                  "outcome": { "minLength": 1, "type": "string" },
-                  "reason": { "minLength": 1, "type": "string" },
-                  "replacedJobId": { "minLength": 1, "type": "string" },
-                },
-                "required": ["outcome"],
-                "type": "object",
-              },
-              "result": {},
-              "service": { "minLength": 1, "type": "string" },
-              "startedAt": { "format": "date-time", "type": "string" },
-              "state": {
-                "anyOf": [
-                  { "const": "pending", "type": "string" },
-                  { "const": "active", "type": "string" },
-                  { "const": "retry", "type": "string" },
-                  { "const": "completed", "type": "string" },
-                  { "const": "failed", "type": "string" },
-                  { "const": "cancelled", "type": "string" },
-                  { "const": "skipped", "type": "string" },
-                  { "const": "stale", "type": "string" },
-                  { "const": "expired", "type": "string" },
-                  { "const": "dead", "type": "string" },
-                  { "const": "dismissed", "type": "string" },
-                ],
-              },
-              "tries": { "minimum": 0, "type": "integer" },
               "type": { "minLength": 1, "type": "string" },
               "updatedAt": { "format": "date-time", "type": "string" },
             },
@@ -1114,10 +1731,255 @@ export const CONTRACT = {
       "required": ["entries", "count", "offset", "limit"],
       "type": "object",
     },
+    "JobsQueryRequest": {
+      "properties": {
+        "groupBy": {
+          "anyOf": [
+            { "const": "service", "type": "string" },
+            { "const": "type", "type": "string" },
+            { "const": "state", "type": "string" },
+            { "const": "queueKey", "type": "string" },
+            { "const": "trigger", "type": "string" },
+            { "const": "runtimeBand", "type": "string" },
+          ],
+        },
+        "limit": { "minimum": 1, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "queueKey": { "type": "string" },
+        "runtimeBand": {
+          "anyOf": [
+            { "const": "queued", "type": "string" },
+            { "const": "running", "type": "string" },
+            { "const": "slow", "type": "string" },
+            { "const": "terminal", "type": "string" },
+          ],
+        },
+        "search": { "type": "string" },
+        "service": { "minLength": 1, "type": "string" },
+        "sort": {
+          "properties": {
+            "direction": {
+              "anyOf": [{ "const": "asc", "type": "string" }, {
+                "const": "desc",
+                "type": "string",
+              }],
+            },
+            "field": {
+              "anyOf": [
+                { "const": "updatedAt", "type": "string" },
+                { "const": "queueAge", "type": "string" },
+                { "const": "runtime", "type": "string" },
+                { "const": "failureRate", "type": "string" },
+                { "const": "retries", "type": "string" },
+                { "const": "depth", "type": "string" },
+              ],
+            },
+          },
+          "required": ["field"],
+          "type": "object",
+        },
+        "state": {
+          "items": {
+            "anyOf": [
+              { "const": "pending", "type": "string" },
+              { "const": "active", "type": "string" },
+              { "const": "retry", "type": "string" },
+              { "const": "completed", "type": "string" },
+              { "const": "failed", "type": "string" },
+              { "const": "cancelled", "type": "string" },
+              { "const": "skipped", "type": "string" },
+              { "const": "stale", "type": "string" },
+              { "const": "expired", "type": "string" },
+              { "const": "dead", "type": "string" },
+              { "const": "dismissed", "type": "string" },
+            ],
+          },
+          "type": "array",
+        },
+        "trigger": { "type": "string" },
+        "type": { "minLength": 1, "type": "string" },
+        "window": {
+          "anyOf": [{ "const": "1h", "type": "string" }, {
+            "const": "24h",
+            "type": "string",
+          }, { "const": "7d", "type": "string" }],
+        },
+      },
+      "required": ["limit"],
+      "type": "object",
+    },
+    "JobsQueryResponse": {
+      "properties": {
+        "count": { "minimum": 0, "type": "integer" },
+        "entries": {
+          "items": {
+            "properties": {
+              "completedAt": { "format": "date-time", "type": "string" },
+              "context": {
+                "properties": {
+                  "requestId": { "minLength": 1, "type": "string" },
+                  "traceId": { "pattern": "^[0-9a-f]{32}$", "type": "string" },
+                  "traceparent": {
+                    "pattern":
+                      "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+                    "type": "string",
+                  },
+                  "tracestate": { "minLength": 1, "type": "string" },
+                },
+                "required": ["requestId", "traceId", "traceparent"],
+                "type": "object",
+              },
+              "createdAt": { "format": "date-time", "type": "string" },
+              "errorFingerprint": { "type": "string" },
+              "id": { "minLength": 1, "type": "string" },
+              "lastError": { "type": "string" },
+              "lineage": {
+                "properties": {
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "relatedKeys": {
+                    "items": { "type": "string" },
+                    "type": "array",
+                  },
+                  "rootJobId": { "type": "string" },
+                },
+                "type": "object",
+              },
+              "maxTries": { "minimum": 1, "type": "integer" },
+              "progress": {
+                "properties": {
+                  "current": { "minimum": 0, "type": "integer" },
+                  "message": { "type": "string" },
+                  "step": { "type": "string" },
+                  "total": { "minimum": 0, "type": "integer" },
+                },
+                "type": "object",
+              },
+              "queueAgeMs": { "minimum": 0, "type": "integer" },
+              "queueKey": { "type": "string" },
+              "runtimeBand": { "type": "string" },
+              "runtimeMs": { "minimum": 0, "type": "integer" },
+              "service": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "state": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "tries": { "minimum": 0, "type": "integer" },
+              "trigger": {
+                "properties": {
+                  "id": { "type": "string" },
+                  "kind": {
+                    "anyOf": [
+                      { "const": "schedule", "type": "string" },
+                      { "const": "operation", "type": "string" },
+                      { "const": "rpc", "type": "string" },
+                      { "const": "event", "type": "string" },
+                      { "const": "manualReplay", "type": "string" },
+                      { "const": "serviceCode", "type": "string" },
+                      { "const": "parentJob", "type": "string" },
+                    ],
+                  },
+                  "operationId": { "type": "string" },
+                  "parentJobId": { "type": "string" },
+                  "requestId": { "type": "string" },
+                  "subject": { "type": "string" },
+                  "traceId": { "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+              "type": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+            },
+            "required": [
+              "id",
+              "service",
+              "type",
+              "state",
+              "createdAt",
+              "updatedAt",
+              "tries",
+              "maxTries",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "groups": {
+          "items": {
+            "properties": {
+              "count": { "minimum": 0, "type": "integer" },
+              "depth": { "minimum": 0, "type": "integer" },
+              "failureRate": { "minimum": 0, "type": "number" },
+              "key": { "type": "string" },
+              "label": { "type": "string" },
+              "latestUpdatedAt": { "format": "date-time", "type": "string" },
+              "oldestCreatedAt": { "format": "date-time", "type": "string" },
+              "state": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+            },
+            "required": ["key", "label", "count"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "limit": { "minimum": 1, "type": "integer" },
+        "nextOffset": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "stats": {
+          "properties": {
+            "byState": {
+              "patternProperties": {
+                "^.*$": { "minimum": 0, "type": "integer" },
+              },
+              "type": "object",
+            },
+            "dead": { "minimum": 0, "type": "integer" },
+            "failed": { "minimum": 0, "type": "integer" },
+            "queued": { "minimum": 0, "type": "integer" },
+            "running": { "minimum": 0, "type": "integer" },
+            "slow": { "minimum": 0, "type": "integer" },
+            "total": { "minimum": 0, "type": "integer" },
+          },
+          "required": ["total", "byState"],
+          "type": "object",
+        },
+      },
+      "required": ["entries", "groups", "stats", "count", "offset", "limit"],
+      "type": "object",
+    },
     "JobsReplayDLQRequest": {
       "description":
         "Jobs admin ids are globally addressable; callers identify jobs by id only.",
-      "properties": { "id": { "minLength": 1, "type": "string" } },
+      "properties": {
+        "id": { "minLength": 1, "type": "string" },
+        "reason": { "minLength": 1, "type": "string" },
+      },
       "required": ["id"],
       "type": "object",
     },
@@ -1153,8 +2015,42 @@ export const CONTRACT = {
             },
             "createdAt": { "format": "date-time", "type": "string" },
             "deadline": { "format": "date-time", "type": "string" },
+            "errorDetail": {
+              "properties": {
+                "causes": { "items": { "type": "object" }, "type": "array" },
+                "fingerprint": { "minLength": 1, "type": "string" },
+                "firstSeen": { "format": "date-time", "type": "string" },
+                "message": { "type": "string" },
+                "occurrenceCount": { "minimum": 0, "type": "integer" },
+                "stack": { "type": "string" },
+                "type": { "type": "string" },
+                "worker": {
+                  "properties": {
+                    "instanceId": { "type": "string" },
+                    "runtime": { "type": "string" },
+                    "service": { "type": "string" },
+                    "version": { "type": "string" },
+                  },
+                  "type": "object",
+                },
+              },
+              "required": ["message", "fingerprint"],
+              "type": "object",
+            },
             "id": { "minLength": 1, "type": "string" },
             "lastError": { "type": "string" },
+            "lineage": {
+              "properties": {
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "relatedKeys": {
+                  "items": { "type": "string" },
+                  "type": "array",
+                },
+                "rootJobId": { "type": "string" },
+              },
+              "type": "object",
+            },
             "logs": {
               "items": {
                 "properties": {
@@ -1212,6 +2108,29 @@ export const CONTRACT = {
               ],
             },
             "tries": { "minimum": 0, "type": "integer" },
+            "trigger": {
+              "properties": {
+                "id": { "type": "string" },
+                "kind": {
+                  "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" },
+                  ],
+                },
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "requestId": { "type": "string" },
+                "subject": { "type": "string" },
+                "traceId": { "type": "string" },
+              },
+              "required": ["kind"],
+              "type": "object",
+            },
             "type": { "minLength": 1, "type": "string" },
             "updatedAt": { "format": "date-time", "type": "string" },
           },
@@ -1236,7 +2155,10 @@ export const CONTRACT = {
     "JobsRetryRequest": {
       "description":
         "Jobs admin ids are globally addressable; callers identify jobs by id only.",
-      "properties": { "id": { "minLength": 1, "type": "string" } },
+      "properties": {
+        "id": { "minLength": 1, "type": "string" },
+        "reason": { "minLength": 1, "type": "string" },
+      },
       "required": ["id"],
       "type": "object",
     },
@@ -1272,8 +2194,42 @@ export const CONTRACT = {
             },
             "createdAt": { "format": "date-time", "type": "string" },
             "deadline": { "format": "date-time", "type": "string" },
+            "errorDetail": {
+              "properties": {
+                "causes": { "items": { "type": "object" }, "type": "array" },
+                "fingerprint": { "minLength": 1, "type": "string" },
+                "firstSeen": { "format": "date-time", "type": "string" },
+                "message": { "type": "string" },
+                "occurrenceCount": { "minimum": 0, "type": "integer" },
+                "stack": { "type": "string" },
+                "type": { "type": "string" },
+                "worker": {
+                  "properties": {
+                    "instanceId": { "type": "string" },
+                    "runtime": { "type": "string" },
+                    "service": { "type": "string" },
+                    "version": { "type": "string" },
+                  },
+                  "type": "object",
+                },
+              },
+              "required": ["message", "fingerprint"],
+              "type": "object",
+            },
             "id": { "minLength": 1, "type": "string" },
             "lastError": { "type": "string" },
+            "lineage": {
+              "properties": {
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "relatedKeys": {
+                  "items": { "type": "string" },
+                  "type": "array",
+                },
+                "rootJobId": { "type": "string" },
+              },
+              "type": "object",
+            },
             "logs": {
               "items": {
                 "properties": {
@@ -1331,6 +2287,29 @@ export const CONTRACT = {
               ],
             },
             "tries": { "minimum": 0, "type": "integer" },
+            "trigger": {
+              "properties": {
+                "id": { "type": "string" },
+                "kind": {
+                  "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" },
+                  ],
+                },
+                "operationId": { "type": "string" },
+                "parentJobId": { "type": "string" },
+                "requestId": { "type": "string" },
+                "subject": { "type": "string" },
+                "traceId": { "type": "string" },
+              },
+              "required": ["kind"],
+              "type": "object",
+            },
             "type": { "minLength": 1, "type": "string" },
             "updatedAt": { "format": "date-time", "type": "string" },
           },
@@ -1350,6 +2329,289 @@ export const CONTRACT = {
         },
       },
       "required": ["job"],
+      "type": "object",
+    },
+    "JobsWatchFrame": {
+      "anyOf": [{
+        "properties": {
+          "kind": { "const": "ready", "type": "string" },
+          "timestamp": { "format": "date-time", "type": "string" },
+        },
+        "required": ["kind", "timestamp"],
+        "type": "object",
+      }, {
+        "properties": {
+          "id": { "minLength": 1, "type": "string" },
+          "kind": { "const": "jobChanged", "type": "string" },
+          "service": { "minLength": 1, "type": "string" },
+          "state": {
+            "anyOf": [
+              { "const": "pending", "type": "string" },
+              { "const": "active", "type": "string" },
+              { "const": "retry", "type": "string" },
+              { "const": "completed", "type": "string" },
+              { "const": "failed", "type": "string" },
+              { "const": "cancelled", "type": "string" },
+              { "const": "skipped", "type": "string" },
+              { "const": "stale", "type": "string" },
+              { "const": "expired", "type": "string" },
+              { "const": "dead", "type": "string" },
+              { "const": "dismissed", "type": "string" },
+            ],
+          },
+          "type": { "minLength": 1, "type": "string" },
+          "updatedAt": { "format": "date-time", "type": "string" },
+        },
+        "required": ["kind", "id", "service", "type", "state", "updatedAt"],
+        "type": "object",
+      }, {
+        "properties": {
+          "kind": { "const": "queryInvalidated", "type": "string" },
+          "reason": {
+            "anyOf": [{ "const": "matched-job-changed", "type": "string" }, {
+              "const": "unknown-match",
+              "type": "string",
+            }],
+          },
+          "timestamp": { "format": "date-time", "type": "string" },
+        },
+        "required": ["kind", "reason", "timestamp"],
+        "type": "object",
+      }, {
+        "properties": {
+          "id": { "minLength": 1, "type": "string" },
+          "kind": { "const": "jobInspectChanged", "type": "string" },
+          "timestamp": { "format": "date-time", "type": "string" },
+        },
+        "required": ["kind", "id", "timestamp"],
+        "type": "object",
+      }],
+    },
+    "JobsWatchRequest": {
+      "properties": {
+        "includeInitial": { "type": "boolean" },
+        "jobId": { "minLength": 1, "type": "string" },
+        "query": {
+          "properties": {
+            "groupBy": {
+              "anyOf": [
+                { "const": "service", "type": "string" },
+                { "const": "type", "type": "string" },
+                { "const": "state", "type": "string" },
+                { "const": "queueKey", "type": "string" },
+                { "const": "trigger", "type": "string" },
+                { "const": "runtimeBand", "type": "string" },
+              ],
+            },
+            "limit": { "minimum": 1, "type": "integer" },
+            "offset": { "minimum": 0, "type": "integer" },
+            "queueKey": { "type": "string" },
+            "runtimeBand": {
+              "anyOf": [
+                { "const": "queued", "type": "string" },
+                { "const": "running", "type": "string" },
+                { "const": "slow", "type": "string" },
+                { "const": "terminal", "type": "string" },
+              ],
+            },
+            "search": { "type": "string" },
+            "service": { "minLength": 1, "type": "string" },
+            "sort": {
+              "properties": {
+                "direction": {
+                  "anyOf": [{ "const": "asc", "type": "string" }, {
+                    "const": "desc",
+                    "type": "string",
+                  }],
+                },
+                "field": {
+                  "anyOf": [
+                    { "const": "updatedAt", "type": "string" },
+                    { "const": "queueAge", "type": "string" },
+                    { "const": "runtime", "type": "string" },
+                    { "const": "failureRate", "type": "string" },
+                    { "const": "retries", "type": "string" },
+                    { "const": "depth", "type": "string" },
+                  ],
+                },
+              },
+              "required": ["field"],
+              "type": "object",
+            },
+            "state": {
+              "items": {
+                "anyOf": [
+                  { "const": "pending", "type": "string" },
+                  { "const": "active", "type": "string" },
+                  { "const": "retry", "type": "string" },
+                  { "const": "completed", "type": "string" },
+                  { "const": "failed", "type": "string" },
+                  { "const": "cancelled", "type": "string" },
+                  { "const": "skipped", "type": "string" },
+                  { "const": "stale", "type": "string" },
+                  { "const": "expired", "type": "string" },
+                  { "const": "dead", "type": "string" },
+                  { "const": "dismissed", "type": "string" },
+                ],
+              },
+              "type": "array",
+            },
+            "trigger": { "type": "string" },
+            "type": { "minLength": 1, "type": "string" },
+            "window": {
+              "anyOf": [{ "const": "1h", "type": "string" }, {
+                "const": "24h",
+                "type": "string",
+              }, { "const": "7d", "type": "string" }],
+            },
+          },
+          "required": ["limit"],
+          "type": "object",
+        },
+      },
+      "type": "object",
+    },
+    "JobsWorkbenchGroup": {
+      "properties": {
+        "count": { "minimum": 0, "type": "integer" },
+        "depth": { "minimum": 0, "type": "integer" },
+        "failureRate": { "minimum": 0, "type": "number" },
+        "key": { "type": "string" },
+        "label": { "type": "string" },
+        "latestUpdatedAt": { "format": "date-time", "type": "string" },
+        "oldestCreatedAt": { "format": "date-time", "type": "string" },
+        "state": {
+          "anyOf": [
+            { "const": "pending", "type": "string" },
+            { "const": "active", "type": "string" },
+            { "const": "retry", "type": "string" },
+            { "const": "completed", "type": "string" },
+            { "const": "failed", "type": "string" },
+            { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
+            { "const": "expired", "type": "string" },
+            { "const": "dead", "type": "string" },
+            { "const": "dismissed", "type": "string" },
+          ],
+        },
+      },
+      "required": ["key", "label", "count"],
+      "type": "object",
+    },
+    "JobsWorkbenchJobRow": {
+      "properties": {
+        "completedAt": { "format": "date-time", "type": "string" },
+        "context": {
+          "properties": {
+            "requestId": { "minLength": 1, "type": "string" },
+            "traceId": { "pattern": "^[0-9a-f]{32}$", "type": "string" },
+            "traceparent": {
+              "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+              "type": "string",
+            },
+            "tracestate": { "minLength": 1, "type": "string" },
+          },
+          "required": ["requestId", "traceId", "traceparent"],
+          "type": "object",
+        },
+        "createdAt": { "format": "date-time", "type": "string" },
+        "errorFingerprint": { "type": "string" },
+        "id": { "minLength": 1, "type": "string" },
+        "lastError": { "type": "string" },
+        "lineage": {
+          "properties": {
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "relatedKeys": { "items": { "type": "string" }, "type": "array" },
+            "rootJobId": { "type": "string" },
+          },
+          "type": "object",
+        },
+        "maxTries": { "minimum": 1, "type": "integer" },
+        "progress": {
+          "properties": {
+            "current": { "minimum": 0, "type": "integer" },
+            "message": { "type": "string" },
+            "step": { "type": "string" },
+            "total": { "minimum": 0, "type": "integer" },
+          },
+          "type": "object",
+        },
+        "queueAgeMs": { "minimum": 0, "type": "integer" },
+        "queueKey": { "type": "string" },
+        "runtimeBand": { "type": "string" },
+        "runtimeMs": { "minimum": 0, "type": "integer" },
+        "service": { "minLength": 1, "type": "string" },
+        "startedAt": { "format": "date-time", "type": "string" },
+        "state": {
+          "anyOf": [
+            { "const": "pending", "type": "string" },
+            { "const": "active", "type": "string" },
+            { "const": "retry", "type": "string" },
+            { "const": "completed", "type": "string" },
+            { "const": "failed", "type": "string" },
+            { "const": "cancelled", "type": "string" },
+            { "const": "skipped", "type": "string" },
+            { "const": "stale", "type": "string" },
+            { "const": "expired", "type": "string" },
+            { "const": "dead", "type": "string" },
+            { "const": "dismissed", "type": "string" },
+          ],
+        },
+        "tries": { "minimum": 0, "type": "integer" },
+        "trigger": {
+          "properties": {
+            "id": { "type": "string" },
+            "kind": {
+              "anyOf": [
+                { "const": "schedule", "type": "string" },
+                { "const": "operation", "type": "string" },
+                { "const": "rpc", "type": "string" },
+                { "const": "event", "type": "string" },
+                { "const": "manualReplay", "type": "string" },
+                { "const": "serviceCode", "type": "string" },
+                { "const": "parentJob", "type": "string" },
+              ],
+            },
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "requestId": { "type": "string" },
+            "subject": { "type": "string" },
+            "traceId": { "type": "string" },
+          },
+          "required": ["kind"],
+          "type": "object",
+        },
+        "type": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+      },
+      "required": [
+        "id",
+        "service",
+        "type",
+        "state",
+        "createdAt",
+        "updatedAt",
+        "tries",
+        "maxTries",
+      ],
+      "type": "object",
+    },
+    "JobsWorkbenchStats": {
+      "properties": {
+        "byState": {
+          "patternProperties": { "^.*$": { "minimum": 0, "type": "integer" } },
+          "type": "object",
+        },
+        "dead": { "minimum": 0, "type": "integer" },
+        "failed": { "minimum": 0, "type": "integer" },
+        "queued": { "minimum": 0, "type": "integer" },
+        "running": { "minimum": 0, "type": "integer" },
+        "slow": { "minimum": 0, "type": "integer" },
+        "total": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["total", "byState"],
       "type": "object",
     },
     "NotFoundErrorData": {

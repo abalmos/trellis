@@ -1,4 +1,4 @@
-use crate::jobs::types::{Job, JobEvent, JobEventType, JobState};
+use crate::jobs::types::{Job, JobErrorDetail, JobEvent, JobEventType, JobState};
 
 pub fn is_terminal(state: JobState) -> bool {
     matches!(
@@ -51,11 +51,14 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
         tries: event.tries,
         max_tries: event.max_tries.unwrap_or(current.max_tries),
         last_error: current.last_error.clone(),
+        error_detail: current.error_detail.clone(),
         deadline: current.deadline.clone(),
         progress: current.progress.clone(),
         logs: current.logs.clone(),
         concurrency: current.concurrency.clone(),
         queue_policy: current.queue_policy.clone(),
+        trigger: current.trigger.clone(),
+        lineage: current.lineage.clone(),
     };
 
     if let Some(concurrency) = &event.concurrency {
@@ -63,6 +66,12 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
     }
     if let Some(queue_policy) = &event.queue_policy {
         next.queue_policy = Some(queue_policy.clone());
+    }
+    if let Some(trigger) = &event.trigger {
+        next.trigger = Some(trigger.clone());
+    }
+    if let Some(lineage) = &event.lineage {
+        next.lineage = Some(lineage.clone());
     }
 
     match event.event_type {
@@ -91,14 +100,17 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
         | JobEventType::Dead
         | JobEventType::Dismissed => {
             next.last_error = event.error.clone();
+            next.error_detail = error_detail_from_event(event);
             next.completed_at = Some(event.timestamp.clone());
         }
         JobEventType::Heartbeat => {}
         JobEventType::StaleCompletionIgnored => {
             next.last_error = event.error.clone();
+            next.error_detail = error_detail_from_event(event);
         }
         JobEventType::Retry => {
             next.last_error = event.error.clone();
+            next.error_detail = error_detail_from_event(event);
         }
         JobEventType::Retried => {
             if let Some(payload) = &event.payload {
@@ -111,6 +123,7 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
             next.completed_at = None;
             next.started_at = None;
             next.last_error = None;
+            next.error_detail = None;
             next.progress = None;
             next.logs = None;
             next.concurrency = event.concurrency.clone();
@@ -194,10 +207,22 @@ fn seed_job_from_event(event: &JobEvent) -> Option<Job> {
         tries: event.tries,
         max_tries: event.max_tries.unwrap_or(1),
         last_error: None,
+        error_detail: None,
         deadline: event.deadline.clone(),
         progress: None,
         logs: None,
         concurrency: event.concurrency.clone(),
         queue_policy: event.queue_policy.clone(),
+        trigger: event.trigger.clone(),
+        lineage: event.lineage.clone(),
+    })
+}
+
+fn error_detail_from_event(event: &JobEvent) -> Option<JobErrorDetail> {
+    event.error_detail.clone().or_else(|| {
+        event
+            .error
+            .as_deref()
+            .map(|message| JobErrorDetail::from_message(&event.service, &event.job_type, message))
     })
 }

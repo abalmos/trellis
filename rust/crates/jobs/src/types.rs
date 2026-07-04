@@ -12,6 +12,72 @@ pub struct JobContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JobTriggerKind {
+    /// Job was started by a schedule.
+    #[serde(rename = "schedule")]
+    Schedule,
+    /// Job was started by operation control code.
+    #[serde(rename = "operation")]
+    Operation,
+    /// Job was started by an RPC handler.
+    #[serde(rename = "rpc")]
+    Rpc,
+    /// Job was started by an event handler.
+    #[serde(rename = "event")]
+    Event,
+    /// Job was manually replayed by an administrator.
+    #[serde(rename = "manualReplay")]
+    ManualReplay,
+    /// Job was created directly by service code.
+    #[serde(rename = "serviceCode")]
+    ServiceCode,
+    /// Job was created from inside another active job handler.
+    #[serde(rename = "parentJob")]
+    ParentJob,
+}
+
+/// Describes the source that created or retried a job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobTrigger {
+    pub kind: JobTriggerKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+/// Relates a job to parent/root work and optional operation context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobLineage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_job_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub related_keys: Option<Vec<String>>,
+}
+
+/// Metadata for an administrator-initiated lifecycle action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobAdminAction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
     Pending,
@@ -141,6 +207,68 @@ pub struct JobProgress {
     pub total: Option<u64>,
 }
 
+/// Worker metadata associated with a captured job error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobErrorWorker {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+}
+
+/// Structured detail for a job failure or retry reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobErrorDetail {
+    pub message: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub error_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stack: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub causes: Option<Vec<JobErrorDetail>>,
+    pub fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_seen: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurrence_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker: Option<JobErrorWorker>,
+}
+
+impl JobErrorDetail {
+    /// Create an error detail from the only currently guaranteed handler error shape.
+    pub fn from_message(service: &str, job_type: &str, message: &str) -> Self {
+        Self {
+            message: message.to_string(),
+            error_type: None,
+            stack: None,
+            causes: None,
+            fingerprint: error_fingerprint(service, job_type, message),
+            first_seen: None,
+            occurrence_count: None,
+            worker: None,
+        }
+    }
+}
+
+/// Return the stable fingerprint for a service, job type, and normalized first error line.
+pub fn error_fingerprint(service: &str, job_type: &str, message: &str) -> String {
+    let first_line = message.lines().next().unwrap_or_default();
+    let normalized = first_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in format!("{service}\0{job_type}\0{}", normalized.to_lowercase()).bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -163,6 +291,8 @@ pub struct Job {
     pub max_tries: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<JobErrorDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deadline: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -173,6 +303,10 @@ pub struct Job {
     pub concurrency: Option<JobConcurrency>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue_policy: Option<JobQueuePolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<JobTrigger>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<JobLineage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,6 +325,8 @@ pub struct JobEvent {
     pub max_tries: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<JobErrorDetail>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<JobProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -205,6 +341,12 @@ pub struct JobEvent {
     pub concurrency: Option<JobConcurrency>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue_policy: Option<JobQueuePolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<JobTrigger>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<JobLineage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admin_action: Option<JobAdminAction>,
     pub timestamp: String,
 }
 

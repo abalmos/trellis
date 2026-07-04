@@ -1566,11 +1566,14 @@ mod tests {
             tries,
             max_tries: 2,
             last_error: None,
+            error_detail: None,
             deadline: None,
             progress: None,
             logs: None,
             concurrency: None,
             queue_policy: None,
+            trigger: None,
+            lineage: None,
         }
     }
 

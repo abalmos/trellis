@@ -34,9 +34,10 @@ pub use api::{
 };
 pub use bindings::{JobsBinding, JobsQueueBinding, JobsRuntimeBinding};
 pub use events::{
-    cancelled_event, completed_event, created_event, dead_event, dismissed_event, expired_event,
-    failed_event, heartbeat_event, logged_event, progress_event, retried_event, retry_event,
-    skipped_event, stale_completion_ignored_event, stale_event, started_event,
+    cancelled_event, cancelled_event_with_admin_reason, completed_event, created_event, dead_event,
+    dismissed_event, expired_event, failed_event, heartbeat_event, logged_event, progress_event,
+    retried_event, retried_event_with_admin_reason, retry_event, skipped_event,
+    stale_completion_ignored_event, stale_event, started_event,
 };
 pub use keys::{derive_key, job_key, key_hash, worker_presence_key, KeyDerivationError};
 pub use manager::{
@@ -53,8 +54,8 @@ pub use runtime::{JobsRuntime, JobsRuntimeMessage, JobsRuntimeMessageStream};
 pub use runtime_worker::{JobCancellationToken, WorkerHostHandle, WorkerHostOptions};
 pub use subjects::{job_event_subject, worker_heartbeat_subject, WORKER_HEARTBEATS_WILDCARD};
 pub use types::{
-    Job, JobConcurrency, JobContext, JobEvent, JobEventType, JobLogEntry, JobLogLevel, JobProgress,
-    JobQueuePolicy, JobQueuePolicyOutcome, JobState, WorkerHeartbeat,
+    Job, JobAdminAction, JobConcurrency, JobContext, JobEvent, JobEventType, JobLogEntry,
+    JobLogLevel, JobProgress, JobQueuePolicy, JobQueuePolicyOutcome, JobState, WorkerHeartbeat,
 };
 
 #[doc(hidden)]

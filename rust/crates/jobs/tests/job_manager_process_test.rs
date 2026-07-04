@@ -117,11 +117,14 @@ fn sample_job(tries: u64, max_tries: u64) -> Job {
         tries,
         max_tries,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     }
 }
 

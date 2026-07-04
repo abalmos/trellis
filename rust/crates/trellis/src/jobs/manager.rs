@@ -24,11 +24,15 @@ use crate::jobs::keys::{
 use crate::jobs::publisher::{JobEventHeaders, JobEventPublisher};
 use crate::jobs::runtime_worker::JobCancellationToken;
 use crate::jobs::types::{
-    Job, JobConcurrency, JobContext, JobEventType, JobLogEntry, JobProgress, JobQueuePolicy,
-    JobQueuePolicyOutcome, JobState,
+    Job, JobConcurrency, JobContext, JobEventType, JobLineage, JobLogEntry, JobProgress,
+    JobQueuePolicy, JobQueuePolicyOutcome, JobState, JobTrigger, JobTriggerKind,
 };
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
+
+tokio::task_local! {
+    static ACTIVE_PARENT_JOB: Job;
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobProcessError<E> {
@@ -417,7 +421,49 @@ where
     {
         let now = self.inner.meta.now_iso();
         let id = self.inner.meta.next_job_id();
-        let context = new_job_context(self.inner.meta.next_job_id(), &id, &now);
+        let parent = ACTIVE_PARENT_JOB.try_with(Clone::clone).ok();
+        let context = parent.as_ref().map_or_else(
+            || new_job_context(self.inner.meta.next_job_id(), &id, &now),
+            |parent| parent.context.clone(),
+        );
+        let trigger = parent.as_ref().map_or_else(
+            || JobTrigger {
+                kind: JobTriggerKind::ServiceCode,
+                id: None,
+                subject: None,
+                operation_id: None,
+                parent_job_id: None,
+                trace_id: None,
+                request_id: None,
+            },
+            |parent| JobTrigger {
+                kind: JobTriggerKind::ParentJob,
+                id: None,
+                subject: None,
+                operation_id: parent
+                    .lineage
+                    .as_ref()
+                    .and_then(|lineage| lineage.operation_id.clone()),
+                parent_job_id: Some(parent.id.clone()),
+                trace_id: Some(parent.context.trace_id.clone()),
+                request_id: Some(parent.context.request_id.clone()),
+            },
+        );
+        let lineage = parent.as_ref().map(|parent| JobLineage {
+            parent_job_id: Some(parent.id.clone()),
+            root_job_id: Some(
+                parent
+                    .lineage
+                    .as_ref()
+                    .and_then(|lineage| lineage.root_job_id.clone())
+                    .unwrap_or_else(|| parent.id.clone()),
+            ),
+            operation_id: parent
+                .lineage
+                .as_ref()
+                .and_then(|lineage| lineage.operation_id.clone()),
+            related_keys: None,
+        });
         let payload_value: Value =
             serde_json::to_value(payload.clone()).map_err(JobManagerError::SerializePayload)?;
         let deadline = compute_deadline(&now, queue.default_deadline_ms).map_err(|details| {
@@ -442,11 +488,14 @@ where
                 tries: 0,
                 max_tries: queue.max_deliver,
                 last_error: None,
+                error_detail: None,
                 deadline,
                 progress: None,
                 logs: None,
                 concurrency: None,
                 queue_policy: None,
+                trigger: Some(trigger),
+                lineage,
             },
             payload_value,
         ))
@@ -483,7 +532,7 @@ where
         concurrency: Option<JobConcurrency>,
         queue_policy: Option<JobQueuePolicy>,
     ) -> Result<(), JobManagerError<P::Error>> {
-        let event = match concurrency.or_else(|| job.concurrency.clone()) {
+        let mut event = match concurrency.or_else(|| job.concurrency.clone()) {
             Some(concurrency) => created_event_with_policy(
                 &job.service,
                 &job.job_type,
@@ -507,6 +556,8 @@ where
                 job.deadline.as_deref(),
             ),
         };
+        event.trigger = job.trigger.clone();
+        event.lineage = job.lineage.clone();
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
             .await
     }
@@ -704,7 +755,8 @@ where
             Arc::new(move || Box::pin(heartbeat())),
         );
 
-        match process(active_job).await {
+        let parent = active_job.job().clone();
+        match ACTIVE_PARENT_JOB.scope(parent, process(active_job)).await {
             Ok(result) => {
                 if cancellation.is_host_shutdown() {
                     self.run_terminal_cleanup(&terminal_cleanup, &job.updated_at)
@@ -1037,13 +1089,9 @@ where
         Fut: Future<Output = Result<T, JobManagerError<P::Error>>>,
     {
         let heartbeat: HeartbeatHook = Arc::new(move || Box::pin(heartbeat()));
-        f(ActiveJob::new(
-            (*self).clone(),
-            job,
-            cancellation,
-            heartbeat,
-        ))
-        .await
+        let active_job = ActiveJob::new((*self).clone(), job, cancellation, heartbeat);
+        let parent = active_job.job().clone();
+        ACTIVE_PARENT_JOB.scope(parent, f(active_job)).await
     }
 
     fn make_active_job(

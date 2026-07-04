@@ -113,10 +113,47 @@ pub fn project_job_event_with_payload(
     raw_event: &Value,
 ) -> Result<Option<Job>, SqliteJobsStoreError> {
     let current = store.get_job(&event.service, &event.job_type, &event.job_id)?;
-    let Some(next) = reduce_job_event(current.as_ref(), event) else {
+    let next = reduce_job_event(current.as_ref(), event);
+    let projected = next
+        .as_ref()
+        .zip(current.as_ref())
+        .map(|(next, current)| next != current);
+    let reason = if projected == Some(false) {
+        if current
+            .as_ref()
+            .is_some_and(|job| trellis_rs::jobs::is_terminal(job.state))
+        {
+            Some("terminal-precedence")
+        } else {
+            Some("illegal-transition")
+        }
+    } else if next.is_none() {
+        Some("illegal-transition")
+    } else {
+        None
+    };
+    store.project_timeline_event(event, raw_event, projected.or(Some(next.is_some())), reason)?;
+    let fallback_detail = event.error.as_deref().map(|message| {
+        trellis_rs::jobs::types::JobErrorDetail::from_message(
+            &event.service,
+            &event.job_type,
+            message,
+        )
+    });
+    if let Some(detail) = event.error_detail.as_ref().or(fallback_detail.as_ref()) {
+        store.upsert_error_projection(
+            &event.service,
+            &event.job_type,
+            event.state,
+            &event.timestamp,
+            detail,
+        )?;
+    }
+    let Some(next) = next else {
         return Ok(None);
     };
     store.upsert_job(&next)?;
+    store.upsert_job_lineage(&next)?;
     let metadata = metadata_patch_from_event_payload(raw_event);
     store.apply_job_metadata_patch(
         &event.service,
@@ -169,8 +206,13 @@ fn optional_string(value: &Value, field: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use trellis_rs::jobs::events::{created_event, started_event_with_concurrency};
-    use trellis_rs::jobs::types::{JobConcurrency, JobContext, JobState};
+    use trellis_rs::jobs::events::{
+        cancelled_event_with_admin_reason, created_event, failed_event,
+        started_event_with_concurrency,
+    };
+    use trellis_rs::jobs::types::{
+        JobConcurrency, JobContext, JobLineage, JobState, JobTrigger, JobTriggerKind,
+    };
 
     use super::*;
 
@@ -239,6 +281,50 @@ mod tests {
     }
 
     #[test]
+    fn project_job_event_projects_trigger_and_lineage() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut event = created_event(
+            "documents",
+            "document-process",
+            "child-job",
+            &context(),
+            json!({ "documentId": "doc-1" }),
+            3,
+            "2026-03-28T12:00:00.000Z",
+            None,
+        );
+        event.trigger = Some(JobTrigger {
+            kind: JobTriggerKind::ParentJob,
+            id: None,
+            subject: None,
+            operation_id: None,
+            parent_job_id: Some("parent-job".to_string()),
+            trace_id: Some("0123456789abcdef0123456789abcdef".to_string()),
+            request_id: Some("request-job-1".to_string()),
+        });
+        event.lineage = Some(JobLineage {
+            parent_job_id: Some("parent-job".to_string()),
+            root_job_id: Some("root-job".to_string()),
+            operation_id: None,
+            related_keys: None,
+        });
+
+        project_job_event(&store, &event).expect("projection should succeed");
+
+        let projected = store
+            .get_job_lineage_by_global_id("child-job")
+            .expect("lineage should read");
+        assert_eq!(
+            projected.trigger.map(|trigger| trigger.kind),
+            Some(JobTriggerKind::ParentJob)
+        );
+        assert_eq!(
+            projected.lineage.and_then(|lineage| lineage.parent_job_id),
+            Some("parent-job".to_string())
+        );
+    }
+
+    #[test]
     fn project_started_event_projects_active_key_instance_id() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         let created = created_event(
@@ -283,6 +369,93 @@ mod tests {
     }
 
     #[test]
+    fn project_job_event_records_timeline_in_sequence_order() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let created = created_event(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            json!({ "documentId": "doc-1" }),
+            3,
+            "2026-03-28T12:00:00.000Z",
+            None,
+        );
+        let started = started_event_with_concurrency(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            JobState::Pending,
+            1,
+            "2026-03-28T12:00:00.000Z",
+            JobConcurrency {
+                key: "tenant-1:document:doc-1".to_string(),
+                key_hash: "hash-1".to_string(),
+                instance_id: Some("worker-1".to_string()),
+                slot_token: Some("slot-1".to_string()),
+                heartbeat_at: None,
+                lease_expires_at: None,
+                stale_takeover_count: None,
+            },
+        );
+
+        project_job_event(&store, &created).expect("created projection should succeed");
+        project_job_event(&store, &started).expect("started projection should succeed");
+
+        let timeline = store
+            .list_timeline_events("job-1", 10)
+            .expect("timeline should list");
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].sequence, 1);
+        assert_eq!(timeline[0].event_type, "created");
+        assert_eq!(timeline[1].sequence, 2);
+        assert_eq!(timeline[1].event_type, "started");
+        assert_eq!(timeline[1].worker_instance_id.as_deref(), Some("worker-1"));
+    }
+
+    #[test]
+    fn project_admin_reason_into_timeline_message() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let created = created_event(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            json!({ "documentId": "doc-1" }),
+            3,
+            "2026-03-28T12:00:00.000Z",
+            None,
+        );
+        project_job_event(&store, &created).expect("created projection should succeed");
+        let cancelled = cancelled_event_with_admin_reason(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            JobState::Pending,
+            0,
+            "2026-03-28T12:01:00.000Z",
+            Some("operator requested maintenance"),
+        );
+
+        project_job_event(&store, &cancelled).expect("cancelled projection should succeed");
+
+        let timeline = store
+            .list_timeline_events("job-1", 10)
+            .expect("timeline should list");
+        let admin_event = timeline
+            .iter()
+            .find(|event| event.event_type == "cancelled")
+            .expect("admin action should appear in timeline");
+        assert_eq!(admin_event.state, "cancelled");
+        assert_eq!(
+            admin_event.message.as_deref(),
+            Some("operator requested maintenance")
+        );
+    }
+
+    #[test]
     fn project_job_event_projects_queue_policy_reason_metadata() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         let event = created_event(
@@ -313,6 +486,64 @@ mod tests {
         assert_eq!(queue_policy.outcome, "coalesced");
         assert_eq!(queue_policy.reason.as_deref(), Some("queue-full"));
         assert_eq!(queue_policy.existing_job_id.as_deref(), Some("job-1"));
+    }
+
+    #[test]
+    fn project_job_event_projects_failed_error_detail_and_aggregate() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let created = created_event(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            json!({ "documentId": "doc-1" }),
+            3,
+            "2026-03-28T12:00:00.000Z",
+            None,
+        );
+        project_job_event(&store, &created).expect("created projection should succeed");
+        let started = started_event_with_concurrency(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            JobState::Pending,
+            1,
+            "2026-03-28T12:01:00.000Z",
+            JobConcurrency {
+                key: "tenant-1:document:doc-1".to_string(),
+                key_hash: "hash-1".to_string(),
+                instance_id: Some("worker-1".to_string()),
+                slot_token: Some("slot-1".to_string()),
+                heartbeat_at: None,
+                lease_expires_at: None,
+                stale_takeover_count: None,
+            },
+        );
+        project_job_event(&store, &started).expect("started projection should succeed");
+        let failed = failed_event(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            JobState::Active,
+            1,
+            "2026-03-28T12:02:00.000Z",
+            "boom\njob id 123",
+        );
+
+        let projected = project_job_event(&store, &failed)
+            .expect("failed projection should succeed")
+            .expect("failed event should reduce");
+
+        let detail = projected.error_detail.expect("error detail should project");
+        assert_eq!(detail.message, "boom\njob id 123");
+        let aggregate = store
+            .get_error_projection(&detail.fingerprint)
+            .expect("error projection should read")
+            .expect("error projection should exist");
+        assert_eq!(aggregate.message, "boom\njob id 123");
+        assert_eq!(aggregate.occurrence_count, 1);
     }
 
     fn context() -> JobContext {

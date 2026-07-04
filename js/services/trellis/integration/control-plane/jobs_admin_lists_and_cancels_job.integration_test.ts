@@ -49,8 +49,8 @@ const adminClientContract = defineAppContract(() => ({
         rpc: {
           call: [
             "Jobs.Health",
-            "Jobs.List",
-            "Jobs.Get",
+            "Jobs.Query",
+            "Jobs.Inspect",
             "Jobs.Cancel",
             "Jobs.ListServices",
           ],
@@ -114,7 +114,7 @@ liveTrellisTest({
 
       await adminClient.rpc.jobs.health({}).orThrow();
       const listedJob = await runtime.waitFor(async () => {
-        const page = await adminClient.rpc.jobs.list({
+        const page = await adminClient.rpc.jobs.query({
           service: ref.service,
           type: ref.type,
           limit: 20,
@@ -132,7 +132,8 @@ liveTrellisTest({
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(listedService.workers[0]?.jobType, ref.type);
 
-      const detail = await adminClient.rpc.jobs.get({ id: ref.id }).orThrow();
+      const detail = await adminClient.rpc.jobs.inspect({ id: ref.id })
+        .orThrow();
       assertEquals(detail.job.id, ref.id);
       assertEquals(detail.job.service, ref.service);
       assertEquals(detail.job.type, ref.type);
@@ -141,7 +142,7 @@ liveTrellisTest({
         .orThrow();
       assertEquals(cancelled.job.id, ref.id);
       const terminal = await runtime.waitFor(async () => {
-        const current = await adminClient.rpc.jobs.get({ id: ref.id })
+        const current = await adminClient.rpc.jobs.inspect({ id: ref.id })
           .orThrow();
         return current.job.state === "cancelled" ? current.job : false;
       }, { timeoutMs: 15_000, intervalMs: 100 });

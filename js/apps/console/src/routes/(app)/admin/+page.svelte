@@ -25,11 +25,12 @@
   } from "$lib/catalog_issues";
   import { getTrellis } from "$lib/trellis";
   import type {
-    JobsListOutput,
+    JobsQueryOutput,
   } from "@qlever-llc/trellis/sdk/jobs";
 
   type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
-  type Job = JobsListOutput["entries"][number];
+  type JobGroup = JobsQueryOutput["groups"][number];
+  type JobStats = JobsQueryOutput["stats"];
   type DeploymentAuthority = { deploymentId: string; kind: DeploymentAuthorityKind; disabled: boolean };
   type DeviceReview = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
   type CatalogIssue = {
@@ -80,7 +81,8 @@
   let sessionCount = $state(0);
   let connectionCount = $state(0);
   let jobsUnavailableMessage = $state<string | null>(null);
-  let jobs = $state<Job[]>([]);
+  let jobGroups = $state.raw<JobGroup[]>([]);
+  let jobStats = $state.raw<JobStats>({ byState: {}, total: 0 });
   let catalogIssues = $state.raw<CatalogIssue[]>([]);
   let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
   let pendingAuthorityPlans = $state.raw<DeploymentAuthorityPlan[]>([]);
@@ -89,11 +91,11 @@
   const activeInstances = $derived(instances.filter((instance) => !instance.disabled).length);
   const disabledInstances = $derived(instances.filter((instance) => instance.disabled).length);
   const displayInstances = $derived(instances.map(toOverviewInstance));
-  const displayJobs = $derived(toOverviewJobs(jobs));
+  const displayJobs = $derived(toOverviewJobs(jobGroups));
   const serviceInstanceTotal = $derived(instances.length);
   const disabledTotal = $derived(disabledInstances);
-  const activeJobCount = $derived(jobs.filter((job) => job.state === "active").length);
-  const totalJobCount = $derived(jobs.length);
+  const activeJobCount = $derived(jobStats.byState.active ?? 0);
+  const totalJobCount = $derived(jobStats.total);
   const pendingWorkTotal = $derived(pendingDeviceReviews.length + pendingAuthorityPlans.length);
   const serviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.kind === "service" && !authority.disabled).length);
   const deviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.kind === "device" && !authority.disabled).length);
@@ -139,27 +141,17 @@
     };
   }
 
-  function toOverviewJobs(records: Job[]): OverviewJob[] {
-    const grouped: Record<string, OverviewJob> = {};
-    for (const job of records) {
-      const key = `${job.service}:${job.type}:${job.state}`;
-      const existing = grouped[key];
-      if (existing) {
-        existing.count += 1;
-        continue;
-      }
-      grouped[key] = {
-        key,
-        job: job.type,
-        state: formatJobState(job.state),
-        count: 1,
-        oldest: "—",
-      };
-    }
-    return Object.values(grouped).slice(0, 5);
+  function toOverviewJobs(groups: JobGroup[]): OverviewJob[] {
+    return groups.slice(0, 5).map((group) => ({
+      key: group.key,
+      job: group.label,
+      state: group.state ? formatJobState(group.state) : "Grouped",
+      count: group.count,
+      oldest: group.oldestCreatedAt ?? "—",
+    }));
   }
 
-  function formatJobState(state: Job["state"]): OverviewJob["state"] {
+  function formatJobState(state: NonNullable<JobGroup["state"]>): OverviewJob["state"] {
     switch (state) {
       case "active":
         return "Active";
@@ -229,17 +221,20 @@
 
       const jobsData = await loadJobsPageData({
         listServices: (input) => trellis.request("Jobs.ListServices", input),
-        listJobs: (filter) => trellis.request("Jobs.List", filter),
-      }).catch((jobsError: unknown) => ({
+        queryJobs: (filter) => trellis.request("Jobs.Query", filter),
+      }, { groupBy: "type", limit: 50, offset: 0 }).catch((jobsError: unknown) => ({
         available: false,
         message: `Jobs admin runtime is unavailable: ${errorMessage(jobsError)}`,
         services: [],
         jobs: [],
+        groups: [],
+        stats: { byState: {}, total: 0 },
         count: 0,
         offset: 0,
         limit: 50,
       }));
-      jobs = jobsData.available ? jobsData.jobs : [];
+      jobGroups = jobsData.available ? jobsData.groups : [];
+      jobStats = jobsData.available ? jobsData.stats : { byState: {}, total: 0 };
       jobsUnavailableMessage = jobsData.available ? null : jobsData.message ?? "Jobs admin runtime is unavailable.";
     } catch (e) {
       error = errorMessage(e);

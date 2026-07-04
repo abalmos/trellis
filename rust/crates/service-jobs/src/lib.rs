@@ -14,6 +14,7 @@ mod projector;
 mod query;
 mod router;
 pub mod storage;
+mod watch;
 pub mod worker_presence;
 
 pub use advisory::{
@@ -34,3 +35,4 @@ pub use janitor::{
 pub use query::{JobsAdminResources, JobsQuery, JobsQueryError};
 pub use router::{build_router_with_query, register_jobs_rpc_handlers};
 pub use storage::{ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError};
+pub use watch::register_jobs_watch_feed;

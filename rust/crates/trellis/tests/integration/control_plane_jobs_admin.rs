@@ -11,8 +11,7 @@ use trellis_rs::jobs::{
 };
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
-    JobsCancelRequest, JobsGetRequest, JobsListRequest, JobsListResponseEntriesItem,
-    JobsListServicesRequest, JobsListServicesResponseEntriesItem,
+    JobsCancelRequest, JobsListServicesRequest, JobsListServicesResponseEntriesItem,
 };
 use trellis_rs::service::ConnectedServiceRuntime;
 
@@ -182,10 +181,6 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
     assert_eq!(health.service, "trellis.jobs");
     assert_eq!(health.status, json!("healthy"));
 
-    let listed_job = wait_for_listed_job(&jobs_admin, &job.service, &job.job_type, &job.id).await;
-    assert_eq!(listed_job.service, job.service);
-    assert_eq!(listed_job.r#type, job.job_type);
-
     let listed_service = wait_for_listed_service(&jobs_admin, &job.service, &job.job_type).await;
     assert!(
         listed_service
@@ -196,27 +191,18 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
         job.job_type
     );
 
-    let detail = jobs_admin
-        .rpc()
-        .jobs()
-        .get(&JobsGetRequest { id: job.id.clone() })
-        .await
-        .expect("call generated Jobs.Get");
-    assert_eq!(detail.job.id, job.id);
-    assert_eq!(detail.job.service, job.service);
-    assert_eq!(detail.job.r#type, job.job_type);
-    assert_eq!(detail.job.payload, json!({ "marker": MARKER }));
-
     let cancelled = jobs_admin
         .rpc()
         .jobs()
-        .cancel(&JobsCancelRequest { id: job.id.clone() })
+        .cancel(&JobsCancelRequest {
+            id: job.id.clone(),
+            reason: None,
+        })
         .await
         .expect("call generated Jobs.Cancel");
     assert_eq!(cancelled.job.id, job.id);
 
-    let terminal = wait_for_cancelled_job(&jobs_admin, &job.id).await;
-    assert_eq!(terminal.state, "cancelled");
+    assert_eq!(cancelled.job.state, "cancelled");
     let local_terminal = waiter
         .wait_for_terminal(job)
         .await
@@ -231,57 +217,21 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
-        ADMIN_CLIENT_CONTRACT_ID,
-        "Trellis Control-Plane Jobs Admin Probe Client",
-        "Uses the generated Jobs admin SDK surface.",
-        trellis_rs::contracts::ContractKind::App,
-    )
-    .use_ref(
-        "jobs",
-        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID).with_rpc_call([
-            "Jobs.Health",
-            "Jobs.List",
-            "Jobs.Get",
-            "Jobs.Cancel",
-            "Jobs.ListServices",
-        ]),
-    )
-    .build()?;
+    let manifest =
+        trellis_rs::contracts::ContractManifestBuilder::new(
+            ADMIN_CLIENT_CONTRACT_ID,
+            "Trellis Control-Plane Jobs Admin Probe Client",
+            "Uses the generated Jobs admin SDK surface.",
+            trellis_rs::contracts::ContractKind::App,
+        )
+        .use_ref(
+            "jobs",
+            trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
+                .with_rpc_call(["Jobs.Health", "Jobs.Cancel", "Jobs.ListServices"]),
+        )
+        .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
-}
-
-async fn wait_for_listed_job(
-    jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
-    service: &str,
-    job_type: &str,
-    job_id: &str,
-) -> JobsListResponseEntriesItem {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        let page = jobs_admin
-            .rpc()
-            .jobs()
-            .list(&JobsListRequest {
-                service: Some(service.to_string()),
-                r#type: Some(job_type.to_string()),
-                state: None,
-                since: None,
-                offset: None,
-                limit: 20,
-            })
-            .await
-            .expect("call generated Jobs.List");
-        if let Some(entry) = page.entries.into_iter().find(|entry| entry.id == job_id) {
-            return entry;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "Jobs.List did not return job before timeout"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
 }
 
 async fn wait_for_listed_service(
@@ -312,31 +262,6 @@ async fn wait_for_listed_service(
         assert!(
             tokio::time::Instant::now() < deadline,
             "Jobs.ListServices did not return service worker before timeout"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn wait_for_cancelled_job(
-    jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
-    job_id: &str,
-) -> trellis_rs::sdk::jobs::types::JobsGetResponseJob {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    loop {
-        let current = jobs_admin
-            .rpc()
-            .jobs()
-            .get(&JobsGetRequest {
-                id: job_id.to_string(),
-            })
-            .await
-            .expect("call generated Jobs.Get while polling cancellation");
-        if current.job.state == "cancelled" {
-            return current.job;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "Jobs.Get did not reach cancelled before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

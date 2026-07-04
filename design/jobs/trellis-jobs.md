@@ -550,8 +550,9 @@ independently. The `jobs` service adds:
    handles redelivery)
 4. **Advisory Consumer** — Consumes `JOBS_ADVISORIES` and maps exhausted
    deliveries to `.dead`
-5. **Global RPCs** — ListServices, ListJobs, GetJob, Cancel, Retry, DLQ
-   management
+5. **Global RPCs and feed** — health, service listing, server-side workbench
+   query/inspect, keyed state, cancel/retry, DLQ management, and workbench
+   invalidation feed
 6. **Keyed concurrency observability** — Projects active key, queued depth by
    key, heartbeat age, lease expiry, stale takeover count, and queue-policy
    rejection/coalescing/replacement reasons for keyed queues
@@ -608,6 +609,7 @@ type JobWire = {
   tries: number;
   maxTries: number;
   lastError?: string;
+  errorDetail?: JobErrorDetail;
 
   deadline?: string;
 
@@ -635,12 +637,49 @@ type JobWire = {
   };
 
   logs?: JobLogEntry[];
+
+  trigger?: JobTrigger;
+  lineage?: JobLineage;
 };
 
 type JobLogEntry = {
   timestamp: string;
   level: "info" | "warn" | "error";
   message: string;
+};
+
+type JobErrorDetail = {
+  message: string;
+  type?: string;
+  stack?: string;
+  causes?: JobErrorDetail[];
+  fingerprint: string;
+  firstSeen?: string;
+  occurrenceCount?: number;
+};
+
+type JobTrigger = {
+  kind:
+    | "schedule"
+    | "operation"
+    | "rpc"
+    | "event"
+    | "manualReplay"
+    | "serviceCode"
+    | "parentJob";
+  id?: string;
+  subject?: string;
+  operationId?: string;
+  parentJobId?: string;
+  traceId?: string;
+  requestId?: string;
+};
+
+type JobLineage = {
+  parentJobId?: string;
+  rootJobId?: string;
+  operationId?: string;
+  relatedKeys?: string[];
 };
 
 type JobState =
@@ -713,6 +752,7 @@ type JobEventWire = {
   previousState?: JobState;
   tries: number;
   error?: string;
+  errorDetail?: JobErrorDetail;
   progress?: {
     step?: string;
     message?: string;
@@ -737,6 +777,12 @@ type JobEventWire = {
     existingJobId?: string;
     replacedJobId?: string;
   };
+  trigger?: JobTrigger;
+  lineage?: JobLineage;
+  admin?: {
+    reason?: string;
+    actor?: string;
+  };
   timestamp: string;
 };
 ```
@@ -746,6 +792,13 @@ reconstruction from stream replay. It may be omitted on subsequent events to
 reduce message size. The `context` field is required on all lifecycle events and
 remains stable for the job across `created`, worker transitions, admin
 mutations, janitor expiry, advisory dead-letter mapping, and replay/dismissal.
+`errorDetail`, `trigger`, `lineage`, and admin metadata are optional event
+evidence. When a handler only supplies an error string, the runtime/projection
+derives a fallback detail with a stable fingerprint and aggregate occurrence
+count. Job creation defaults to `trigger.kind = "serviceCode"`; manual DLQ
+replay uses `manualReplay`; child jobs created from a job handler carry parent
+job lineage and context. Admin mutation `reason` values are carried in lifecycle
+event admin metadata and shown in the inspection timeline.
 
 Worker heartbeat subjects are part of the jobs subsystem subject space but are
 not job lifecycle events. They use the
@@ -987,12 +1040,20 @@ The required v1 surface is:
 
 - list services and observed worker presence
 - health check for the jobs admin service
-- list jobs and get one job
-- cancel and retry eligible jobs
+- server-side workbench query through `Jobs.Query`, including safe full-text
+  search, filtering, sorting, grouping, and stats
+- single-job inspection through `Jobs.Inspect`, including the current job,
+  timeline, attempts, related jobs, errors, trigger, and lineage
+- keyed concurrency state through `Jobs.GetKey`
+- cancel and retry eligible jobs, with optional admin reasons
 - list DLQ jobs, replay DLQ jobs, and dismiss DLQ jobs
+- watch workbench invalidations through `Jobs.Watch`
 
-Jobs watch APIs are admin and observability helpers only. Caller-visible async
-workflows MUST use operations rather than direct jobs watch APIs.
+`Jobs.List` and `Jobs.Get` are not part of the clean-break Jobs admin surface.
+Workbench callers use `Jobs.Query`; detail and timeline callers use
+`Jobs.Inspect`. Jobs watch APIs are admin and observability helpers only.
+Caller-visible async workflows MUST use operations rather than direct jobs watch
+APIs.
 
 For exact admin TypeScript APIs, use the generated API reference under `/api`.
 For Rust jobs crates, use published Rustdoc where linked from `/api`; if a crate
@@ -1006,35 +1067,53 @@ derived SQL projections for job state and worker presence, then publishes
 administrative events or commands to the appropriate jobs subjects. It does not
 mutate projected job state directly.
 
-| RPC                 | Input                                                                | Output                      | Description                                |
-| ------------------- | -------------------------------------------------------------------- | --------------------------- | ------------------------------------------ |
-| `Jobs.Health`       | `{}`                                                                 | health payload              | Check jobs admin service health            |
-| `Jobs.ListServices` | `{ offset?: number; limit: number }`                                 | `PageResponse<ServiceInfo>` | List services and observed worker presence |
-| `Jobs.List`         | `JobFilter & { state?: JobState[]; offset?: number; limit: number }` | `PageResponse<Job>`         | List jobs (filterable)                     |
-| `Jobs.Get`          | `{ id }`                                                             | `{ job: Job }`              | Get single globally addressable job        |
-| `Jobs.GetKey`       | `{ service, type, key }`                                             | key status payload          | Inspect keyed concurrency state            |
-| `Jobs.Retry`        | `{ id }`                                                             | `{ job: Job }`              | Manually retry an eligible job             |
-| `Jobs.Cancel`       | `{ id }`                                                             | `{ job: Job }`              | Cancel an eligible job                     |
-| `Jobs.ListDLQ`      | `Omit<JobFilter, "state"> & { offset?: number; limit: number }`      | `PageResponse<Job>`         | List dead letter jobs (`dead` only)        |
-| `Jobs.ReplayDLQ`    | `{ id }`                                                             | `{ job: Job }`              | Replay job from DLQ                        |
-| `Jobs.DismissDLQ`   | `{ id }`                                                             | `{ job: Job }`              | Dismiss dead-letter job                    |
+| RPC                 | Input                                                           | Output                      | Description                                |
+| ------------------- | --------------------------------------------------------------- | --------------------------- | ------------------------------------------ |
+| `Jobs.Health`       | `{}`                                                            | health payload              | Check jobs admin service health            |
+| `Jobs.ListServices` | `{ offset?: number; limit: number }`                            | `PageResponse<ServiceInfo>` | List services and observed worker presence |
+| `Jobs.Query`        | workbench filters/search/sort/group/page                        | workbench rows/groups/stats | Query jobs for admin workbenches           |
+| `Jobs.Inspect`  | `{ id }`                                                        | inspection payload            | Get job, timeline, attempts, and relations |
+| `Jobs.GetKey`       | `{ service, type, key }`                                        | key status payload          | Inspect keyed concurrency state            |
+| `Jobs.Retry`        | `{ id, reason? }`                                               | `{ job: Job }`              | Manually retry an eligible job             |
+| `Jobs.Cancel`       | `{ id, reason? }`                                               | `{ job: Job }`              | Request cooperative cancellation           |
+| `Jobs.ListDLQ`      | `Omit<JobFilter, "state"> & { offset?: number; limit: number }` | `PageResponse<Job>`         | List dead letter jobs (`dead` only)        |
+| `Jobs.ReplayDLQ`    | `{ id, reason? }`                                               | `{ job: Job }`              | Replay job from DLQ                        |
+| `Jobs.DismissDLQ`   | `{ id, reason? }`                                               | `{ job: Job }`              | Dismiss dead-letter job                    |
 
-List RPCs use the standard live offset page shape. Requests are
+| Feed         | Input                | Frames                                                          | Description                         |
+| ------------ | -------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| `Jobs.Watch` | `{ jobId?, query? }` | `ready`, `jobChanged`, `jobInspectChanged`, `queryInvalidated` | Invalidate workbench/inspection views |
+
+`Jobs.Query` performs server-side search, sort, grouping, and stats for the
+admin workbench. Full-text search indexes safe fields only: identifiers,
+service/type/state, request and trace context, queue key/policy text,
+progress/log/error text. Payload and result bodies are not full-text indexed by
+default.
+
+List-style RPCs use the standard live offset page shape. Requests are
 `{ offset?: number; limit: number }` plus documented filters. Responses are
 `{ entries, count, offset, limit, nextOffset? }`. This is live offset
 pagination, not snapshot or cursor pagination: concurrent job updates can change
 which rows appear at later offsets.
 
-Production service-local runtimes generate Trellis-controlled ULID job ids. List
-filters can still narrow by service and job type, but single-job reads and
+Production service-local runtimes generate Trellis-controlled ULID job ids.
+Query filters can still narrow by service and job type, but single-job reads and
 mutations identify the job by `id` only. A missing id returns the declared
 `NotFoundError`; invalid filters, including invalid RFC3339 `since` timestamps,
 or invalid state transitions return the declared `ValidationError`.
 
+`Jobs.Watch` is an invalidation feed, not a precise row-delta protocol. It emits
+a `ready` frame and changed/invalidated frames; UIs rerun `Jobs.Query` or
+`Jobs.Inspect` when their current view is invalidated.
+
+`Jobs.Cancel` is the only stop primitive. Pending and retry jobs cancel
+immediately; active jobs observe cancellation cooperatively in the worker. There
+is intentionally no `Jobs.Kill`, `Jobs.Stop`, or hard-kill RPC.
+
 `Jobs.ReplayDLQ` and `Jobs.DismissDLQ` are explicit admin actions valid only for
 jobs currently in `dead`. `Jobs.ListDLQ` returns jobs still awaiting admin
-action in `dead`; dismissed jobs remain queryable through normal `Jobs.List` /
-`Jobs.Get` responses.
+action in `dead`; dismissed jobs remain queryable through `Jobs.Query` /
+`Jobs.Inspect` responses.
 
 ### Failure Detection
 

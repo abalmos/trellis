@@ -59,13 +59,6 @@ impl<'a> JobsRpc<'a> {
             .call::<super::rpc::JobsDismissDLQRpc>(input)
             .await
     }
-    /// Call `Jobs.Get`.
-    pub async fn get(
-        &self,
-        input: &super::types::JobsGetRequest,
-    ) -> Result<super::types::JobsGetResponse, TrellisClientError> {
-        self.inner.call::<super::rpc::JobsGetRpc>(input).await
-    }
     /// Call `Jobs.GetKey`.
     pub async fn get_key(
         &self,
@@ -79,12 +72,12 @@ impl<'a> JobsRpc<'a> {
             .call::<super::rpc::JobsHealthRpc>(&super::rpc::Empty {})
             .await
     }
-    /// Call `Jobs.List`.
-    pub async fn list(
+    /// Call `Jobs.Inspect`.
+    pub async fn inspect(
         &self,
-        input: &super::types::JobsListRequest,
-    ) -> Result<super::types::JobsListResponse, TrellisClientError> {
-        self.inner.call::<super::rpc::JobsListRpc>(input).await
+        input: &super::types::JobsInspectRequest,
+    ) -> Result<super::types::JobsInspectResponse, TrellisClientError> {
+        self.inner.call::<super::rpc::JobsInspectRpc>(input).await
     }
     /// Call `Jobs.ListDLQ`.
     pub async fn list_dlq(
@@ -101,6 +94,13 @@ impl<'a> JobsRpc<'a> {
         self.inner
             .call::<super::rpc::JobsListServicesRpc>(input)
             .await
+    }
+    /// Call `Jobs.Query`.
+    pub async fn query(
+        &self,
+        input: &super::types::JobsQueryRequest,
+    ) -> Result<super::types::JobsQueryResponse, TrellisClientError> {
+        self.inner.call::<super::rpc::JobsQueryRpc>(input).await
     }
     /// Call `Jobs.ReplayDLQ`.
     pub async fn replay_dlq(
@@ -126,7 +126,31 @@ impl<'a> Event<'a> {}
 pub struct Feed<'a> {
     pub(crate) _inner: &'a crate::client::TrellisClient,
 }
-impl<'a> Feed<'a> {}
+impl<'a> Feed<'a> {
+    pub fn jobs(&self) -> JobsFeed<'a> {
+        JobsFeed { inner: self._inner }
+    }
+}
+pub struct JobsFeed<'a> {
+    inner: &'a crate::client::TrellisClient,
+}
+impl<'a> JobsFeed<'a> {
+    /// Subscribe to `Jobs.Watch`.
+    pub async fn watch(
+        &self,
+        input: &super::types::JobsWatchInput,
+    ) -> Result<
+        futures_util::stream::BoxStream<
+            'static,
+            Result<super::types::JobsWatchEvent, TrellisClientError>,
+        >,
+        TrellisClientError,
+    > {
+        self.inner
+            .feed::<super::feeds::JobsWatchFeedDescriptor>(input)
+            .await
+    }
+}
 /// Typed operation surface.
 pub struct Operation<'a> {
     pub(crate) _inner: &'a crate::client::TrellisClient,

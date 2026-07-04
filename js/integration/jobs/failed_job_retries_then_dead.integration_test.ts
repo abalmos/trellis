@@ -14,7 +14,7 @@ const adminContract = defineAppContract(() => ({
   description: "Observes jobs through the generated Jobs admin SDK surface.",
   uses: {
     required: {
-      jobs: trellisJobs.use({ rpc: { call: ["Jobs.Get"] } }),
+      jobs: trellisJobs.use({ rpc: { call: ["Jobs.Inspect"] } }),
     },
   },
 }));
@@ -41,7 +41,8 @@ liveTrellisTest({
 
       let lastAdminState = "missing";
       const adminDead = await runtime.waitFor(async () => {
-        const current = await admin.rpc.jobs.get({ id: ref.id }).orThrow();
+        const current = await admin.rpc.jobs.inspect({ id: ref.id })
+          .orThrow();
         lastAdminState = current.job.state;
         return current.job.state === "dead" ? current.job : false;
       }, { timeoutMs: 15_000, intervalMs: 100 }).catch((cause) => {

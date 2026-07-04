@@ -3,10 +3,10 @@ import { deepEqual } from "node:assert/strict";
 import type {
   JobsCancelOutput,
   JobsDismissDLQOutput,
-  JobsGetOutput,
-  JobsListInput,
-  JobsListOutput,
+  JobsInspectOutput,
   JobsListServicesOutput,
+  JobsQueryInput,
+  JobsQueryOutput,
   JobsReplayDLQOutput,
   JobsRetryOutput,
 } from "@qlever-llc/trellis/sdk/jobs";
@@ -50,13 +50,13 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
     input: { limit: number; offset?: number },
   ): AsyncResult<JobsListServicesOutput, BaseError>;
   function request(
-    method: "Jobs.List",
-    input: JobsListInput,
-  ): AsyncResult<JobsListOutput, BaseError>;
+    method: "Jobs.Query",
+    input: JobsQueryInput,
+  ): AsyncResult<JobsQueryOutput, BaseError>;
   function request(
-    method: "Jobs.ListServices" | "Jobs.List",
-    input: { limit: number; offset?: number } | JobsListInput,
-  ): AsyncResult<JobsListServicesOutput | JobsListOutput, BaseError> {
+    method: "Jobs.ListServices" | "Jobs.Query",
+    input: { limit: number; offset?: number } | JobsQueryInput,
+  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
     calls.push({ method, input });
     if (method === "Jobs.ListServices") {
       return AsyncResult.ok<JobsListServicesOutput>({
@@ -67,7 +67,7 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
       });
     }
 
-    return AsyncResult.ok<JobsListOutput>({
+    return AsyncResult.ok<JobsQueryOutput>({
       count: 2,
       entries: [
         {
@@ -75,14 +75,17 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
           service: "documents",
           type: "document-process",
           state: "pending",
-          payload: null,
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
           tries: 0,
           maxTries: 3,
+          queueAgeMs: 1000,
+          runtimeBand: "queued",
         },
       ],
+      groups: [{ key: "documents", label: "documents", count: 2, depth: 2 }],
+      stats: { byState: { pending: 2 }, queued: 2, total: 2 },
       limit: 50,
       nextOffset: 50,
       offset: 0,
@@ -90,13 +93,13 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
   }
   const data = await loadJobsPageData({
     listServices: (input) => request("Jobs.ListServices", input),
-    listJobs: (filter) => request("Jobs.List", filter),
+    queryJobs: (filter) => request("Jobs.Query", filter),
   }, { service: "documents", state: ["pending"], limit: 50, offset: 0 });
 
   deepEqual(calls, [
     { method: "Jobs.ListServices", input: { limit: 500 } },
     {
-      method: "Jobs.List",
+      method: "Jobs.Query",
       input: {
         service: "documents",
         state: ["pending"],
@@ -107,6 +110,8 @@ Deno.test("loadJobsPageData requests jobs and services with the provided filter"
   ]);
   deepEqual(data.services[0]?.name, "documents");
   deepEqual(data.jobs[0]?.id, "job-1");
+  deepEqual(data.groups[0]?.key, "documents");
+  deepEqual(data.stats.queued, 2);
   deepEqual(data.nextOffset, 50);
 });
 
@@ -116,13 +121,13 @@ Deno.test("loadJobsPageData reports Jobs admin runtime as unavailable when Jobs 
     input: { limit: number; offset?: number },
   ): AsyncResult<JobsListServicesOutput, BaseError>;
   function request(
-    method: "Jobs.List",
-    input: JobsListInput,
-  ): AsyncResult<JobsListOutput, BaseError>;
+    method: "Jobs.Query",
+    input: JobsQueryInput,
+  ): AsyncResult<JobsQueryOutput, BaseError>;
   function request(
-    method: "Jobs.ListServices" | "Jobs.List",
-    _input: { limit: number; offset?: number } | JobsListInput,
-  ): AsyncResult<JobsListServicesOutput | JobsListOutput, BaseError> {
+    method: "Jobs.ListServices" | "Jobs.Query",
+    _input: { limit: number; offset?: number } | JobsQueryInput,
+  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -131,16 +136,18 @@ Deno.test("loadJobsPageData reports Jobs admin runtime as unavailable when Jobs 
       );
     }
 
-    return AsyncResult.ok<JobsListOutput>({
+    return AsyncResult.ok<JobsQueryOutput>({
       count: 0,
       entries: [],
+      groups: [],
+      stats: { byState: {}, total: 0 },
       limit: 50,
       offset: 0,
     });
   }
   const data = await loadJobsPageData({
     listServices: (input) => request("Jobs.ListServices", input),
-    listJobs: (filter) => request("Jobs.List", filter),
+    queryJobs: (filter) => request("Jobs.Query", filter),
   });
 
   deepEqual(data.available, false);
@@ -158,13 +165,13 @@ Deno.test("loadJobsPageData reports lowercase NATS no responders as unavailable"
     input: { limit: number; offset?: number },
   ): AsyncResult<JobsListServicesOutput, BaseError>;
   function request(
-    method: "Jobs.List",
-    input: JobsListInput,
-  ): AsyncResult<JobsListOutput, BaseError>;
+    method: "Jobs.Query",
+    input: JobsQueryInput,
+  ): AsyncResult<JobsQueryOutput, BaseError>;
   function request(
-    method: "Jobs.ListServices" | "Jobs.List",
-    _input: { limit: number; offset?: number } | JobsListInput,
-  ): AsyncResult<JobsListServicesOutput | JobsListOutput, BaseError> {
+    method: "Jobs.ListServices" | "Jobs.Query",
+    _input: { limit: number; offset?: number } | JobsQueryInput,
+  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -173,16 +180,18 @@ Deno.test("loadJobsPageData reports lowercase NATS no responders as unavailable"
       );
     }
 
-    return AsyncResult.ok<JobsListOutput>({
+    return AsyncResult.ok<JobsQueryOutput>({
       count: 0,
       entries: [],
+      groups: [],
+      stats: { byState: {}, total: 0 },
       limit: 50,
       offset: 0,
     });
   }
   const data = await loadJobsPageData({
     listServices: (input) => request("Jobs.ListServices", input),
-    listJobs: (filter) => request("Jobs.List", filter),
+    queryJobs: (filter) => request("Jobs.Query", filter),
   });
 
   deepEqual(data.available, false);
@@ -198,13 +207,13 @@ Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidan
     input: { limit: number; offset?: number },
   ): AsyncResult<JobsListServicesOutput, BaseError>;
   function request(
-    method: "Jobs.List",
-    input: JobsListInput,
-  ): AsyncResult<JobsListOutput, BaseError>;
+    method: "Jobs.Query",
+    input: JobsQueryInput,
+  ): AsyncResult<JobsQueryOutput, BaseError>;
   function request(
-    method: "Jobs.ListServices" | "Jobs.List",
-    _input: { limit: number; offset?: number } | JobsListInput,
-  ): AsyncResult<JobsListServicesOutput | JobsListOutput, BaseError> {
+    method: "Jobs.ListServices" | "Jobs.Query",
+    _input: { limit: number; offset?: number } | JobsQueryInput,
+  ): AsyncResult<JobsListServicesOutput | JobsQueryOutput, BaseError> {
     if (method === "Jobs.ListServices") {
       return AsyncResult.err(
         new UnexpectedError({
@@ -215,16 +224,18 @@ Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidan
       );
     }
 
-    return AsyncResult.ok<JobsListOutput>({
+    return AsyncResult.ok<JobsQueryOutput>({
       count: 0,
       entries: [],
+      groups: [],
+      stats: { byState: {}, total: 0 },
       limit: 50,
       offset: 0,
     });
   }
   const data = await loadJobsPageData({
     listServices: (input) => request("Jobs.ListServices", input),
-    listJobs: (filter) => request("Jobs.List", filter),
+    queryJobs: (filter) => request("Jobs.Query", filter),
   });
 
   deepEqual(data.available, false);
@@ -239,9 +250,11 @@ Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidan
 Deno.test("loadJobDetailData requests detail by id", async () => {
   const calls: Array<{ method: string; input: unknown }> = [];
   const data = await loadJobDetailData({
-    getJob: (input) => {
-      calls.push({ method: "Jobs.Get", input });
-      return AsyncResult.ok<JobsGetOutput>({
+    inspect: (input) => {
+      calls.push({ method: "Jobs.Inspect", input });
+      return AsyncResult.ok<JobsInspectOutput>({
+        attempts: [],
+        errors: [],
         job: {
           id: "job-1",
           service: "documents",
@@ -255,18 +268,20 @@ Deno.test("loadJobDetailData requests detail by id", async () => {
           maxTries: 3,
           lastError: "boom",
         },
+        related: [],
+        timeline: [],
       });
     },
   }, "job-1");
 
-  deepEqual(calls, [{ method: "Jobs.Get", input: { id: "job-1" } }]);
+  deepEqual(calls, [{ method: "Jobs.Inspect", input: { id: "job-1" } }]);
   deepEqual(data.available, true);
-  deepEqual(data.job?.id, "job-1");
+  deepEqual(data.inspection?.job.id, "job-1");
 });
 
 Deno.test("loadJobDetailData treats declared NotFoundError as an empty detail", async () => {
   const data = await loadJobDetailData({
-    getJob: () =>
+    inspect: () =>
       AsyncResult.err(
         new JobsNotFoundTestError("Job 'missing' not found"),
       ),

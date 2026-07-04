@@ -8,6 +8,7 @@ use trellis_contracts::{
 
 const READ_CAPABILITY: &str = "admin.read";
 const MUTATE_CAPABILITY: &str = "admin.mutate";
+const STREAM_CAPABILITY: &str = "admin.stream";
 const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";
@@ -41,6 +42,14 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             consequence: Some("Can change background job execution state.".to_string()),
         },
     )
+    .capability(
+        STREAM_CAPABILITY,
+        ContractCapabilityMetadata {
+            display_name: "Stream jobs admin data".to_string(),
+            description: "Subscribe to Jobs live workbench updates.".to_string(),
+            consequence: None,
+        },
+    )
     .schema("Empty", empty_schema())
     .schema("JobState", job_state_schema())
     .schema("JobContext", job_context_schema())
@@ -48,6 +57,9 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("JobQueuePolicyMetadata", job_queue_policy_metadata_schema())
     .schema("JobLogEntry", job_log_entry_schema())
     .schema("JobProgress", job_progress_schema())
+    .schema("JobErrorDetail", job_error_detail_schema())
+    .schema("JobTrigger", job_trigger_schema())
+    .schema("JobLineage", job_lineage_schema())
     .schema("Job", job_schema())
     .schema("JobsHealthResponse", jobs_health_response_schema())
     .schema("JobsListServicesRequest", page_request_schema())
@@ -55,21 +67,27 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         "JobsListServicesResponse",
         jobs_list_services_response_schema(),
     )
-    .schema("JobsListRequest", job_list_request_schema())
-    .schema("JobsListResponse", jobs_list_response_schema())
-    .schema("JobsGetRequest", job_identity_schema())
-    .schema("JobsGetResponse", jobs_get_response_schema())
+    .schema("JobsQueryRequest", jobs_query_request_schema())
+    .schema("JobsWorkbenchJobRow", jobs_workbench_job_row_schema())
+    .schema("JobsWorkbenchGroup", jobs_workbench_group_schema())
+    .schema("JobsWorkbenchStats", jobs_workbench_stats_schema())
+    .schema("JobsQueryResponse", jobs_query_response_schema())
+    .schema("JobTimelineEvent", job_timeline_event_schema())
+    .schema("JobsInspectRequest", job_identity_schema())
+    .schema("JobsInspectResponse", jobs_inspect_response_schema())
+    .schema("JobsWatchRequest", jobs_watch_request_schema())
+    .schema("JobsWatchFrame", jobs_watch_frame_schema())
     .schema("JobsGetKeyRequest", jobs_get_key_request_schema())
     .schema("JobsGetKeyResponse", jobs_get_key_response_schema())
-    .schema("JobsCancelRequest", job_identity_schema())
+    .schema("JobsCancelRequest", job_admin_action_request_schema())
     .schema("JobsCancelResponse", job_response_schema())
-    .schema("JobsRetryRequest", job_identity_schema())
+    .schema("JobsRetryRequest", job_admin_action_request_schema())
     .schema("JobsRetryResponse", job_response_schema())
     .schema("JobsListDLQRequest", job_list_dlq_request_schema())
-    .schema("JobsListDLQResponse", jobs_list_response_schema())
-    .schema("JobsReplayDLQRequest", job_identity_schema())
+    .schema("JobsListDLQResponse", jobs_list_dlq_response_schema())
+    .schema("JobsReplayDLQRequest", job_admin_action_request_schema())
     .schema("JobsReplayDLQResponse", job_response_schema())
-    .schema("JobsDismissDLQRequest", job_identity_schema())
+    .schema("JobsDismissDLQRequest", job_admin_action_request_schema())
     .schema("JobsDismissDLQResponse", job_response_schema())
     .schema("NotFoundErrorData", not_found_error_schema())
     .error(NOT_FOUND_ERROR, NOT_FOUND_ERROR, "NotFoundErrorData")
@@ -102,25 +120,31 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]),
     )
     .rpc(
-        "Jobs.List",
+        "Jobs.Query",
         admin_rpc(
-            "Jobs.List",
-            "JobsListRequest",
-            "JobsListResponse",
+            "Jobs.Query",
+            "JobsQueryRequest",
+            "JobsQueryResponse",
             READ_CAPABILITY,
         )
-        .docs_with_summary("List jobs.", "Lists jobs matching the requested filters.")
+        .docs_with_summary(
+            "Query jobs workbench data.",
+            "Returns filtered, sorted, grouped Jobs workbench rows and stats.",
+        )
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]),
     )
     .rpc(
-        "Jobs.Get",
+        "Jobs.Inspect",
         admin_rpc(
-            "Jobs.Get",
-            "JobsGetRequest",
-            "JobsGetResponse",
+            "Jobs.Inspect",
+            "JobsInspectRequest",
+            "JobsInspectResponse",
             READ_CAPABILITY,
         )
-        .docs_with_summary("Read a job.", "Returns one background job by id.")
+        .docs_with_summary(
+            "Inspect a job.",
+            "Returns one job with timeline, attempts, related jobs, errors, trigger, and lineage details.",
+        )
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR, NOT_FOUND_ERROR]),
     )
     .rpc(
@@ -191,6 +215,20 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         )
         .docs_with_summary("Dismiss a dead-letter job.", "Marks one dead-letter job as dismissed.")
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR, NOT_FOUND_ERROR]),
+    )
+    .feed(
+        "Jobs.Watch",
+        trellis_contracts::feed(
+            "v1",
+            "feeds.v1.Jobs.Watch",
+            "JobsWatchRequest",
+            "JobsWatchFrame",
+        )
+        .docs_with_summary(
+            "Watch jobs workbench changes.",
+            "Streams invalidation frames for Jobs workbench queries and job inspect views.",
+        )
+        .with_subscribe_capabilities([STREAM_CAPABILITY]),
     )
     .build()?;
 
@@ -268,6 +306,69 @@ fn job_progress_schema() -> Value {
     })
 }
 
+fn job_error_detail_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["message", "fingerprint"],
+        "properties": {
+            "message": { "type": "string" },
+            "type": { "type": "string" },
+            "stack": { "type": "string" },
+            "causes": { "type": "array", "items": { "type": "object" } },
+            "fingerprint": { "type": "string", "minLength": 1 },
+            "firstSeen": { "type": "string", "format": "date-time" },
+            "occurrenceCount": { "type": "integer", "minimum": 0 },
+            "worker": {
+                "type": "object",
+                "properties": {
+                    "service": { "type": "string" },
+                    "instanceId": { "type": "string" },
+                    "version": { "type": "string" },
+                    "runtime": { "type": "string" }
+                }
+            }
+        }
+    })
+}
+
+fn job_trigger_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+            "kind": {
+                "anyOf": [
+                    { "const": "schedule", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "rpc", "type": "string" },
+                    { "const": "event", "type": "string" },
+                    { "const": "manualReplay", "type": "string" },
+                    { "const": "serviceCode", "type": "string" },
+                    { "const": "parentJob", "type": "string" }
+                ]
+            },
+            "id": { "type": "string" },
+            "subject": { "type": "string" },
+            "operationId": { "type": "string" },
+            "parentJobId": { "type": "string" },
+            "traceId": { "type": "string" },
+            "requestId": { "type": "string" }
+        }
+    })
+}
+
+fn job_lineage_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "parentJobId": { "type": "string" },
+            "rootJobId": { "type": "string" },
+            "operationId": { "type": "string" },
+            "relatedKeys": { "type": "array", "items": { "type": "string" } }
+        }
+    })
+}
+
 fn job_context_schema() -> Value {
     json!({
         "type": "object",
@@ -315,8 +416,11 @@ fn job_schema() -> Value {
             "tries": { "type": "integer", "minimum": 0 },
             "maxTries": { "type": "integer", "minimum": 1 },
             "lastError": { "type": "string" },
+            "errorDetail": job_error_detail_schema(),
             "deadline": { "type": "string", "format": "date-time" },
             "progress": job_progress_schema(),
+            "trigger": job_trigger_schema(),
+            "lineage": job_lineage_schema(),
             "queuePolicy": job_queue_policy_metadata_schema(),
             "logs": { "type": "array", "items": job_log_entry_schema() }
         }
@@ -361,7 +465,19 @@ fn job_identity_schema() -> Value {
     })
 }
 
-fn job_list_request_schema() -> Value {
+fn job_admin_action_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "Jobs admin ids are globally addressable; callers identify jobs by id only.",
+        "required": ["id"],
+        "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "reason": { "type": "string", "minLength": 1 }
+        }
+    })
+}
+
+fn jobs_query_request_schema() -> Value {
     json!({
         "type": "object",
         "required": ["limit"],
@@ -369,7 +485,56 @@ fn job_list_request_schema() -> Value {
             "service": { "type": "string", "minLength": 1 },
             "type": { "type": "string", "minLength": 1 },
             "state": { "type": "array", "items": job_state_schema() },
-            "since": { "type": "string", "format": "date-time" },
+            "search": { "type": "string" },
+            "queueKey": { "type": "string" },
+            "trigger": { "type": "string" },
+            "runtimeBand": {
+                "anyOf": [
+                    { "const": "queued", "type": "string" },
+                    { "const": "running", "type": "string" },
+                    { "const": "slow", "type": "string" },
+                    { "const": "terminal", "type": "string" }
+                ]
+            },
+            "groupBy": {
+                "anyOf": [
+                    { "const": "service", "type": "string" },
+                    { "const": "type", "type": "string" },
+                    { "const": "state", "type": "string" },
+                    { "const": "queueKey", "type": "string" },
+                    { "const": "trigger", "type": "string" },
+                    { "const": "runtimeBand", "type": "string" }
+                ]
+            },
+            "sort": {
+                "type": "object",
+                "required": ["field"],
+                "properties": {
+                    "field": {
+                        "anyOf": [
+                            { "const": "updatedAt", "type": "string" },
+                            { "const": "queueAge", "type": "string" },
+                            { "const": "runtime", "type": "string" },
+                            { "const": "failureRate", "type": "string" },
+                            { "const": "retries", "type": "string" },
+                            { "const": "depth", "type": "string" }
+                        ]
+                    },
+                    "direction": {
+                        "anyOf": [
+                            { "const": "asc", "type": "string" },
+                            { "const": "desc", "type": "string" }
+                        ]
+                    }
+                }
+            },
+            "window": {
+                "anyOf": [
+                    { "const": "1h", "type": "string" },
+                    { "const": "24h", "type": "string" },
+                    { "const": "7d", "type": "string" }
+                ]
+            },
             "offset": { "type": "integer", "minimum": 0 },
             "limit": { "type": "integer", "minimum": 1 }
         }
@@ -451,8 +616,86 @@ fn jobs_list_services_response_schema() -> Value {
     page_response_schema(service_entry_schema())
 }
 
-fn jobs_list_response_schema() -> Value {
+fn jobs_list_dlq_response_schema() -> Value {
     page_response_schema(job_schema())
+}
+
+fn jobs_workbench_job_row_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "service", "type", "state", "createdAt", "updatedAt", "tries", "maxTries"],
+        "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "service": { "type": "string", "minLength": 1 },
+            "type": { "type": "string", "minLength": 1 },
+            "state": job_state_schema(),
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" },
+            "startedAt": { "type": "string", "format": "date-time" },
+            "completedAt": { "type": "string", "format": "date-time" },
+            "tries": { "type": "integer", "minimum": 0 },
+            "maxTries": { "type": "integer", "minimum": 1 },
+            "queueKey": { "type": "string" },
+            "queueAgeMs": { "type": "integer", "minimum": 0 },
+            "runtimeMs": { "type": "integer", "minimum": 0 },
+            "runtimeBand": { "type": "string" },
+            "trigger": job_trigger_schema(),
+            "lineage": job_lineage_schema(),
+            "lastError": { "type": "string" },
+            "errorFingerprint": { "type": "string" },
+            "context": job_context_schema(),
+            "progress": job_progress_schema()
+        }
+    })
+}
+
+fn jobs_workbench_group_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["key", "label", "count"],
+        "properties": {
+            "key": { "type": "string" },
+            "label": { "type": "string" },
+            "count": { "type": "integer", "minimum": 0 },
+            "state": job_state_schema(),
+            "depth": { "type": "integer", "minimum": 0 },
+            "failureRate": { "type": "number", "minimum": 0 },
+            "oldestCreatedAt": { "type": "string", "format": "date-time" },
+            "latestUpdatedAt": { "type": "string", "format": "date-time" }
+        }
+    })
+}
+
+fn jobs_workbench_stats_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["total", "byState"],
+        "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "byState": { "type": "object", "patternProperties": { "^.*$": { "type": "integer", "minimum": 0 } } },
+            "running": { "type": "integer", "minimum": 0 },
+            "queued": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "dead": { "type": "integer", "minimum": 0 },
+            "slow": { "type": "integer", "minimum": 0 }
+        }
+    })
+}
+
+fn jobs_query_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["entries", "groups", "stats", "count", "offset", "limit"],
+        "properties": {
+            "entries": { "type": "array", "items": jobs_workbench_job_row_schema() },
+            "groups": { "type": "array", "items": jobs_workbench_group_schema() },
+            "stats": jobs_workbench_stats_schema(),
+            "count": { "type": "integer", "minimum": 0 },
+            "offset": { "type": "integer", "minimum": 0 },
+            "limit": { "type": "integer", "minimum": 1 },
+            "nextOffset": { "type": "integer", "minimum": 0 }
+        }
+    })
 }
 
 fn page_response_schema(entry: Value) -> Value {
@@ -481,13 +724,117 @@ fn service_entry_schema() -> Value {
     })
 }
 
-fn jobs_get_response_schema() -> Value {
+fn job_timeline_event_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["job"],
+        "required": ["sequence", "type", "state", "timestamp"],
         "properties": {
-            "job": job_schema()
+            "sequence": { "type": "integer", "minimum": 0 },
+            "type": { "type": "string", "minLength": 1 },
+            "state": job_state_schema(),
+            "previousState": job_state_schema(),
+            "timestamp": { "type": "string", "format": "date-time" },
+            "tries": { "type": "integer", "minimum": 0 },
+            "message": { "type": "string" },
+            "error": { "type": "string" },
+            "errorDetail": job_error_detail_schema(),
+            "progress": job_progress_schema(),
+            "logs": { "type": "array", "items": job_log_entry_schema() },
+            "workerInstanceId": { "type": "string" },
+            "projected": { "type": "boolean" },
+            "reason": { "type": "string" },
+            "rawEvent": {}
         }
+    })
+}
+
+fn jobs_inspect_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["job", "timeline", "attempts", "related", "errors"],
+        "properties": {
+            "job": job_schema(),
+            "timeline": { "type": "array", "items": job_timeline_event_schema() },
+            "attempts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["try", "startedAt"],
+                    "properties": {
+                        "try": { "type": "integer", "minimum": 0 },
+                        "startedAt": { "type": "string", "format": "date-time" },
+                        "endedAt": { "type": "string", "format": "date-time" },
+                        "state": job_state_schema(),
+                        "error": job_error_detail_schema()
+                    }
+                }
+            },
+            "related": { "type": "array", "items": jobs_workbench_job_row_schema() },
+            "errors": { "type": "array", "items": job_error_detail_schema() },
+            "trigger": job_trigger_schema(),
+            "lineage": job_lineage_schema()
+        }
+    })
+}
+
+fn jobs_watch_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "jobId": { "type": "string", "minLength": 1 },
+            "query": jobs_query_request_schema(),
+            "includeInitial": { "type": "boolean" }
+        }
+    })
+}
+
+fn jobs_watch_frame_schema() -> Value {
+    json!({
+        "anyOf": [
+            {
+                "type": "object",
+                "required": ["kind", "timestamp"],
+                "properties": {
+                    "kind": { "const": "ready", "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "id", "service", "type", "state", "updatedAt"],
+                "properties": {
+                    "kind": { "const": "jobChanged", "type": "string" },
+                    "id": { "type": "string", "minLength": 1 },
+                    "service": { "type": "string", "minLength": 1 },
+                    "type": { "type": "string", "minLength": 1 },
+                    "state": job_state_schema(),
+                    "updatedAt": { "type": "string", "format": "date-time" }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "reason", "timestamp"],
+                "properties": {
+                    "kind": { "const": "queryInvalidated", "type": "string" },
+                    "reason": {
+                        "anyOf": [
+                            { "const": "matched-job-changed", "type": "string" },
+                            { "const": "unknown-match", "type": "string" }
+                        ]
+                    },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "id", "timestamp"],
+                "properties": {
+                    "kind": { "const": "jobInspectChanged", "type": "string" },
+                    "id": { "type": "string", "minLength": 1 },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                }
+            }
+        ]
     })
 }
 

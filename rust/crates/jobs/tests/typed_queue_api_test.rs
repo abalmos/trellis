@@ -50,11 +50,14 @@ fn snapshot_round_trips_to_typed_payload_and_result() {
         tries: 2,
         max_tries: 5,
         last_error: None,
+        error_detail: None,
         deadline: None,
         progress: None,
         logs: None,
         concurrency: None,
         queue_policy: None,
+        trigger: None,
+        lineage: None,
     };
 
     let snapshot: JobSnapshot<serde_json::Value, serde_json::Value> =
