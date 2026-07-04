@@ -8,6 +8,27 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.5] - 2026-07-04
+
+### Public Breaking Changes
+
+- Replaced the Jobs admin list/detail RPCs with the workbench-oriented
+  `Jobs.Query` and `Jobs.Inspect` RPCs. Generated TypeScript and Rust Jobs SDKs
+  no longer expose `Jobs.List` or `Jobs.Get`.
+
+### Added
+
+- Added the Jobs admin workbench API with filtered/sorted/grouped job queries,
+  single-job inspection, keyed-concurrency lookup, live invalidation feed,
+  structured error details, trigger/lineage metadata, related jobs, and admin
+  action reasons.
+- Added Jobs admin Console pages backed by `Jobs.Query`, `Jobs.Inspect`, and
+  `Jobs.Watch`, including queue stats, grouping, detail timeline, related jobs,
+  and cancel/retry/DLQ actions.
+- Added live TypeScript and Rust coverage for the new Jobs admin workbench API,
+  terminal job inspection, keyed queue policies, retry-to-dead projection,
+  worker presence, and control-plane Jobs admin registration.
+
 ## [0.11.0-rc.4] - 2026-07-03
 
 ### Public Breaking Changes
