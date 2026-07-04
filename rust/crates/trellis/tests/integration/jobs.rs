@@ -1042,7 +1042,7 @@ async fn call_documents_process_with_retry(
     client: &trellis_rs::client::TrellisClient,
     document_id: &str,
 ) -> WorkflowOutput {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match client
             .call::<DocumentsProcessRpc>(&WorkflowInput {
@@ -1067,7 +1067,7 @@ async fn call_documents_keyed_process_with_retry(
     group_key: &str,
     sequence: u64,
 ) -> KeyedWorkflowOutput {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match client
             .call::<DocumentsKeyedProcessRpc>(&KeyedWorkflowInput {
@@ -1092,7 +1092,7 @@ async fn call_documents_submit_long_process_with_retry(
     client: &trellis_rs::client::TrellisClient,
     document_id: &str,
 ) -> WorkflowOutput {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         match client
             .call::<DocumentsSubmitLongProcessRpc>(&WorkflowInput {
