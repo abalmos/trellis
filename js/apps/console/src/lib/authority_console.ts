@@ -73,6 +73,50 @@ export type DeltaCapabilityRow = {
   availability: "required" | "optional";
 };
 
+export type ContractChangeKind = "Add" | "Change" | "Remove";
+
+export type ContractDiffRow = {
+  id: string;
+  change: ContractChangeKind;
+  kind: string;
+  name: string;
+  detail: string;
+  before: unknown;
+  after: unknown;
+};
+
+export type ContractManifestDiffRows = {
+  contracts: ContractDiffRow[];
+  surfaces: ContractDiffRow[];
+  schemas: ContractDiffRow[];
+  resources: ContractDiffRow[];
+  capabilities: ContractDiffRow[];
+};
+type ContractDiffGroup = keyof ContractManifestDiffRows;
+type ContractDiffSection = {
+  group: ContractDiffGroup;
+  kind: string;
+  path: string[];
+};
+
+const CONTRACT_DIFF_SECTIONS: ContractDiffSection[] = [
+  { group: "contracts", kind: "Docs", path: ["docs"] },
+  { group: "contracts", kind: "Required use", path: ["uses", "required"] },
+  { group: "contracts", kind: "Optional use", path: ["uses", "optional"] },
+  { group: "surfaces", kind: "RPC", path: ["rpc"] },
+  { group: "surfaces", kind: "Operation", path: ["operations"] },
+  { group: "surfaces", kind: "Event", path: ["events"] },
+  { group: "surfaces", kind: "Feed", path: ["feeds"] },
+  { group: "schemas", kind: "Schema", path: ["schemas"] },
+  { group: "schemas", kind: "Error", path: ["errors"] },
+  { group: "resources", kind: "Job", path: ["jobs"] },
+  { group: "resources", kind: "State", path: ["state"] },
+  { group: "resources", kind: "KV", path: ["resources", "kv"] },
+  { group: "resources", kind: "Store", path: ["resources", "store"] },
+  { group: "resources", kind: "Event consumer", path: ["eventConsumers"] },
+  { group: "capabilities", kind: "Capability", path: ["capabilities"] },
+];
+
 export type CreatesCapabilityRow = {
   id: string;
   capability: string;
@@ -297,6 +341,28 @@ export function deltaCapabilityRows(
     capability: need.capability,
     availability: need.required ? "required" : "optional",
   }));
+}
+
+export function contractManifestDiffRows(
+  previous: unknown,
+  proposed: unknown,
+): ContractManifestDiffRows {
+  const oldContract = isRecord(previous) ? previous : null;
+  const newContract = isRecord(proposed) ? proposed : null;
+  if (!newContract) return emptyContractDiffRows();
+  const rows = emptyContractDiffRows();
+  rows.contracts.push(...contractIdentityRows(oldContract, newContract));
+  for (const section of CONTRACT_DIFF_SECTIONS) {
+    rows[section.group].push(
+      ...diffRecordRows(
+        contractPathRecord(oldContract, section.path),
+        contractPathRecord(newContract, section.path),
+        section.kind,
+        section.path.join("."),
+      ),
+    );
+  }
+  return rows;
 }
 
 export function createsCapabilityRows(
@@ -660,6 +726,435 @@ function isAuthorityPlanState(value: unknown): value is AuthorityPlanState {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function emptyContractDiffRows(): ContractManifestDiffRows {
+  return {
+    contracts: [],
+    surfaces: [],
+    schemas: [],
+    resources: [],
+    capabilities: [],
+  };
+}
+
+function contractIdentityRows(
+  oldContract: Record<string, unknown> | null,
+  newContract: Record<string, unknown>,
+): ContractDiffRow[] {
+  const oldIdentity = contractIdentity(oldContract);
+  const newIdentity = contractIdentity(newContract);
+  if (oldContract && unknownEquals(oldIdentity, newIdentity)) return [];
+  return [
+    {
+      id: "contract:manifest",
+      change: oldContract ? "Change" : "Add",
+      kind: "Contract",
+      name: stringProperty(newContract, "id") ?? "Contract",
+      detail: stringProperty(newContract, "displayName") ??
+        (oldContract ? "Contract metadata changed" : "New contract"),
+      before: oldContract,
+      after: newContract,
+    },
+  ];
+}
+
+function contractIdentity(
+  contract: Record<string, unknown> | null,
+): Record<string, unknown> {
+  if (!contract) return {};
+  const ignored = new Set([
+    "capabilities",
+    "docs",
+    "errors",
+    "eventConsumers",
+    "events",
+    "exports",
+    "feeds",
+    "jobs",
+    "operations",
+    "resources",
+    "rpc",
+    "schemas",
+    "state",
+    "uses",
+  ]);
+  return Object.fromEntries(
+    Object.entries(contract).filter(([key]) => !ignored.has(key)),
+  );
+}
+
+function contractPathRecord(
+  contract: Record<string, unknown> | null,
+  path: string[],
+): Record<string, unknown> | null {
+  let current: unknown = contract;
+  for (const key of path) {
+    if (!isRecord(current)) return null;
+    current = current[key];
+  }
+  return isRecord(current) ? current : null;
+}
+
+function diffRecordRows(
+  oldRecord: Record<string, unknown> | null,
+  newRecord: Record<string, unknown> | null,
+  kind: string,
+  idPrefix: string,
+): ContractDiffRow[] {
+  const names = [
+    ...new Set([
+      ...Object.keys(oldRecord ?? {}),
+      ...Object.keys(newRecord ?? {}),
+    ]),
+  ].sort((left, right) => left.localeCompare(right));
+  return names.flatMap((name) => {
+    const oldValue = oldRecord?.[name];
+    const newValue = newRecord?.[name];
+    if (oldValue !== undefined && newValue !== undefined) {
+      if (unknownEquals(oldValue, newValue)) return [];
+      return [
+        contractDiffRow(idPrefix, "Change", kind, name, oldValue, newValue),
+      ];
+    }
+    if (newValue !== undefined) {
+      return [contractDiffRow(idPrefix, "Add", kind, name, null, newValue)];
+    }
+    return [contractDiffRow(idPrefix, "Remove", kind, name, oldValue, null)];
+  });
+}
+
+function contractDiffRow(
+  idPrefix: string,
+  change: ContractChangeKind,
+  kind: string,
+  name: string,
+  oldValue: unknown,
+  newValue: unknown,
+): ContractDiffRow {
+  return {
+    id: `${idPrefix}:${name}`,
+    change,
+    kind,
+    name,
+    detail: contractPartDetail(change, kind, oldValue, newValue),
+    before: oldValue,
+    after: newValue,
+  };
+}
+
+function contractPartDetail(
+  change: ContractChangeKind,
+  kind: string,
+  oldValue: unknown,
+  newValue: unknown,
+): string {
+  if (change === "Change") {
+    const semantic = semanticContractChange(kind, oldValue, newValue);
+    if (semantic.length > 0) return semantic.join("; ");
+    const oldDetail = contractPartSummary(oldValue);
+    const newDetail = contractPartSummary(newValue);
+    return oldDetail === newDetail
+      ? changedFieldNames(oldValue, newValue)
+      : `${oldDetail} -> ${newDetail}`;
+  }
+  return change === "Remove"
+    ? contractPartSummary(oldValue)
+    : contractPartSummary(newValue);
+}
+
+function contractPartSummary(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true schema" : "false schema";
+  if (typeof value === "string") return textSummary(value);
+  if (!isRecord(value)) return "—";
+  const required = stringArraySummary(value.required);
+  const properties = isRecord(value.properties)
+    ? `${Object.keys(value.properties).length} properties`
+    : null;
+  const subject = stringProperty(value, "subject");
+  const type = Array.isArray(value.type)
+    ? value.type.filter((entry): entry is string => typeof entry === "string")
+      .join(" | ")
+    : stringProperty(value, "type");
+  const title = stringProperty(value, "title");
+  const description = stringProperty(value, "description");
+  const purpose = stringProperty(value, "purpose");
+  const displayName = stringProperty(value, "displayName");
+  const refs = [
+    labeledSchemaRef("schema", value.schema),
+    labeledSchemaRef("input", value.input),
+    labeledSchemaRef("output", value.output),
+    labeledSchemaRef("event", value.event),
+    labeledSchemaRef("payload", value.payload),
+    labeledSchemaRef("result", value.result),
+  ].filter((entry): entry is string => Boolean(entry));
+  const constraints = [
+    required ? `required: ${required}` : null,
+    properties,
+  ].filter((entry): entry is string => Boolean(entry));
+  return [
+    subject,
+    ...refs,
+    type,
+    ...constraints,
+    displayName,
+    title,
+    purpose,
+    description,
+  ]
+    .filter((entry): entry is string => Boolean(entry))
+    .join(" · ") || "changed";
+}
+
+function semanticContractChange(
+  kind: string,
+  oldValue: unknown,
+  newValue: unknown,
+): string[] {
+  if (typeof oldValue === "string" || typeof newValue === "string") {
+    return [`${primitiveSummary(oldValue)} -> ${primitiveSummary(newValue)}`];
+  }
+  if (!isRecord(oldValue) || !isRecord(newValue)) return [];
+
+  return [
+    ...new Set([
+      ...schemaChanges(kind, oldValue, newValue),
+      ...referenceChanges(oldValue, newValue),
+      ...stringFieldChanges(oldValue, newValue, [
+        "subject",
+        "version",
+        "displayName",
+        "title",
+        "description",
+        "purpose",
+        "consequence",
+        "summary",
+        "markdown",
+      ]),
+      ...arrayFieldChanges(oldValue, newValue, ["requiredCapabilities"]),
+      ...docsChanges(oldValue, newValue),
+    ]),
+  ];
+}
+
+function schemaChanges(
+  kind: string,
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+): string[] {
+  if (kind !== "Schema" && kind !== "Error") return [];
+  return [
+    ...stringFieldChanges(oldValue, newValue, ["type", "format", "pattern"]),
+    arrayDiffSummary("required fields", oldValue.required, newValue.required),
+    arrayDiffSummary("enum", oldValue.enum, newValue.enum),
+    recordKeyDiffSummary(
+      "properties",
+      oldValue.properties,
+      newValue.properties,
+    ),
+    valueChangeSummary(
+      "additionalProperties",
+      oldValue.additionalProperties,
+      newValue.additionalProperties,
+    ),
+    valueChangeSummary("items", oldValue.items, newValue.items),
+  ].filter((entry): entry is string => Boolean(entry));
+}
+
+function referenceChanges(
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+): string[] {
+  return ["schema", "input", "output", "event", "progress", "payload", "result"]
+    .flatMap((key) => {
+      const oldRef = schemaRefName(oldValue[key]);
+      const newRef = schemaRefName(newValue[key]);
+      return oldRef !== newRef
+        ? [`${key}: ${oldRef ?? "none"} -> ${newRef ?? "none"}`]
+        : [];
+    });
+}
+
+function docsChanges(
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+): string[] {
+  if (!isRecord(oldValue.docs) && !isRecord(newValue.docs)) return [];
+  return stringFieldChanges(
+    isRecord(oldValue.docs) ? oldValue.docs : {},
+    isRecord(newValue.docs) ? newValue.docs : {},
+    ["summary", "markdown"],
+    "docs ",
+  );
+}
+
+function stringFieldChanges(
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+  keys: string[],
+  prefix = "",
+): string[] {
+  return keys.flatMap((key) => {
+    const oldField = stringOrStringArray(oldValue[key]);
+    const newField = stringOrStringArray(newValue[key]);
+    return oldField !== newField
+      ? [
+        `${prefix}${key}: ${primitiveSummary(oldField)} -> ${
+          primitiveSummary(newField)
+        }`,
+      ]
+      : [];
+  });
+}
+
+function arrayFieldChanges(
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>,
+  keys: string[],
+): string[] {
+  return keys.flatMap((key) => {
+    const summary = arrayDiffSummary(key, oldValue[key], newValue[key]);
+    return summary ? [summary] : [];
+  });
+}
+
+function arrayDiffSummary(
+  label: string,
+  oldValue: unknown,
+  newValue: unknown,
+): string | null {
+  const oldEntries = stringArray(oldValue);
+  const newEntries = stringArray(newValue);
+  if (oldEntries.length === 0 && newEntries.length === 0) return null;
+  const added = newEntries.filter((entry) => !oldEntries.includes(entry));
+  const removed = oldEntries.filter((entry) => !newEntries.includes(entry));
+  return added.length || removed.length
+    ? `${label}: ${diffTokens(added, removed)}`
+    : null;
+}
+
+function recordKeyDiffSummary(
+  label: string,
+  oldValue: unknown,
+  newValue: unknown,
+): string | null {
+  const oldKeys = isRecord(oldValue) ? Object.keys(oldValue).sort() : [];
+  const newKeys = isRecord(newValue) ? Object.keys(newValue).sort() : [];
+  const added = newKeys.filter((entry) => !oldKeys.includes(entry));
+  const removed = oldKeys.filter((entry) => !newKeys.includes(entry));
+  return added.length || removed.length
+    ? `${label}: ${diffTokens(added, removed)}`
+    : null;
+}
+
+function valueChangeSummary(
+  label: string,
+  oldValue: unknown,
+  newValue: unknown,
+): string | null {
+  return unknownEquals(oldValue, newValue)
+    ? null
+    : `${label}: ${primitiveSummary(oldValue)} -> ${
+      primitiveSummary(newValue)
+    }`;
+}
+
+function diffTokens(added: string[], removed: string[]): string {
+  return [
+    ...added.map((entry) => `+${entry}`),
+    ...removed.map((entry) => `-${entry}`),
+  ].join(", ");
+}
+
+function primitiveSummary(value: unknown): string {
+  if (value === undefined || value === null) return "none";
+  if (typeof value === "string") return textSummary(value);
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return stringArray(value).join(", ") || `${value.length} entries`;
+  }
+  if (isRecord(value)) {
+    return Object.keys(value).length > 0 ? "changed" : "none";
+  }
+  return "changed";
+}
+
+function textSummary(value: string): string {
+  const collapsed = value.replace(/\s+/g, " ").trim();
+  return collapsed.length > 80
+    ? `${collapsed.slice(0, 77)}...`
+    : collapsed || "empty";
+}
+
+function stringOrStringArray(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return stringArray(value).join(" | ");
+  return null;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string").sort()
+    : [];
+}
+
+function changedFieldNames(oldValue: unknown, newValue: unknown): string {
+  if (!isRecord(oldValue) || !isRecord(newValue)) return "changed";
+  const changed = [
+    ...new Set([
+      ...Object.keys(oldValue),
+      ...Object.keys(newValue),
+    ]),
+  ]
+    .filter((key) => !unknownEquals(oldValue[key], newValue[key]))
+    .sort((left, right) => left.localeCompare(right));
+  return changed.length > 0 ? `changed: ${changed.join(", ")}` : "changed";
+}
+
+function stringArraySummary(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const strings = value.filter((entry): entry is string =>
+    typeof entry === "string"
+  );
+  return strings.length > 0 ? strings.join(", ") : "none";
+}
+
+function labeledSchemaRef(label: string, value: unknown): string | null {
+  const name = schemaRefName(value);
+  return name ? `${label}: ${name}` : null;
+}
+
+function schemaRefName(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (!isRecord(value)) return null;
+  const schema = value.schema;
+  return typeof schema === "string" && schema.length > 0 ? schema : null;
+}
+
+function stringProperty(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function unknownEquals(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => unknownEquals(entry, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) =>
+      key === rightKeys[index] && unknownEquals(left[key], right[key])
+    );
 }
 
 function isAuthorityNeedSet(value: unknown): value is AuthorityNeedSet {

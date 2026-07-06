@@ -1,41 +1,62 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
+  import type { TrellisContractGetOutput } from "@qlever-llc/trellis/sdk/core";
   import { goto } from "$app/navigation";
   import { base, resolve } from "$app/paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
-  import DataTable from "$lib/components/DataTable.svelte";
-  import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
-  import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
-  import StatusBadge from "$lib/components/StatusBadge.svelte";
   import {
-    authorityPlanChangeState,
-    deltaCapabilityRows,
-    deltaContractRows,
-    deltaResourceRows,
-    deltaSurfaceRows,
+    contractManifestDiffRows,
+    type ContractChangeKind,
+    type ContractDiffRow,
   } from "$lib/authority_console";
-  import { errorMessage, formatDate } from "$lib/format";
+  import { structuredPatch } from "diff";
+  import { errorMessage } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
+  import Icon from "$lib/components/Icon.svelte";
+  import { fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
 
   type PlanState = "pending" | "accepted" | "rejected" | "expired";
   type AuthorityKind = DeploymentAuthorityKind;
+  type ContractDetail = TrellisContractGetOutput["contract"];
+  type DiffGroup = "contracts" | "surfaces" | "schemas" | "resources" | "capabilities";
+  type SummaryKind = "permission" | "api" | "data-shape" | "background-job" | "storage" | "metadata";
+  type SummaryField =
+    | { kind: "scalar"; label: string; before: string; after: string; mono?: boolean; breaking?: boolean }
+    | { kind: "set"; label: string; added: string[]; removed: string[]; kept: string[]; mono?: boolean; breaking?: boolean };
+  type SummaryEntry = {
+    id: string;
+    change: ContractChangeKind;
+    kind: SummaryKind;
+    name: string;
+    summary: string;
+    fields: SummaryField[];
+    breaking: boolean;
+  };
+  type SummaryGroup = {
+    kind: SummaryKind;
+    label: string;
+    entries: SummaryEntry[];
+  };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityPlansRequest = {
     (method: "Auth.DeploymentAuthority.Plans.Get", input: { planId: string }): RpcTakeable<{ plan: DeploymentAuthorityPlan }>;
+    (method: "Auth.DeploymentAuthority.Plans.List", input: { deploymentId: string; state: PlanState; limit: number; offset?: number }): RpcTakeable<{ entries: DeploymentAuthorityPlan[] }>;
     (method: "Auth.DeploymentAuthority.Get", input: { deploymentId: string }): RpcTakeable<{ authority: { kind: AuthorityKind } }>;
     (method: "Auth.DeploymentAuthority.AcceptUpdate", input: { planId: string; expectedDesiredVersion?: string }): RpcTakeable<unknown>;
     (method: "Auth.DeploymentAuthority.AcceptMigration", input: { planId: string; expectedDesiredVersion?: string; acknowledgement: string }): RpcTakeable<unknown>;
     (method: "Auth.DeploymentAuthority.Reject", input: { planId: string; reason?: string }): RpcTakeable<unknown>;
+    (method: "Trellis.Contract.Get", input: { digest: string }): RpcTakeable<TrellisContractGetOutput>;
   };
 
   const trellis = getTrellis();
   const request = trellis.request.bind(trellis) as AuthorityPlansRequest;
-  const planId = $derived(decodeURIComponent(page.url.pathname.split("/").filter(Boolean).at(-1) ?? ""));
+  const planId = $derived(decodeURIComponent(page.params.planId ?? ""));
   const plansHref = `${base}/admin/authority/plans`;
 
   let loading = $state(true);
@@ -43,19 +64,53 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let plan = $state.raw<DeploymentAuthorityPlan | null>(null);
+  let previousContract = $state.raw<ContractDetail | null>(null);
   let authorityKind = $state<AuthorityKind | null>(null);
-  let acknowledgement = $state("");
+  let acknowledgeChecked = $state(false);
   let rejectReason = $state("");
+  let rejectDetails = $state("");
+  let activeTab = $state<"summary" | "full">("summary");
 
   const planStatus = $derived(plan ? planState(plan) : "pending");
   const pending = $derived(planStatus === "pending");
-  const requestedState = $derived(plan ? authorityPlanChangeState(plan) : null);
-  const contractRows = $derived(requestedState ? deltaContractRows(requestedState) : []);
-  const surfaceRows = $derived(requestedState ? deltaSurfaceRows(requestedState) : []);
-  const resourceRows = $derived(requestedState ? deltaResourceRows(requestedState) : []);
-  const capabilityRows = $derived(requestedState ? deltaCapabilityRows(requestedState) : []);
-  const migrationAcknowledged = $derived(acknowledgement.trim() === "I understand");
+  const contractDiff = $derived(contractManifestDiffRows(previousContract, plan?.proposal.contract));
+  const capabilityRows = $derived(contractDiff.capabilities);
+  const surfaceRows = $derived(contractDiff.surfaces);
+  const resourceRows = $derived(contractDiff.resources);
+  const schemaRows = $derived(contractDiff.schemas);
+  const contractRows = $derived(contractDiff.contracts);
+  const isMigration = $derived(plan?.classification === "migration");
+  const migrationAcknowledged = $derived(acknowledgeChecked);
   const rejectReady = $derived(rejectReason.trim().length > 0);
+  const summaryGroups = $derived(buildSummary(capabilityRows, surfaceRows, resourceRows, schemaRows, contractRows));
+  const summaryEntryCount = $derived(summaryGroups.reduce((n, g) => n + g.entries.length, 0));
+  const summaryBreakingCount = $derived(summaryGroups.reduce((n, g) => n + g.entries.filter((e) => e.breaking).length, 0));
+  const jsonDiff = $derived(buildJsonDiff(previousContract, plan?.proposal.contract));
+  const diffContext = 3;
+  const diffRows = $derived(buildDiffRows(jsonDiff, diffContext));
+  let expandedGaps = $state<Set<number>>(new Set());
+  function toggleGap(gapIndex: number) {
+    const next = new Set(expandedGaps);
+    if (next.has(gapIndex)) next.delete(gapIndex);
+    else next.add(gapIndex);
+    expandedGaps = next;
+  }
+  function isGapExpanded(gapIndex: number): boolean {
+    return expandedGaps.has(gapIndex);
+  }
+  function expandAllGaps() {
+    const all = new Set<number>();
+    for (const row of diffRows) {
+      if (row.kind === "gap") all.add(row.gapIndex);
+    }
+    expandedGaps = all;
+  }
+  function collapseAllGaps() {
+    expandedGaps = new Set();
+  }
+  const gapCount = $derived(diffRows.filter((r) => r.kind === "gap").length);
+  const expandedGapCount = $derived(diffRows.filter((r) => r.kind === "gap" && expandedGaps.has(r.gapIndex)).length);
+  const allGapsExpanded = $derived(gapCount > 0 && expandedGapCount === gapCount);
 
   function planState(value: DeploymentAuthorityPlan): PlanState {
     if ("state" in value && isPlanState(value.state)) return value.state;
@@ -66,38 +121,560 @@
     return value === "pending" || value === "accepted" || value === "rejected" || value === "expired";
   }
 
-  function decisionField(value: DeploymentAuthorityPlan, key: "decisionAt" | "decisionReason"): string | null {
-    if (!(key in value)) return null;
-    const field = value[key];
-    return typeof field === "string" && field.length > 0 ? field : null;
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
-  function decisionBy(value: DeploymentAuthorityPlan): string {
-    if (!("decisionBy" in value) || value.decisionBy === null || typeof value.decisionBy !== "object") return "—";
-    const actor = value.decisionBy;
-    for (const key of ["email", "userId", "id", "subject"]) {
-      const field = actor[key];
-      if (typeof field === "string" && field.length > 0) return field;
+  function stringField(record: Record<string, unknown>, key: string): string | null {
+    const value = record[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
+  }
+
+  function summarizeCapability(row: ContractDiffRow): SummaryEntry {
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    if (row.change === "Add") {
+      const desc = (after ? stringField(after, "description") : null) ?? "new permission";
+      return { id: row.id, change: "Add", kind: "permission", name: row.name, summary: desc, fields: [], breaking: false };
     }
-    return "recorded";
+    if (row.change === "Remove") {
+      return { id: row.id, change: "Remove", kind: "permission", name: row.name, summary: "", fields: [], breaking: true };
+    }
+    const fields: SummaryField[] = [];
+    const beforeDesc = before ? stringField(before, "description") : null;
+    const afterDesc = after ? stringField(after, "description") : null;
+    if (beforeDesc !== afterDesc) fields.push(scalarField("description", beforeDesc ?? "—", afterDesc ?? "—"));
+    const beforeConseq = before ? stringField(before, "consequence") : null;
+    const afterConseq = after ? stringField(after, "consequence") : null;
+    if (beforeConseq !== afterConseq) fields.push(scalarField("consequence", beforeConseq ?? "—", afterConseq ?? "—"));
+    const beforeName = before ? stringField(before, "displayName") : null;
+    const afterName = after ? stringField(after, "displayName") : null;
+    if (beforeName !== afterName) fields.push(scalarField("display name", beforeName ?? "—", afterName ?? "—"));
+    const summary = buildChangeSummary(fields);
+    return { id: row.id, change: "Change", kind: "permission", name: row.name, summary, fields, breaking: false };
   }
 
-  function statusVariant(value: PlanState): "healthy" | "degraded" | "unhealthy" | "offline" {
-    if (value === "accepted") return "healthy";
-    if (value === "pending") return "degraded";
-    if (value === "rejected") return "unhealthy";
-    return "offline";
+  function buildChangeSummary(_fields: SummaryField[]): string {
+    return "";
+  }
+
+  function summarizeSurface(row: ContractDiffRow): SummaryEntry {
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    const kindLabel = surfaceKindLabel(row.kind);
+    if (row.change === "Add") {
+      const desc = describeSurface(after, "new") ?? `new ${kindLabel} added`;
+      return { id: row.id, change: "Add", kind: surfaceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
+    }
+    if (row.change === "Remove") {
+      return { id: row.id, change: "Remove", kind: surfaceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: true };
+    }
+    const fields: SummaryField[] = [];
+    const beforeSubject = before ? stringField(before, "subject") : null;
+    const afterSubject = after ? stringField(after, "subject") : null;
+    if (beforeSubject !== null || afterSubject !== null) fields.push(scalarField("subject", beforeSubject ?? "—", afterSubject ?? "—", true, beforeSubject !== afterSubject));
+    for (const key of ["description", "purpose", "consequence"]) {
+      const b = before ? stringField(before, key) : null;
+      const a = after ? stringField(after, key) : null;
+      if (b !== a) fields.push(scalarField(key, b ?? "—", a ?? "—"));
+    }
+    const beforeReqs = before && Array.isArray(before.requiredCapabilities) ? before.requiredCapabilities.filter((v): v is string => typeof v === "string") : [];
+    const afterReqs = after && Array.isArray(after.requiredCapabilities) ? after.requiredCapabilities.filter((v): v is string => typeof v === "string") : [];
+    if (beforeReqs.length > 0 || afterReqs.length > 0) {
+      const field = stringSetField("required caps", beforeReqs, afterReqs);
+      if (field.added.length + field.removed.length > 0) fields.push(field);
+    }
+    for (const [label, key] of [["input", "input"], ["output", "output"], ["event", "event"], ["progress", "progress"], ["payload", "payload"], ["result", "result"], ["error", "error"], ["request", "requestModel"], ["response", "responseModel"]] as const) {
+      const b = before ? schemaRefLabel(before, key) : null;
+      const a = after ? schemaRefLabel(after, key) : null;
+      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true, true));
+    }
+    const summary = buildChangeSummary(fields);
+    return { id: row.id, change: "Change", kind: surfaceSummaryKind(row.kind), name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+  }
+
+  function surfaceKindLabel(kind: string): string {
+    if (kind === "RPC") return "API method";
+    if (kind === "Operation") return "operation";
+    if (kind === "Event") return "event";
+    if (kind === "Feed") return "feed";
+    return "interface";
+  }
+
+  function surfaceSummaryKind(kind: string): SummaryKind {
+    if (kind === "RPC" || kind === "Operation" || kind === "Event" || kind === "Feed") return "api";
+    return "metadata";
+  }
+
+  function describeSurface(record: Record<string, unknown> | null, prefix: "new" | "removed"): string | null {
+    if (!record) return null;
+    const subject = stringField(record, "subject");
+    const purpose = stringField(record, "purpose");
+    const input = schemaRefLabel(record, "input");
+    if (subject) return `${prefix} ${surfaceKindLabel(surfaceKindFromRecord(record))} at ${subject}`;
+    if (purpose) return purpose;
+    if (input) return `${prefix} interface using data shape ${input}`;
+    return null;
+  }
+
+  function surfaceKindFromRecord(record: Record<string, unknown>): string {
+    if ("requestModel" in record || "responseModel" in record) return "Feed";
+    if ("request" in record || "progress" in record) return "Operation";
+    if ("event" in record) return "Event";
+    if ("input" in record || "output" in record) return "RPC";
+    return "RPC";
+  }
+
+  function schemaRefLabel(record: Record<string, unknown>, key: string): string | null {
+    const ref = record[key];
+    if (typeof ref === "string" && ref.length > 0) return ref;
+    if (isRecord(ref)) {
+      const nested = ref.schema;
+      if (typeof nested === "string" && nested.length > 0) return nested;
+    }
+    return null;
+  }
+
+  function formatList(items: string[]): string {
+    if (items.length === 0) return "";
+    if (items.length === 1) return items[0];
+    if (items.length === 2) return `${items[0]} and ${items[1]}`;
+    return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+  }
+
+  function stringSetField(label: string, before: unknown, after: unknown, mono = true): Extract<SummaryField, { kind: "set" }> {
+    const beforeSet = new Set(coerceToStringArray(before));
+    const afterSet = new Set(coerceToStringArray(after));
+    const added: string[] = [];
+    const removed: string[] = [];
+    const kept: string[] = [];
+    for (const value of afterSet) {
+      if (beforeSet.has(value)) kept.push(value);
+      else added.push(value);
+    }
+    for (const value of beforeSet) {
+      if (!afterSet.has(value)) removed.push(value);
+    }
+    const breaking = removed.length > 0 && (label === "required" || label === "capabilities");
+    return { kind: "set", label, added: added.sort(), removed: removed.sort(), kept: kept.sort(), mono, breaking };
+  }
+
+  function scalarField(label: string, before: string, after: string, mono = false, breaking = false): Extract<SummaryField, { kind: "scalar" }> {
+    return { kind: "scalar", label, before, after, mono, breaking };
+  }
+
+  function isFieldBreaking(field: SummaryField): boolean {
+    return field.breaking === true;
+  }
+
+  function coerceToStringArray(value: unknown): string[] {
+    return Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === "string")
+      : [];
+  }
+
+  function summarizeResource(row: ContractDiffRow): SummaryEntry {
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    const kindLabel = resourceKindLabel(row.kind);
+    if (row.change === "Add") {
+      const desc = describeResource(after) ?? `new ${kindLabel} added`;
+      return { id: row.id, change: "Add", kind: resourceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
+    }
+    if (row.change === "Remove") {
+      return { id: row.id, change: "Remove", kind: resourceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: true };
+    }
+    const fields: SummaryField[] = [];
+    for (const [label, key] of [["payload", "payload"], ["result", "result"], ["input", "input"], ["output", "output"], ["schema", "schema"], ["keySchema", "keySchema"], ["valueSchema", "valueSchema"]] as const) {
+      const b = before ? schemaRefLabel(before, key) : null;
+      const a = after ? schemaRefLabel(after, key) : null;
+      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true, true));
+    }
+    const beforeCaps = before && Array.isArray(before.capabilities) ? before.capabilities.filter((v): v is string => typeof v === "string") : [];
+    const afterCaps = after && Array.isArray(after.capabilities) ? after.capabilities.filter((v): v is string => typeof v === "string") : [];
+    if (beforeCaps.length > 0 || afterCaps.length > 0) {
+      const field = stringSetField("capabilities", beforeCaps, afterCaps);
+      if (field.added.length + field.removed.length > 0) fields.push(field);
+    }
+    for (const [label, key] of [["concurrency", "concurrency"], ["maxDeliver", "maxDeliver"], ["ttlMs", "ttlMs"], ["maxValueSizeBytes", "maxValueSizeBytes"], ["history", "history"]] as const) {
+      const b = before ? primitiveValue(before, key) : "—";
+      const a = after ? primitiveValue(after, key) : "—";
+      if (b !== a) fields.push(scalarField(label, b, a, true));
+    }
+    const beforePurpose = before ? stringField(before, "purpose") : null;
+    const afterPurpose = after ? stringField(after, "purpose") : null;
+    if (beforePurpose !== afterPurpose) fields.push(scalarField("purpose", beforePurpose ?? "—", afterPurpose ?? "—"));
+    const summary = buildChangeSummary(fields);
+    return { id: row.id, change: "Change", kind: resourceSummaryKind(row.kind), name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+  }
+
+  function primitiveValue(record: Record<string, unknown>, key: string): string {
+    const field = record[key];
+    if (field === undefined || field === null) return "—";
+    if (typeof field === "string") return field;
+    if (typeof field === "number" || typeof field === "boolean") return String(field);
+    return "—";
+  }
+
+  function resourceKindLabel(kind: string): string {
+    if (kind === "Job") return "background job";
+    if (kind === "KV") return "key-value store";
+    if (kind === "Store") return "data store";
+    if (kind === "State") return "state resource";
+    if (kind === "Event consumer") return "event consumer";
+    return "resource";
+  }
+
+  function resourceSummaryKind(kind: string): SummaryKind {
+    if (kind === "Job" || kind === "Event consumer") return "background-job";
+    if (kind === "KV" || kind === "Store" || kind === "State") return "storage";
+    return "metadata";
+  }
+
+  function describeResource(record: Record<string, unknown> | null): string | null {
+    if (!record) return null;
+    const purpose = stringField(record, "purpose");
+    const payload = schemaRefLabel(record, "payload");
+    if (purpose) return purpose;
+    if (payload) return `processes data of shape ${payload}`;
+    return null;
+  }
+
+  function summarizeSchema(row: ContractDiffRow): SummaryEntry {
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    if (row.change === "Add") {
+      const desc = describeSchema(after) ?? "new data shape added";
+      return { id: row.id, change: "Add", kind: "data-shape", name: row.name, summary: desc, fields: [], breaking: false };
+    }
+    if (row.change === "Remove") {
+      return { id: row.id, change: "Remove", kind: "data-shape", name: row.name, summary: "", fields: [], breaking: true };
+    }
+    const fields: SummaryField[] = [];
+    const beforeType = before && typeof before.type === "string" ? before.type : null;
+    const afterType = after && typeof after.type === "string" ? after.type : null;
+    if (beforeType !== afterType) fields.push(scalarField("type", beforeType ?? "—", afterType ?? "—", true, true));
+    const beforeRequired = before && Array.isArray(before.required) ? before.required.filter((v): v is string => typeof v === "string") : [];
+    const afterRequired = after && Array.isArray(after.required) ? after.required.filter((v): v is string => typeof v === "string") : [];
+    if (beforeRequired.length > 0 || afterRequired.length > 0) {
+      const field = stringSetField("required", beforeRequired, afterRequired);
+      if (field.added.length + field.removed.length > 0) fields.push(field);
+    }
+    const beforeProps = before && isRecord(before.properties) ? Object.keys(before.properties) : [];
+    const afterProps = after && isRecord(after.properties) ? Object.keys(after.properties) : [];
+    if (beforeProps.length > 0 || afterProps.length > 0) {
+      const field = stringSetField("properties", beforeProps, afterProps);
+      if (field.added.length + field.removed.length > 0) fields.push(field);
+    }
+    const beforeEnum = before && Array.isArray(before.enum) ? before.enum.filter((v): v is string => typeof v === "string") : [];
+    const afterEnum = after && Array.isArray(after.enum) ? after.enum.filter((v): v is string => typeof v === "string") : [];
+    if (beforeEnum.length > 0 || afterEnum.length > 0) {
+      const field = stringSetField("enum", beforeEnum, afterEnum);
+      if (field.added.length + field.removed.length > 0) fields.push(field);
+    }
+    for (const key of ["format", "pattern"]) {
+      const b = before ? stringField(before, key) : null;
+      const a = after ? stringField(after, key) : null;
+      if (b !== a) fields.push(scalarField(key, b ?? "—", a ?? "—", true));
+    }
+    const summary = buildChangeSummary(fields);
+    return { id: row.id, change: "Change", kind: "data-shape", name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+  }
+
+  function describeSchema(record: Record<string, unknown> | null): string | null {
+    if (!record) return null;
+    const type = record.type;
+    if (typeof type === "string") {
+      const required = Array.isArray(record.required) ? record.required.filter((v): v is string => typeof v === "string") : [];
+      if (required.length > 0) return `${type} with required fields ${formatList(required)}`;
+      return `${type} data shape`;
+    }
+    if (type === true) return "any data shape";
+    if (type === false) return "no data";
+    return null;
+  }
+
+  function summarizeContractMeta(row: ContractDiffRow): SummaryEntry {
+    if (row.kind === "Docs") return summarizeDocs(row);
+    return { id: row.id, change: row.change, kind: "metadata", name: row.name, summary: "", fields: [], breaking: row.change === "Remove" };
+  }
+
+  function summarizeDocs(row: ContractDiffRow): SummaryEntry {
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    if (row.change === "Add") {
+      return { id: row.id, change: "Add", kind: "metadata", name: "docs", summary: "contract documentation added", fields: [], breaking: false };
+    }
+    if (row.change === "Remove") {
+      return { id: row.id, change: "Remove", kind: "metadata", name: "docs", summary: "", fields: [], breaking: false };
+    }
+    const fields: SummaryField[] = [];
+    const beforeSummary = before ? stringField(before, "summary") : null;
+    const afterSummary = after ? stringField(after, "summary") : null;
+    if (beforeSummary !== afterSummary) {
+      const shortened = afterSummary && afterSummary.length > 80 ? `${afterSummary.slice(0, 77)}…` : afterSummary;
+      fields.push(scalarField("summary", beforeSummary ?? "—", shortened ?? "—"));
+    }
+    const beforeMarkdown = before ? stringField(before, "markdown") : null;
+    const afterMarkdown = after ? stringField(after, "markdown") : null;
+    if (beforeMarkdown !== afterMarkdown) {
+      const beforeLen = beforeMarkdown?.length ?? 0;
+      const afterLen = afterMarkdown?.length ?? 0;
+      const beforeDisplay = beforeLen > 40 ? `${beforeMarkdown!.slice(0, 37)}…` : beforeMarkdown ?? "—";
+      const afterDisplay = afterLen > 40 ? `${afterMarkdown!.slice(0, 37)}…` : afterMarkdown ?? "—";
+      fields.push(scalarField("markdown", beforeDisplay, afterDisplay));
+    }
+    return { id: row.id, change: "Change", kind: "metadata", name: "docs", summary: "", fields, breaking: false };
+  }
+
+  function buildSummary(
+    capabilities: ContractDiffRow[],
+    surfaces: ContractDiffRow[],
+    resources: ContractDiffRow[],
+    schemas: ContractDiffRow[],
+    contracts: ContractDiffRow[],
+  ): SummaryGroup[] {
+    const entries: SummaryEntry[] = [];
+    for (const row of capabilities) entries.push(summarizeCapability(row));
+    for (const row of surfaces) entries.push(summarizeSurface(row));
+    for (const row of resources) entries.push(summarizeResource(row));
+    for (const row of schemas) entries.push(summarizeSchema(row));
+    for (const row of contracts) entries.push(summarizeContractMeta(row));
+    const sorted = sortSummary(entries);
+    const groups: SummaryGroup[] = [
+      { kind: "permission", label: "Permissions", entries: [] },
+      { kind: "api", label: "API calls, events, and feeds", entries: [] },
+      { kind: "background-job", label: "Background jobs and event consumers", entries: [] },
+      { kind: "storage", label: "Storage and state", entries: [] },
+      { kind: "data-shape", label: "Data shapes", entries: [] },
+      { kind: "metadata", label: "Contract metadata", entries: [] },
+    ];
+    for (const entry of sorted) {
+      const group = groups.find((g) => g.kind === entry.kind);
+      if (group) group.entries.push(entry);
+    }
+    return groups.filter((g) => g.entries.length > 0);
+  }
+
+  function sortSummary(entries: SummaryEntry[]): SummaryEntry[] {
+    const order: Record<ContractChangeKind, number> = { Add: 0, Change: 1, Remove: 2 };
+    return [...entries].sort((a, b) => {
+      const aOrder = order[a.change];
+      const bOrder = order[b.change];
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function kindLabel(kind: SummaryKind): string {
+    if (kind === "permission") return "Permission";
+    if (kind === "api") return "API";
+    if (kind === "data-shape") return "Data shape";
+    if (kind === "background-job") return "Background job";
+    if (kind === "storage") return "Storage";
+    return "Metadata";
+  }
+
+  type DiffHunk = {
+    oldStart: number;
+    oldLines: number;
+    newStart: number;
+    newLines: number;
+    lines: string[];
+  };
+  type JsonDiff = {
+    hunks: DiffHunk[];
+    beforeLines: string[];
+    afterLines: string[];
+    additions: number;
+    deletions: number;
+  };
+  type DiffRow =
+    | { kind: "header"; hunkIndex: number; hunk: DiffHunk }
+    | { kind: "line"; hunkIndex: number; lineIndex: number; line: string; beforeLine: number | null; afterLine: number | null }
+    | { kind: "gap"; gapIndex: number; beforeStart: number; beforeCount: number; afterStart: number; afterCount: number };
+
+  function buildJsonDiff(before: unknown, after: unknown): JsonDiff {
+    const beforeLines = before === undefined || before === null ? [] : stableStringify(before, 2).split("\n");
+    const afterLines = after === undefined || after === null ? [] : stableStringify(after, 2).split("\n");
+    if (before === undefined || before === null) {
+      return { hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: afterLines.length, lines: afterLines.map((l) => `+${l}`) }], beforeLines, afterLines, additions: afterLines.length, deletions: 0 };
+    }
+    if (after === undefined || after === null) {
+      return { hunks: [{ oldStart: 1, oldLines: beforeLines.length, newStart: 0, newLines: 0, lines: beforeLines.map((l) => `-${l}`) }], beforeLines, afterLines, additions: 0, deletions: beforeLines.length };
+    }
+    const beforeText = beforeLines.join("\n");
+    const afterText = afterLines.join("\n");
+    const patch = structuredPatch("contract.json", "contract.json", beforeText, afterText, undefined, undefined, { context: 0 });
+    let additions = 0;
+    let deletions = 0;
+    for (const hunk of patch.hunks) {
+      for (const line of hunk.lines) {
+        if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+        else if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+      }
+    }
+    return { hunks: patch.hunks, beforeLines, afterLines, additions, deletions };
+  }
+
+  function buildDiffRows(diff: JsonDiff, context: number): DiffRow[] {
+    const rows: DiffRow[] = [];
+    let gapIndex = 0;
+    const hunks = diff.hunks;
+    for (let h = 0; h < hunks.length; h += 1) {
+      const hunk = hunks[h];
+      const prev = h === 0 ? null : hunks[h - 1];
+      const beforeStart = prev === null ? 1 : prev.oldStart + prev.oldLines;
+      const afterStart = prev === null ? 1 : prev.newStart + prev.newLines;
+      const skippedBefore = hunk.oldStart - beforeStart;
+      const skippedAfter = hunk.newStart - afterStart;
+      if (skippedBefore > 0 || skippedAfter > 0) {
+        if (skippedBefore > 2 * context) {
+          rows.push({ kind: "gap", gapIndex, beforeStart: beforeStart + context, beforeCount: skippedBefore - 2 * context, afterStart: afterStart + context, afterCount: skippedAfter - 2 * context });
+          gapIndex += 1;
+        } else {
+          for (let i = 0; i < skippedBefore; i += 1) {
+            const beforeLineIdx = beforeStart - 1 + i;
+            const afterLineIdx = afterStart - 1 + i;
+            const text = diff.beforeLines[beforeLineIdx] ?? "";
+            rows.push({ kind: "line", hunkIndex: h, lineIndex: -1, line: ` ${text}`, beforeLine: beforeLineIdx + 1, afterLine: afterLineIdx + 1 });
+          }
+        }
+      }
+      rows.push({ kind: "header", hunkIndex: h, hunk });
+      for (let li = 0; li < hunk.lines.length; li += 1) {
+        rows.push(makeLineRow(h, li, hunk));
+      }
+    }
+    return rows;
+  }
+
+  function makeLineRow(hunkIndex: number, lineIndex: number, hunk: DiffHunk): DiffRow {
+    const line = hunk.lines[lineIndex];
+    const sign = lineSignChar(line);
+    const beforeCount = hunk.oldStart + countBefore(hunk, lineIndex);
+    const afterCount = hunk.newStart + countAfter(hunk, lineIndex);
+    const beforeLine = sign !== "+" ? beforeCount : null;
+    const afterLine = sign !== "-" ? afterCount : null;
+    return { kind: "line", hunkIndex, lineIndex, line, beforeLine, afterLine };
+  }
+
+  function gapLines(diff: JsonDiff, gap: Extract<DiffRow, { kind: "gap" }>): { lines: string[]; beforeLine: number; afterLine: number }[] {
+    const result: { lines: string[]; beforeLine: number; afterLine: number }[] = [];
+    for (let i = 0; i < gap.beforeCount; i += 1) {
+      const beforeIdx = gap.beforeStart - 1 + i;
+      const afterIdx = gap.afterStart - 1 + i;
+      const text = diff.beforeLines[beforeIdx] ?? "";
+      result.push({ lines: [` ${text}`], beforeLine: beforeIdx + 1, afterLine: afterIdx + 1 });
+    }
+    return result;
+  }
+
+  function stableStringify(value: unknown, indent: number): string {
+    return JSON.stringify(sortKeys(value), null, indent);
+  }
+
+  function sortKeys(value: unknown): unknown {
+    if (value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(sortKeys);
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      sorted[key] = sortKeys(record[key]);
+    }
+    return sorted;
+  }
+
+  function lineSignChar(line: string): "+" | "-" | " " {
+    if (line.startsWith("+")) return "+";
+    if (line.startsWith("-")) return "-";
+    return " ";
+  }
+
+  function lineText(line: string): string {
+    return line.slice(1);
+  }
+
+  function countBefore(hunk: DiffHunk, lineIndex: number): number {
+    let count = 0;
+    for (let i = 0; i < lineIndex; i += 1) {
+      if (lineSignChar(hunk.lines[i]) !== "+") count += 1;
+    }
+    return count;
+  }
+
+  function countAfter(hunk: DiffHunk, lineIndex: number): number {
+    let count = 0;
+    for (let i = 0; i < lineIndex; i += 1) {
+      if (lineSignChar(hunk.lines[i]) !== "-") count += 1;
+    }
+    return count;
+  }
+
+  function previousContractDigest(value: DeploymentAuthorityPlan): string | null {
+    const summary = value.proposal.summary;
+    if (!isRecord(summary)) return null;
+    const digest = summary.previousContractDigest;
+    return typeof digest === "string" && digest.length > 0 ? digest : null;
+  }
+
+  function contractDetail(value: unknown): ContractDetail | null {
+    return isRecord(value) && typeof value.id === "string" && value.id.length > 0 ? value as ContractDetail : null;
+  }
+
+  async function contractByDigest(digest: string): Promise<ContractDetail | null> {
+    const response = await request("Trellis.Contract.Get", { digest }).take();
+    return isErr(response) ? null : response.contract;
+  }
+
+  async function previousContractFor(value: DeploymentAuthorityPlan): Promise<ContractDetail | null> {
+    const previousDigest = previousContractDigest(value);
+    if (previousDigest) {
+      const contract = await contractByDigest(previousDigest);
+      if (contract) return contract;
+    }
+    const response = await request("Auth.DeploymentAuthority.Plans.List", { deploymentId: value.deploymentId, state: "accepted", limit: 500 }).take();
+    if (isErr(response)) return null;
+    const accepted = response.entries
+      .filter((entry) => entry.planId !== value.planId && entry.proposal.contractId === value.proposal.contractId && entry.proposal.contractDigest !== value.proposal.contractDigest)
+      .filter((entry) => !previousDigest || entry.proposal.contractDigest === previousDigest)
+      .toSorted((left, right) => (right.decisionAt ?? right.createdAt).localeCompare(left.decisionAt ?? left.createdAt))[0];
+    return contractDetail(accepted?.proposal.contract);
+  }
+
+  function withTimeout<T>(promise: PromiseLike<T>, ms: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(message)), ms);
+      promise.then(
+        (value) => { clearTimeout(timer); resolve(value); },
+        (cause) => { clearTimeout(timer); reject(cause); },
+      );
+    });
   }
 
   async function load(clearNotice = true) {
     loading = true;
     error = null;
+    previousContract = null;
     if (clearNotice) notice = null;
     try {
-      const response = await request("Auth.DeploymentAuthority.Plans.Get", { planId }).take();
+      const response = await withTimeout(
+        request("Auth.DeploymentAuthority.Plans.Get", { planId }).take(),
+        15000,
+        "Loading the plan timed out.",
+      );
       if (isErr(response)) { error = errorMessage(response); return; }
       plan = response.plan;
-      const authorityResponse = await request("Auth.DeploymentAuthority.Get", { deploymentId: response.plan.deploymentId }).take();
+      previousContract = await withTimeout(
+        previousContractFor(response.plan),
+        15000,
+        "Loading the previous contract timed out.",
+      );
+      const authorityResponse = await withTimeout(
+        request("Auth.DeploymentAuthority.Get", { deploymentId: response.plan.deploymentId }).take(),
+        15000,
+        "Loading the deployment authority timed out.",
+      );
       authorityKind = isErr(authorityResponse) ? null : authorityResponse.authority.kind;
     } catch (cause) {
       error = errorMessage(cause);
@@ -111,7 +688,7 @@
     if (!currentPlan || currentPlan.classification !== "update") return;
     await runDecision(
       () => request("Auth.DeploymentAuthority.AcceptUpdate", { planId: currentPlan.planId }).take(),
-      "Update plan accepted.",
+      "Contract applied.",
     );
   }
 
@@ -119,17 +696,19 @@
     const currentPlan = plan;
     if (!currentPlan || currentPlan.classification !== "migration" || !migrationAcknowledged) return;
     await runDecision(
-      () => request("Auth.DeploymentAuthority.AcceptMigration", { planId: currentPlan.planId, acknowledgement: acknowledgement.trim() }).take(),
-      "Migration plan accepted.",
+      () => request("Auth.DeploymentAuthority.AcceptMigration", { planId: currentPlan.planId, acknowledgement: `I have reviewed and approve migration of ${currentPlan.proposal.contractId} at ${new Date().toISOString()}.` }).take(),
+      "Migration applied.",
     );
   }
 
   async function rejectPlan() {
     const currentPlan = plan;
     if (!currentPlan || !rejectReady) return;
+    const trimmedDetails = rejectDetails.trim();
+    const reason = trimmedDetails.length > 0 ? `${rejectReason.trim()}: ${trimmedDetails}` : rejectReason.trim();
     await runDecision(
-      () => request("Auth.DeploymentAuthority.Reject", { planId: currentPlan.planId, reason: rejectReason.trim() }).take(),
-      "Plan rejected.",
+      () => request("Auth.DeploymentAuthority.Reject", { planId: currentPlan.planId, reason }).take(),
+      "Contract rejected.",
     );
   }
 
@@ -166,88 +745,295 @@
   });
 </script>
 
-<section class="space-y-4">
-  <PageToolbar title="Authority plan" description="Review what deployment authority changes if this plan is accepted.">
-    {#snippet actions()}
-      <a class="btn btn-ghost btn-sm" href={plansHref}>Back to plans</a>
-      <button class="btn btn-ghost btn-sm" onclick={() => void load()} disabled={loading}>Refresh</button>
-    {/snippet}
-  </PageToolbar>
+{#if error}
+  <Notice variant="error" class="flex flex-wrap items-start justify-between gap-3">
+    <div class="min-w-0">
+      <div class="font-medium">Failed to load authority plan</div>
+      <div class="mt-1 text-sm">{error}</div>
+    </div>
+    <button class="btn btn-sm" onclick={() => void load()} disabled={loading}>Retry</button>
+  </Notice>
+{/if}
+{#if notice}<Notice variant="success">{notice}</Notice>{/if}
 
-  {#if error}<Notice variant="error">{error}</Notice>{/if}
-  {#if notice}<Notice variant="success">{notice}</Notice>{/if}
-
-  {#if loading}
-    <Panel><LoadingState label="Loading authority plan" /></Panel>
-  {:else if !plan}
-    <Panel><EmptyState title="Authority plan unavailable" description="The selected authority plan could not be loaded." /></Panel>
-  {:else}
-    <Panel>
-      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-base-300 pb-3">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h2 class="trellis-identifier truncate text-lg font-semibold">{plan.planId}</h2>
-            <StatusBadge label={planStatus} status={statusVariant(planStatus)} />
-            <span class="badge badge-outline badge-sm">{plan.classification}</span>
-            {#if authorityKind}<span class="badge badge-outline badge-sm">{authorityKind}</span>{/if}
-          </div>
-          <div class="mt-1 text-sm text-base-content/60">
-            Deployment <span class="trellis-identifier">{plan.deploymentId}</span> · contract <span class="trellis-identifier">{plan.proposal.contractId}</span> · created {formatDate(plan.createdAt)}
-          </div>
-        </div>
-        <button class="btn btn-outline btn-sm" onclick={() => plan && openDeployment(plan.deploymentId)}>Open deployment</button>
+{#if loading}
+  <Panel><LoadingState label="Loading authority plan" /></Panel>
+{:else if !plan}
+  <Panel>
+    <div class="text-sm text-base-content/70">This authority plan is unavailable. It may have expired, been accepted elsewhere, or been deleted.</div>
+  </Panel>
+{:else}
+  {#if plan.warnings.length > 0}
+    <Notice variant="warning">
+      <div class="min-w-0">
+        <div class="font-medium">Plan warnings</div>
+        <ul class="mt-1 list-disc pl-4 text-sm">
+          {#each plan.warnings as warning (warning)}<li>{warning}</li>{/each}
+        </ul>
       </div>
-
-      {#if plan.warnings.length > 0}
-        <Notice variant="warning" class="mt-3 items-start">
-          <div><div class="font-medium">Plan warnings</div><ul class="mt-1 list-disc pl-4 text-sm">{#each plan.warnings as warning (warning)}<li>{warning}</li>{/each}</ul></div>
-        </Notice>
-      {/if}
-
-      <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div class="space-y-4">
-          <Panel title="Contracts" class="min-w-0">
-            <DataTable><thead><tr><th>Change</th><th>Contract</th><th>Availability</th></tr></thead><tbody>{#each contractRows as row (row.id)}<tr><td><span class="badge badge-outline badge-xs">Add</span></td><td class="trellis-identifier">{row.contractId}</td><td><span class="badge badge-outline badge-xs">{row.availability}</span></td></tr>{:else}<tr><td colspan="3"><EmptyState title="No contract changes" description="This plan does not request contract authority changes." /></td></tr>{/each}</tbody></DataTable>
-          </Panel>
-
-          <Panel title="Surfaces" class="min-w-0">
-            <DataTable><thead><tr><th>Change</th><th>Surface</th><th>Kind</th><th>Action</th><th>Availability</th></tr></thead><tbody>{#each surfaceRows as row (row.id)}<tr><td><span class="badge badge-outline badge-xs">Add</span></td><td><div class="trellis-identifier">{row.name}</div><div class="trellis-identifier text-xs text-base-content/50">{row.contractId}</div></td><td>{row.kind}</td><td>{row.action}</td><td><span class="badge badge-outline badge-xs">{row.availability}</span></td></tr>{:else}<tr><td colspan="5"><EmptyState title="No surface changes" description="This plan does not request callable, event, operation, or feed surface changes." /></td></tr>{/each}</tbody></DataTable>
-          </Panel>
-
-          <div class="grid gap-4 lg:grid-cols-2">
-            <Panel title="Resources" class="min-w-0">
-              <DataTable><thead><tr><th>Change</th><th>Resource</th><th>Availability</th></tr></thead><tbody>{#each resourceRows as row (row.id)}<tr><td><span class="badge badge-outline badge-xs">Add</span></td><td><div class="trellis-identifier">{row.alias}</div><div class="text-xs text-base-content/60">{row.kind}</div></td><td><span class="badge badge-outline badge-xs">{row.availability}</span></td></tr>{:else}<tr><td colspan="3"><EmptyState title="No resource changes" description="This plan does not request runtime resources." /></td></tr>{/each}</tbody></DataTable>
-            </Panel>
-            <Panel title="Capabilities" class="min-w-0">
-              <DataTable><thead><tr><th>Change</th><th>Capability</th><th>Availability</th></tr></thead><tbody>{#each capabilityRows as row (row.id)}<tr><td><span class="badge badge-outline badge-xs">Add</span></td><td class="trellis-identifier">{row.capability}</td><td><span class="badge badge-outline badge-xs">{row.availability}</span></td></tr>{:else}<tr><td colspan="3"><EmptyState title="No capability changes" description="This plan does not request capability grants." /></td></tr>{/each}</tbody></DataTable>
-            </Panel>
-          </div>
-        </div>
-
-        <div class="space-y-4">
-          <Panel title={pending ? "Decision" : "Decision record"}>
-            {#if pending}
-              {#if plan.classification === "migration"}
-                <Notice variant="warning" class="mb-3">Migration plans can change existing authority semantics. Type <span class="trellis-identifier font-semibold">I understand</span> to enable acceptance.</Notice>
-                <label class="form-control"><span class="label py-1 text-xs text-base-content/60">Acknowledgement</span><input class="input input-bordered input-sm" bind:value={acknowledgement} placeholder="I understand" /></label>
-                <button class="btn btn-warning btn-outline btn-sm mt-3 w-full" onclick={acceptMigration} disabled={acting || !migrationAcknowledged}>Accept migration</button>
-              {:else}
-                <button class="btn btn-warning btn-outline btn-sm w-full" onclick={acceptUpdate} disabled={acting}>Accept update</button>
-              {/if}
-              <div class="divider my-3">Reject</div>
-              <label class="form-control"><span class="label py-1 text-xs text-base-content/60">Reason required</span><textarea class="textarea textarea-bordered min-h-24" bind:value={rejectReason} placeholder="Why is this plan being rejected?"></textarea></label>
-              <button class="btn btn-error btn-outline btn-sm mt-3 w-full" onclick={rejectPlan} disabled={acting || !rejectReady}>Reject plan</button>
-            {:else}
-              <dl class="space-y-2 text-sm">
-                <div class="flex justify-between gap-3"><dt class="text-base-content/60">State</dt><dd><StatusBadge label={planStatus} status={statusVariant(planStatus)} /></dd></div>
-                <div class="flex justify-between gap-3"><dt class="text-base-content/60">Decision at</dt><dd>{decisionField(plan, "decisionAt") ? formatDate(decisionField(plan, "decisionAt") ?? "") : "—"}</dd></div>
-                <div class="flex justify-between gap-3"><dt class="text-base-content/60">Decision by</dt><dd class="trellis-identifier text-xs">{decisionBy(plan)}</dd></div>
-                <div><dt class="text-base-content/60">Reason</dt><dd class="mt-1 text-base-content/80">{decisionField(plan, "decisionReason") ?? "—"}</dd></div>
-              </dl>
-            {/if}
-          </Panel>
-        </div>
-      </div>
-    </Panel>
+    </Notice>
   {/if}
-</section>
+
+  <div class="mt-4 border-b border-base-300">
+    <div role="tablist" class="-mb-px flex gap-1">
+      <button
+        role="tab"
+        type="button"
+        class={[
+          "border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          activeTab === "summary"
+            ? "border-primary text-base-content"
+            : "border-transparent text-base-content/60 hover:text-base-content",
+        ]}
+        aria-selected={activeTab === "summary"}
+        onclick={() => (activeTab = "summary")}
+      >
+        Summary
+      </button>
+      <button
+        role="tab"
+        type="button"
+        class={[
+          "border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+          activeTab === "full"
+            ? "border-primary text-base-content"
+            : "border-transparent text-base-content/60 hover:text-base-content",
+        ]}
+        aria-selected={activeTab === "full"}
+        onclick={() => (activeTab = "full")}
+      >
+        Full diff
+      </button>
+    </div>
+  </div>
+
+  <div class="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <div class="min-w-0">
+      {#if activeTab === "summary"}
+        <div in:fade={{ duration: 200, easing: cubicOut }} out:fade={{ duration: 100 }}>
+        <Panel title="Contract changes" class="min-w-0">
+          {#if summaryGroups.length === 0}
+            <p class="text-sm text-base-content/60">No contract changes proposed. The proposed contract matches the previous accepted contract.</p>
+          {:else}
+            <div class="divide-y divide-base-200">
+              {#each summaryGroups as group (group.kind)}
+                {@const groupBreaking = group.entries.filter((e) => e.breaking).length}
+                <div class="border-b border-base-300 bg-base-300/15 px-1 py-2">
+                  <div class="text-xs font-semibold uppercase tracking-wide text-base-content/70">{group.label}</div>
+                  <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span class="badge badge-ghost badge-sm">{group.entries.length} {group.entries.length === 1 ? "change" : "changes"}</span>
+                    {#if groupBreaking > 0}
+                      <span class="badge badge-error badge-sm">{groupBreaking} breaking</span>
+                    {/if}
+                  </div>
+                </div>
+                {#each group.entries as entry (entry.id)}
+                  <div class={["grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-1 py-2", entry.breaking ? "bg-error/15" : ""]}>
+                    <div class="row-span-2 flex items-center justify-center">
+                      {#if entry.change === "Add"}
+                        <Icon name="plus" size={16} class="text-success" />
+                      {:else if entry.change === "Remove"}
+                        <Icon name="minus" size={16} class="text-error" />
+                      {:else}
+                        <Icon name="pencil" size={16} class="text-info" />
+                      {/if}
+                    </div>
+                    <div class="flex flex-wrap items-baseline gap-2">
+                      <code class={["trellis-identifier !whitespace-normal !break-all", entry.breaking ? "font-bold" : "font-semibold"]}>{entry.name}</code>
+                      <span class="text-xs text-base-content/55">{kindLabel(entry.kind)}</span>
+                      {#if entry.breaking}
+                        <span class="badge badge-error badge-outline badge-sm">Breaking</span>
+                      {/if}
+                    </div>
+                    <div class="min-w-0">
+                      {#if entry.fields.length > 0}
+                        <div class="space-y-1.5">
+                          {#each entry.fields as field, fieldIndex (fieldIndex)}
+                            {#if field.kind === "set"}
+                              <div class="text-xs">
+                                <span class="font-semibold text-base-content/70">{field.label}:</span>
+                                <span class="ml-1 inline-flex flex-wrap gap-1 align-middle">
+                                  {#each field.removed as value (value)}<span class={["badge badge-error badge-sm gap-1 px-1.5", field.mono ? "trellis-identifier" : ""]}><Icon name="minus" size={10} />{value}</span>{/each}
+                                  {#each field.added as value (value)}<span class={["badge badge-success badge-sm gap-1 px-1.5", field.mono ? "trellis-identifier" : ""]}><Icon name="plus" size={10} />{value}</span>{/each}
+                                  {#each field.kept as value (value)}<span class={["badge badge-ghost badge-sm opacity-60", field.mono ? "trellis-identifier" : ""]}>{value}</span>{/each}
+                                </span>
+                              </div>
+                            {:else}
+                              <div class="flex flex-wrap items-baseline gap-x-1.5 text-xs">
+                                <span class="font-semibold text-base-content/70 shrink-0">{field.label}:</span>
+                                <span class={field.mono ? "trellis-identifier !whitespace-normal !break-all text-error line-through" : "break-all text-error line-through"}>{field.before}</span>
+                                <span class="shrink-0 text-base-content/40">→</span>
+                                <span class={field.mono ? "trellis-identifier !whitespace-normal !break-all text-success" : "break-all text-success"}>{field.after}</span>
+                              </div>
+                            {/if}
+                          {/each}
+                        </div>
+                      {:else if entry.summary}
+                        <div class="text-sm text-base-content/80">{entry.summary}</div>
+                      {:else}
+                        <span class="text-xs text-base-content/40">—</span>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              {/each}
+            </div>
+          {/if}
+        </Panel>
+        </div>
+      {:else}
+        <div in:fade={{ duration: 200, easing: cubicOut }} out:fade={{ duration: 100 }}>
+        <Panel title="Full contract diff" class="min-w-0">
+          {#if diffRows.length === 0}
+            <p class="text-sm text-base-content/60">No contract changes proposed. The proposed contract matches the previous accepted contract.</p>
+          {:else}
+            <div class="mb-2 flex flex-wrap items-center gap-3 text-xs text-base-content/60">
+              <span class="font-mono">{jsonDiff.additions} added</span>
+              <span class="font-mono">{jsonDiff.deletions} removed</span>
+              <span class="font-mono">{jsonDiff.hunks.length} hunk{jsonDiff.hunks.length === 1 ? "" : "s"}</span>
+              <span class="grow"></span>
+              {#if allGapsExpanded}
+                <button class="btn btn-ghost btn-xs gap-1" onclick={collapseAllGaps}><Icon name="minus" size={12} />Collapse all</button>
+              {:else}
+                <button class="btn btn-ghost btn-xs gap-1" onclick={expandAllGaps}><Icon name="plus" size={12} />Expand all {gapCount} gaps</button>
+              {/if}
+            </div>
+            <div class="rounded border border-base-300 bg-base-200/30 text-xs">
+              <table class="w-full font-mono leading-relaxed">
+                <colgroup>
+                  <col class="w-10" />
+                  <col />
+                  <col class="w-3" />
+                  <col />
+                  <col class="w-10" />
+                </colgroup>
+                <tbody>
+                  {#each diffRows as row, index (index)}
+                    {#if row.kind === "header"}
+                      <tr class="bg-base-300/40">
+                        <td colspan="5" class="px-2 py-1 text-base-content/60">@@ -{row.hunk.oldStart},{row.hunk.oldLines} +{row.hunk.newStart},{row.hunk.newLines} @@</td>
+                      </tr>
+                    {:else if row.kind === "line"}
+                      {@const sign = lineSignChar(row.line)}
+                      <tr class={sign === "+" ? "bg-success/15" : sign === "-" ? "bg-error/15" : ""}>
+                        <td class="select-none border-r border-base-300/60 px-2 py-0.5 text-right text-base-content/40">{row.beforeLine ?? ""}</td>
+                        <td class={"px-2 py-0.5 whitespace-pre-wrap break-all border-r border-base-300/60 " + (sign === "-" ? "text-error" : "text-base-content/80")}>
+                          {#if sign !== "+"}{lineText(row.line)}{/if}
+                        </td>
+                        <td class={"select-none px-1 py-0.5 text-center " + (sign === "+" ? "text-success" : sign === "-" ? "text-error" : "text-base-content/30")}>
+                          {sign === "+" ? "+" : sign === "-" ? "−" : ""}
+                        </td>
+                        <td class={"px-2 py-0.5 whitespace-pre-wrap break-all border-l border-base-300/60 " + (sign === "+" ? "text-success" : "text-base-content/80")}>
+                          {#if sign !== "-"}{lineText(row.line)}{/if}
+                        </td>
+                        <td class="select-none border-l border-base-300/60 px-2 py-0.5 text-right text-base-content/40">{row.afterLine ?? ""}</td>
+                      </tr>
+                    {:else}
+                      {@const expanded = isGapExpanded(row.gapIndex)}
+                      <tr class="cursor-pointer bg-base-300/30 hover:bg-base-300/50 focus-within:bg-base-300/50" onclick={() => toggleGap(row.gapIndex)}>
+                        <td colspan="5" class="px-2 py-1 text-center text-base-content/60">
+                          {#if expanded}
+                            <span>− collapse {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"}</span>
+                          {:else}
+                            <span>⋯ expand {row.beforeCount} unchanged line{row.beforeCount === 1 ? "" : "s"} (lines {row.beforeStart}–{row.beforeStart + row.beforeCount - 1})</span>
+                          {/if}
+                        </td>
+                      </tr>
+                      {#if expanded}
+                        {#each gapLines(jsonDiff, row) as gapLine, gapLineIndex (gapLineIndex)}
+                          <tr class="" in:fade={{ duration: 150, delay: gapLineIndex * 15, easing: cubicOut }}>
+                            <td class="select-none border-r border-base-300/60 px-2 py-0.5 text-right text-base-content/40">{gapLine.beforeLine}</td>
+                            <td class="px-2 py-0.5 whitespace-pre-wrap break-all border-r border-base-300/60 text-base-content/80">{lineText(gapLine.lines[0])}</td>
+                            <td class="select-none px-1 py-0.5 text-center text-base-content/30"></td>
+                            <td class="px-2 py-0.5 whitespace-pre-wrap break-all border-l border-base-300/60 text-base-content/80">{lineText(gapLine.lines[0])}</td>
+                            <td class="select-none border-l border-base-300/60 px-2 py-0.5 text-right text-base-content/40">{gapLine.afterLine}</td>
+                          </tr>
+                        {/each}
+                      {/if}
+                    {/if}
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-base-content/60">
+              <span class="flex items-center gap-1"><span class="inline-block h-3 w-3 rounded-sm bg-success/15"></span>added</span>
+              <span class="flex items-center gap-1"><span class="inline-block h-3 w-3 rounded-sm bg-error/15"></span>removed</span>
+              <span class="flex items-center gap-1"><span class="inline-block h-3 w-3 rounded-sm bg-base-100 ring-1 ring-base-300"></span>unchanged</span>
+            </div>
+          {/if}
+        </Panel>
+        </div>
+      {/if}
+    </div>
+
+    <Panel title={pending ? "Decision" : "Decision record"} class="min-w-0">
+      {#if plan}
+        <div class="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+          <span class="text-xs uppercase tracking-wide text-base-content/55">For Deployment</span>
+          <span class="text-base-content/40">·</span>
+          {#if authorityKind === "service"}
+            <a class="link link-hover font-mono font-semibold" href={resolve("/(app)/admin/services/[deploymentId]", { deploymentId: plan.deploymentId })}>{plan.deploymentId}</a>
+          {:else if authorityKind === "device"}
+            <a class="link link-hover font-mono font-semibold" href={resolve("/admin/devices")}>{plan.deploymentId}</a>
+          {:else}
+            <code class="trellis-identifier font-semibold">{plan.deploymentId}</code>
+          {/if}
+        </div>
+      {/if}
+      <div class="mb-3 flex flex-wrap items-stretch gap-3 rounded-box border border-base-300 bg-base-100 p-3">
+        <div class="flex flex-1 min-w-28 flex-col items-center justify-center text-center">
+          <div class="text-xs uppercase tracking-wide text-base-content/55">Changes</div>
+          <div class="mt-1 text-4xl font-semibold leading-none">{summaryEntryCount}</div>
+        </div>
+        <div class="w-px self-stretch bg-base-300"></div>
+        <div class={["flex flex-1 min-w-28 flex-col items-center justify-center rounded-md px-3 py-2 text-center", summaryBreakingCount > 0 ? "bg-error/10" : "bg-base-200/40"]}>
+          <div class={["text-xs uppercase tracking-wide", summaryBreakingCount > 0 ? "text-error" : "text-base-content/55"]}>Breaking</div>
+          <div class={["mt-1 text-4xl font-semibold leading-none", summaryBreakingCount > 0 ? "text-error" : "text-base-content/60"]}>{summaryBreakingCount}</div>
+        </div>
+      </div>
+      {#if pending}
+        {#if isMigration}
+          <Notice variant="info">
+            <div>
+              <div class="font-semibold">Migration required</div>
+              <div class="mt-1 text-sm break-words">This is a migration. Existing data or call sites may not be compatible with the new version. Review the changes, then accept to apply.</div>
+            </div>
+          </Notice>
+          <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm">
+            <input type="checkbox" class="checkbox checkbox-sm mt-0.5 shrink-0" bind:checked={acknowledgeChecked} />
+            <span class="min-w-0 break-words">I have reviewed the changes and acknowledge this may break existing services and users.</span>
+          </label>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-primary" onclick={acceptMigration} disabled={acting || !migrationAcknowledged}>Accept migration</button>
+          </div>
+        {:else}
+          <p class="text-sm text-base-content/70 break-words">Accepting will deploy this contract as the new configuration for <code class="trellis-identifier !whitespace-normal !break-all">{plan.deploymentId}</code>.</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-primary" onclick={acceptUpdate} disabled={acting}>Accept update</button>
+          </div>
+        {/if}
+        <div class="mt-4 space-y-2 border-t border-base-300 pt-4 text-sm">
+          <div class="text-sm font-semibold">Reject with a reason</div>
+          <label class="form-control block">
+            <span class="label py-1 text-xs text-base-content/60">Reason *</span>
+            <select class="select select-bordered select-sm w-full" bind:value={rejectReason}>
+              <option value="">Select a reason</option>
+              <option value="breaking_change_unintended">Breaking change not intended</option>
+              <option value="security_concern">Security or permission concern</option>
+              <option value="needs_review">Needs additional review</option>
+              <option value="wrong_version">Wrong contract version</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label class="form-control block">
+            <span class="label py-1 text-xs text-base-content/60">Details (optional)</span>
+            <textarea class="textarea textarea-bordered min-h-20 w-full" bind:value={rejectDetails} placeholder="Add any additional details..."></textarea>
+          </label>
+          <button class="btn btn-sm btn-error btn-outline w-full" onclick={rejectPlan} disabled={acting || !rejectReady}>Reject</button>
+        </div>
+      {:else}
+        <p class="text-sm text-base-content/60">This plan has already been decided.</p>
+      {/if}
+    </Panel>
+  </div>
+{/if}

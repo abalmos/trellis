@@ -11,6 +11,7 @@ import {
   AuthoritySelectionGuard,
   chooseSelectedAuthorityPlan,
   chooseSelectedDeployment,
+  contractManifestDiffRows,
   createsCapabilityRows,
   deltaCapabilityRows,
   deltaContractRows,
@@ -342,6 +343,82 @@ Deno.test("delta display helpers preserve exact authority needs", () => {
     id: "billing.events",
     capability: "billing.events",
     availability: "optional",
+  }]);
+});
+
+Deno.test("contractManifestDiffRows shows schema-only contract changes", () => {
+  const oldContract = {
+    format: "trellis.contract.v1",
+    id: "acme.billing@v1",
+    displayName: "Acme Billing",
+    description: "Billing contract",
+    kind: "service",
+    schemas: {
+      SyncJobPayload: { type: "object", required: ["id"] },
+    },
+    jobs: { Sync: { payload: { schema: "SyncJobPayload" } } },
+  };
+  const newContract = {
+    ...oldContract,
+    schemas: {
+      SyncJobPayload: { type: "object", required: ["id", "cursor"] },
+    },
+  };
+
+  deepEqual(contractManifestDiffRows(oldContract, newContract).schemas, [{
+    id: "schemas:SyncJobPayload",
+    change: "Change",
+    kind: "Schema",
+    name: "SyncJobPayload",
+    detail: "required fields: +cursor",
+    before: oldContract.schemas.SyncJobPayload,
+    after: newContract.schemas.SyncJobPayload,
+  }]);
+});
+
+Deno.test("contractManifestDiffRows summarizes docs and capability changes", () => {
+  const oldContract = {
+    id: "acme.billing@v1",
+    docs: { summary: "Creates invoices." },
+    capabilities: {
+      "billing.read": { description: "Read invoices." },
+    },
+  };
+  const newContract = {
+    id: "acme.billing@v1",
+    docs: { summary: "Creates and syncs invoices." },
+    capabilities: {
+      "billing.read": { description: "Read invoices and sync status." },
+      "billing.write": { description: "Write invoices." },
+    },
+  };
+  const rows = contractManifestDiffRows(oldContract, newContract);
+
+  deepEqual(rows.contracts, [{
+    id: "docs:summary",
+    change: "Change",
+    kind: "Docs",
+    name: "summary",
+    detail: "Creates invoices. -> Creates and syncs invoices.",
+    before: "Creates invoices.",
+    after: "Creates and syncs invoices.",
+  }]);
+  deepEqual(rows.capabilities, [{
+    id: "capabilities:billing.read",
+    change: "Change",
+    kind: "Capability",
+    name: "billing.read",
+    detail: "description: Read invoices. -> Read invoices and sync status.",
+    before: oldContract.capabilities["billing.read"],
+    after: newContract.capabilities["billing.read"],
+  }, {
+    id: "capabilities:billing.write",
+    change: "Add",
+    kind: "Capability",
+    name: "billing.write",
+    detail: "Write invoices.",
+    before: null,
+    after: newContract.capabilities["billing.write"],
   }]);
 });
 
