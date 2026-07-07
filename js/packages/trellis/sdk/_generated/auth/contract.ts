@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "J9b9u106r0DsWY41bC_mwUEbF7roWXkQiNAAyBpTTh0" as const;
+  "pPSUf9eDM42CHk_SrUpLO0-tDU5QcLXNNDqYlXeHs5o" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -3199,10 +3199,6 @@ export const CONTRACT = {
                   { "const": "superseded", "type": "string" },
                 ],
               },
-              "warnings": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
             },
             "required": [
               "planId",
@@ -3210,7 +3206,6 @@ export const CONTRACT = {
               "proposal",
               "desiredChange",
               "materializationPreview",
-              "warnings",
               "breakingChanges",
               "createdAt",
               "classification",
@@ -3508,10 +3503,6 @@ export const CONTRACT = {
                   { "const": "superseded", "type": "string" },
                 ],
               },
-              "warnings": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
             },
             "required": [
               "planId",
@@ -3519,7 +3510,6 @@ export const CONTRACT = {
               "proposal",
               "desiredChange",
               "materializationPreview",
-              "warnings",
               "breakingChanges",
               "createdAt",
               "classification",
@@ -3831,10 +3821,6 @@ export const CONTRACT = {
                   { "const": "superseded", "type": "string" },
                 ],
               },
-              "warnings": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
             },
             "required": [
               "planId",
@@ -3842,7 +3828,6 @@ export const CONTRACT = {
               "proposal",
               "desiredChange",
               "materializationPreview",
-              "warnings",
               "breakingChanges",
               "createdAt",
               "classification",
@@ -4140,10 +4125,6 @@ export const CONTRACT = {
                   { "const": "superseded", "type": "string" },
                 ],
               },
-              "warnings": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
             },
             "required": [
               "planId",
@@ -4151,7 +4132,6 @@ export const CONTRACT = {
               "proposal",
               "desiredChange",
               "materializationPreview",
-              "warnings",
               "breakingChanges",
               "createdAt",
               "classification",
@@ -4513,10 +4493,6 @@ export const CONTRACT = {
                     { "const": "superseded", "type": "string" },
                   ],
                 },
-                "warnings": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
               },
               "required": [
                 "planId",
@@ -4524,7 +4500,6 @@ export const CONTRACT = {
                 "proposal",
                 "desiredChange",
                 "materializationPreview",
-                "warnings",
                 "breakingChanges",
                 "createdAt",
                 "classification",
@@ -4840,10 +4815,6 @@ export const CONTRACT = {
                     { "const": "superseded", "type": "string" },
                   ],
                 },
-                "warnings": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
               },
               "required": [
                 "planId",
@@ -4851,7 +4822,6 @@ export const CONTRACT = {
                 "proposal",
                 "desiredChange",
                 "materializationPreview",
-                "warnings",
                 "breakingChanges",
                 "createdAt",
                 "classification",
@@ -9488,10 +9458,6 @@ export const CONTRACT = {
             { "const": "superseded", "type": "string" },
           ],
         },
-        "warnings": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
       },
       "required": [
         "planId",
@@ -9499,7 +9465,6 @@ export const CONTRACT = {
         "proposal",
         "desiredChange",
         "materializationPreview",
-        "warnings",
         "breakingChanges",
         "createdAt",
         "classification",
@@ -10091,10 +10056,6 @@ export const CONTRACT = {
             { "const": "superseded", "type": "string" },
           ],
         },
-        "warnings": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
       },
       "required": [
         "planId",
@@ -10102,7 +10063,6 @@ export const CONTRACT = {
         "proposal",
         "desiredChange",
         "materializationPreview",
-        "warnings",
         "breakingChanges",
         "createdAt",
         "classification",

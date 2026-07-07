@@ -916,9 +916,6 @@ Deno.test("POST /bootstrap/service creates migration plan for incompatible same-
   assertEquals(setup.plans.length, 1);
   assertEquals(setup.plans[0]?.classification, "migration");
   assertEquals(setup.plans[0]?.state, "pending");
-  assertEquals(setup.plans[0]?.warnings, [
-    "Active compatible digests define schema 'Empty' incompatibly",
-  ]);
   assertEquals(setup.plans[0]?.breakingChanges, [{
     kind: "schema-property-type-changed",
     target: {
@@ -953,9 +950,6 @@ Deno.test("POST /bootstrap/service annotates required schema field removal", asy
 
   assertEquals(response.status, 202);
   assertEquals(setup.plans[0]?.classification, "migration");
-  assertEquals(setup.plans[0]?.warnings, [
-    "Active compatible digests define schema 'Empty' incompatibly",
-  ]);
   assertEquals(setup.plans[0]?.breakingChanges, [{
     kind: "schema-required-removed",
     target: {
@@ -1160,7 +1154,6 @@ Deno.test("POST /bootstrap/service allows retry with accepted compatibility migr
         },
         desiredChange: EMPTY_BOUNDARY,
         materializationPreview: {},
-        warnings: [],
         breakingChanges: [],
         createdAt: TEST_NOW,
         state: "accepted",
@@ -1471,7 +1464,6 @@ Deno.test("POST /bootstrap/service accepts required dependency from accepted aut
       },
       desiredChange: providerNeeds,
       materializationPreview: {},
-      warnings: [],
       breakingChanges: [],
       createdAt: TEST_NOW,
       decisionAt: TEST_NOW,
@@ -1573,7 +1565,6 @@ Deno.test("POST /bootstrap/service does not reuse stale pending authority plans"
       },
       desiredChange: EMPTY_BOUNDARY,
       materializationPreview: {},
-      warnings: [],
       breakingChanges: [],
       createdAt: TEST_NOW,
       state: "pending",
@@ -1610,7 +1601,6 @@ Deno.test("POST /bootstrap/service supersedes older pending plans for the same c
       },
       desiredChange: EMPTY_BOUNDARY,
       materializationPreview: {},
-      warnings: [],
       breakingChanges: [],
       createdAt: TEST_NOW,
       state: "pending",

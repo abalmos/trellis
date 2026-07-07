@@ -1022,7 +1022,6 @@ type AuthorityPlan = {
   proposal: ContractProposal;
   desiredChange: Record<string, unknown>;
   materializationPreview: Record<string, unknown>;
-  warnings: string[];
   breakingChanges: BreakingChange[];
   createdAt: string;
   expiresAt?: string;
@@ -1254,8 +1253,7 @@ Rules:
   `mutable-dev` same-contract replacement migrations remain visible with a
   recorded decision timestamp and auto-approval reason
 - `AuthorityPlan.breakingChanges` is the authoritative structured list of
-  concrete compatibility failures for operator UI; `AuthorityPlan.warnings`
-  remains a derived human-readable summary for logs and existing readers
+  concrete compatibility failures for operator UI
 - `BreakingChange.path` is a JSON Pointer into the target when the verifier can
   localize the breakage; schema targets are preferred over generic
   `digest-incompatible` entries when a named schema is known

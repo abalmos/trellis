@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "J9b9u106r0DsWY41bC_mwUEbF7roWXkQiNAAyBpTTh0" as const;
+  "pPSUf9eDM42CHk_SrUpLO0-tDU5QcLXNNDqYlXeHs5o" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -815,7 +815,6 @@ export type AuthDeploymentAuthorityPlanOutput = {
       summary?: {};
     };
     state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-    warnings: Array<string>;
   } | {
     acknowledgementRequired: boolean;
     breakingChanges: Array<
@@ -899,7 +898,6 @@ export type AuthDeploymentAuthorityPlanOutput = {
       summary?: {};
     };
     state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-    warnings: Array<string>;
   };
 };
 
@@ -987,7 +985,6 @@ export type AuthDeploymentAuthorityPlansGetOutput = {
       summary?: {};
     };
     state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-    warnings: Array<string>;
   } | {
     acknowledgementRequired: boolean;
     breakingChanges: Array<
@@ -1071,7 +1068,6 @@ export type AuthDeploymentAuthorityPlansGetOutput = {
       summary?: {};
     };
     state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-    warnings: Array<string>;
   };
 };
 
@@ -1168,7 +1164,6 @@ export type AuthDeploymentAuthorityPlansListOutput = {
         summary?: {};
       };
       state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-      warnings: Array<string>;
     } | {
       acknowledgementRequired: boolean;
       breakingChanges: Array<
@@ -1252,7 +1247,6 @@ export type AuthDeploymentAuthorityPlansListOutput = {
         summary?: {};
       };
       state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
-      warnings: Array<string>;
     })
   >;
   limit: number;

@@ -2,6 +2,7 @@ import type { TrellisContractV1 } from "@qlever-llc/trellis/contracts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 
 import {
+  analyzeActiveContractCompatibility,
   createActiveContractLookup,
   validateActiveContractUses,
 } from "./uses.ts";
@@ -498,6 +499,53 @@ Deno.test("active compatible projection rejects enum narrowing", () => {
       ]),
     Error,
   );
+});
+
+Deno.test("active compatibility analysis reports enum narrowing without throwing", () => {
+  const analysis = analyzeActiveContractCompatibility([
+    {
+      digest: "graph-a",
+      contract: makeSchemaRpcContract({
+        schemas: {
+          Input: {
+            type: "object",
+            properties: {
+              status: { enum: ["active", "paused"] },
+            },
+            required: ["status"],
+          },
+          Output: { type: "object" },
+        },
+      }),
+    },
+    {
+      digest: "graph-b",
+      contract: makeSchemaRpcContract({
+        schemas: {
+          Input: {
+            type: "object",
+            properties: {
+              status: { enum: ["active"] },
+            },
+            required: ["status"],
+          },
+          Output: { type: "object" },
+        },
+      }),
+    },
+  ]);
+
+  assertEquals(analysis.compatible, false);
+  assertEquals(
+    analysis.message,
+    "Active compatible digests define schema 'Input' incompatibly",
+  );
+  assertEquals(analysis.breakingChanges, [{
+    kind: "digest-incompatible",
+    target: { kind: "schema", contractId: "graph@v1", schemaName: "Input" },
+    path: "/properties/status",
+    reason: "Schema value at /properties/status changed incompatibly.",
+  }]);
 });
 
 Deno.test("active compatible projection rejects duplicate required entries", () => {

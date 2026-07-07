@@ -28,7 +28,11 @@ import {
   mergeAuthorityNeeds,
   normalizeAuthorityNeeds,
 } from "../authority_needs.ts";
-import { classifyDeploymentAuthorityPlan } from "../deployment_authority_plan.ts";
+import {
+  classifyDeploymentAuthorityPlan,
+  evaluateSameContractCompatibility,
+  serviceOfferLineageKey,
+} from "../deployment_authority_plan.ts";
 import type { AuthContractsRuntime, RpcRegistrar } from "./types.ts";
 import type { AuthRuntimeDeps, RuntimeKV } from "../runtime_deps.ts";
 import type {
@@ -161,6 +165,7 @@ export async function registerServiceAdminRpcs(deps: {
     AuthContractsRuntime,
     | "getActiveContractsById"
     | "getActiveEntries"
+    | "getContract"
     | "getKnownContract"
     | "getKnownEntriesByContractId"
     | "installDeviceContract"
@@ -255,6 +260,9 @@ export async function registerServiceAdminRpcs(deps: {
         actualDigest: analysis.contract.digest,
       });
     }
+    const presentedContract = (await deps.contracts.validateContract(
+      args.input.contract,
+    )).contract;
 
     const requested = mergeNeeds(
       analysis.required,
@@ -292,6 +300,17 @@ export async function registerServiceAdminRpcs(deps: {
       currentNeeds(detail.authority),
       requested,
     );
+    const latestAccepted = detail.authority.kind === "service"
+      ? await deps.implementationOfferStorage.latestAcceptedByLineage(
+        serviceOfferLineageKey(args.input.deploymentId, analysis.contract.id),
+      )
+      : undefined;
+    const compatibilityError = await evaluateSameContractCompatibility({
+      contracts: deps.contracts,
+      latestAcceptedContractDigest: latestAccepted?.contractDigest,
+      presentedDigest: args.input.expectedDigest,
+      presentedContract,
+    });
     const planBase = {
       planId:
         `${args.input.deploymentId}:${args.input.expectedDigest}:${ulid()}`,
@@ -309,6 +328,13 @@ export async function registerServiceAdminRpcs(deps: {
         summary: {
           adapter: "deployment-authority-plan",
           desiredVersion: detail.authority.version,
+          ...(compatibilityError
+            ? {
+              compatibilityMigration: true,
+              previousContractDigest:
+                compatibilityError.latestAcceptedContractDigest,
+            }
+            : {}),
           authorityCapabilityDefinitions: capabilityDefinitions,
         },
       },
@@ -317,13 +343,12 @@ export async function registerServiceAdminRpcs(deps: {
         resourceBindings: [],
         provisioning: "not-run",
       },
-      warnings: [],
-      breakingChanges: [],
+      breakingChanges: compatibilityError?.breakingChanges ?? [],
       createdAt: new Date().toISOString(),
       state: "pending" as const,
     };
-    const plan: DeploymentAuthorityPlan = classified.classification ===
-        "migration"
+    const plan: DeploymentAuthorityPlan = compatibilityError ||
+        classified.classification === "migration"
       ? {
         ...planBase,
         classification: "migration",

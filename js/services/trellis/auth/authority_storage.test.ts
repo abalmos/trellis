@@ -125,7 +125,6 @@ function makePlan(
     },
     desiredChange: { add: ["a.use"] },
     materializationPreview: { resources: [] },
-    warnings: [],
     breakingChanges: [],
     createdAt: "2026-05-07T00:00:02.000Z",
     state: "pending",

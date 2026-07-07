@@ -48,7 +48,10 @@ import {
   createAuthDeploymentAuthorityPlansListHandler,
   createAuthDeploymentAuthorityRejectHandler,
 } from "./authority_rpc.ts";
-import { classifyDeploymentAuthorityPlan } from "../deployment_authority_plan.ts";
+import {
+  classifyDeploymentAuthorityPlan,
+  evaluateSameContractCompatibility,
+} from "../deployment_authority_plan.ts";
 import type {
   AuthorityNeedSet,
   DeploymentAuthority,
@@ -466,11 +469,31 @@ function deploymentAuthorityPlan(
       },
     ),
     materializationPreview: {},
-    warnings: [],
     breakingChanges: [],
     createdAt: "2026-01-01T00:00:01.000Z",
     state: "pending",
     ...planOverrides,
+  };
+}
+
+function sameContractSchemaContract(
+  schema: NonNullable<TrellisContractV1["schemas"]>[string],
+): TrellisContractV1 {
+  return {
+    format: "trellis.contract.v1",
+    id: "svc.contract@v1",
+    displayName: "Service Contract",
+    description: "Service contract.",
+    kind: "service",
+    schemas: { Empty: schema },
+    rpc: {
+      Query: {
+        version: "v1",
+        subject: "rpc.v1.svc.Query",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+      },
+    },
   };
 }
 
@@ -1036,6 +1059,39 @@ Deno.test("Auth.DeploymentAuthority.Plan classifies resource removals as migrati
 
   assertEquals(result.classification, "migration");
   assertEquals(result.desiredChange.resources, []);
+});
+
+Deno.test("Auth.DeploymentAuthority.Plan reports same-contract compatibility breakages", async () => {
+  const current = sameContractSchemaContract({ type: "object" });
+  const replacement = sameContractSchemaContract({ type: "string" });
+  const currentDigest = digestContractManifest(current);
+  const replacementDigest = digestContractManifest(replacement);
+
+  const result = await evaluateSameContractCompatibility({
+    contracts: {
+      getContract: async (digest) =>
+        digest === currentDigest ? current : undefined,
+    },
+    latestAcceptedContractDigest: currentDigest,
+    presentedDigest: replacementDigest,
+    presentedContract: replacement,
+  });
+
+  assertEquals(
+    result?.message,
+    "Active compatible digests define schema 'Empty' incompatibly",
+  );
+  assertEquals(result?.latestAcceptedContractDigest, currentDigest);
+  assertEquals(result?.breakingChanges, [{
+    kind: "schema-property-type-changed",
+    target: {
+      kind: "schema",
+      contractId: "svc.contract@v1",
+      schemaName: "Empty",
+    },
+    path: "/type",
+    reason: "Schema type changed from object to string.",
+  }]);
 });
 
 Deno.test("Auth.DeploymentAuthority.AcceptUpdate rejects desired version mismatch", async () => {

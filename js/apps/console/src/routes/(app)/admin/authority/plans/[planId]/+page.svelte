@@ -10,9 +10,14 @@
   import Notice from "$lib/components/Notice.svelte";
   import Panel from "$lib/components/Panel.svelte";
   import {
+    applyBreakingChanges,
     contractManifestDiffRows,
     type ContractChangeKind,
     type ContractDiffRow,
+    type PlanSummaryEntry,
+    type PlanSummaryField,
+    type PlanSummaryGroup,
+    type PlanSummaryKind,
   } from "$lib/authority_console";
   import { structuredPatch } from "diff";
   import { errorMessage } from "$lib/format";
@@ -21,28 +26,14 @@
   import { fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
 
-  type PlanState = "pending" | "accepted" | "rejected" | "expired";
+  type PlanState = "pending" | "accepted" | "rejected" | "expired" | "superseded";
   type AuthorityKind = DeploymentAuthorityKind;
   type ContractDetail = TrellisContractGetOutput["contract"];
   type DiffGroup = "contracts" | "surfaces" | "schemas" | "resources" | "capabilities";
-  type SummaryKind = "permission" | "api" | "data-shape" | "background-job" | "storage" | "metadata";
-  type SummaryField =
-    | { kind: "scalar"; label: string; before: string; after: string; mono?: boolean; breaking?: boolean }
-    | { kind: "set"; label: string; added: string[]; removed: string[]; kept: string[]; mono?: boolean; breaking?: boolean };
-  type SummaryEntry = {
-    id: string;
-    change: ContractChangeKind;
-    kind: SummaryKind;
-    name: string;
-    summary: string;
-    fields: SummaryField[];
-    breaking: boolean;
-  };
-  type SummaryGroup = {
-    kind: SummaryKind;
-    label: string;
-    entries: SummaryEntry[];
-  };
+  type SummaryField = PlanSummaryField;
+  type SummaryEntry = PlanSummaryEntry;
+  type SummaryKind = PlanSummaryKind;
+  type SummaryGroup = PlanSummaryGroup;
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityPlansRequest = {
     (method: "Auth.DeploymentAuthority.Plans.Get", input: { planId: string }): RpcTakeable<{ plan: DeploymentAuthorityPlan }>;
@@ -83,8 +74,10 @@
   const migrationAcknowledged = $derived(acknowledgeChecked);
   const rejectReady = $derived(rejectReason.trim().length > 0);
   const summaryGroups = $derived(buildSummary(capabilityRows, surfaceRows, resourceRows, schemaRows, contractRows));
+  const annotatedSummary = $derived(applyBreakingChanges(summaryGroups, plan?.breakingChanges ?? []));
   const summaryEntryCount = $derived(summaryGroups.reduce((n, g) => n + g.entries.length, 0));
-  const summaryBreakingCount = $derived(summaryGroups.reduce((n, g) => n + g.entries.filter((e) => e.breaking).length, 0));
+  const summaryBreakingCount = $derived(annotatedSummary.groups.reduce((n, g) => n + g.entries.filter((e) => e.breaking).length, 0));
+  const unmatchedBreaking = $derived(annotatedSummary.unmatched);
   const jsonDiff = $derived(buildJsonDiff(previousContract, plan?.proposal.contract));
   const diffContext = 3;
   const diffRows = $derived(buildDiffRows(jsonDiff, diffContext));
@@ -118,7 +111,7 @@
   }
 
   function isPlanState(value: unknown): value is PlanState {
-    return value === "pending" || value === "accepted" || value === "rejected" || value === "expired";
+    return value === "pending" || value === "accepted" || value === "rejected" || value === "expired" || value === "superseded";
   }
 
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,7 +131,7 @@
       return { id: row.id, change: "Add", kind: "permission", name: row.name, summary: desc, fields: [], breaking: false };
     }
     if (row.change === "Remove") {
-      return { id: row.id, change: "Remove", kind: "permission", name: row.name, summary: "", fields: [], breaking: true };
+      return { id: row.id, change: "Remove", kind: "permission", name: row.name, summary: "", fields: [], breaking: false };
     }
     const fields: SummaryField[] = [];
     const beforeDesc = before ? stringField(before, "description") : null;
@@ -167,12 +160,12 @@
       return { id: row.id, change: "Add", kind: surfaceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
     }
     if (row.change === "Remove") {
-      return { id: row.id, change: "Remove", kind: surfaceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: true };
+      return { id: row.id, change: "Remove", kind: surfaceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: false };
     }
     const fields: SummaryField[] = [];
     const beforeSubject = before ? stringField(before, "subject") : null;
     const afterSubject = after ? stringField(after, "subject") : null;
-    if (beforeSubject !== null || afterSubject !== null) fields.push(scalarField("subject", beforeSubject ?? "—", afterSubject ?? "—", true, beforeSubject !== afterSubject));
+    if (beforeSubject !== null || afterSubject !== null) fields.push(scalarField("subject", beforeSubject ?? "—", afterSubject ?? "—", true));
     for (const key of ["description", "purpose", "consequence"]) {
       const b = before ? stringField(before, key) : null;
       const a = after ? stringField(after, key) : null;
@@ -187,10 +180,10 @@
     for (const [label, key] of [["input", "input"], ["output", "output"], ["event", "event"], ["progress", "progress"], ["payload", "payload"], ["result", "result"], ["error", "error"], ["request", "requestModel"], ["response", "responseModel"]] as const) {
       const b = before ? schemaRefLabel(before, key) : null;
       const a = after ? schemaRefLabel(after, key) : null;
-      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true, true));
+      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true));
     }
     const summary = buildChangeSummary(fields);
-    return { id: row.id, change: "Change", kind: surfaceSummaryKind(row.kind), name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+    return { id: row.id, change: "Change", kind: surfaceSummaryKind(row.kind), name: row.name, summary, fields, breaking: false };
   }
 
   function surfaceKindLabel(kind: string): string {
@@ -255,16 +248,11 @@
     for (const value of beforeSet) {
       if (!afterSet.has(value)) removed.push(value);
     }
-    const breaking = removed.length > 0 && (label === "required" || label === "capabilities");
-    return { kind: "set", label, added: added.sort(), removed: removed.sort(), kept: kept.sort(), mono, breaking };
+    return { kind: "set", label, added: added.sort(), removed: removed.sort(), kept: kept.sort(), mono };
   }
 
-  function scalarField(label: string, before: string, after: string, mono = false, breaking = false): Extract<SummaryField, { kind: "scalar" }> {
-    return { kind: "scalar", label, before, after, mono, breaking };
-  }
-
-  function isFieldBreaking(field: SummaryField): boolean {
-    return field.breaking === true;
+  function scalarField(label: string, before: string, after: string, mono = false): Extract<SummaryField, { kind: "scalar" }> {
+    return { kind: "scalar", label, before, after, mono };
   }
 
   function coerceToStringArray(value: unknown): string[] {
@@ -282,13 +270,13 @@
       return { id: row.id, change: "Add", kind: resourceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
     }
     if (row.change === "Remove") {
-      return { id: row.id, change: "Remove", kind: resourceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: true };
+      return { id: row.id, change: "Remove", kind: resourceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: false };
     }
     const fields: SummaryField[] = [];
     for (const [label, key] of [["payload", "payload"], ["result", "result"], ["input", "input"], ["output", "output"], ["schema", "schema"], ["keySchema", "keySchema"], ["valueSchema", "valueSchema"]] as const) {
       const b = before ? schemaRefLabel(before, key) : null;
       const a = after ? schemaRefLabel(after, key) : null;
-      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true, true));
+      if (b !== a) fields.push(scalarField(label, b ?? "—", a ?? "—", true));
     }
     const beforeCaps = before && Array.isArray(before.capabilities) ? before.capabilities.filter((v): v is string => typeof v === "string") : [];
     const afterCaps = after && Array.isArray(after.capabilities) ? after.capabilities.filter((v): v is string => typeof v === "string") : [];
@@ -305,7 +293,7 @@
     const afterPurpose = after ? stringField(after, "purpose") : null;
     if (beforePurpose !== afterPurpose) fields.push(scalarField("purpose", beforePurpose ?? "—", afterPurpose ?? "—"));
     const summary = buildChangeSummary(fields);
-    return { id: row.id, change: "Change", kind: resourceSummaryKind(row.kind), name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+    return { id: row.id, change: "Change", kind: resourceSummaryKind(row.kind), name: row.name, summary, fields, breaking: false };
   }
 
   function primitiveValue(record: Record<string, unknown>, key: string): string {
@@ -348,12 +336,12 @@
       return { id: row.id, change: "Add", kind: "data-shape", name: row.name, summary: desc, fields: [], breaking: false };
     }
     if (row.change === "Remove") {
-      return { id: row.id, change: "Remove", kind: "data-shape", name: row.name, summary: "", fields: [], breaking: true };
+      return { id: row.id, change: "Remove", kind: "data-shape", name: row.name, summary: "", fields: [], breaking: false };
     }
     const fields: SummaryField[] = [];
     const beforeType = before && typeof before.type === "string" ? before.type : null;
     const afterType = after && typeof after.type === "string" ? after.type : null;
-    if (beforeType !== afterType) fields.push(scalarField("type", beforeType ?? "—", afterType ?? "—", true, true));
+    if (beforeType !== afterType) fields.push(scalarField("type", beforeType ?? "—", afterType ?? "—", true));
     const beforeRequired = before && Array.isArray(before.required) ? before.required.filter((v): v is string => typeof v === "string") : [];
     const afterRequired = after && Array.isArray(after.required) ? after.required.filter((v): v is string => typeof v === "string") : [];
     if (beforeRequired.length > 0 || afterRequired.length > 0) {
@@ -378,7 +366,7 @@
       if (b !== a) fields.push(scalarField(key, b ?? "—", a ?? "—", true));
     }
     const summary = buildChangeSummary(fields);
-    return { id: row.id, change: "Change", kind: "data-shape", name: row.name, summary, fields, breaking: fields.some(isFieldBreaking) };
+    return { id: row.id, change: "Change", kind: "data-shape", name: row.name, summary, fields, breaking: false };
   }
 
   function describeSchema(record: Record<string, unknown> | null): string | null {
@@ -396,7 +384,7 @@
 
   function summarizeContractMeta(row: ContractDiffRow): SummaryEntry {
     if (row.kind === "Docs") return summarizeDocs(row);
-    return { id: row.id, change: row.change, kind: "metadata", name: row.name, summary: "", fields: [], breaking: row.change === "Remove" };
+    return { id: row.id, change: row.change, kind: "metadata", name: row.name, summary: "", fields: [], breaking: false };
   }
 
   function summarizeDocs(row: ContractDiffRow): SummaryEntry {
@@ -763,12 +751,11 @@
     <div class="text-sm text-base-content/70">This authority plan is unavailable. It may have expired, been accepted elsewhere, or been deleted.</div>
   </Panel>
 {:else}
-  {#if plan.warnings.length > 0}
+  {#if unmatchedBreaking.length > 0}
     <Notice variant="warning">
       <div class="min-w-0">
-        <div class="font-medium">Plan warnings</div>
-        <ul class="mt-1 list-disc pl-4 text-sm">
-          {#each plan.warnings as warning (warning)}<li>{warning}</li>{/each}
+        <ul class="mt-2 list-disc pl-4 text-sm">
+          {#each unmatchedBreaking as change (`${change.kind}:${change.target.kind}:${change.reason}`)}<li>{change.reason}</li>{/each}
         </ul>
       </div>
     </Notice>
@@ -812,11 +799,11 @@
       {#if activeTab === "summary"}
         <div in:fade={{ duration: 200, easing: cubicOut }} out:fade={{ duration: 100 }}>
         <Panel title="Contract changes" class="min-w-0">
-          {#if summaryGroups.length === 0}
+          {#if annotatedSummary.groups.length === 0}
             <p class="text-sm text-base-content/60">No contract changes proposed. The proposed contract matches the previous accepted contract.</p>
           {:else}
             <div class="divide-y divide-base-200">
-              {#each summaryGroups as group (group.kind)}
+              {#each annotatedSummary.groups as group (group.kind)}
                 {@const groupBreaking = group.entries.filter((e) => e.breaking).length}
                 <div class="border-b border-base-300 bg-base-300/15 px-1 py-2">
                   <div class="text-xs font-semibold uppercase tracking-wide text-base-content/70">{group.label}</div>
@@ -1032,7 +1019,7 @@
           <button class="btn btn-sm btn-error btn-outline w-full" onclick={rejectPlan} disabled={acting || !rejectReady}>Reject</button>
         </div>
       {:else}
-        <p class="text-sm text-base-content/60">This plan has already been decided.</p>
+        <p class="text-sm text-base-content/60">This plan is no longer actionable.</p>
       {/if}
     </Panel>
   </div>

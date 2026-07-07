@@ -6,6 +6,7 @@ import type {
   DeploymentAuthorityContractNeed,
   DeploymentAuthorityNeeds,
   DeploymentAuthorityPlan,
+  DeploymentAuthorityPlanBreakingChange,
   DeploymentAuthorityResourceNeed,
   DeploymentAuthoritySurface,
   DeploymentAuthoritySurfaceNeed,
@@ -22,7 +23,12 @@ type ImplementationOffer = {
 };
 
 type AuthorityState = DeploymentAuthority["desiredState"];
-type AuthorityPlanState = "pending" | "accepted" | "rejected" | "expired";
+type AuthorityPlanState =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "expired"
+  | "superseded";
 type AuthorityNeedSet = {
   contracts: Array<{ contractId: string; required: boolean }>;
   surfaces: Array<DeploymentAuthoritySurface & { required: boolean }>;
@@ -92,6 +98,191 @@ export type ContractManifestDiffRows = {
   resources: ContractDiffRow[];
   capabilities: ContractDiffRow[];
 };
+
+export type PlanSummaryKind =
+  | "permission"
+  | "api"
+  | "data-shape"
+  | "background-job"
+  | "storage"
+  | "metadata";
+
+export type PlanSummaryField =
+  | {
+    kind: "scalar";
+    label: string;
+    before: string;
+    after: string;
+    mono?: boolean;
+    breaking?: boolean;
+  }
+  | {
+    kind: "set";
+    label: string;
+    added: string[];
+    removed: string[];
+    kept: string[];
+    mono?: boolean;
+    breaking?: boolean;
+  };
+
+export type PlanSummaryEntry = {
+  id: string;
+  change: ContractChangeKind;
+  kind: PlanSummaryKind;
+  name: string;
+  summary: string;
+  fields: PlanSummaryField[];
+  breaking: boolean;
+};
+
+export type PlanSummaryGroup = {
+  kind: PlanSummaryKind;
+  label: string;
+  entries: PlanSummaryEntry[];
+};
+
+export type PlanSummaryGroups = PlanSummaryGroup[];
+
+export type AnnotatedPlanSummary = {
+  groups: PlanSummaryGroups;
+  unmatched: DeploymentAuthorityPlanBreakingChange[];
+};
+
+const SURFACE_SECTION_KINDS: Record<string, string> = {
+  rpc: "RPC",
+  operations: "Operation",
+  events: "Event",
+  feeds: "Feed",
+  jobs: "Job",
+};
+
+function entrySurfaceKind(entry: PlanSummaryEntry): string | null {
+  if (entry.kind !== "api") return null;
+  const prefix = entry.id.split(":", 1)[0];
+  return SURFACE_SECTION_KINDS[prefix] ?? null;
+}
+
+function surfaceKindLabel(
+  kind: "rpc" | "operation" | "event" | "feed" | "job",
+): string {
+  if (kind === "rpc") return "RPC";
+  if (kind === "operation") return "Operation";
+  if (kind === "event") return "Event";
+  if (kind === "feed") return "Feed";
+  return "Job";
+}
+
+function matchBreakingChange(
+  change: DeploymentAuthorityPlanBreakingChange,
+  entry: PlanSummaryEntry,
+): boolean {
+  const t = change.target;
+  if (t.kind === "schema") {
+    if (entry.kind !== "data-shape") return false;
+    return entry.name === t.schemaName;
+  }
+  if (t.kind === "surface") {
+    if (entry.kind !== "api") return false;
+    if (entry.name !== t.surfaceName) return false;
+    return surfaceKindLabel(t.surfaceKind) === entrySurfaceKind(entry);
+  }
+  if (t.kind === "resource") {
+    if (entry.kind !== "background-job" && entry.kind !== "storage") {
+      return false;
+    }
+    return entry.name === t.resourceAlias;
+  }
+  if (t.kind === "capability") {
+    if (entry.kind !== "permission") return false;
+    return entry.name === t.capability;
+  }
+  return false;
+}
+
+const FIELD_LABEL_BY_PATH: Record<string, string> = {
+  type: "type",
+  required: "required",
+  properties: "properties",
+  enum: "enum",
+  format: "format",
+  pattern: "pattern",
+  subject: "subject",
+  description: "description",
+  purpose: "purpose",
+  consequence: "consequence",
+  input: "input",
+  output: "output",
+  event: "event",
+  progress: "progress",
+  payload: "payload",
+  result: "result",
+  error: "error",
+  request: "request",
+  response: "response",
+  schema: "schema",
+  keySchema: "keySchema",
+  valueSchema: "valueSchema",
+  concurrency: "concurrency",
+  maxDeliver: "maxDeliver",
+  ttlMs: "ttlMs",
+  maxValueSizeBytes: "maxValueSizeBytes",
+  history: "history",
+};
+
+const CAPABILITY_FIELD_LABEL_BY_PATH: Record<string, string> = {
+  description: "description",
+  consequence: "consequence",
+  displayName: "display name",
+};
+
+function pathToFieldLabel(
+  change: DeploymentAuthorityPlanBreakingChange,
+  entry: PlanSummaryEntry,
+): string | null {
+  if (!change.path) return null;
+  const segments = change.path.split("/").filter((s: string) => s.length > 0);
+  if (segments.length === 0) return null;
+  const first = segments[0];
+  if (entry.kind === "permission") {
+    return CAPABILITY_FIELD_LABEL_BY_PATH[first] ?? null;
+  }
+  if (first === "capabilities") {
+    if (entry.kind === "api") return "required caps";
+    if (entry.kind === "background-job" || entry.kind === "storage") {
+      return "capabilities";
+    }
+    return null;
+  }
+  return FIELD_LABEL_BY_PATH[first] ?? null;
+}
+
+export function applyBreakingChanges(
+  groups: PlanSummaryGroups,
+  breakingChanges: readonly DeploymentAuthorityPlanBreakingChange[],
+): AnnotatedPlanSummary {
+  if (breakingChanges.length === 0) return { groups, unmatched: [] };
+  const remaining = new Set(breakingChanges);
+  const next: PlanSummaryGroups = groups.map((group) => ({
+    ...group,
+    entries: group.entries.map((entry) => {
+      const matching = breakingChanges.filter((c) =>
+        matchBreakingChange(c, entry)
+      );
+      if (matching.length === 0) return entry;
+      const fields = entry.fields.map((field) => {
+        const fieldBreaking = matching.some(
+          (c) => pathToFieldLabel(c, entry) === field.label,
+        );
+        return fieldBreaking ? { ...field, breaking: true } : field;
+      });
+      const entryBreaking = entry.breaking || matching.length > 0;
+      for (const c of matching) remaining.delete(c);
+      return { ...entry, breaking: entryBreaking, fields };
+    }),
+  }));
+  return { groups: next, unmatched: [...remaining] };
+}
 type ContractDiffGroup = keyof ContractManifestDiffRows;
 type ContractDiffSection = {
   group: ContractDiffGroup;
@@ -721,7 +912,7 @@ function planState(plan: DeploymentAuthorityPlan): AuthorityPlanState {
 
 function isAuthorityPlanState(value: unknown): value is AuthorityPlanState {
   return value === "pending" || value === "accepted" ||
-    value === "rejected" || value === "expired";
+    value === "rejected" || value === "expired" || value === "superseded";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

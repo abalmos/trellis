@@ -149,10 +149,6 @@ function decodePlan(row: AuthorityPlanRow): DeploymentAuthorityPlan {
       "deployment authority materialization preview",
       row.materializationPreviewJson,
     ),
-    warnings: parseJsonField(
-      "deployment authority plan warnings",
-      row.warningsJson,
-    ),
     breakingChanges: parseJsonField(
       "deployment authority plan breaking changes",
       row.breakingChangesJson,
@@ -195,7 +191,7 @@ function encodePlan(record: DeploymentAuthorityPlan): AuthorityPlanInsert {
     proposalJson: JSON.stringify(decoded.proposal),
     desiredChangeJson: JSON.stringify(decoded.desiredChange),
     materializationPreviewJson: JSON.stringify(decoded.materializationPreview),
-    warningsJson: JSON.stringify(decoded.warnings),
+    warningsJson: "[]",
     breakingChangesJson: JSON.stringify(decoded.breakingChanges),
     acknowledgementRequired: decoded.classification === "migration"
       ? decoded.acknowledgementRequired
@@ -512,7 +508,6 @@ async function putAuthorityPlanRow(
         proposalJson: row.proposalJson,
         desiredChangeJson: row.desiredChangeJson,
         materializationPreviewJson: row.materializationPreviewJson,
-        warningsJson: row.warningsJson,
         breakingChangesJson: row.breakingChangesJson,
         acknowledgementRequired: row.acknowledgementRequired,
         decisionAt: row.decisionAt,
@@ -571,7 +566,6 @@ export class SqlDeploymentAuthorityRepository {
           proposalJson: planRow.proposalJson,
           desiredChangeJson: planRow.desiredChangeJson,
           materializationPreviewJson: planRow.materializationPreviewJson,
-          warningsJson: planRow.warningsJson,
           breakingChangesJson: planRow.breakingChangesJson,
           acknowledgementRequired: planRow.acknowledgementRequired,
           decisionAt: planRow.decisionAt,

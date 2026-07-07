@@ -150,7 +150,7 @@ const deploymentAuthorityUpdate = {
   proposal: deploymentAuthorityProposal,
   desiredChange: { addCapabilities: ["graph.query"] },
   materializationPreview: { grants: 1 },
-  warnings: ["resource binding will be reconciled"],
+  breakingChanges: [],
   createdAt: now,
   expiresAt: now,
 };

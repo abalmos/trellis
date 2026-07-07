@@ -167,7 +167,7 @@ Rules:
 - Deployment authority plans can be `superseded`; only `pending` plans targeting
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
-  compatibility failures; `warnings` is only the human-readable summary.
+  compatibility failures for operator UI.
 - Trellis runtime behavior should be tested with live integration tests, not fake
   NATS, fake Trellis runtimes, fake auth, fake generated clients, or hand-built
   bootstrap/control-plane responders. If a live test needs a missing failure or

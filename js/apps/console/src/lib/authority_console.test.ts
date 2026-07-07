@@ -3,8 +3,10 @@ import { deepEqual, equal } from "node:assert/strict";
 import type {
   DeploymentAuthority,
   DeploymentAuthorityPlan,
+  DeploymentAuthorityPlanBreakingChange,
 } from "@qlever-llc/trellis/auth";
 import {
+  applyBreakingChanges,
   type AuthorityCapabilityDefinition,
   authorityCounts,
   authorityPlanRows,
@@ -22,6 +24,8 @@ import {
   formatBindingTarget,
   givenCapabilityRows,
   livenessRows,
+  type PlanSummaryEntry,
+  type PlanSummaryGroup,
   serviceRuntimeDeployments,
 } from "./authority_console.ts";
 
@@ -169,7 +173,7 @@ function authorityPlan(
       ],
     },
     materializationPreview: {},
-    warnings: [],
+    breakingChanges: [],
     createdAt: "2026-05-07T00:00:00.000Z",
     ...overrides,
   };
@@ -715,4 +719,180 @@ Deno.test("formatBindingTarget displays resource binding identity", () => {
   };
 
   equal(formatBindingTarget(binding), "bucket: billing-cache");
+});
+
+function makeSummaryEntry(
+  overrides: Partial<PlanSummaryEntry> = {},
+): PlanSummaryEntry {
+  return {
+    id: "schemas:SyncJobPayload",
+    change: "Change",
+    kind: "data-shape",
+    name: "SyncJobPayload",
+    summary: "",
+    fields: [{
+      kind: "set",
+      label: "properties",
+      added: [],
+      removed: ["mode"],
+      kept: ["maxPages", "maxTickets"],
+    }],
+    breaking: false,
+    ...overrides,
+  };
+}
+
+function makeSummaryGroup(
+  entries: PlanSummaryEntry[],
+  kind: PlanSummaryGroup["kind"] = "data-shape",
+): PlanSummaryGroup[] {
+  return [{ kind, label: "Data shapes", entries }];
+}
+
+Deno.test("applyBreakingChanges flags schema property removal as breaking", () => {
+  const groups = makeSummaryGroup([makeSummaryEntry()]);
+  const change: DeploymentAuthorityPlanBreakingChange = {
+    kind: "schema-property-removed",
+    target: {
+      kind: "schema",
+      contractId: "acme.billing@v1",
+      schemaName: "SyncJobPayload",
+    },
+    path: "/properties/mode",
+    reason: "Property mode removed.",
+  };
+
+  const result = applyBreakingChanges(groups, [change]);
+
+  equal(result.groups[0].entries[0].breaking, true);
+  const firstField = result.groups[0].entries[0].fields[0];
+  equal(firstField.breaking, true);
+  equal(firstField.kind === "set" && firstField.removed.includes("mode"), true);
+  deepEqual(result.unmatched, []);
+});
+
+Deno.test("applyBreakingChanges leaves non-matching entries alone", () => {
+  const groups = makeSummaryGroup([makeSummaryEntry({ name: "OtherSchema" })]);
+  const change: DeploymentAuthorityPlanBreakingChange = {
+    kind: "schema-property-removed",
+    target: {
+      kind: "schema",
+      contractId: "acme.billing@v1",
+      schemaName: "SyncJobPayload",
+    },
+    path: "/properties/mode",
+    reason: "Property mode removed.",
+  };
+
+  const result = applyBreakingChanges(groups, [change]);
+
+  equal(result.groups[0].entries[0].breaking, false);
+  deepEqual(result.unmatched, [change]);
+});
+
+Deno.test("applyBreakingChanges matches surface targets by id and kind", () => {
+  const groups = makeSummaryGroup(
+    [makeSummaryEntry({
+      id: "rpc:Invoice.Get",
+      name: "Invoice.Get",
+      kind: "api",
+    })],
+    "api",
+  );
+  const change: DeploymentAuthorityPlanBreakingChange = {
+    kind: "surface-subject-changed",
+    target: {
+      kind: "surface",
+      contractId: "acme.billing@v1",
+      surfaceKind: "rpc",
+      surfaceName: "Invoice.Get",
+    },
+    reason: "Subject changed.",
+  };
+
+  const result = applyBreakingChanges(groups, [change]);
+
+  equal(result.groups[0].entries[0].breaking, true);
+  deepEqual(result.unmatched, []);
+});
+
+Deno.test("applyBreakingChanges ignores contract and digest targets", () => {
+  const groups = makeSummaryGroup([makeSummaryEntry()]);
+  const change: DeploymentAuthorityPlanBreakingChange = {
+    kind: "digest-incompatible",
+    target: {
+      kind: "digest",
+      contractId: "acme.billing@v1",
+      contractDigest: "new-digest",
+    },
+    reason: "Active compatible digests are incompatible.",
+  };
+
+  const result = applyBreakingChanges(groups, [change]);
+
+  equal(result.groups[0].entries[0].breaking, false);
+  deepEqual(result.unmatched, [change]);
+});
+
+Deno.test("applyBreakingChanges matches capability and resource targets", () => {
+  const groups: PlanSummaryGroup[] = [{
+    kind: "permission",
+    label: "Permissions",
+    entries: [makeSummaryEntry({
+      id: "capabilities:billing.read",
+      name: "billing.read",
+      kind: "permission",
+      fields: [{
+        kind: "scalar",
+        label: "description",
+        before: "Read invoices.",
+        after: "Read invoices and sync status.",
+      }],
+    })],
+  }, {
+    kind: "background-job",
+    label: "Background jobs and event consumers",
+    entries: [makeSummaryEntry({
+      id: "jobs:Sync",
+      name: "Sync",
+      kind: "background-job",
+      fields: [{
+        kind: "scalar",
+        label: "payload",
+        before: "OldPayload",
+        after: "NewPayload",
+        mono: true,
+      }],
+    })],
+  }];
+
+  const capabilityChange: DeploymentAuthorityPlanBreakingChange = {
+    kind: "capability-removed",
+    target: {
+      kind: "capability",
+      contractId: "acme.billing@v1",
+      capability: "billing.read",
+    },
+    reason: "Capability removed.",
+  };
+  const resourceChange: DeploymentAuthorityPlanBreakingChange = {
+    kind: "resource-shape-changed",
+    target: {
+      kind: "resource",
+      contractId: "acme.billing@v1",
+      resourceAlias: "Sync",
+    },
+    path: "/payload",
+    reason: "Payload schema changed.",
+  };
+
+  const result = applyBreakingChanges(groups, [
+    capabilityChange,
+    resourceChange,
+  ]);
+
+  equal(result.groups[0].entries[0].breaking, true);
+  equal(result.groups[1].entries[0].breaking, true);
+  equal(result.groups[1].entries[0].fields[0].breaking, true);
+  deepEqual(result.unmatched, []);
 });

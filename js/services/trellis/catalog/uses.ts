@@ -63,6 +63,12 @@ export type ActiveContractBreakingChange = {
   reason: string;
 };
 
+export type ActiveContractCompatibilityAnalysis = {
+  compatible: boolean;
+  breakingChanges: ActiveContractBreakingChange[];
+  message?: string;
+};
+
 type SubjectSurface = {
   kind: "rpc" | "operations" | "events" | "feeds";
   key: string;
@@ -697,6 +703,7 @@ function schemaBreakingChangesForContracts(
         continue;
       }
       const issues = describeSchemaCompatibility(existing.schema, schema);
+      const mergedSchema = mergeCompatibleSchemas(existing.schema, schema);
       for (const issue of issues) {
         changes.push({
           kind: issue.kind,
@@ -709,12 +716,32 @@ function schemaBreakingChangesForContracts(
           reason: issue.reason,
         });
       }
-      if (issues.length === 0) {
-        schemas.set(name, { digest: entry.digest, schema });
+      if (issues.length === 0 && mergedSchema === null) {
+        changes.push({
+          kind: "digest-incompatible",
+          target: {
+            kind: "schema",
+            contractId: first.contract.id,
+            schemaName: name,
+          },
+          reason: "Schema changed incompatibly.",
+        });
+      }
+      if (mergedSchema !== null) {
+        schemas.set(name, { digest: entry.digest, schema: mergedSchema });
       }
     }
   }
   return changes;
+}
+
+function activeContractCompatibilityMessage(
+  change: ActiveContractBreakingChange | undefined,
+): string {
+  if (change?.target.kind === "schema") {
+    return `Active compatible digests define schema '${change.target.schemaName}' incompatibly`;
+  }
+  return change?.reason ?? "Active compatible digests are incompatible";
 }
 
 /** Returns structured active-compatibility failures for same-lineage manifests. */
@@ -732,6 +759,42 @@ export function activeContractBreakingChanges(
     changes.push(...schemaBreakingChangesForContracts(group));
   }
   return changes;
+}
+
+/** Computes active compatibility without throwing to drive authority planning. */
+export function analyzeActiveContractCompatibility(
+  entries: ActiveCompatibleContractEntry[],
+): ActiveContractCompatibilityAnalysis {
+  const breakingChanges = activeContractBreakingChanges(entries);
+  if (breakingChanges.length > 0) {
+    return {
+      compatible: false,
+      breakingChanges,
+      message: activeContractCompatibilityMessage(breakingChanges[0]),
+    };
+  }
+  try {
+    createActiveContractLookup(entries);
+    return { compatible: true, breakingChanges: [] };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const first = entries[0];
+    return {
+      compatible: false,
+      message,
+      breakingChanges: first
+        ? [{
+          kind: "digest-incompatible",
+          target: {
+            kind: "digest",
+            contractId: first.contract.id,
+            contractDigest: first.digest,
+          },
+          reason: message,
+        }]
+        : [],
+    };
+  }
 }
 
 function mergeCompatibleContractSurfaces(
@@ -1047,7 +1110,14 @@ export function createKnownContractLookup(
 export function validateActiveContractCompatibility(
   entries: ActiveCompatibleContractEntry[],
 ): void {
-  createActiveContractLookup(entries);
+  const analysis = analyzeActiveContractCompatibility(entries);
+  if (!analysis.compatible) {
+    throw new Error(
+      analysis.message ?? activeContractCompatibilityMessage(
+        analysis.breakingChanges[0],
+      ),
+    );
+  }
 }
 
 /** Validates that active contracts only use surfaces from the proposed active set. */

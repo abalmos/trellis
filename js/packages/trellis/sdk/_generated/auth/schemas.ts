@@ -2049,10 +2049,6 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
               { "const": "superseded", "type": "string" },
             ],
           },
-          "warnings": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
         },
         "required": [
           "planId",
@@ -2060,7 +2056,6 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
           "proposal",
           "desiredChange",
           "materializationPreview",
-          "warnings",
           "breakingChanges",
           "createdAt",
           "classification",
@@ -2336,10 +2331,6 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
               { "const": "superseded", "type": "string" },
             ],
           },
-          "warnings": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
         },
         "required": [
           "planId",
@@ -2347,7 +2338,6 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
           "proposal",
           "desiredChange",
           "materializationPreview",
-          "warnings",
           "breakingChanges",
           "createdAt",
           "classification",
@@ -2639,10 +2629,6 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
               { "const": "superseded", "type": "string" },
             ],
           },
-          "warnings": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
         },
         "required": [
           "planId",
@@ -2650,7 +2636,6 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
           "proposal",
           "desiredChange",
           "materializationPreview",
-          "warnings",
           "breakingChanges",
           "createdAt",
           "classification",
@@ -2926,10 +2911,6 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
               { "const": "superseded", "type": "string" },
             ],
           },
-          "warnings": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
         },
         "required": [
           "planId",
@@ -2937,7 +2918,6 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
           "proposal",
           "desiredChange",
           "materializationPreview",
-          "warnings",
           "breakingChanges",
           "createdAt",
           "classification",
@@ -3266,10 +3246,6 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
                 { "const": "superseded", "type": "string" },
               ],
             },
-            "warnings": {
-              "items": { "minLength": 1, "type": "string" },
-              "type": "array",
-            },
           },
           "required": [
             "planId",
@@ -3277,7 +3253,6 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
             "proposal",
             "desiredChange",
             "materializationPreview",
-            "warnings",
             "breakingChanges",
             "createdAt",
             "classification",
@@ -3558,10 +3533,6 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
                 { "const": "superseded", "type": "string" },
               ],
             },
-            "warnings": {
-              "items": { "minLength": 1, "type": "string" },
-              "type": "array",
-            },
           },
           "required": [
             "planId",
@@ -3569,7 +3540,6 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
             "proposal",
             "desiredChange",
             "materializationPreview",
-            "warnings",
             "breakingChanges",
             "createdAt",
             "classification",

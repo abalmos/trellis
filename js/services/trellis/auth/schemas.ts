@@ -699,7 +699,6 @@ const DeploymentAuthorityPlanBaseSchema = Type.Object({
   proposal: DeploymentAuthorityProposalSchema,
   desiredChange: Type.Record(Type.String(), Type.Unknown()),
   materializationPreview: Type.Record(Type.String(), Type.Unknown()),
-  warnings: Type.Array(Type.String({ minLength: 1 })),
   breakingChanges: Type.Array(DeploymentAuthorityPlanBreakingChangeSchema),
   createdAt: DurableIsoDateStringSchema,
   expiresAt: Type.Optional(DurableIsoDateStringSchema),

@@ -184,11 +184,9 @@ mode, Trellis auto-accepts the same migration plan for local development,
 records the auto-accepted decision in plan/history, mutates desired state, and
 schedules reconciliation like any other accepted migration.
 
-Authority plans expose structured `breakingChanges` alongside free-form
-`warnings`. `breakingChanges` is the authoritative per-target compatibility
-signal for operator UI, with JSON Pointer `path` values when a schema field can
-be localized. `warnings` remains a human-readable summary derived from the same
-planning path.
+Authority plans expose structured `breakingChanges` as the authoritative
+per-target compatibility signal for operator UI, with JSON Pointer `path` values
+when a schema field can be localized.
 
 ### 3) Reconciliation materializes desired authority
 

@@ -443,7 +443,6 @@ const DeploymentAuthorityPlanBaseSchema = Type.Object({
   proposal: DeploymentAuthorityProposalSchema,
   desiredChange: OpenObjectSchema,
   materializationPreview: OpenObjectSchema,
-  warnings: Type.Array(Type.String({ minLength: 1 })),
   breakingChanges: Type.Array(DeploymentAuthorityPlanBreakingChangeSchema),
   createdAt: IsoDateStringSchema,
   expiresAt: Type.Optional(IsoDateStringSchema),

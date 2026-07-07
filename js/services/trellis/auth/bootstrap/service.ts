@@ -7,10 +7,8 @@ import { ulid } from "ulid";
 
 import type { ContractsModule } from "../../catalog/runtime.ts";
 import {
-  activeContractBreakingChanges,
   type ContractEntry,
   ContractUseDependencyError,
-  validateActiveContractCompatibility,
 } from "../../catalog/uses.ts";
 import {
   analyzeContractProposal,
@@ -22,14 +20,18 @@ import {
   mergeAuthorityNeeds,
   normalizeAuthorityNeeds,
 } from "../authority_needs.ts";
-import { classifyDeploymentAuthorityPlan } from "../deployment_authority_plan.ts";
+import {
+  classifyDeploymentAuthorityPlan,
+  type ContractCompatibilityFailure,
+  evaluateSameContractCompatibility,
+  serviceOfferLineageKey,
+} from "../deployment_authority_plan.ts";
 import { SessionKeySchema, SignatureSchema } from "../schemas.ts";
 import type {
   AuthorityNeedSet,
   DeploymentAuthority,
   DeploymentAuthorityMaterialization,
   DeploymentAuthorityPlan,
-  DeploymentAuthorityPlanBreakingChange,
   DeploymentResourceBinding,
   ImplementationOffer,
   SentinelCreds,
@@ -116,12 +118,6 @@ type ImplementationOfferStorage = {
   latestAcceptedByLineage(
     lineageKey: string,
   ): Promise<ImplementationOffer | undefined>;
-};
-
-type ContractCompatibilityFailure = {
-  message: string;
-  latestAcceptedContractDigest: string;
-  breakingChanges: DeploymentAuthorityPlanBreakingChange[];
 };
 
 type DeploymentAuthorityMigrationPlan = Extract<
@@ -343,13 +339,6 @@ function resourceKey(kind: string, alias: string): string {
   return `${kind}\u001f${alias}`;
 }
 
-function serviceOfferLineageKey(
-  deploymentId: string,
-  contractId: string,
-): string {
-  return JSON.stringify(["service", deploymentId, contractId]);
-}
-
 function serviceOfferId(input: {
   deploymentId: string;
   instanceId: string;
@@ -380,54 +369,12 @@ async function assertPresentedContractCompatible(input: {
       ),
     );
   const currentDigest = latestAccepted?.contractDigest;
-  if (!currentDigest || currentDigest === input.presentedDigest) {
-    return null;
-  }
-
-  const currentContract = await input.contracts.getContract(currentDigest, {
-    includeInactive: true,
+  return await evaluateSameContractCompatibility({
+    contracts: input.contracts,
+    latestAcceptedContractDigest: currentDigest,
+    presentedDigest: input.presentedDigest,
+    presentedContract: input.presentedContract,
   });
-  if (!currentContract) {
-    return {
-      message: `previous service contract digest '${currentDigest}' is unknown`,
-      latestAcceptedContractDigest: currentDigest,
-      breakingChanges: [{
-        kind: "digest-incompatible",
-        target: {
-          kind: "digest",
-          contractId: input.presentedContract.id,
-          contractDigest: currentDigest,
-        },
-        reason:
-          `Previous service contract digest '${currentDigest}' is unknown.`,
-      }],
-    };
-  }
-  const breakingChanges = activeContractBreakingChanges([
-    { digest: currentDigest, contract: currentContract },
-    { digest: input.presentedDigest, contract: input.presentedContract },
-  ]);
-  try {
-    validateActiveContractCompatibility([
-      { digest: currentDigest, contract: currentContract },
-      { digest: input.presentedDigest, contract: input.presentedContract },
-    ]);
-    return null;
-  } catch (error) {
-    return {
-      message: error instanceof Error ? error.message : String(error),
-      latestAcceptedContractDigest: currentDigest,
-      breakingChanges: breakingChanges.length > 0 ? breakingChanges : [{
-        kind: "digest-incompatible",
-        target: {
-          kind: "digest",
-          contractId: input.presentedContract.id,
-          contractDigest: input.presentedDigest,
-        },
-        reason: error instanceof Error ? error.message : String(error),
-      }],
-    };
-  }
 }
 
 function resourceBindingsForResponse(
@@ -1207,7 +1154,6 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
           },
           desiredChange: planClassification.desiredChange,
           materializationPreview: {},
-          warnings: [compatibilityError.message],
           breakingChanges: compatibilityError.breakingChanges,
           createdAt: now,
           state: "pending",
@@ -1324,7 +1270,6 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
             proposal,
             desiredChange: planClassification.desiredChange,
             materializationPreview: {},
-            warnings: [],
             breakingChanges: [],
             createdAt: now,
             state: "pending",
@@ -1337,7 +1282,6 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
             proposal,
             desiredChange: planClassification.desiredChange,
             materializationPreview: {},
-            warnings: [],
             breakingChanges: [],
             createdAt: now,
             state: "pending",

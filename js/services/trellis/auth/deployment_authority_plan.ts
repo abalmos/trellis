@@ -1,5 +1,12 @@
+import type { TrellisContractV1 } from "@qlever-llc/trellis/contracts";
+
+import { analyzeActiveContractCompatibility } from "../catalog/uses.ts";
 import { computeAuthorityNeedsDelta } from "./authority_needs_decision.ts";
-import type { AuthorityNeedSet, AuthorityNeedSetResource } from "./schemas.ts";
+import type {
+  AuthorityNeedSet,
+  AuthorityNeedSetResource,
+  DeploymentAuthorityPlanBreakingChange,
+} from "./schemas.ts";
 
 export type DeploymentAuthorityPlanClassification = "update" | "migration";
 
@@ -7,6 +14,27 @@ export type DeploymentAuthorityPlanClassificationResult = {
   classification: DeploymentAuthorityPlanClassification;
   desiredChange: AuthorityNeedSet;
 };
+
+export type ContractCompatibilityFailure = {
+  message: string;
+  latestAcceptedContractDigest: string;
+  breakingChanges: DeploymentAuthorityPlanBreakingChange[];
+};
+
+type ContractLookup = {
+  getContract(
+    digest: string,
+    options?: { includeInactive?: boolean },
+  ): Promise<TrellisContractV1 | undefined>;
+};
+
+/** Returns the implementation-offer lineage for one service deployment contract. */
+export function serviceOfferLineageKey(
+  deploymentId: string,
+  contractId: string,
+): string {
+  return JSON.stringify(["service", deploymentId, contractId]);
+}
 
 function resourceKey(
   resource: Pick<AuthorityNeedSetResource, "kind" | "alias">,
@@ -87,5 +115,60 @@ export function classifyDeploymentAuthorityPlan(
       ...desiredChange,
       resources: [...desiredChange.resources, ...definitionChanges],
     },
+  };
+}
+
+/** Checks whether a same-contract digest replacement is active-compatible. */
+export async function evaluateSameContractCompatibility(input: {
+  contracts: ContractLookup;
+  latestAcceptedContractDigest: string | undefined;
+  presentedDigest: string;
+  presentedContract: TrellisContractV1;
+}): Promise<ContractCompatibilityFailure | null> {
+  const currentDigest = input.latestAcceptedContractDigest;
+  if (!currentDigest || currentDigest === input.presentedDigest) return null;
+
+  const currentContract = await input.contracts.getContract(currentDigest, {
+    includeInactive: true,
+  });
+  if (!currentContract) {
+    return {
+      message: `previous service contract digest '${currentDigest}' is unknown`,
+      latestAcceptedContractDigest: currentDigest,
+      breakingChanges: [{
+        kind: "digest-incompatible",
+        target: {
+          kind: "digest",
+          contractId: input.presentedContract.id,
+          contractDigest: currentDigest,
+        },
+        reason:
+          `Previous service contract digest '${currentDigest}' is unknown.`,
+      }],
+    };
+  }
+
+  const analysis = analyzeActiveContractCompatibility([
+    { digest: currentDigest, contract: currentContract },
+    { digest: input.presentedDigest, contract: input.presentedContract },
+  ]);
+  if (analysis.compatible) return null;
+
+  const message = analysis.message ??
+    "Active compatible digests are incompatible";
+  return {
+    message,
+    latestAcceptedContractDigest: currentDigest,
+    breakingChanges: analysis.breakingChanges.length > 0
+      ? analysis.breakingChanges
+      : [{
+        kind: "digest-incompatible",
+        target: {
+          kind: "digest",
+          contractId: input.presentedContract.id,
+          contractDigest: input.presentedDigest,
+        },
+        reason: message,
+      }],
   };
 }

@@ -28,7 +28,7 @@ Rules:
 - Deployment authority plans can be `superseded`; only `pending` plans targeting
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
-  compatibility failures; `warnings` is only the human-readable summary.
+  compatibility failures for operator UI.
 - prefer generated descriptors and generated client/facade methods
 - prefer generated provider facades for service handler registration when they
   are available
