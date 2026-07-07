@@ -647,6 +647,7 @@ where
             cleanup_queued_key_for_terminal(
                 key_coordinator.as_ref(),
                 &queue,
+                manager.bindings().namespace.as_str(),
                 &parsed_job,
                 &manager.now_iso(),
             )
@@ -668,6 +669,7 @@ where
         let active_key = acquire_key_slot_for_work(
             key_coordinator.as_ref(),
             &queue,
+            manager.bindings().namespace.as_str(),
             &parsed_job,
             &manager.now_iso(),
             1,
@@ -889,6 +891,7 @@ async fn key_coordinator_for_queue(
 async fn acquire_key_slot_for_work(
     coordinator: Option<&NatsKeyCoordinator>,
     queue: &JobsQueueBinding,
+    namespace: &str,
     job: &Job,
     started_at: &str,
     tries: u64,
@@ -899,7 +902,7 @@ async fn acquire_key_slot_for_work(
     let Some(key_concurrency) = queue.key_concurrency.as_ref() else {
         return Ok(None);
     };
-    let policy = key_policy_for_job(queue, key_concurrency, job)?;
+    let policy = key_policy_for_job(queue, key_concurrency, namespace, job)?;
     let lease_expires_at = add_millis(started_at, key_concurrency.heartbeat_ttl_ms)
         .map_err(RuntimeWorkerError::KeyCoordinator)?;
     let input = AcquireSlotInput {
@@ -973,6 +976,7 @@ async fn renew_key_lease_at(
 async fn cleanup_queued_key_for_terminal(
     coordinator: Option<&NatsKeyCoordinator>,
     queue: &JobsQueueBinding,
+    namespace: &str,
     job: &Job,
     removed_at: &str,
 ) -> Result<(), RuntimeWorkerError> {
@@ -982,7 +986,7 @@ async fn cleanup_queued_key_for_terminal(
     let Some(key_concurrency) = queue.key_concurrency.as_ref() else {
         return Ok(());
     };
-    let policy = key_policy_for_job(queue, key_concurrency, job)?;
+    let policy = key_policy_for_job(queue, key_concurrency, namespace, job)?;
     coordinator
         .remove_queued(policy, job.id.clone(), removed_at.to_string())
         .await
@@ -1034,13 +1038,14 @@ async fn release_key_lease(
 fn key_policy_for_job(
     queue: &JobsQueueBinding,
     key_concurrency: &JobKeyConcurrencyBinding,
+    namespace: &str,
     job: &Job,
 ) -> Result<JobKeyPolicy, RuntimeWorkerError> {
     let derived = derive_job_key(&job.payload, &key_concurrency.key)
         .map_err(|error| RuntimeWorkerError::KeyCoordinator(error.to_string()))?;
     let queue_depth = queue.queue.as_ref();
     Ok(JobKeyPolicy {
-        service: job.service.clone(),
+        service: namespace.to_string(),
         job_type: job.job_type.clone(),
         key: derived.key,
         key_hash: derived.key_hash,
@@ -1187,6 +1192,7 @@ where
         heartbeats.push(
             start_worker_heartbeat_loop(
                 nats.clone(),
+                binding.jobs.service_name.clone(),
                 binding.jobs.namespace.clone(),
                 queue_type.clone(),
                 instance_id.clone(),

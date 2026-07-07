@@ -556,7 +556,7 @@ impl JobsQuery {
             expected: expected_states.to_string(),
             actual: format!("{:?}", job.state).to_lowercase(),
         })?;
-        let subject = job_event_subject(&job.service, &job.job_type, &job.id, event.event_type);
+        let subject = self.transition_event_subject(&job, &event);
         let payload = serde_json::to_vec(&event).map_err(|error| JobsQueryError::EncodeEvent {
             key: key.clone(),
             details: error.to_string(),
@@ -580,6 +580,21 @@ impl JobsQuery {
         let projected = self.await_job_projection(&predicted, &event).await?;
 
         Ok(projected)
+    }
+
+    fn transition_event_subject(&self, job: &Job, event: &JobEvent) -> String {
+        self.store
+            .list_timeline_events(&job.id, 1)
+            .ok()
+            .and_then(|events| {
+                events
+                    .first()
+                    .and_then(|timeline_event| raw_event_subject(&timeline_event.raw_event_json))
+            })
+            .and_then(|subject| sibling_event_subject(&subject, event.event_type.as_token()))
+            .unwrap_or_else(|| {
+                job_event_subject(&job.service, &job.job_type, &job.id, event.event_type)
+            })
     }
 
     async fn await_job_projection(
@@ -1192,6 +1207,18 @@ fn to_wire_integer(value: u64) -> i64 {
 
 fn projection_key(job: &Job) -> String {
     format!("{}/{}/{}", job.service, job.job_type, job.id)
+}
+
+fn raw_event_subject(raw_event_json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(raw_event_json)
+        .ok()?
+        .get("_trellisSubject")?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn sibling_event_subject(subject: &str, event_type: &str) -> Option<String> {
+    Some(format!("{}.{}", subject.rsplit_once('.')?.0, event_type))
 }
 
 #[cfg(test)]

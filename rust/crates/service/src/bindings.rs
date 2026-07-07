@@ -56,6 +56,8 @@ pub struct StoreResourceBinding {
 /// Bound service-private jobs resource.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobsResourceBinding {
+    /// Logical registered service name projected in job admin views.
+    pub service_name: String,
     /// Service-local jobs namespace used in job subjects and stream names.
     pub namespace: String,
     /// Work stream used by private job workers, when provisioned.

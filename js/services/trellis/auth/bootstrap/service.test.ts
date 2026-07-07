@@ -1735,6 +1735,7 @@ Deno.test("POST /bootstrap/service does not resolve omitted manifests from imple
 Deno.test("POST /bootstrap/service returns jobs bindings in contract resource shape", async () => {
   const contract = await validatedContract(jobsContract());
   const jobsBinding = {
+    serviceName: "deployment-1",
     namespace: "deployment_1_jobs",
     workStream: "JOBS_WORK",
     queues: {
@@ -1758,6 +1759,7 @@ Deno.test("POST /bootstrap/service returns jobs bindings in contract resource sh
   const setup = await createApp({
     initialBindings: [
       jobsBindingRecord("process", {
+        serviceName: jobsBinding.serviceName,
         namespace: jobsBinding.namespace,
         workStream: jobsBinding.workStream,
         ...jobsBinding.queues.process,
@@ -2064,6 +2066,7 @@ Deno.test("POST /bootstrap/service does not reject stale jobs bindings", async (
     ),
     initialBindings: [
       jobsBindingRecord("process", {
+        serviceName: "deployment-1",
         namespace: "deployment_1_jobs",
         workStream: "JOBS_WORK",
         queueType: "process",

@@ -64,6 +64,7 @@ impl JobMetaSource for FixedMetaSource {
 
 fn sample_bindings() -> JobsBinding {
     JobsBinding {
+        service_name: "trellis/documents".to_string(),
         namespace: "documents".to_string(),
         queues: BTreeMap::from([(
             "document-process".to_string(),
@@ -91,6 +92,7 @@ async fn create_errors_when_queue_binding_missing() {
     let manager = JobManager::new(
         RecordingPublisher::default(),
         JobsBinding {
+            service_name: "trellis/documents".to_string(),
             namespace: "documents".to_string(),
             queues: BTreeMap::new(),
         },
@@ -122,7 +124,7 @@ async fn create_returns_pending_job_with_namespace_and_max_deliver() {
         .expect("create should succeed");
 
     assert_eq!(job.id, "job-1");
-    assert_eq!(job.service, "documents");
+    assert_eq!(job.service, "trellis/documents");
     assert_eq!(job.job_type, "document-process");
     assert_eq!(job.state, JobState::Pending);
     assert_eq!(job.tries, 0);

@@ -518,7 +518,8 @@ export async function startNatsQueueWorker<TResult>(
     getProjectedJob: options.getProjectedJob,
     getLatestLifecycleEvent: options.getLatestLifecycleEvent ??
       (direct
-        ? (job) => getLatestLifecycleEvent(direct, "JOBS", job)
+        ? (job) =>
+          getLatestLifecycleEvent(direct, "JOBS", queue.publishPrefix, job)
         : undefined),
     payloadSchema: queue.payload,
     validatePayload: options.validatePayload,
@@ -559,7 +560,8 @@ export async function startWorkerHostFromBinding(
       }
       return startWorkerHeartbeatLoop({
         publisher: options.heartbeatPublisher!,
-        service: binding.jobs.namespace,
+        service: binding.jobs.serviceName,
+        subjectService: binding.jobs.namespace,
         jobType: queueType,
         instanceId: options.instanceId,
         concurrency: queue.concurrency,
@@ -705,11 +707,12 @@ function getQueueBinding(
 async function getLatestLifecycleEvent(
   direct: DirectMessageReader,
   stream: string,
+  publishPrefix: string,
   job: Job,
 ): Promise<JobEvent | undefined> {
   try {
     const msg = await direct.getMessage(stream, {
-      last_by_subj: `trellis.jobs.${job.service}.${job.type}.${job.id}.*`,
+      last_by_subj: `${publishPrefix}.${job.id}.*`,
     });
     if (!msg) {
       return undefined;

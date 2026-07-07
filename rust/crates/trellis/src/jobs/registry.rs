@@ -147,11 +147,16 @@ pub async fn publish_worker_heartbeat(
     nats: async_nats::Client,
     heartbeat: &WorkerHeartbeat,
 ) -> Result<(), ServiceRegistryError> {
-    let subject = worker_heartbeat_subject(
-        &heartbeat.service,
-        &heartbeat.job_type,
-        &heartbeat.instance_id,
-    );
+    publish_worker_heartbeat_for_subject(nats, &heartbeat.service, heartbeat).await
+}
+
+async fn publish_worker_heartbeat_for_subject(
+    nats: async_nats::Client,
+    subject_service: &str,
+    heartbeat: &WorkerHeartbeat,
+) -> Result<(), ServiceRegistryError> {
+    let subject =
+        worker_heartbeat_subject(subject_service, &heartbeat.job_type, &heartbeat.instance_id);
     let payload = serde_json::to_vec(heartbeat).map_err(|error| {
         ServiceRegistryError::EncodeWorkerHeartbeat {
             subject: subject.clone(),
@@ -171,6 +176,7 @@ pub async fn publish_worker_heartbeat(
 pub async fn start_worker_heartbeat_loop(
     nats: async_nats::Client,
     service: String,
+    subject_service: String,
     job_type: String,
     instance_id: String,
     concurrency: Option<u32>,
@@ -186,7 +192,8 @@ pub async fn start_worker_heartbeat_loop(
             version.clone(),
             timestamp,
         );
-        async move { publish_worker_heartbeat(nats, &heartbeat).await }
+        let subject_service = subject_service.clone();
+        async move { publish_worker_heartbeat_for_subject(nats, &subject_service, &heartbeat).await }
     };
 
     publish(nats.clone(), now_timestamp_string()).await?;

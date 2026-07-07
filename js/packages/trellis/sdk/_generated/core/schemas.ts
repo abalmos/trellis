@@ -164,9 +164,10 @@ export const TrellisBindingsGetResponseSchema = {
                   },
                   "type": "object",
                 },
+                "serviceName": { "minLength": 1, "type": "string" },
                 "workStream": { "minLength": 1, "type": "string" },
               },
-              "required": ["namespace", "queues"],
+              "required": ["serviceName", "namespace", "queues"],
               "type": "object",
             },
             "kv": {

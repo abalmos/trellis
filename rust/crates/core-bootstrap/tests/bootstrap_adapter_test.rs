@@ -246,6 +246,7 @@ fn jobs_binding_types_deserialize_with_work_stream() {
             "digest": "sha256:expected",
             "resources": {
                 "jobs": {
+                    "serviceName": "trellis/jobs",
                     "namespace": "jobs",
                     "workStream": "JOBS_WORK",
                     "queues": {
@@ -343,6 +344,7 @@ fn core_bootstrap_binding_maps_generated_resources_to_service_resource_bindings(
                     }
                 },
                 "jobs": {
+                    "serviceName": "trellis/field-ops",
                     "namespace": "field-ops",
                     "workStream": "JOBS_WORK",
                     "queues": {
@@ -378,6 +380,7 @@ fn core_bootstrap_binding_maps_generated_resources_to_service_resource_bindings(
         "svc_evidence"
     );
     let jobs = resources.jobs.expect("jobs");
+    assert_eq!(jobs.service_name, "trellis/field-ops");
     assert_eq!(jobs.namespace, "field-ops");
     assert_eq!(jobs.work_stream.as_deref(), Some("JOBS_WORK"));
     let queue = jobs.queues.get("report-finalize").expect("queue");

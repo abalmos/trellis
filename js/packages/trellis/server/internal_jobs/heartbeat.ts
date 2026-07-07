@@ -16,6 +16,7 @@ type WorkerHeartbeatOptions = {
 type WorkerHeartbeatLoopOptions = {
   publisher: HeartbeatPublisher;
   service: string;
+  subjectService?: string;
   jobType: string;
   instanceId: string;
   concurrency?: number;
@@ -57,10 +58,11 @@ export function newWorkerHeartbeat(
 export async function publishWorkerHeartbeat(
   publisher: HeartbeatPublisher,
   heartbeat: WorkerHeartbeat,
+  subjectService = heartbeat.service,
 ): Promise<void> {
   await publisher.publish(
     workerHeartbeatSubject(
-      heartbeat.service,
+      subjectService,
       heartbeat.jobType,
       heartbeat.instanceId,
     ),
@@ -89,6 +91,7 @@ export async function startWorkerHeartbeatLoop(
         ...(options.version !== undefined ? { version: options.version } : {}),
         timestamp: nowIso(),
       }),
+      options.subjectService,
     );
   };
 

@@ -51,6 +51,7 @@ impl JobMetaSource for FixedMetaSource {
 
 fn sample_bindings() -> JobsBinding {
     JobsBinding {
+        service_name: "documents".to_string(),
         namespace: "documents".to_string(),
         queues: BTreeMap::from([(
             "document-process".to_string(),

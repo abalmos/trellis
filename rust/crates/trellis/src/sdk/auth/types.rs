@@ -1993,6 +1993,8 @@ pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobs {
         String,
         AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValue,
     >,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
     #[serde(rename = "workStream")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_stream: Option<String>,
@@ -2163,6 +2165,8 @@ pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobs {
     pub namespace: String,
     pub queues:
         BTreeMap<String, AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValue>,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
     #[serde(rename = "workStream")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_stream: Option<String>,
@@ -2341,6 +2345,8 @@ pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobs {
         String,
         AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValue,
     >,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
     #[serde(rename = "workStream")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_stream: Option<String>,
@@ -2523,6 +2529,8 @@ pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobs {
         String,
         AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValue,
     >,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
     #[serde(rename = "workStream")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_stream: Option<String>,

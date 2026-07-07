@@ -223,6 +223,7 @@ export type ContractResourceBindings = {
     maxTotalBytes?: number;
   }>;
   jobs?: {
+    serviceName: string;
     namespace: string;
     workStream: string;
     queues: Record<string, {
@@ -1632,7 +1633,12 @@ export async function materializeAuthorityResourceBindings(
           deploymentId: options.deploymentId,
           kind: resource.kind,
           alias: resource.alias,
-          binding: { namespace, workStream, ...queue },
+          binding: {
+            serviceName: options.deploymentId,
+            namespace,
+            workStream,
+            ...queue,
+          },
           limits: null,
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
@@ -1989,7 +1995,7 @@ export async function provisionContractResourceBindings(
 export async function provisionContractResources(
   nats: NatsConnection | undefined,
   contract: TrellisContractV1,
-  _serviceDeploymentId: string,
+  serviceDeploymentId: string,
   options: ResourceProvisioningOptions = {},
 ): Promise<ProvisionedContractResources> {
   const requests = getKvResourceRequests(contract);
@@ -2101,6 +2107,7 @@ export async function provisionContractResources(
         },
       );
       const jobBindings: NonNullable<ContractResourceBindings["jobs"]> = {
+        serviceName: serviceDeploymentId,
         namespace,
         workStream: "JOBS_WORK",
         queues: {},

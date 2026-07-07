@@ -105,18 +105,14 @@ pub async fn start_worker_presence_projector(
                     "worker presence projector failed to pull from consumer '{WORKER_PRESENCE_CONSUMER_NAME}' on stream '{jobs_stream}': {error}"
                 ))
             })?;
-            let Some((service, job_type, instance_id)) =
+            let Some((subject_service, job_type, instance_id)) =
                 parse_worker_heartbeat_subject(message.subject())
             else {
                 let _ = message.ack().await;
                 continue;
             };
             let heartbeat = match serde_json::from_slice::<WorkerHeartbeat>(message.payload()) {
-                Ok(heartbeat)
-                    if heartbeat.service == service
-                        && heartbeat.job_type == job_type
-                        && heartbeat.instance_id == instance_id =>
-                {
+                Ok(heartbeat) if heartbeat_matches_subject(&heartbeat, &job_type, &instance_id) => {
                     heartbeat
                 }
                 _ => {
@@ -127,7 +123,7 @@ pub async fn start_worker_presence_projector(
 
             project_worker_heartbeat(&store, &heartbeat).map_err(|error| {
                 ServerError::Nats(format!(
-                    "worker presence projector failed to project worker '{service}/{job_type}/{instance_id}': {error}"
+                    "worker presence projector failed to project worker '{subject_service}/{job_type}/{instance_id}': {error}"
                 ))
             })?;
             let _ = message.ack().await;
@@ -187,13 +183,22 @@ fn parse_worker_heartbeat_subject(subject: &str) -> Option<(String, String, Stri
     }
 }
 
+fn heartbeat_matches_subject(
+    heartbeat: &WorkerHeartbeat,
+    subject_job_type: &str,
+    subject_instance_id: &str,
+) -> bool {
+    heartbeat.job_type == subject_job_type && heartbeat.instance_id == subject_instance_id
+}
+
 #[cfg(test)]
 mod tests {
     use time::OffsetDateTime;
     use trellis_rs::jobs::WorkerHeartbeat;
 
     use super::{
-        parse_worker_heartbeat_subject, project_worker_heartbeat, WORKER_PRESENCE_FRESH_FOR,
+        heartbeat_matches_subject, parse_worker_heartbeat_subject, project_worker_heartbeat,
+        WORKER_PRESENCE_FRESH_FOR,
     };
     use crate::storage::SqliteJobsStore;
     use trellis_rs::jobs::worker_heartbeat_subject;
@@ -250,5 +255,24 @@ mod tests {
             .expect("fresh worker list should succeed");
         assert_eq!(workers.len(), 1);
         assert_eq!(workers[0].concurrency, Some(4));
+    }
+
+    #[test]
+    fn heartbeat_subject_match_ignores_physical_service_namespace() {
+        let heartbeat = WorkerHeartbeat {
+            service: "trellis/zendesk".to_string(),
+            job_type: "sync".to_string(),
+            instance_id: "instance-1".to_string(),
+            concurrency: Some(1),
+            version: None,
+            timestamp: "2026-03-28T12:00:00.000Z".to_string(),
+        };
+
+        assert!(heartbeat_matches_subject(&heartbeat, "sync", "instance-1"));
+        assert!(!heartbeat_matches_subject(
+            &heartbeat,
+            "other",
+            "instance-1"
+        ));
     }
 }

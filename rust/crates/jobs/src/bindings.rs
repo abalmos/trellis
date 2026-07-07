@@ -9,6 +9,8 @@ use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 /// Resolved service-local jobs binding derived from Trellis resource bindings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobsBinding {
+    /// Logical registered service name projected in job admin views.
+    pub service_name: String,
     /// Service namespace used in job subjects.
     pub namespace: String,
     /// Queue bindings keyed by logical queue type.
@@ -178,6 +180,7 @@ struct NormalizedJobsQueueBinding {
 
 /// Parse a raw jobs binding map into the handwritten runtime binding type.
 pub fn parse_jobs_binding(
+    service_name: &str,
     namespace: &str,
     queues: &BTreeMap<String, Value>,
 ) -> Result<JobsBinding, JobsBindingError> {
@@ -186,7 +189,11 @@ pub fn parse_jobs_binding(
         .map(|(queue_type, value)| normalize_json_queue_binding(queue_type, value))
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(build_jobs_binding(namespace.to_string(), normalized))
+    Ok(build_jobs_binding(
+        service_name.to_string(),
+        namespace.to_string(),
+        normalized,
+    ))
 }
 
 impl TryFrom<&TrellisBindingsGetResponseBinding> for JobsRuntimeBinding {
@@ -210,14 +217,23 @@ impl TryFrom<&TrellisBindingsGetResponseBinding> for JobsRuntimeBinding {
             .ok_or(JobsBindingError::MissingWorkStream)?;
 
         Ok(Self {
-            jobs: build_jobs_binding(jobs.namespace.clone(), normalized),
+            jobs: build_jobs_binding(
+                jobs.service_name.clone(),
+                jobs.namespace.clone(),
+                normalized,
+            ),
             work_stream,
         })
     }
 }
 
-fn build_jobs_binding(namespace: String, queues: Vec<NormalizedJobsQueueBinding>) -> JobsBinding {
+fn build_jobs_binding(
+    service_name: String,
+    namespace: String,
+    queues: Vec<NormalizedJobsQueueBinding>,
+) -> JobsBinding {
     JobsBinding {
+        service_name,
         namespace,
         queues: queues
             .into_iter()

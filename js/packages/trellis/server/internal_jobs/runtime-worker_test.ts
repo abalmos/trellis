@@ -17,6 +17,7 @@ const jobContext: JobContext = {
 };
 
 const jobsBinding = {
+  serviceName: "svc",
   namespace: "svc",
   queues: {
     refresh: {
@@ -37,6 +38,7 @@ const jobsBinding = {
 };
 
 const keyedJobsBinding = {
+  serviceName: "svc",
   namespace: "svc",
   queues: {
     sync: {

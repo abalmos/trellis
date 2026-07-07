@@ -55,6 +55,7 @@ fn resources() -> ServiceResourceBindings {
             },
         )]),
         jobs: Some(JobsResourceBinding {
+            service_name: "trellis/field-ops".to_string(),
             namespace: "field-ops".to_string(),
             work_stream: Some("JOBS_WORK".to_string()),
             queues: BTreeMap::from([(

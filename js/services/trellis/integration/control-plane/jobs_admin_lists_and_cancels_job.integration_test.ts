@@ -1,16 +1,17 @@
-import { assertEquals } from "@std/assert";
 import {
   defineAppContract,
   defineServiceContract,
   Result,
 } from "@qlever-llc/trellis";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
-import { Type } from "typebox";
 import {
   caseScopedContractId,
   caseScopedName,
 } from "@qlever-llc/trellis-test/integration";
+import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { assert, assertEquals } from "@std/assert";
+import { Type } from "typebox";
+
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 
 const CASE_ID = "control-plane.jobs-admin-lists-and-cancels-job" as const;
@@ -109,6 +110,8 @@ liveTrellisTest({
         return current.state === "active" ? current : false;
       }, { timeoutMs: 15_000, intervalMs: 50 });
       assertEquals(activeJob.id, ref.id);
+      assertEquals(activeJob.service, ref.service);
+      assert(!ref.service.startsWith("tr_jobs_"));
       assertEquals(activeJob.payload.marker, marker);
 
       const listedJob = await runtime.waitFor(async () => {

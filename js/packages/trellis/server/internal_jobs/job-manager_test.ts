@@ -53,6 +53,7 @@ Deno.test("JobManager creates and publishes job context", async () => {
       },
     },
     jobs: {
+      serviceName: "trellis/svc",
       namespace: "svc",
       queues: {
         refresh: {
@@ -79,6 +80,7 @@ Deno.test("JobManager creates and publishes job context", async () => {
   });
 
   const job = await manager.create("refresh", { siteId: "site-1" });
+  assertEquals(job.service, "trellis/svc");
   assertEquals(job.context.requestId.length > 0, true);
   assertMatch(job.context.traceparent, TRACEPARENT_PATTERN);
   assertEquals(job.context.traceId, job.context.traceparent.slice(3, 35));
@@ -88,8 +90,11 @@ Deno.test("JobManager creates and publishes job context", async () => {
     new TextDecoder().decode(published[0].payload),
   ) as {
     context?: typeof job.context;
+    service?: string;
   };
   assertEquals(created.context, job.context);
+  assertEquals(created.service, "trellis/svc");
+  assertEquals(published[0].subject, "trellis.jobs.svc.refresh.job-1.created");
   assertEquals(published[0].headers?.get("request-id"), job.context.requestId);
   assertEquals(
     published[0].headers?.get("traceparent"),
@@ -127,6 +132,7 @@ Deno.test("JobManager preserves structured failure error string", async () => {
       },
     },
     jobs: {
+      serviceName: "svc",
       namespace: "svc",
       queues: {
         refresh: {
@@ -209,6 +215,7 @@ Deno.test("JobManager keyed create rejects before publishing created", async () 
       },
     },
     jobs: {
+      serviceName: "svc",
       namespace: "svc",
       queues: {
         sync: {
@@ -734,6 +741,7 @@ Deno.test("JobManager publishes staleCompletionIgnored when slot is lost", async
 
 function keyedJobsBinding(): JobsBinding {
   return {
+    serviceName: "svc",
     namespace: "svc",
     queues: {
       sync: {

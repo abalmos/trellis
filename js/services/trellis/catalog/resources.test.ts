@@ -563,6 +563,7 @@ Deno.test("resource rollback deletes only resources created by the attempt", asy
   const result: ProvisionedContractResources = {
     bindings: {
       jobs: {
+        serviceName: "billing",
         namespace: "billing_jobs",
         workStream: "JOBS_WORK",
         queues: {},
@@ -1423,6 +1424,7 @@ Deno.test("Jobs admin contract infrastructure provisioning requires NATS", async
 Deno.test("jobs resource grants use service-visible queue bindings", () => {
   const grants = getResourcePermissionGrants({
     jobs: {
+      serviceName: "trellis/documents",
       namespace: "document_activity_25c0dcc8dbcd",
       workStream: "JOBS_WORK",
       queues: {

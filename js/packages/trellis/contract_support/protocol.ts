@@ -254,6 +254,7 @@ export const JobsQueueBindingSchema = Type.Object({
 export type JobsQueueBinding = Static<typeof JobsQueueBindingSchema>;
 
 export const JobsResourceBindingSchema = Type.Object({
+  serviceName: Type.String({ minLength: 1 }),
   namespace: Type.String({ minLength: 1 }),
   workStream: Type.Optional(Type.String({ minLength: 1 })),
   queues: Type.Record(Type.String({ minLength: 1 }), JobsQueueBindingSchema),

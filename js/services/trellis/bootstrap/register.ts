@@ -5,8 +5,6 @@ import { registerAuth } from "../auth/register.ts";
 import { registerCatalog } from "../catalog/register.ts";
 import { createContractsModule } from "../catalog/runtime.ts";
 import type { Config } from "../config.ts";
-import { registerJobsAdmin } from "../jobs/register.ts";
-import { createJobsAdminHandlers } from "../jobs/rpc.ts";
 import { registerState } from "../state/register.ts";
 import { createSessionResolver, createStateHandlers } from "../state/rpc.ts";
 import { StateStore } from "../state/storage.ts";
@@ -116,10 +114,6 @@ export async function registerControlPlane(deps: {
     state: new StateStore({ kv: stateKV }),
     contracts,
   });
-  const jobsAdminHandlers = config.trellisTest?.disableJobsAdmin
-    ? undefined
-    : createJobsAdminHandlers(natsTrellis);
-
   await registerCatalog({
     trellis,
     contracts,
@@ -135,10 +129,6 @@ export async function registerControlPlane(deps: {
   });
 
   await registerState({ trellis, stateHandlers });
-
-  if (jobsAdminHandlers) {
-    await registerJobsAdmin({ trellis, handlers: jobsAdminHandlers });
-  }
 
   await registerAuth({
     app,
@@ -224,7 +214,6 @@ export async function registerControlPlane(deps: {
     async stop() {
       const results = await Promise.allSettled([
         backgroundTasks.stop(),
-        Promise.resolve().then(() => jobsAdminHandlers?.stop()),
       ]);
       const failures = results.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []

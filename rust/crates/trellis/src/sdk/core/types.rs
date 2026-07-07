@@ -102,6 +102,8 @@ pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValue {
 pub struct TrellisBindingsGetResponseBindingResourcesJobs {
     pub namespace: String,
     pub queues: BTreeMap<String, TrellisBindingsGetResponseBindingResourcesJobsQueuesValue>,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
     #[serde(rename = "workStream")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub work_stream: Option<String>,

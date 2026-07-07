@@ -1,4 +1,3 @@
-import { fromFileUrl } from "@std/path";
 import type { ContractModule, TrellisApiLike } from "@qlever-llc/trellis";
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
 import type { TrellisTestRuntimeStartOptions } from "@qlever-llc/trellis-test";
@@ -13,6 +12,7 @@ import type {
   TrellisIntegrationRuntimeOptions,
   TrellisIntegrationScope,
 } from "@qlever-llc/trellis-test/integration";
+import { fromFileUrl } from "@std/path";
 
 const repoJsRoot = fromFileUrl(new URL("../../", import.meta.url));
 
@@ -51,6 +51,19 @@ export function trellisRepoRuntimeOptions(
       command: options.trellis?.command ?? {
         cmd: Deno.execPath(),
         args: ["run", "-A", "./services/trellis/main.ts"],
+        cwd: repoJsRoot,
+      },
+    },
+    jobsAdmin: options.jobsAdmin ?? {
+      command: {
+        cmd: "cargo",
+        args: [
+          "run",
+          "--manifest-path",
+          "../rust/Cargo.toml",
+          "-p",
+          "trellis-service-jobs",
+        ],
         cwd: repoJsRoot,
       },
     },

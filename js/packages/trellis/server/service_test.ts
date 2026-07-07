@@ -189,6 +189,7 @@ async function connectJobsHandlerTestService(opts?: {
               kv: {},
               store: {},
               jobs: {
+                serviceName: "jobs-handler-test",
                 namespace: "jobs_handler_test",
                 ...(includeWorkStream ? { workStream: "JOBS_WORK" } : {}),
                 queues: {

@@ -79,6 +79,7 @@ impl JobMetaSource for SequenceMetaSource {
 
 fn sample_bindings() -> JobsBinding {
     JobsBinding {
+        service_name: "documents".to_string(),
         namespace: "documents".to_string(),
         queues: BTreeMap::from([(
             "document-process".to_string(),
@@ -142,6 +143,7 @@ async fn process_errors_when_queue_binding_missing() {
     let manager = JobManager::new(
         RecordingPublisher::default(),
         JobsBinding {
+            service_name: "documents".to_string(),
             namespace: "documents".to_string(),
             queues: BTreeMap::new(),
         },

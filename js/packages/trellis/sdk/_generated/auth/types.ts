@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "pPSUf9eDM42CHk_SrUpLO0-tDU5QcLXNNDqYlXeHs5o" as const;
+  "wvLFGaWPpVvGJ17Z16k15ygYmjMEU5sw0adZZVqf3Gk" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -1978,6 +1978,7 @@ export type AuthServiceInstancesDisableOutput = {
             workSubject: string;
           };
         };
+        serviceName: string;
         workStream?: string;
       };
       kv?: {
@@ -2054,6 +2055,7 @@ export type AuthServiceInstancesEnableOutput = {
             workSubject: string;
           };
         };
+        serviceName: string;
         workStream?: string;
       };
       kv?: {
@@ -2137,6 +2139,7 @@ export type AuthServiceInstancesListOutput = {
               workSubject: string;
             };
           };
+          serviceName: string;
           workStream?: string;
         };
         kv?: {
@@ -2220,6 +2223,7 @@ export type AuthServiceInstancesProvisionOutput = {
             workSubject: string;
           };
         };
+        serviceName: string;
         workStream?: string;
       };
       kv?: {

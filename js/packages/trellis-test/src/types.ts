@@ -8,8 +8,9 @@ import type {
   TrellisApiLike,
   TrellisContractV1,
 } from "@qlever-llc/trellis";
-import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
+
 import type { TrellisControlPlaneOAuthProvider } from "./control_plane_config.ts";
+import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 
 /** Serializable contract descriptor accepted by test admin automation. */
 export type TrellisTestContractDescriptor = {
@@ -64,12 +65,20 @@ export type TrellisTestRuntimeTrellisOptions = {
   command: TrellisTestRuntimeTrellisCommand;
 };
 
+/** Optional Jobs admin service sidecar started by the test runtime. */
+export type TrellisTestRuntimeJobsAdminOptions = {
+  command: TrellisTestRuntimeTrellisCommand;
+  deployment?: string;
+  mode?: "owner" | "rpc-only";
+};
+
 /** Options for starting an isolated Trellis test runtime. */
 export type TrellisTestRuntimeStartOptions = {
   nats?: "container";
   keepWorkdir?: boolean;
   deployment?: string;
   trellis: TrellisTestRuntimeTrellisOptions;
+  jobsAdmin?: TrellisTestRuntimeJobsAdminOptions;
   authority?: {
     /**
      * Authority plan classifications the runtime admin automation may accept.

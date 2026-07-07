@@ -476,7 +476,7 @@ where
             Job {
                 id,
                 context,
-                service: self.inner.bindings.namespace.clone(),
+                service: self.inner.bindings.service_name.clone(),
                 job_type: queue_type.to_string(),
                 state: JobState::Pending,
                 payload: payload_value.clone(),
@@ -512,7 +512,7 @@ where
         let queue_depth = queue.queue.as_ref();
         let derived = derive_job_key(&job.payload, &key_concurrency.key)?;
         Ok(Some(JobKeyPolicy {
-            service: job.service.clone(),
+            service: self.inner.bindings.namespace.clone(),
             job_type: job.job_type.clone(),
             key: derived.key,
             key_hash: derived.key_hash,
@@ -572,7 +572,7 @@ where
             return Ok(());
         };
         let event = skipped_event(
-            &self.inner.bindings.namespace,
+            &self.inner.bindings.service_name,
             &queue.queue_type,
             &entry.job_id,
             context,
@@ -597,7 +597,7 @@ where
             return Ok(());
         };
         let event = stale_event(
-            &self.inner.bindings.namespace,
+            &self.inner.bindings.service_name,
             queue_type,
             &slot.job_id,
             context,

@@ -170,6 +170,7 @@ liveTrellisTest({
         projected,
         resourceContract.CONTRACT_DIGEST,
         true,
+        deployment,
       );
 
       await resourceService.stop();
@@ -249,6 +250,7 @@ function assertBindingProjection(
   output: TrellisBindingsGetOutput,
   digest: string | undefined,
   hasResources: boolean,
+  expectedServiceName?: string,
 ): void {
   if (digest === undefined) throw new Error("contract digest missing");
   assert(output.binding);
@@ -264,7 +266,9 @@ function assertBindingProjection(
   assert(isRecord(resources.store?.blobs));
   assertEquals(typeof resources.store.blobs.name, "string");
   assert(isRecord(resources.jobs));
+  assertEquals(resources.jobs.serviceName, expectedServiceName);
   assertEquals(typeof resources.jobs.namespace, "string");
+  assert(resources.jobs.namespace !== expectedServiceName);
   assert(isRecord(resources.jobs.queues?.syncRecords));
 }
 

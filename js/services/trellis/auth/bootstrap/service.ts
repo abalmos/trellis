@@ -384,6 +384,7 @@ function resourceBindingsForResponse(
   const resourcesByKind: Record<string, Record<string, unknown>> = {};
   let jobsBinding:
     | {
+      serviceName: unknown;
       namespace: unknown;
       workStream?: unknown;
       queues: Record<string, Record<string, unknown>>;
@@ -391,8 +392,10 @@ function resourceBindingsForResponse(
     | undefined;
   for (const record of records) {
     if (record.kind === "jobs") {
-      const { namespace, workStream, ...queueBinding } = record.binding;
+      const { serviceName, namespace, workStream, ...queueBinding } =
+        record.binding;
       jobsBinding ??= {
+        serviceName,
         namespace,
         ...(workStream !== undefined ? { workStream } : {}),
         queues: {},

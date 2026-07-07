@@ -16,6 +16,7 @@ use trellis_rs::sdk::core::types::{
 #[test]
 fn parse_jobs_binding_maps_queue_values() {
     let binding = parse_jobs_binding(
+        "trellis/documents",
         "documents",
         &BTreeMap::from([(
             "document-process".to_string(),
@@ -35,6 +36,7 @@ fn parse_jobs_binding_maps_queue_values() {
     )
     .expect("binding should parse");
 
+    assert_eq!(binding.service_name, "trellis/documents");
     assert_eq!(binding.namespace, "documents");
     let queue = binding
         .queues
@@ -61,6 +63,7 @@ fn parse_jobs_binding_maps_queue_values() {
 #[test]
 fn parse_jobs_binding_maps_keyed_queue_policy() {
     let binding = parse_jobs_binding(
+        "trellis/documents",
         "documents",
         &BTreeMap::from([(
             "sync-tickets".to_string(),
@@ -108,6 +111,7 @@ fn parse_jobs_binding_maps_keyed_queue_policy() {
 #[test]
 fn parse_jobs_binding_rejects_invalid_queue_shape() {
     let error = parse_jobs_binding(
+        "trellis/documents",
         "documents",
         &BTreeMap::from([(
             "document-process".to_string(),
@@ -129,6 +133,7 @@ fn sample_core_binding() -> TrellisBindingsGetResponseBinding {
         resources: TrellisBindingsGetResponseBindingResources {
             event_consumers: None,
             jobs: Some(TrellisBindingsGetResponseBindingResourcesJobs {
+                service_name: "trellis/documents".to_string(),
                 namespace: "documents".to_string(),
                 work_stream: Some("JOBS_WORK".to_string()),
                 queues: BTreeMap::from([(
@@ -178,6 +183,7 @@ fn jobs_runtime_binding_try_from_core_binding_maps_jobs_and_work_stream() {
     let runtime = JobsRuntimeBinding::try_from(&sample_core_binding()).expect("binding should map");
 
     assert_eq!(runtime.work_stream, "JOBS_WORK");
+    assert_eq!(runtime.jobs.service_name, "trellis/documents");
     assert_eq!(runtime.jobs.namespace, "documents");
     let queue = runtime.jobs.queues.get("document-process").expect("queue");
     assert_eq!(queue.max_deliver, 5);
@@ -188,6 +194,7 @@ fn jobs_runtime_binding_try_from_core_binding_maps_jobs_and_work_stream() {
 #[test]
 fn parse_jobs_binding_and_runtime_binding_share_same_queue_shape() {
     let parsed = parse_jobs_binding(
+        "trellis/documents",
         "documents",
         &BTreeMap::from([(
             "document-process".to_string(),
@@ -209,6 +216,7 @@ fn parse_jobs_binding_and_runtime_binding_share_same_queue_shape() {
 
     let runtime = JobsRuntimeBinding::try_from(&sample_core_binding()).expect("runtime binding");
 
+    assert_eq!(parsed.service_name, runtime.jobs.service_name);
     assert_eq!(parsed.namespace, runtime.jobs.namespace);
     assert_eq!(parsed.queues, runtime.jobs.queues);
 }

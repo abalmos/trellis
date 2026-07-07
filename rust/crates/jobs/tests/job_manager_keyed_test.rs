@@ -262,6 +262,7 @@ impl JobMetaSource for SequenceMetaSource {
 
 fn keyed_bindings(when_full: JobQueueWhenFull, max_queued_per_key: u64) -> JobsBinding {
     JobsBinding {
+        service_name: "documents".to_string(),
         namespace: "documents".to_string(),
         queues: BTreeMap::from([(
             "sync".to_string(),

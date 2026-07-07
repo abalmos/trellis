@@ -130,6 +130,7 @@ fn resource_bindings_from_core_binding(
             .jobs
             .clone()
             .map(|jobs| JobsResourceBinding {
+                service_name: jobs.service_name,
                 namespace: jobs.namespace,
                 work_stream: jobs.work_stream,
                 queues: jobs

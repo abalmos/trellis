@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "pPSUf9eDM42CHk_SrUpLO0-tDU5QcLXNNDqYlXeHs5o" as const;
+  "wvLFGaWPpVvGJ17Z16k15ygYmjMEU5sw0adZZVqf3Gk" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -7256,9 +7256,10 @@ export const CONTRACT = {
                       },
                       "type": "object",
                     },
+                    "serviceName": { "minLength": 1, "type": "string" },
                     "workStream": { "minLength": 1, "type": "string" },
                   },
-                  "required": ["namespace", "queues"],
+                  "required": ["serviceName", "namespace", "queues"],
                   "type": "object",
                 },
                 "kv": {
@@ -7487,9 +7488,10 @@ export const CONTRACT = {
                       },
                       "type": "object",
                     },
+                    "serviceName": { "minLength": 1, "type": "string" },
                     "workStream": { "minLength": 1, "type": "string" },
                   },
-                  "required": ["namespace", "queues"],
+                  "required": ["serviceName", "namespace", "queues"],
                   "type": "object",
                 },
                 "kv": {
@@ -7746,9 +7748,10 @@ export const CONTRACT = {
                         },
                         "type": "object",
                       },
+                      "serviceName": { "minLength": 1, "type": "string" },
                       "workStream": { "minLength": 1, "type": "string" },
                     },
-                    "required": ["namespace", "queues"],
+                    "required": ["serviceName", "namespace", "queues"],
                     "type": "object",
                   },
                   "kv": {
@@ -7985,9 +7988,10 @@ export const CONTRACT = {
                       },
                       "type": "object",
                     },
+                    "serviceName": { "minLength": 1, "type": "string" },
                     "workStream": { "minLength": 1, "type": "string" },
                   },
-                  "required": ["namespace", "queues"],
+                  "required": ["serviceName", "namespace", "queues"],
                   "type": "object",
                 },
                 "kv": {
@@ -10841,9 +10845,10 @@ export const CONTRACT = {
                   },
                   "type": "object",
                 },
+                "serviceName": { "minLength": 1, "type": "string" },
                 "workStream": { "minLength": 1, "type": "string" },
               },
-              "required": ["namespace", "queues"],
+              "required": ["serviceName", "namespace", "queues"],
               "type": "object",
             },
             "kv": {

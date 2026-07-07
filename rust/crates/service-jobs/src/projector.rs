@@ -71,7 +71,15 @@ pub async fn start_jobs_projector(
                 ))
             })?;
             let raw_event = match serde_json::from_slice::<Value>(message.payload()) {
-                Ok(raw_event) => raw_event,
+                Ok(mut raw_event) => {
+                    if let Value::Object(fields) = &mut raw_event {
+                        fields.insert(
+                            "_trellisSubject".to_string(),
+                            Value::String(message.subject().to_string()),
+                        );
+                    }
+                    raw_event
+                }
                 Err(_) => {
                     let _ = message.ack().await;
                     continue;

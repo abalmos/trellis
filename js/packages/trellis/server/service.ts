@@ -184,6 +184,7 @@ type ResourceBindingJobsQueue = {
 };
 
 type ResourceBindingJobs = {
+  serviceName: string;
   namespace: string;
   workStream?: string;
   queues: Record<string, ResourceBindingJobsQueue>;
@@ -219,7 +220,11 @@ function normalizeResourceJobsBinding(
       queue: policy.queue,
     };
   }
-  return { namespace: binding.namespace, queues };
+  return {
+    serviceName: binding.serviceName,
+    namespace: binding.namespace,
+    queues,
+  };
 }
 
 function baseJobsQueueBinding(

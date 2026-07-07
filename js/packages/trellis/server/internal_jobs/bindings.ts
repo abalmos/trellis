@@ -27,6 +27,7 @@ export type JobsQueueBinding = {
 };
 
 export type JobsBinding = {
+  serviceName: string;
   namespace: string;
   queues: Record<string, JobsQueueBinding>;
 };

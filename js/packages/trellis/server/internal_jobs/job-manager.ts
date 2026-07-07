@@ -267,12 +267,12 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const now = meta.nowIso();
     const id = meta.nextJobId();
     const context = createJobContext();
-    const namespace = this.#context.jobs!.namespace;
+    const serviceName = this.#context.jobs!.serviceName;
 
     const submission: PreparedJobSubmission<TPayload> = {
       submissionId: id,
       mode: strictCreate ? "create" : "submit",
-      service: namespace,
+      service: serviceName,
       queue: type,
       jobId: id,
       payload,
@@ -422,7 +422,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       );
     }
     return await coordinator.admitCreate({
-      service: args.job.service,
+      service: this.#coordinationService(),
       jobType: args.type,
       jobId: args.job.id,
       payload: args.job.payload,
@@ -448,7 +448,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const coordinator = this.#context.keyCoordinator;
     if (!coordinator) return;
     await coordinator.removeQueuedJob({
-      service: job.service,
+      service: this.#coordinationService(),
       jobType: job.type,
       jobId: job.id,
       payload: job.payload,
@@ -466,7 +466,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const coordinator = this.#context.keyCoordinator;
     if (!coordinator) return;
     await coordinator.restoreReplacedQueuedJob({
-      service: job.service,
+      service: this.#coordinationService(),
       jobType: job.type,
       replacementJobId: job.id,
       replaced,
@@ -485,7 +485,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   ): Promise<void> {
     await this.#publishJobEvent(type, replaced.id, {
       jobId: replaced.id,
-      service: this.#context.jobs!.namespace,
+      service: this.#context.jobs!.serviceName,
       jobType: type,
       eventType: "skipped",
       state: "skipped",
@@ -537,7 +537,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
         );
       }
       const acquired = await coordinator.acquireActiveSlot({
-        service: job.service,
+        service: this.#coordinationService(),
         jobType: job.type,
         jobId: job.id,
         payload: job.payload,
@@ -796,7 +796,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     return async () => {
       await heartbeat();
       const renewed = await this.#context.keyCoordinator!.renewHeartbeat({
-        service: job.service,
+        service: this.#coordinationService(),
         jobType: job.type,
         jobId: job.id,
         lease,
@@ -822,7 +822,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   ): Promise<"released" | "staleCompletion" | undefined> {
     if (!lease) return undefined;
     const released = await this.#context.keyCoordinator!.releaseActiveSlot({
-      service: job.service,
+      service: this.#coordinationService(),
       jobType: job.type,
       jobId: job.id,
       lease,
@@ -907,6 +907,10 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     } finally {
       stopAutoHeartbeat();
     }
+  }
+
+  #coordinationService(): string {
+    return this.#context.jobs!.namespace;
   }
 }
 
