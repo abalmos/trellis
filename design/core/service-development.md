@@ -388,9 +388,10 @@ Behavior:
   authority migration before a fresh reconnect receives that authority
 - Trellis derives requested needs from the contract proposal and compares them
   to deployment authority desired state
-- if desired authority is missing, bootstrap records an authority update or
-  authority migration proposal for the delta and asks the service runtime to
-  wait and retry until an admin accepts or rejects the proposal
+- if desired authority is missing, bootstrap classifies the delta. Safe updates
+  auto-apply. Updates that add new capability grants or resource aliases record
+  a pending authority update and ask the service runtime to wait and retry until
+  an admin accepts or rejects the proposal.
 - service-originated pending authority proposals are durable and deduplicated by
   the requested boundary so repeated starts with the same missing boundary
   coalesce into one pending authority update or migration
@@ -402,9 +403,9 @@ Behavior:
   Trellis records and auto-accepts the same migration plan for unreleased
   iteration, then continues through normal desired-state and materialization
   checks.
-- compatibility mode controls whether an incompatible same-contract migration
-  requires manual approval or is auto-approved for development; it does not make
-  contract history an authority source
+- compatibility mode controls whether migrations require manual approval or are
+  auto-approved for development; it does not make contract history an authority
+  source
 - once deployment authority desired state covers the requested needs, bootstrap
   verifies that required `uses` dependencies resolve against effective active
   contracts or accepted dependency shapes. If a required dependency has neither,

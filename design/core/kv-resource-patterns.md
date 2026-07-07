@@ -60,12 +60,15 @@ Rules:
 
 ### Authority Update And Migration Classification
 
-Safe KV authority updates include:
+Safe auto-applied KV authority updates include:
 
-- adding a new KV alias
 - increasing `history` or `maxValueBytes`
 - changing `purpose` without changing runtime behavior
 - changing `required` when it does not remove already materialized access
+
+Approval-required KV authority updates include:
+
+- adding a new KV alias
 
 Dangerous KV authority migrations include:
 

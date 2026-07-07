@@ -1011,6 +1011,7 @@ Deno.test("Auth.DeploymentAuthority.Plan classifies additive missing needs as up
   );
 
   assertEquals(result.classification, "update");
+  assertEquals(result.approvalRequired, true);
   assertEquals(
     result.desiredChange,
     authorityNeedSet({
@@ -1049,6 +1050,54 @@ Deno.test("Auth.DeploymentAuthority.Plan classifies resource definition changes 
   }]);
 });
 
+Deno.test("Auth.DeploymentAuthority.Plan auto-classifies safe resource relaxations as update", () => {
+  const result = classifyDeploymentAuthorityPlan(
+    authorityNeedSet({
+      resources: [{
+        kind: "kv",
+        alias: "cache",
+        required: true,
+        definition: { type: "kv", history: 1, ttlMs: 1000 },
+      }],
+    }),
+    authorityNeedSet({
+      resources: [{
+        kind: "kv",
+        alias: "cache",
+        required: true,
+        definition: { type: "kv", history: 2, ttlMs: 0 },
+      }],
+    }),
+  );
+
+  assertEquals(result.classification, "update");
+  assertEquals(result.approvalRequired, false);
+  assertEquals(result.desiredChange.resources, [{
+    kind: "kv",
+    alias: "cache",
+    required: true,
+    definition: { type: "kv", history: 2, ttlMs: 0 },
+  }]);
+});
+
+Deno.test("Auth.DeploymentAuthority.Plan does not require approval for additive surfaces", () => {
+  const result = classifyDeploymentAuthorityPlan(
+    authorityNeedSet(),
+    authorityNeedSet({
+      surfaces: [{
+        contractId: "svc.example@v1",
+        kind: "rpc",
+        name: "Query",
+        action: "call",
+        required: true,
+      }],
+    }),
+  );
+
+  assertEquals(result.classification, "update");
+  assertEquals(result.approvalRequired, false);
+});
+
 Deno.test("Auth.DeploymentAuthority.Plan classifies resource removals as migration", () => {
   const result = classifyDeploymentAuthorityPlan(
     authorityNeedSet({
@@ -1058,6 +1107,7 @@ Deno.test("Auth.DeploymentAuthority.Plan classifies resource removals as migrati
   );
 
   assertEquals(result.classification, "migration");
+  assertEquals(result.approvalRequired, true);
   assertEquals(result.desiredChange.resources, []);
 });
 

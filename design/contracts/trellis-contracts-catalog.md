@@ -304,8 +304,8 @@ The digest projection includes:
 - reachable schemas referenced by state, RPCs, operations, operation errors,
   operation signals, events, feeds, jobs, schema-backed KV resources, and
   declared RPC error schemas
-- state, `uses`, RPCs, operations (including operation errors), events, feeds, jobs, `eventConsumers`,
-  declared RPC errors, and KV/store resource requests
+- state, `uses`, RPCs, operations (including operation errors), events, feeds,
+  jobs, `eventConsumers`, declared RPC errors, and KV/store resource requests
 - sorted and deduplicated capability and `uses` selector lists
 
 The digest projection excludes:
@@ -1105,10 +1105,11 @@ Rules:
 
 Resource change classification:
 
-- adding a new optional or required resource alias is an authority update when
-  it does not remove or weaken existing materialized authority
+- adding a new optional or required resource alias is an approval-required
+  authority update when it does not remove or weaken existing materialized
+  authority
 - increasing non-destructive limits, clarifying `purpose`, or adding a
-  compatible event consumer group is usually an authority update
+  compatible event consumer group is usually an auto-applied authority update
 - reducing TTL, history, size limits, or retention; changing a KV schema in a
   way that may reject existing values; changing a store's semantics; removing a
   resource alias; or renaming an event consumer group is an authority migration
@@ -1473,8 +1474,9 @@ the runtime discovery RPC set.
   supplies the reviewed dependency shape. They MUST NOT derive dependency
   surfaces or capabilities from missing or historical manifests.
 - when requested needs from the presented contract are missing from deployment
-  authority, bootstrap records an authority update or authority migration
-  proposal and returns a blocker so the service runtime can wait and retry
+  authority, bootstrap classifies the delta. Safe updates auto-apply; new
+  capability grants, new resource aliases, and strict-mode migrations record a
+  proposal and return a blocker so the service runtime can wait and retry.
 - service-originated authority proposals are keyed by requester connection and
   requested delta; repeated requests from the same connected requester are
   deduplicated, and proposals created by that requester are removed when it
@@ -1618,10 +1620,11 @@ Same-contract replacement rule:
 - instances that present an authority-incompatible contract are rejected with
   `contract_changed`; instances that present an incompatible same-contract offer
   enter the authority migration path before the new offer becomes active
-- authority update and authority migration remain separate review paths for
-  desired-state changes and forceful same-contract replacement; compatibility
-  mode controls whether an incompatible same-contract migration requires manual
-  approval or is auto-approved for development
+- authority update and authority migration remain separate decision paths for
+  desired-state changes and forceful same-contract replacement. Safe updates
+  auto-apply, new capability grants and new resource aliases require update
+  approval, and compatibility mode controls whether migrations require manual
+  approval or are auto-approved for development.
 
 Subject collision rule:
 

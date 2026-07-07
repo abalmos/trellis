@@ -551,32 +551,122 @@ function desiredStateFromProposal(
   };
 }
 
-async function acceptMutableDevCompatibilityMigration(input: {
+function mergeDesiredChange(
+  authority: DeploymentAuthority,
+  desiredChange: AuthorityNeedSet,
+  providedSurfaces: DeploymentAuthorityPlan["proposal"]["providedSurfaces"],
+): DeploymentAuthority["desiredState"] {
+  const resources = new Map<
+    string,
+    DeploymentAuthority["desiredState"]["resources"][number]
+  >();
+  const surfaces = new Map<
+    string,
+    DeploymentAuthority["desiredState"]["surfaces"][number]
+  >();
+
+  for (const resource of authority.desiredState.resources) {
+    resources.set(resourceKey(resource.kind, resource.alias), resource);
+  }
+  for (const surface of authority.desiredState.surfaces) {
+    surfaces.set(
+      [surface.contractId, surface.kind, surface.name, surface.action].join(
+        "\u001f",
+      ),
+      surface,
+    );
+  }
+  for (const surface of providedSurfaces) {
+    surfaces.set(
+      [surface.contractId, surface.kind, surface.name, surface.action].join(
+        "\u001f",
+      ),
+      surface,
+    );
+  }
+  for (const surface of desiredChange.surfaces) {
+    const desiredSurface = {
+      contractId: surface.contractId,
+      kind: surface.kind,
+      name: surface.name,
+      ...(surface.action === undefined ? {} : { action: surface.action }),
+    };
+    surfaces.set(
+      [
+        desiredSurface.contractId,
+        desiredSurface.kind,
+        desiredSurface.name,
+        desiredSurface.action,
+      ].join("\u001f"),
+      desiredSurface,
+    );
+  }
+  for (const resource of desiredChange.resources) {
+    const desiredResource = {
+      kind: resource.kind,
+      alias: resource.alias,
+      required: resource.required,
+      ...(resource.definition === undefined
+        ? {}
+        : { definition: resource.definition }),
+    };
+    resources.set(
+      resourceKey(desiredResource.kind, desiredResource.alias),
+      desiredResource,
+    );
+  }
+
+  return {
+    needs: mergeAuthorityNeeds(authority.desiredState.needs, desiredChange),
+    capabilities: [
+      ...new Set([
+        ...authority.desiredState.capabilities,
+        ...desiredChange.capabilities.map((need) => need.capability),
+      ]),
+    ],
+    resources: [...resources.values()],
+    surfaces: [...surfaces.values()],
+  };
+}
+
+async function acceptBootstrapAuthorityPlan(input: {
   deps: ServiceBootstrapDeps;
   authority: DeploymentAuthority;
-  plan: DeploymentAuthorityMigrationPlan;
+  plan: DeploymentAuthorityPlan;
   service: ServiceBootstrapInstance;
   now: string;
+  mode: string;
+  reason: string;
 }): Promise<DeploymentAuthority> {
   const newVersion = input.deps.createAuthorityVersion?.() ?? ulid();
+  const desiredChange = isAuthorityNeedSet(input.plan.desiredChange)
+    ? input.plan.desiredChange
+    : emptyAuthorityNeeds();
   const updatedAuthority: DeploymentAuthority = {
     ...input.authority,
-    desiredState: desiredStateFromProposal(input.plan.proposal),
+    desiredState: input.plan.classification === "migration"
+      ? desiredStateFromProposal(input.plan.proposal)
+      : mergeDesiredChange(
+        input.authority,
+        desiredChange,
+        input.plan.proposal.providedSurfaces,
+      ),
     version: newVersion,
     updatedAt: input.now,
   };
-  const acceptedPlan: DeploymentAuthorityMigrationPlan = {
+  const acceptedPlan: DeploymentAuthorityPlan = {
     ...input.plan,
-    acknowledgementRequired: false,
+    ...(input.plan.classification === "migration"
+      ? { acknowledgementRequired: false }
+      : {}),
     state: "accepted",
     decisionAt: input.now,
     decisionBy: {
       kind: "system",
-      mode: "mutable-dev",
+      mode: input.mode,
       serviceInstanceId: input.service.instanceId,
     },
-    decisionReason:
-      "mutable-dev auto-accepted incompatible same-contract replacement",
+    decisionReason: input.reason,
   };
 
   if (input.deps.deploymentAuthorityStorage.acceptAuthorityPlan) {
@@ -1163,16 +1253,18 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
           acknowledgementRequired: true,
         };
         if (deployment.contractCompatibilityMode === "mutable-dev") {
-          const acceptedAuthority =
-            await acceptMutableDevCompatibilityMigration(
-              {
-                deps,
-                authority: deploymentAuthority,
-                plan,
-                service,
-                now,
-              },
-            );
+          const acceptedAuthority = await acceptBootstrapAuthorityPlan(
+            {
+              deps,
+              authority: deploymentAuthority,
+              plan,
+              service,
+              now,
+              mode: "mutable-dev",
+              reason:
+                "mutable-dev auto-accepted incompatible same-contract replacement",
+            },
+          );
           if (acceptedAuthority.version === deploymentAuthority.version) {
             return c.json(
               bootstrapFailure(
@@ -1303,27 +1395,95 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
           capabilityDefinitions,
         );
       }
-      return c.json(
-        bootstrapFailure(
-          plan.classification === "migration"
-            ? "authority_migration_required"
-            : "authority_update_required",
-          `Service deployment '${service.deploymentId}' authority does not cover contract '${request.contractId}' digest '${request.contractDigest}'. A deployment authority ${plan.classification} plan is pending.`,
-          {
-            instanceId: service.instanceId,
-            deploymentId: service.deploymentId,
-            contractId: request.contractId,
-            contractDigest: request.contractDigest,
-            planId: plan.planId,
-            desiredVersion: deploymentAuthority.version,
-            classification: plan.classification,
-            desiredChange: plan.desiredChange,
-            missingAvailability: fit.missingAvailability,
-            missingCapabilities: fit.missingCapabilities,
-          },
-        ),
-        202,
-      );
+      if (
+        plan.classification === "migration" &&
+        deployment.contractCompatibilityMode === "mutable-dev"
+      ) {
+        const acceptedAuthority = await acceptBootstrapAuthorityPlan({
+          deps,
+          authority: deploymentAuthority,
+          plan,
+          service,
+          now,
+          mode: "mutable-dev",
+          reason: "mutable-dev auto-accepted deployment authority migration",
+        });
+        if (acceptedAuthority.version === deploymentAuthority.version) {
+          return c.json(
+            bootstrapFailure(
+              "authority_migration_required",
+              `Service deployment '${service.deploymentId}' authority has a migration pending auto-accept retry.`,
+              {
+                instanceId: service.instanceId,
+                deploymentId: service.deploymentId,
+                contractId: request.contractId,
+                contractDigest: request.contractDigest,
+                planId: plan.planId,
+                desiredVersion: deploymentAuthority.version,
+                classification: plan.classification,
+                desiredChange: plan.desiredChange,
+              },
+            ),
+            202,
+          );
+        }
+        deploymentAuthority = acceptedAuthority;
+      } else if (
+        plan.classification === "update" &&
+        !planClassification.approvalRequired
+      ) {
+        const acceptedAuthority = await acceptBootstrapAuthorityPlan({
+          deps,
+          authority: deploymentAuthority,
+          plan,
+          service,
+          now,
+          mode: "auto-update",
+          reason: "auto-accepted safe deployment authority update",
+        });
+        if (acceptedAuthority.version === deploymentAuthority.version) {
+          return c.json(
+            bootstrapFailure(
+              "authority_update_required",
+              `Service deployment '${service.deploymentId}' authority has an update pending auto-accept retry.`,
+              {
+                instanceId: service.instanceId,
+                deploymentId: service.deploymentId,
+                contractId: request.contractId,
+                contractDigest: request.contractDigest,
+                planId: plan.planId,
+                desiredVersion: deploymentAuthority.version,
+                classification: plan.classification,
+                desiredChange: plan.desiredChange,
+              },
+            ),
+            202,
+          );
+        }
+        deploymentAuthority = acceptedAuthority;
+      } else {
+        return c.json(
+          bootstrapFailure(
+            plan.classification === "migration"
+              ? "authority_migration_required"
+              : "authority_update_required",
+            `Service deployment '${service.deploymentId}' authority does not cover contract '${request.contractId}' digest '${request.contractDigest}'. A deployment authority ${plan.classification} plan is pending.`,
+            {
+              instanceId: service.instanceId,
+              deploymentId: service.deploymentId,
+              contractId: request.contractId,
+              contractDigest: request.contractDigest,
+              planId: plan.planId,
+              desiredVersion: deploymentAuthority.version,
+              classification: plan.classification,
+              desiredChange: plan.desiredChange,
+              missingAvailability: fit.missingAvailability,
+              missingCapabilities: fit.missingCapabilities,
+            },
+          ),
+          202,
+        );
+      }
     }
 
     const capabilities = getRequiredServiceCapabilities(analysis, contract);

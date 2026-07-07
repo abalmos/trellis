@@ -97,12 +97,17 @@ Terms:
 - **materialized authority**: reconciled actual state exposed to runtimes
 - **contract proposal**: requested needs plus provided surfaces derived from a
   presented contract
-- **authority update**: safe or non-breaking deployment authority change
+- **authority update**: safe or non-breaking deployment authority change. Safe
+  updates auto-apply during bootstrap unless they grant new capability authority
+  or add new resource aliases.
 - **authority migration**: dangerous or potentially breaking deployment
   authority change, including incompatible replacement of a previously accepted
   digest for the same contract id. In `strict` mode it requires explicit admin
-  acknowledgement. In `mutable-dev`, Trellis may auto-accept the migration, but
+  acknowledgement. In `mutable-dev`, Trellis auto-accepts the migration, but
   still records the plan and decision in authority plan/history.
+- **approval-required update**: non-migration authority update that grants new
+  capability authority or adds durable resource aliases. These remain pending
+  until explicitly accepted.
 - **authority plan**: pending operator approval for one deployment authority
   version, or historical evidence of an accepted, rejected, expired, or
   superseded decision. Only pending plans targeting the current desired
@@ -182,7 +187,9 @@ mode, Trellis records a pending authority migration plan and does not accept the
 replacement until an admin explicitly accepts the migration. In `mutable-dev`
 mode, Trellis auto-accepts the same migration plan for local development,
 records the auto-accepted decision in plan/history, mutates desired state, and
-schedules reconciliation like any other accepted migration.
+schedules reconciliation like any other accepted migration. Safe updates that do
+not add resource aliases or grant new capabilities use the same accepted-plan
+history shape, but bootstrap accepts them automatically.
 
 Authority plans expose structured `breakingChanges` as the authoritative
 per-target compatibility signal for operator UI, with JSON Pointer `path` values
@@ -229,8 +236,10 @@ Runtime behavior:
    Trellis checks whether those needs are materialized.
 2. If materialized authority is complete, bootstrap returns scoped credentials,
    permissions, and resolved resource bindings.
-3. If desired authority is missing, Trellis records or returns an authority plan
-   for admin handling and the runtime waits or retries.
+3. If desired authority is missing, Trellis classifies the delta. Safe deltas
+   auto-apply; new capability grants, new resource aliases, and strict-mode
+   migrations record or return an authority plan for admin handling and the
+   runtime waits or retries.
 4. If desired authority exists but materialization is incomplete, bootstrap
    waits or retries until reconciliation converges.
 5. If the presented contract is an incompatible same-contract replacement,

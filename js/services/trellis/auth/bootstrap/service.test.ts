@@ -140,6 +140,22 @@ function expandedContract(): TrellisContractV1 {
   };
 }
 
+function relaxedResourceContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    resources: {
+      kv: {
+        cache: {
+          purpose: "Store cache entries",
+          schema: { schema: "CacheEntry" },
+          history: 2,
+          ttlMs: 0,
+        },
+      },
+    },
+  };
+}
+
 function compatibleMetadataContract(): TrellisContractV1 {
   return {
     ...baseContract(),
@@ -2164,6 +2180,74 @@ Deno.test("POST /bootstrap/service requires migration plan for resource definiti
   assertEquals(body.reason, "authority_migration_required");
   assertEquals(body.planId, "plan_1");
   assertEquals(setup.plans[0]?.classification, "migration");
+});
+
+Deno.test("POST /bootstrap/service auto-applies safe resource definition update", async () => {
+  const relaxed = await validatedContract(relaxedResourceContract());
+  const setup = await createApp({
+    knownContracts: [{ digest: relaxed.digest, contract: relaxed.contract }],
+    initialBindings: [kvBinding("cache")],
+  });
+  setup.desiredAuthority.needs.resources = setup.desiredAuthority.needs
+    .resources.map(
+      (resource) =>
+        resource.kind === "kv" && resource.alias === "cache"
+          ? {
+            ...resource,
+            definition: {
+              ...resource.definition,
+              history: 1,
+              ttlMs: 1000,
+            },
+          }
+          : resource,
+    );
+
+  const response = await setup.bootstrap({
+    contractId: relaxed.contract.id,
+    contractDigest: relaxed.digest,
+    contract: relaxed.contract,
+  });
+
+  assertEquals(response.status, 200);
+  const body = await response.json();
+  assertEquals(body.status, "ready");
+  assertEquals(setup.plans[0]?.classification, "update");
+  assertEquals(setup.plans[0]?.state, "accepted");
+  assertEquals(setup.plans[0]?.decisionBy, {
+    kind: "system",
+    mode: "auto-update",
+    serviceInstanceId: "svc_1",
+  });
+});
+
+Deno.test("POST /bootstrap/service auto-accepts resource migration in mutable-dev", async () => {
+  const setup = await createApp({
+    contractCompatibilityMode: "mutable-dev",
+    initialBindings: [kvBinding("cache")],
+  });
+  setup.desiredAuthority.needs.resources = setup.desiredAuthority.needs
+    .resources.map(
+      (resource) =>
+        resource.kind === "kv" && resource.alias === "cache"
+          ? { ...resource, definition: { ...resource.definition, history: 2 } }
+          : resource,
+    );
+
+  const response = await setup.bootstrap({
+    contractId: setup.contract.contract.id,
+    contractDigest: setup.contract.digest,
+    contract: setup.contract.contract,
+  });
+
+  assertEquals(response.status, 200);
+  assertEquals(setup.plans[0]?.classification, "migration");
+  assertEquals(setup.plans[0]?.state, "accepted");
+  assertEquals(setup.plans[0]?.decisionBy, {
+    kind: "system",
+    mode: "mutable-dev",
+    serviceInstanceId: "svc_1",
+  });
 });
 
 Deno.test("POST /bootstrap/service requires migration plan for resource removal", async () => {

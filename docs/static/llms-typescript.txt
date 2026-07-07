@@ -71,6 +71,9 @@ Rules:
   `nats`; service permissions require current materialization for the accepted
   desired authority version. Stale or obsolete persisted projections are repaired
   by Trellis storage upgrade and reconciliation.
+- Safe deployment authority updates auto-apply during bootstrap. New capability
+  grants and new resource aliases require update approval; strict-mode
+  migrations require approval; `mutable-dev` records and auto-accepts migrations.
 - Deployment authority plans can be `superseded`; only `pending` plans targeting
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target

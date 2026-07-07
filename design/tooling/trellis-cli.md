@@ -270,11 +270,12 @@ Operational command behavior:
 - `trellis svc <id> apply` and `trellis dev <id> apply` resolve a contract
   proposal from source, manifest, or OCI image, call
   `Auth.DeploymentAuthority.Plan`, and require an explicit operator accept path
-  for pending authority updates or migrations. `mutable-dev` same-contract
-  replacement migrations may already be auto-accepted by bootstrap, but the plan
-  remains visible in history. Accepting a plan mutates desired authority and
-  schedules reconciliation; reconciliation is the only path that materializes
-  resource and binding changes.
+  for updates that grant new capabilities or add resource aliases, plus strict
+  migrations. Safe updates and `mutable-dev` migrations may already be
+  auto-accepted by bootstrap, but accepted plans remain visible in history.
+  Accepting a plan mutates desired authority and schedules reconciliation;
+  reconciliation is the only path that materializes resource and binding
+  changes.
 - `trellis <svc|dev> <id> authority plan list` discovers pending and historical
   authority plans, optionally filtered by `--state` or `--classification`, and
   `trellis <svc|dev> <id> authority plan show <PLAN_ID>` shows one plan for

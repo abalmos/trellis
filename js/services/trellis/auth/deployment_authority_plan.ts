@@ -12,6 +12,7 @@ export type DeploymentAuthorityPlanClassification = "update" | "migration";
 
 export type DeploymentAuthorityPlanClassificationResult = {
   classification: DeploymentAuthorityPlanClassification;
+  approvalRequired: boolean;
   desiredChange: AuthorityNeedSet;
 };
 
@@ -70,6 +71,169 @@ function requestedResourceMap(requested: AuthorityNeedSet) {
   return resources;
 }
 
+function numberValue(
+  definition: unknown,
+  key: string,
+): number | undefined {
+  if (!isRecord(definition)) return undefined;
+  const value = definition[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function isLimitRelaxedOrSame(
+  current: number | undefined,
+  requested: number | undefined,
+): boolean {
+  if (current === undefined) return requested === undefined;
+  if (requested === undefined) return true;
+  return requested >= current;
+}
+
+function isTtlRelaxedOrSame(
+  current: number | undefined,
+  requested: number | undefined,
+): boolean {
+  const currentTtl = current ?? 0;
+  const requestedTtl = requested ?? 0;
+  if (currentTtl === 0) return requestedTtl === 0;
+  if (requestedTtl === 0) return true;
+  return requestedTtl >= currentTtl;
+}
+
+function isBackoffRelaxedOrSame(current: unknown, requested: unknown): boolean {
+  if (current === undefined) return true;
+  if (requested === undefined) return false;
+  if (!Array.isArray(current) || !Array.isArray(requested)) {
+    return unknownEquals(current, requested);
+  }
+  return current.length <= requested.length &&
+    current.every((value, index) => {
+      const requestedValue = requested[index];
+      return typeof value === "number" && typeof requestedValue === "number" &&
+        requestedValue >= value;
+    });
+}
+
+function hasChangedUnsafeDefinitionFields(
+  current: Record<string, unknown>,
+  requested: Record<string, unknown>,
+  safeKeys: readonly string[],
+): boolean {
+  const safe = new Set(safeKeys);
+  for (
+    const key of new Set([...Object.keys(current), ...Object.keys(requested)])
+  ) {
+    if (!safe.has(key) && !unknownEquals(current[key], requested[key])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resourceDefinitionChangeRequiresMigration(
+  current: AuthorityNeedSetResource,
+  requested: AuthorityNeedSetResource,
+): boolean {
+  if (current.kind !== requested.kind) return true;
+  const currentDefinition = current.definition;
+  const requestedDefinition = requested.definition;
+  if (unknownEquals(currentDefinition, requestedDefinition)) return false;
+  if (!isRecord(currentDefinition) || !isRecord(requestedDefinition)) {
+    return true;
+  }
+
+  if (current.kind === "kv" || current.kind === "store") {
+    if (
+      hasChangedUnsafeDefinitionFields(currentDefinition, requestedDefinition, [
+        "type",
+        "history",
+        "ttlMs",
+        "maxValueBytes",
+        "maxObjectBytes",
+        "maxTotalBytes",
+        "schema",
+        "purpose",
+        "docs",
+        "description",
+        "displayName",
+      ])
+    ) return true;
+    return !(
+      unknownEquals(currentDefinition.schema, requestedDefinition.schema) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "history"),
+        numberValue(requestedDefinition, "history"),
+      ) &&
+      isTtlRelaxedOrSame(
+        numberValue(currentDefinition, "ttlMs"),
+        numberValue(requestedDefinition, "ttlMs"),
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "maxValueBytes"),
+        numberValue(requestedDefinition, "maxValueBytes"),
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "maxObjectBytes"),
+        numberValue(requestedDefinition, "maxObjectBytes"),
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "maxTotalBytes"),
+        numberValue(requestedDefinition, "maxTotalBytes"),
+      )
+    );
+  }
+
+  if (current.kind === "jobs" || current.kind === "event-consumer") {
+    if (
+      hasChangedUnsafeDefinitionFields(currentDefinition, requestedDefinition, [
+        "type",
+        "payload",
+        "result",
+        "filterSubjects",
+        "replayPolicy",
+        "maxDeliver",
+        "ackWaitMs",
+        "concurrency",
+        "backoffMs",
+        "purpose",
+        "docs",
+        "description",
+        "displayName",
+      ])
+    ) return true;
+    return !(
+      unknownEquals(currentDefinition.payload, requestedDefinition.payload) &&
+      unknownEquals(currentDefinition.result, requestedDefinition.result) &&
+      unknownEquals(
+        currentDefinition.filterSubjects,
+        requestedDefinition.filterSubjects,
+      ) &&
+      unknownEquals(
+        currentDefinition.replayPolicy,
+        requestedDefinition.replayPolicy,
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "maxDeliver"),
+        numberValue(requestedDefinition, "maxDeliver"),
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "ackWaitMs"),
+        numberValue(requestedDefinition, "ackWaitMs"),
+      ) &&
+      isLimitRelaxedOrSame(
+        numberValue(currentDefinition, "concurrency"),
+        numberValue(requestedDefinition, "concurrency"),
+      ) &&
+      isBackoffRelaxedOrSame(
+        currentDefinition.backoffMs,
+        requestedDefinition.backoffMs,
+      )
+    );
+  }
+
+  return true;
+}
+
 function hasResourceRemoval(
   current: AuthorityNeedSet,
   requested: AuthorityNeedSet,
@@ -83,7 +247,7 @@ function hasResourceRemoval(
 function changedResourceDefinitions(
   current: AuthorityNeedSet,
   requested: AuthorityNeedSet,
-): AuthorityNeedSetResource[] {
+): Array<{ resource: AuthorityNeedSetResource; requiresMigration: boolean }> {
   const requestedResources = requestedResourceMap(requested);
   return current.resources.flatMap((resource) => {
     const requestedResource = requestedResources.get(resourceKey(resource));
@@ -93,8 +257,24 @@ function changedResourceDefinitions(
     ) {
       return [];
     }
-    return [requestedResource];
+    return [{
+      resource: requestedResource,
+      requiresMigration: resourceDefinitionChangeRequiresMigration(
+        resource,
+        requestedResource,
+      ),
+    }];
   });
+}
+
+function hasNewResource(
+  current: AuthorityNeedSet,
+  desiredChange: AuthorityNeedSet,
+): boolean {
+  const currentResources = requestedResourceMap(current);
+  return desiredChange.resources.some((resource) =>
+    !currentResources.has(resourceKey(resource))
+  );
 }
 
 /** Classifies a requested deployment authority desired-state change. */
@@ -105,15 +285,22 @@ export function classifyDeploymentAuthorityPlan(
   const desiredChange = computeAuthorityNeedsDelta(current, requested);
   const definitionChanges = changedResourceDefinitions(current, requested);
   const classification = hasResourceRemoval(current, requested) ||
-      definitionChanges.length > 0
+      definitionChanges.some((change) => change.requiresMigration)
     ? "migration"
     : "update";
 
   return {
     classification,
+    approvalRequired: classification === "migration" ||
+      desiredChange.contracts.length > 0 ||
+      desiredChange.capabilities.length > 0 ||
+      hasNewResource(current, desiredChange),
     desiredChange: {
       ...desiredChange,
-      resources: [...desiredChange.resources, ...definitionChanges],
+      resources: [
+        ...desiredChange.resources,
+        ...definitionChanges.map((change) => change.resource),
+      ],
     },
   };
 }

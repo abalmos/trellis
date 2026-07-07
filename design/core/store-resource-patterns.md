@@ -110,12 +110,15 @@ Rules:
 
 ### Authority Update And Migration Classification
 
-Safe store authority updates include:
+Safe auto-applied store authority updates include:
 
-- adding a new store alias
 - increasing `maxTotalBytes` or `maxObjectBytes`
 - increasing retention or moving from finite retention to no automatic expiry
 - changing `purpose` without changing runtime behavior
+
+Approval-required store authority updates include:
+
+- adding a new store alias
 
 Dangerous store authority migrations include:
 

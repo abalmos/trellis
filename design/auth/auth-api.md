@@ -1249,9 +1249,9 @@ Rules:
 - authority plans include pending requests and accepted, rejected, expired, or
   superseded history; pending plans are actionable only while they target the
   current deployment authority version, and newer pending plans for the same
-  deployment contract supersede older unanswered plans; auto-accepted
-  `mutable-dev` same-contract replacement migrations remain visible with a
-  recorded decision timestamp and auto-approval reason
+  deployment contract supersede older unanswered plans; auto-accepted safe
+  updates and `mutable-dev` migrations remain visible with a recorded decision
+  timestamp and auto-approval reason
 - `AuthorityPlan.breakingChanges` is the authoritative structured list of
   concrete compatibility failures for operator UI
 - `BreakingChange.path` is a JSON Pointer into the target when the verifier can
@@ -1284,6 +1284,9 @@ Rules:
   explicit admin acceptance. Under `mutable-dev`, auth records the same
   migration plan, auto-accepts it with an auto-approval decision, mutates
   desired authority, and schedules reconciliation.
+- safe authority updates auto-apply during service bootstrap. Updates that grant
+  new capability authority or add resource aliases remain pending until explicit
+  admin acceptance.
 - missing optional dependency contracts or optional requested surfaces are
   absent from the contract proposal and grant no authority; if they later become
   active, a fresh plan is required before a reconnect can use that optional

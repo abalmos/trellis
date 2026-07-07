@@ -39,6 +39,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   runtime projection with `grants` grouped by `capabilities`, `surfaces`, and
   `nats`; service and device permissions require current materialization for the
   accepted desired authority version.
+- Safe deployment authority updates auto-apply during bootstrap. New capability
+  grants and new resource aliases require update approval; strict-mode
+  migrations require approval; `mutable-dev` records and auto-accepts migrations.
 - The runtime `contracts` store is a digest-keyed manifest cache, not durable
   authority. Invalid cached manifests may be pruned without changing
   implementation offers, sessions, identity grants, deployment authority,

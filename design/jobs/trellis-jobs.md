@@ -311,16 +311,17 @@ install step.
 
 Queue change classification:
 
-- adding a queue is an authority update
+- adding a queue is an approval-required authority update
 - increasing `maxDeliver`, increasing `ackWaitMs`, extending backoff, enabling
-  progress/logs/DLQ, or increasing `concurrency` is usually an authority update
+  progress/logs/DLQ, or increasing `concurrency` is usually an auto-applied
+  authority update
 - adding `keyConcurrency.key` to a previously unkeyed queue, reducing
   `keyConcurrency.maxActive`, reducing `queue.maxQueuedPerKey`, or changing
   `queue.whenFull` to a stricter policy is an authority migration because it can
   reject work that would previously enqueue or run
 - increasing `keyConcurrency.maxActive`, increasing `queue.maxQueuedPerKey`, or
   relaxing `queue.whenFull` from `reject` to `coalesce` or `replace-oldest` is
-  usually an authority update
+  usually an auto-applied authority update
 - removing or renaming a queue, changing payload or result schema in a way that
   may reject existing jobs, reducing `maxDeliver` or `ackWaitMs`, shortening
   backoff, disabling DLQ for a queue with outstanding failures, or changing
