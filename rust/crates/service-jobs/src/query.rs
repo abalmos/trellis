@@ -23,19 +23,26 @@ use trellis_rs::sdk::jobs::types::{
     JobsInspectResponseTimelineItem, JobsInspectResponseTimelineItemErrorDetail,
     JobsListDLQRequest, JobsListDLQResponse, JobsListDLQResponseEntriesItem,
     JobsListServicesRequest, JobsListServicesResponse, JobsListServicesResponseEntriesItem,
-    JobsListServicesResponseEntriesItemWorkersItem, JobsQueryRequest, JobsQueryResponse,
-    JobsQueryResponseEntriesItem, JobsQueryResponseEntriesItemContext,
-    JobsQueryResponseEntriesItemProgress, JobsQueryResponseGroupsItem, JobsQueryResponseStats,
-    JobsReplayDLQRequest, JobsReplayDLQResponse, JobsRetryRequest, JobsRetryResponse,
+    JobsListServicesResponseEntriesItemWorkersItem, JobsMetricsRequest, JobsMetricsResponse,
+    JobsMetricsResponseBucketsItem, JobsMetricsResponseBucketsItemGroupsItem,
+    JobsMetricsResponseBucketsItemGroupsItemQueueWait,
+    JobsMetricsResponseBucketsItemGroupsItemRuntime, JobsMetricsResponseSummaryItem,
+    JobsMetricsResponseSummaryItemQueueWait, JobsMetricsResponseSummaryItemRuntime,
+    JobsQueryRequest, JobsQueryResponse, JobsQueryResponseEntriesItem,
+    JobsQueryResponseEntriesItemContext, JobsQueryResponseEntriesItemProgress,
+    JobsQueryResponseGroupsItem, JobsQueryResponseStats, JobsReplayDLQRequest,
+    JobsReplayDLQResponse, JobsRetryRequest, JobsRetryResponse,
 };
 
 mod resources;
 mod state;
 mod wire;
 use crate::storage::{
-    JobProjectionMetadata, JobTimelineEvent, JobsWorkbenchEntry, JobsWorkbenchFilter,
-    JobsWorkbenchGroup, JobsWorkbenchGroupBy, JobsWorkbenchSort, JobsWorkbenchSortField,
-    JobsWorkbenchStats, ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError,
+    JobProjectionMetadata, JobTimelineEvent, JobsMetricsBucket, JobsMetricsBucketGroup,
+    JobsMetricsFilter, JobsMetricsLatency, JobsMetricsSummaryGroup, JobsWorkbenchEntry,
+    JobsWorkbenchFilter, JobsWorkbenchGroup, JobsWorkbenchGroupBy, JobsWorkbenchSort,
+    JobsWorkbenchSortField, JobsWorkbenchStats, ListJobsFilter, SqliteJobsStore,
+    SqliteJobsStoreError,
 };
 use crate::worker_presence::WORKER_PRESENCE_FRESH_FOR;
 
@@ -181,6 +188,56 @@ impl JobsQuery {
             next_offset: page.next_offset.map(to_wire_integer),
             offset: to_wire_integer(page.offset),
             stats: workbench_stats_to_wire(&page.stats)?,
+        })
+    }
+
+    /// Query grouped operational metrics for Jobs dashboards.
+    pub async fn metrics(
+        &self,
+        request: &JobsMetricsRequest,
+    ) -> Result<JobsMetricsResponse, JobsQueryError> {
+        let until = OffsetDateTime::now_utc();
+        let window = parse_metrics_window(&request.window)?;
+        let filter = JobsMetricsFilter {
+            service: request.service.clone(),
+            job_type: request.r#type.clone(),
+            states: parse_state_filter(request.state.as_ref())?,
+            since: until - window,
+            until,
+            step_nanos: parse_metrics_step(&request.step)?
+                .whole_nanoseconds()
+                .try_into()
+                .map_err(
+                    |error: std::num::TryFromIntError| JobsQueryError::Validation {
+                        field: "step",
+                        details: error.to_string(),
+                    },
+                )?,
+            queue_key: request.queue_key.clone(),
+            trigger: request.trigger.clone(),
+            group_by: parse_metrics_group_by(&request.group_by)?,
+        };
+        let page = self.store.query_metrics(&filter)?;
+        Ok(JobsMetricsResponse {
+            buckets: page
+                .buckets
+                .iter()
+                .map(metrics_bucket_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
+            generated_at: until
+                .format(&Rfc3339)
+                .map_err(|error| JobsQueryError::Validation {
+                    field: "generatedAt",
+                    details: error.to_string(),
+                })?,
+            group_by: request.group_by.clone(),
+            step: request.step.clone(),
+            summary: page
+                .summary
+                .iter()
+                .map(metrics_summary_group_to_wire)
+                .collect::<Result<Vec<_>, _>>()?,
+            window: request.window.clone(),
         })
     }
 
@@ -637,6 +694,49 @@ fn parse_window_filter(value: Option<&str>) -> Result<Option<OffsetDateTime>, Jo
     Ok(Some(OffsetDateTime::now_utc() - duration))
 }
 
+fn parse_metrics_window(value: &str) -> Result<time::Duration, JobsQueryError> {
+    match value {
+        "15m" => Ok(time::Duration::minutes(15)),
+        "1h" => Ok(time::Duration::hours(1)),
+        "6h" => Ok(time::Duration::hours(6)),
+        "24h" => Ok(time::Duration::hours(24)),
+        "7d" => Ok(time::Duration::days(7)),
+        other => Err(JobsQueryError::Validation {
+            field: "window",
+            details: format!("unsupported window '{other}'"),
+        }),
+    }
+}
+
+fn parse_metrics_step(value: &str) -> Result<time::Duration, JobsQueryError> {
+    match value {
+        "1m" => Ok(time::Duration::minutes(1)),
+        "5m" => Ok(time::Duration::minutes(5)),
+        "15m" => Ok(time::Duration::minutes(15)),
+        "1h" => Ok(time::Duration::hours(1)),
+        "6h" => Ok(time::Duration::hours(6)),
+        "1d" => Ok(time::Duration::days(1)),
+        other => Err(JobsQueryError::Validation {
+            field: "step",
+            details: format!("unsupported step '{other}'"),
+        }),
+    }
+}
+
+fn parse_metrics_group_by(value: &str) -> Result<JobsWorkbenchGroupBy, JobsQueryError> {
+    match value {
+        "service" => Ok(JobsWorkbenchGroupBy::Service),
+        "type" => Ok(JobsWorkbenchGroupBy::Type),
+        "state" => Ok(JobsWorkbenchGroupBy::State),
+        "queueKey" => Ok(JobsWorkbenchGroupBy::QueueKey),
+        "trigger" => Ok(JobsWorkbenchGroupBy::Trigger),
+        other => Err(JobsQueryError::Validation {
+            field: "groupBy",
+            details: format!("unsupported group '{other}'"),
+        }),
+    }
+}
+
 fn parse_workbench_sort(
     sort: Option<&trellis_rs::sdk::jobs::types::JobsQueryRequestSort>,
 ) -> Result<JobsWorkbenchSort, JobsQueryError> {
@@ -759,6 +859,7 @@ fn related_entry_to_wire(
         id: job.id.clone(),
         last_error: job.last_error.clone(),
         lineage: map_optional_wire(&job.lineage, "job inspect related lineage")?,
+        matched_by: entry.matched_by.clone(),
         max_tries: to_wire_integer(job.max_tries),
         progress: job
             .progress
@@ -942,6 +1043,108 @@ fn workbench_stats_to_wire(
         running: stats.running.map(to_wire_integer),
         slow: stats.slow.map(to_wire_integer),
         total: to_wire_integer(stats.total),
+    })
+}
+
+fn metrics_latency_to_summary_wire(
+    latency: &JobsMetricsLatency,
+) -> JobsMetricsResponseSummaryItemRuntime {
+    JobsMetricsResponseSummaryItemRuntime {
+        count: to_wire_integer(latency.count),
+        max_ms: latency.max_ms.map(to_wire_integer),
+        p50_ms: latency.p50_ms.map(to_wire_integer),
+        p95_ms: latency.p95_ms.map(to_wire_integer),
+    }
+}
+
+fn metrics_latency_to_summary_queue_wire(
+    latency: &JobsMetricsLatency,
+) -> JobsMetricsResponseSummaryItemQueueWait {
+    JobsMetricsResponseSummaryItemQueueWait {
+        count: to_wire_integer(latency.count),
+        max_ms: latency.max_ms.map(to_wire_integer),
+        p50_ms: latency.p50_ms.map(to_wire_integer),
+        p95_ms: latency.p95_ms.map(to_wire_integer),
+    }
+}
+
+fn metrics_latency_to_bucket_wire(
+    latency: &JobsMetricsLatency,
+) -> JobsMetricsResponseBucketsItemGroupsItemRuntime {
+    JobsMetricsResponseBucketsItemGroupsItemRuntime {
+        count: to_wire_integer(latency.count),
+        max_ms: latency.max_ms.map(to_wire_integer),
+        p50_ms: latency.p50_ms.map(to_wire_integer),
+        p95_ms: latency.p95_ms.map(to_wire_integer),
+    }
+}
+
+fn metrics_latency_to_bucket_queue_wire(
+    latency: &JobsMetricsLatency,
+) -> JobsMetricsResponseBucketsItemGroupsItemQueueWait {
+    JobsMetricsResponseBucketsItemGroupsItemQueueWait {
+        count: to_wire_integer(latency.count),
+        max_ms: latency.max_ms.map(to_wire_integer),
+        p50_ms: latency.p50_ms.map(to_wire_integer),
+        p95_ms: latency.p95_ms.map(to_wire_integer),
+    }
+}
+
+fn metrics_summary_group_to_wire(
+    group: &JobsMetricsSummaryGroup,
+) -> Result<JobsMetricsResponseSummaryItem, JobsQueryError> {
+    Ok(JobsMetricsResponseSummaryItem {
+        by_state: group
+            .by_state
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), to_wire_integer(*value))))
+            .collect::<Result<BTreeMap<_, _>, JobsQueryError>>()?,
+        dead: group.dead.map(to_wire_integer),
+        failed: group.failed.map(to_wire_integer),
+        failure_rate: group.failure_rate,
+        key: group.key.clone(),
+        label: group.label.clone(),
+        latest_updated_at: group.latest_updated_at.clone(),
+        oldest_created_at: group.oldest_created_at.clone(),
+        queue_wait: metrics_latency_to_summary_queue_wire(&group.queue_wait),
+        queued: group.queued.map(to_wire_integer),
+        running: group.running.map(to_wire_integer),
+        runtime: metrics_latency_to_summary_wire(&group.runtime),
+        slow: group.slow.map(to_wire_integer),
+        total: to_wire_integer(group.total),
+    })
+}
+
+fn metrics_bucket_to_wire(
+    bucket: &JobsMetricsBucket,
+) -> Result<JobsMetricsResponseBucketsItem, JobsQueryError> {
+    Ok(JobsMetricsResponseBucketsItem {
+        end: bucket.end.clone(),
+        groups: bucket
+            .groups
+            .iter()
+            .map(metrics_bucket_group_to_wire)
+            .collect::<Result<Vec<_>, _>>()?,
+        start: bucket.start.clone(),
+    })
+}
+
+fn metrics_bucket_group_to_wire(
+    group: &JobsMetricsBucketGroup,
+) -> Result<JobsMetricsResponseBucketsItemGroupsItem, JobsQueryError> {
+    Ok(JobsMetricsResponseBucketsItemGroupsItem {
+        cancelled: to_wire_integer(group.cancelled),
+        completed: to_wire_integer(group.completed),
+        dead: to_wire_integer(group.dead),
+        dismissed: to_wire_integer(group.dismissed),
+        failed: to_wire_integer(group.failed),
+        key: group.key.clone(),
+        label: group.label.clone(),
+        queue_wait: metrics_latency_to_bucket_queue_wire(&group.queue_wait),
+        retried: to_wire_integer(group.retried),
+        runtime: metrics_latency_to_bucket_wire(&group.runtime),
+        started: to_wire_integer(group.started),
+        submitted: to_wire_integer(group.submitted),
     })
 }
 

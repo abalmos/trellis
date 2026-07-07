@@ -70,6 +70,12 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("JobsWorkbenchGroup", jobs_workbench_group_schema())
     .schema("JobsWorkbenchStats", jobs_workbench_stats_schema())
     .schema("JobsQueryResponse", jobs_query_response_schema())
+    .schema("JobsMetricsRequest", jobs_metrics_request_schema())
+    .schema("JobsMetricsLatency", jobs_metrics_latency_schema())
+    .schema("JobsMetricsSummaryGroup", jobs_metrics_summary_group_schema())
+    .schema("JobsMetricsBucketGroup", jobs_metrics_bucket_group_schema())
+    .schema("JobsMetricsBucket", jobs_metrics_bucket_schema())
+    .schema("JobsMetricsResponse", jobs_metrics_response_schema())
     .schema("JobTimelineEvent", job_timeline_event_schema())
     .schema("JobsInspectRequest", job_identity_schema())
     .schema("JobsInspectResponse", jobs_inspect_response_schema())
@@ -114,6 +120,20 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         .docs_with_summary(
             "Query jobs workbench data.",
             "Returns filtered, sorted, grouped Jobs workbench rows and stats.",
+        )
+        .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]),
+    )
+    .rpc(
+        "Jobs.Metrics",
+        admin_rpc(
+            "Jobs.Metrics",
+            "JobsMetricsRequest",
+            "JobsMetricsResponse",
+            READ_CAPABILITY,
+        )
+        .docs_with_summary(
+            "Query jobs operational metrics.",
+            "Returns grouped job health summaries and time buckets for operator dashboards.",
         )
         .with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]),
     )
@@ -525,6 +545,48 @@ fn jobs_query_request_schema() -> Value {
     })
 }
 
+fn jobs_metrics_request_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["window", "step", "groupBy"],
+        "properties": {
+            "service": { "type": "string", "minLength": 1 },
+            "type": { "type": "string", "minLength": 1 },
+            "state": { "type": "array", "items": job_state_schema() },
+            "queueKey": { "type": "string" },
+            "trigger": { "type": "string" },
+            "window": {
+                "anyOf": [
+                    { "const": "15m", "type": "string" },
+                    { "const": "1h", "type": "string" },
+                    { "const": "6h", "type": "string" },
+                    { "const": "24h", "type": "string" },
+                    { "const": "7d", "type": "string" }
+                ]
+            },
+            "step": {
+                "anyOf": [
+                    { "const": "1m", "type": "string" },
+                    { "const": "5m", "type": "string" },
+                    { "const": "15m", "type": "string" },
+                    { "const": "1h", "type": "string" },
+                    { "const": "6h", "type": "string" },
+                    { "const": "1d", "type": "string" }
+                ]
+            },
+            "groupBy": {
+                "anyOf": [
+                    { "const": "type", "type": "string" },
+                    { "const": "service", "type": "string" },
+                    { "const": "queueKey", "type": "string" },
+                    { "const": "state", "type": "string" },
+                    { "const": "trigger", "type": "string" }
+                ]
+            }
+        }
+    })
+}
+
 fn jobs_get_key_request_schema() -> Value {
     json!({
         "type": "object",
@@ -614,6 +676,25 @@ fn jobs_workbench_job_row_schema() -> Value {
     })
 }
 
+fn jobs_inspect_related_job_row_schema() -> Value {
+    let mut schema = jobs_workbench_job_row_schema();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.insert(
+            "matchedBy".to_string(),
+            json!({
+                "anyOf": [
+                    { "const": "trace", "type": "string" },
+                    { "const": "parent", "type": "string" },
+                    { "const": "root", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "concurrency", "type": "string" }
+                ]
+            }),
+        );
+    }
+    schema
+}
+
 fn jobs_workbench_group_schema() -> Value {
     json!({
         "type": "object",
@@ -659,6 +740,90 @@ fn jobs_query_response_schema() -> Value {
             "offset": { "type": "integer", "minimum": 0 },
             "limit": { "type": "integer", "minimum": 1 },
             "nextOffset": { "type": "integer", "minimum": 0 }
+        }
+    })
+}
+
+fn jobs_metrics_latency_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["count"],
+        "properties": {
+            "count": { "type": "integer", "minimum": 0 },
+            "p50Ms": { "type": "integer", "minimum": 0 },
+            "p95Ms": { "type": "integer", "minimum": 0 },
+            "maxMs": { "type": "integer", "minimum": 0 }
+        }
+    })
+}
+
+fn jobs_metrics_summary_group_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["key", "label", "total", "byState", "runtime", "queueWait"],
+        "properties": {
+            "key": { "type": "string" },
+            "label": { "type": "string" },
+            "total": { "type": "integer", "minimum": 0 },
+            "byState": { "type": "object", "patternProperties": { "^.*$": { "type": "integer", "minimum": 0 } } },
+            "running": { "type": "integer", "minimum": 0 },
+            "queued": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "dead": { "type": "integer", "minimum": 0 },
+            "slow": { "type": "integer", "minimum": 0 },
+            "failureRate": { "type": "number", "minimum": 0 },
+            "runtime": jobs_metrics_latency_schema(),
+            "queueWait": jobs_metrics_latency_schema(),
+            "oldestCreatedAt": { "type": "string", "format": "date-time" },
+            "latestUpdatedAt": { "type": "string", "format": "date-time" }
+        }
+    })
+}
+
+fn jobs_metrics_bucket_group_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["key", "label", "submitted", "started", "completed", "failed", "retried", "dead", "cancelled", "dismissed", "runtime", "queueWait"],
+        "properties": {
+            "key": { "type": "string" },
+            "label": { "type": "string" },
+            "submitted": { "type": "integer", "minimum": 0 },
+            "started": { "type": "integer", "minimum": 0 },
+            "completed": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "retried": { "type": "integer", "minimum": 0 },
+            "dead": { "type": "integer", "minimum": 0 },
+            "cancelled": { "type": "integer", "minimum": 0 },
+            "dismissed": { "type": "integer", "minimum": 0 },
+            "runtime": jobs_metrics_latency_schema(),
+            "queueWait": jobs_metrics_latency_schema()
+        }
+    })
+}
+
+fn jobs_metrics_bucket_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["start", "end", "groups"],
+        "properties": {
+            "start": { "type": "string", "format": "date-time" },
+            "end": { "type": "string", "format": "date-time" },
+            "groups": { "type": "array", "items": jobs_metrics_bucket_group_schema() }
+        }
+    })
+}
+
+fn jobs_metrics_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["window", "step", "groupBy", "generatedAt", "summary", "buckets"],
+        "properties": {
+            "window": { "type": "string" },
+            "step": { "type": "string" },
+            "groupBy": { "type": "string" },
+            "generatedAt": { "type": "string", "format": "date-time" },
+            "summary": { "type": "array", "items": jobs_metrics_summary_group_schema() },
+            "buckets": { "type": "array", "items": jobs_metrics_bucket_schema() }
         }
     })
 }
@@ -734,7 +899,7 @@ fn jobs_inspect_response_schema() -> Value {
                     }
                 }
             },
-            "related": { "type": "array", "items": jobs_workbench_job_row_schema() },
+            "related": { "type": "array", "items": jobs_inspect_related_job_row_schema() },
             "errors": { "type": "array", "items": job_error_detail_schema() },
             "trigger": job_trigger_schema(),
             "lineage": job_lineage_schema()

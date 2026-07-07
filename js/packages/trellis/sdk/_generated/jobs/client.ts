@@ -81,6 +81,10 @@ export interface TrellisJobsClient {
         input: Types.JobsListServicesInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.JobsListServicesOutput, BaseError>;
+      metrics(
+        input: Types.JobsMetricsInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.JobsMetricsOutput, BaseError>;
       query(
         input: Types.JobsQueryInput,
         opts?: RequestOpts,
@@ -161,6 +165,7 @@ export interface ServiceHandle {
       inspect(handler: Types.JobsInspectHandler): Promise<void>;
       listDLQ(handler: Types.JobsListDLQHandler): Promise<void>;
       listServices(handler: Types.JobsListServicesHandler): Promise<void>;
+      metrics(handler: Types.JobsMetricsHandler): Promise<void>;
       query(handler: Types.JobsQueryHandler): Promise<void>;
       replayDLQ(handler: Types.JobsReplayDLQHandler): Promise<void>;
       retry(handler: Types.JobsRetryHandler): Promise<void>;

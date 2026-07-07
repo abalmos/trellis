@@ -21,7 +21,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "Iln89UGlHZLnM2ZjaOvdA2NvRgcfYI02IXJun3mkhqc" as const;
+  "w3tzV0hwJkaIXCeSlpZQq7hgsEPDlghrc0iOs_Bpxpg" as const;
 
 export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {
@@ -407,6 +407,7 @@ export type JobsInspectOutput = {
         relatedKeys?: Array<string>;
         rootJobId?: string;
       };
+      matchedBy?: "trace" | "parent" | "root" | "operation" | "concurrency";
       maxTries: number;
       progress?: {
         current?: number;
@@ -663,6 +664,97 @@ export type JobsListServicesOutput = {
   limit: number;
   nextOffset?: number;
   offset: number;
+};
+
+export type JobsMetricsInput = {
+  groupBy: "type" | "service" | "queueKey" | "state" | "trigger";
+  queueKey?: string;
+  service?: string;
+  state?: Array<
+    (
+      | "pending"
+      | "active"
+      | "retry"
+      | "completed"
+      | "failed"
+      | "cancelled"
+      | "skipped"
+      | "stale"
+      | "expired"
+      | "dead"
+      | "dismissed"
+    )
+  >;
+  step: "1m" | "5m" | "15m" | "1h" | "6h" | "1d";
+  trigger?: string;
+  type?: string;
+  window: "15m" | "1h" | "6h" | "24h" | "7d";
+};
+export type JobsMetricsOutput = {
+  buckets: Array<
+    {
+      end: string;
+      groups: Array<
+        {
+          cancelled: number;
+          completed: number;
+          dead: number;
+          dismissed: number;
+          failed: number;
+          key: string;
+          label: string;
+          queueWait: {
+            count: number;
+            maxMs?: number;
+            p50Ms?: number;
+            p95Ms?: number;
+          };
+          retried: number;
+          runtime: {
+            count: number;
+            maxMs?: number;
+            p50Ms?: number;
+            p95Ms?: number;
+          };
+          started: number;
+          submitted: number;
+        }
+      >;
+      start: string;
+    }
+  >;
+  generatedAt: string;
+  groupBy: string;
+  step: string;
+  summary: Array<
+    {
+      byState: { [k: string]: number };
+      dead?: number;
+      failed?: number;
+      failureRate?: number;
+      key: string;
+      label: string;
+      latestUpdatedAt?: string;
+      oldestCreatedAt?: string;
+      queueWait: {
+        count: number;
+        maxMs?: number;
+        p50Ms?: number;
+        p95Ms?: number;
+      };
+      queued?: number;
+      running?: number;
+      runtime: {
+        count: number;
+        maxMs?: number;
+        p50Ms?: number;
+        p95Ms?: number;
+      };
+      slow?: number;
+      total: number;
+    }
+  >;
+  window: string;
 };
 
 export type JobsQueryInput = {
@@ -1130,6 +1222,7 @@ export interface RpcMap {
     input: JobsListServicesInput;
     output: JobsListServicesOutput;
   };
+  "Jobs.Metrics": { input: JobsMetricsInput; output: JobsMetricsOutput };
   "Jobs.Query": { input: JobsQueryInput; output: JobsQueryOutput };
   "Jobs.ReplayDLQ": { input: JobsReplayDLQInput; output: JobsReplayDLQOutput };
   "Jobs.Retry": { input: JobsRetryInput; output: JobsRetryOutput };
@@ -1215,6 +1308,18 @@ export type JobsListServicesHandler = (
     client: HandlerClient;
   },
 ) => JobsListServicesHandlerResult | Promise<JobsListServicesHandlerResult>;
+export type JobsMetricsHandlerError = TrellisErrorInstance;
+export type JobsMetricsHandlerResult = Result<
+  JobsMetricsOutput,
+  JobsMetricsHandlerError
+>;
+export type JobsMetricsHandler = (
+  args: {
+    input: JobsMetricsInput;
+    context: RpcHandlerContext;
+    client: HandlerClient;
+  },
+) => JobsMetricsHandlerResult | Promise<JobsMetricsHandlerResult>;
 export type JobsQueryHandlerError = TrellisErrorInstance;
 export type JobsQueryHandlerResult = Result<
   JobsQueryOutput,

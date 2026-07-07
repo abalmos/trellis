@@ -2,12 +2,12 @@
 
 use trellis_rs::sdk::jobs::rpc::{
     JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsInspectRpc, JobsListDLQRpc,
-    JobsListServicesRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
+    JobsListServicesRpc, JobsMetricsRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
 };
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsInspectRequest,
-    JobsListDLQRequest, JobsListServicesRequest, JobsQueryRequest, JobsReplayDLQRequest,
-    JobsRetryRequest,
+    JobsListDLQRequest, JobsListServicesRequest, JobsMetricsRequest, JobsQueryRequest,
+    JobsReplayDLQRequest, JobsRetryRequest,
 };
 use trellis_rs::service::{ConnectedServiceRuntime, DeclaredRpcError, Router, ServerError};
 
@@ -31,6 +31,13 @@ pub fn register_jobs_rpc_handlers(
         move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
             async move { query.query_jobs(&input).await.map_err(map_query_error) }
+        }
+    });
+    runtime.register_rpc::<JobsMetricsRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsMetricsRequest| {
+            let query = query.clone();
+            async move { query.metrics(&input).await.map_err(map_query_error) }
         }
     });
     runtime.register_rpc::<JobsInspectRpc, _, _>({
@@ -99,6 +106,13 @@ pub fn build_router_with_query(query: JobsQuery) -> Router {
         move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
             async move { query.query_jobs(&input).await.map_err(map_query_error) }
+        }
+    });
+    router.register_rpc::<JobsMetricsRpc, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsMetricsRequest| {
+            let query = query.clone();
+            async move { query.metrics(&input).await.map_err(map_query_error) }
         }
     });
     router.register_rpc::<JobsInspectRpc, _, _>({

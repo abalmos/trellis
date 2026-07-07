@@ -110,6 +110,7 @@
     "sirv": "npm:sirv@^3.0.2",
     "svelte": "npm:svelte@5.55.5",
     "svelte-check": "npm:svelte-check@4.4.6",
+    "svelteplot": "npm:svelteplot@0.14.2",
     "tailwindcss": "npm:tailwindcss@4.2.4",
     "tweetnacl": "npm:tweetnacl@^1.0.3",
     "ts-deepmerge": "npm:ts-deepmerge@^7.0.3",

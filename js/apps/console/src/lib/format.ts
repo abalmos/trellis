@@ -100,6 +100,48 @@ export function formatList(values: string[] | null | undefined): string {
   return values.join(", ");
 }
 
+export function compactDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "-";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+export function jsonBlock(value: unknown): string {
+  if (value === undefined) return "null";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+export function jobStateStatus(
+  state: string | undefined,
+): "healthy" | "degraded" | "unhealthy" | "offline" {
+  switch (state) {
+    case "completed":
+    case "active":
+      return "healthy";
+    case "failed":
+    case "dead":
+    case "expired":
+    case "stale":
+    case "dismissed":
+      return "unhealthy";
+    case "retry":
+    case "pending":
+    case "skipped":
+      return "degraded";
+    default:
+      return "offline";
+  }
+}
+
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
 

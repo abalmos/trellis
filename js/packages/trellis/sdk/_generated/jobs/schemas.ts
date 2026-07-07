@@ -702,6 +702,15 @@ export const JobsInspectResponseSchema = {
             },
             "type": "object",
           },
+          "matchedBy": {
+            "anyOf": [
+              { "const": "trace", "type": "string" },
+              { "const": "parent", "type": "string" },
+              { "const": "root", "type": "string" },
+              { "const": "operation", "type": "string" },
+              { "const": "concurrency", "type": "string" },
+            ],
+          },
           "maxTries": { "minimum": 1, "type": "integer" },
           "progress": {
             "properties": {
@@ -1128,6 +1137,197 @@ export const JobsListServicesResponseSchema = {
     "offset": { "minimum": 0, "type": "integer" },
   },
   "required": ["entries", "count", "offset", "limit"],
+  "type": "object",
+} as const;
+
+export const JobsMetricsRequestSchema = {
+  "properties": {
+    "groupBy": {
+      "anyOf": [
+        { "const": "type", "type": "string" },
+        { "const": "service", "type": "string" },
+        { "const": "queueKey", "type": "string" },
+        { "const": "state", "type": "string" },
+        { "const": "trigger", "type": "string" },
+      ],
+    },
+    "queueKey": { "type": "string" },
+    "service": { "minLength": 1, "type": "string" },
+    "state": {
+      "items": {
+        "anyOf": [
+          { "const": "pending", "type": "string" },
+          { "const": "active", "type": "string" },
+          { "const": "retry", "type": "string" },
+          { "const": "completed", "type": "string" },
+          { "const": "failed", "type": "string" },
+          { "const": "cancelled", "type": "string" },
+          { "const": "skipped", "type": "string" },
+          { "const": "stale", "type": "string" },
+          { "const": "expired", "type": "string" },
+          { "const": "dead", "type": "string" },
+          { "const": "dismissed", "type": "string" },
+        ],
+      },
+      "type": "array",
+    },
+    "step": {
+      "anyOf": [
+        { "const": "1m", "type": "string" },
+        { "const": "5m", "type": "string" },
+        { "const": "15m", "type": "string" },
+        { "const": "1h", "type": "string" },
+        { "const": "6h", "type": "string" },
+        { "const": "1d", "type": "string" },
+      ],
+    },
+    "trigger": { "type": "string" },
+    "type": { "minLength": 1, "type": "string" },
+    "window": {
+      "anyOf": [
+        { "const": "15m", "type": "string" },
+        { "const": "1h", "type": "string" },
+        { "const": "6h", "type": "string" },
+        { "const": "24h", "type": "string" },
+        { "const": "7d", "type": "string" },
+      ],
+    },
+  },
+  "required": ["window", "step", "groupBy"],
+  "type": "object",
+} as const;
+
+export const JobsMetricsResponseSchema = {
+  "properties": {
+    "buckets": {
+      "items": {
+        "properties": {
+          "end": { "format": "date-time", "type": "string" },
+          "groups": {
+            "items": {
+              "properties": {
+                "cancelled": { "minimum": 0, "type": "integer" },
+                "completed": { "minimum": 0, "type": "integer" },
+                "dead": { "minimum": 0, "type": "integer" },
+                "dismissed": { "minimum": 0, "type": "integer" },
+                "failed": { "minimum": 0, "type": "integer" },
+                "key": { "type": "string" },
+                "label": { "type": "string" },
+                "queueWait": {
+                  "properties": {
+                    "count": { "minimum": 0, "type": "integer" },
+                    "maxMs": { "minimum": 0, "type": "integer" },
+                    "p50Ms": { "minimum": 0, "type": "integer" },
+                    "p95Ms": { "minimum": 0, "type": "integer" },
+                  },
+                  "required": ["count"],
+                  "type": "object",
+                },
+                "retried": { "minimum": 0, "type": "integer" },
+                "runtime": {
+                  "properties": {
+                    "count": { "minimum": 0, "type": "integer" },
+                    "maxMs": { "minimum": 0, "type": "integer" },
+                    "p50Ms": { "minimum": 0, "type": "integer" },
+                    "p95Ms": { "minimum": 0, "type": "integer" },
+                  },
+                  "required": ["count"],
+                  "type": "object",
+                },
+                "started": { "minimum": 0, "type": "integer" },
+                "submitted": { "minimum": 0, "type": "integer" },
+              },
+              "required": [
+                "key",
+                "label",
+                "submitted",
+                "started",
+                "completed",
+                "failed",
+                "retried",
+                "dead",
+                "cancelled",
+                "dismissed",
+                "runtime",
+                "queueWait",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "start": { "format": "date-time", "type": "string" },
+        },
+        "required": ["start", "end", "groups"],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "generatedAt": { "format": "date-time", "type": "string" },
+    "groupBy": { "type": "string" },
+    "step": { "type": "string" },
+    "summary": {
+      "items": {
+        "properties": {
+          "byState": {
+            "patternProperties": {
+              "^.*$": { "minimum": 0, "type": "integer" },
+            },
+            "type": "object",
+          },
+          "dead": { "minimum": 0, "type": "integer" },
+          "failed": { "minimum": 0, "type": "integer" },
+          "failureRate": { "minimum": 0, "type": "number" },
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "latestUpdatedAt": { "format": "date-time", "type": "string" },
+          "oldestCreatedAt": { "format": "date-time", "type": "string" },
+          "queueWait": {
+            "properties": {
+              "count": { "minimum": 0, "type": "integer" },
+              "maxMs": { "minimum": 0, "type": "integer" },
+              "p50Ms": { "minimum": 0, "type": "integer" },
+              "p95Ms": { "minimum": 0, "type": "integer" },
+            },
+            "required": ["count"],
+            "type": "object",
+          },
+          "queued": { "minimum": 0, "type": "integer" },
+          "running": { "minimum": 0, "type": "integer" },
+          "runtime": {
+            "properties": {
+              "count": { "minimum": 0, "type": "integer" },
+              "maxMs": { "minimum": 0, "type": "integer" },
+              "p50Ms": { "minimum": 0, "type": "integer" },
+              "p95Ms": { "minimum": 0, "type": "integer" },
+            },
+            "required": ["count"],
+            "type": "object",
+          },
+          "slow": { "minimum": 0, "type": "integer" },
+          "total": { "minimum": 0, "type": "integer" },
+        },
+        "required": [
+          "key",
+          "label",
+          "total",
+          "byState",
+          "runtime",
+          "queueWait",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "window": { "type": "string" },
+  },
+  "required": [
+    "window",
+    "step",
+    "groupBy",
+    "generatedAt",
+    "summary",
+    "buckets",
+  ],
   "type": "object",
 } as const;
 

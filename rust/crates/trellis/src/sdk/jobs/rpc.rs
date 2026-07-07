@@ -80,6 +80,18 @@ impl RpcDescriptor for JobsListServicesRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Descriptor for `Jobs.Metrics`.
+pub struct JobsMetricsRpc;
+impl RpcDescriptor for JobsMetricsRpc {
+    type Input = super::types::JobsMetricsRequest;
+    type Output = super::types::JobsMetricsResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_METRICS_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::JOBS_METRICS_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Jobs.Metrics";
+    const SUBJECT: &'static str = "rpc.v1.Jobs.Metrics";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
+    const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
 /// Descriptor for `Jobs.Query`.
 pub struct JobsQueryRpc;
 impl RpcDescriptor for JobsQueryRpc {

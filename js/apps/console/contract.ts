@@ -94,6 +94,7 @@ export const contract = defineAppContract(
               "Jobs.Cancel",
               "Jobs.Retry",
               "Jobs.Query",
+              "Jobs.Metrics",
               "Jobs.ListServices",
               "Jobs.ListDLQ",
               "Jobs.ReplayDLQ",

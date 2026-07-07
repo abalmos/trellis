@@ -89,6 +89,13 @@ impl<'a> JobsRpc<'a> {
             .call::<super::rpc::JobsListServicesRpc>(input)
             .await
     }
+    /// Call `Jobs.Metrics`.
+    pub async fn metrics(
+        &self,
+        input: &super::types::JobsMetricsRequest,
+    ) -> Result<super::types::JobsMetricsResponse, TrellisClientError> {
+        self.inner.call::<super::rpc::JobsMetricsRpc>(input).await
+    }
     /// Call `Jobs.Query`.
     pub async fn query(
         &self,

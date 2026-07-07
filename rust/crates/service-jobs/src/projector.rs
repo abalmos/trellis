@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use serde_json::Value;
 use trellis_rs::jobs::reduce_job_event;
-use trellis_rs::jobs::types::{Job, JobEvent};
+use trellis_rs::jobs::types::{Job, JobEvent, JobEventType};
 use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::service::ServerError;
 
@@ -49,12 +49,17 @@ pub async fn start_jobs_projector(
     store: SqliteJobsStore,
     jobs_stream: String,
 ) -> Result<JobsProjectorHandle, ServerError> {
+    let consumer_name = projector_consumer_name(&store.projection_id().map_err(|error| {
+        ServerError::Nats(format!(
+            "failed to resolve Jobs projection identity: {error}"
+        ))
+    })?);
     let mut messages = jobs_runtime
-        .filtered_messages(&jobs_stream, PROJECTOR_CONSUMER_NAME, JOBS_EVENTS_SUBJECT_WILDCARD)
+        .filtered_messages(&jobs_stream, &consumer_name, JOBS_EVENTS_SUBJECT_WILDCARD)
         .await
         .map_err(|error| {
             ServerError::Nats(format!(
-                "failed to start jobs projector consumer '{PROJECTOR_CONSUMER_NAME}' message stream: {error}"
+                "failed to start jobs projector consumer '{consumer_name}' message stream: {error}"
             ))
         })?;
 
@@ -62,7 +67,7 @@ pub async fn start_jobs_projector(
         while let Some(message) = messages.next().await {
             let message = message.map_err(|error| {
                 ServerError::Nats(format!(
-                    "jobs projector failed to pull from consumer '{PROJECTOR_CONSUMER_NAME}' on stream '{jobs_stream}': {error}"
+                    "jobs projector failed to pull from consumer '{consumer_name}' on stream '{jobs_stream}': {error}"
                 ))
             })?;
             let raw_event = match serde_json::from_slice::<Value>(message.payload()) {
@@ -94,6 +99,10 @@ pub async fn start_jobs_projector(
     Ok(JobsProjectorHandle { task: Some(task) })
 }
 
+fn projector_consumer_name(projection_id: &str) -> String {
+    format!("{PROJECTOR_CONSUMER_NAME}-{projection_id}")
+}
+
 #[cfg(test)]
 fn project_job_event(
     store: &SqliteJobsStore,
@@ -113,7 +122,7 @@ pub fn project_job_event_with_payload(
     raw_event: &Value,
 ) -> Result<Option<Job>, SqliteJobsStoreError> {
     let current = store.get_job(&event.service, &event.job_type, &event.job_id)?;
-    let next = reduce_job_event(current.as_ref(), event);
+    let next = reduce_job_event(current.as_ref(), event).or_else(|| job_from_terminal_event(event));
     let projected = next
         .as_ref()
         .zip(current.as_ref())
@@ -176,6 +185,53 @@ fn metadata_patch_from_event_payload(raw_event: &Value) -> JobProjectionMetadata
     }
 }
 
+fn job_from_terminal_event(event: &JobEvent) -> Option<Job> {
+    if !trellis_rs::jobs::is_terminal(event.state) {
+        return None;
+    }
+
+    let mut job = Job {
+        id: event.job_id.clone(),
+        context: event.context.clone(),
+        service: event.service.clone(),
+        job_type: event.job_type.clone(),
+        state: event.state,
+        payload: event.payload.clone().unwrap_or(Value::Null),
+        result: None,
+        created_at: event.timestamp.clone(),
+        updated_at: event.timestamp.clone(),
+        started_at: None,
+        completed_at: Some(event.timestamp.clone()),
+        tries: event.tries,
+        max_tries: event.max_tries.unwrap_or(event.tries.max(1)),
+        last_error: event.error.clone(),
+        error_detail: event.error_detail.clone().or_else(|| {
+            event.error.as_deref().map(|message| {
+                trellis_rs::jobs::types::JobErrorDetail::from_message(
+                    &event.service,
+                    &event.job_type,
+                    message,
+                )
+            })
+        }),
+        deadline: event.deadline.clone(),
+        progress: event.progress.clone(),
+        logs: event.logs.clone(),
+        concurrency: event.concurrency.clone(),
+        queue_policy: event.queue_policy.clone(),
+        trigger: event.trigger.clone(),
+        lineage: event.lineage.clone(),
+    };
+
+    if event.event_type == JobEventType::Completed {
+        job.result = event.result.clone();
+        job.last_error = None;
+        job.error_detail = None;
+    }
+
+    Some(job)
+}
+
 fn concurrency_metadata_from_value(value: &Value) -> Option<JobConcurrencyMetadata> {
     let key = value.get("key")?.as_str()?.to_string();
     let key_hash = value.get("keyHash")?.as_str()?.to_string();
@@ -217,6 +273,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn projector_consumer_name_includes_projection_identity() {
+        assert_eq!(
+            projector_consumer_name("0123456789abcdef"),
+            "jobs-projector-0123456789abcdef"
+        );
+    }
+
+    #[test]
     fn project_job_event_upserts_sql_projection() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         let event = created_event(
@@ -241,6 +305,35 @@ mod tests {
             .expect("job should be stored");
         assert_eq!(stored.id, "job-1");
         assert_eq!(stored.payload, json!({ "documentId": "doc-1" }));
+    }
+
+    #[test]
+    fn project_terminal_event_without_created_keeps_evidence_visible() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let event = failed_event(
+            "documents",
+            "document-process",
+            "old-job",
+            &context(),
+            JobState::Active,
+            1,
+            "2026-03-28T12:05:00.000Z",
+            "boom",
+        );
+
+        let projected = project_job_event(&store, &event)
+            .expect("projection should succeed")
+            .expect("terminal evidence should reduce");
+
+        assert_eq!(projected.id, "old-job");
+        assert_eq!(projected.state, JobState::Failed);
+        assert_eq!(projected.payload, Value::Null);
+        assert_eq!(projected.last_error.as_deref(), Some("boom"));
+        let stored = store
+            .get_job_by_global_id("old-job")
+            .expect("lookup should succeed")
+            .expect("synthetic terminal job should be stored");
+        assert_eq!(stored.state, JobState::Failed);
     }
 
     #[test]

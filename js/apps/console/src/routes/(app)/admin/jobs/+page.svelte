@@ -3,22 +3,22 @@
   import { onDestroy, onMount } from "svelte";
   import DataTable from "../../../../lib/components/DataTable.svelte";
   import EmptyState from "../../../../lib/components/EmptyState.svelte";
+  import JobsHealthMatrix from "../../../../lib/components/JobsHealthMatrix.svelte";
+  import JobsScopedCharts from "../../../../lib/components/JobsScopedCharts.svelte";
   import LoadingState from "../../../../lib/components/LoadingState.svelte";
   import Notice from "../../../../lib/components/Notice.svelte";
   import PageToolbar from "../../../../lib/components/PageToolbar.svelte";
   import Panel from "../../../../lib/components/Panel.svelte";
-  import StatusBadge from "../../../../lib/components/StatusBadge.svelte";
-  import { errorMessage, formatDate } from "../../../../lib/format";
+  import InlineMetricsStrip from "../../../../lib/components/InlineMetricsStrip.svelte";
+  import { errorMessage, jobStateStatus, compactDuration } from "../../../../lib/format";
   import {
-    cancelJob,
-    dismissDlqJob,
     loadJobsPageData,
-    replayDlqJob,
-    retryJob,
   } from "../../../../lib/jobs_page.ts";
+  import { loadJobsMetrics, type JobsMetrics } from "../../../../lib/jobs_metrics.ts";
   import { getTrellis } from "../../../../lib/trellis";
   import type {
     JobsListServicesOutput,
+    JobsMetricsInput,
     JobsQueryInput,
     JobsQueryOutput,
   } from "@qlever-llc/trellis/sdk/jobs";
@@ -26,7 +26,6 @@
   type Job = JobsQueryOutput["entries"][number];
   type JobState = Job["state"];
   type ServiceInfo = JobsListServicesOutput["entries"][number];
-  type QueryGroup = JobsQueryOutput["groups"][number];
   type QueryStats = JobsQueryOutput["stats"];
   type JobPathname = `/admin/jobs/${string}` & {};
   type RuntimeFilter = "" | "running" | "slow" | "queued" | "terminal";
@@ -36,19 +35,12 @@
   const trellis = getTrellis();
   const pageLimit = 100;
 
-  const stateOptions: Array<{ value: "" | JobState; label: string }> = [
-    { value: "", label: "All states" },
-    { value: "pending", label: "Pending" },
+  const statePills: Array<{ value: "" | JobState; label: string }> = [
+    { value: "", label: "All" },
     { value: "active", label: "Active" },
-    { value: "retry", label: "Retry" },
-    { value: "completed", label: "Completed" },
     { value: "failed", label: "Failed" },
-    { value: "cancelled", label: "Cancelled" },
-    { value: "skipped", label: "Skipped" },
-    { value: "stale", label: "Stale" },
-    { value: "expired", label: "Expired" },
     { value: "dead", label: "Dead" },
-    { value: "dismissed", label: "Dismissed" },
+    { value: "stale", label: "Stale" },
   ];
 
   const runtimeOptions: Array<{ value: RuntimeFilter; label: string }> = [
@@ -61,14 +53,15 @@
 
   let loading = $state(true);
   let refreshing = $state(false);
-  let actionBusy = $state<string | null>(null);
   let error = $state<string | null>(null);
   let unavailableMessage = $state<string | null>(null);
   let services = $state.raw<ServiceInfo[]>([]);
   let jobs = $state.raw<Job[]>([]);
-  let groups = $state.raw<QueryGroup[]>([]);
   let stats = $state.raw<QueryStats>({ byState: {}, total: 0 });
-  let selectedJobId = $state<string | null>(null);
+  let metrics = $state.raw<JobsMetrics | null>(null);
+  let metricsError = $state<string | null>(null);
+  let metricsWindow = $state<"15m" | "1h" | "6h" | "24h" | "7d">("1h");
+  let selectedJobType = $state<string | null>(null);
   let selectedService = $state("");
   let selectedState = $state<"" | JobState>("");
   let runtimeFilter = $state<RuntimeFilter>("");
@@ -79,90 +72,89 @@
   let offset = $state(0);
   let offsetStack = $state.raw<number[]>([]);
   let nextOffset = $state<number | undefined>(undefined);
-  let autoRefresh = $state(false);
   let lastUpdated = $state<Date | null>(null);
-  let refreshInterval: ReturnType<typeof setInterval> | undefined;
-  let watchController: AbortController | undefined;
-  let watchReloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let metricsSequence = 0;
   let loadSequence = 0;
 
   const pageNumber = $derived(offsetStack.length + 1);
-  const pageTypeFilter = $derived(typeFilter.trim());
   const query = $derived(searchText.trim());
-  const selectedJob = $derived.by(() => {
-    if (jobs.length === 0) return undefined;
-    return jobs.find((job) => job.id === selectedJobId) ?? jobs[0];
-  });
   const workerCount = $derived.by(() => services.reduce((sum, service) => sum + service.workers.length, 0));
-  const filterSummary = $derived.by(() => {
-    const parts = [
-      selectedService || "all services",
-      selectedState || "all states",
-      runtimeOptions.find((option) => option.value === runtimeFilter)?.label.toLowerCase() ?? "any runtime",
-      pageTypeFilter ? `type ${pageTypeFilter}` : "all types",
-      query ? "server search" : "no search",
-    ];
-    return parts.join(" · ");
-  });
+  const stateStatus = jobStateStatus;
 
-  function stateStatus(state: JobState): "healthy" | "degraded" | "unhealthy" | "offline" {
+  function stateBadgeClass(state: JobState): string {
     switch (state) {
       case "completed":
-        return "healthy";
+      case "active":
+        return "badge-success";
       case "failed":
       case "dead":
       case "expired":
+        return "badge-error";
       case "stale":
-        return "unhealthy";
-      case "active":
-        return "healthy";
+      case "dismissed":
+        return "badge-warning";
       case "retry":
       case "pending":
-        return "degraded";
+        return "badge-info";
       default:
-        return "offline";
+        return "badge-ghost";
     }
   }
 
-  function ageLabel(value: string | undefined): string {
-    if (!value) return "-";
-    const time = new Date(value).getTime();
-    if (Number.isNaN(time)) return "-";
-    return compactDuration(Date.now() - time);
-  }
-
-  function compactDuration(ms: number): string {
-    if (!Number.isFinite(ms) || ms < 0) return "-";
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return `${seconds}s`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 48) return `${hours}h`;
-    return `${Math.floor(hours / 24)}d`;
-  }
-
-  function durationLabel(job: Job): string {
+  function jobRuntimeLabel(job: Job): string {
     return compactDuration(job.runtimeMs ?? 0);
   }
 
-  function jsonBlock(value: unknown): string {
-    if (value === undefined) return "-";
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  function jobRoute(id: string): JobPathname {
-    return `/admin/jobs/${encodeURIComponent(id)}` as JobPathname;
+  function jobQueueAgeLabel(job: Job): string {
+    return compactDuration(job.queueAgeMs ?? 0);
   }
 
   function sortField(): NonNullable<JobsQueryInput["sort"]>["field"] {
     if (sortMode === "failRate") return "failureRate";
     if (sortMode === "recent") return "updatedAt";
     return sortMode;
+  }
+
+  function resolveMetricsStep(window: typeof metricsWindow): JobsMetricsInput["step"] {
+    if (window === "15m" || window === "1h") return "1m";
+    if (window === "6h") return "5m";
+    if (window === "24h") return "15m";
+    return "1h";
+  }
+
+  function buildMetricsInput(): JobsMetricsInput {
+    return {
+      groupBy: "type",
+      service: selectedService || undefined,
+      state: selectedState ? [selectedState] : undefined,
+      step: resolveMetricsStep(metricsWindow),
+      window: metricsWindow,
+    };
+  }
+
+  async function loadMetrics() {
+    const sequence = ++metricsSequence;
+    metricsError = null;
+    try {
+      const payload = await loadJobsMetrics(
+        { metrics: (request) => trellis.request("Jobs.Metrics", request) },
+        buildMetricsInput(),
+      );
+      if (sequence !== metricsSequence) return;
+      if (!payload.available) {
+        metrics = null;
+        metricsError = payload.message ?? "Jobs metrics are unavailable.";
+        return;
+      }
+      metrics = payload.metrics ?? null;
+      if (selectedJobType && metrics && !metrics.summary.some((group) => group.key === selectedJobType)) {
+        selectedJobType = null;
+      }
+    } catch (e) {
+      if (sequence !== metricsSequence) return;
+      metrics = null;
+      metricsError = errorMessage(e);
+    }
   }
 
   function buildFilter(): JobsQueryInput {
@@ -175,19 +167,15 @@
       service: selectedService || undefined,
       sort: { field: sortField(), direction: "desc" },
       state: selectedState ? [selectedState] : undefined,
-      type: pageTypeFilter || undefined,
+      type: typeFilter.trim() || undefined,
     };
   }
 
   async function load(showLoading = true) {
     const sequence = ++loadSequence;
     const filter = buildFilter();
-    stopJobsWatch();
-    if (showLoading) {
-      loading = true;
-    } else {
-      refreshing = true;
-    }
+    if (showLoading) loading = true;
+    else refreshing = true;
     error = null;
     unavailableMessage = null;
 
@@ -196,27 +184,21 @@
         listServices: (input) => trellis.request("Jobs.ListServices", input),
         queryJobs: (filter) => trellis.request("Jobs.Query", filter),
       }, filter);
-
       if (sequence !== loadSequence) return;
 
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
       services = data.services;
       jobs = data.jobs;
-      groups = data.groups;
       stats = data.stats;
-      selectedJobId = data.jobs.some((job) => job.id === selectedJobId) ? selectedJobId : data.jobs[0]?.id ?? null;
       nextOffset = data.nextOffset;
       lastUpdated = new Date();
-      if (data.available) startJobsWatch(filter);
     } catch (e) {
       if (sequence !== loadSequence) return;
       error = errorMessage(e);
       unavailableMessage = null;
       jobs = [];
-      groups = [];
       stats = { byState: {}, total: 0 };
       services = [];
-      selectedJobId = null;
       nextOffset = undefined;
     } finally {
       if (sequence === loadSequence) {
@@ -224,6 +206,7 @@
         refreshing = false;
       }
     }
+    void loadMetrics();
   }
 
   function resetPagination() {
@@ -237,11 +220,17 @@
   }
 
   function isJobStateFilter(value: string): value is "" | JobState {
-    return stateOptions.some((option) => option.value === value);
+    return statePills.some((option) => option.value === value);
   }
 
   function isRuntimeFilter(value: string): value is RuntimeFilter {
     return runtimeOptions.some((option) => option.value === value);
+  }
+
+  function selectState(value: "" | JobState) {
+    selectedState = value;
+    resetPagination();
+    void load();
   }
 
   function handleServiceFilterChange(event: Event) {
@@ -252,9 +241,7 @@
 
   function handleStateFilterChange(event: Event) {
     const value = event.currentTarget instanceof HTMLSelectElement ? event.currentTarget.value : "";
-    selectedState = isJobStateFilter(value) ? value : "";
-    resetPagination();
-    void load();
+    selectState(isJobStateFilter(value) ? value : "");
   }
 
   function handleRuntimeFilterChange(event: Event) {
@@ -262,14 +249,29 @@
     runtimeFilter = isRuntimeFilter(value) ? value : "";
   }
 
-  function selectJob(job: Job) {
-    selectedJobId = job.id;
+  function handleMetricsWindowChange(event: Event) {
+    const value = event.currentTarget instanceof HTMLSelectElement ? event.currentTarget.value : "1h";
+    if (value === "15m" || value === "1h" || value === "6h" || value === "24h" || value === "7d") {
+      metricsWindow = value;
+      void loadMetrics();
+    }
   }
 
-  function selectJobFromKeyboard(event: KeyboardEvent, job: Job) {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    selectJob(job);
+  function selectJobType(key: string | null) {
+    if (key === null) {
+      selectedJobType = null;
+      return;
+    }
+    selectedJobType = key;
+    if (typeFilter !== key) {
+      typeFilter = key;
+      resetPagination();
+      void load();
+    }
+  }
+
+  function jobRoute(id: string): JobPathname {
+    return `/admin/jobs/${encodeURIComponent(id)}` as JobPathname;
   }
 
   function goNext() {
@@ -291,80 +293,15 @@
     void load(false);
   }
 
-  function clearAutoRefresh() {
-    if (!refreshInterval) return;
-    clearInterval(refreshInterval);
-    refreshInterval = undefined;
-  }
-
-  function clearWatchReload() {
-    if (!watchReloadTimer) return;
-    clearTimeout(watchReloadTimer);
-    watchReloadTimer = undefined;
-  }
-
-  function scheduleWatchReload() {
-    clearWatchReload();
-    watchReloadTimer = setTimeout(() => {
-      watchReloadTimer = undefined;
-      void load(false);
-    }, 350);
-  }
-
-  function stopJobsWatch() {
-    watchController?.abort();
-    watchController = undefined;
-    clearWatchReload();
-  }
-
-  function startJobsWatch(filter: JobsQueryInput) {
-    stopJobsWatch();
-    const controller = new AbortController();
-    watchController = controller;
-
-    void (async () => {
-      try {
-        const stream = await trellis.feed.jobs.watch({ includeInitial: false, query: filter }, { signal: controller.signal }).orThrow();
-        for await (const event of stream) {
-          if (controller.signal.aborted) return;
-          if (event.kind !== "ready") scheduleWatchReload();
-        }
-      } catch {
-        // Jobs.Watch is optional; manual refresh remains available.
-      }
-    })();
-  }
-
-  function handleAutoRefreshChange(event: Event) {
-    const checked = event.currentTarget instanceof HTMLInputElement ? event.currentTarget.checked : false;
-    autoRefresh = checked;
-    clearAutoRefresh();
-    if (!checked) return;
-    refreshInterval = setInterval(() => {
-      void load(false);
-    }, 10000);
-  }
-
-  async function runAction(name: "cancel" | "retry" | "replay" | "dismiss") {
-    if (!selectedJob) return;
-    actionBusy = name;
-    error = null;
-    try {
-      if (name === "cancel") {
-        await cancelJob({ action: (input) => trellis.request("Jobs.Cancel", input) }, selectedJob.id);
-      } else if (name === "retry") {
-        await retryJob({ action: (input) => trellis.request("Jobs.Retry", input) }, selectedJob.id);
-      } else if (name === "replay") {
-        await replayDlqJob({ action: (input) => trellis.request("Jobs.ReplayDLQ", input) }, selectedJob.id);
-      } else {
-        await dismissDlqJob({ action: (input) => trellis.request("Jobs.DismissDLQ", input) }, selectedJob.id);
-      }
-      await load(false);
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      actionBusy = null;
-    }
+  function clearAll() {
+    selectedJobType = null;
+    selectedState = "";
+    selectedService = "";
+    runtimeFilter = "";
+    typeFilter = "";
+    searchText = "";
+    resetPagination();
+    void load();
   }
 
   onMount(() => {
@@ -372,13 +309,12 @@
   });
 
   onDestroy(() => {
-    clearAutoRefresh();
-    stopJobsWatch();
+    // load() now uses straight RPCs; no streaming controller to tear down.
   });
 </script>
 
 <section class="space-y-4">
-  <PageToolbar title="Jobs" description="Grouped service-private work for local triage, queue review, and runtime timeline.">
+  <PageToolbar title="Jobs" description="Trellis job-type health, scoped diagnostics, and individual job triage.">
     {#snippet meta()}
       <span class="badge badge-ghost badge-sm">Page {pageNumber}</span>
       <span class="badge badge-neutral badge-sm">{jobs.length} loaded</span>
@@ -387,88 +323,173 @@
       {/if}
     {/snippet}
     {#snippet actions()}
-      <label class="flex items-center gap-2 text-xs text-base-content/70">
-        <input class="toggle toggle-xs" type="checkbox" checked={autoRefresh} onchange={handleAutoRefreshChange} />
-        Auto refresh
-      </label>
       <button class="btn btn-ghost btn-sm" onclick={refreshNow} disabled={loading || refreshing || !!unavailableMessage}>
         {refreshing ? "Refreshing" : "Refresh"}
       </button>
     {/snippet}
   </PageToolbar>
 
-  <form class="trellis-filterbar" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}>
-    <div class="trellis-filterbar-controls grow">
-      <label class="trellis-field min-w-[min(100%,28rem)] grow">
-        <span class="trellis-field-label">Command search</span>
-        <input
-          class="input input-bordered input-sm"
-          placeholder="Paste error, job id, trigger, service, or job type"
-          bind:value={searchText}
+  {#if !loading && !error && !unavailableMessage}
+    {@const metricsStrip = [
+      { label: 'Total', value: stats.total, badge: `${stats.byState.active ?? 0} active`, badgeClass: 'badge-neutral' as const },
+      { label: 'Queued', value: stats.queued ?? 0, badge: `${stats.byState.pending ?? 0} pending`, badgeClass: 'badge-neutral' as const },
+      { label: 'Running', value: stats.running ?? 0, badge: `${stats.byState.slow ?? 0} slow`, badgeClass: 'badge-neutral' as const },
+      { label: 'Failed', value: stats.byState.failed ?? 0, badge: `${stats.byState.dead ?? 0} dead`, badgeClass: (stats.byState.failed ?? 0) > 0 ? 'badge-error' as const : 'badge-neutral' as const },
+      { label: 'Workers', value: workerCount, detail: 'services' },
+    ]}
+    <InlineMetricsStrip metrics={metricsStrip} />
+  {/if}
+
+  <div class="jobs-filterbar">
+    <div class="jobs-filterbar-primary">
+      <input
+        class="input input-bordered input-sm jobs-search-input"
+        placeholder="Search error, job id, trigger, service, or type"
+        bind:value={searchText}
+        onchange={applyFilters}
+        disabled={loading || !!unavailableMessage}
+      />
+
+      <div class="jobs-state-pills">
+        {#each statePills as pill (pill.value)}
+          <button
+            type="button"
+            class={['jobs-state-pill', selectedState === pill.value && 'active']}
+            onclick={() => selectState(pill.value)}
+            disabled={loading || !!unavailableMessage}
+          >
+            {pill.label}
+          </button>
+        {/each}
+      </div>
+
+      <label class="jobs-inline-select">
+        <span class="jobs-inline-label">Service</span>
+        <select
+          class="select select-bordered select-xs"
+          value={selectedService}
+          onchange={handleServiceFilterChange}
           disabled={loading || !!unavailableMessage}
-        />
-        <span class="trellis-field-help">Sent to Jobs.Query as server-side search.</span>
-      </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Status</span>
-        <select class="select select-bordered select-sm" value={selectedState} onchange={handleStateFilterChange} disabled={loading || !!unavailableMessage}>
-          {#each stateOptions as option (option.value)}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Runtime</span>
-        <select class="select select-bordered select-sm" value={runtimeFilter} onchange={handleRuntimeFilterChange} disabled={loading || !!unavailableMessage}>
-          {#each runtimeOptions as option (option.value)}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Service</span>
-        <select class="select select-bordered select-sm" value={selectedService} onchange={handleServiceFilterChange} disabled={loading || !!unavailableMessage}>
-          <option value="">All services</option>
+        >
+          <option value="">All</option>
           {#each services as service (service.name)}
             <option value={service.name}>{service.name}</option>
           {/each}
         </select>
       </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Job type</span>
-        <input class="input input-bordered input-sm" placeholder="Exact type" bind:value={typeFilter} disabled={loading || !!unavailableMessage} />
-      </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Queue/key</span>
-        <input class="input input-bordered input-sm" placeholder="Use command search" disabled />
-      </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Trigger/context</span>
-        <input class="input input-bordered input-sm" placeholder="Use command search" disabled />
-      </label>
-    </div>
-    <div class="trellis-filterbar-actions">
-      <label class="trellis-field">
-        <span class="trellis-field-label">Group</span>
-        <select class="select select-bordered select-sm" bind:value={groupBy} disabled={loading || !!unavailableMessage}>
-          <option value="service">Service</option>
-          <option value="type">Job type</option>
-          <option value="state">State</option>
+
+      <label class="jobs-inline-select">
+        <span class="jobs-inline-label">Window</span>
+        <select
+          class="select select-bordered select-xs"
+          value={metricsWindow}
+          onchange={handleMetricsWindowChange}
+          disabled={!!unavailableMessage}
+        >
+          <option value="15m">15m</option>
+          <option value="1h">1h</option>
+          <option value="6h">6h</option>
+          <option value="24h">24h</option>
+          <option value="7d">7d</option>
         </select>
       </label>
-      <label class="trellis-field">
-        <span class="trellis-field-label">Sort</span>
-        <select class="select select-bordered select-sm" bind:value={sortMode} disabled={loading || !!unavailableMessage}>
-          <option value="queueAge">Queue age</option>
-          <option value="failRate">Failure rate</option>
-          <option value="runtime">Runtime</option>
-          <option value="depth">Depth</option>
-          <option value="recent">Recent</option>
-        </select>
-      </label>
-      <button class="btn btn-outline btn-sm" disabled={loading || !!unavailableMessage}>Apply server filters</button>
+
+      <details class="jobs-more-filters">
+        <summary class="jobs-more-filters-trigger">More filters</summary>
+        <div class="jobs-more-filters-popover">
+          <label class="jobs-inline-select">
+            <span class="jobs-inline-label">Type</span>
+            <input
+              class="input input-bordered input-xs jobs-type-input"
+              placeholder="Exact type"
+              bind:value={typeFilter}
+              onchange={applyFilters}
+              disabled={loading || !!unavailableMessage}
+            />
+          </label>
+          <label class="jobs-inline-select">
+            <span class="jobs-inline-label">Group</span>
+            <select
+              class="select select-bordered select-xs"
+              bind:value={groupBy}
+              onchange={applyFilters}
+              disabled={loading || !!unavailableMessage}
+            >
+              <option value="service">Service</option>
+              <option value="type">Job type</option>
+              <option value="state">State</option>
+            </select>
+          </label>
+          <label class="jobs-inline-select">
+            <span class="jobs-inline-label">Sort</span>
+            <select
+              class="select select-bordered select-xs"
+              bind:value={sortMode}
+              onchange={applyFilters}
+              disabled={loading || !!unavailableMessage}
+            >
+              <option value="queueAge">Queue age</option>
+              <option value="failRate">Failure rate</option>
+              <option value="runtime">Runtime</option>
+              <option value="depth">Depth</option>
+              <option value="recent">Recent</option>
+            </select>
+          </label>
+          <label class="jobs-inline-select">
+            <span class="jobs-inline-label">Runtime</span>
+            <select
+              class="select select-bordered select-xs"
+              value={runtimeFilter}
+              onchange={handleRuntimeFilterChange}
+              disabled={loading || !!unavailableMessage}
+            >
+              {#each runtimeOptions as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+      </details>
     </div>
-  </form>
+
+    {#if selectedJobType || selectedState || selectedService || runtimeFilter || typeFilter.trim() || query}
+      <div class="jobs-active-filters">
+        {#if selectedJobType}
+          <button type="button" class="badge badge-sm badge-primary cursor-pointer" onclick={() => selectJobType(null)}>
+            Type drill: {selectedJobType} ×
+          </button>
+        {/if}
+        {#if selectedState}
+          <button type="button" class="badge badge-sm badge-outline cursor-pointer" onclick={() => selectState("")}>
+            State: {selectedState} ×
+          </button>
+        {/if}
+        {#if selectedService}
+          <button type="button" class="badge badge-sm badge-outline cursor-pointer" onclick={() => { selectedService = ''; resetPagination(); void load(); }}>
+            Service: {selectedService} ×
+          </button>
+        {/if}
+        {#if runtimeFilter}
+          <button type="button" class="badge badge-sm badge-outline cursor-pointer" onclick={() => { runtimeFilter = ''; resetPagination(); void load(); }}>
+            Runtime: {runtimeFilter} ×
+          </button>
+        {/if}
+        {#if typeFilter.trim() && typeFilter.trim() !== selectedJobType}
+          <button type="button" class="badge badge-sm badge-outline cursor-pointer" onclick={() => { typeFilter = ''; resetPagination(); void load(); }}>
+            Type: {typeFilter} ×
+          </button>
+        {/if}
+        {#if query}
+          <button type="button" class="badge badge-sm badge-outline cursor-pointer" onclick={() => { searchText = ''; resetPagination(); void load(); }}>
+            Search: {query} ×
+          </button>
+        {/if}
+        <button type="button" class="text-xs text-base-content/50 underline" onclick={clearAll}>
+          Clear all
+        </button>
+      </div>
+    {/if}
+  </div>
 
   {#if error}
     <Notice variant="error" role="alert">{error}</Notice>
@@ -476,228 +497,205 @@
     <Notice variant="info" role="status">{unavailableMessage}</Notice>
   {/if}
 
-  <div class="jobs-workbench">
-    <div class="space-y-4 min-w-0">
-      <Panel title="Queue topology" eyebrow="Primary">
-        {#snippet actions()}
-          <span class="badge badge-ghost badge-sm">{filterSummary}</span>
-        {/snippet}
+  {#if metricsError}
+    <Notice variant="info" role="status">{metricsError}</Notice>
+  {/if}
 
-        {#if loading}
-          <LoadingState label="Loading jobs" />
-        {:else if unavailableMessage}
-          <p class="text-xs text-base-content/60">The console can still be used normally without jobs installed.</p>
-        {:else if jobs.length === 0}
-          <EmptyState title="No jobs found" description="Jobs will appear here when the Jobs API reports active or retained work." />
-        {:else}
-          <div class="mb-3 grid gap-2 text-xs text-base-content/70 sm:grid-cols-4">
-            <div class="ops-stat"><span>Total</span><strong>{stats.total}</strong></div>
-            <div class="ops-stat"><span>Queued</span><strong>{stats.queued ?? 0}</strong></div>
-            <div class="ops-stat"><span>Running</span><strong>{stats.running ?? 0}</strong></div>
-            <div class="ops-stat"><span>Workers seen</span><strong>{workerCount}</strong></div>
-          </div>
-          <DataTable fixed wrapperClass="jobs-topology-table">
-            <thead>
-              <tr>
-                <th>Family / job</th>
-                <th class="w-32">Status</th>
-                <th class="w-24">Runtime</th>
-                <th class="w-24">Queue age</th>
-                <th class="w-20">Depth</th>
-                <th class="w-24">Tries</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each groups as group (group.key)}
-                <tr class="group-row">
-                  <td>
-                    <div class="flex items-center gap-2">
-                      <span class="badge badge-ghost badge-xs">{groupBy}</span>
-                      <span class="font-semibold">{group.label}</span>
-                      <span class="text-xs text-base-content/50">{group.count} jobs</span>
-                    </div>
-                  </td>
-                  <td>
-                    <span class="text-xs tabular-nums text-base-content/70">{group.failureRate === undefined ? "-" : `${(group.failureRate * 100).toFixed(1)}% fail`}</span>
-                  </td>
-                  <td class="text-xs tabular-nums text-base-content/70">-</td>
-                  <td class="text-xs tabular-nums text-base-content/70">{group.oldestCreatedAt ? ageLabel(group.oldestCreatedAt) : "-"}</td>
-                  <td class="text-xs tabular-nums text-base-content/70">{group.depth ?? group.count}</td>
-                  <td></td>
-                </tr>
-              {/each}
-              {#each jobs as job (job.id)}
-                <tr
-                  class={['job-row hover', selectedJob?.id === job.id && 'selected']}
-                  tabindex="0"
-                  onkeydown={(event) => selectJobFromKeyboard(event, job)}
-                  onclick={() => selectJob(job)}
-                >
-                  <td class="min-w-0">
-                    <div class="flex min-w-0 flex-col gap-1">
-                      <div class="flex min-w-0 items-center gap-2">
-                        <button class="btn btn-ghost btn-xs px-1" type="button" onclick={(event) => { event.stopPropagation(); selectJob(job); }}>Inspect</button>
-                        <a class="link link-hover trellis-identifier truncate" href={resolve(jobRoute(job.id))} onclick={(event) => event.stopPropagation()}>{job.type}</a>
-                      </div>
-                      <span class="trellis-identifier text-base-content/45">{job.id}</span>
-                    </div>
-                  </td>
-                  <td><StatusBadge label={job.state} status={stateStatus(job.state)} /></td>
-                  <td class="text-xs tabular-nums text-base-content/70">{durationLabel(job)}</td>
-                  <td class="text-xs tabular-nums text-base-content/70">{compactDuration(job.queueAgeMs ?? 0)}</td>
-                  <td class="text-xs tabular-nums text-base-content/70">{job.queueKey ? "keyed" : "1"}</td>
-                  <td class="text-xs tabular-nums text-base-content/70">{job.tries}/{job.maxTries}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </DataTable>
-        {/if}
+  {#if metrics}
+    <JobsHealthMatrix
+      summary={metrics.summary}
+      buckets={metrics.buckets}
+      selectedKey={selectedJobType}
+      onSelect={selectJobType}
+    />
+    {#if selectedJobType}
+      <JobsScopedCharts buckets={metrics.buckets} selectedKey={selectedJobType} />
+    {/if}
+  {/if}
 
-        {#snippet footer()}
-          <div class="flex items-center justify-between gap-3">
-            <span>{jobs.length} shown from {stats.total} jobs</span>
-            <div class="join">
-              <button class="btn btn-outline btn-xs join-item" onclick={goPrevious} disabled={loading || offsetStack.length === 0}>Previous</button>
-              <button class="btn btn-outline btn-xs join-item" onclick={goNext} disabled={loading || nextOffset === undefined}>Next</button>
-            </div>
-          </div>
-        {/snippet}
-      </Panel>
-
-    </div>
-
-    <aside class="job-inspector">
-      <Panel title={selectedJob?.type ?? "Job inspector"} eyebrow={selectedJob ? selectedJob.service : "Select a job"}>
-        {#snippet actions()}
-          {#if selectedJob}
-            <a class="btn btn-ghost btn-xs" href={resolve(jobRoute(selectedJob.id))}>Full detail</a>
-          {/if}
-        {/snippet}
-
-        {#if !selectedJob}
-          <EmptyState title="Select a job" description="Choose a job row to inspect logs, context, trigger, retries, and controls." />
-        {:else}
-          <div class="space-y-4">
-            <div class="flex flex-wrap items-center gap-2">
-              <StatusBadge label={selectedJob.state} status={stateStatus(selectedJob.state)} />
-              <span class="badge badge-ghost badge-sm">runtime {durationLabel(selectedJob)}</span>
-              <span class="badge badge-ghost badge-sm">tries {selectedJob.tries}/{selectedJob.maxTries}</span>
-            </div>
-
-            <DataTable size="xs" overflow="none">
-              <tbody>
-                <tr><th>Service</th><td class="trellis-identifier">{selectedJob.service}</td></tr>
-                <tr><th>Job ID</th><td class="trellis-identifier break-anywhere">{selectedJob.id}</td></tr>
-                <tr><th>Trigger</th><td class="trellis-identifier break-anywhere">{selectedJob.trigger?.id ?? selectedJob.context?.requestId ?? "-"}</td></tr>
-                <tr><th>Trace</th><td class="trellis-identifier break-anywhere">{selectedJob.context?.traceId ?? selectedJob.trigger?.traceId ?? "-"}</td></tr>
-                <tr><th>Queue key</th><td class="trellis-identifier break-anywhere">{selectedJob.queueKey ?? "unkeyed"}</td></tr>
-              </tbody>
-            </DataTable>
-
-            {#if selectedJob.lastError}
-              <div class="timeline-box error-box">
-                <div class="flex items-center justify-between gap-3">
-                  <h3>Error</h3>
-                  <span class="badge badge-error badge-xs">captured</span>
+  <Panel eyebrow="Primary" title="Jobs">
+    {#if loading}
+      <LoadingState label="Loading jobs" />
+    {:else if unavailableMessage}
+      <p class="text-xs text-base-content/60">The console can still be used normally without jobs installed.</p>
+    {:else if jobs.length === 0}
+      <EmptyState title="No jobs found" description="Jobs will appear here when the Jobs API reports active or retained work." />
+    {:else}
+      <DataTable fixed wrapperClass="jobs-topology-table">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th class="w-32">Status</th>
+            <th class="w-24">Runtime</th>
+            <th class="w-24">Queue age</th>
+            <th class="w-20">Tries</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each jobs as job (job.id)}
+            <tr class="job-row hover">
+              <td class="min-w-0">
+                <div class="flex min-w-0 flex-col gap-1">
+                  <a class="link link-hover trellis-identifier truncate" href={resolve(jobRoute(job.id))}>{job.type}</a>
+                  <span class="trellis-identifier text-base-content/45">{job.id}</span>
                 </div>
-                <p class="trellis-identifier break-anywhere">{selectedJob.lastError}</p>
-              </div>
-            {/if}
-
-            <div class="action-panel">
-              <h3>Action controls</h3>
-              <button class="btn btn-primary btn-sm" onclick={() => runAction("retry")} disabled={selectedJob.state !== "failed" || actionBusy !== null}>
-                {actionBusy === "retry" ? "Retrying" : "Restart job"}
-              </button>
-              <p class="text-xs text-base-content/55">{selectedJob.state === "failed" ? "Creates a new run with the same job identity." : "Available only for failed jobs."}</p>
-              <button class="btn btn-outline btn-sm" onclick={() => runAction("cancel")} disabled={!(selectedJob.state === "pending" || selectedJob.state === "retry" || selectedJob.state === "active") || actionBusy !== null}>Cancel job</button>
-              <p class="text-xs text-base-content/55">{selectedJob.state === "failed" ? "Cannot cancel a job that already failed" : "Cancels pending, retrying, or active work."}</p>
-              <button class="btn btn-outline btn-sm" disabled>Stop job</button>
-              <p class="text-xs text-base-content/55">{selectedJob.state === "active" ? "Stop is not exposed by the current Jobs API." : "Cannot stop a job that is not running"}</p>
-              {#if selectedJob.state === "dead"}
-                <div class="join w-full">
-                  <button class="btn btn-outline btn-xs join-item flex-1" onclick={() => runAction("replay")} disabled={actionBusy !== null}>Replay DLQ</button>
-                  <button class="btn btn-outline btn-xs join-item flex-1" onclick={() => runAction("dismiss")} disabled={actionBusy !== null}>Dismiss DLQ</button>
-                </div>
-              {/if}
-            </div>
-
-            <div class="inspector-grid">
-              <section class="timeline-section">
-                <h3>Input / context</h3>
-                <pre>{jsonBlock({ context: selectedJob.context, progress: selectedJob.progress, queueKey: selectedJob.queueKey, trigger: selectedJob.trigger })}</pre>
-              </section>
-              <section class="timeline-section">
-                <h3>Retry history</h3>
-                <DataTable size="xs" overflow="none">
-                  <tbody>
-                    <tr><th>Attempt</th><td>{selectedJob.tries}</td></tr>
-                    <tr><th>Max</th><td>{selectedJob.maxTries}</td></tr>
-                    <tr><th>Last update</th><td>{formatDate(selectedJob.updatedAt)}</td></tr>
-                  </tbody>
-                </DataTable>
-              </section>
-            </div>
-
-          </div>
-        {/if}
-      </Panel>
-    </aside>
-  </div>
+              </td>
+              <td><span class={['badge badge-sm', stateBadgeClass(job.state)]}>{job.state}</span></td>
+              <td class="text-xs tabular-nums text-base-content/70">{jobRuntimeLabel(job)}</td>
+              <td class="text-xs tabular-nums text-base-content/70">{jobQueueAgeLabel(job)}</td>
+              <td class="text-xs tabular-nums text-base-content/70">{job.tries}/{job.maxTries}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </DataTable>
+    {/if}
+    {#snippet footer()}
+      <div class="flex items-center justify-between gap-3">
+        <span>{jobs.length} shown from {stats.total} jobs</span>
+        <div class="join">
+          <button class="btn btn-outline btn-xs join-item" onclick={goPrevious} disabled={loading || offsetStack.length === 0}>Previous</button>
+          <button class="btn btn-outline btn-xs join-item" onclick={goNext} disabled={loading || nextOffset === undefined}>Next</button>
+        </div>
+      </div>
+    {/snippet}
+  </Panel>
 </section>
 
-<style>
-  .jobs-workbench {
-    display: grid;
-    gap: 1rem;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  @media (min-width: 1280px) {
-    .jobs-workbench {
-      grid-template-columns: minmax(0, 1fr) minmax(24rem, 32rem);
-    }
-
-    .job-inspector {
-      position: sticky;
-      top: 1rem;
-      align-self: start;
-    }
-  }
-
-  .ops-stat {
+  <style>
+    .jobs-filterbar {
     background: color-mix(in oklab, var(--color-base-100) 78%, var(--color-base-200));
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 78%, transparent);
-    border-radius: 0.85rem;
-    display: grid;
+    border: 1px solid color-mix(in oklab, var(--color-base-300) 82%, transparent);
+    border-radius: var(--radius-box, 1rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.65rem 0.85rem;
+  }
+
+  .jobs-filterbar-primary {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+
+  .jobs-search-input {
+    flex: 1 1 16rem;
+    min-width: 12rem;
+  }
+
+  .jobs-state-pills {
+    display: inline-flex;
+    align-items: center;
     gap: 0.1rem;
+    border-left: 1px solid color-mix(in oklab, var(--color-base-300) 60%, transparent);
+    border-right: 1px solid color-mix(in oklab, var(--color-base-300) 60%, transparent);
+    padding: 0 0.45rem;
+  }
+
+  .jobs-state-pill {
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-field, 0.5rem);
+    color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.25rem 0.55rem;
+  }
+
+  .jobs-state-pill:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--color-base-300) 30%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .jobs-state-pill.active {
+    background: var(--color-base-content);
+    color: var(--color-base-100);
+  }
+
+  .jobs-state-pill:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .jobs-inline-select {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.35rem;
+  }
+
+  .jobs-inline-label {
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .jobs-type-input {
+    width: 8rem;
+  }
+
+  .jobs-more-filters {
+    position: relative;
+  }
+
+  .jobs-more-filters summary {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .jobs-more-filters summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .jobs-more-filters-trigger {
+    color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+    font-size: 0.78rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: var(--radius-field, 0.5rem);
+    border: 1px solid color-mix(in oklab, var(--color-base-300) 70%, transparent);
+  }
+
+  .jobs-more-filters-trigger:hover {
+    background: color-mix(in oklab, var(--color-base-300) 30%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .jobs-more-filters[open] > .jobs-more-filters-trigger {
+    background: color-mix(in oklab, var(--color-base-300) 30%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .jobs-more-filters-popover {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 16rem;
+    max-width: min(28rem, 90vw);
+    background: color-mix(in oklab, var(--color-base-100) 95%, var(--color-base-200));
+    border: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
+    border-radius: var(--radius-box, 0.75rem);
+    box-shadow: 0 8px 24px -12px color-mix(in oklab, var(--color-base-content) 25%, transparent);
     padding: 0.65rem 0.75rem;
   }
 
-  .ops-stat span {
-    color: color-mix(in oklab, var(--color-base-content) 54%, transparent);
-    font-size: 0.72rem;
-    font-style: normal;
-  }
-
-  .ops-stat strong {
-    font-size: 1rem;
-    font-variant-numeric: tabular-nums;
-    line-height: 1.2;
-  }
-
-  .group-row {
-    background: color-mix(in oklab, var(--color-base-content) 3%, transparent);
+  .jobs-active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
   }
 
   .job-row {
     cursor: pointer;
   }
 
-  .job-row.selected {
-    background: color-mix(in oklab, var(--color-accent) 10%, transparent);
-    outline: 1px solid color-mix(in oklab, var(--color-accent) 46%, transparent);
-    outline-offset: -1px;
+  .job-row:hover {
+    background: color-mix(in oklab, var(--color-accent) 6%, transparent);
   }
 
   .job-row:focus-visible {
@@ -705,54 +703,13 @@
     outline: none;
   }
 
-  .timeline-box,
-  .action-panel,
-  .timeline-section {
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 76%, transparent);
-    border-radius: 0.85rem;
-    padding: 0.8rem;
-  }
+  @media (max-width: 640px) {
+    .jobs-filterbar-primary {
+      align-items: stretch;
+    }
 
-  .error-box {
-    background: color-mix(in oklab, var(--color-error) 8%, var(--color-base-100));
-    border-color: color-mix(in oklab, var(--color-error) 36%, var(--color-base-300));
-  }
-
-  .action-panel {
-    display: grid;
-    gap: 0.55rem;
-  }
-
-  .action-panel h3,
-  .timeline-section h3,
-  .timeline-box h3 {
-    color: color-mix(in oklab, var(--color-base-content) 74%, transparent);
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-
-  .inspector-grid {
-    display: grid;
-    gap: 0.75rem;
-  }
-
-  .timeline-section pre {
-    background: color-mix(in oklab, var(--color-base-200) 64%, var(--color-base-100));
-    border-radius: 0.65rem;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.72rem;
-    line-height: 1.5;
-    margin-top: 0.65rem;
-    max-height: 18rem;
-    overflow: auto;
-    padding: 0.75rem;
-    white-space: pre-wrap;
-  }
-
-  .break-anywhere {
-    overflow-wrap: anywhere;
-    white-space: normal;
+    .jobs-search-input {
+      width: 100%;
+    }
   }
 </style>

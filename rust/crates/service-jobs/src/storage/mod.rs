@@ -128,6 +128,7 @@ pub struct JobsWorkbenchEntry {
     pub queue_key: Option<String>,
     pub runtime_band: Option<String>,
     pub last_error_fingerprint: Option<String>,
+    pub matched_by: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +167,75 @@ pub struct JobsWorkbenchStats {
     pub failed: Option<u64>,
     pub dead: Option<u64>,
     pub slow: Option<u64>,
+}
+
+/// Filter used by the Jobs metrics dashboard surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobsMetricsFilter {
+    pub service: Option<String>,
+    pub job_type: Option<String>,
+    pub states: Option<Vec<JobState>>,
+    pub since: OffsetDateTime,
+    pub until: OffsetDateTime,
+    pub step_nanos: i64,
+    pub queue_key: Option<String>,
+    pub trigger: Option<String>,
+    pub group_by: JobsWorkbenchGroupBy,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobsMetricsLatency {
+    pub count: u64,
+    pub p50_ms: Option<u64>,
+    pub p95_ms: Option<u64>,
+    pub max_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobsMetricsSummaryGroup {
+    pub key: String,
+    pub label: String,
+    pub total: u64,
+    pub by_state: BTreeMap<String, u64>,
+    pub running: Option<u64>,
+    pub queued: Option<u64>,
+    pub failed: Option<u64>,
+    pub dead: Option<u64>,
+    pub slow: Option<u64>,
+    pub failure_rate: Option<f64>,
+    pub runtime: JobsMetricsLatency,
+    pub queue_wait: JobsMetricsLatency,
+    pub oldest_created_at: Option<String>,
+    pub latest_updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobsMetricsBucketGroup {
+    pub key: String,
+    pub label: String,
+    pub submitted: u64,
+    pub started: u64,
+    pub completed: u64,
+    pub failed: u64,
+    pub retried: u64,
+    pub dead: u64,
+    pub cancelled: u64,
+    pub dismissed: u64,
+    pub runtime: JobsMetricsLatency,
+    pub queue_wait: JobsMetricsLatency,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobsMetricsBucket {
+    pub start: String,
+    pub end: String,
+    pub groups: Vec<JobsMetricsBucketGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobsMetricsPage {
+    pub summary: Vec<JobsMetricsSummaryGroup>,
+    pub buckets: Vec<JobsMetricsBucket>,
 }
 
 /// One projected lifecycle event for a job evidence timeline.
@@ -470,6 +540,25 @@ impl SqliteJobsStore {
         backfill_metadata_timestamp_columns(&connection)?;
         populate_empty_search_index(&connection)?;
         Ok(())
+    }
+
+    /// Return the stable identity for this local projection database.
+    pub fn projection_id(&self) -> Result<String, SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        connection.execute(
+            "INSERT OR IGNORE INTO projection_metadata (name, value) VALUES ('projection_id', lower(hex(randomblob(16))))",
+            [],
+        )?;
+        connection
+            .query_row(
+                "SELECT value FROM projection_metadata WHERE name = 'projection_id'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(SqliteJobsStoreError::from)
     }
 
     /// Upsert one projected job row.
@@ -971,7 +1060,7 @@ impl SqliteJobsStore {
             .map_err(SqliteJobsStoreError::from)
     }
 
-    /// List a small set of jobs related by trace id, queue key, or service/type.
+    /// List a small set of jobs related by trace id, lineage, operation, or queue key.
     pub fn list_related_jobs(
         &self,
         job: &Job,
@@ -983,18 +1072,14 @@ impl SqliteJobsStore {
             .and_then(|metadata| metadata.concurrency.as_ref())
             .map(|concurrency| concurrency.key.clone());
         let lineage = self.get_job_lineage_by_global_id(&job.id)?;
-        let mut clauses = vec!["(j.service = ?1 AND j.job_type = ?2)".to_string()];
-        let mut query_params = vec![
-            SqlValue::Text(job.service.clone()),
-            SqlValue::Text(job.job_type.clone()),
-            SqlValue::Text(job.id.clone()),
-        ];
+        let mut clauses = Vec::new();
+        let mut match_arms = Vec::new();
+        let mut query_params = vec![SqlValue::Text(job.id.clone())];
         if !job.context.trace_id.is_empty() {
             query_params.push(SqlValue::Text(job.context.trace_id.clone()));
-            clauses.push(format!(
-                "COALESCE(l.trace_id, j.trace_id) = ?{}",
-                query_params.len()
-            ));
+            let clause = format!("COALESCE(l.trace_id, j.trace_id) = ?{}", query_params.len());
+            match_arms.push(format!("WHEN {clause} THEN 'trace'"));
+            clauses.push(clause);
         }
         if let Some(parent_job_id) = lineage
             .lineage
@@ -1002,11 +1087,13 @@ impl SqliteJobsStore {
             .and_then(|lineage| lineage.parent_job_id.clone())
         {
             query_params.push(SqlValue::Text(parent_job_id));
-            clauses.push(format!(
+            let clause = format!(
                 "(l.parent_job_id = ?{} OR j.id = ?{})",
                 query_params.len(),
                 query_params.len()
-            ));
+            );
+            match_arms.push(format!("WHEN {clause} THEN 'parent'"));
+            clauses.push(clause);
         }
         if let Some(root_job_id) = lineage
             .lineage
@@ -1014,11 +1101,13 @@ impl SqliteJobsStore {
             .and_then(|lineage| lineage.root_job_id.clone())
         {
             query_params.push(SqlValue::Text(root_job_id));
-            clauses.push(format!(
+            let clause = format!(
                 "(l.root_job_id = ?{} OR j.id = ?{})",
                 query_params.len(),
                 query_params.len()
-            ));
+            );
+            match_arms.push(format!("WHEN {clause} THEN 'root'"));
+            clauses.push(clause);
         }
         if let Some(operation_id) = lineage
             .lineage
@@ -1026,25 +1115,34 @@ impl SqliteJobsStore {
             .and_then(|lineage| lineage.operation_id.clone())
         {
             query_params.push(SqlValue::Text(operation_id));
-            clauses.push(format!("l.operation_id = ?{}", query_params.len()));
+            let clause = format!("l.operation_id = ?{}", query_params.len());
+            match_arms.push(format!("WHEN {clause} THEN 'operation'"));
+            clauses.push(clause);
         }
         if let Some(queue_key) = queue_key {
             query_params.push(SqlValue::Text(queue_key));
-            clauses.push(format!("m.concurrency_key = ?{}", query_params.len()));
+            let clause = format!("m.concurrency_key = ?{}", query_params.len());
+            match_arms.push(format!("WHEN {clause} THEN 'concurrency'"));
+            clauses.push(clause);
+        }
+        if clauses.is_empty() {
+            return Ok(Vec::new());
         }
         query_params.push(sql_u64(limit));
         let limit_param = query_params.len();
         let sql = format!(
             "SELECT j.job_json, j.runtime_ms, j.queue_age_anchor_nanos, m.concurrency_key, \
-                    {RUNTIME_BAND_SQL}, j.last_error_fingerprint \
+                    {RUNTIME_BAND_SQL}, j.last_error_fingerprint, \
+                    CASE {} ELSE NULL END AS matched_by \
              FROM jobs_projection j \
-              LEFT JOIN jobs_metadata_projection m \
-                ON m.service = j.service AND m.job_type = j.job_type AND m.id = j.id \
-              LEFT JOIN jobs_lineage_projection l \
-                ON l.service = j.service AND l.job_type = j.job_type AND l.id = j.id \
-              WHERE j.id <> ?3 AND ({}) \
-             ORDER BY j.updated_at_nanos DESC, j.service ASC, j.job_type ASC, j.id ASC \
-             LIMIT ?{limit_param}",
+               LEFT JOIN jobs_metadata_projection m \
+                 ON m.service = j.service AND m.job_type = j.job_type AND m.id = j.id \
+               LEFT JOIN jobs_lineage_projection l \
+                 ON l.service = j.service AND l.job_type = j.job_type AND l.id = j.id \
+               WHERE j.id <> ?1 AND ({}) \
+              ORDER BY j.updated_at_nanos DESC, j.service ASC, j.job_type ASC, j.id ASC \
+              LIMIT ?{limit_param}",
+            match_arms.join(" "),
             clauses.join(" OR ")
         );
         let connection = self
@@ -1060,6 +1158,7 @@ impl SqliteJobsStore {
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?;
         let mut entries = Vec::new();
@@ -1071,6 +1170,7 @@ impl SqliteJobsStore {
                 queue_key,
                 runtime_band,
                 last_error_fingerprint,
+                matched_by,
             ) = row?;
             entries.push(JobsWorkbenchEntry {
                 job: decode_job_json(&job_json)?,
@@ -1079,6 +1179,7 @@ impl SqliteJobsStore {
                 queue_key,
                 runtime_band,
                 last_error_fingerprint,
+                matched_by,
             });
         }
         Ok(entries)
@@ -1210,6 +1311,7 @@ impl SqliteJobsStore {
                 queue_key,
                 runtime_band,
                 last_error_fingerprint,
+                matched_by: None,
             });
         }
 
@@ -1269,6 +1371,174 @@ impl SqliteJobsStore {
 
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(SqliteJobsStoreError::from)
+    }
+
+    /// Query grouped current summaries and time buckets for the Jobs metrics dashboard.
+    pub fn query_metrics(
+        &self,
+        filter: &JobsMetricsFilter,
+    ) -> Result<JobsMetricsPage, SqliteJobsStoreError> {
+        Ok(JobsMetricsPage {
+            summary: self.query_metrics_summary(filter)?,
+            buckets: self.query_metrics_buckets(filter)?,
+        })
+    }
+
+    fn query_metrics_summary(
+        &self,
+        filter: &JobsMetricsFilter,
+    ) -> Result<Vec<JobsMetricsSummaryGroup>, SqliteJobsStoreError> {
+        let (from_sql, where_sql, params) =
+            metrics_jobs_where_clause(filter, Some("j.updated_at_nanos"))?;
+        let (key_sql, label_sql, _) = workbench_group_sql(filter.group_by);
+        let sql = format!(
+            "SELECT {key_sql} AS key, {label_sql} AS label, j.state, COUNT(*) AS count, \
+                    SUM(CASE WHEN j.state IN ('pending', 'retry') THEN 1 ELSE 0 END) AS queued, \
+                    SUM(CASE WHEN j.state = 'active' THEN 1 ELSE 0 END) AS running, \
+                    SUM(CASE WHEN j.state = 'failed' THEN 1 ELSE 0 END) AS failed, \
+                    SUM(CASE WHEN j.state = 'dead' THEN 1 ELSE 0 END) AS dead, \
+                    SUM(CASE WHEN j.state = 'active' AND j.runtime_ms >= 60000 THEN 1 ELSE 0 END) AS slow, \
+                    MIN(j.created_at) AS oldest_created_at, MAX(j.updated_at) AS latest_updated_at \
+             {from_sql}{where_sql} GROUP BY key, j.state ORDER BY count DESC, key ASC"
+        );
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        let mut groups = BTreeMap::<String, JobsMetricsSummaryGroup>::new();
+        {
+            let mut statement = connection.prepare(&sql)?;
+            let rows = statement.query_map(params_from_iter(params.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            })?;
+            for row in rows {
+                let (key, label, state, count, queued, running, failed, dead, slow, oldest, latest) =
+                    row?;
+                let count = i64_to_u64(count).unwrap_or(0);
+                let entry = groups
+                    .entry(key.clone())
+                    .or_insert_with(|| JobsMetricsSummaryGroup {
+                        key,
+                        label,
+                        total: 0,
+                        by_state: BTreeMap::new(),
+                        running: None,
+                        queued: None,
+                        failed: None,
+                        dead: None,
+                        slow: None,
+                        failure_rate: None,
+                        runtime: JobsMetricsLatency::default(),
+                        queue_wait: JobsMetricsLatency::default(),
+                        oldest_created_at: oldest.clone(),
+                        latest_updated_at: latest.clone(),
+                    });
+                entry.total = entry.total.saturating_add(count);
+                entry.by_state.insert(state, count);
+                add_optional_count(&mut entry.queued, queued.and_then(i64_to_u64));
+                add_optional_count(&mut entry.running, running.and_then(i64_to_u64));
+                add_optional_count(&mut entry.failed, failed.and_then(i64_to_u64));
+                add_optional_count(&mut entry.dead, dead.and_then(i64_to_u64));
+                add_optional_count(&mut entry.slow, slow.and_then(i64_to_u64));
+                if entry.oldest_created_at.as_ref() > oldest.as_ref() {
+                    entry.oldest_created_at = oldest;
+                }
+                if entry.latest_updated_at.as_ref() < latest.as_ref() {
+                    entry.latest_updated_at = latest;
+                }
+            }
+        }
+
+        for group in groups.values_mut() {
+            let failures = group
+                .failed
+                .unwrap_or(0)
+                .saturating_add(group.dead.unwrap_or(0));
+            group.failure_rate = (group.total > 0).then(|| failures as f64 / group.total as f64);
+            group.runtime = query_group_latency(
+                &connection,
+                filter,
+                &group.key,
+                "j.runtime_ms",
+                "j.updated_at_nanos",
+            )?;
+            group.queue_wait = query_group_latency(
+                &connection,
+                filter,
+                &group.key,
+                "((j.started_at_nanos - j.created_at_nanos) / 1000000)",
+                "j.started_at_nanos",
+            )?;
+        }
+
+        let mut groups = groups.into_values().collect::<Vec<_>>();
+        groups.sort_by(|left, right| {
+            right
+                .total
+                .cmp(&left.total)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        Ok(groups)
+    }
+
+    fn query_metrics_buckets(
+        &self,
+        filter: &JobsMetricsFilter,
+    ) -> Result<Vec<JobsMetricsBucket>, SqliteJobsStoreError> {
+        let since_nanos = timestamp_nanos(filter.since);
+        let until_nanos = timestamp_nanos(filter.until);
+        let mut buckets = BTreeMap::<i64, BTreeMap<String, JobsMetricsBucketGroup>>::new();
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        collect_event_counts(&connection, filter, &mut buckets)?;
+        collect_latency_buckets(
+            &connection,
+            filter,
+            &mut buckets,
+            "runtime",
+            "j.runtime_ms",
+            "COALESCE(j.completed_at_nanos, j.updated_at_nanos)",
+        )?;
+        collect_latency_buckets(
+            &connection,
+            filter,
+            &mut buckets,
+            "queueWait",
+            "((j.started_at_nanos - j.created_at_nanos) / 1000000)",
+            "j.started_at_nanos",
+        )?;
+
+        let mut output = Vec::new();
+        let mut start = since_nanos;
+        while start < until_nanos {
+            let end = start.saturating_add(filter.step_nanos).min(until_nanos);
+            let mut groups = buckets
+                .remove(&start)
+                .map(|groups| groups.into_values().collect::<Vec<_>>())
+                .unwrap_or_default();
+            groups.sort_by(|left, right| left.label.cmp(&right.label));
+            output.push(JobsMetricsBucket {
+                start: timestamp_nanos_to_string(start),
+                end: timestamp_nanos_to_string(end),
+                groups,
+            });
+            start = end;
+        }
+        Ok(output)
     }
 
     /// List non-terminal jobs whose business deadline is at or before `now`.
@@ -2182,6 +2452,257 @@ fn workbench_group_sql(
     }
 }
 
+fn metrics_jobs_where_clause(
+    filter: &JobsMetricsFilter,
+    time_column: Option<&str>,
+) -> Result<(String, String, Vec<SqlValue>), SqliteJobsStoreError> {
+    let mut clauses = Vec::new();
+    let mut params = Vec::new();
+    let from_sql = "FROM jobs_projection j LEFT JOIN jobs_metadata_projection m ON m.service = j.service AND m.job_type = j.job_type AND m.id = j.id LEFT JOIN jobs_lineage_projection l ON l.service = j.service AND l.job_type = j.job_type AND l.id = j.id".to_string();
+
+    if let Some(service) = &filter.service {
+        clauses.push("j.service = ?".to_string());
+        params.push(SqlValue::Text(service.clone()));
+    }
+    if let Some(job_type) = &filter.job_type {
+        clauses.push("j.job_type = ?".to_string());
+        params.push(SqlValue::Text(job_type.clone()));
+    }
+    if let Some(states) = &filter.states {
+        if states.is_empty() {
+            clauses.push("1 = 0".to_string());
+        } else {
+            clauses.push(format!(
+                "j.state IN ({})",
+                vec!["?"; states.len()].join(", ")
+            ));
+            params.extend(
+                states
+                    .iter()
+                    .map(|state| SqlValue::Text(job_state_token(*state).to_string())),
+            );
+        }
+    }
+    if let Some(queue_key) = &filter.queue_key {
+        clauses.push("COALESCE(m.concurrency_key, 'unkeyed') = ?".to_string());
+        params.push(SqlValue::Text(queue_key.clone()));
+    }
+    if let Some(trigger) = &filter.trigger {
+        clauses.push("COALESCE(l.trigger_kind, 'unknown') = ?".to_string());
+        params.push(SqlValue::Text(trigger.clone()));
+    }
+    if let Some(time_column) = time_column {
+        clauses.push(format!("{time_column} >= ? AND {time_column} < ?"));
+        params.push(SqlValue::Integer(timestamp_nanos(filter.since)));
+        params.push(SqlValue::Integer(timestamp_nanos(filter.until)));
+    }
+
+    let where_sql = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", clauses.join(" AND "))
+    };
+    Ok((from_sql, where_sql, params))
+}
+
+fn query_group_latency(
+    connection: &Connection,
+    filter: &JobsMetricsFilter,
+    group_key: &str,
+    value_sql: &str,
+    time_column: &str,
+) -> Result<JobsMetricsLatency, SqliteJobsStoreError> {
+    let (from_sql, mut where_sql, mut params) =
+        metrics_jobs_where_clause(filter, Some(time_column))?;
+    let (key_sql, _, _) = workbench_group_sql(filter.group_by);
+    if where_sql.is_empty() {
+        where_sql = format!(" WHERE {key_sql} = ? AND {value_sql} IS NOT NULL");
+    } else {
+        where_sql.push_str(&format!(" AND {key_sql} = ? AND {value_sql} IS NOT NULL"));
+    }
+    params.push(SqlValue::Text(group_key.to_string()));
+    let sql = format!("SELECT {value_sql} {from_sql}{where_sql} ORDER BY {value_sql} ASC");
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(params.iter()), |row| row.get::<_, i64>(0))?;
+    let mut values = Vec::new();
+    for row in rows {
+        if let Some(value) = i64_to_u64(row?) {
+            values.push(value);
+        }
+    }
+    Ok(latency_stats(values))
+}
+
+fn collect_event_counts(
+    connection: &Connection,
+    filter: &JobsMetricsFilter,
+    buckets: &mut BTreeMap<i64, BTreeMap<String, JobsMetricsBucketGroup>>,
+) -> Result<(), SqliteJobsStoreError> {
+    let (from_sql, where_sql, params) = metrics_jobs_where_clause(filter, None)?;
+    let (key_sql, label_sql, _) = workbench_group_sql(filter.group_by);
+    let time_bucket_sql = bucket_sql(
+        "e.timestamp_nanos",
+        timestamp_nanos(filter.since),
+        filter.step_nanos,
+    );
+    let event_from_sql = from_sql.replacen("FROM jobs_projection j", "FROM jobs_events_projection e JOIN jobs_projection j ON j.service = e.service AND j.job_type = e.job_type AND j.id = e.id", 1);
+    let mut clauses = Vec::new();
+    if !where_sql.is_empty() {
+        clauses.push(where_sql.trim_start_matches(" WHERE ").to_string());
+    }
+    clauses.push("e.timestamp_nanos >= ?".to_string());
+    clauses.push("e.timestamp_nanos < ?".to_string());
+    let mut params = params;
+    params.push(SqlValue::Integer(timestamp_nanos(filter.since)));
+    params.push(SqlValue::Integer(timestamp_nanos(filter.until)));
+    let sql = format!(
+        "SELECT {time_bucket_sql} AS bucket, {key_sql} AS key, {label_sql} AS label, e.event_type, COUNT(*) \
+         {event_from_sql} WHERE {} GROUP BY bucket, key, e.event_type",
+        clauses.join(" AND ")
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(params.iter()), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    for row in rows {
+        let (bucket, key, label, event_type, count) = row?;
+        let count = i64_to_u64(count).unwrap_or(0);
+        let group = bucket_group(buckets, bucket, key, label);
+        match event_type.as_str() {
+            "created" => group.submitted = group.submitted.saturating_add(count),
+            "started" => group.started = group.started.saturating_add(count),
+            "completed" => group.completed = group.completed.saturating_add(count),
+            "failed" => group.failed = group.failed.saturating_add(count),
+            "retried" | "retry" => group.retried = group.retried.saturating_add(count),
+            "dead" => group.dead = group.dead.saturating_add(count),
+            "cancelled" | "expired" | "skipped" | "stale" => {
+                group.cancelled = group.cancelled.saturating_add(count);
+            }
+            "dismissed" => group.dismissed = group.dismissed.saturating_add(count),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn collect_latency_buckets(
+    connection: &Connection,
+    filter: &JobsMetricsFilter,
+    buckets: &mut BTreeMap<i64, BTreeMap<String, JobsMetricsBucketGroup>>,
+    target: &str,
+    value_sql: &str,
+    time_column: &str,
+) -> Result<(), SqliteJobsStoreError> {
+    let (from_sql, mut where_sql, params) = metrics_jobs_where_clause(filter, Some(time_column))?;
+    let (key_sql, label_sql, _) = workbench_group_sql(filter.group_by);
+    if where_sql.is_empty() {
+        where_sql = format!(" WHERE {value_sql} IS NOT NULL");
+    } else {
+        where_sql.push_str(&format!(" AND {value_sql} IS NOT NULL"));
+    }
+    let sql = format!(
+        "SELECT {} AS bucket, {key_sql} AS key, {label_sql} AS label, {value_sql} \
+         {from_sql}{where_sql} ORDER BY bucket ASC, key ASC, {value_sql} ASC",
+        bucket_sql(
+            time_column,
+            timestamp_nanos(filter.since),
+            filter.step_nanos
+        )
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(params.iter()), |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    let mut values = BTreeMap::<(i64, String), Vec<u64>>::new();
+    let mut labels = BTreeMap::<(i64, String), String>::new();
+    for row in rows {
+        let (bucket, key, label, value) = row?;
+        if let Some(value) = i64_to_u64(value) {
+            values.entry((bucket, key.clone())).or_default().push(value);
+            labels.insert((bucket, key), label);
+        }
+    }
+    for ((bucket, key), values) in values {
+        let label = labels
+            .remove(&(bucket, key.clone()))
+            .unwrap_or_else(|| key.clone());
+        let group = bucket_group(buckets, bucket, key, label);
+        let stats = latency_stats(values);
+        if target == "runtime" {
+            group.runtime = stats;
+        } else {
+            group.queue_wait = stats;
+        }
+    }
+    Ok(())
+}
+
+fn bucket_group(
+    buckets: &mut BTreeMap<i64, BTreeMap<String, JobsMetricsBucketGroup>>,
+    bucket: i64,
+    key: String,
+    label: String,
+) -> &mut JobsMetricsBucketGroup {
+    buckets
+        .entry(bucket)
+        .or_default()
+        .entry(key.clone())
+        .or_insert_with(|| JobsMetricsBucketGroup {
+            key,
+            label,
+            ..JobsMetricsBucketGroup::default()
+        })
+}
+
+fn bucket_sql(column: &str, since_nanos: i64, step_nanos: i64) -> String {
+    format!("((({column} - {since_nanos}) / {step_nanos}) * {step_nanos} + {since_nanos})")
+}
+
+fn latency_stats(mut values: Vec<u64>) -> JobsMetricsLatency {
+    values.sort_unstable();
+    if values.is_empty() {
+        return JobsMetricsLatency::default();
+    }
+    JobsMetricsLatency {
+        count: u64::try_from(values.len()).unwrap_or(u64::MAX),
+        p50_ms: percentile(&values, 50),
+        p95_ms: percentile(&values, 95),
+        max_ms: values.last().copied(),
+    }
+}
+
+fn percentile(values: &[u64], pct: usize) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    let index = ((values.len() - 1) * pct) / 100;
+    values.get(index).copied()
+}
+
+fn add_optional_count(target: &mut Option<u64>, value: Option<u64>) {
+    if let Some(value) = value {
+        *target = Some(target.unwrap_or(0).saturating_add(value));
+    }
+}
+
+fn timestamp_nanos_to_string(nanos: i64) -> String {
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(nanos))
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
 fn query_workbench_stats(
     connection: &Connection,
     from_sql: &str,
@@ -2312,7 +2833,9 @@ fn timestamp_nanos(timestamp: OffsetDateTime) -> i64 {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use trellis_rs::jobs::types::{JobContext, JobLogEntry, JobLogLevel};
+    use trellis_rs::jobs::types::{
+        JobContext, JobEvent, JobEventType, JobLineage, JobLogEntry, JobLogLevel,
+    };
 
     use super::*;
 
@@ -2349,6 +2872,38 @@ mod tests {
             trace_id: "0123456789abcdef0123456789abcdef".to_string(),
             traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01".to_string(),
             tracestate: None,
+        }
+    }
+
+    fn set_trace(job: &mut Job, trace_id: &str) {
+        job.context.trace_id = trace_id.to_string();
+        job.context.traceparent = format!("00-{trace_id}-0123456789abcdef-01");
+    }
+
+    fn event(job: &Job, event_type: JobEventType, state: JobState, timestamp: &str) -> JobEvent {
+        JobEvent {
+            job_id: job.id.clone(),
+            context: job.context.clone(),
+            service: job.service.clone(),
+            job_type: job.job_type.clone(),
+            event_type,
+            state,
+            previous_state: None,
+            tries: job.tries,
+            max_tries: Some(job.max_tries),
+            error: job.last_error.clone(),
+            error_detail: job.error_detail.clone(),
+            progress: None,
+            logs: None,
+            payload: None,
+            result: None,
+            deadline: None,
+            concurrency: None,
+            queue_policy: None,
+            trigger: None,
+            lineage: None,
+            admin_action: None,
+            timestamp: timestamp.to_string(),
         }
     }
 
@@ -2478,6 +3033,25 @@ mod tests {
         store
             .initialize_schema()
             .expect("schema init should be idempotent");
+    }
+
+    #[test]
+    fn projection_id_is_stable_for_one_database() {
+        let path = temp_db_path("projection-id");
+        let _ = std::fs::remove_file(&path);
+        let first = SqliteJobsStore::open(&path).expect("store should open");
+        let first_id = first.projection_id().expect("projection id should exist");
+        drop(first);
+
+        let second = SqliteJobsStore::open(&path).expect("store should reopen");
+        let second_id = second
+            .projection_id()
+            .expect("projection id should persist");
+
+        assert_eq!(first_id, second_id);
+        assert_eq!(first_id.len(), 32);
+        assert!(first_id.chars().all(|value| value.is_ascii_hexdigit()));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -3008,6 +3582,112 @@ mod tests {
     }
 
     #[test]
+    fn query_metrics_groups_by_job_type_and_buckets_events() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut completed = job(
+            "completed-import",
+            "svc",
+            "import",
+            "2026-01-01T00:03:00Z",
+            JobState::Completed,
+        );
+        completed.started_at = Some("2026-01-01T00:01:00Z".to_string());
+        completed.completed_at = Some("2026-01-01T00:03:00Z".to_string());
+        let mut failed = job(
+            "failed-import",
+            "svc",
+            "import",
+            "2026-01-01T00:04:00Z",
+            JobState::Failed,
+        );
+        failed.started_at = Some("2026-01-01T00:02:00Z".to_string());
+        failed.last_error = Some("boom".to_string());
+        let queued = job(
+            "queued-export",
+            "svc",
+            "export",
+            "2026-01-01T00:05:00Z",
+            JobState::Pending,
+        );
+
+        for job in [&completed, &failed, &queued] {
+            store.upsert_job(job).expect("job should project");
+        }
+        store
+            .project_timeline_event(
+                &event(
+                    &completed,
+                    JobEventType::Created,
+                    JobState::Pending,
+                    "2026-01-01T00:00:10Z",
+                ),
+                &json!({}),
+                None,
+                None,
+            )
+            .expect("created event should project");
+        store
+            .project_timeline_event(
+                &event(
+                    &completed,
+                    JobEventType::Started,
+                    JobState::Active,
+                    "2026-01-01T00:01:00Z",
+                ),
+                &json!({}),
+                None,
+                None,
+            )
+            .expect("started event should project");
+        store
+            .project_timeline_event(
+                &event(
+                    &failed,
+                    JobEventType::Failed,
+                    JobState::Failed,
+                    "2026-01-01T00:04:00Z",
+                ),
+                &json!({}),
+                None,
+                None,
+            )
+            .expect("failed event should project");
+
+        let metrics = store
+            .query_metrics(&JobsMetricsFilter {
+                service: None,
+                job_type: None,
+                states: None,
+                since: OffsetDateTime::parse("2026-01-01T00:00:00Z", &Rfc3339).unwrap(),
+                until: OffsetDateTime::parse("2026-01-01T00:10:00Z", &Rfc3339).unwrap(),
+                step_nanos: 5 * 60 * 1_000_000_000,
+                queue_key: None,
+                trigger: None,
+                group_by: JobsWorkbenchGroupBy::Type,
+            })
+            .expect("metrics should query");
+
+        let import = metrics
+            .summary
+            .iter()
+            .find(|group| group.key == "import")
+            .expect("import summary group");
+        assert_eq!(import.total, 2);
+        assert_eq!(import.failed, Some(1));
+        assert_eq!(import.runtime.count, 2);
+        assert_eq!(import.queue_wait.count, 2);
+
+        let first_bucket_import = metrics.buckets[0]
+            .groups
+            .iter()
+            .find(|group| group.key == "import")
+            .expect("import bucket group");
+        assert_eq!(first_bucket_import.submitted, 1);
+        assert_eq!(first_bucket_import.started, 1);
+        assert_eq!(first_bucket_import.failed, 1);
+    }
+
+    #[test]
     fn duplicate_global_id_is_rejected() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         store
@@ -3185,6 +3865,181 @@ mod tests {
         assert_eq!(key.active[0].instance_id.as_deref(), Some("worker-1"));
         assert_eq!(key.queued.len(), 1);
         assert_eq!(key.queued[0].job_id, "queued");
+    }
+
+    #[test]
+    fn list_related_jobs_ignores_same_service_and_type_without_relation() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:03:00Z",
+            JobState::Pending,
+        );
+        let mut peer_one = job(
+            "peer-one",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Pending,
+        );
+        let mut peer_two = job(
+            "peer-two",
+            "svc",
+            "sync",
+            "2026-01-01T00:01:00Z",
+            JobState::Pending,
+        );
+        set_trace(&mut current, "00000000000000000000000000000001");
+        set_trace(&mut peer_one, "00000000000000000000000000000002");
+        set_trace(&mut peer_two, "00000000000000000000000000000003");
+        store
+            .upsert_job(&current)
+            .expect("current job should insert");
+        store.upsert_job(&peer_one).expect("peer one should insert");
+        store.upsert_job(&peer_two).expect("peer two should insert");
+
+        let related = store
+            .list_related_jobs(&current, 10)
+            .expect("related query should succeed");
+
+        assert!(related.is_empty());
+    }
+
+    #[test]
+    fn list_related_jobs_marks_trace_match() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Pending,
+        );
+        let mut peer = job(
+            "peer",
+            "svc",
+            "sync",
+            "2026-01-01T00:01:00Z",
+            JobState::Pending,
+        );
+        set_trace(&mut current, "0000000000000000000000000000000a");
+        set_trace(&mut peer, "0000000000000000000000000000000a");
+        store
+            .upsert_job(&current)
+            .expect("current job should insert");
+        store.upsert_job(&peer).expect("peer job should insert");
+
+        let related = store
+            .list_related_jobs(&current, 10)
+            .expect("related query should succeed");
+
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].job.id, "peer");
+        assert_eq!(related[0].matched_by.as_deref(), Some("trace"));
+    }
+
+    #[test]
+    fn list_related_jobs_prefers_trace_over_parent_match() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Pending,
+        );
+        let mut peer = job(
+            "peer",
+            "svc",
+            "sync",
+            "2026-01-01T00:01:00Z",
+            JobState::Pending,
+        );
+        set_trace(&mut current, "0000000000000000000000000000000b");
+        set_trace(&mut peer, "0000000000000000000000000000000b");
+        current.lineage = Some(JobLineage {
+            parent_job_id: Some("parent".to_string()),
+            root_job_id: None,
+            operation_id: None,
+            related_keys: None,
+        });
+        peer.lineage = Some(JobLineage {
+            parent_job_id: Some("parent".to_string()),
+            root_job_id: None,
+            operation_id: None,
+            related_keys: None,
+        });
+        store
+            .upsert_job(&current)
+            .expect("current job should insert");
+        store.upsert_job(&peer).expect("peer job should insert");
+        store
+            .upsert_job_lineage(&current)
+            .expect("current lineage should insert");
+        store
+            .upsert_job_lineage(&peer)
+            .expect("peer lineage should insert");
+
+        let related = store
+            .list_related_jobs(&current, 10)
+            .expect("related query should succeed");
+
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].job.id, "peer");
+        assert_eq!(related[0].matched_by.as_deref(), Some("trace"));
+    }
+
+    #[test]
+    fn list_related_jobs_marks_concurrency_match() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Pending,
+        );
+        let mut peer = job(
+            "peer",
+            "svc",
+            "sync",
+            "2026-01-01T00:01:00Z",
+            JobState::Pending,
+        );
+        set_trace(&mut current, "0000000000000000000000000000000c");
+        set_trace(&mut peer, "0000000000000000000000000000000d");
+        store
+            .upsert_job(&current)
+            .expect("current job should insert");
+        store.upsert_job(&peer).expect("peer job should insert");
+        for job_id in ["current", "peer"] {
+            store
+                .apply_job_metadata_patch(
+                    "svc",
+                    "sync",
+                    job_id,
+                    "2026-01-01T00:02:00Z",
+                    &JobProjectionMetadataPatch {
+                        concurrency: Some(JobConcurrencyMetadata {
+                            key: "tenant-1".to_string(),
+                            key_hash: "hash-1".to_string(),
+                            ..Default::default()
+                        }),
+                        queue_policy: None,
+                    },
+                )
+                .expect("metadata should insert");
+        }
+
+        let related = store
+            .list_related_jobs(&current, 10)
+            .expect("related query should succeed");
+
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].job.id, "peer");
+        assert_eq!(related[0].matched_by.as_deref(), Some("concurrency"));
     }
 
     #[test]

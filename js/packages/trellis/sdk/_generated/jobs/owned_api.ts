@@ -15,6 +15,8 @@ import {
   JobsListDLQResponseSchema,
   JobsListServicesRequestSchema,
   JobsListServicesResponseSchema,
+  JobsMetricsRequestSchema,
+  JobsMetricsResponseSchema,
   JobsQueryRequestSchema,
   JobsQueryResponseSchema,
   JobsReplayDLQRequestSchema,
@@ -118,6 +120,14 @@ export const OWNED_API = {
       output: schema<Types.JobsListServicesOutput>(
         JobsListServicesResponseSchema,
       ),
+      callerCapabilities: ["trellis.jobs::admin.read"] as const,
+      errors: ["UnexpectedError", "ValidationError"] as const,
+      declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    },
+    "Jobs.Metrics": {
+      subject: "rpc.v1.Jobs.Metrics",
+      input: schema<Types.JobsMetricsInput>(JobsMetricsRequestSchema),
+      output: schema<Types.JobsMetricsOutput>(JobsMetricsResponseSchema),
       callerCapabilities: ["trellis.jobs::admin.read"] as const,
       errors: ["UnexpectedError", "ValidationError"] as const,
       declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,

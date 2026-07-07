@@ -781,6 +781,9 @@ pub struct JobsInspectResponseRelatedItem {
     pub last_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<JobsInspectResponseRelatedItemLineage>,
+    #[serde(rename = "matchedBy")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_by: Option<String>,
     #[serde(rename = "maxTries")]
     pub max_tries: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1165,6 +1168,148 @@ pub struct JobsListServicesResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_offset: Option<i64>,
     pub offset: i64,
+}
+/// Generated schema type `JobsMetricsRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsRequest {
+    #[serde(rename = "groupBy")]
+    pub group_by: String,
+    #[serde(rename = "queueKey")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<Vec<String>>,
+    pub step: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    pub window: String,
+}
+/// Generated schema type `JobsMetricsResponse`.
+/// Generated schema type `JobsMetricsResponseBucketsItem`.
+/// Generated schema type `JobsMetricsResponseBucketsItemGroupsItem`.
+/// Generated schema type `JobsMetricsResponseBucketsItemGroupsItemQueueWait`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseBucketsItemGroupsItemQueueWait {
+    pub count: i64,
+    #[serde(rename = "maxMs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<i64>,
+    #[serde(rename = "p50Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<i64>,
+    #[serde(rename = "p95Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<i64>,
+}
+/// Generated schema type `JobsMetricsResponseBucketsItemGroupsItemRuntime`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseBucketsItemGroupsItemRuntime {
+    pub count: i64,
+    #[serde(rename = "maxMs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<i64>,
+    #[serde(rename = "p50Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<i64>,
+    #[serde(rename = "p95Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseBucketsItemGroupsItem {
+    pub cancelled: i64,
+    pub completed: i64,
+    pub dead: i64,
+    pub dismissed: i64,
+    pub failed: i64,
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "queueWait")]
+    pub queue_wait: JobsMetricsResponseBucketsItemGroupsItemQueueWait,
+    pub retried: i64,
+    pub runtime: JobsMetricsResponseBucketsItemGroupsItemRuntime,
+    pub started: i64,
+    pub submitted: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseBucketsItem {
+    pub end: String,
+    pub groups: Vec<JobsMetricsResponseBucketsItemGroupsItem>,
+    pub start: String,
+}
+/// Generated schema type `JobsMetricsResponseSummaryItem`.
+/// Generated schema type `JobsMetricsResponseSummaryItemQueueWait`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseSummaryItemQueueWait {
+    pub count: i64,
+    #[serde(rename = "maxMs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<i64>,
+    #[serde(rename = "p50Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<i64>,
+    #[serde(rename = "p95Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<i64>,
+}
+/// Generated schema type `JobsMetricsResponseSummaryItemRuntime`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseSummaryItemRuntime {
+    pub count: i64,
+    #[serde(rename = "maxMs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<i64>,
+    #[serde(rename = "p50Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p50_ms: Option<i64>,
+    #[serde(rename = "p95Ms")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponseSummaryItem {
+    #[serde(rename = "byState")]
+    pub by_state: BTreeMap<String, i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dead: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<i64>,
+    #[serde(rename = "failureRate")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_rate: Option<f64>,
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "latestUpdatedAt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_updated_at: Option<String>,
+    #[serde(rename = "oldestCreatedAt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_created_at: Option<String>,
+    #[serde(rename = "queueWait")]
+    pub queue_wait: JobsMetricsResponseSummaryItemQueueWait,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queued: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running: Option<i64>,
+    pub runtime: JobsMetricsResponseSummaryItemRuntime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slow: Option<i64>,
+    pub total: i64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsMetricsResponse {
+    pub buckets: Vec<JobsMetricsResponseBucketsItem>,
+    #[serde(rename = "generatedAt")]
+    pub generated_at: String,
+    #[serde(rename = "groupBy")]
+    pub group_by: String,
+    pub step: String,
+    pub summary: Vec<JobsMetricsResponseSummaryItem>,
+    pub window: String,
 }
 /// Generated schema type `JobsQueryRequest`.
 /// Generated schema type `JobsQueryRequestSort`.
