@@ -20,6 +20,7 @@
     type PlanSummaryKind,
   } from "$lib/authority_console";
   import { structuredPatch } from "diff";
+  import { schemaDiffFields } from "$lib/schema-diff";
   import { errorMessage } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
   import Icon from "$lib/components/Icon.svelte";
@@ -82,6 +83,8 @@
   const diffContext = 3;
   const diffRows = $derived(buildDiffRows(jsonDiff, diffContext));
   let expandedGaps = $state<Set<number>>(new Set());
+  let expandedDetails = $state<Set<string>>(new Set());
+
   function toggleGap(gapIndex: number) {
     const next = new Set(expandedGaps);
     if (next.has(gapIndex)) next.delete(gapIndex);
@@ -116,6 +119,26 @@
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  function unknownEquals(left: unknown, right: unknown): boolean {
+    if (Object.is(left, right)) return true;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      return Array.isArray(left) && Array.isArray(right) &&
+        left.length === right.length &&
+        left.every((entry, index) => unknownEquals(entry, right[index]));
+    }
+    if (!isRecord(left) || !isRecord(right)) return false;
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length &&
+      leftKeys.every((key, index) =>
+        key === rightKeys[index] && unknownEquals(left[key], right[key])
+      );
+  }
+
+  function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((v) => typeof v === "string");
   }
 
   function stringField(record: Record<string, unknown>, key: string): string | null {
@@ -156,8 +179,16 @@
     const after = isRecord(row.after) ? row.after : null;
     const kindLabel = surfaceKindLabel(row.kind);
     if (row.change === "Add") {
-      const desc = describeSurface(after, "new") ?? `new ${kindLabel} added`;
-      return { id: row.id, change: "Add", kind: surfaceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
+      const fields: SummaryField[] = [];
+      if (after) {
+        const subject = stringField(after, "subject");
+        if (subject) fields.push(scalarField("subject", "—", subject));
+        const desc = stringField(after, "description");
+        if (desc) fields.push(scalarField("description", "—", desc));
+        const reqs = Array.isArray(after.requiredCapabilities) ? after.requiredCapabilities.filter((v): v is string => typeof v === "string") : [];
+        if (reqs.length > 0) fields.push(stringSetField("required caps", [], reqs, true));
+      }
+      return { id: row.id, change: "Add", kind: surfaceSummaryKind(row.kind), name: row.name, summary: "", fields, breaking: false };
     }
     if (row.change === "Remove") {
       return { id: row.id, change: "Remove", kind: surfaceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: false };
@@ -266,8 +297,18 @@
     const after = isRecord(row.after) ? row.after : null;
     const kindLabel = resourceKindLabel(row.kind);
     if (row.change === "Add") {
-      const desc = describeResource(after) ?? `new ${kindLabel} added`;
-      return { id: row.id, change: "Add", kind: resourceSummaryKind(row.kind), name: row.name, summary: desc, fields: [], breaking: false };
+      const fields: SummaryField[] = [];
+      if (after) {
+        for (const [label, key] of [["payload", "payload"], ["result", "result"], ["input", "input"], ["output", "output"], ["schema", "schema"], ["keySchema", "keySchema"], ["valueSchema", "valueSchema"]] as const) {
+          const a = schemaRefLabel(after, key);
+          if (a) fields.push(scalarField(label, "—", a, true));
+        }
+        const caps = Array.isArray(after.capabilities) ? after.capabilities.filter((v): v is string => typeof v === "string") : [];
+        if (caps.length > 0) fields.push(stringSetField("capabilities", [], caps, true));
+        const purpose = stringField(after, "purpose");
+        if (purpose) fields.push(scalarField("purpose", "—", purpose));
+      }
+      return { id: row.id, change: "Add", kind: resourceSummaryKind(row.kind), name: row.name, summary: "", fields, breaking: false };
     }
     if (row.change === "Remove") {
       return { id: row.id, change: "Remove", kind: resourceSummaryKind(row.kind), name: row.name, summary: "", fields: [], breaking: false };
@@ -332,39 +373,36 @@
     const before = isRecord(row.before) ? row.before : null;
     const after = isRecord(row.after) ? row.after : null;
     if (row.change === "Add") {
-      const desc = describeSchema(after) ?? "new data shape added";
-      return { id: row.id, change: "Add", kind: "data-shape", name: row.name, summary: desc, fields: [], breaking: false };
+      const fields: SummaryField[] = [];
+      if (after) {
+        const type = typeof after.type === "string" ? after.type : (isRecord(after.properties) ? "object" : "—");
+        fields.push(scalarField("type", "—", type));
+        const required = Array.isArray(after.required) ? after.required.filter((v): v is string => typeof v === "string") : [];
+        if (required.length > 0) {
+          fields.push(stringSetField("required", [], required, true));
+        }
+        const props = isRecord(after.properties) ? Object.keys(after.properties).sort() : [];
+        if (props.length > 0) {
+          fields.push(stringSetField("properties", [], props, true));
+        }
+      }
+      return { id: row.id, change: "Add", kind: "data-shape", name: row.name, summary: "", fields, breaking: false };
     }
     if (row.change === "Remove") {
       return { id: row.id, change: "Remove", kind: "data-shape", name: row.name, summary: "", fields: [], breaking: false };
     }
-    const fields: SummaryField[] = [];
-    const beforeType = before && typeof before.type === "string" ? before.type : null;
-    const afterType = after && typeof after.type === "string" ? after.type : null;
-    if (beforeType !== afterType) fields.push(scalarField("type", beforeType ?? "—", afterType ?? "—", true));
-    const beforeRequired = before && Array.isArray(before.required) ? before.required.filter((v): v is string => typeof v === "string") : [];
-    const afterRequired = after && Array.isArray(after.required) ? after.required.filter((v): v is string => typeof v === "string") : [];
-    if (beforeRequired.length > 0 || afterRequired.length > 0) {
-      const field = stringSetField("required", beforeRequired, afterRequired);
-      if (field.added.length + field.removed.length > 0) fields.push(field);
-    }
-    const beforeProps = before && isRecord(before.properties) ? Object.keys(before.properties) : [];
-    const afterProps = after && isRecord(after.properties) ? Object.keys(after.properties) : [];
-    if (beforeProps.length > 0 || afterProps.length > 0) {
-      const field = stringSetField("properties", beforeProps, afterProps);
-      if (field.added.length + field.removed.length > 0) fields.push(field);
-    }
-    const beforeEnum = before && Array.isArray(before.enum) ? before.enum.filter((v): v is string => typeof v === "string") : [];
-    const afterEnum = after && Array.isArray(after.enum) ? after.enum.filter((v): v is string => typeof v === "string") : [];
-    if (beforeEnum.length > 0 || afterEnum.length > 0) {
-      const field = stringSetField("enum", beforeEnum, afterEnum);
-      if (field.added.length + field.removed.length > 0) fields.push(field);
-    }
-    for (const key of ["format", "pattern"]) {
-      const b = before ? stringField(before, key) : null;
-      const a = after ? stringField(after, key) : null;
-      if (b !== a) fields.push(scalarField(key, b ?? "—", a ?? "—", true));
-    }
+    const diffFields = schemaDiffFields(before as Record<string, unknown>, after as Record<string, unknown>);
+    const fields: SummaryField[] = diffFields.map((df) => {
+      if (df.beforeSet || df.afterSet) {
+        const f = stringSetField(df.label, df.beforeSet ?? [], df.afterSet ?? [], true);
+        f.breaking = df.breaking;
+        if (df.details) f.details = df.details;
+        return f;
+      }
+      const f = scalarField(df.label, df.before, df.after, df.breaking);
+      if (df.details) f.details = df.details;
+      return f;
+    });
     const summary = buildChangeSummary(fields);
     return { id: row.id, change: "Change", kind: "data-shape", name: row.name, summary, fields, breaking: false };
   }
@@ -384,7 +422,77 @@
 
   function summarizeContractMeta(row: ContractDiffRow): SummaryEntry {
     if (row.kind === "Docs") return summarizeDocs(row);
+    const before = isRecord(row.before) ? row.before : null;
+    const after = isRecord(row.after) ? row.after : null;
+    if (row.change === "Change") {
+      const fields: SummaryField[] = [];
+      const keys = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])].sort();
+      for (const key of keys) {
+        const bv = before?.[key];
+        const av = after?.[key];
+        if (unknownEquals(bv, av)) continue;
+        if (isStringArray(bv) || isStringArray(av)) {
+          const field = stringSetField(key, bv ?? [], av ?? [], true);
+          fields.push(field);
+        } else {
+          const bStr = metadataValueSummary(bv);
+          const aStr = metadataValueSummary(av);
+          fields.push(scalarField(key, bStr, aStr));
+        }
+      }
+      return { id: row.id, change: "Change", kind: "metadata", name: row.name, summary: "", fields, breaking: false };
+    }
+    if (row.change === "Add") {
+      const fields: SummaryField[] = [];
+      if (after) {
+        for (const [key, value] of Object.entries(after)) {
+          if (value === undefined) continue;
+          if (isStringArray(value)) {
+            fields.push(stringSetField(key, [], value, true));
+          } else {
+            fields.push(scalarField(key, "—", metadataValueSummary(value)));
+          }
+        }
+      }
+      return { id: row.id, change: "Add", kind: "metadata", name: row.name, summary: "", fields, breaking: false };
+    }
+    if (row.change === "Remove") {
+      const fields: SummaryField[] = [];
+      if (before) {
+        for (const [key, value] of Object.entries(before)) {
+          if (value === undefined) continue;
+          if (isStringArray(value)) {
+            fields.push(stringSetField(key, value, [], true));
+          } else {
+            fields.push(scalarField(key, metadataValueSummary(value), "—"));
+          }
+        }
+      }
+      return { id: row.id, change: "Remove", kind: "metadata", name: row.name, summary: "", fields, breaking: false };
+    }
     return { id: row.id, change: row.change, kind: "metadata", name: row.name, summary: "", fields: [], breaking: false };
+  }
+
+  function metadataValueSummary(value: unknown): string {
+    if (value === undefined || value === null) return "—";
+    if (typeof value === "string") return value;
+    if (typeof value === "boolean" || typeof value === "number") return String(value);
+    if (Array.isArray(value)) {
+      const strs = value.map((v) => metadataValueSummary(v));
+      return strs.length <= 3 ? strs.join(", ") : `${strs.slice(0, 3).join(", ")}, +${strs.length - 3}`;
+    }
+    if (isRecord(value)) {
+      const entries = Object.entries(value).filter(([, v]) => v !== undefined);
+      if (entries.length === 0) return "{}";
+      return entries.map(([k, v]) => `${k}: ${metadataValueSummary(v)}`).join(", ");
+    }
+    return "—";
+  }
+
+  function metadataRecordSummary(record: Record<string, unknown>): string {
+    const entries = Object.entries(record).filter(([, v]) => v !== undefined);
+    if (entries.length === 0) return "";
+    return entries.map(([k, v]) => `${k}: ${metadataValueSummary(v)}`).join(" · ");
   }
 
   function summarizeDocs(row: ContractDiffRow): SummaryEntry {
@@ -844,14 +952,66 @@
                                   {#each field.added as value (value)}<span class={["badge badge-success badge-sm gap-1 px-1.5", field.mono ? "trellis-identifier" : ""]}><Icon name="plus" size={10} />{value}</span>{/each}
                                   {#each field.kept as value (value)}<span class={["badge badge-ghost badge-sm opacity-60", field.mono ? "trellis-identifier" : ""]}>{value}</span>{/each}
                                 </span>
+                                {#if field.details && field.details.length > 0}
+                                  {@const detailKey = `${entry.id}-${fieldIndex}`}
+                                  <button
+                                    type="button"
+                                    class="link link-hover text-base-content/50 text-[10px] ml-1"
+                                    onclick={() => { expandedDetails = expandedDetails.has(detailKey) ? new Set([...expandedDetails].filter(k => k !== detailKey)) : new Set([...expandedDetails, detailKey]); }}
+                                  >
+                                    {expandedDetails.has(detailKey) ? "hide" : `${field.details.length} detail${field.details.length > 1 ? "s" : ""}`}
+                                  </button>
+                                {/if}
                               </div>
+                              {#if field.details && field.details.length > 0 && expandedDetails.has(`${entry.id}-${fieldIndex}`)}
+                                <div class="ml-4 mt-1 space-y-0.5 border-l border-base-300 pl-2">
+                                  {#each field.details as detail}
+                                    <div class="text-[11px] text-base-content/60">
+                                      <span class="font-medium">{detail.label}:</span>
+                                      {#if detail.before === "—"}
+                                        <span class="text-success">{detail.after}</span>
+                                      {:else}
+                                        <span class="text-error line-through">{detail.before}</span>
+                                        <span class="text-base-content/40">→</span>
+                                        <span class="text-success">{detail.after}</span>
+                                      {/if}
+                                    </div>
+                                  {/each}
+                                </div>
+                              {/if}
                             {:else}
                               <div class="flex flex-wrap items-baseline gap-x-1.5 text-xs">
                                 <span class="font-semibold text-base-content/70 shrink-0">{field.label}:</span>
                                 <span class={field.mono ? "trellis-identifier !whitespace-normal !break-all text-error line-through" : "break-all text-error line-through"}>{field.before}</span>
                                 <span class="shrink-0 text-base-content/40">→</span>
                                 <span class={field.mono ? "trellis-identifier !whitespace-normal !break-all text-success" : "break-all text-success"}>{field.after}</span>
+                                {#if field.details && field.details.length > 0}
+                                  {@const detailKey = `${entry.id}-${fieldIndex}`}
+                                  <button
+                                    type="button"
+                                    class="link link-hover text-base-content/50 text-[10px] ml-1"
+                                    onclick={() => { expandedDetails = expandedDetails.has(detailKey) ? new Set([...expandedDetails].filter(k => k !== detailKey)) : new Set([...expandedDetails, detailKey]); }}
+                                  >
+                                    {expandedDetails.has(detailKey) ? "hide" : `${field.details.length} detail${field.details.length > 1 ? "s" : ""}`}
+                                  </button>
+                                {/if}
                               </div>
+                              {#if field.details && field.details.length > 0 && expandedDetails.has(`${entry.id}-${fieldIndex}`)}
+                                <div class="ml-4 mt-1 space-y-0.5 border-l border-base-300 pl-2">
+                                  {#each field.details as detail}
+                                    <div class="text-[11px] text-base-content/60">
+                                      <span class="font-medium">{detail.label}:</span>
+                                      {#if detail.before === "—" || detail.after === "—"}
+                                        <span class={detail.before === "—" ? "text-success" : "text-error line-through"}>{detail.before === "—" ? detail.after : detail.before}</span>
+                                      {:else}
+                                        <span class="text-error line-through">{detail.before}</span>
+                                        <span class="text-base-content/40">→</span>
+                                        <span class="text-success">{detail.after}</span>
+                                      {/if}
+                                    </div>
+                                  {/each}
+                                </div>
+                              {/if}
                             {/if}
                           {/each}
                         </div>

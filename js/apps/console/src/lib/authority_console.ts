@@ -115,6 +115,9 @@ export type PlanSummaryField =
     after: string;
     mono?: boolean;
     breaking?: boolean;
+    details?: Array<
+      { label: string; before: string; after: string; breaking?: boolean }
+    >;
   }
   | {
     kind: "set";
@@ -124,6 +127,9 @@ export type PlanSummaryField =
     kept: string[];
     mono?: boolean;
     breaking?: boolean;
+    details?: Array<
+      { label: string; before: string; after: string; breaking?: boolean }
+    >;
   };
 
 export type PlanSummaryEntry = {
@@ -1078,10 +1084,32 @@ function contractPartSummary(value: unknown): string {
     labeledSchemaRef("event", value.event),
     labeledSchemaRef("payload", value.payload),
     labeledSchemaRef("result", value.result),
+    labeledSchemaRef("$ref", value["$ref"]),
   ].filter((entry): entry is string => Boolean(entry));
   const constraints = [
     required ? `required: ${required}` : null,
     properties,
+    typeof value.additionalProperties === "boolean"
+      ? `additionalProperties: ${value.additionalProperties}`
+      : null,
+    isRecord(value.items) ? "array items" : null,
+    typeof value.minimum === "number" ? `min: ${value.minimum}` : null,
+    typeof value.maximum === "number" ? `max: ${value.maximum}` : null,
+    typeof value.minLength === "number"
+      ? `minLength: ${value.minLength}`
+      : null,
+    typeof value.maxLength === "number"
+      ? `maxLength: ${value.maxLength}`
+      : null,
+    stringProperty(value, "format")
+      ? `format: ${stringProperty(value, "format")}`
+      : null,
+    stringProperty(value, "pattern")
+      ? `pattern: ${stringProperty(value, "pattern")}`
+      : null,
+    Array.isArray(value.oneOf) ? `oneOf: ${value.oneOf.length} variants` : null,
+    Array.isArray(value.anyOf) ? `anyOf: ${value.anyOf.length} variants` : null,
+    Array.isArray(value.allOf) ? `allOf: ${value.allOf.length} variants` : null,
   ].filter((entry): entry is string => Boolean(entry));
   return [
     subject,
@@ -1404,3 +1432,7 @@ function needSearchTexts(needs: DeploymentAuthorityNeeds): string[] {
     ...needs.capabilities.map((need) => need.capability),
   ];
 }
+
+// ponytail: json-schema-diff produces coarse-grained add/remove diffs.
+// We use it for type-level and property-level changes; our own
+// summarizer fills in field-level details the library doesn't cover.
