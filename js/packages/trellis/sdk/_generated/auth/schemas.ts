@@ -1782,6 +1782,111 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
     "plan": {
       "anyOf": [{
         "properties": {
+          "breakingChanges": {
+            "items": {
+              "properties": {
+                "kind": {
+                  "anyOf": [
+                    { "const": "schema-required-removed", "type": "string" },
+                    { "const": "schema-property-removed", "type": "string" },
+                    {
+                      "const": "schema-property-type-changed",
+                      "type": "string",
+                    },
+                    { "const": "schema-enum-value-removed", "type": "string" },
+                    {
+                      "const": "schema-closed-shape-violation",
+                      "type": "string",
+                    },
+                    { "const": "surface-removed", "type": "string" },
+                    { "const": "surface-subject-changed", "type": "string" },
+                    {
+                      "const": "surface-required-capability-added",
+                      "type": "string",
+                    },
+                    { "const": "resource-shape-changed", "type": "string" },
+                    { "const": "resource-removed", "type": "string" },
+                    { "const": "capability-removed", "type": "string" },
+                    {
+                      "const": "capability-required-changed",
+                      "type": "string",
+                    },
+                    { "const": "digest-incompatible", "type": "string" },
+                    { "const": "unresolved-ref", "type": "string" },
+                  ],
+                },
+                "path": { "minLength": 1, "type": "string" },
+                "reason": { "minLength": 1, "type": "string" },
+                "target": {
+                  "anyOf": [{
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "schema", "type": "string" },
+                      "schemaName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "schemaName"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "surface", "type": "string" },
+                      "surfaceKind": {
+                        "anyOf": [
+                          { "const": "rpc", "type": "string" },
+                          { "const": "operation", "type": "string" },
+                          { "const": "event", "type": "string" },
+                          { "const": "feed", "type": "string" },
+                          { "const": "job", "type": "string" },
+                        ],
+                      },
+                      "surfaceName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "surfaceKind",
+                      "surfaceName",
+                    ],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "resource", "type": "string" },
+                      "resourceAlias": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "resourceAlias"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "capability": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "capability", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "capability"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "contract", "type": "string" },
+                    },
+                    "required": ["kind", "contractId"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractDigest": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "digest", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "contractDigest"],
+                    "type": "object",
+                  }],
+                },
+              },
+              "required": ["kind", "target", "reason"],
+              "type": "object",
+            },
+            "type": "array",
+          },
           "classification": { "const": "update", "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "decisionAt": {
@@ -1941,6 +2046,7 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
               { "const": "accepted", "type": "string" },
               { "const": "rejected", "type": "string" },
               { "const": "expired", "type": "string" },
+              { "const": "superseded", "type": "string" },
             ],
           },
           "warnings": {
@@ -1955,6 +2061,7 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
           "desiredChange",
           "materializationPreview",
           "warnings",
+          "breakingChanges",
           "createdAt",
           "classification",
         ],
@@ -1962,6 +2069,111 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
       }, {
         "properties": {
           "acknowledgementRequired": { "type": "boolean" },
+          "breakingChanges": {
+            "items": {
+              "properties": {
+                "kind": {
+                  "anyOf": [
+                    { "const": "schema-required-removed", "type": "string" },
+                    { "const": "schema-property-removed", "type": "string" },
+                    {
+                      "const": "schema-property-type-changed",
+                      "type": "string",
+                    },
+                    { "const": "schema-enum-value-removed", "type": "string" },
+                    {
+                      "const": "schema-closed-shape-violation",
+                      "type": "string",
+                    },
+                    { "const": "surface-removed", "type": "string" },
+                    { "const": "surface-subject-changed", "type": "string" },
+                    {
+                      "const": "surface-required-capability-added",
+                      "type": "string",
+                    },
+                    { "const": "resource-shape-changed", "type": "string" },
+                    { "const": "resource-removed", "type": "string" },
+                    { "const": "capability-removed", "type": "string" },
+                    {
+                      "const": "capability-required-changed",
+                      "type": "string",
+                    },
+                    { "const": "digest-incompatible", "type": "string" },
+                    { "const": "unresolved-ref", "type": "string" },
+                  ],
+                },
+                "path": { "minLength": 1, "type": "string" },
+                "reason": { "minLength": 1, "type": "string" },
+                "target": {
+                  "anyOf": [{
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "schema", "type": "string" },
+                      "schemaName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "schemaName"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "surface", "type": "string" },
+                      "surfaceKind": {
+                        "anyOf": [
+                          { "const": "rpc", "type": "string" },
+                          { "const": "operation", "type": "string" },
+                          { "const": "event", "type": "string" },
+                          { "const": "feed", "type": "string" },
+                          { "const": "job", "type": "string" },
+                        ],
+                      },
+                      "surfaceName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "surfaceKind",
+                      "surfaceName",
+                    ],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "resource", "type": "string" },
+                      "resourceAlias": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "resourceAlias"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "capability": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "capability", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "capability"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "contract", "type": "string" },
+                    },
+                    "required": ["kind", "contractId"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractDigest": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "digest", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "contractDigest"],
+                    "type": "object",
+                  }],
+                },
+              },
+              "required": ["kind", "target", "reason"],
+              "type": "object",
+            },
+            "type": "array",
+          },
           "classification": { "const": "migration", "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "decisionAt": {
@@ -2121,6 +2333,7 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
               { "const": "accepted", "type": "string" },
               { "const": "rejected", "type": "string" },
               { "const": "expired", "type": "string" },
+              { "const": "superseded", "type": "string" },
             ],
           },
           "warnings": {
@@ -2135,6 +2348,7 @@ export const AuthDeploymentAuthorityPlanResponseSchema = {
           "desiredChange",
           "materializationPreview",
           "warnings",
+          "breakingChanges",
           "createdAt",
           "classification",
           "acknowledgementRequired",
@@ -2158,6 +2372,111 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
     "plan": {
       "anyOf": [{
         "properties": {
+          "breakingChanges": {
+            "items": {
+              "properties": {
+                "kind": {
+                  "anyOf": [
+                    { "const": "schema-required-removed", "type": "string" },
+                    { "const": "schema-property-removed", "type": "string" },
+                    {
+                      "const": "schema-property-type-changed",
+                      "type": "string",
+                    },
+                    { "const": "schema-enum-value-removed", "type": "string" },
+                    {
+                      "const": "schema-closed-shape-violation",
+                      "type": "string",
+                    },
+                    { "const": "surface-removed", "type": "string" },
+                    { "const": "surface-subject-changed", "type": "string" },
+                    {
+                      "const": "surface-required-capability-added",
+                      "type": "string",
+                    },
+                    { "const": "resource-shape-changed", "type": "string" },
+                    { "const": "resource-removed", "type": "string" },
+                    { "const": "capability-removed", "type": "string" },
+                    {
+                      "const": "capability-required-changed",
+                      "type": "string",
+                    },
+                    { "const": "digest-incompatible", "type": "string" },
+                    { "const": "unresolved-ref", "type": "string" },
+                  ],
+                },
+                "path": { "minLength": 1, "type": "string" },
+                "reason": { "minLength": 1, "type": "string" },
+                "target": {
+                  "anyOf": [{
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "schema", "type": "string" },
+                      "schemaName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "schemaName"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "surface", "type": "string" },
+                      "surfaceKind": {
+                        "anyOf": [
+                          { "const": "rpc", "type": "string" },
+                          { "const": "operation", "type": "string" },
+                          { "const": "event", "type": "string" },
+                          { "const": "feed", "type": "string" },
+                          { "const": "job", "type": "string" },
+                        ],
+                      },
+                      "surfaceName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "surfaceKind",
+                      "surfaceName",
+                    ],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "resource", "type": "string" },
+                      "resourceAlias": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "resourceAlias"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "capability": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "capability", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "capability"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "contract", "type": "string" },
+                    },
+                    "required": ["kind", "contractId"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractDigest": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "digest", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "contractDigest"],
+                    "type": "object",
+                  }],
+                },
+              },
+              "required": ["kind", "target", "reason"],
+              "type": "object",
+            },
+            "type": "array",
+          },
           "classification": { "const": "update", "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "decisionAt": {
@@ -2317,6 +2636,7 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
               { "const": "accepted", "type": "string" },
               { "const": "rejected", "type": "string" },
               { "const": "expired", "type": "string" },
+              { "const": "superseded", "type": "string" },
             ],
           },
           "warnings": {
@@ -2331,6 +2651,7 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
           "desiredChange",
           "materializationPreview",
           "warnings",
+          "breakingChanges",
           "createdAt",
           "classification",
         ],
@@ -2338,6 +2659,111 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
       }, {
         "properties": {
           "acknowledgementRequired": { "type": "boolean" },
+          "breakingChanges": {
+            "items": {
+              "properties": {
+                "kind": {
+                  "anyOf": [
+                    { "const": "schema-required-removed", "type": "string" },
+                    { "const": "schema-property-removed", "type": "string" },
+                    {
+                      "const": "schema-property-type-changed",
+                      "type": "string",
+                    },
+                    { "const": "schema-enum-value-removed", "type": "string" },
+                    {
+                      "const": "schema-closed-shape-violation",
+                      "type": "string",
+                    },
+                    { "const": "surface-removed", "type": "string" },
+                    { "const": "surface-subject-changed", "type": "string" },
+                    {
+                      "const": "surface-required-capability-added",
+                      "type": "string",
+                    },
+                    { "const": "resource-shape-changed", "type": "string" },
+                    { "const": "resource-removed", "type": "string" },
+                    { "const": "capability-removed", "type": "string" },
+                    {
+                      "const": "capability-required-changed",
+                      "type": "string",
+                    },
+                    { "const": "digest-incompatible", "type": "string" },
+                    { "const": "unresolved-ref", "type": "string" },
+                  ],
+                },
+                "path": { "minLength": 1, "type": "string" },
+                "reason": { "minLength": 1, "type": "string" },
+                "target": {
+                  "anyOf": [{
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "schema", "type": "string" },
+                      "schemaName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "schemaName"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "surface", "type": "string" },
+                      "surfaceKind": {
+                        "anyOf": [
+                          { "const": "rpc", "type": "string" },
+                          { "const": "operation", "type": "string" },
+                          { "const": "event", "type": "string" },
+                          { "const": "feed", "type": "string" },
+                          { "const": "job", "type": "string" },
+                        ],
+                      },
+                      "surfaceName": { "minLength": 1, "type": "string" },
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "surfaceKind",
+                      "surfaceName",
+                    ],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "resource", "type": "string" },
+                      "resourceAlias": { "minLength": 1, "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "resourceAlias"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "capability": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "capability", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "capability"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "contract", "type": "string" },
+                    },
+                    "required": ["kind", "contractId"],
+                    "type": "object",
+                  }, {
+                    "properties": {
+                      "contractDigest": { "minLength": 1, "type": "string" },
+                      "contractId": { "minLength": 1, "type": "string" },
+                      "kind": { "const": "digest", "type": "string" },
+                    },
+                    "required": ["kind", "contractId", "contractDigest"],
+                    "type": "object",
+                  }],
+                },
+              },
+              "required": ["kind", "target", "reason"],
+              "type": "object",
+            },
+            "type": "array",
+          },
           "classification": { "const": "migration", "type": "string" },
           "createdAt": { "format": "date-time", "type": "string" },
           "decisionAt": {
@@ -2497,6 +2923,7 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
               { "const": "accepted", "type": "string" },
               { "const": "rejected", "type": "string" },
               { "const": "expired", "type": "string" },
+              { "const": "superseded", "type": "string" },
             ],
           },
           "warnings": {
@@ -2511,6 +2938,7 @@ export const AuthDeploymentAuthorityPlansGetResponseSchema = {
           "desiredChange",
           "materializationPreview",
           "warnings",
+          "breakingChanges",
           "createdAt",
           "classification",
           "acknowledgementRequired",
@@ -2550,6 +2978,7 @@ export const AuthDeploymentAuthorityPlansListRequestSchema = {
         { "const": "accepted", "type": "string" },
         { "const": "rejected", "type": "string" },
         { "const": "expired", "type": "string" },
+        { "const": "superseded", "type": "string" },
       ],
     },
   },
@@ -2565,6 +2994,114 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
       "items": {
         "anyOf": [{
           "properties": {
+            "breakingChanges": {
+              "items": {
+                "properties": {
+                  "kind": {
+                    "anyOf": [
+                      { "const": "schema-required-removed", "type": "string" },
+                      { "const": "schema-property-removed", "type": "string" },
+                      {
+                        "const": "schema-property-type-changed",
+                        "type": "string",
+                      },
+                      {
+                        "const": "schema-enum-value-removed",
+                        "type": "string",
+                      },
+                      {
+                        "const": "schema-closed-shape-violation",
+                        "type": "string",
+                      },
+                      { "const": "surface-removed", "type": "string" },
+                      { "const": "surface-subject-changed", "type": "string" },
+                      {
+                        "const": "surface-required-capability-added",
+                        "type": "string",
+                      },
+                      { "const": "resource-shape-changed", "type": "string" },
+                      { "const": "resource-removed", "type": "string" },
+                      { "const": "capability-removed", "type": "string" },
+                      {
+                        "const": "capability-required-changed",
+                        "type": "string",
+                      },
+                      { "const": "digest-incompatible", "type": "string" },
+                      { "const": "unresolved-ref", "type": "string" },
+                    ],
+                  },
+                  "path": { "minLength": 1, "type": "string" },
+                  "reason": { "minLength": 1, "type": "string" },
+                  "target": {
+                    "anyOf": [{
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "schema", "type": "string" },
+                        "schemaName": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "schemaName"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "surface", "type": "string" },
+                        "surfaceKind": {
+                          "anyOf": [
+                            { "const": "rpc", "type": "string" },
+                            { "const": "operation", "type": "string" },
+                            { "const": "event", "type": "string" },
+                            { "const": "feed", "type": "string" },
+                            { "const": "job", "type": "string" },
+                          ],
+                        },
+                        "surfaceName": { "minLength": 1, "type": "string" },
+                      },
+                      "required": [
+                        "kind",
+                        "contractId",
+                        "surfaceKind",
+                        "surfaceName",
+                      ],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "resource", "type": "string" },
+                        "resourceAlias": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "resourceAlias"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "capability": { "minLength": 1, "type": "string" },
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "capability", "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "capability"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "contract", "type": "string" },
+                      },
+                      "required": ["kind", "contractId"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractDigest": { "minLength": 1, "type": "string" },
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "digest", "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "contractDigest"],
+                      "type": "object",
+                    }],
+                  },
+                },
+                "required": ["kind", "target", "reason"],
+                "type": "object",
+              },
+              "type": "array",
+            },
             "classification": { "const": "update", "type": "string" },
             "createdAt": { "format": "date-time", "type": "string" },
             "decisionAt": {
@@ -2726,6 +3263,7 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
                 { "const": "accepted", "type": "string" },
                 { "const": "rejected", "type": "string" },
                 { "const": "expired", "type": "string" },
+                { "const": "superseded", "type": "string" },
               ],
             },
             "warnings": {
@@ -2740,6 +3278,7 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
             "desiredChange",
             "materializationPreview",
             "warnings",
+            "breakingChanges",
             "createdAt",
             "classification",
           ],
@@ -2747,6 +3286,114 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
         }, {
           "properties": {
             "acknowledgementRequired": { "type": "boolean" },
+            "breakingChanges": {
+              "items": {
+                "properties": {
+                  "kind": {
+                    "anyOf": [
+                      { "const": "schema-required-removed", "type": "string" },
+                      { "const": "schema-property-removed", "type": "string" },
+                      {
+                        "const": "schema-property-type-changed",
+                        "type": "string",
+                      },
+                      {
+                        "const": "schema-enum-value-removed",
+                        "type": "string",
+                      },
+                      {
+                        "const": "schema-closed-shape-violation",
+                        "type": "string",
+                      },
+                      { "const": "surface-removed", "type": "string" },
+                      { "const": "surface-subject-changed", "type": "string" },
+                      {
+                        "const": "surface-required-capability-added",
+                        "type": "string",
+                      },
+                      { "const": "resource-shape-changed", "type": "string" },
+                      { "const": "resource-removed", "type": "string" },
+                      { "const": "capability-removed", "type": "string" },
+                      {
+                        "const": "capability-required-changed",
+                        "type": "string",
+                      },
+                      { "const": "digest-incompatible", "type": "string" },
+                      { "const": "unresolved-ref", "type": "string" },
+                    ],
+                  },
+                  "path": { "minLength": 1, "type": "string" },
+                  "reason": { "minLength": 1, "type": "string" },
+                  "target": {
+                    "anyOf": [{
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "schema", "type": "string" },
+                        "schemaName": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "schemaName"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "surface", "type": "string" },
+                        "surfaceKind": {
+                          "anyOf": [
+                            { "const": "rpc", "type": "string" },
+                            { "const": "operation", "type": "string" },
+                            { "const": "event", "type": "string" },
+                            { "const": "feed", "type": "string" },
+                            { "const": "job", "type": "string" },
+                          ],
+                        },
+                        "surfaceName": { "minLength": 1, "type": "string" },
+                      },
+                      "required": [
+                        "kind",
+                        "contractId",
+                        "surfaceKind",
+                        "surfaceName",
+                      ],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "resource", "type": "string" },
+                        "resourceAlias": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "resourceAlias"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "capability": { "minLength": 1, "type": "string" },
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "capability", "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "capability"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "contract", "type": "string" },
+                      },
+                      "required": ["kind", "contractId"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "contractDigest": { "minLength": 1, "type": "string" },
+                        "contractId": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "digest", "type": "string" },
+                      },
+                      "required": ["kind", "contractId", "contractDigest"],
+                      "type": "object",
+                    }],
+                  },
+                },
+                "required": ["kind", "target", "reason"],
+                "type": "object",
+              },
+              "type": "array",
+            },
             "classification": { "const": "migration", "type": "string" },
             "createdAt": { "format": "date-time", "type": "string" },
             "decisionAt": {
@@ -2908,6 +3555,7 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
                 { "const": "accepted", "type": "string" },
                 { "const": "rejected", "type": "string" },
                 { "const": "expired", "type": "string" },
+                { "const": "superseded", "type": "string" },
               ],
             },
             "warnings": {
@@ -2922,6 +3570,7 @@ export const AuthDeploymentAuthorityPlansListResponseSchema = {
             "desiredChange",
             "materializationPreview",
             "warnings",
+            "breakingChanges",
             "createdAt",
             "classification",
             "acknowledgementRequired",

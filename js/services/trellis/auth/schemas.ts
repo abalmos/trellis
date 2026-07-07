@@ -631,6 +631,68 @@ export type DeploymentAuthorityReconciliationStatus = StaticDecode<
   typeof DeploymentAuthorityReconciliationStatusSchema
 >;
 
+export const DeploymentAuthorityPlanBreakingChangeSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("schema-required-removed"),
+    Type.Literal("schema-property-removed"),
+    Type.Literal("schema-property-type-changed"),
+    Type.Literal("schema-enum-value-removed"),
+    Type.Literal("schema-closed-shape-violation"),
+    Type.Literal("surface-removed"),
+    Type.Literal("surface-subject-changed"),
+    Type.Literal("surface-required-capability-added"),
+    Type.Literal("resource-shape-changed"),
+    Type.Literal("resource-removed"),
+    Type.Literal("capability-removed"),
+    Type.Literal("capability-required-changed"),
+    Type.Literal("digest-incompatible"),
+    Type.Literal("unresolved-ref"),
+  ]),
+  target: Type.Union([
+    Type.Object({
+      kind: Type.Literal("schema"),
+      contractId: Type.String({ minLength: 1 }),
+      schemaName: Type.String({ minLength: 1 }),
+    }),
+    Type.Object({
+      kind: Type.Literal("surface"),
+      contractId: Type.String({ minLength: 1 }),
+      surfaceKind: Type.Union([
+        Type.Literal("rpc"),
+        Type.Literal("operation"),
+        Type.Literal("event"),
+        Type.Literal("feed"),
+        Type.Literal("job"),
+      ]),
+      surfaceName: Type.String({ minLength: 1 }),
+    }),
+    Type.Object({
+      kind: Type.Literal("resource"),
+      contractId: Type.String({ minLength: 1 }),
+      resourceAlias: Type.String({ minLength: 1 }),
+    }),
+    Type.Object({
+      kind: Type.Literal("capability"),
+      contractId: Type.String({ minLength: 1 }),
+      capability: Type.String({ minLength: 1 }),
+    }),
+    Type.Object({
+      kind: Type.Literal("contract"),
+      contractId: Type.String({ minLength: 1 }),
+    }),
+    Type.Object({
+      kind: Type.Literal("digest"),
+      contractId: Type.String({ minLength: 1 }),
+      contractDigest: Type.String({ minLength: 1 }),
+    }),
+  ]),
+  path: Type.Optional(Type.String({ minLength: 1 })),
+  reason: Type.String({ minLength: 1 }),
+});
+export type DeploymentAuthorityPlanBreakingChange = StaticDecode<
+  typeof DeploymentAuthorityPlanBreakingChangeSchema
+>;
+
 const DeploymentAuthorityPlanBaseSchema = Type.Object({
   planId: Type.String({ minLength: 1 }),
   deploymentId: Type.String({ minLength: 1 }),
@@ -638,6 +700,7 @@ const DeploymentAuthorityPlanBaseSchema = Type.Object({
   desiredChange: Type.Record(Type.String(), Type.Unknown()),
   materializationPreview: Type.Record(Type.String(), Type.Unknown()),
   warnings: Type.Array(Type.String({ minLength: 1 })),
+  breakingChanges: Type.Array(DeploymentAuthorityPlanBreakingChangeSchema),
   createdAt: DurableIsoDateStringSchema,
   expiresAt: Type.Optional(DurableIsoDateStringSchema),
   state: Type.Optional(
@@ -646,6 +709,7 @@ const DeploymentAuthorityPlanBaseSchema = Type.Object({
       Type.Literal("accepted"),
       Type.Literal("rejected"),
       Type.Literal("expired"),
+      Type.Literal("superseded"),
     ]),
   ),
   decisionAt: Type.Optional(

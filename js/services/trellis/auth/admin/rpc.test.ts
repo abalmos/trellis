@@ -331,6 +331,42 @@ class InMemoryDeploymentAuthorityPlanStorage {
     this.#plans.set(plan.planId, plan);
   }
 
+  async supersedePending(filters: {
+    deploymentId: string;
+    contractId?: string;
+    desiredVersion?: string;
+    exceptPlanId?: string;
+    reason: string;
+    now?: string;
+  }): Promise<void> {
+    await Promise.resolve();
+    for (const plan of this.#plans.values()) {
+      if (plan.planId === filters.exceptPlanId) continue;
+      if (plan.deploymentId !== filters.deploymentId) continue;
+      if ((plan.state ?? "pending") !== "pending") continue;
+      if (
+        filters.contractId !== undefined &&
+        plan.proposal.contractId !== filters.contractId
+      ) continue;
+      const summary = plan.proposal.summary;
+      const version = summary !== undefined && summary !== null &&
+          typeof summary === "object" && "desiredVersion" in summary
+        ? summary.desiredVersion
+        : undefined;
+      if (
+        filters.desiredVersion !== undefined &&
+        version !== filters.desiredVersion
+      ) continue;
+      this.#plans.set(plan.planId, {
+        ...plan,
+        state: "superseded",
+        decisionAt: filters.now ?? "2026-01-01T00:00:02.000Z",
+        decisionBy: { kind: "system" },
+        decisionReason: filters.reason,
+      });
+    }
+  }
+
   async listFilteredPage(
     filters: {
       deploymentId?: string;
@@ -431,6 +467,7 @@ function deploymentAuthorityPlan(
     ),
     materializationPreview: {},
     warnings: [],
+    breakingChanges: [],
     createdAt: "2026-01-01T00:00:01.000Z",
     state: "pending",
     ...planOverrides,
@@ -798,6 +835,66 @@ Deno.test("Auth.DeploymentAuthority.AcceptUpdate accepts pending plan without ma
     deploymentId: "svc-a",
     definitions: [capabilityDefinition],
   }]);
+});
+
+Deno.test("Auth.DeploymentAuthority.AcceptUpdate supersedes sibling pending plans", async () => {
+  const authorities = new InMemoryDeploymentAuthorityStorage(
+    deploymentAuthority(),
+  );
+  const plans = new InMemoryDeploymentAuthorityPlanStorage([
+    deploymentAuthorityPlan({ planId: "plan-a" }),
+    deploymentAuthorityPlan({
+      planId: "plan-b",
+      proposal: {
+        contractId: "svc.contract@v2",
+        contractDigest: "sha256-b",
+        summary: { desiredVersion: "v1" },
+      },
+    }),
+    deploymentAuthorityPlan({
+      planId: "plan-c",
+      proposal: {
+        contractId: "svc.contract@v3",
+        contractDigest: "sha256-c",
+        summary: { desiredVersion: "v2" },
+      },
+    }),
+  ]);
+  const handler = createAuthDeploymentAuthorityAcceptUpdateHandler({
+    deploymentAuthorityStorage: authorities,
+    deploymentAuthorityPlanStorage: plans,
+    authorityReconciler: {
+      reconcileDeployment: async () => ({
+        authority: authorities.getValue() ?? deploymentAuthority(),
+        materializedAuthority: {
+          deploymentId: "svc-a",
+          desiredVersion: "v2",
+          status: "current",
+          resourceBindings: [],
+          grants: emptyMaterializedGrants(),
+          reconciledAt: "2026-01-01T00:00:02.000Z",
+        },
+        reconciliation: {
+          deploymentId: "svc-a",
+          desiredVersion: "v2",
+          state: "succeeded",
+          startedAt: "2026-01-01T00:00:02.000Z",
+          finishedAt: "2026-01-01T00:00:03.000Z",
+        },
+      }),
+    },
+    logger: { trace: () => {} },
+  });
+
+  const result = await handler({
+    input: { planId: "plan-a" },
+    context: adminContext,
+  });
+
+  assert(!result.isErr());
+  assertEquals(plans.getValue("plan-a")?.state, "accepted");
+  assertEquals(plans.getValue("plan-b")?.state, "superseded");
+  assertEquals(plans.getValue("plan-c")?.state, "pending");
 });
 
 Deno.test("Auth.DeploymentAuthority.AcceptUpdate persists normalized resource definitions", async () => {

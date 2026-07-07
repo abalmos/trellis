@@ -454,6 +454,7 @@ export const deploymentAuthorityPlans = sqliteTable(
     desiredChangeJson: text("desired_change_json").notNull(),
     materializationPreviewJson: text("materialization_preview_json").notNull(),
     warningsJson: text("warnings_json").notNull(),
+    breakingChangesJson: text("breaking_changes_json").notNull(),
     acknowledgementRequired: integer("acknowledgement_required", {
       mode: "boolean",
     }),

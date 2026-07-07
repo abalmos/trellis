@@ -7,6 +7,7 @@ import { ulid } from "ulid";
 
 import type { ContractsModule } from "../../catalog/runtime.ts";
 import {
+  activeContractBreakingChanges,
   type ContractEntry,
   ContractUseDependencyError,
   validateActiveContractCompatibility,
@@ -28,6 +29,7 @@ import type {
   DeploymentAuthority,
   DeploymentAuthorityMaterialization,
   DeploymentAuthorityPlan,
+  DeploymentAuthorityPlanBreakingChange,
   DeploymentResourceBinding,
   ImplementationOffer,
   SentinelCreds,
@@ -75,6 +77,14 @@ type DeploymentAuthorityStorage = {
 
 type DeploymentAuthorityPlanStorage = {
   put(record: DeploymentAuthorityPlan): Promise<void>;
+  supersedePending?(filters: {
+    deploymentId: string;
+    contractId?: string;
+    desiredVersion?: string;
+    exceptPlanId?: string;
+    reason: string;
+    now?: string;
+  }): Promise<void>;
   listFiltered(
     filters: { deploymentId?: string; state?: string },
     query: { limit: number; offset?: number },
@@ -111,6 +121,7 @@ type ImplementationOfferStorage = {
 type ContractCompatibilityFailure = {
   message: string;
   latestAcceptedContractDigest: string;
+  breakingChanges: DeploymentAuthorityPlanBreakingChange[];
 };
 
 type DeploymentAuthorityMigrationPlan = Extract<
@@ -380,8 +391,22 @@ async function assertPresentedContractCompatible(input: {
     return {
       message: `previous service contract digest '${currentDigest}' is unknown`,
       latestAcceptedContractDigest: currentDigest,
+      breakingChanges: [{
+        kind: "digest-incompatible",
+        target: {
+          kind: "digest",
+          contractId: input.presentedContract.id,
+          contractDigest: currentDigest,
+        },
+        reason:
+          `Previous service contract digest '${currentDigest}' is unknown.`,
+      }],
     };
   }
+  const breakingChanges = activeContractBreakingChanges([
+    { digest: currentDigest, contract: currentContract },
+    { digest: input.presentedDigest, contract: input.presentedContract },
+  ]);
   try {
     validateActiveContractCompatibility([
       { digest: currentDigest, contract: currentContract },
@@ -392,6 +417,15 @@ async function assertPresentedContractCompatible(input: {
     return {
       message: error instanceof Error ? error.message : String(error),
       latestAcceptedContractDigest: currentDigest,
+      breakingChanges: breakingChanges.length > 0 ? breakingChanges : [{
+        kind: "digest-incompatible",
+        target: {
+          kind: "digest",
+          contractId: input.presentedContract.id,
+          contractDigest: input.presentedDigest,
+        },
+        reason: error instanceof Error ? error.message : String(error),
+      }],
     };
   }
 }
@@ -652,6 +686,43 @@ async function pendingAuthorityPlanForContract(input: {
     isRecord(plan.proposal.summary) &&
     plan.proposal.summary.desiredVersion === input.desiredVersion
   );
+}
+
+async function supersedePendingAuthorityPlans(input: {
+  storage: DeploymentAuthorityPlanStorage;
+  deploymentId: string;
+  contractId: string;
+  exceptPlanId: string;
+  now: string;
+}): Promise<void> {
+  const reason = `superseded by newer plan ${input.exceptPlanId}`;
+  if (input.storage.supersedePending !== undefined) {
+    await input.storage.supersedePending({
+      deploymentId: input.deploymentId,
+      contractId: input.contractId,
+      exceptPlanId: input.exceptPlanId,
+      reason,
+      now: input.now,
+    });
+    return;
+  }
+  const plans = await input.storage.listFiltered(
+    { deploymentId: input.deploymentId, state: "pending" },
+    { limit: 500 },
+  );
+  for (const plan of plans) {
+    if (
+      plan.planId === input.exceptPlanId ||
+      plan.proposal.contractId !== input.contractId
+    ) continue;
+    await input.storage.put({
+      ...plan,
+      state: "superseded",
+      decisionAt: input.now,
+      decisionBy: { kind: "system" },
+      decisionReason: reason,
+    });
+  }
 }
 
 function compatibilityMigrationSummary(input: {
@@ -1137,6 +1208,7 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
           desiredChange: planClassification.desiredChange,
           materializationPreview: {},
           warnings: [compatibilityError.message],
+          breakingChanges: compatibilityError.breakingChanges,
           createdAt: now,
           state: "pending",
           acknowledgementRequired: true,
@@ -1178,6 +1250,13 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
         } else {
           if (existingPlan === undefined) {
             await deps.deploymentAuthorityPlanStorage.put(plan);
+            await supersedePendingAuthorityPlans({
+              storage: deps.deploymentAuthorityPlanStorage,
+              deploymentId: service.deploymentId,
+              contractId: request.contractId,
+              exceptPlanId: plan.planId,
+              now,
+            });
             await deps.capabilityDefinitionStorage?.replaceForDeployment(
               service.deploymentId,
               capabilityDefinitions,
@@ -1246,6 +1325,7 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
             desiredChange: planClassification.desiredChange,
             materializationPreview: {},
             warnings: [],
+            breakingChanges: [],
             createdAt: now,
             state: "pending",
             acknowledgementRequired: true,
@@ -1258,11 +1338,19 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
             desiredChange: planClassification.desiredChange,
             materializationPreview: {},
             warnings: [],
+            breakingChanges: [],
             createdAt: now,
             state: "pending",
           });
       if (existingPlan === undefined) {
         await deps.deploymentAuthorityPlanStorage.put(plan);
+        await supersedePendingAuthorityPlans({
+          storage: deps.deploymentAuthorityPlanStorage,
+          deploymentId: service.deploymentId,
+          contractId: request.contractId,
+          exceptPlanId: plan.planId,
+          now,
+        });
         await deps.capabilityDefinitionStorage?.replaceForDeployment(
           service.deploymentId,
           capabilityDefinitions,

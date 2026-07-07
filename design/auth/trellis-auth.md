@@ -103,6 +103,11 @@ Terms:
   digest for the same contract id. In `strict` mode it requires explicit admin
   acknowledgement. In `mutable-dev`, Trellis may auto-accept the migration, but
   still records the plan and decision in authority plan/history.
+- **authority plan**: pending operator approval for one deployment authority
+  version, or historical evidence of an accepted, rejected, expired, or
+  superseded decision. Only pending plans targeting the current desired
+  authority version are actionable; newer plans for the same deployment contract
+  supersede older unanswered plans.
 - **reconciliation**: convergence from desired deployment authority to
   materialized resources and bindings
 - **identity authority**: durable identity-owned authority for delegated user,
@@ -178,6 +183,12 @@ replacement until an admin explicitly accepts the migration. In `mutable-dev`
 mode, Trellis auto-accepts the same migration plan for local development,
 records the auto-accepted decision in plan/history, mutates desired state, and
 schedules reconciliation like any other accepted migration.
+
+Authority plans expose structured `breakingChanges` alongside free-form
+`warnings`. `breakingChanges` is the authoritative per-target compatibility
+signal for operator UI, with JSON Pointer `path` values when a schema field can
+be localized. `warnings` remains a human-readable summary derived from the same
+planning path.
 
 ### 3) Reconciliation materializes desired authority
 

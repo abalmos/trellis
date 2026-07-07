@@ -331,6 +331,7 @@ Deno.test("authority surfaces and pending plans persist observe/subscribe action
         },
       }),
       warningsJson: JSON.stringify([]),
+      breakingChangesJson: JSON.stringify([]),
       acknowledgementRequired: null,
       decisionAt: null,
       decisionByJson: null,

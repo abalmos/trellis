@@ -153,6 +153,10 @@ function decodePlan(row: AuthorityPlanRow): DeploymentAuthorityPlan {
       "deployment authority plan warnings",
       row.warningsJson,
     ),
+    breakingChanges: parseJsonField(
+      "deployment authority plan breaking changes",
+      row.breakingChangesJson,
+    ),
     ...(row.acknowledgementRequired === null ? {} : {
       acknowledgementRequired: row.acknowledgementRequired,
     }),
@@ -167,6 +171,20 @@ function decodePlan(row: AuthorityPlanRow): DeploymentAuthorityPlan {
   });
 }
 
+function planDesiredVersion(plan: DeploymentAuthorityPlan): string | undefined {
+  const summary = plan.proposal.summary;
+  if (
+    summary === undefined || summary === null || typeof summary !== "object"
+  ) {
+    return undefined;
+  }
+  if (!("desiredVersion" in summary)) return undefined;
+  const version = summary.desiredVersion;
+  return typeof version === "string" && version.length > 0
+    ? version
+    : undefined;
+}
+
 function encodePlan(record: DeploymentAuthorityPlan): AuthorityPlanInsert {
   const decoded = Value.Decode(DeploymentAuthorityPlanSchema, record);
   return {
@@ -178,6 +196,7 @@ function encodePlan(record: DeploymentAuthorityPlan): AuthorityPlanInsert {
     desiredChangeJson: JSON.stringify(decoded.desiredChange),
     materializationPreviewJson: JSON.stringify(decoded.materializationPreview),
     warningsJson: JSON.stringify(decoded.warnings),
+    breakingChangesJson: JSON.stringify(decoded.breakingChanges),
     acknowledgementRequired: decoded.classification === "migration"
       ? decoded.acknowledgementRequired
       : null,
@@ -494,6 +513,7 @@ async function putAuthorityPlanRow(
         desiredChangeJson: row.desiredChangeJson,
         materializationPreviewJson: row.materializationPreviewJson,
         warningsJson: row.warningsJson,
+        breakingChangesJson: row.breakingChangesJson,
         acknowledgementRequired: row.acknowledgementRequired,
         decisionAt: row.decisionAt,
         decisionByJson: row.decisionByJson,
@@ -552,6 +572,7 @@ export class SqlDeploymentAuthorityRepository {
           desiredChangeJson: planRow.desiredChangeJson,
           materializationPreviewJson: planRow.materializationPreviewJson,
           warningsJson: planRow.warningsJson,
+          breakingChangesJson: planRow.breakingChangesJson,
           acknowledgementRequired: planRow.acknowledgementRequired,
           decisionAt: planRow.decisionAt,
           decisionByJson: planRow.decisionByJson,
@@ -775,6 +796,46 @@ export class SqlDeploymentAuthorityPlanRepository {
   /** Inserts or replaces one plan. */
   async put(record: DeploymentAuthorityPlan): Promise<void> {
     await putAuthorityPlanRow(this.#db, record);
+  }
+
+  /** Marks matching pending plans as superseded. */
+  async supersedePending(filters: {
+    deploymentId: string;
+    contractId?: string;
+    desiredVersion?: string;
+    exceptPlanId?: string;
+    reason: string;
+    now?: string;
+  }): Promise<void> {
+    const now = filters.now ?? new Date().toISOString();
+    const stale: DeploymentAuthorityPlan[] = [];
+    let offset = 0;
+    while (true) {
+      const plans = await this.listFiltered(
+        { deploymentId: filters.deploymentId, state: "pending" },
+        { limit: 500, offset },
+      );
+      stale.push(
+        ...plans.filter((plan) =>
+          plan.planId !== filters.exceptPlanId &&
+          (filters.contractId === undefined ||
+            plan.proposal.contractId === filters.contractId) &&
+          (filters.desiredVersion === undefined ||
+            planDesiredVersion(plan) === filters.desiredVersion)
+        ),
+      );
+      if (plans.length < 500) break;
+      offset += plans.length;
+    }
+    for (const plan of stale) {
+      await this.put({
+        ...plan,
+        state: "superseded",
+        decisionAt: now,
+        decisionBy: { kind: "system" },
+        decisionReason: filters.reason,
+      });
+    }
   }
   /** Returns plans for one deployment ordered by creation time and id. */
   async listByDeployment(

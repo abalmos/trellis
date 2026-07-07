@@ -6,13 +6,16 @@ import type {
   ContractSchemaRef,
   ContractSchemas,
   ContractUses,
+  JsonSchema,
   TrellisContractV1,
 } from "@qlever-llc/trellis/contracts";
 import { canonicalizeJson, isJsonValue } from "@qlever-llc/trellis";
 
 import {
+  describeSchemaCompatibility,
   mergeCompatibleSchemaRefs,
   mergeCompatibleSchemas,
+  type SchemaCompatibilityIssue,
 } from "./schema_compatibility.ts";
 export { templateToWildcard } from "./subject_templates.ts";
 import { templateToWildcard } from "./subject_templates.ts";
@@ -36,9 +39,28 @@ type ActiveCompatibleContract = Omit<TrellisContractV1, "operations"> & {
 
 export type ContractEntry = { digest: string; contract: TrellisContractV1 };
 
-type ActiveCompatibleContractEntry = {
+export type ActiveCompatibleContractEntry = {
   digest: string;
   contract: ActiveCompatibleContract;
+};
+
+export type ActiveContractBreakingChange = {
+  kind:
+    | SchemaCompatibilityIssue["kind"]
+    | "surface-removed"
+    | "surface-subject-changed"
+    | "surface-required-capability-added";
+  target:
+    | { kind: "schema"; contractId: string; schemaName: string }
+    | {
+      kind: "surface";
+      contractId: string;
+      surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+      surfaceName: string;
+    }
+    | { kind: "digest"; contractId: string; contractDigest: string };
+  path?: string;
+  reason: string;
 };
 
 type SubjectSurface = {
@@ -654,6 +676,62 @@ function mergeContractSchemas(contracts: TrellisContractV1[]): ContractSchemas {
     }
   }
   return schemas;
+}
+
+function schemaBreakingChangesForContracts(
+  contracts: ActiveCompatibleContractEntry[],
+): ActiveContractBreakingChange[] {
+  const changes: ActiveContractBreakingChange[] = [];
+  const first = contracts[0];
+  if (!first) return changes;
+  const referencedNames = referencedSchemaNames(
+    contracts.map((entry) => entry.contract as TrellisContractV1),
+  );
+  const schemas = new Map<string, { digest: string; schema: JsonSchema }>();
+  for (const entry of contracts) {
+    for (const [name, schema] of Object.entries(entry.contract.schemas ?? {})) {
+      if (!referencedNames.has(name)) continue;
+      const existing = schemas.get(name);
+      if (existing === undefined) {
+        schemas.set(name, { digest: entry.digest, schema });
+        continue;
+      }
+      const issues = describeSchemaCompatibility(existing.schema, schema);
+      for (const issue of issues) {
+        changes.push({
+          kind: issue.kind,
+          target: {
+            kind: "schema",
+            contractId: first.contract.id,
+            schemaName: name,
+          },
+          ...(issue.path === undefined ? {} : { path: issue.path }),
+          reason: issue.reason,
+        });
+      }
+      if (issues.length === 0) {
+        schemas.set(name, { digest: entry.digest, schema });
+      }
+    }
+  }
+  return changes;
+}
+
+/** Returns structured active-compatibility failures for same-lineage manifests. */
+export function activeContractBreakingChanges(
+  entries: ActiveCompatibleContractEntry[],
+): ActiveContractBreakingChange[] {
+  const changes: ActiveContractBreakingChange[] = [];
+  const entriesById = new Map<string, ActiveCompatibleContractEntry[]>();
+  for (const entry of entries) {
+    const group = entriesById.get(entry.contract.id) ?? [];
+    group.push(entry);
+    entriesById.set(entry.contract.id, group);
+  }
+  for (const group of entriesById.values()) {
+    changes.push(...schemaBreakingChangesForContracts(group));
+  }
+  return changes;
 }
 
 function mergeCompatibleContractSurfaces(

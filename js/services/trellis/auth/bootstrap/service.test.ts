@@ -162,6 +162,98 @@ function incompatibleSchemaContract(): TrellisContractV1 {
   };
 }
 
+function requiredFieldContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: {
+        type: "object",
+        properties: { mode: { type: "string" } },
+        required: ["mode"],
+      },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function removedRequiredFieldContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: {
+        type: "object",
+        properties: { mode: { type: "string" } },
+        required: [],
+      },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function closedPropertyContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: {
+        type: "object",
+        additionalProperties: false,
+        properties: { mode: { type: "string" } },
+        required: [],
+      },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function removedClosedPropertyContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: {
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+        required: [],
+      },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function incompatibleEnumContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: { enum: ["new"] },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function enumContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: { enum: ["old"] },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
+function compatibleOptionalAdditiveContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    schemas: {
+      Empty: {
+        type: "object",
+        properties: { traceId: { type: "string" } },
+        required: [],
+      },
+      CacheEntry: { type: "object" },
+    },
+  };
+}
+
 function jobsContract(): TrellisContractV1 {
   return {
     ...baseContract(),
@@ -824,12 +916,127 @@ Deno.test("POST /bootstrap/service creates migration plan for incompatible same-
   assertEquals(setup.plans.length, 1);
   assertEquals(setup.plans[0]?.classification, "migration");
   assertEquals(setup.plans[0]?.state, "pending");
+  assertEquals(setup.plans[0]?.warnings, [
+    "Active compatible digests define schema 'Empty' incompatibly",
+  ]);
+  assertEquals(setup.plans[0]?.breakingChanges, [{
+    kind: "schema-property-type-changed",
+    target: {
+      kind: "schema",
+      contractId: "svc.example@v1",
+      schemaName: "Empty",
+    },
+    path: "/type",
+    reason: "Schema type changed from object to string.",
+  }]);
   assertEquals(setup.plans[0]?.proposal.summary?.compatibilityMigration, true);
   assertEquals(
     setup.plans[0]?.proposal.summary?.previousContractDigest,
     current.digest,
   );
   assertEquals(setup.services.length, 0);
+});
+
+Deno.test("POST /bootstrap/service annotates required schema field removal", async () => {
+  const current = await validatedContract(requiredFieldContract());
+  const replacement = await validatedContract(removedRequiredFieldContract());
+  const setup = await createApp({
+    initialOffers: [serviceOffer(current)],
+    knownContracts: [current],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: replacement.contract.id,
+    contractDigest: replacement.digest,
+    contract: replacement.contract,
+  });
+
+  assertEquals(response.status, 202);
+  assertEquals(setup.plans[0]?.classification, "migration");
+  assertEquals(setup.plans[0]?.warnings, [
+    "Active compatible digests define schema 'Empty' incompatibly",
+  ]);
+  assertEquals(setup.plans[0]?.breakingChanges, [{
+    kind: "schema-required-removed",
+    target: {
+      kind: "schema",
+      contractId: "svc.example@v1",
+      schemaName: "Empty",
+    },
+    path: "/properties/mode",
+    reason: "Required field 'mode' was removed from the schema.",
+  }]);
+});
+
+Deno.test("POST /bootstrap/service annotates closed schema property removal", async () => {
+  const current = await validatedContract(closedPropertyContract());
+  const replacement = await validatedContract(removedClosedPropertyContract());
+  const setup = await createApp({
+    initialOffers: [serviceOffer(current)],
+    knownContracts: [current],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: replacement.contract.id,
+    contractDigest: replacement.digest,
+    contract: replacement.contract,
+  });
+
+  assertEquals(response.status, 202);
+  assertEquals(setup.plans[0]?.classification, "migration");
+  assertEquals(
+    setup.plans[0]?.breakingChanges.some((change) =>
+      change.kind === "schema-property-removed" &&
+      change.target.kind === "schema" &&
+      change.target.schemaName === "Empty" &&
+      change.path === "/properties/mode"
+    ),
+    true,
+  );
+});
+
+Deno.test("POST /bootstrap/service annotates generic same-schema digest incompatibility", async () => {
+  const current = await validatedContract(enumContract());
+  const replacement = await validatedContract(incompatibleEnumContract());
+  const setup = await createApp({
+    initialOffers: [serviceOffer(current)],
+    knownContracts: [current],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: replacement.contract.id,
+    contractDigest: replacement.digest,
+    contract: replacement.contract,
+  });
+
+  assertEquals(response.status, 202);
+  assertEquals(setup.plans[0]?.classification, "migration");
+  assertEquals(setup.plans[0]?.breakingChanges, [{
+    kind: "digest-incompatible",
+    target: {
+      kind: "schema",
+      contractId: "svc.example@v1",
+      schemaName: "Empty",
+    },
+    reason: "Schema changed incompatibly.",
+  }]);
+});
+
+Deno.test("POST /bootstrap/service leaves compatible schema additions unannotated", async () => {
+  const current = await validatedContract(baseContract());
+  const replacement = await validatedContract(
+    compatibleOptionalAdditiveContract(),
+  );
+  const setup = await createApp({ initialOffers: [serviceOffer(current)] });
+
+  const response = await setup.bootstrap({
+    contractId: replacement.contract.id,
+    contractDigest: replacement.digest,
+    contract: replacement.contract,
+  });
+
+  assertEquals(response.status, 200);
+  assertEquals(setup.plans.length, 0);
 });
 
 Deno.test("POST /bootstrap/service includes authority delta in incompatible same-contract migration", async () => {
@@ -954,6 +1161,7 @@ Deno.test("POST /bootstrap/service allows retry with accepted compatibility migr
         desiredChange: EMPTY_BOUNDARY,
         materializationPreview: {},
         warnings: [],
+        breakingChanges: [],
         createdAt: TEST_NOW,
         state: "accepted",
         acknowledgementRequired: true,
@@ -1264,6 +1472,7 @@ Deno.test("POST /bootstrap/service accepts required dependency from accepted aut
       desiredChange: providerNeeds,
       materializationPreview: {},
       warnings: [],
+      breakingChanges: [],
       createdAt: TEST_NOW,
       decisionAt: TEST_NOW,
       state: "accepted",
@@ -1365,6 +1574,7 @@ Deno.test("POST /bootstrap/service does not reuse stale pending authority plans"
       desiredChange: EMPTY_BOUNDARY,
       materializationPreview: {},
       warnings: [],
+      breakingChanges: [],
       createdAt: TEST_NOW,
       state: "pending",
     }],
@@ -1379,6 +1589,45 @@ Deno.test("POST /bootstrap/service does not reuse stale pending authority plans"
   assertEquals(response.status, 202);
   assertEquals((await response.json()).planId, "plan_1");
   assertEquals(setup.plans.length, 2);
+  assertEquals(setup.plans[0]?.state, "superseded");
+  assertEquals(setup.plans[1]?.state, "pending");
+});
+
+Deno.test("POST /bootstrap/service supersedes older pending plans for the same contract", async () => {
+  const expanded = await validatedContract(expandedContract());
+  const setup = await createApp({
+    initialPlans: [{
+      classification: "update",
+      planId: "old-plan",
+      deploymentId: "deployment_1",
+      proposal: {
+        deploymentId: "deployment_1",
+        contractId: expanded.contract.id,
+        contractDigest: "sha256-old",
+        requestedNeeds: EMPTY_BOUNDARY,
+        providedSurfaces: [],
+        summary: { desiredVersion: TEST_NOW },
+      },
+      desiredChange: EMPTY_BOUNDARY,
+      materializationPreview: {},
+      warnings: [],
+      breakingChanges: [],
+      createdAt: TEST_NOW,
+      state: "pending",
+    }],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: setup.expanded.contract.id,
+    contractDigest: setup.expanded.digest,
+    contract: setup.expanded.contract,
+  });
+
+  assertEquals(response.status, 202);
+  assertEquals((await response.json()).planId, "plan_1");
+  assertEquals(setup.plans.length, 2);
+  assertEquals(setup.plans[0]?.state, "superseded");
+  assertEquals(setup.plans[1]?.state, "pending");
 });
 
 Deno.test("POST /bootstrap/service reports presented contract validation details", async () => {

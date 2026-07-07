@@ -1023,12 +1023,45 @@ type AuthorityPlan = {
   desiredChange: Record<string, unknown>;
   materializationPreview: Record<string, unknown>;
   warnings: string[];
+  breakingChanges: BreakingChange[];
   createdAt: string;
   expiresAt?: string;
-  state?: "pending" | "accepted" | "rejected" | "expired";
+  state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
   decisionAt?: string | null;
   decisionBy?: Record<string, unknown> | null;
   decisionReason?: string | null;
+};
+
+type BreakingChange = {
+  kind:
+    | "schema-required-removed"
+    | "schema-property-removed"
+    | "schema-property-type-changed"
+    | "schema-enum-value-removed"
+    | "schema-closed-shape-violation"
+    | "surface-removed"
+    | "surface-subject-changed"
+    | "surface-required-capability-added"
+    | "resource-shape-changed"
+    | "resource-removed"
+    | "capability-removed"
+    | "capability-required-changed"
+    | "digest-incompatible"
+    | "unresolved-ref";
+  target:
+    | { kind: "schema"; contractId: string; schemaName: string }
+    | {
+      kind: "surface";
+      contractId: string;
+      surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+      surfaceName: string;
+    }
+    | { kind: "resource"; contractId: string; resourceAlias: string }
+    | { kind: "capability"; contractId: string; capability: string }
+    | { kind: "contract"; contractId: string }
+    | { kind: "digest"; contractId: string; contractDigest: string };
+  path?: string;
+  reason: string;
 };
 
 type DeploymentPortalRoute = {
@@ -1124,7 +1157,7 @@ type PlanDeploymentAuthorityRequest = {
 type PlanDeploymentAuthorityResponse = { plan: AuthorityPlan };
 type ListAuthorityPlansRequest = {
   deploymentId?: string;
-  state?: "pending" | "accepted" | "rejected" | "expired";
+  state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
   classification?: "update" | "migration";
   kind?: "service" | "device" | "app" | "cli" | "native" | "device-user";
   offset?: number;
@@ -1214,9 +1247,18 @@ Rules:
 - accepting an authority update or authority migration approves desired
   authority changes, including resulting resource definition changes, and
   schedules reconciliation after the desired-state commit
-- authority plans include pending requests and accepted or rejected history;
-  auto-accepted `mutable-dev` same-contract replacement migrations remain
-  visible with a recorded decision timestamp and auto-approval reason
+- authority plans include pending requests and accepted, rejected, expired, or
+  superseded history; pending plans are actionable only while they target the
+  current deployment authority version, and newer pending plans for the same
+  deployment contract supersede older unanswered plans; auto-accepted
+  `mutable-dev` same-contract replacement migrations remain visible with a
+  recorded decision timestamp and auto-approval reason
+- `AuthorityPlan.breakingChanges` is the authoritative structured list of
+  concrete compatibility failures for operator UI; `AuthorityPlan.warnings`
+  remains a derived human-readable summary for logs and existing readers
+- `BreakingChange.path` is a JSON Pointer into the target when the verifier can
+  localize the breakage; schema targets are preferred over generic
+  `digest-incompatible` entries when a named schema is known
 - reconciliation is the only path that creates, updates, removes, adopts, or
   purges materialized resources and bindings
 - runtime bootstrap receives only current materialized authority where

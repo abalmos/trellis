@@ -57,6 +57,14 @@ type DeploymentAuthorityStorage = {
 type DeploymentAuthorityPlanStorage = {
   get(planId: string): Promise<DeploymentAuthorityPlan | undefined>;
   put(record: DeploymentAuthorityPlan): Promise<void>;
+  supersedePending?(filters: {
+    deploymentId: string;
+    contractId?: string;
+    desiredVersion?: string;
+    exceptPlanId?: string;
+    reason: string;
+    now?: string;
+  }): Promise<void>;
 };
 
 type DeploymentAuthorityPlanListStorage = DeploymentAuthorityPlanStorage & {
@@ -712,6 +720,13 @@ function createAcceptDeploymentAuthorityPlanHandler(
         await deps.deploymentAuthorityStorage.put(updatedAuthority);
         await deps.deploymentAuthorityPlanStorage.put(acceptedPlan);
       }
+      await deps.deploymentAuthorityPlanStorage.supersedePending?.({
+        deploymentId: plan.deploymentId,
+        desiredVersion: authority.version,
+        exceptPlanId: plan.planId,
+        reason: `superseded by accepted plan ${plan.planId}`,
+        now,
+      });
       await deps.capabilityDefinitionStorage?.replaceForDeployment(
         updatedAuthority.deploymentId,
         authorityCapabilityDefinitions(plan),

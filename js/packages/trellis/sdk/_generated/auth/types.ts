@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "GJaxa9eLvCBahgub__QH6vCrMMZM4qEdtcVU-OsjQ7A" as const;
+  "J9b9u106r0DsWY41bC_mwUEbF7roWXkQiNAAyBpTTh0" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -734,6 +734,39 @@ export type AuthDeploymentAuthorityPlanInput = {
 };
 export type AuthDeploymentAuthorityPlanOutput = {
   plan: {
+    breakingChanges: Array<
+      {
+        kind:
+          | "schema-required-removed"
+          | "schema-property-removed"
+          | "schema-property-type-changed"
+          | "schema-enum-value-removed"
+          | "schema-closed-shape-violation"
+          | "surface-removed"
+          | "surface-subject-changed"
+          | "surface-required-capability-added"
+          | "resource-shape-changed"
+          | "resource-removed"
+          | "capability-removed"
+          | "capability-required-changed"
+          | "digest-incompatible"
+          | "unresolved-ref";
+        path?: string;
+        reason: string;
+        target:
+          | { contractId: string; kind: "schema"; schemaName: string }
+          | {
+            contractId: string;
+            kind: "surface";
+            surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+            surfaceName: string;
+          }
+          | { contractId: string; kind: "resource"; resourceAlias: string }
+          | { capability: string; contractId: string; kind: "capability" }
+          | { contractId: string; kind: "contract" }
+          | { contractDigest: string; contractId: string; kind: "digest" };
+      }
+    >;
     classification: "update";
     createdAt: string;
     decisionAt?: string | null;
@@ -781,10 +814,43 @@ export type AuthDeploymentAuthorityPlanOutput = {
       };
       summary?: {};
     };
-    state?: "pending" | "accepted" | "rejected" | "expired";
+    state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
     warnings: Array<string>;
   } | {
     acknowledgementRequired: boolean;
+    breakingChanges: Array<
+      {
+        kind:
+          | "schema-required-removed"
+          | "schema-property-removed"
+          | "schema-property-type-changed"
+          | "schema-enum-value-removed"
+          | "schema-closed-shape-violation"
+          | "surface-removed"
+          | "surface-subject-changed"
+          | "surface-required-capability-added"
+          | "resource-shape-changed"
+          | "resource-removed"
+          | "capability-removed"
+          | "capability-required-changed"
+          | "digest-incompatible"
+          | "unresolved-ref";
+        path?: string;
+        reason: string;
+        target:
+          | { contractId: string; kind: "schema"; schemaName: string }
+          | {
+            contractId: string;
+            kind: "surface";
+            surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+            surfaceName: string;
+          }
+          | { contractId: string; kind: "resource"; resourceAlias: string }
+          | { capability: string; contractId: string; kind: "capability" }
+          | { contractId: string; kind: "contract" }
+          | { contractDigest: string; contractId: string; kind: "digest" };
+      }
+    >;
     classification: "migration";
     createdAt: string;
     decisionAt?: string | null;
@@ -832,7 +898,7 @@ export type AuthDeploymentAuthorityPlanOutput = {
       };
       summary?: {};
     };
-    state?: "pending" | "accepted" | "rejected" | "expired";
+    state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
     warnings: Array<string>;
   };
 };
@@ -840,6 +906,39 @@ export type AuthDeploymentAuthorityPlanOutput = {
 export type AuthDeploymentAuthorityPlansGetInput = { planId: string };
 export type AuthDeploymentAuthorityPlansGetOutput = {
   plan: {
+    breakingChanges: Array<
+      {
+        kind:
+          | "schema-required-removed"
+          | "schema-property-removed"
+          | "schema-property-type-changed"
+          | "schema-enum-value-removed"
+          | "schema-closed-shape-violation"
+          | "surface-removed"
+          | "surface-subject-changed"
+          | "surface-required-capability-added"
+          | "resource-shape-changed"
+          | "resource-removed"
+          | "capability-removed"
+          | "capability-required-changed"
+          | "digest-incompatible"
+          | "unresolved-ref";
+        path?: string;
+        reason: string;
+        target:
+          | { contractId: string; kind: "schema"; schemaName: string }
+          | {
+            contractId: string;
+            kind: "surface";
+            surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+            surfaceName: string;
+          }
+          | { contractId: string; kind: "resource"; resourceAlias: string }
+          | { capability: string; contractId: string; kind: "capability" }
+          | { contractId: string; kind: "contract" }
+          | { contractDigest: string; contractId: string; kind: "digest" };
+      }
+    >;
     classification: "update";
     createdAt: string;
     decisionAt?: string | null;
@@ -887,10 +986,43 @@ export type AuthDeploymentAuthorityPlansGetOutput = {
       };
       summary?: {};
     };
-    state?: "pending" | "accepted" | "rejected" | "expired";
+    state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
     warnings: Array<string>;
   } | {
     acknowledgementRequired: boolean;
+    breakingChanges: Array<
+      {
+        kind:
+          | "schema-required-removed"
+          | "schema-property-removed"
+          | "schema-property-type-changed"
+          | "schema-enum-value-removed"
+          | "schema-closed-shape-violation"
+          | "surface-removed"
+          | "surface-subject-changed"
+          | "surface-required-capability-added"
+          | "resource-shape-changed"
+          | "resource-removed"
+          | "capability-removed"
+          | "capability-required-changed"
+          | "digest-incompatible"
+          | "unresolved-ref";
+        path?: string;
+        reason: string;
+        target:
+          | { contractId: string; kind: "schema"; schemaName: string }
+          | {
+            contractId: string;
+            kind: "surface";
+            surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+            surfaceName: string;
+          }
+          | { contractId: string; kind: "resource"; resourceAlias: string }
+          | { capability: string; contractId: string; kind: "capability" }
+          | { contractId: string; kind: "contract" }
+          | { contractDigest: string; contractId: string; kind: "digest" };
+      }
+    >;
     classification: "migration";
     createdAt: string;
     decisionAt?: string | null;
@@ -938,7 +1070,7 @@ export type AuthDeploymentAuthorityPlansGetOutput = {
       };
       summary?: {};
     };
-    state?: "pending" | "accepted" | "rejected" | "expired";
+    state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
     warnings: Array<string>;
   };
 };
@@ -949,12 +1081,45 @@ export type AuthDeploymentAuthorityPlansListInput = {
   kind?: "service" | "device" | "app" | "cli" | "native" | "device-user";
   limit: number;
   offset?: number;
-  state?: "pending" | "accepted" | "rejected" | "expired";
+  state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
 };
 export type AuthDeploymentAuthorityPlansListOutput = {
   count: number;
   entries: Array<
     ({
+      breakingChanges: Array<
+        {
+          kind:
+            | "schema-required-removed"
+            | "schema-property-removed"
+            | "schema-property-type-changed"
+            | "schema-enum-value-removed"
+            | "schema-closed-shape-violation"
+            | "surface-removed"
+            | "surface-subject-changed"
+            | "surface-required-capability-added"
+            | "resource-shape-changed"
+            | "resource-removed"
+            | "capability-removed"
+            | "capability-required-changed"
+            | "digest-incompatible"
+            | "unresolved-ref";
+          path?: string;
+          reason: string;
+          target:
+            | { contractId: string; kind: "schema"; schemaName: string }
+            | {
+              contractId: string;
+              kind: "surface";
+              surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+              surfaceName: string;
+            }
+            | { contractId: string; kind: "resource"; resourceAlias: string }
+            | { capability: string; contractId: string; kind: "capability" }
+            | { contractId: string; kind: "contract" }
+            | { contractDigest: string; contractId: string; kind: "digest" };
+        }
+      >;
       classification: "update";
       createdAt: string;
       decisionAt?: string | null;
@@ -1002,10 +1167,43 @@ export type AuthDeploymentAuthorityPlansListOutput = {
         };
         summary?: {};
       };
-      state?: "pending" | "accepted" | "rejected" | "expired";
+      state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
       warnings: Array<string>;
     } | {
       acknowledgementRequired: boolean;
+      breakingChanges: Array<
+        {
+          kind:
+            | "schema-required-removed"
+            | "schema-property-removed"
+            | "schema-property-type-changed"
+            | "schema-enum-value-removed"
+            | "schema-closed-shape-violation"
+            | "surface-removed"
+            | "surface-subject-changed"
+            | "surface-required-capability-added"
+            | "resource-shape-changed"
+            | "resource-removed"
+            | "capability-removed"
+            | "capability-required-changed"
+            | "digest-incompatible"
+            | "unresolved-ref";
+          path?: string;
+          reason: string;
+          target:
+            | { contractId: string; kind: "schema"; schemaName: string }
+            | {
+              contractId: string;
+              kind: "surface";
+              surfaceKind: "rpc" | "operation" | "event" | "feed" | "job";
+              surfaceName: string;
+            }
+            | { contractId: string; kind: "resource"; resourceAlias: string }
+            | { capability: string; contractId: string; kind: "capability" }
+            | { contractId: string; kind: "contract" }
+            | { contractDigest: string; contractId: string; kind: "digest" };
+        }
+      >;
       classification: "migration";
       createdAt: string;
       decisionAt?: string | null;
@@ -1053,7 +1251,7 @@ export type AuthDeploymentAuthorityPlansListOutput = {
         };
         summary?: {};
       };
-      state?: "pending" | "accepted" | "rejected" | "expired";
+      state?: "pending" | "accepted" | "rejected" | "expired" | "superseded";
       warnings: Array<string>;
     })
   >;

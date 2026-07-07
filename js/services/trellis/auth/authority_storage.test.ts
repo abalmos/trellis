@@ -126,6 +126,7 @@ function makePlan(
     desiredChange: { add: ["a.use"] },
     materializationPreview: { resources: [] },
     warnings: [],
+    breakingChanges: [],
     createdAt: "2026-05-07T00:00:02.000Z",
     state: "pending",
     ...overrides,
@@ -323,6 +324,50 @@ Deno.test("deployment authority plans round-trip state and decision metadata", a
         decisionBy: { userId: "admin" },
         decisionReason: "accepted",
       }).proposal,
+    );
+  });
+});
+
+Deno.test("deployment authority plans supersede matching pending rows", async () => {
+  await withAuthorityRepositories(async ({ plans }) => {
+    await plans.put(makePlan({
+      planId: "plan-a",
+      proposal: {
+        ...makePlan().proposal,
+        summary: { desiredVersion: "v1" },
+      },
+    }));
+    await plans.put(makePlan({
+      planId: "plan-b",
+      proposal: {
+        ...makePlan().proposal,
+        contractDigest: "sha256-b",
+        summary: { desiredVersion: "v1" },
+      },
+    }));
+    await plans.put(makePlan({
+      planId: "plan-c",
+      proposal: {
+        ...makePlan().proposal,
+        summary: { desiredVersion: "v2" },
+      },
+    }));
+
+    await plans.supersedePending({
+      deploymentId: "svc-a",
+      contractId: "a.contract@v1",
+      desiredVersion: "v1",
+      exceptPlanId: "plan-a",
+      reason: "superseded by plan-a",
+      now: "2026-05-07T00:00:05.000Z",
+    });
+
+    assertEquals((await plans.get("plan-a"))?.state, "pending");
+    assertEquals((await plans.get("plan-b"))?.state, "superseded");
+    assertEquals((await plans.get("plan-c"))?.state, "pending");
+    assertEquals(
+      (await plans.get("plan-b"))?.decisionReason,
+      "superseded by plan-a",
     );
   });
 });

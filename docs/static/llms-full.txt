@@ -55,10 +55,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background work.
 - Jobs admin workbenches use `Jobs.Query` for server-side safe-field search,
-  sorting, grouping, and stats, and `Jobs.Inspect` for one-job detail,
-  timeline, attempts, related jobs, errors, trigger, and lineage. `Jobs.List` and
-  `Jobs.Get` are removed. `Jobs.Watch` is an invalidation feed only; rerun query
-  or inspection reads after `jobChanged`, `jobInspectChanged`, or
+  sorting, grouping, and stats, `Jobs.Metrics` for grouped operational summaries
+  and time buckets, and `Jobs.Inspect` for one-job detail, timeline, attempts,
+  related jobs, errors, trigger, and lineage. `Jobs.List` and `Jobs.Get` are
+  removed. `Jobs.Watch` is an invalidation feed only; rerun query, metrics, or
+  inspection reads after `jobChanged`, `jobInspectChanged`, or
   `queryInvalidated` frames.
 - Use job `keyConcurrency` for service-private work that must have at most one
   active job per logical key across service instances. The existing numeric job
@@ -163,6 +164,10 @@ Rules:
   Keep one case per module and never depend on cleanup or execution order.
   Migration authority plans should be allowed only in tests that intentionally
   cover migrations.
+- Deployment authority plans can be `superseded`; only `pending` plans targeting
+  the current desired authority version are actionable.
+- Deployment authority plans expose `breakingChanges` as structured per-target
+  compatibility failures; `warnings` is only the human-readable summary.
 - Trellis runtime behavior should be tested with live integration tests, not fake
   NATS, fake Trellis runtimes, fake auth, fake generated clients, or hand-built
   bootstrap/control-plane responders. If a live test needs a missing failure or

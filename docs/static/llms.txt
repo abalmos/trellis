@@ -59,10 +59,11 @@ commands.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background execution.
 - Jobs admin is a clean-break workbench surface: use `Jobs.Query` for server-side
-  search/sort/group/stats and `Jobs.Inspect` for one-job detail, timeline,
-  attempts, related jobs, errors, trigger, and lineage. Do not use removed
-  `Jobs.List` or `Jobs.Get`; `Jobs.Watch` only emits invalidations, so rerun the
-  query/inspection read.
+  search/sort/group/stats, `Jobs.Metrics` for grouped operational summaries and
+  time buckets, and `Jobs.Inspect` for one-job detail, timeline, attempts,
+  related jobs, errors, trigger, and lineage. Do not use removed `Jobs.List` or
+  `Jobs.Get`; `Jobs.Watch` only emits invalidations, so rerun the query,
+  metrics, or inspection read.
 - For service-private work that must be singleton per logical entity, declare
   job `keyConcurrency` instead of building ad hoc scheduler dedupe. Defaults
   should fail clearly (`stalePolicy: "fail-stale"`, `whenFull: "reject"`);
@@ -148,6 +149,10 @@ commands.
   bootstrap/control-plane responders to prove Trellis behavior. If a live test
   needs a missing failure or inspection surface, add the smallest named test
   helper instead of enriching a fake.
+- Deployment authority plans can be `superseded`; only `pending` plans targeting
+  the current desired authority version are actionable.
+- Deployment authority plans expose `breakingChanges` as structured per-target
+  compatibility failures; `warnings` is only the human-readable summary.
 - Wrap Rust Trellis generation in `cargo xtask prepare`.
 - Browser app repos should read the Svelte AI guide before wiring
   `createTrellisApp`, `TrellisProvider`, generated service SDK aliases for

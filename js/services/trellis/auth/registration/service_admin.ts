@@ -238,7 +238,7 @@ export async function registerServiceAdminRpcs(deps: {
     const current = await getDeploymentAuthority(args);
     if (current.isErr()) return current;
 
-    let analysis;
+    let analysis: Awaited<ReturnType<typeof analyzeContractProposal>>;
     try {
       analysis = await analyzeContractProposal(
         deps.contracts,
@@ -318,6 +318,7 @@ export async function registerServiceAdminRpcs(deps: {
         provisioning: "not-run",
       },
       warnings: [],
+      breakingChanges: [],
       createdAt: new Date().toISOString(),
       state: "pending" as const,
     };
@@ -331,6 +332,13 @@ export async function registerServiceAdminRpcs(deps: {
       : { ...planBase, classification: "update" };
     try {
       await deps.deploymentAuthorityPlanStorage.put(plan);
+      await deps.deploymentAuthorityPlanStorage.supersedePending({
+        deploymentId: args.input.deploymentId,
+        contractId: plan.proposal.contractId,
+        exceptPlanId: plan.planId,
+        reason: `superseded by newer plan ${plan.planId}`,
+        now: plan.createdAt,
+      });
       await deps.capabilityDefinitionStorage.replaceForDeployment(
         args.input.deploymentId,
         capabilityDefinitions,

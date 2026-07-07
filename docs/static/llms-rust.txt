@@ -25,6 +25,10 @@ Rules:
   `nats`; service permissions require current materialization for the accepted
   desired authority version. Stale or obsolete persisted projections are repaired
   by Trellis storage upgrade and reconciliation.
+- Deployment authority plans can be `superseded`; only `pending` plans targeting
+  the current desired authority version are actionable.
+- Deployment authority plans expose `breakingChanges` as structured per-target
+  compatibility failures; `warnings` is only the human-readable summary.
 - prefer generated descriptors and generated client/facade methods
 - prefer generated provider facades for service handler registration when they
   are available
@@ -68,12 +72,13 @@ Rules:
   queued jobs should be explicit policy.
 - Rust job handlers classify failures with `JobProcessError::retryable(...)` for
   JetStream redelivery or `JobProcessError::failed(...)` for terminal failure.
-- Jobs admin clients use `Jobs.Query` for server-side search/sort/group/stats and
+- Jobs admin clients use `Jobs.Query` for server-side search/sort/group/stats,
+  `Jobs.Metrics` for grouped operational summaries and time buckets, and
   `Jobs.Inspect` for one-job detail, timeline, attempts, related jobs,
   errors, trigger, and lineage. `Jobs.List` and `Jobs.Get` are removed.
-  `Jobs.Watch` is an invalidation feed only; rerun query/inspection reads after
-  invalidation frames. Admin mutations accept optional `reason`, and active
-  cancellation remains cooperative through `Jobs.Cancel`.
+  `Jobs.Watch` is an invalidation feed only; rerun query, metrics, or inspection
+  reads after invalidation frames. Admin mutations accept optional `reason`, and
+  active cancellation remains cooperative through `Jobs.Cancel`.
 
 ## Use generated descriptors and facades
 

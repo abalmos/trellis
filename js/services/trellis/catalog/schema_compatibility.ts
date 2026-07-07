@@ -7,6 +7,18 @@ import { canonicalizeJson, isJsonValue } from "@qlever-llc/trellis";
 
 type JsonObject = { [key: string]: JsonSchema };
 
+export type SchemaCompatibilityIssue = {
+  kind:
+    | "schema-required-removed"
+    | "schema-property-removed"
+    | "schema-property-type-changed"
+    | "schema-closed-shape-violation"
+    | "digest-incompatible"
+    | "unresolved-ref";
+  path?: string;
+  reason: string;
+};
+
 const SUPPORTED_OBJECT_KEYS = new Set([
   "additionalProperties",
   "properties",
@@ -60,6 +72,118 @@ function sameStringSet(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   const rightValues = new Set(right);
   return left.every((value) => rightValues.has(value));
+}
+
+function pointer(path: string, key: string): string {
+  return `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+}
+
+function genericSchemaIssue(path: string): SchemaCompatibilityIssue {
+  return {
+    kind: "digest-incompatible",
+    ...(path.length > 0 ? { path } : {}),
+    reason: path.length > 0
+      ? `Schema value at ${path} changed incompatibly.`
+      : "Schema changed incompatibly.",
+  };
+}
+
+function schemaCompatibilityIssues(
+  left: JsonSchema,
+  right: JsonSchema,
+  path: string,
+): SchemaCompatibilityIssue[] {
+  if (canonicalizeJson(left) === canonicalizeJson(right)) return [];
+  if (!isJsonObject(left) || !isJsonObject(right)) {
+    return [genericSchemaIssue(path)];
+  }
+  const leftType = objectValue(left, "type");
+  const rightType = objectValue(right, "type");
+  if (leftType !== rightType) {
+    return [{
+      kind: "schema-property-type-changed",
+      path: pointer(path, "type"),
+      reason: `Schema type changed from ${String(leftType)} to ${
+        String(rightType)
+      }.`,
+    }];
+  }
+  if (leftType !== "object") return [genericSchemaIssue(path)];
+  if (!hasOnlySupportedObjectKeys(left) || !hasOnlySupportedObjectKeys(right)) {
+    return [genericSchemaIssue(path)];
+  }
+  if (
+    !hasSupportedAdditionalProperties(left) ||
+    !hasSupportedAdditionalProperties(right)
+  ) return [genericSchemaIssue(path)];
+
+  const leftRequired = stringArray(objectValue(left, "required"));
+  const rightRequired = stringArray(objectValue(right, "required"));
+  if (!leftRequired || !rightRequired) return [genericSchemaIssue(path)];
+  const rightRequiredSet = new Set(rightRequired);
+  const issues: SchemaCompatibilityIssue[] = [];
+  for (const field of leftRequired) {
+    if (rightRequiredSet.has(field)) continue;
+    issues.push({
+      kind: "schema-required-removed",
+      path: pointer(pointer(path, "properties"), field),
+      reason: `Required field '${field}' was removed from the schema.`,
+    });
+  }
+  if (!sameStringSet(leftRequired, rightRequired) && issues.length === 0) {
+    issues.push({
+      kind: "schema-closed-shape-violation",
+      path: pointer(path, "required"),
+      reason: "Schema required fields changed incompatibly.",
+    });
+  }
+  const required = new Set(leftRequired);
+
+  const leftProperties = propertiesObject(objectValue(left, "properties"));
+  const rightProperties = propertiesObject(objectValue(right, "properties"));
+  if (!leftProperties || !rightProperties) return [genericSchemaIssue(path)];
+
+  if (
+    (!isOpenObject(left) || !isOpenObject(right)) &&
+    !sameStringSet(Object.keys(leftProperties), Object.keys(rightProperties))
+  ) {
+    issues.push({
+      kind: "schema-closed-shape-violation",
+      path: pointer(path, "properties"),
+      reason: "Closed object property set changed incompatibly.",
+    });
+  }
+
+  for (const [name, leftProperty] of Object.entries(leftProperties)) {
+    const propertyPath = pointer(pointer(path, "properties"), name);
+    const rightProperty = rightProperties[name];
+    if (rightProperty === undefined) {
+      if (required.has(name) || !isOpenObject(right)) {
+        issues.push({
+          kind: "schema-property-removed",
+          path: propertyPath,
+          reason: `Declared property '${name}' was removed from the schema.`,
+        });
+      }
+      continue;
+    }
+    issues.push(
+      ...schemaCompatibilityIssues(leftProperty, rightProperty, propertyPath),
+    );
+  }
+
+  for (const [name] of Object.entries(rightProperties)) {
+    if (leftProperties[name] !== undefined) continue;
+    if (required.has(name) || !isOpenObject(left)) {
+      issues.push({
+        kind: "schema-closed-shape-violation",
+        path: pointer(pointer(path, "properties"), name),
+        reason: `Declared property '${name}' was added incompatibly.`,
+      });
+    }
+  }
+
+  return issues;
 }
 
 function mergeResolvedSchemaCompatible(
@@ -159,6 +283,14 @@ export function mergeCompatibleSchemas(
   return mergeResolvedSchemaCompatible(left, right);
 }
 
+/** Returns structured reasons why two concrete schemas are not active-compatible. */
+export function describeSchemaCompatibility(
+  left: JsonSchema,
+  right: JsonSchema,
+): SchemaCompatibilityIssue[] {
+  return schemaCompatibilityIssues(left, right, "");
+}
+
 /**
  * Returns the conservative projected schema for compatible schema refs, or null
  * when Trellis cannot prove the resolved schemas are active-compatible.
@@ -173,4 +305,24 @@ export function mergeCompatibleSchemaRefs(
   const rightSchema = resolveSchemaRef(rightRef, rightSchemas);
   if (leftSchema === null || rightSchema === null) return null;
   return mergeResolvedSchemaCompatible(leftSchema, rightSchema);
+}
+
+/** Returns structured reasons why two schema refs are not active-compatible. */
+export function describeSchemaRefCompatibility(
+  leftRef: ContractSchemaRef,
+  leftSchemas: ContractSchemas | undefined,
+  rightRef: ContractSchemaRef,
+  rightSchemas: ContractSchemas | undefined,
+): SchemaCompatibilityIssue[] {
+  const leftSchema = resolveSchemaRef(leftRef, leftSchemas);
+  const rightSchema = resolveSchemaRef(rightRef, rightSchemas);
+  if (leftSchema === null || rightSchema === null) {
+    return [{
+      kind: "unresolved-ref",
+      reason: `Schema reference '${
+        leftSchema === null ? leftRef.schema : rightRef.schema
+      }' could not be resolved.`,
+    }];
+  }
+  return describeSchemaCompatibility(leftSchema, rightSchema);
 }
