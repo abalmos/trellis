@@ -23,16 +23,6 @@ type PortalAuthState = Omit<DeviceActivationAuth, "init"> & {
   init(): Promise<SessionKeyHandle>;
 };
 
-type ResolveDeviceUserAuthoritiesOperationClient = {
-  operation(operation: "Auth.DeviceUserAuthorities.Resolve"): {
-    input(input: { flowId: string }): {
-      start(): {
-        orThrow(): Promise<DeviceActivationOperationRef>;
-      };
-    };
-  };
-};
-
 function mapBindResponse(response: BindResponse): DeviceActivationBindResult {
   if (response.status === "bound") return { status: "bound" };
   return {
@@ -113,20 +103,10 @@ export function createPortalDeviceActivationController() {
         onAuthRequired: () => ({ status: "handled" }),
         contract,
       }).orThrow();
-      const operation = Reflect.get(trellis as object, "operation");
-      if (typeof operation !== "function") {
-        throw new TypeError(
-          "Connected Trellis client is missing operation support",
-        );
-      }
-      const activationClient: ResolveDeviceUserAuthoritiesOperationClient = {
-        operation: operation.bind(trellis),
-      };
 
       return {
         async activateDevice(input): Promise<DeviceActivationOperationRef> {
-          return await activationClient
-            .operation("Auth.DeviceUserAuthorities.Resolve")
+          return await trellis.operation.auth.deviceUserAuthoritiesResolve
             .input(input)
             .start()
             .orThrow();

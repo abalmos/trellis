@@ -1,11 +1,25 @@
 import type { BaseError } from "@qlever-llc/result";
 import type { AsyncResult } from "@qlever-llc/result";
-import { ulid } from "ulid";
+import type {
+  OperationEvent,
+  OperationSnapshot,
+  TerminalOperation,
+} from "@qlever-llc/trellis";
 import type {
   AuthResolveDeviceUserAuthoritiesOutput,
   AuthResolveDeviceUserAuthoritiesProgress,
 } from "@qlever-llc/trellis/auth";
-import type { OperationEvent, TerminalOperation } from "@qlever-llc/trellis";
+import { ulid } from "ulid";
+
+import {
+  createDeviceActivationReadyView,
+  createDeviceActivationSignInRequiredView,
+  createInvalidDeviceActivationView,
+  type DeviceActivationView,
+  mapDeviceActivationFailure,
+  mapDeviceActivationProgress,
+  mapDeviceActivationTerminal,
+} from "./internal/activation_view.ts";
 import {
   clearPreservedDeviceActivationCallbackState,
   getPreservedDeviceActivationCallbackState,
@@ -19,15 +33,6 @@ import {
   type DeviceActivationConnectAuthUrlState,
   resolveDeviceActivationUrlState,
 } from "./internal/portal_url.ts";
-import {
-  createDeviceActivationReadyView,
-  createDeviceActivationSignInRequiredView,
-  createInvalidDeviceActivationView,
-  type DeviceActivationView,
-  mapDeviceActivationFailure,
-  mapDeviceActivationProgress,
-  mapDeviceActivationTerminal,
-} from "./internal/activation_view.ts";
 
 export type DeviceActivationSignInOptions = {
   redirectTo?: string;
@@ -79,6 +84,18 @@ export type DeviceActivationOperationRef = {
     BaseError
   >;
 };
+
+type SnapshotCapableDeviceActivationOperationRef =
+  & DeviceActivationOperationRef
+  & {
+    get(): AsyncResult<
+      OperationSnapshot<
+        AuthResolveDeviceUserAuthoritiesProgress,
+        AuthResolveDeviceUserAuthoritiesOutput
+      >,
+      BaseError
+    >;
+  };
 
 export type DeviceActivationClient = {
   activateDevice(
@@ -305,6 +322,18 @@ export class DeviceActivationControllerCore {
 
     try {
       const operation = await this.#client.activateDevice({ flowId });
+      if (hasOperationSnapshot(operation)) {
+        const snapshot = await operation.get().match({
+          ok: (value) => value,
+          err: () => null,
+        });
+        if (snapshot?.progress && this.#isRunActive(runId)) {
+          this.state.view = mapDeviceActivationProgress(
+            flowId,
+            snapshot.progress,
+          );
+        }
+      }
       const watch = await operation.watch().match({
         ok: (value) => value,
         err: () => null,
@@ -394,4 +423,10 @@ export class DeviceActivationControllerCore {
       }
     }
   }
+}
+
+function hasOperationSnapshot(
+  operation: DeviceActivationOperationRef,
+): operation is SnapshotCapableDeviceActivationOperationRef {
+  return "get" in operation && typeof operation.get === "function";
 }

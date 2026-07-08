@@ -8,6 +8,17 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Added browser smoke coverage for login portal session refresh, signed logout,
+  consent denial, credential failures, account-link/password flows, and device
+  activation outcomes.
+
+### Fixed
+
+- Fixed device activation UI state so pending operation progress is loaded from
+  the current operation snapshot before watching for future events.
+
 ## [0.11.0-rc.5] - 2026-07-04
 
 ### Public Breaking Changes

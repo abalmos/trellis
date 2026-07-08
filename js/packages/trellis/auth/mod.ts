@@ -257,6 +257,8 @@ export {
   type DeploymentAuthorityNeeds,
   DeploymentAuthorityNeedsSchema,
   type DeploymentAuthorityPlan,
+  type DeploymentAuthorityPlanBreakingChange,
+  DeploymentAuthorityPlanBreakingChangeSchema,
   DeploymentAuthorityPlanSchema,
   type DeploymentAuthorityProposal,
   DeploymentAuthorityProposalSchema,

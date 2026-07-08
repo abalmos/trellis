@@ -1,11 +1,12 @@
-import { assertEquals } from "@std/assert";
 import { AsyncResult } from "@qlever-llc/result";
-
+import type { BaseError } from "@qlever-llc/result";
+import type { OperationEvent, OperationSnapshot } from "@qlever-llc/trellis";
 import type {
   AuthResolveDeviceUserAuthoritiesOutput,
   AuthResolveDeviceUserAuthoritiesProgress,
 } from "@qlever-llc/trellis/auth";
-import type { OperationEvent } from "@qlever-llc/trellis";
+import { assertEquals } from "@std/assert";
+
 import {
   type DeviceActivationAuth,
   type DeviceActivationBindResult,
@@ -14,6 +15,16 @@ import {
   type DeviceActivationOperationRef,
   type DeviceActivationSignInOptions,
 } from "./device_activation_controller.ts";
+
+type TestSnapshotOperationRef = DeviceActivationOperationRef & {
+  get(): AsyncResult<
+    OperationSnapshot<
+      AuthResolveDeviceUserAuthoritiesProgress,
+      AuthResolveDeviceUserAuthoritiesOutput
+    >,
+    BaseError
+  >;
+};
 
 function createStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
   const values = new Map<string, string>();
@@ -99,7 +110,7 @@ function createPendingReviewOperationRef(args: {
   output: AuthResolveDeviceUserAuthoritiesOutput;
   onProgress(): void;
   waitForCompletion: Promise<void>;
-}): DeviceActivationOperationRef {
+}): TestSnapshotOperationRef {
   const running = {
     id: "op_123",
     service: "trellis",
@@ -123,6 +134,9 @@ function createPendingReviewOperationRef(args: {
   };
 
   return {
+    get() {
+      return AsyncResult.ok(running);
+    },
     wait() {
       return AsyncResult.ok(terminal);
     },
