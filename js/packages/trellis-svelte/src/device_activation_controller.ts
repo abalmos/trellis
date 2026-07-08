@@ -1,5 +1,4 @@
-import type { BaseError } from "@qlever-llc/result";
-import type { AsyncResult } from "@qlever-llc/result";
+import type { AsyncResult, BaseError } from "@qlever-llc/result";
 import type {
   OperationEvent,
   OperationSnapshot,
