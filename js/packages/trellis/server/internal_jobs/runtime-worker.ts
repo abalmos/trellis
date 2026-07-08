@@ -255,7 +255,11 @@ export async function processWorkPayloadWithContextAndHeartbeat<TResult>(
       args: ResultValidationArgs<TResult>,
     ) => Promise<void> | void;
   },
-  runtime?: { latestState?: Job["state"]; redeliveryCount?: number },
+  runtime?: {
+    latestState?: Job["state"];
+    latestTries?: number;
+    redeliveryCount?: number;
+  },
   instanceId?: string,
 ): Promise<JobProcessOutcome<TResult> | undefined> {
   const event = parseWorkPayloadEvent(payload);
@@ -266,8 +270,12 @@ export async function processWorkPayloadWithContextAndHeartbeat<TResult>(
   if (!job) {
     return undefined;
   }
+  const currentJob = runtime?.latestState !== undefined &&
+      runtime.latestTries !== undefined
+    ? { ...job, state: runtime.latestState, tries: runtime.latestTries }
+    : job;
   return await manager.processWithHeartbeat(
-    job,
+    currentJob,
     cancellation,
     heartbeat,
     async (activeJob) => {
@@ -432,6 +440,7 @@ export async function startQueueWorkerLoop<TResult>(
           },
           {
             latestState: latestLifecycle?.state,
+            latestTries: latestLifecycle?.tries,
             redeliveryCount: msg.info?.redeliveryCount,
           },
           options.instanceId,

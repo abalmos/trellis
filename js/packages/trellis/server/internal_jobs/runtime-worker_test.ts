@@ -1,7 +1,7 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { assertEquals, assertRejects } from "@std/assert";
 import type { JobKeyCoordinator } from "./key-coordinator.ts";
-import { JobManager } from "./job-manager.ts";
+import { JobManager, JobProcessError } from "./job-manager.ts";
 import {
   ackActionForOutcome,
   JobsInfrastructureMissingError,
@@ -226,6 +226,74 @@ Deno.test("startQueueWorkerLoop prefers latest lifecycle event over stale projec
 
   assertEquals(acked, 1);
   assertEquals(handled, 1);
+});
+
+Deno.test("startQueueWorkerLoop processes redelivery from latest lifecycle tries", async () => {
+  let acked = 0;
+  let nacked = 0;
+  const published: unknown[] = [];
+  const job: Job = {
+    id: "job-redelivery",
+    service: "svc",
+    type: "refresh",
+    state: "pending",
+    context: jobContext,
+    payload: { siteId: "site-redelivery" },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 0,
+    maxTries: 2,
+  };
+  const event = createdEvent(job);
+
+  const loop = await startQueueWorkerLoop({
+    manager: new JobManager({
+      nc: {
+        publish(_subject, payload) {
+          published.push(JSON.parse(new TextDecoder().decode(payload)));
+        },
+      },
+      jobs: jobsBinding,
+    }),
+    consumer: {
+      consume() {
+        return Promise.resolve((async function* () {
+          yield {
+            data: new TextEncoder().encode(JSON.stringify(event)),
+            subject: "trellis.work.svc.refresh",
+            info: { redeliveryCount: 1 },
+            ack: () => {
+              acked += 1;
+            },
+            nak: () => {
+              nacked += 1;
+            },
+            inProgress: () => {},
+          };
+        })());
+      },
+    },
+    cancelSubscription: cancelSubscription(() => {}),
+    getLatestLifecycleEvent: () =>
+      Promise.resolve({
+        ...event,
+        eventType: "retry",
+        state: "retry",
+        tries: 1,
+      }),
+    handler: () => {
+      throw JobProcessError.retryable("retry again");
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await loop.stop();
+
+  assertEquals(acked, 1);
+  assertEquals(nacked, 0);
+  const terminal = published.at(-1) as { eventType?: string; tries?: number };
+  assertEquals(terminal.eventType, "dead");
+  assertEquals(terminal.tries, 2);
 });
 
 Deno.test("startQueueWorkerLoop cleans queued key state for terminal lifecycle before ack", async () => {
