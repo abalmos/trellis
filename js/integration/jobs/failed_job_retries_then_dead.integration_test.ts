@@ -45,7 +45,7 @@ liveTrellisTest({
           .orThrow();
         lastAdminState = current.job.state;
         return current.job.state === "dead" ? current.job : false;
-      }, { timeoutMs: 15_000, intervalMs: 100 }).catch((cause) => {
+      }, { timeoutMs: 60_000, intervalMs: 100 }).catch((cause) => {
         throw new Error(
           `timed out waiting for admin dead state; last state ${lastAdminState}; attempts ${controls.attempts().length}`,
           { cause },

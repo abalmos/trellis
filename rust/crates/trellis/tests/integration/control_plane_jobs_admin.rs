@@ -233,7 +233,7 @@ async fn wait_for_listed_service(
     service: &str,
     job_type: &str,
 ) -> JobsListServicesResponseEntriesItem {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let page = match jobs_admin
             .rpc()

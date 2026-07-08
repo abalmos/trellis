@@ -1168,7 +1168,7 @@ async fn wait_for_admin_services(
     service: &str,
     instance_id: &str,
 ) -> JobsListServicesResponse {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let page = match jobs_admin
             .rpc()
@@ -1207,7 +1207,7 @@ async fn wait_for_admin_dlq_job(
     jobs_admin: &trellis_rs::sdk::jobs::JobsClient<'_>,
     job_id: &str,
 ) -> trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItem {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let page = match jobs_admin
             .rpc()

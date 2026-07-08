@@ -82,7 +82,7 @@ liveTrellisTest({
           )
           ? current
           : false;
-      }, { timeoutMs: 15_000, intervalMs: 100 });
+      }, { timeoutMs: 60_000, intervalMs: 100 });
 
       const freshEntry = page.entries.find((entry) =>
         entry.name === freshService

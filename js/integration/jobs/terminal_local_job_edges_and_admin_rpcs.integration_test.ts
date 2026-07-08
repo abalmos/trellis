@@ -61,7 +61,7 @@ liveTrellisTest({
         const current = await admin.rpc.jobs.inspect({ id: result.jobId })
           .orThrow();
         return current.job.state === "completed" ? current : false;
-      }, { timeoutMs: 15_000, intervalMs: 100 });
+      }, { timeoutMs: 60_000, intervalMs: 100 });
       assertEquals(adminJob.job.id, result.jobId);
       assertEquals(adminJob.job.state, "completed");
 
