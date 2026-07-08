@@ -2993,7 +2993,7 @@
       "kind": "client",
       "id": "authority-plan.resource-change-migration-approved-and-bound",
       "fixture": "authority-plan",
-      "title": "Accepted resource migration binds the changed resource definition",
+      "title": "Auto-accepted safe resource update binds the changed resource definition",
       "coverage": [
         "deployment-authority",
         "contract-planning",

@@ -2145,6 +2145,23 @@ impl NatsContainer {
         runtime: ResolvedContainerRuntime,
         workdir: &IntegrationWorkdir,
     ) -> Result<Self, TrellisTestError> {
+        let mut last_error = None;
+        for _ in 0..3 {
+            match Self::start_once(runtime, workdir) {
+                Ok(container) => return Ok(container),
+                Err(error) if is_podman_port_race(&error) => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_error.expect("NATS container startup should have an error after retries"))
+    }
+
+    fn start_once(
+        runtime: ResolvedContainerRuntime,
+        workdir: &IntegrationWorkdir,
+    ) -> Result<Self, TrellisTestError> {
         remove_stale_nats_containers(runtime);
         let nats_dir = workdir.path().join("nats");
         fs::create_dir_all(nats_dir.join("data"))?;
@@ -2366,6 +2383,15 @@ fn keep_workdir_from_env() -> bool {
 fn reserve_local_port() -> Result<u16, TrellisTestError> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     Ok(listener.local_addr()?.port())
+}
+
+fn is_podman_port_race(error: &TrellisTestError) -> bool {
+    match error {
+        TrellisTestError::CommandFailed { stderr_tail, .. } => {
+            stderr_tail.contains("pasta failed") && stderr_tail.contains("Address already in use")
+        }
+        _ => false,
+    }
 }
 
 fn rewrite_trellis_config(

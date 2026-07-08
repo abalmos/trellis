@@ -8,20 +8,50 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.6] - 2026-07-08
+
+### Public Breaking Changes
+
+- Removed the service-hosted Health RPC surfaces from TypeScript and Rust
+  service facades. Health remains a Trellis-owned heartbeat/event surface rather
+  than a caller-invoked service RPC surface.
+
 ### Added
 
+- Added `Jobs.Metrics` and Console job-type diagnostics with health matrix rows,
+  scoped throughput/latency charts, queue wait/runtime aggregates, worker
+  counts, and error fingerprints.
+- Added schema-aware deployment authority plan diffs, structured breaking-change
+  records, superseded plan state, and Console rendering for capability, schema,
+  resource, surface, docs, and contract-use changes.
 - Added browser smoke coverage for login portal session refresh, signed logout,
   consent denial, credential failures, account-link/password flows, and device
   activation outcomes.
 
 ### Changed
 
+- Updated deployment authority approval policy so safe updates auto-apply during
+  service bootstrap, new capability grants and resource aliases require pending
+  approval, strict same-contract migrations require approval, and `mutable-dev`
+  records and auto-accepts migrations.
+- Updated Jobs worker identity and presence handling so runtime worker subjects
+  use the logical service identifier consistently across TypeScript and Rust.
 - Updated the Console job detail view with denser operational status, timeline,
   attempt, lineage, related-job, and JSON payload inspection surfaces.
+- Updated service-author LLM guidance and design docs for the current Jobs,
+  authority, resources, and service-runtime behavior.
 
 ### Fixed
 
 - Fixed Console authority-plan state typing to recognize superseded plans.
+- Fixed Jobs admin projections so each independent Rust `service-jobs`
+  projection uses its own durable consumer instead of sharing stream delivery
+  with other projections.
+- Fixed Rust Jobs admin cancellation so cancelling an already-terminal job
+  returns the current terminal job instead of surfacing an invalid error
+  payload.
+- Fixed TypeScript jobs so retryable handler failures publish `dead` once the
+  job reaches `maxDeliver`.
 - Fixed Rust jobs workers so per-message processing or terminal cleanup errors
   request redelivery, best-effort release keyed active slots, and keep the queue
   worker running.

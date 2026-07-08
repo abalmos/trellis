@@ -21,6 +21,7 @@ use trellis_rs::sdk::jobs::types::{
 use trellis_rs::service::{ConnectedServiceRuntime, ServerError};
 
 use crate::support::assertions::assert_case_registered;
+use crate::support::jobs_admin::start_rust_jobs_admin;
 
 const JOBS_SERVICE_ID: &str = "trellis.integration.jobs-service@v1";
 const JOBS_CLIENT_ID: &str = "trellis.integration.jobs-client@v1";
@@ -344,9 +345,12 @@ struct KeyedJobRunState {
 
 async fn setup_jobs_fixture() -> JobsFixture {
     let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions {
+            disable_jobs_admin: true,
+            ..trellis_test::TrellisTestRuntimeOptions::default()
+        })
+        .await
+        .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
@@ -848,6 +852,8 @@ async fn jobs_failed_job_retries_then_dead() {
     assert_case_registered("jobs.failed-job-retries-then-dead", "jobs", "jobs");
 
     let mut fixture = setup_jobs_fixture().await;
+    let _jobs_admin_process =
+        start_rust_jobs_admin(&fixture.runtime, &mut fixture.admin, &fixture.bootstrap_url).await;
     let admin_contract = jobs_admin_client_contract().expect("build jobs admin client contract");
     let admin_client = fixture
         .admin
@@ -935,14 +941,18 @@ async fn jobs_job_context_propagates_request_and_trace() {
 #[tokio::test]
 async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
     let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions {
+            disable_jobs_admin: true,
+            ..trellis_test::TrellisTestRuntimeOptions::default()
+        })
+        .await
+        .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
+    let _jobs_admin_process = start_rust_jobs_admin(&runtime, &mut admin, &bootstrap_url).await;
     let admin_contract = jobs_admin_client_contract().expect("build jobs admin client contract");
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_contract)
@@ -1160,7 +1170,7 @@ async fn wait_for_admin_services(
 ) -> JobsListServicesResponse {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let page = jobs_admin
+        let page = match jobs_admin
             .rpc()
             .jobs()
             .list_services(&JobsListServicesRequest {
@@ -1168,7 +1178,14 @@ async fn wait_for_admin_services(
                 limit: 20,
             })
             .await
-            .expect("call generated Jobs.ListServices");
+        {
+            Ok(page) => page,
+            Err(error) if is_retryable_jobs_admin_error(&error) && Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+            Err(error) => panic!("call generated Jobs.ListServices: {error}"),
+        };
         if page.entries.iter().any(|entry| {
             entry.name == service
                 && entry
@@ -1192,7 +1209,7 @@ async fn wait_for_admin_dlq_job(
 ) -> trellis_rs::sdk::jobs::types::JobsQueryResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
-        let page = jobs_admin
+        let page = match jobs_admin
             .rpc()
             .jobs()
             .query(&JobsQueryRequest {
@@ -1210,7 +1227,17 @@ async fn wait_for_admin_dlq_job(
                 window: None,
             })
             .await
-            .expect("call generated Jobs.Query");
+        {
+            Ok(page) => page,
+            Err(error)
+                if is_retryable_jobs_admin_error(&error)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+            Err(error) => panic!("call generated Jobs.Query: {error}"),
+        };
         if let Some(job) = page.entries.into_iter().find(|entry| entry.id == job_id) {
             return job;
         }
@@ -1226,6 +1253,16 @@ fn timestamp_seconds_ago(seconds: i64) -> String {
     (OffsetDateTime::now_utc() - TimeDuration::seconds(seconds))
         .format(&Rfc3339)
         .expect("format worker heartbeat timestamp")
+}
+
+fn is_retryable_jobs_admin_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+    match error {
+        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+            message.contains("no responders") || message.contains("NoResponders")
+        }
+        trellis_rs::client::TrellisClientError::Timeout => true,
+        _ => false,
+    }
 }
 
 fn jobs_admin_client_contract(

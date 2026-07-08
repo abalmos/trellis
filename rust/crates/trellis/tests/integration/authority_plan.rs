@@ -892,7 +892,7 @@ async fn authority_plan_resource_change_migration_approved_and_bound() {
     )
     .await;
     let service_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
-    let mut connect_handle = spawn_service_connect(
+    let connect_handle = spawn_service_connect(
         runtime.trellis_url(),
         "authority-plan-resource-service",
         RESOURCE_SERVICE_CONTRACT_ID,
@@ -903,16 +903,19 @@ async fn authority_plan_resource_change_migration_approved_and_bound() {
         &mut admin,
         &bootstrap_url,
         STRICT_DEPLOYMENT,
-        "pending",
-        "migration",
+        "accepted",
+        "update",
         changed_contract.digest(),
     )
     .await;
-    accept_plan(&mut admin, &bootstrap_url, &plan).await;
+    assert_eq!(
+        plan.decision_reason.as_deref(),
+        Some("auto-accepted safe deployment authority update")
+    );
     admin
         .wait_ready(&bootstrap_url, STRICT_DEPLOYMENT)
         .await
-        .expect("deployment authority ready after resource migration");
+        .expect("deployment authority ready after safe resource update");
     let mut service = connect_handle
         .await
         .expect("resource service connect task panicked")

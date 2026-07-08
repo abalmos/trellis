@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { createAuth, defineAppContract } from "@qlever-llc/trellis";
 import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
 import {
@@ -6,6 +6,10 @@ import {
   caseScopedName,
 } from "@qlever-llc/trellis-test/integration";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
+import {
+  assertRefreshHookFailure,
+  restartWithFailOnceHook,
+} from "./_auth_admin_refresh_rollback.ts";
 
 const CASE_ID =
   "control-plane.admin-service-deployment-rollback-fault" as const;
@@ -40,12 +44,6 @@ liveTrellisTest({
   name:
     "control-plane.admin-service-deployment-rollback-fault rolls back service admin faults and retries successfully",
   scope: runtimeScopeForCase(CASE_ID),
-  runtime: {
-    failOnceHooks: [
-      "auth.admin.serviceDeployments.createAuthority",
-      "auth.admin.serviceDeployments.deleteCascadeRecord",
-    ],
-  },
   async fn(runtime) {
     const admin = await runtime.connectClient({
       name: caseScopedName("admin-service-rollback-client", CASE_ID),
@@ -72,13 +70,15 @@ liveTrellisTest({
         );
       };
 
+      const createHook = "auth.admin.serviceDeployments.createAuthority";
+      await restartWithFailOnceHook(runtime, createHook);
       const failedCreate = await admin.rpc.auth.deploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       });
-      assert(failedCreate.isErr());
+      assertRefreshHookFailure(failedCreate, createHook);
       assertEquals(await findDeployment(), undefined);
 
       await admin.rpc.auth.deploymentsCreate({
@@ -100,12 +100,14 @@ liveTrellisTest({
         instanceKey: secondAuth.sessionKey,
       }).orThrow();
 
+      const removeHook = "auth.admin.serviceDeployments.deleteCascadeRecord";
+      await restartWithFailOnceHook(runtime, removeHook);
       const failedRemove = await admin.rpc.auth.deploymentsRemove({
         kind: "service",
         deploymentId,
         cascade: true,
       });
-      assert(failedRemove.isErr());
+      assertRefreshHookFailure(failedRemove, removeHook);
       assertEquals((await findDeployment())?.deploymentId, deploymentId);
       assertEquals(
         (await findServiceInstance(provisioned.instance.instanceId))

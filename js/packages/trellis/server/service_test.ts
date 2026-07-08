@@ -868,7 +868,6 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
               transports: {
                 native: {
                   natsServers: ["nats://127.0.0.1:4222"],
-                  tlsRequired: true,
                 },
                 websocket: { natsServers: ["ws://localhost:8080"] },
               },
@@ -878,9 +877,7 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
               auth: {
                 mode: "service_identity",
                 iatSkewSeconds: 30,
-                tokenVersion: 2,
               },
-              rollout: "canary",
             },
             binding: {
               contractId: core.CONTRACT_ID,
@@ -888,9 +885,9 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
               resources: {
                 kv: {},
                 jobs: {
+                  serviceName: "svc",
                   namespace: "jobs",
                   queues: {},
-                  rollout: "canary",
                 },
               },
               requestId: "req_123",
@@ -2289,6 +2286,7 @@ Deno.test("service wait resolves after service stop when no job handlers are reg
 Deno.test("service-local JobRef wait observes scoped lifecycle events", async () => {
   const published: PublishedNatsMessage[] = [];
   const { connection, service, restore } = await connectJobsHandlerTestService({
+    jetstreamJobs: true,
     published,
   });
 
@@ -2304,7 +2302,7 @@ Deno.test("service-local JobRef wait observes scoped lifecycle events", async ()
       `trellis.jobs.jobs_handler_test.refreshSummaries.${ref.id}.completed`,
       new TextEncoder().encode(JSON.stringify({
         jobId: ref.id,
-        service: "jobs_handler_test",
+        service: "jobs-handler-test",
         jobType: "refreshSummaries",
         eventType: "completed",
         state: "completed",
@@ -2330,8 +2328,9 @@ Deno.test("service-local JobRef wait observes scoped lifecycle events", async ()
 });
 
 Deno.test("service-local JobRef wait observes terminal event before wait starts", async () => {
-  const { connection, service, restore } =
-    await connectJobsHandlerTestService();
+  const { connection, service, restore } = await connectJobsHandlerTestService({
+    jetstreamJobs: true,
+  });
 
   try {
     const ref = await service.jobs.refreshSummaries.create({
@@ -2343,7 +2342,7 @@ Deno.test("service-local JobRef wait observes terminal event before wait starts"
       `trellis.jobs.jobs_handler_test.refreshSummaries.${ref.id}.completed`,
       new TextEncoder().encode(JSON.stringify({
         jobId: ref.id,
-        service: "jobs_handler_test",
+        service: "jobs-handler-test",
         jobType: "refreshSummaries",
         eventType: "completed",
         state: "completed",
@@ -2372,6 +2371,7 @@ Deno.test("service-local JobRef wait observes terminal event before wait starts"
 Deno.test("service-local JobRef cancel publishes scoped cancelled lifecycle event", async () => {
   const published: PublishedNatsMessage[] = [];
   const { connection, service, restore } = await connectJobsHandlerTestService({
+    jetstreamJobs: true,
     published,
   });
 
@@ -2399,7 +2399,7 @@ Deno.test("service-local JobRef cancel publishes scoped cancelled lifecycle even
       previousState: string;
     };
     assertEquals(event.jobId, ref.id);
-    assertEquals(event.service, "jobs_handler_test");
+    assertEquals(event.service, "jobs-handler-test");
     assertEquals(event.jobType, "refreshSummaries");
     assertEquals(event.eventType, "cancelled");
     assertEquals(event.state, "cancelled");
@@ -2424,6 +2424,7 @@ Deno.test("service-local JobRef cancel publishes scoped cancelled lifecycle even
 Deno.test("service-local JobRef cancel is a no-op after terminal completion", async () => {
   const published: PublishedNatsMessage[] = [];
   const { connection, service, restore } = await connectJobsHandlerTestService({
+    jetstreamJobs: true,
     published,
   });
 
@@ -2436,7 +2437,7 @@ Deno.test("service-local JobRef cancel is a no-op after terminal completion", as
       `trellis.jobs.jobs_handler_test.refreshSummaries.${ref.id}.completed`,
       new TextEncoder().encode(JSON.stringify({
         jobId: ref.id,
-        service: "jobs_handler_test",
+        service: "jobs-handler-test",
         jobType: "refreshSummaries",
         eventType: "completed",
         state: "completed",

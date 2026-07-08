@@ -586,7 +586,7 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     file:
       "authority-plan/resource_change_migration_approved_and_bound.integration_test.ts",
     testName:
-      "authority-plan.resource-change-migration-approved-and-bound accepts resource migration and binds resource",
+      "authority-plan.resource-change-migration-approved-and-bound auto-accepts safe resource update and binds resource",
     runtime: "live-trellis",
   },
   {

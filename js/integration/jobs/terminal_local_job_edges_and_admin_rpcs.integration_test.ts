@@ -1,6 +1,7 @@
-import { assert, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
 import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import { assert, assertEquals } from "@std/assert";
+
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import {
@@ -56,8 +57,11 @@ liveTrellisTest({
       assertEquals(result.getState, "completed");
       assertEquals(result.cancelState, "completed");
 
-      const adminJob = await admin.rpc.jobs.inspect({ id: result.jobId })
-        .orThrow();
+      const adminJob = await runtime.waitFor(async () => {
+        const current = await admin.rpc.jobs.inspect({ id: result.jobId })
+          .orThrow();
+        return current.job.state === "completed" ? current : false;
+      }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(adminJob.job.id, result.jobId);
       assertEquals(adminJob.job.state, "completed");
 

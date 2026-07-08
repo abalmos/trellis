@@ -1,3 +1,4 @@
+import type { MsgHdrs } from "@nats-io/nats-core";
 import {
   assertEquals,
   assertExists,
@@ -5,15 +6,14 @@ import {
   assertMatch,
   assertRejects,
 } from "@std/assert";
-import type { MsgHdrs } from "@nats-io/nats-core";
-import { JobNotEnqueuedError } from "../../jobs.ts";
 
+import { JobNotEnqueuedError } from "../../jobs.ts";
+import type { JobsBinding } from "./bindings.ts";
 import {
   JobCancellationToken,
   JobManager,
   JobProcessError,
 } from "./job-manager.ts";
-import type { JobsBinding } from "./bindings.ts";
 import type { JobKeyCoordinator } from "./key-coordinator.ts";
 import type { Job, JobContext } from "./types.ts";
 
@@ -192,6 +192,60 @@ Deno.test("JobManager preserves structured failure error string", async () => {
     JSON.parse(failedEvent.error ?? ""),
     JSON.parse(serializedError),
   );
+});
+
+Deno.test("JobManager marks retryable failure dead at max tries", async () => {
+  const published: PublishedMessage[] = [];
+  const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
+    nc: {
+      publish(subject, payload, opts) {
+        published.push({ subject, payload, headers: opts?.headers });
+      },
+    },
+    jobs: {
+      serviceName: "svc",
+      namespace: "svc",
+      queues: {
+        refresh: {
+          queueType: "refresh",
+          publishPrefix: "trellis.jobs.svc.refresh",
+          workSubject: "trellis.work.svc.refresh",
+          consumerName: "svc-refresh",
+          payload: { schema: "RefreshPayload" },
+          result: { schema: "RefreshResult" },
+          maxDeliver: 1,
+          backoffMs: [],
+          ackWaitMs: 1_000,
+          progress: false,
+          logs: false,
+          dlq: false,
+          concurrency: 1,
+        },
+      },
+    },
+    meta: {
+      nextJobId: () => "job-dead",
+      nowIso: () => "2024-01-01T00:00:00.000Z",
+    },
+  });
+  const job = await manager.create("refresh", { siteId: "site-1" });
+
+  const outcome = await manager.process(
+    job,
+    new JobCancellationToken(),
+    async () => {
+      throw JobProcessError.retryable("try again");
+    },
+  );
+
+  assertEquals(outcome, { outcome: "dead", tries: 1, error: "try again" });
+  const deadEvent = JSON.parse(
+    new TextDecoder().decode(published[published.length - 1]!.payload),
+  ) as { eventType?: string; state?: string; tries?: number; error?: string };
+  assertEquals(deadEvent.eventType, "dead");
+  assertEquals(deadEvent.state, "dead");
+  assertEquals(deadEvent.tries, 1);
+  assertEquals(deadEvent.error, "try again");
 });
 
 Deno.test("JobManager keyed create rejects before publishing created", async () => {

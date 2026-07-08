@@ -1,12 +1,12 @@
 import { headers as natsHeaders, type MsgHdrs } from "@nats-io/nats-core";
 import { ulid } from "ulid";
+
+import { JobNotEnqueuedError } from "../../jobs.ts";
 import {
   createMapCarrier,
   injectTraceContext,
 } from "../../telemetry/carrier.ts";
 import { recordTrellisError } from "../../telemetry/mod.ts";
-import { JobNotEnqueuedError } from "../../jobs.ts";
-
 import {
   ActiveJob,
   ActiveJobRuntimeError,
@@ -84,6 +84,7 @@ export class JobProcessError extends Error {
 export type JobProcessOutcome<TResult> =
   | { outcome: "completed"; tries: number; result: TResult }
   | { outcome: "retry"; tries: number; error: string }
+  | { outcome: "dead"; tries: number; error: string }
   | { outcome: "failed"; tries: number; error: string }
   | { outcome: "cancelled"; tries: number }
   | { outcome: "deferred"; tries: number; reason: string }
@@ -662,6 +663,21 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
           if (release === "staleCompletion") {
             await this.#publishStaleCompletionIgnored(job, tries);
             return { outcome: "stale_completion_ignored", tries };
+          }
+          if (tries >= job.maxTries) {
+            await this.#publishJobEvent(job.type, job.id, {
+              jobId: job.id,
+              service: job.service,
+              jobType: job.type,
+              eventType: "dead",
+              state: "dead",
+              previousState: "active",
+              context: job.context,
+              tries,
+              error: detail,
+              timestamp: this.#meta().nowIso(),
+            });
+            return { outcome: "dead", tries, error: detail };
           }
           await this.#publishJobEvent(job.type, job.id, {
             jobId: job.id,

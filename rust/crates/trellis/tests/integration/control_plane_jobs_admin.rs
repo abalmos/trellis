@@ -15,6 +15,7 @@ use trellis_rs::sdk::jobs::types::{
 use trellis_rs::service::ConnectedServiceRuntime;
 
 use crate::support::assertions::assert_service_case_registered;
+use crate::support::jobs_admin::start_rust_jobs_admin;
 
 const CASE_ID: &str = "control-plane.jobs-admin-lists-and-cancels-job";
 const SERVICE_CONTRACT_ID: &str =
@@ -66,14 +67,18 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
     assert_service_case_registered(CASE_ID, "control-plane", "control_plane_jobs_admin");
 
     let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions {
+            disable_jobs_admin: true,
+            ..trellis_test::TrellisTestRuntimeOptions::default()
+        })
+        .await
+        .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
+    let _jobs_admin_process = start_rust_jobs_admin(&runtime, &mut admin, &bootstrap_url).await;
     let service_contract =
         trellis_test::TrellisTestContract::from_manifest_json(SERVICE_CONTRACT_JSON)
             .expect("build jobs admin probe service contract");
@@ -230,7 +235,7 @@ async fn wait_for_listed_service(
 ) -> JobsListServicesResponseEntriesItem {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     loop {
-        let page = jobs_admin
+        let page = match jobs_admin
             .rpc()
             .jobs()
             .list_services(&JobsListServicesRequest {
@@ -238,7 +243,17 @@ async fn wait_for_listed_service(
                 limit: 20,
             })
             .await
-            .expect("call generated Jobs.ListServices");
+        {
+            Ok(page) => page,
+            Err(error)
+                if is_retryable_jobs_admin_error(&error)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+            Err(error) => panic!("call generated Jobs.ListServices: {error}"),
+        };
         if let Some(entry) = page.entries.into_iter().find(|entry| {
             entry.name == service
                 && entry
@@ -253,5 +268,15 @@ async fn wait_for_listed_service(
             "Jobs.ListServices did not return service worker before timeout"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn is_retryable_jobs_admin_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+    match error {
+        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+            message.contains("no responders") || message.contains("NoResponders")
+        }
+        trellis_rs::client::TrellisClientError::Timeout => true,
+        _ => false,
     }
 }

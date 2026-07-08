@@ -1,5 +1,6 @@
-import { assertEquals } from "@std/assert";
 import { Result } from "@qlever-llc/trellis";
+import { assertEquals } from "@std/assert";
+
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createAuthorityPlanFixture } from "./_fixture.ts";
 
@@ -9,7 +10,7 @@ const fixture = createAuthorityPlanFixture(CASE_ID);
 
 liveTrellisTest({
   name:
-    "authority-plan.resource-change-migration-approved-and-bound accepts resource migration and binds resource",
+    "authority-plan.resource-change-migration-approved-and-bound auto-accepts safe resource update and binds resource",
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
     await runtime.deployments.create({
@@ -51,12 +52,15 @@ liveTrellisTest({
         return connected;
       });
       connectPromise.catch(() => undefined);
-      const plan = await fixture.waitForPendingPlan(runtime, {
+      const plan = await fixture.findAcceptedPlan(runtime, {
         deploymentId: fixture.strictDeployment,
-        classification: "migration",
+        classification: "update",
         contractDigest: fixture.resourceChangedContract.CONTRACT_DIGEST,
       });
-      await fixture.acceptPlan(runtime, plan);
+      assertEquals(
+        plan.decisionReason,
+        "auto-accepted safe deployment authority update",
+      );
       await runtime.deployments.waitReady(fixture.strictDeployment);
 
       changedService = await connectPromise;

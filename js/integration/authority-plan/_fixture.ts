@@ -1,17 +1,18 @@
-import { assert } from "@std/assert";
 import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { assert } from "@std/assert";
 import { Type } from "typebox";
-import type {
-  LiveTrellisRuntime,
-  RuntimeContract,
-} from "../_support/runtime.ts";
+
 import {
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,
   integrationSlug,
 } from "../_support/names.ts";
+import type {
+  LiveTrellisRuntime,
+  RuntimeContract,
+} from "../_support/runtime.ts";
 
 export type AuthorityPlanEntry = {
   readonly planId: string;
@@ -480,7 +481,18 @@ export function createAuthorityPlanFixture(caseId: string) {
         args.contractDigest === undefined ||
         plan.proposal.contractDigest === args.contractDigest
       );
-    }, { timeoutMs: 10_000, intervalMs: 100 });
+    }, { timeoutMs: 10_000, intervalMs: 100 }).catch(async (cause) => {
+      const plans = await requireAuthority(runtime).plans.list({
+        deploymentId: args.deploymentId,
+        limit: 50,
+      });
+      throw new Error(
+        `timed out waiting for pending ${args.classification} plan; saw ${
+          JSON.stringify(plans.entries)
+        }`,
+        { cause },
+      );
+    });
   }
 
   async function findAcceptedPlan(

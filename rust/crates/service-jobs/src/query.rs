@@ -334,25 +334,36 @@ impl JobsQuery {
         &self,
         request: &JobsCancelRequest,
     ) -> Result<JobsCancelResponse, JobsQueryError> {
-        let job = self
-            .transition_job(&request.id, "pending|retry|active", |job, now| {
-                match job.state {
-                    JobState::Pending | JobState::Retry | JobState::Active => {
-                        Some(cancelled_event_with_admin_reason(
-                            &job.service,
-                            &job.job_type,
-                            &job.id,
-                            &job.context,
-                            job.state,
-                            job.tries,
-                            now,
-                            request.reason.as_deref(),
-                        ))
-                    }
-                    _ => None,
+        let existing = self
+            .store
+            .get_job_by_global_id(&request.id)?
+            .ok_or_else(|| JobsQueryError::JobNotFound {
+                key: request.id.clone(),
+            })?;
+        let job = if is_terminal(existing.state) {
+            existing
+        } else {
+            self.transition_job(&request.id, "pending|retry|active", |job, now| {
+                if matches!(
+                    job.state,
+                    JobState::Pending | JobState::Retry | JobState::Active
+                ) {
+                    Some(cancelled_event_with_admin_reason(
+                        &job.service,
+                        &job.job_type,
+                        &job.id,
+                        &job.context,
+                        job.state,
+                        job.tries,
+                        now,
+                        request.reason.as_deref(),
+                    ))
+                } else {
+                    None
                 }
             })
-            .await?;
+            .await?
+        };
 
         Ok(JobsCancelResponse {
             job: job_to_cancel_item(&job, &self.job_metadata(&job)?)?,
