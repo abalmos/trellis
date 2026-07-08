@@ -8,6 +8,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed service bootstrap authority planning so additive provided RPC,
+  operation, feed, and event surfaces are included in safe auto-applied updates,
+  preventing stale materialized NATS subscription grants after contract uploads.
+
 ## [0.11.0-rc.6] - 2026-07-08
 
 ### Public Breaking Changes

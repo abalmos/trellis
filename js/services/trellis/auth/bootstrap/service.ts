@@ -1175,17 +1175,24 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
     const providedSurfaces = analysis.contributedAvailability.surfaces.map(
       ({ required: _required, ...surface }) => surface,
     );
+    const requestedAuthorityNeeds = mergeBoundaries(requestedNeeds, {
+      ...emptyAuthorityNeeds(),
+      surfaces: providedSurfaces.map((surface) => ({
+        ...surface,
+        required: true,
+      })),
+    });
     const desiredNeeds = desiredStateToAuthorityNeeds(
       deploymentAuthority.desiredState,
     );
     const fit = evaluateProposalNeedsFit(
       desiredNeeds,
-      requestedNeeds,
+      requestedAuthorityNeeds,
     );
     const now = (deps.now?.() ?? new Date()).toISOString();
     const planClassification = classifyDeploymentAuthorityPlan(
       desiredNeeds,
-      requestedNeeds,
+      requestedAuthorityNeeds,
     );
     const requestedProposalNeeds = authorityNeedsToProposalNeeds(
       requestedNeeds,

@@ -140,6 +140,22 @@ function expandedContract(): TrellisContractV1 {
   };
 }
 
+function expandedRpcContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    rpc: {
+      ...baseContract().rpc,
+      "RelatedRefs.List": {
+        version: "v1",
+        subject: "rpc.v1.Collections.RelatedRefs.List",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        capabilities: { call: ["svc.call"] },
+      },
+    },
+  };
+}
+
 function relaxedResourceContract(): TrellisContractV1 {
   return {
     ...baseContract(),
@@ -1145,7 +1161,10 @@ Deno.test("POST /bootstrap/service allows retry with accepted compatibility migr
   const providedSurfaces = replacementAnalysis.contributedAvailability.surfaces
     .map(({ required: _required, ...surface }) => surface);
   const setup = await createApp({
-    envelopeBoundary: replacementNeeds,
+    envelopeBoundary: await contractBoundary(
+      createTestContracts(),
+      replacement.contract,
+    ),
     initialOffers: [serviceOffer(current)],
     initialBindings: [kvBinding("cache")],
     initialPlans: [
@@ -2219,6 +2238,31 @@ Deno.test("POST /bootstrap/service auto-applies safe resource definition update"
     mode: "auto-update",
     serviceInstanceId: "svc_1",
   });
+});
+
+Deno.test("POST /bootstrap/service auto-applies additive provided surfaces", async () => {
+  const expanded = await validatedContract(expandedRpcContract());
+  const setup = await createApp({
+    knownContracts: [{ digest: expanded.digest, contract: expanded.contract }],
+    initialBindings: [kvBinding("cache")],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: expanded.contract.id,
+    contractDigest: expanded.digest,
+    contract: expanded.contract,
+  });
+
+  assertEquals(response.status, 200);
+  assertEquals(setup.plans[0]?.classification, "update");
+  assertEquals(setup.plans[0]?.state, "accepted");
+  assertEquals(setup.plans[0]?.desiredChange.surfaces, [{
+    contractId: "svc.example@v1",
+    kind: "rpc",
+    name: "RelatedRefs.List",
+    action: "call",
+    required: true,
+  }]);
 });
 
 Deno.test("POST /bootstrap/service auto-accepts resource migration in mutable-dev", async () => {
