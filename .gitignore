@@ -63,3 +63,5 @@ rust/xtask/Cargo.lock
 rust/tools/generate/Cargo.lock
 
 .trellis
+
+.cortexkit
