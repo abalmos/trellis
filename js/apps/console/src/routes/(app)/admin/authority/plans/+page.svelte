@@ -16,7 +16,7 @@
   import { getTrellis } from "$lib/trellis";
 
   type AuthorityKind = DeploymentAuthorityKind;
-  type PlanState = "pending" | "accepted" | "rejected" | "expired";
+  type PlanState = "pending" | "accepted" | "rejected" | "expired" | "superseded";
   type PlanClassification = "update" | "migration";
   type PlanListInput = {
     deploymentId?: string;
@@ -33,7 +33,7 @@
 
   const trellis = getTrellis();
   const request = trellis.request.bind(trellis) as AuthorityPlansRequest;
-  const states: (PlanState | "")[] = ["", "pending", "accepted", "rejected", "expired"];
+  const states: (PlanState | "")[] = ["", "pending", "accepted", "rejected", "expired", "superseded"];
   const classifications: (PlanClassification | "")[] = ["", "update", "migration"];
   const kinds: (AuthorityKind | "")[] = ["", "service", "device", "app", "cli", "native", "device-user"];
   const pageSize = 10;
@@ -73,7 +73,7 @@
   }
 
   function isPlanState(value: unknown): value is PlanState {
-    return value === "pending" || value === "accepted" || value === "rejected" || value === "expired";
+    return value === "pending" || value === "accepted" || value === "rejected" || value === "expired" || value === "superseded";
   }
 
   function statusVariant(state: PlanState): "healthy" | "degraded" | "unhealthy" | "offline" {

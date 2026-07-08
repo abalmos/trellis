@@ -11,6 +11,7 @@
   import Globe from "lucide-svelte/icons/globe";
   import Key from "lucide-svelte/icons/key";
   import LayoutGrid from "lucide-svelte/icons/layout-grid";
+  import Maximize2 from "lucide-svelte/icons/maximize-2";
   import Menu from "lucide-svelte/icons/menu";
   import Minus from "lucide-svelte/icons/minus";
   import Moon from "lucide-svelte/icons/moon";
@@ -25,6 +26,7 @@
   import Sun from "lucide-svelte/icons/sun";
   import TriangleAlert from "lucide-svelte/icons/triangle-alert";
   import Users from "lucide-svelte/icons/users";
+  import X from "lucide-svelte/icons/x";
 
   type IconName =
     | "activity"
@@ -34,8 +36,10 @@
     | "box"
     | "chevronDown"
     | "clipboard"
+    | "close"
     | "cpu"
     | "database"
+    | "expand"
     | "grid"
     | "key"
     | "menu"
@@ -62,8 +66,10 @@
     box: Box,
     chevronDown: ChevronDown,
     clipboard: Clipboard,
+    close: X,
     cpu: Cpu,
     database: Database,
+    expand: Maximize2,
     grid: LayoutGrid,
     key: Key,
     menu: Menu,

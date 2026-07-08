@@ -49,6 +49,9 @@
     label?: string;
     initiallyExpanded?: boolean;
     maxDepth?: number;
+    visited?: Set<object>;
+    fullscreenEnabled?: boolean;
+    forceExpandStrings?: boolean;
   };
 
   let {
@@ -56,22 +59,61 @@
     label,
     initiallyExpanded = true,
     maxDepth = 4,
+    visited,
+    fullscreenEnabled = true,
+    forceExpandStrings = false,
   }: Props = $props();
 
   const summary = $derived(summarize(value));
   const canExpand = $derived(
     summary.kind === "object" || summary.kind === "array",
   );
+  const isCircular = $derived(
+    canExpand && visited !== undefined && visited.has(value as object),
+  );
+  const isRoot = $derived(label === undefined);
 
-  let expanded = $state(false);
+  let expandedOverride = $state<boolean>();
+  let stringExpandedOverride = $state<boolean>();
+  const expanded = $derived(expandedOverride ?? initiallyExpanded);
+  const stringExpanded = $derived(stringExpandedOverride ?? forceExpandStrings);
+  let fullscreenOpen = $state(false);
+  let dialog: HTMLDialogElement | undefined = $state();
 
   $effect(() => {
-    expanded = initiallyExpanded;
+    initiallyExpanded;
+    expandedOverride = undefined;
+  });
+
+  $effect(() => {
+    forceExpandStrings;
+    stringExpandedOverride = undefined;
+  });
+
+  $effect(() => {
+    if (fullscreenOpen && dialog) {
+      if (!dialog.open) dialog.showModal();
+    } else if (!fullscreenOpen && dialog) {
+      if (dialog.open) dialog.close();
+    }
   });
 
   function toggle() {
     if (!canExpand) return;
-    expanded = !expanded;
+    expandedOverride = !expanded;
+  }
+
+  function toggleString() {
+    if (summary.kind !== "string") return;
+    stringExpandedOverride = !stringExpanded;
+  }
+
+  function openFullscreen() {
+    fullscreenOpen = true;
+  }
+
+  function closeFullscreen() {
+    fullscreenOpen = false;
   }
 
   function copyChild() {
@@ -91,6 +133,14 @@
   function asObject(value: unknown): Array<[string, unknown]> {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
     return Object.entries(value as Record<string, unknown>);
+  }
+
+  function addToVisited(set: Set<object> | undefined, value: unknown): Set<object> {
+    const next = new Set<object>(set);
+    if (value !== null && typeof value === "object") {
+      next.add(value);
+    }
+    return next;
   }
 </script>
 
@@ -114,12 +164,14 @@
       <span class="json-tree-punct">:</span>
     {/if}
     <span class={["json-tree-pill", `json-tree-pill-${summary.kind}`]}>
-      {#if summary.kind === "object"}
+      {#if isCircular}
+        [Circular reference]
+      {:else if summary.kind === "object"}
         {`{ ${summary.length ?? 0} ${summary.length === 1 ? "key" : "keys"} }`}
       {:else if summary.kind === "array"}
         {`[ ${summary.length ?? 0} ${summary.length === 1 ? "item" : "items"} ]`}
       {:else if summary.kind === "string"}
-        "{summary.preview ?? ""}"
+        "{stringExpanded && typeof value === "string" ? value : (summary.preview ?? "")}"
       {:else if summary.kind === "number"}
         {String(value)}
       {:else if summary.kind === "boolean"}
@@ -128,7 +180,28 @@
         null
       {/if}
     </span>
+    {#if summary.kind === "string" && typeof value === "string" && value.length > 80}
+      <button
+        type="button"
+        class="json-tree-expand"
+        aria-label={stringExpanded ? "Collapse string" : "Expand string"}
+        onclick={toggleString}
+      >
+        {stringExpanded ? "less" : "more"}
+      </button>
+    {/if}
     {#if canExpand && initiallyExpanded}
+      {#if fullscreenEnabled && isRoot}
+        <button
+          type="button"
+          class="json-tree-fullscreen"
+          aria-label="View at full width"
+          onclick={openFullscreen}
+        >
+          <Icon name="expand" size={12} />
+          <span>Full width</span>
+        </button>
+      {/if}
       <button
         type="button"
         class="json-tree-copy"
@@ -139,7 +212,8 @@
       </button>
     {/if}
   </div>
-  {#if canExpand && expanded}
+  {#if canExpand && expanded && !isCircular}
+    {@const childVisited = addToVisited(visited, value)}
     <div class="json-tree-children">
       {#if summary.kind === "array"}
         {#each asArray(value) as item, index (index)}
@@ -148,6 +222,9 @@
             label={`${index}`}
             initiallyExpanded={initiallyExpanded && maxDepth > 1}
             maxDepth={maxDepth - 1}
+            visited={childVisited}
+            {fullscreenEnabled}
+            {forceExpandStrings}
           />
         {/each}
       {:else}
@@ -157,12 +234,47 @@
             label={key}
             initiallyExpanded={initiallyExpanded && maxDepth > 1}
             maxDepth={maxDepth - 1}
+            visited={childVisited}
+            {fullscreenEnabled}
+            {forceExpandStrings}
           />
         {/each}
       {/if}
     </div>
   {/if}
 </div>
+
+{#if fullscreenEnabled && fullscreenOpen}
+  <dialog bind:this={dialog} class="modal" onclose={closeFullscreen} aria-labelledby="json-fullscreen-title">
+    <div class="modal-box json-fullscreen-box border border-base-300 bg-base-100 max-w-[min(96vw,120rem)]">
+      <div class="json-fullscreen-header">
+        <h3 id="json-fullscreen-title" class="json-fullscreen-title">
+          {label !== undefined ? `JSON: ${label}` : "JSON"}
+        </h3>
+        <button
+          type="button"
+          class="json-fullscreen-close"
+          aria-label="Close"
+          onclick={closeFullscreen}
+        >
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+      <div class="json-fullscreen-content">
+        <JsonTree
+          {value}
+          initiallyExpanded={true}
+          maxDepth={20}
+          fullscreenEnabled={false}
+          forceExpandStrings={true}
+        />
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button type="submit" aria-label="Close">close</button>
+    </form>
+  </dialog>
+{/if}
 
 <style>
   .json-tree {
@@ -208,7 +320,7 @@
 
   .json-tree-key {
     color: var(--color-base-content);
-    word-break: break-all;
+    overflow-wrap: break-word;
   }
 
   .json-tree-punct {
@@ -218,9 +330,10 @@
   .json-tree-pill {
     align-items: baseline;
     color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
-    display: inline-flex;
+    display: block;
     font-size: 0.72rem;
-    gap: 0.25rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .json-tree-pill-string {
@@ -259,6 +372,101 @@
   }
 
   .json-tree-copy:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  .json-tree-fullscreen {
+    align-items: center;
+    background: transparent;
+    border: none;
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    cursor: pointer;
+    display: inline-flex;
+    font-family: inherit;
+    font-size: 0.65rem;
+    gap: 0.25rem;
+    margin-left: 0.3rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.25rem;
+    transition: background 150ms ease-out, color 150ms ease-out;
+  }
+
+  .json-tree-fullscreen:hover {
+    background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .json-tree-fullscreen:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+
+  .json-fullscreen-box {
+    max-height: 85vh;
+    overflow: auto;
+    padding: 0;
+  }
+
+  .json-fullscreen-header {
+    align-items: center;
+    border-bottom: 1px solid var(--color-base-300);
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    position: sticky;
+    top: 0;
+    background: var(--color-base-100);
+    z-index: 1;
+  }
+
+  .json-fullscreen-title {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0;
+  }
+
+  .json-fullscreen-close {
+    background: transparent;
+    border: none;
+    color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 0.25rem;
+  }
+
+  .json-fullscreen-close:hover {
+    color: var(--color-base-content);
+  }
+
+  .json-fullscreen-content {
+    padding: 1rem;
+  }
+
+  .json-tree-expand {
+    background: transparent;
+    border: none;
+    color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.65rem;
+    margin-left: 0.2rem;
+    opacity: 0;
+    padding: 0;
+    transition: opacity 150ms ease-out, color 150ms ease-out;
+  }
+
+  .json-tree-row:hover .json-tree-expand,
+  .json-tree-expand:focus-visible {
+    opacity: 1;
+  }
+
+  .json-tree-expand:hover {
+    color: var(--color-base-content);
+  }
+
+  .json-tree-expand:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: 1px;
   }

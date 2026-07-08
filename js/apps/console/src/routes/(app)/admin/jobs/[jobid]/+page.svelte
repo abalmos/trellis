@@ -77,6 +77,12 @@
     return Boolean(j && typeof j.type === "string" && j.type.length > 0);
   }
 
+  const jobDeploymentId = $derived.by(() => {
+    if (!job) return "";
+    const svc = (job as { service?: unknown }).service;
+    return typeof svc === "string" && svc.length > 0 ? svc : "";
+  });
+
   const stateStatus = jobStateStatus;
 
   function attemptDurationLabel(attempt: { startedAt?: string; endedAt?: string; createdAt?: string; updatedAt?: string } | null | undefined): string {
@@ -150,40 +156,6 @@
       // not JSON; fall through
     }
     return null;
-  }
-
-  function formatJson(message: string | undefined, indent: number): string {
-    if (!message) return "";
-    const trimmed = message.trim();
-    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return message;
-    try {
-      return JSON.stringify(JSON.parse(trimmed), null, indent);
-    } catch {
-      return message;
-    }
-  }
-
-  function isKeyLine(line: string): boolean {
-    const t = line.trim();
-    return t.startsWith("\"") && t.includes(":");
-  }
-
-  function isStringLine(line: string): boolean {
-    const t = line.trim();
-    return t.startsWith("\"") && !t.includes(":");
-  }
-
-  function isNumberLine(line: string): boolean {
-    return /^[-0-9]/.test(line.trim());
-  }
-
-  function isBoolLine(line: string): boolean {
-    const t = line.trim();
-    return t === "true" || t === "false";
-  }
-
-  function isNullLine(line: string): boolean {
-    return line.trim() === "null";
   }
 
   async function copyText(key: string, value: unknown) {
@@ -406,12 +378,12 @@
 
 <section class="job-detail">
   {#if job}
-    <PageToolbar title={canShowJobName(job) ? job.type : "Job"}>
-      {#snippet meta()}
-        <StatusBadge label={job.state} status={stateStatus(job.state)} />
-        <span class="text-xs text-base-content/60">{job.service}</span>
-        {#if job.trigger?.kind}
-          <span class="text-xs text-base-content/50">via {job.trigger.kind}</span>
+    <PageToolbar title={canShowJobName(job) ? job.type : "Job"} description={job.trigger?.kind ? `via ${job.trigger.kind}` : undefined}>
+      {#snippet eyebrowExtra()}
+        {#if jobDeploymentId}
+          <a class="job-deployment-link break-anywhere" href={resolve(`/admin/services/${encodeURIComponent(jobDeploymentId)}`)} title={jobDeploymentId}>
+            {jobDeploymentId}
+          </a>
         {/if}
       {/snippet}
       {#snippet actions()}
@@ -454,263 +426,338 @@
   {:else if !job}
     <EmptyState title="Job not found" description="No job exists for this id." />
   {:else}
+    <div class="stats-strip">
+      <div class="stats-cell stats-cell-status">
+        <span class="stats-cell-label">Status</span>
+        <span class={["stats-cell-value tabular-nums font-semibold", job.state === "failed" || job.state === "dead" ? "status-failed" : job.state === "completed" ? "status-completed" : job.state === "active" || job.state === "retry" ? "status-active" : ""]}>
+          {job.state}
+        </span>
+      </div>
+      <div class="stats-cell" title={jobRuntimeMs != null && runtimeBaseline ? `Job runtime vs p50 ${compactDuration(runtimeBaseline.p50 ?? 0)} / p95 ${compactDuration(runtimeBaseline.p95 ?? 0)} over the last ${runtimeBaseline.count} ${runtimeBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Runtime since the job started"}>
+        <span class="stats-cell-label">Runtime</span>
+        <span class="stats-cell-value tabular-nums">{jobRuntime}</span>
+        {#if runtimeBaseline}
+          {@const tone = jobRuntimeMs != null ? runtimeTone(jobRuntimeMs, runtimeBaseline.p50, runtimeBaseline.p95) : "fast"}
+          {@const pct = jobRuntimeMs != null ? ratio(jobRuntimeMs, runtimeBaseline) : null}
+          {@const p50Pct = p50Ratio(runtimeBaseline)}
+          <div class={["status-row-bar", `status-row-bar-${tone}`]} aria-hidden="true">
+            {#if pct != null}
+              <span class="status-row-tick" style="--bar-pct: {Math.round(pct * 100)}%"></span>
+            {/if}
+            {#if p50Pct != null}
+              <span class="status-row-rule" style="--bar-pct: {Math.round(p50Pct * 100)}%"></span>
+            {/if}
+          </div>
+          <span class="stats-cell-baseline tabular-nums">
+            {#if runtimeBaseline.p50 != null && runtimeBaseline.p95 != null}
+              p50 {compactDuration(runtimeBaseline.p50)} · p95 {compactDuration(runtimeBaseline.p95)}
+            {:else}
+              n {runtimeBaseline.count} job{runtimeBaseline.count === 1 ? "" : "s"}
+            {/if}
+          </span>
+        {:else if metricsUnavailable}
+          <span class="stats-cell-baseline">Baseline unavailable</span>
+        {:else if metrics}
+          <span class="stats-cell-baseline">No baseline yet</span>
+        {:else}
+          <span class="stats-cell-baseline">Loading baseline…</span>
+        {/if}
+      </div>
+      <div class="stats-cell" title={jobQueueWaitMs != null && queueWaitBaseline ? `Queue wait vs p50 ${compactDuration(queueWaitBaseline.p50 ?? 0)} / p95 ${compactDuration(queueWaitBaseline.p95 ?? 0)} over the last ${queueWaitBaseline.count} ${queueWaitBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Time the job spent in the queue before starting"}>
+        <span class="stats-cell-label">Queue wait</span>
+        <span class="stats-cell-value tabular-nums">{jobQueueWaitMs != null ? compactDuration(jobQueueWaitMs) : UNSET}</span>
+        {#if queueWaitBaseline && jobQueueWaitMs != null}
+          {@const tone = runtimeTone(jobQueueWaitMs, queueWaitBaseline.p50, queueWaitBaseline.p95)}
+          {@const pct = ratio(jobQueueWaitMs, queueWaitBaseline)}
+          {@const p50Pct = p50Ratio(queueWaitBaseline)}
+          <div class={["status-row-bar", `status-row-bar-${tone}`]} aria-hidden="true">
+            <span class="status-row-tick" style="--bar-pct: {Math.round(pct * 100)}%"></span>
+            {#if p50Pct != null}
+              <span class="status-row-rule" style="--bar-pct: {Math.round(p50Pct * 100)}%"></span>
+            {/if}
+          </div>
+          <span class="stats-cell-baseline tabular-nums">
+            {#if queueWaitBaseline.p50 != null && queueWaitBaseline.p95 != null}
+              p50 {compactDuration(queueWaitBaseline.p50)} · p95 {compactDuration(queueWaitBaseline.p95)}
+            {:else}
+              n {queueWaitBaseline.count} job{queueWaitBaseline.count === 1 ? "" : "s"}
+            {/if}
+          </span>
+        {:else if jobQueueWaitMs == null}
+          <span class="stats-cell-baseline">Job not started</span>
+        {/if}
+      </div>
+      <div class="stats-cell">
+        <span class="stats-cell-label">Tries</span>
+        <span class={["stats-cell-value tabular-nums", job.tries > 1 ? "text-warning" : ""]}>{job.tries}/{job.maxTries}</span>
+        {#if job.tries > 1}
+          <span class="stats-cell-baseline text-warning">retrying</span>
+        {:else}
+          <span class="stats-cell-baseline">first attempt</span>
+        {/if}
+      </div>
+      {#if job.deadline}
+        {@const deadlinePast = new Date(job.deadline) < new Date()}
+        <div class="stats-cell">
+          <span class="stats-cell-label">Deadline</span>
+          <span class={["stats-cell-value tabular-nums", deadlinePast ? "text-error" : ""]}>{formatDate(job.deadline)}</span>
+          <span class={["stats-cell-baseline", deadlinePast ? "text-error" : ""]}>{deadlinePast ? "overdue" : "wall clock"}</span>
+        </div>
+      {/if}
+      <div class="stats-cell">
+        <span class="stats-cell-label">Created</span>
+        <span class="stats-cell-value tabular-nums">{formatDate(job.createdAt)}</span>
+        <span class="stats-cell-baseline">submitted</span>
+      </div>
+      {#if job.startedAt}
+        <div class="stats-cell">
+          <span class="stats-cell-label">Started</span>
+          <span class="stats-cell-value tabular-nums">{formatDate(job.startedAt)}</span>
+          <span class="stats-cell-baseline">worker pickup</span>
+        </div>
+      {/if}
+      {#if job.completedAt}
+        <div class="stats-cell">
+          <span class="stats-cell-label">Completed</span>
+          <span class="stats-cell-value tabular-nums">{formatDate(job.completedAt)}</span>
+          <span class="stats-cell-baseline">terminal</span>
+        </div>
+      {/if}
+      {#if job.errorDetail?.worker?.service}
+        <div class="stats-cell" title="The worker instance that last failed this job">
+          <span class="stats-cell-label">Last worker</span>
+          <span class="stats-cell-value">
+            <span class="trellis-identifier">{job.errorDetail.worker.service}</span>
+            {#if job.errorDetail.worker.runtime}
+              <span class="stats-cell-baseline">{job.errorDetail.worker.runtime}{job.errorDetail.worker.version ? ` · ${job.errorDetail.worker.version}` : ""}</span>
+            {/if}
+          </span>
+          <span class="stats-cell-baseline">{job.errorDetail.worker.instanceId ?? "no instance"}</span>
+        </div>
+      {/if}
+      {#if job.progress && !["completed", "failed", "dead", "cancelled", "dismissed", "expired", "skipped"].includes(job.state) && (job.progress.current !== undefined || job.progress.step !== undefined)}
+        <div class="stats-cell">
+          <span class="stats-cell-label">Progress</span>
+          <span class="stats-cell-value tabular-nums">
+            {#if job.progress.current !== undefined && job.progress.total !== undefined}
+              {job.progress.current}/{job.progress.total}
+            {:else if job.progress.current !== undefined}
+              {job.progress.current}
+            {:else}
+              {job.progress.step ?? UNSET}
+            {/if}
+          </span>
+          <span class="stats-cell-baseline">{job.progress.message ?? job.progress.step ?? "in flight"}</span>
+        </div>
+      {/if}
+      {#if job.concurrency?.key}
+        <div class="stats-cell">
+          <span class="stats-cell-label">Concurrency</span>
+          <span class="trellis-identifier stats-cell-value break-anywhere">{job.concurrency.key}</span>
+          {#if job.concurrency.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0}
+            <span class="stats-cell-baseline text-warning">{job.concurrency.staleTakeoverCount} stale takeover{job.concurrency.staleTakeoverCount === 1 ? "" : "s"}</span>
+          {:else}
+            <span class="stats-cell-baseline">keyed</span>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
     <div class="job-body">
       <div class="job-body-left">
-        <Panel title="At a glance">
-          {#snippet actions()}
-            <button
-              type="button"
-              class="btn btn-ghost btn-xs"
-              aria-label="Refresh metrics"
-              disabled={metrics === null && !metricsUnavailable}
-              onclick={() => void loadJobMetrics()}
-            >
-              <Icon name="refresh" size={12} />
-              <span>Baseline</span>
-            </button>
-          {/snippet}
-          <div class="stats-grid">
-            <div class="stats-cell" title={jobRuntimeMs != null && runtimeBaseline ? `Job runtime vs p50 ${compactDuration(runtimeBaseline.p50 ?? 0)} / p95 ${compactDuration(runtimeBaseline.p95 ?? 0)} over the last ${runtimeBaseline.count} ${runtimeBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Runtime since the job started"}>
-              <span class="stats-cell-label">Runtime</span>
-              <span class="stats-cell-value tabular-nums">{jobRuntime}</span>
-              {#if runtimeBaseline}
-                {@const tone = jobRuntimeMs != null ? runtimeTone(jobRuntimeMs, runtimeBaseline.p50, runtimeBaseline.p95) : "fast"}
-                {@const pct = jobRuntimeMs != null ? ratio(jobRuntimeMs, runtimeBaseline) : null}
-                {@const p50Pct = p50Ratio(runtimeBaseline)}
-                <div class={["status-row-bar", `status-row-bar-${tone}`]} aria-hidden="true">
-                  {#if pct != null}
-                    <span class="status-row-tick" style="--bar-pct: {Math.round(pct * 100)}%"></span>
-                  {/if}
-                  {#if p50Pct != null}
-                    <span class="status-row-rule" style="--bar-pct: {Math.round(p50Pct * 100)}%"></span>
-                  {/if}
-                </div>
-                <span class="stats-cell-baseline tabular-nums">
-                  {#if runtimeBaseline.p50 != null && runtimeBaseline.p95 != null}
-                    p50 {compactDuration(runtimeBaseline.p50)} · p95 {compactDuration(runtimeBaseline.p95)}
-                  {:else}
-                    n {runtimeBaseline.count}
-                  {/if}
-                </span>
-              {:else if metricsUnavailable}
-                <span class="stats-cell-baseline">Baseline unavailable</span>
-              {:else if metrics}
-                <span class="stats-cell-baseline">No baseline yet</span>
+        <div class="job-io-grid">
+          {#if showOutput}
+            <Panel title="Output">
+              {#snippet actions()}
+                {#if outputIsError}
+                  <span class="badge badge-error badge-sm" aria-label="{errors.length} errors">{errors.length}</span>
+                {:else}
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    aria-label="Copy result"
+                    disabled={job.result === undefined || job.result === null}
+                    onclick={() => void copyText("job-result", job.result)}
+                  >
+                    {copyFlash === "job-result" ? "Copied" : "Copy"}
+                  </button>
+                {/if}
+              {/snippet}
+              {#if outputIsError}
+                <ul class="errors-list">
+                  {#each errors as err (err.fingerprint)}
+                    {@const payload = parseErrorPayload(err.message)}
+                    {@const ctx = payload && payload.context && typeof payload.context === "object" ? (payload.context as Record<string, unknown>) : null}
+                    <li>
+                      <div class="error-payload">
+                        <div class="error-payload-summary">
+                          <div class="error-payload-type">{String(payload?.type ?? "Error")}</div>
+                          <div class="error-payload-message">{String(payload?.message ?? err.message)}</div>
+                          {#if ctx && ctx.causeMessage}
+                            <div class="error-payload-cause">{String(ctx.causeMessage)}</div>
+                          {/if}
+                        </div>
+                        <dl class="error-context-list">
+                          {#if ctx && ctx.traceId}
+                            <div class="error-context-row">
+                              <dt>Trace</dt>
+                              <dd class="trellis-identifier break-anywhere">{String(ctx.traceId)}</dd>
+                            </div>
+                          {/if}
+                        </dl>
+                        {#if err.stack}
+                          <details class="error-payload-details">
+                            <summary>
+                              <span>Show stack</span>
+                              <button
+                                type="button"
+                                class="error-payload-copy"
+                                aria-label="Copy stack trace"
+                                onclick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void copyText(`error-stack-${err.fingerprint}`, err.stack ?? "");
+                                }}
+                              >
+                                <Icon name="clipboard" size={12} />
+                                <span>{copyFlash === `error-stack-${err.fingerprint}` ? "Copied" : "Copy"}</span>
+                              </button>
+                            </summary>
+                            <pre class="error-stack" aria-label="Stack trace">{err.stack}</pre>
+                          </details>
+                        {/if}
+                        {#if payload}
+                          <details class="error-payload-details">
+                            <summary>
+                              <span>Show raw JSON</span>
+                            </summary>
+                            <JsonTree value={payload} initiallyExpanded={true} maxDepth={4} />
+                          </details>
+                        {/if}
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {:else if job.result !== undefined && job.result !== null}
+                <JsonTree value={job.result} initiallyExpanded={true} maxDepth={4} />
               {:else}
-                <span class="stats-cell-baseline">Loading baseline…</span>
+                <p class="text-xs text-base-content/60">No result recorded.</p>
               {/if}
+            </Panel>
+          {/if}
+
+          <Panel title="Inputs">
+            {#snippet actions()}
+              <button
+                type="button"
+                class="btn btn-ghost btn-xs"
+                aria-label="Copy payload"
+                disabled={job.payload === undefined || job.payload === null}
+                onclick={() => void copyText("job-payload", job.payload)}
+              >
+                {copyFlash === "job-payload" ? "Copied" : "Copy"}
+              </button>
+            {/snippet}
+            {#if job.payload !== undefined && job.payload !== null}
+              <JsonTree value={job.payload} initiallyExpanded={true} maxDepth={4} />
+            {:else}
+              <p class="text-xs text-base-content/60">No payload recorded.</p>
+            {/if}
+          </Panel>
+        </div>
+
+        <Panel title="Identity">
+          <dl class="identity-list">
+            <div class="identity-row">
+              <dt>Job id</dt>
+              <dd class="flex flex-wrap items-center gap-2">
+                <span class="trellis-identifier break-anywhere">{job.id}</span>
+                <button
+                  type="button"
+                  class="identity-copy"
+                  aria-label="Copy job id"
+                  onclick={() => void copyText("identity-job-id", job.id)}
+                >
+                  <Icon name="clipboard" size={10} />
+                  <span>{copyFlash === "identity-job-id" ? "Copied" : "Copy"}</span>
+                </button>
+              </dd>
             </div>
-            <div class="stats-cell" title={jobQueueWaitMs != null && queueWaitBaseline ? `Queue wait vs p50 ${compactDuration(queueWaitBaseline.p50 ?? 0)} / p95 ${compactDuration(queueWaitBaseline.p95 ?? 0)} over the last ${queueWaitBaseline.count} ${queueWaitBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Time the job spent in the queue before starting"}>
-              <span class="stats-cell-label">Queue wait</span>
-              <span class="stats-cell-value tabular-nums">{jobQueueWaitMs != null ? compactDuration(jobQueueWaitMs) : UNSET}</span>
-              {#if queueWaitBaseline && jobQueueWaitMs != null}
-                {@const tone = runtimeTone(jobQueueWaitMs, queueWaitBaseline.p50, queueWaitBaseline.p95)}
-                {@const pct = ratio(jobQueueWaitMs, queueWaitBaseline)}
-                {@const p50Pct = p50Ratio(queueWaitBaseline)}
-                <div class={["status-row-bar", `status-row-bar-${tone}`]} aria-hidden="true">
-                  <span class="status-row-tick" style="--bar-pct: {Math.round(pct * 100)}%"></span>
-                  {#if p50Pct != null}
-                    <span class="status-row-rule" style="--bar-pct: {Math.round(p50Pct * 100)}%"></span>
-                  {/if}
-                </div>
-                <span class="stats-cell-baseline tabular-nums">
-                  {#if queueWaitBaseline.p50 != null && queueWaitBaseline.p95 != null}
-                    p50 {compactDuration(queueWaitBaseline.p50)} · p95 {compactDuration(queueWaitBaseline.p95)}
-                  {:else}
-                    n {queueWaitBaseline.count}
-                  {/if}
-                </span>
-              {:else if jobQueueWaitMs == null}
-                <span class="stats-cell-baseline">Job not started</span>
-              {/if}
-            </div>
-            <div class="stats-cell">
-              <span class="stats-cell-label">Tries</span>
-              <span class="stats-cell-value tabular-nums">{job.tries}/{job.maxTries}</span>
-              {#if job.tries > 1}
-                <span class="stats-cell-baseline">retrying</span>
-              {:else}
-                <span class="stats-cell-baseline">first attempt</span>
-              {/if}
-            </div>
-            {#if job.deadline}
-              <div class="stats-cell">
-                <span class="stats-cell-label">Deadline</span>
-                <span class="stats-cell-value tabular-nums">{formatDate(job.deadline)}</span>
-                <span class="stats-cell-baseline">wall clock</span>
+            {#if job.context?.requestId}
+              <div class="identity-row">
+                <dt>Request id</dt>
+                <dd class="flex flex-wrap items-center gap-2">
+                  <span class="trellis-identifier break-anywhere">{job.context.requestId}</span>
+                  <button
+                    type="button"
+                    class="identity-copy"
+                    aria-label="Copy request id"
+                    onclick={() => void copyText("identity-request-id", job.context.requestId)}
+                  >
+                    <Icon name="clipboard" size={10} />
+                    <span>{copyFlash === "identity-request-id" ? "Copied" : "Copy"}</span>
+                  </button>
+                </dd>
               </div>
             {/if}
-            <div class="stats-cell">
-              <span class="stats-cell-label">Created</span>
-              <span class="stats-cell-value tabular-nums">{formatDate(job.createdAt)}</span>
-              <span class="stats-cell-baseline">submitted</span>
+            {#if job.context?.traceId}
+              <div class="identity-row">
+                <dt>Trace id</dt>
+                <dd class="flex flex-wrap items-center gap-2">
+                  <span class="trellis-identifier break-anywhere">{job.context.traceId}</span>
+                  <button
+                    type="button"
+                    class="identity-copy"
+                    aria-label="Copy trace id"
+                    onclick={() => void copyText("identity-trace-id", job.context.traceId)}
+                  >
+                    <Icon name="clipboard" size={10} />
+                    <span>{copyFlash === "identity-trace-id" ? "Copied" : "Copy"}</span>
+                  </button>
+                </dd>
+              </div>
+            {/if}
+            <div class="identity-row">
+              <dt>Trigger</dt>
+              <dd class="trellis-identifier break-anywhere">{job.trigger?.id ?? UNSET}</dd>
+            </div>
+            <div class="identity-row">
+              <dt>Concurrency</dt>
+              <dd class="trellis-identifier break-anywhere">{job.concurrency?.key ?? "unkeyed"}</dd>
+            </div>
+            <div class="identity-row">
+              <dt>Created</dt>
+              <dd class="tabular-nums">{formatDate(job.createdAt)}</dd>
+            </div>
+            <div class="identity-row">
+              <dt>Updated</dt>
+              <dd class="tabular-nums">{formatDate(job.updatedAt)}</dd>
             </div>
             {#if job.startedAt}
-              <div class="stats-cell">
-                <span class="stats-cell-label">Started</span>
-                <span class="stats-cell-value tabular-nums">{formatDate(job.startedAt)}</span>
-                <span class="stats-cell-baseline">worker pickup</span>
+              <div class="identity-row">
+                <dt>Started</dt>
+                <dd class="tabular-nums">{formatDate(job.startedAt)}</dd>
               </div>
             {/if}
             {#if job.completedAt}
-              <div class="stats-cell">
-                <span class="stats-cell-label">Completed</span>
-                <span class="stats-cell-value tabular-nums">{formatDate(job.completedAt)}</span>
-                <span class="stats-cell-baseline">terminal</span>
+              <div class="identity-row">
+                <dt>Completed</dt>
+                <dd class="tabular-nums">{formatDate(job.completedAt)}</dd>
               </div>
             {/if}
-            {#if job.errorDetail?.fingerprint}
-              <div class="stats-cell" title="Fingerprint of the error that ended this job's last attempt">
-                <span class="stats-cell-label">Error</span>
-                <span class="trellis-identifier stats-cell-value text-error tabular-nums">{job.errorDetail.fingerprint.slice(0, 16)}</span>
-                <span class="stats-cell-baseline text-error">fingerprint</span>
+            {#if job.deadline}
+              <div class="identity-row">
+                <dt>Deadline</dt>
+                <dd class="tabular-nums">{formatDate(job.deadline)}</dd>
               </div>
             {/if}
-            {#if job.errorDetail?.worker?.service}
-              <div class="stats-cell" title="The worker instance that last failed this job">
-                <span class="stats-cell-label">Last worker</span>
-                <span class="stats-cell-value">
-                  <span class="trellis-identifier">{job.errorDetail.worker.service}</span>
-                  {#if job.errorDetail.worker.runtime}
-                    <span class="stats-cell-baseline">{job.errorDetail.worker.runtime}{job.errorDetail.worker.version ? ` · ${job.errorDetail.worker.version}` : ""}</span>
-                  {/if}
-                </span>
-                <span class="stats-cell-baseline">{job.errorDetail.worker.instanceId ?? "no instance"}</span>
+            {#if job.concurrency?.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0}
+              <div class="identity-row">
+                <dt>Stale takeovers</dt>
+                <dd class="text-warning tabular-nums">{job.concurrency.staleTakeoverCount}</dd>
               </div>
             {/if}
-            {#if job.progress && (job.progress.current !== undefined || job.progress.step !== undefined)}
-              <div class="stats-cell">
-                <span class="stats-cell-label">Progress</span>
-                <span class="stats-cell-value tabular-nums">
-                  {#if job.progress.current !== undefined && job.progress.total !== undefined}
-                    {job.progress.current}/{job.progress.total}
-                  {:else if job.progress.current !== undefined}
-                    {job.progress.current}
-                  {:else}
-                    {job.progress.step ?? UNSET}
-                  {/if}
-                </span>
-                <span class="stats-cell-baseline">{job.progress.message ?? job.progress.step ?? "in flight"}</span>
-              </div>
-            {/if}
-            {#if job.concurrency?.key}
-              <div class="stats-cell">
-                <span class="stats-cell-label">Concurrency</span>
-                <span class="trellis-identifier stats-cell-value break-anywhere">{job.concurrency.key}</span>
-                {#if job.concurrency.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0}
-                  <span class="stats-cell-baseline text-warning">{job.concurrency.staleTakeoverCount} stale takeover{job.concurrency.staleTakeoverCount === 1 ? "" : "s"}</span>
-                {:else}
-                  <span class="stats-cell-baseline">keyed</span>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        </Panel>
-
-        {#if showOutput}
-          <Panel title="Output">
-            {#snippet actions()}
-              {#if outputIsError}
-                <span class="badge badge-error badge-sm" aria-label="{errors.length} errors">{errors.length}</span>
-              {:else}
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-xs"
-                  aria-label="Copy result"
-                  disabled={job.result === undefined || job.result === null}
-                  onclick={() => void copyText("job-result", job.result)}
-                >
-                  {copyFlash === "job-result" ? "Copied" : "Copy"}
-                </button>
-              {/if}
-            {/snippet}
-            {#if outputIsError}
-              <ul class="errors-list">
-                {#each errors as err (err.fingerprint)}
-                  {@const payload = parseErrorPayload(err.message)}
-                  {@const ctx = payload && payload.context && typeof payload.context === "object" ? (payload.context as Record<string, unknown>) : null}
-                  {@const prettyJson = formatJson(err.message, 2)}
-                  <li>
-                    <div class="error-payload">
-                      <div class="error-payload-headline">
-                        <span class="badge badge-ghost badge-xs">{String(payload?.type ?? "Error")}</span>
-                        <span class="trellis-identifier text-error text-xs" title={err.fingerprint}>{err.fingerprint.slice(0, 16)}</span>
-                        <span class="text-sm font-semibold break-anywhere">{String(payload?.message ?? err.message)}</span>
-                      </div>
-                      {#if ctx && ctx.causeMessage}
-                        <div class="error-payload-cause">{String(ctx.causeMessage)}</div>
-                      {/if}
-                      {#if payload}
-                        <details class="error-payload-details">
-                          <summary>
-                            <span>Show raw payload</span>
-                            <button
-                              type="button"
-                              class="error-payload-copy"
-                              aria-label="Copy raw payload"
-                              onclick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                void copyText(`error-payload-${err.fingerprint}`, prettyJson);
-                              }}
-                            >
-                              <Icon name="clipboard" size={12} />
-                              <span>{copyFlash === `error-payload-${err.fingerprint}` ? "Copied" : "Copy"}</span>
-                            </button>
-                          </summary>
-                          <pre class="error-stack error-stack-tree" aria-label="Raw error payload">{#each prettyJson.split("\n") as line, i (i)}<span class:json-key={isKeyLine(line)} class:json-string={isStringLine(line)} class:json-num={isNumberLine(line)} class:json-bool={isBoolLine(line)} class:json-null={isNullLine(line)}>{line}{NEWLINE}</span>{/each}</pre>
-                        </details>
-                      {/if}
-                      {#if err.stack}
-                        <details class="error-payload-details">
-                          <summary>
-                            <span>Show stack</span>
-                            <button
-                              type="button"
-                              class="error-payload-copy"
-                              aria-label="Copy stack trace"
-                              onclick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                void copyText(`error-stack-${err.fingerprint}`, err.stack ?? "");
-                              }}
-                            >
-                              <Icon name="clipboard" size={12} />
-                              <span>{copyFlash === `error-stack-${err.fingerprint}` ? "Copied" : "Copy"}</span>
-                            </button>
-                          </summary>
-                          <pre class="error-stack" aria-label="Stack trace">{err.stack}</pre>
-                        </details>
-                      {/if}
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-            {:else if job.result !== undefined && job.result !== null}
-              <JsonTree value={job.result} initiallyExpanded={true} maxDepth={4} />
-            {:else}
-              <p class="text-xs text-base-content/60">No result recorded.</p>
-            {/if}
-          </Panel>
-        {/if}
-
-        <Panel title="Inputs">
-          {#snippet actions()}
-            <button
-              type="button"
-              class="btn btn-ghost btn-xs"
-              aria-label="Copy payload"
-              disabled={job.payload === undefined || job.payload === null}
-              onclick={() => void copyText("job-payload", job.payload)}
-            >
-              {copyFlash === "job-payload" ? "Copied" : "Copy"}
-            </button>
-          {/snippet}
-          {#if job.payload !== undefined && job.payload !== null}
-            <JsonTree value={job.payload} initiallyExpanded={true} maxDepth={4} />
-          {:else}
-            <p class="text-xs text-base-content/60">No payload recorded.</p>
-          {/if}
+          </dl>
         </Panel>
 
         {#if (job.lineage?.rootJobId || job.lineage?.parentJobId || job.lineage?.operationId)}
@@ -759,167 +806,89 @@
                   </span>
                 </li>
               {/each}
-            </ul>
-          </Panel>
-        {/if}
-      </div>
+             </ul>
+           </Panel>
+         {/if}
+       </div>
 
-      <div class="job-body-right">
-        {#if sortedAttempts.length > 0}
-          <div class="attempt-tabs" role="tablist" aria-label="Attempts">
-            {#each sortedAttempts as attempt, idx (`${attempt.try}`)}
-              <button
-                type="button"
-                role="tab"
-                id={`attempt-tab-${idx}`}
-                aria-selected={idx === activeAttemptIndex}
-                aria-controls="attempt-summary"
-                class={["attempt-tab", idx === activeAttemptIndex ? "attempt-tab-active" : ""]}
-                onclick={() => (activeAttemptIndex = idx)}
-              >
-                <span class="attempt-tab-label">#{attempt.try ?? idx + 1}</span>
-                <StatusBadge label={attempt.state ?? UNSET} status={stateStatus(attempt.state ?? "")} />
-                <span class="attempt-tab-duration">{attemptDurationLabel(attempt)}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+       <div class="job-body-right">
+         {#if sortedAttempts.length > 0}
+           <div class="attempt-tabs" role="tablist" aria-label="Attempts">
+             {#each sortedAttempts as attempt, idx (`${attempt.try}`)}
+               <button
+                 type="button"
+                 role="tab"
+                 id={`attempt-tab-${idx}`}
+                 aria-selected={idx === activeAttemptIndex}
+                 aria-controls="attempt-summary"
+                 class={["attempt-tab", idx === activeAttemptIndex ? "attempt-tab-active" : ""]}
+                 onclick={() => (activeAttemptIndex = idx)}
+               >
+                 <span class="attempt-tab-label">#{attempt.try ?? idx + 1}</span>
+                 <StatusBadge label={attempt.state ?? UNSET} status={stateStatus(attempt.state ?? "")} />
+                 <span class="attempt-tab-duration">{attemptDurationLabel(attempt)}</span>
+               </button>
+             {/each}
+           </div>
+         {/if}
 
-        <div id="attempt-summary" role="tabpanel" aria-labelledby={sortedAttempts.length > 0 ? `attempt-tab-${Math.min(activeAttemptIndex, Math.max(0, sortedAttempts.length - 1))}` : undefined}>
-          <Panel title="Timeline">
-            {#snippet actions()}
-              <span class="badge badge-ghost badge-sm">{selectedTimeline.length} events</span>
-            {/snippet}
-            <JobEventTimeline events={selectedTimeline} />
-          </Panel>
-        </div>
+         <div id="attempt-summary" role="tabpanel" aria-labelledby={sortedAttempts.length > 0 ? `attempt-tab-${Math.min(activeAttemptIndex, Math.max(0, sortedAttempts.length - 1))}` : undefined}>
+           <Panel title="Timeline">
+             {#snippet actions()}
+               <span class="badge badge-ghost badge-sm">{selectedTimeline.length} events</span>
+             {/snippet}
+             <JobEventTimeline events={selectedTimeline} />
+           </Panel>
+         </div>
 
-        {#if job.logs && job.logs.length > 0}
-          <Panel title="Logs">
-            {#snippet actions()}
-              <span class="badge badge-ghost badge-sm">{job.logs?.length ?? 0} entries</span>
-            {/snippet}
-            <DataTable size="xs">
-              <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
-              <tbody>
-                {#each job.logs as log (`${log.timestamp}:${log.message}`)}
-                  <tr>
-                    <td class="text-xs text-base-content/60">{formatDate(log.timestamp)}</td>
-                    <td>
-                      <span class={["badge badge-xs", log.level === "error" ? "badge-error" : log.level === "warn" ? "badge-warning" : "badge-ghost"]}>
-                        {log.level}
-                      </span>
-                    </td>
-                    <td class="text-sm">{log.message}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </DataTable>
-          </Panel>
-        {/if}
-      </div>
-    </div>
-
-    <Panel title="Identity">
-      <dl class="identity-list">
-        <div class="identity-row">
-          <dt>Job id</dt>
-          <dd class="flex flex-wrap items-center gap-2">
-            <span class="trellis-identifier break-anywhere">{job.id}</span>
-            <button
-              type="button"
-              class="identity-copy"
-              aria-label="Copy job id"
-              onclick={() => void copyText("identity-job-id", job.id)}
-            >
-              <Icon name="clipboard" size={10} />
-              <span>{copyFlash === "identity-job-id" ? "Copied" : "Copy"}</span>
-            </button>
-          </dd>
-        </div>
-        {#if job.context?.requestId}
-          <div class="identity-row">
-            <dt>Request id</dt>
-            <dd class="flex flex-wrap items-center gap-2">
-              <span class="trellis-identifier break-anywhere">{job.context.requestId}</span>
-              <button
-                type="button"
-                class="identity-copy"
-                aria-label="Copy request id"
-                onclick={() => void copyText("identity-request-id", job.context.requestId)}
-              >
-                <Icon name="clipboard" size={10} />
-                <span>{copyFlash === "identity-request-id" ? "Copied" : "Copy"}</span>
-              </button>
-            </dd>
-          </div>
-        {/if}
-        {#if job.context?.traceId}
-          <div class="identity-row">
-            <dt>Trace id</dt>
-            <dd class="flex flex-wrap items-center gap-2">
-              <span class="trellis-identifier break-anywhere">{job.context.traceId}</span>
-              <button
-                type="button"
-                class="identity-copy"
-                aria-label="Copy trace id"
-                onclick={() => void copyText("identity-trace-id", job.context.traceId)}
-              >
-                <Icon name="clipboard" size={10} />
-                <span>{copyFlash === "identity-trace-id" ? "Copied" : "Copy"}</span>
-              </button>
-            </dd>
-          </div>
-        {/if}
-        <div class="identity-row">
-          <dt>Trigger</dt>
-          <dd class="trellis-identifier break-anywhere">{job.trigger?.id ?? UNSET}</dd>
-        </div>
-        <div class="identity-row">
-          <dt>Concurrency</dt>
-          <dd class="trellis-identifier break-anywhere">{job.concurrency?.key ?? "unkeyed"}</dd>
-        </div>
-        <div class="identity-row">
-          <dt>Created</dt>
-          <dd class="tabular-nums">{formatDate(job.createdAt)}</dd>
-        </div>
-        <div class="identity-row">
-          <dt>Updated</dt>
-          <dd class="tabular-nums">{formatDate(job.updatedAt)}</dd>
-        </div>
-        {#if job.startedAt}
-          <div class="identity-row">
-            <dt>Started</dt>
-            <dd class="tabular-nums">{formatDate(job.startedAt)}</dd>
-          </div>
-        {/if}
-        {#if job.completedAt}
-          <div class="identity-row">
-            <dt>Completed</dt>
-            <dd class="tabular-nums">{formatDate(job.completedAt)}</dd>
-          </div>
-        {/if}
-        {#if job.deadline}
-          <div class="identity-row">
-            <dt>Deadline</dt>
-            <dd class="tabular-nums">{formatDate(job.deadline)}</dd>
-          </div>
-        {/if}
-        {#if job.concurrency?.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0}
-          <div class="identity-row">
-            <dt>Stale takeovers</dt>
-            <dd class="text-warning tabular-nums">{job.concurrency.staleTakeoverCount}</dd>
-          </div>
-        {/if}
-      </dl>
-    </Panel>
-  {/if}
-</section>
+         {#if job.logs && job.logs.length > 0}
+           <Panel title="Logs">
+             {#snippet actions()}
+               <span class="badge badge-ghost badge-sm">{job.logs?.length ?? 0} entries</span>
+             {/snippet}
+             <DataTable size="xs">
+               <thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead>
+               <tbody>
+                 {#each job.logs as log (`${log.timestamp}:${log.message}`)}
+                   <tr>
+                     <td class="text-xs text-base-content/60">{formatDate(log.timestamp)}</td>
+                     <td>
+                       <span class={["badge badge-xs", log.level === "error" ? "badge-error" : log.level === "warn" ? "badge-warning" : "badge-ghost"]}>
+                         {log.level}
+                       </span>
+                     </td>
+                     <td class="text-sm">{log.message}</td>
+                   </tr>
+                 {/each}
+               </tbody>
+             </DataTable>
+           </Panel>
+         {/if}
+       </div>
+     </div>
+   {/if}
+ </section>
 
 <style>
   .job-detail {
     display: grid;
     gap: 0.85rem;
+  }
+
+  .job-deployment-link {
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.7rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    text-decoration: none;
+    border-bottom: 1px dotted color-mix(in oklab, var(--color-base-content) 25%, transparent);
+  }
+
+  .job-deployment-link:hover {
+    color: var(--color-base-content);
+    border-bottom-color: var(--color-base-content);
   }
 
   .job-body {
@@ -934,17 +903,32 @@
     align-content: start;
   }
 
+  .job-io-grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  @media (min-width: 900px) {
+    .job-io-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+  }
+
   @media (min-width: 1100px) {
     .job-body {
-      grid-template-columns: minmax(0, 1.4fr) minmax(20rem, 1fr);
+      grid-template-columns: minmax(0, 2.2fr) minmax(16rem, 1fr);
       gap: 1rem;
     }
   }
 
-  .stats-grid {
+  .stats-strip {
+    background: var(--color-base-100);
+    border-radius: 0.75rem;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-    gap: 0.85rem 1.1rem;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.65rem 1rem;
+    margin-bottom: 0.85rem;
+    padding: 0.75rem 1rem;
   }
 
   .stats-cell {
@@ -953,12 +937,62 @@
     flex-direction: column;
     gap: 0.15rem;
     min-width: 0;
+    padding: 0.35rem 0.5rem;
+    margin: -0.35rem -0.5rem;
+    border-radius: 0.5rem;
+    transition: background 0.2s ease-out, box-shadow 0.2s ease-out, transform 0.15s ease-out;
+  }
+
+  .stats-cell:hover {
+    background: color-mix(in oklab, var(--color-base-content) 4%, transparent);
+    box-shadow: 0 1px 3px color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    transform: translateY(-1px);
+  }
+
+  .stats-cell:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  .stats-cell-status {
+    transition: background 0.3s ease-out, box-shadow 0.2s ease-out, transform 0.15s ease-out;
+  }
+
+  .stats-cell-status .stats-cell-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  .stats-cell:has(.status-row-bar) .stats-cell-value {
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  @keyframes deadline-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .stats-cell:has(.text-error) .stats-cell-value {
+    animation: deadline-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes retry-emphasis {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+  }
+
+  .stats-cell:has(.text-warning) .stats-cell-value {
+    animation: retry-emphasis 1.5s ease-in-out infinite;
   }
 
   .stats-cell-label {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.65rem;
-    letter-spacing: 0.04em;
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    font-size: 0.6rem;
+    font-weight: 300;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
   }
 
@@ -972,42 +1006,57 @@
     gap: 0.35rem;
   }
 
+  .status-failed {
+    color: oklch(0.55 0.15 25);
+  }
+
+  .status-completed {
+    color: oklch(0.55 0.15 145);
+  }
+
+  .status-active {
+    color: oklch(0.55 0.15 85);
+  }
+
   .stats-cell-baseline {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.65rem;
+    color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+    font-size: 0.6rem;
+    font-weight: 300;
     letter-spacing: 0.02em;
   }
 
   .status-row-bar {
-    background: color-mix(in oklab, var(--color-base-300) 50%, transparent);
+    background: color-mix(in oklab, var(--color-base-300) 60%, transparent);
     border-radius: 999px;
-    height: 4px;
+    height: 6px;
     margin-top: 0.2rem;
     position: relative;
     width: 100%;
+    overflow: hidden;
   }
 
   .status-row-bar-fast {
-    background: color-mix(in oklab, var(--color-success) 30%, var(--color-base-300) 50%);
+    background: color-mix(in oklab, var(--color-success) 40%, var(--color-base-300) 40%);
   }
 
   .status-row-bar-normal {
-    background: color-mix(in oklab, var(--color-warning) 30%, var(--color-base-300) 50%);
+    background: color-mix(in oklab, var(--color-warning) 40%, var(--color-base-300) 40%);
   }
 
   .status-row-bar-slow {
-    background: color-mix(in oklab, var(--color-error) 30%, var(--color-base-300) 50%);
+    background: color-mix(in oklab, oklch(0.65 0.18 55) 50%, var(--color-base-300) 30%);
   }
 
   .status-row-tick {
     background: var(--color-base-content);
     border-radius: 999px;
-    height: 8px;
+    height: 10px;
     left: var(--bar-pct, 0%);
     position: absolute;
     top: 50%;
     transform: translate(-50%, -50%);
     width: 2px;
+    transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1);
   }
 
   .status-row-rule {
@@ -1165,21 +1214,65 @@
 
   :global(.error-payload) {
     display: grid;
-    gap: 0.4rem;
+    gap: 0.5rem;
     min-width: 0;
   }
 
-  :global(.error-payload-headline) {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem 0.6rem;
+  :global(.error-payload-summary) {
+    background: color-mix(in oklab, var(--color-error) 8%, transparent);
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.85rem;
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  :global(.error-payload-type) {
+    color: var(--color-error);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  :global(.error-payload-message) {
+    color: var(--color-base-content);
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.3;
   }
 
   :global(.error-payload-cause) {
-    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
-    font-size: 0.78rem;
+    color: color-mix(in oklab, var(--color-base-content) 85%, transparent);
+    font-size: 0.85rem;
     line-height: 1.4;
+  }
+
+  :global(.error-context-list) {
+    display: grid;
+    gap: 0.2rem 0.85rem;
+    font-size: 0.72rem;
+    margin: 0;
+    padding: 0;
+  }
+
+  :global(.error-context-row) {
+    align-items: baseline;
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+
+  :global(.error-context-row dt) {
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.65rem;
+  }
+
+  :global(.error-context-row dd) {
+    color: var(--color-base-content);
+    margin: 0;
   }
 
   :global(.error-payload-details) {

@@ -39,6 +39,12 @@ The UI MUST NOT resemble:
 - DO NOT use decorative UI elements
 - DO NOT use excessive whitespace
 
+Charts are permitted as **secondary** diagnostic artifacts only when they
+explain a specific data series that the operator is already looking at. The
+table or list must remain the dominant visual element on every screen.
+Whole-system dashboards, large metric tiles, and chart-only views are not
+allowed.
+
 ---
 
 ## LAYOUT SYSTEM
@@ -240,12 +246,21 @@ derived permissions only.
 
 Structure:
 
-- Table only (primary)
+- Filter bar (search, state pills, service, window, more filters)
+- Inline metrics strip (total, queued, running, failed, workers)
+- Secondary job-type matrix: one row per job type with backlog, running, failed,
+  DLQ, queue wait p95, runtime p95, and a small sparkline for recent failures
+- Optional scoped diagnostic charts (event throughput and latency over time) for
+  the selected job type
+- Table only (primary): the workbench jobs table
+- Side panel (secondary): job inspector
 
 MUST include:
 
 - job state badges
 - filtering by service
+- click-to-scope behavior: selecting a job type filters the table and reveals
+  the scoped diagnostic charts for that type
 
 ---
 

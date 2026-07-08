@@ -17,7 +17,12 @@ export type AuthorityPlanEntry = {
   readonly planId: string;
   readonly deploymentId: string;
   readonly classification: "update" | "migration";
-  readonly state?: "pending" | "accepted" | "rejected" | "expired";
+  readonly state?:
+    | "pending"
+    | "accepted"
+    | "rejected"
+    | "expired"
+    | "superseded";
   readonly decisionReason?: string | null;
   readonly proposal: {
     readonly contractId: string;

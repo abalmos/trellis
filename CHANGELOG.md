@@ -14,8 +14,14 @@ and this project adheres to
   consent denial, credential failures, account-link/password flows, and device
   activation outcomes.
 
+### Changed
+
+- Updated the Console job detail view with denser operational status, timeline,
+  attempt, lineage, related-job, and JSON payload inspection surfaces.
+
 ### Fixed
 
+- Fixed Console authority-plan state typing to recognize superseded plans.
 - Fixed device activation UI state so pending operation progress is loaded from
   the current operation snapshot before watching for future events.
 
