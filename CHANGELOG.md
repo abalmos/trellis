@@ -22,6 +22,9 @@ and this project adheres to
 ### Fixed
 
 - Fixed Console authority-plan state typing to recognize superseded plans.
+- Fixed Rust jobs workers so per-message processing or terminal cleanup errors
+  request redelivery, best-effort release keyed active slots, and keep the queue
+  worker running.
 - Fixed device activation UI state so pending operation progress is loaded from
   the current operation snapshot before watching for future events.
 

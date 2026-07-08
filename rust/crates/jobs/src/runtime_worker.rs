@@ -795,17 +795,37 @@ where
         }
         forward_cancellation.abort();
         let _ = forward_cancellation.await;
-        let process_result = process_result?;
-        match ack_action_for_outcome(Some(&process_result)) {
-            WorkerAckAction::Ack => message.ack().await.map_err(map_ack_error)?,
-            WorkerAckAction::Nak => message
-                .ack_with(AckKind::Nak(None))
-                .await
-                .map_err(map_ack_error)?,
-        }
+        let ack_action = ack_action_for_process_result(process_result.as_ref());
+        match process_result {
+            Ok(_) => {}
+            Err(_) => {
+                if let (Some(coordinator), Some(active_key)) =
+                    (key_coordinator.as_ref(), active_key.as_ref())
+                {
+                    let _ = release_key_lease(coordinator, active_key, &manager.now_iso()).await;
+                }
+                cancellation_registry.clear_pending(&job_key);
+                ack_worker_message(&message, ack_action).await?;
+                continue;
+            }
+        };
+        ack_worker_message(&message, ack_action).await?;
     }
 
     Ok(())
+}
+
+async fn ack_worker_message(
+    message: &async_nats::jetstream::Message,
+    action: WorkerAckAction,
+) -> Result<(), RuntimeWorkerError> {
+    match action {
+        WorkerAckAction::Ack => message.ack().await.map_err(map_ack_error),
+        WorkerAckAction::Nak => message
+            .ack_with(AckKind::Nak(None))
+            .await
+            .map_err(map_ack_error),
+    }
 }
 
 async fn run_prepared_queue_worker_with_cancellation<P, M, H, Fut, E>(
@@ -1485,6 +1505,15 @@ fn ack_action_for_outcome<TResult>(
     }
 }
 
+fn ack_action_for_process_result<TResult>(
+    outcome: Result<&JobProcessOutcome<TResult>, &RuntimeWorkerError>,
+) -> WorkerAckAction {
+    match outcome {
+        Ok(outcome) => ack_action_for_outcome(Some(outcome)),
+        Err(_) => WorkerAckAction::Nak,
+    }
+}
+
 async fn latest_lifecycle_message(
     lifecycle_stream: &stream::Stream<()>,
     subject: &str,
@@ -1536,7 +1565,8 @@ mod tests {
     use super::JobCancellationToken;
 
     use super::{
-        ack_action_for_outcome, lifecycle_work_decision, ProjectedWorkDecision, WorkerAckAction,
+        ack_action_for_outcome, ack_action_for_process_result, lifecycle_work_decision,
+        ProjectedWorkDecision, RuntimeWorkerError, WorkerAckAction,
     };
     use crate::events::{cancelled_event, completed_event, started_event};
     use crate::manager::JobProcessOutcome;
@@ -1582,6 +1612,16 @@ mod tests {
     fn interrupted_outcomes_use_nak_instead_of_ack() {
         assert_eq!(
             ack_action_for_outcome(Some(&JobProcessOutcome::<Value>::Interrupted { tries: 1 })),
+            WorkerAckAction::Nak
+        );
+    }
+
+    #[test]
+    fn process_errors_use_nak_instead_of_stopping_worker() {
+        let error = RuntimeWorkerError::Process("cleanup failed".to_string());
+
+        assert_eq!(
+            ack_action_for_process_result::<Value>(Err(&error)),
             WorkerAckAction::Nak
         );
     }

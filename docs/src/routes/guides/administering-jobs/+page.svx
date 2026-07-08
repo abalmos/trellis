@@ -170,8 +170,9 @@ a detail view. The feed does not provide a precise row-delta protocol.
 
 ## Worker presence
 
-Services emit heartbeat messages per job type while workers are running. Use
-these to confirm workers are active and see what they are processing.
+Services emit heartbeat messages per job type while the worker host is running.
+Use these to confirm service/job-type presence, not as proof that every queue
+consumer task is healthy or making progress.
 
 The heartbeat data includes the service name, job type, instance identifier, and
 a timestamp. Absence of recent heartbeats for a job type means either the service

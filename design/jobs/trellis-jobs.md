@@ -361,6 +361,9 @@ For each bound queue, the connected service runtime MUST:
   than running duplicate active work
 - for keyed queues, run automatic heartbeat renewal while the handler is active
   and release the active slot only when the job still owns the slot token
+- if per-message processing or terminal cleanup fails after work is accepted,
+  request redelivery for that message, best-effort release any owned keyed
+  active slot, and keep the queue worker running
 - subscribe to the queue cancellation subject for live cooperative cancellation
 
 This canonical path is intentionally language-neutral. TypeScript, Rust, and any
