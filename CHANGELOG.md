@@ -8,6 +8,25 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Added the Console Events admin route and nav entry for browsing persisted
+  platform events.
+
+### Changed
+
+- Updated the Console job detail view so the error panel reads the Trellis
+  error payload directly (typed headline, cause message, optional stack), the
+  raw error JSON is hidden behind a collapsed disclosure, the header surfaces
+  the deployment name as a linked eyebrow, and the timeline classifies events
+  by type with PROGRESS events taking precedence over STARTED so progress
+  updates are not mislabeled as the job's start.
+- Updated the Console deployment authority plan view so the Decision panel
+  sticks to the top of the viewport on wide screens, keeping the Accept
+  update action visible while reviewing long contract changes.
+- Updated Jobs guide pages and service-author LLM guidance for the current
+  job-type diagnostics and related-job matching behavior.
+
 ### Fixed
 
 - Fixed service bootstrap authority planning so additive provided RPC,

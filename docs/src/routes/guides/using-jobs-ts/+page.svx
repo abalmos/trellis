@@ -217,6 +217,27 @@ job lifecycle events and NATS headers, so include `requestId` or `traceId` in
 service logs when you need to follow work across RPCs, events, operations, and
 jobs.
 
+When a handler waits on another Trellis job with `JobRef.wait()` or an operation
+with `OperationRef.wait()`, Trellis records a current wait edge while the handler
+is suspended. `Jobs.Inspect` and Console show the job as still `active`, with a
+`waitingOn` entry that names the child job or operation.
+
+For long external calls, wrap the await with `job.waitFor(...)` so operators can
+see what the active job is waiting on:
+
+```ts
+const charge = await job.waitFor({
+  kind: "external",
+  label: "Stripe payment authorization",
+  system: "stripe",
+  operation: "POST /payment_intents",
+  key: paymentIntentId,
+}, () => stripe.paymentIntents.confirm(paymentIntentId));
+```
+
+Use safe correlation keys only; never put secrets, full credentials, or private
+payloads in wait metadata. Short local awaits do not need annotation.
+
 ## 5. Run the service
 
 Call `service.wait()` after all `handle()` registrations. The service starts registered workers, keeps them running, and stops them when `service.stop()` or process shutdown runs:

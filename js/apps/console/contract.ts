@@ -1,8 +1,9 @@
-import { defineAppContract } from "@qlever-llc/trellis";
+import { defineAppContract } from "@qlever-llc/trellis/contracts";
 import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
 import { sdk as trellisCore } from "@qlever-llc/trellis/sdk/core";
 import { sdk as trellisHealth } from "@qlever-llc/trellis/sdk/health";
 import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import { sdk as trellisEventLog } from "../../../generated/packages/jsr/eventlog/mod.ts";
 
 export const contract = defineAppContract(
   () => ({
@@ -103,6 +104,22 @@ export const contract = defineAppContract(
           },
           feeds: {
             subscribe: ["Jobs.Watch"],
+          },
+        }),
+      },
+      optional: {
+        eventlog: trellisEventLog.use({
+          rpc: {
+            call: [
+              "EventLog.Query",
+              "EventLog.Inspect",
+              "EventLog.Metrics",
+              "EventLog.Consumers.Query",
+              "EventLog.Consumers.Inspect",
+            ],
+          },
+          feeds: {
+            subscribe: ["EventLog.Watch"],
           },
         }),
       },

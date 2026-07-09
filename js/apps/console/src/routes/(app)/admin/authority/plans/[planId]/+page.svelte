@@ -1113,7 +1113,8 @@
       {/if}
     </div>
 
-    <Panel title={pending ? "Decision" : "Decision record"} class="min-w-0">
+    <div class="min-w-0 self-start xl:sticky xl:top-4">
+      <Panel title={pending ? "Decision" : "Decision record"} class="min-w-0">
       {#if plan}
         <div class="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
           <span class="text-xs uppercase tracking-wide text-base-content/55">For Deployment</span>
@@ -1181,6 +1182,7 @@
       {:else}
         <p class="text-sm text-base-content/60">This plan is no longer actionable.</p>
       {/if}
-    </Panel>
+      </Panel>
+    </div>
   </div>
 {/if}

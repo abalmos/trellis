@@ -538,6 +538,9 @@
                 <div class="flex min-w-0 flex-col gap-1">
                   <a class="link link-hover trellis-identifier truncate" href={resolve(jobRoute(job.id))}>{job.type}</a>
                   <span class="trellis-identifier text-base-content/45">{job.id}</span>
+                  {#if job.state === "active" && (job.waitingOn?.length ?? 0) > 0}
+                    <span class="badge badge-warning badge-xs w-fit">waiting on {job.waitingOn?.length}</span>
+                  {/if}
                 </div>
               </td>
               <td><span class={['badge badge-sm', stateBadgeClass(job.state)]}>{job.state}</span></td>

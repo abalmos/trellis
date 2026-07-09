@@ -35,6 +35,7 @@
   const trellis = getTrellis();
   type Inspection = JobInspection;
   type Job = Inspection["job"];
+  type WaitEdge = NonNullable<Job["waitingOn"]>[number];
 
   const jobId = $derived(page.params.jobid);
   const currentJobId = $derived(jobId ?? "");
@@ -59,6 +60,7 @@
   const errors = $derived(inspection?.errors ?? []);
   const related = $derived(inspection?.related ?? []);
   const timeline = $derived(inspection?.timeline ?? []);
+  const activeWaits = $derived(job?.state === "active" ? job.waitingOn ?? [] : []);
   const selectedTimeline = $derived.by(() => {
     const tryNumber = selectedAttempt?.try;
     if (typeof tryNumber !== "number") return timeline;
@@ -104,6 +106,7 @@
     root: "Same root",
     operation: "Same operation",
     concurrency: "Same concurrency key",
+    wait: "Wait edge",
   } as const;
 
   function relatedReasonLabel(reason: string): string | null {
@@ -112,7 +115,18 @@
     if (reason === "root") return relatedReasonLabels.root;
     if (reason === "operation") return relatedReasonLabels.operation;
     if (reason === "concurrency") return relatedReasonLabels.concurrency;
+    if (reason === "wait") return relatedReasonLabels.wait;
     return null;
+  }
+
+  function waitTargetLabel(edge: WaitEdge): string {
+    return edge.target.label ?? edge.label ?? edge.target.operation ?? edge.target.type ?? edge.target.key ?? edge.target.operationId ?? edge.target.id ?? edge.target.kind;
+  }
+
+  function waitDurationLabel(edge: WaitEdge): string {
+    const startedMs = new Date(edge.startedAt).getTime();
+    if (Number.isNaN(startedMs)) return UNSET;
+    return compactDuration(Date.now() - startedMs);
   }
 
   const relatedWithReason = $derived.by(() => {
@@ -433,6 +447,17 @@
           {job.state}
         </span>
       </div>
+      {#if activeWaits.length > 0}
+        {@const firstWait = activeWaits[0]}
+        <div class="stats-cell stats-cell-waiting" title="Current active wait edges">
+          <span class="stats-cell-label">Waiting on</span>
+          <span class="stats-cell-value">
+            <span class="badge badge-warning badge-sm">{activeWaits.length}</span>
+            <span class="trellis-identifier break-anywhere">{firstWait ? waitTargetLabel(firstWait) : UNSET}</span>
+          </span>
+          <span class="stats-cell-baseline tabular-nums">{firstWait ? waitDurationLabel(firstWait) : UNSET}{activeWaits.length > 1 ? ` · +${activeWaits.length - 1} more` : ""}</span>
+        </div>
+      {/if}
       <div class="stats-cell" title={jobRuntimeMs != null && runtimeBaseline ? `Job runtime vs p50 ${compactDuration(runtimeBaseline.p50 ?? 0)} / p95 ${compactDuration(runtimeBaseline.p95 ?? 0)} over the last ${runtimeBaseline.count} ${runtimeBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Runtime since the job started"}>
         <span class="stats-cell-label">Runtime</span>
         <span class="stats-cell-value tabular-nums">{jobRuntime}</span>
@@ -760,6 +785,60 @@
           </dl>
         </Panel>
 
+        {#if activeWaits.length > 0}
+          <Panel title="Current waits">
+            {#snippet actions()}
+              <span class="badge badge-warning badge-sm" aria-label="{activeWaits.length} active waits">{activeWaits.length}</span>
+            {/snippet}
+            <ul class="wait-list">
+              {#each activeWaits as edge (edge.id)}
+                <li class="wait-item">
+                  <div class="wait-item-head">
+                    <span class="badge badge-warning badge-sm">{edge.target.kind}</span>
+                    <span class="wait-title">{waitTargetLabel(edge)}</span>
+                  </div>
+                  <dl class="wait-meta">
+                    <div>
+                      <dt>Kind</dt>
+                      <dd>{edge.target.kind}</dd>
+                    </div>
+                    <div>
+                      <dt>Key</dt>
+                      <dd>
+                        {#if edge.target.kind === "job" && edge.target.id}
+                          <a class="trellis-identifier link link-hover break-anywhere" href={resolve(`/admin/jobs/${encodeURIComponent(edge.target.id)}`)}>{edge.target.id}</a>
+                        {:else}
+                          <span class="trellis-identifier break-anywhere">{edge.target.key ?? edge.target.operationId ?? edge.target.id ?? UNSET}</span>
+                        {/if}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Label</dt>
+                      <dd>{edge.target.label ?? edge.label ?? UNSET}</dd>
+                    </div>
+                    <div>
+                      <dt>System</dt>
+                      <dd class="trellis-identifier break-anywhere">{edge.target.system ?? edge.target.service ?? UNSET}</dd>
+                    </div>
+                    <div>
+                      <dt>Operation</dt>
+                      <dd class="trellis-identifier break-anywhere">{edge.target.operation ?? edge.target.type ?? UNSET}</dd>
+                    </div>
+                    <div>
+                      <dt>Since</dt>
+                      <dd class="tabular-nums">{formatDate(edge.startedAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Duration</dt>
+                      <dd class="tabular-nums">{waitDurationLabel(edge)}</dd>
+                    </div>
+                  </dl>
+                </li>
+              {/each}
+            </ul>
+          </Panel>
+        {/if}
+
         {#if (job.lineage?.rootJobId || job.lineage?.parentJobId || job.lineage?.operationId)}
           <Panel title="Where this job sits">
             <ol class="lineage-tree">
@@ -794,7 +873,7 @@
             {#snippet actions()}
               <span class="badge badge-ghost badge-sm" aria-label="{meaningfulRelated.length} related jobs">{meaningfulRelated.length}</span>
             {/snippet}
-            <p class="related-help">Other jobs that share a trace, parent, root, operation, or concurrency key with this one.</p>
+            <p class="related-help">Other jobs that share a trace, parent, root, operation, concurrency key, or wait edge with this one.</p>
             <ul class="related-list">
               {#each meaningfulRelated as entry (entry.job.id)}
                 <li>
@@ -1018,6 +1097,10 @@
     color: oklch(0.55 0.15 85);
   }
 
+  .stats-cell-waiting {
+    background: color-mix(in oklab, var(--color-warning) 9%, transparent);
+  }
+
   .stats-cell-baseline {
     color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
     font-size: 0.6rem;
@@ -1171,6 +1254,62 @@
     letter-spacing: 0.04em;
     min-width: 4.5rem;
     text-transform: uppercase;
+  }
+
+  .wait-list {
+    display: grid;
+    gap: 0.45rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .wait-item {
+    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 45%, transparent);
+    display: grid;
+    gap: 0.45rem;
+    padding: 0.35rem 0 0.5rem;
+  }
+
+  .wait-item:last-child {
+    border-bottom: none;
+  }
+
+  .wait-item-head {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .wait-title {
+    color: var(--color-base-content);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+
+  .wait-meta {
+    display: grid;
+    gap: 0.25rem 0.7rem;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    margin: 0;
+  }
+
+  .wait-meta div {
+    min-width: 0;
+  }
+
+  .wait-meta dt {
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+    font-size: 0.6rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .wait-meta dd {
+    color: var(--color-base-content);
+    font-size: 0.74rem;
+    margin: 0;
   }
 
   .related-help {

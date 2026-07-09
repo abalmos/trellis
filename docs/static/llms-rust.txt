@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-04).
+Last verified against Trellis main (2026-07-08).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -28,6 +28,10 @@ Rules:
 - Safe deployment authority updates auto-apply during bootstrap. New capability
   grants and new resource aliases require update approval; strict-mode
   migrations require approval; `mutable-dev` records and auto-accepts migrations.
+- Rust service bootstrap polls pending deployment authority until it becomes
+  ready by default. Set `authority_pending_timeout_ms` to `Some(milliseconds)`
+  only when startup needs an overall deadline; `timeout_ms` still bounds each
+  request.
 - Deployment authority plans can be `superseded`; only `pending` plans targeting
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
@@ -78,10 +82,18 @@ Rules:
 - Jobs admin clients use `Jobs.Query` for server-side search/sort/group/stats,
   `Jobs.Metrics` for grouped operational summaries and time buckets, and
   `Jobs.Inspect` for one-job detail, timeline, attempts, related jobs,
-  errors, trigger, and lineage. `Jobs.List` and `Jobs.Get` are removed.
-  `Jobs.Watch` is an invalidation feed only; rerun query, metrics, or inspection
-  reads after invalidation frames. Admin mutations accept optional `reason`, and
-  active cancellation remains cooperative through `Jobs.Cancel`.
+  errors, trigger, lineage, and current `waitingOn` edges. Jobs remain `active`
+  while waiting. Use active-job wait helpers such as `job.wait_for(...)` to
+  annotate long external async work with safe metadata. `Jobs.List` and
+  `Jobs.Get` are removed. `Jobs.Watch` is an invalidation feed only; rerun query,
+  metrics, or inspection reads after invalidation frames. Admin mutations accept
+  optional `reason`, and active cancellation remains cooperative through
+  `Jobs.Cancel`.
+- Event Log admin clients use read-only `EventLog.Query`, `EventLog.Inspect`,
+  `EventLog.Metrics`, `EventLog.Consumers.Query`, and `EventLog.Watch` surfaces.
+  Declare it as an optional dependency unless the app cannot operate without
+  historical event data. Publisher deployment attribution comes from verified
+  event session proof; owner contract/event comes from subject/catalog matching.
 
 ## Use generated descriptors and facades
 
@@ -151,6 +163,11 @@ Trellis-owned lifecycle/resource helpers instead of extracting or constructing
 raw transport handles through Trellis.
 
 ## Prepared events and outbox/inbox
+
+Trellis signs event publishes at publish time and consumers validate event proofs
+before invoking handlers. Prepared events intentionally store subject, payload,
+event id, and event time without deployment or contract metadata; runtime publish
+adds proof headers from the current session.
 
 Direct descriptor publish is the default. Use `prepare_event::<Descriptor>(...)`
 only when event enqueue must be coupled to local durable state:

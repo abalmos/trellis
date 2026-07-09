@@ -173,6 +173,37 @@ job lifecycle events and NATS headers, so include `request_id` or `trace_id` in
 service logs when you need to follow work across RPCs, events, operations, and
 jobs.
 
+Use `job.wait_for(...)` around long external async calls so operators can see
+what an active job is waiting on. The job remains `active`; `Jobs.Inspect` and
+Console show the current `waitingOn` edge until the future completes.
+
+```rust
+let charge = job
+    .wait_for(
+        JobWaitEdge {
+            id: format!("stripe:{payment_intent_id}"),
+            target: JobWaitTarget {
+                kind: JobWaitTargetKind::External,
+                id: None,
+                operation_id: None,
+                label: Some("Stripe payment authorization".into()),
+                service: None,
+                target_type: None,
+                system: Some("stripe".into()),
+                operation: Some("POST /payment_intents".into()),
+                key: Some(payment_intent_id.clone()),
+            },
+            started_at: chrono::Utc::now().to_rfc3339(),
+            label: None,
+        },
+        confirm_payment(payment_intent_id.clone()),
+    )
+    .await?;
+```
+
+Use safe correlation keys only; never put secrets, full credentials, or private
+payloads in wait metadata. Short local awaits do not need annotation.
+
 ## 4. Start workers
 
 Call `start_workers()` **after** all `handle()` registrations:

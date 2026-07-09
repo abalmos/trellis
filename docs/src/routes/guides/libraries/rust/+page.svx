@@ -57,6 +57,10 @@ async fn main() -> anyhow::Result<()> {
 
 The generated helper presents the contract manifest, authenticates the service
 instance, resolves resource bindings, and owns the service runtime loop.
+Pending deployment authority is polled until it becomes ready by default. Set
+`authority_pending_timeout_ms` to `Some(milliseconds)` only when the caller needs
+an overall startup deadline; the per-request `timeout_ms` remains bounded either
+way.
 
 ## Connect as an app, CLI, or other user participant
 

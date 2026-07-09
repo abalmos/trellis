@@ -33,6 +33,7 @@ export const routeTitles = {
   "/admin/health-events": "Health",
   "/admin/apps": "Apps",
   "/admin/apps/revoke": "Revoke App Approval",
+  "/admin/events": "Events",
   "/admin/jobs": "Jobs",
   "/admin/portals": "Portals",
   "/admin/portals/login": "Portal Policy",
@@ -71,6 +72,7 @@ const navSections: NavSection[] = [
       { href: "/admin", label: "Overview", icon: "users" },
       { href: "/admin/health-events", label: "Health Events", icon: "alert" },
       { href: "/admin/sessions", label: "Sessions", icon: "activity" },
+      { href: "/admin/events", label: "Events", icon: "activity" },
       { href: "/admin/jobs", label: "Jobs", icon: "clipboard" },
       { href: "/admin/grants", label: "Grants", icon: "key" },
       {

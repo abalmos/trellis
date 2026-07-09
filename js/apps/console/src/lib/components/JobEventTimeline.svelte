@@ -9,8 +9,26 @@
     message?: string;
     reason?: string;
     error?: string;
+    waitEdge?: WaitEdge;
     workerInstanceId?: string;
     tries?: number;
+  };
+
+  type WaitEdge = {
+    id: string;
+    label?: string;
+    startedAt: string;
+    target: {
+      id?: string;
+      operationId?: string;
+      kind: "job" | "operation" | "external";
+      key?: string;
+      label?: string;
+      operation?: string;
+      service?: string;
+      system?: string;
+      type?: string;
+    };
   };
 
   type Props = {
@@ -22,13 +40,14 @@
   let showRaw = $state(false);
 
   type TimelineStep = {
-    kind: "start" | "progress" | "terminal";
+    kind: "start" | "progress" | "wait" | "terminal";
     label: string;
     detail?: string;
     timestamp: string;
     state: string;
     type: string;
     attempt?: number;
+    waitEdge?: WaitEdge;
     workerInstanceId?: string;
     rawEvents: TimelineEvent[];
   };
@@ -61,6 +80,41 @@
           state: event.state,
           type: event.type,
           attempt,
+          rawEvents: [event],
+        });
+        continue;
+      }
+
+      if (event.type === "waiting" || event.type === "WAITING" || event.type === "Waiting") {
+        const attempt = event.tries;
+        result.push({
+          kind: "wait",
+          label: "Waiting",
+          detail: event.waitEdge ? waitTargetLabel(event.waitEdge) : event.reason,
+          timestamp: event.timestamp,
+          state: event.state,
+          type: event.type,
+          attempt,
+          waitEdge: event.waitEdge,
+          workerInstanceId: event.workerInstanceId,
+          rawEvents: [event],
+        });
+        continue;
+      }
+
+      if (event.type === "resumed" || event.type === "RESUMED" || event.type === "Resumed") {
+        const attempt = event.tries;
+        const waited = event.waitEdge ? elapsedLabel(event.waitEdge.startedAt, event.timestamp) : null;
+        result.push({
+          kind: "wait",
+          label: "Resumed",
+          detail: waited ? `Waited ${waited}` : event.reason,
+          timestamp: event.timestamp,
+          state: event.state,
+          type: event.type,
+          attempt,
+          waitEdge: event.waitEdge,
+          workerInstanceId: event.workerInstanceId,
           rawEvents: [event],
         });
         continue;
@@ -179,6 +233,21 @@
     return result;
   }
 
+  function waitTargetLabel(edge: WaitEdge): string {
+    return edge.target.label ?? edge.label ?? edge.target.operation ?? edge.target.type ?? edge.target.key ?? edge.target.operationId ?? edge.target.id ?? edge.target.kind;
+  }
+
+  function waitTargetKey(edge: WaitEdge): string | undefined {
+    return edge.target.key ?? edge.target.operationId ?? edge.target.id;
+  }
+
+  function elapsedLabel(start: string, end: string): string | null {
+    const startMs = new Date(start).getTime();
+    const endMs = new Date(end).getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) return null;
+    return compactDuration(endMs - startMs);
+  }
+
   function parseErrorMessage(event: TimelineEvent): string | null {
     if (!event.error) return null;
     try {
@@ -199,6 +268,7 @@
         default: return "step-neutral";
       }
     }
+    if (kind === "wait") return "step-warning";
     if (kind === "start") return "step-info";
     return "step-progress";
   }
@@ -224,6 +294,20 @@
             <div class="timeline-label">{step.label}</div>
             {#if step.detail}
               <div class="timeline-detail">{step.detail}</div>
+            {/if}
+            {#if step.waitEdge}
+              <div class="timeline-wait-edge">
+                <span>{step.waitEdge.target.kind}</span>
+                {#if step.waitEdge.target.system || step.waitEdge.target.service}
+                  <span class="trellis-identifier">{step.waitEdge.target.system ?? step.waitEdge.target.service}</span>
+                {/if}
+                {#if step.waitEdge.target.operation || step.waitEdge.target.type}
+                  <span class="trellis-identifier">{step.waitEdge.target.operation ?? step.waitEdge.target.type}</span>
+                {/if}
+                {#if waitTargetKey(step.waitEdge)}
+                  <span class="trellis-identifier break-anywhere">{waitTargetKey(step.waitEdge)}</span>
+                {/if}
+              </div>
             {/if}
             <div class="timeline-meta">
               <time class="timeline-time">{formatDate(step.timestamp)}</time>
@@ -336,6 +420,15 @@
     color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
     font-size: 0.7rem;
     line-height: 1.4;
+  }
+
+  .timeline-wait-edge {
+    align-items: center;
+    color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 0.65rem;
+    gap: 0.35rem;
   }
 
   .timeline-meta {

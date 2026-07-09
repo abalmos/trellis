@@ -644,6 +644,7 @@ type JobWire = {
 
   trigger?: JobTrigger;
   lineage?: JobLineage;
+  waitingOn?: JobWaitEdge[];
 };
 
 type JobLogEntry = {
@@ -686,6 +687,25 @@ type JobLineage = {
   relatedKeys?: string[];
 };
 
+type JobWaitTarget = {
+  kind: "job" | "operation" | "external";
+  id?: string;
+  operationId?: string;
+  service?: string;
+  type?: string;
+  label?: string;
+  system?: string;
+  operation?: string;
+  key?: string;
+};
+
+type JobWaitEdge = {
+  id: string;
+  target: JobWaitTarget;
+  startedAt: string;
+  label?: string;
+};
+
 type JobState =
   | "pending"
   | "active"
@@ -718,6 +738,10 @@ Job state changes are published to the `JOBS` stream:
 - `retry` — Worker requested redelivery via NAK/backoff
 - `progress` — Progress update (structured: step/message/current/total, all
   optional)
+- `waiting` — Active handler began waiting on another job, operation, or
+  explicitly declared external async work; job state remains `active`
+- `resumed` — Active handler stopped waiting on the matching wait edge; job
+  state remains `active`
 - `logged` — Log entry added (contains only new entries; the SQL projection
   aggregates the current log view)
 - `completed` — Successfully finished (includes result)
@@ -783,6 +807,7 @@ type JobEventWire = {
   };
   trigger?: JobTrigger;
   lineage?: JobLineage;
+  waitEdge?: JobWaitEdge;
   admin?: {
     reason?: string;
     actor?: string;
@@ -963,6 +988,13 @@ Public runtime rules:
   outcomes
 - `JobRef.wait()` is valid as an internal service primitive, but jobs are still
   service-private and are not the public async API for ordinary callers
+- active job waits are represented as `active` jobs with optional `waitingOn`
+  edges, not as a separate blocked state. Runtime-owned waits on Trellis jobs
+  and operations SHOULD emit `waiting`/`resumed` automatically when the runtime
+  has active-job context
+- handlers SHOULD wrap long external async calls in the active job wait helper
+  so operators can see the external system, operation, and safe correlation key;
+  short awaits do not need annotation
 - public TypeScript jobs APIs MUST use `Result` / `AsyncResult` for expected
   failures rather than exception-oriented `requestOrThrow` wrappers
 - Rust jobs APIs return Rust `Result` values directly and should not model

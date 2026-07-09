@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-The generated `connect_service(...)` helper authenticates the service instance through the public Trellis service facade, presents the generated contract manifest, resolves deployment bindings, prepares authenticated request validation, and waits if bootstrap creates a pending authority update. `service.run()` owns the NATS service loop for the handlers you register.
+The generated `connect_service(...)` helper authenticates the service instance through the public Trellis service facade, presents the generated contract manifest, resolves deployment bindings, prepares authenticated request validation, and polls until pending deployment authority becomes ready. Rust service connections wait indefinitely by default; set `authority_pending_timeout_ms` to `Some(milliseconds)` only when startup needs an overall deadline. `service.run()` owns the NATS service loop for the handlers you register.
 
 {/snippet}
 </LanguageTabs>

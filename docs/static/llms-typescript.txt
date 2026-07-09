@@ -1,6 +1,6 @@
 # Trellis AI guidance for TypeScript services
 
-Last verified against Trellis main (2026-07-04).
+Last verified against Trellis main (2026-07-08).
 
 Use this file for AI coding agents working in a TypeScript service repository
 that consumes Trellis. The language-neutral guide is:
@@ -161,10 +161,21 @@ Job handlers that need JetStream redelivery should return or throw
 For Jobs admin clients, use `Jobs.Query` for server-side search/sort/group/stats,
 `Jobs.Metrics` for grouped operational summaries and time buckets, and
 `Jobs.Inspect` for one-job detail, timeline, attempts, related jobs, errors,
-trigger, and lineage. `Jobs.List` and `Jobs.Get` are removed. Use `Jobs.Watch`
-as an invalidation feed only; rerun the query, metrics, or inspection read after
+trigger, lineage, and current `waitingOn` edges. Jobs remain `active` while
+waiting. Trellis records `JobRef.wait()` and `OperationRef.wait()` automatically
+inside active job handlers; wrap long external awaits with `job.waitFor(...)` and
+safe metadata. `Jobs.List` and `Jobs.Get` are removed. Use `Jobs.Watch` as an
+invalidation feed only; rerun the query, metrics, or inspection read after
 invalidation frames. Admin mutations accept optional `reason`, and active
 cancellation remains cooperative through `Jobs.Cancel`.
+
+For Event Log admin clients, use the read-only `EventLog.Query`,
+`EventLog.Inspect`, `EventLog.Metrics`, `EventLog.Consumers.Query`, and
+`EventLog.Watch` surfaces. Event Log is optional observability infrastructure;
+apps should declare it as an optional dependency unless they cannot operate
+without historical event data. Treat publisher deployment as verified session
+attribution, not subject inference; subject/catalog matching identifies owner
+contract/event.
 
 ## Register handlers with `service.handle`
 
@@ -261,6 +272,11 @@ from the generated SDK, for example `OrdersGetHandler`.
 - Manifest: operation descriptors carry `errors: [{ type: "..." }]`
 
 ## Prepared events and outbox/inbox
+
+Trellis signs event publishes at publish time and consumers validate event proofs
+before invoking handlers. Prepared events intentionally store subject, payload,
+event id, and event time without deployment or contract metadata; runtime publish
+adds proof headers from the current session.
 
 Direct publish is the default when no local transaction must be coupled to the
 event:
