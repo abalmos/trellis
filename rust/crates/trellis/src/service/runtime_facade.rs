@@ -223,8 +223,8 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 /// Default retry delay while service deployment authority is pending.
 pub const DEFAULT_RETRY_DELAY_MS: u64 = 1_000;
 
-/// Default maximum time to wait for service deployment authority to become ready.
-pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: u64 = 60_000;
+/// Default authority-pending wait limit. `None` waits until authority is ready.
+pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: Option<u64> = None;
 
 /// Contract constants emitted by generated Rust service SDKs.
 pub trait GeneratedServiceContract {
@@ -251,8 +251,8 @@ pub struct ServiceConnectOptions<'a> {
     pub timeout_ms: u64,
     /// Retry delay in milliseconds while bootstrap is pending authority readiness.
     pub retry_delay_ms: u64,
-    /// Maximum authority-pending wait time in milliseconds.
-    pub authority_pending_timeout_ms: u64,
+    /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
+    pub authority_pending_timeout_ms: Option<u64>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
@@ -1709,6 +1709,13 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
     use std::sync::Mutex;
+
+    #[test]
+    fn service_connect_waits_indefinitely_for_authority_by_default() {
+        let options = ServiceConnectOptions::new("http://localhost:3000", "svc", "seed");
+
+        assert_eq!(options.authority_pending_timeout_ms, None);
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct PingInput {

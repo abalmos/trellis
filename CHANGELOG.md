@@ -29,6 +29,8 @@ and this project adheres to
 
 ### Fixed
 
+- Fixed Rust service bootstrap to poll pending deployment authority indefinitely
+  by default, matching TypeScript, while retaining an optional overall deadline.
 - Fixed service bootstrap authority planning so additive provided RPC,
   operation, feed, and event surfaces are included in safe auto-applied updates,
   preventing stale materialized NATS subscription grants after contract uploads.

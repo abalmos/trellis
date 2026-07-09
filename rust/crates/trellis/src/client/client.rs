@@ -29,7 +29,6 @@ const HEALTH_HEARTBEAT_SUBJECT: &str = "events.v1.Health.Heartbeat";
 const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
 const DEFAULT_AUTHORITY_RETRY_DELAY_MS: u64 = 1_000;
-const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: u64 = 60_000;
 static HEALTH_HEARTBEAT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 static FEED_INBOX_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -63,7 +62,8 @@ pub struct ServiceConnectWithContractOptions<'a> {
     pub session_key_seed_base64url: &'a str,
     pub timeout_ms: u64,
     pub retry_delay_ms: u64,
-    pub authority_pending_timeout_ms: u64,
+    /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
+    pub authority_pending_timeout_ms: Option<u64>,
 }
 
 /// Connection options for an activated device principal.
@@ -427,7 +427,7 @@ async fn fetch_service_bootstrap(
             contract: None,
             timeout_ms: opts.timeout_ms,
             retry_delay_ms: Some(DEFAULT_AUTHORITY_RETRY_DELAY_MS),
-            authority_pending_timeout_ms: Some(DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS),
+            authority_pending_timeout_ms: None,
         },
     )
     .await
@@ -447,7 +447,7 @@ async fn fetch_service_bootstrap_with_contract(
             contract: Some(contract),
             timeout_ms: opts.timeout_ms,
             retry_delay_ms: Some(opts.retry_delay_ms),
-            authority_pending_timeout_ms: Some(opts.authority_pending_timeout_ms),
+            authority_pending_timeout_ms: opts.authority_pending_timeout_ms,
         },
     )
     .await
@@ -2325,7 +2325,7 @@ mod tests {
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
             retry_delay_ms: 1,
-            authority_pending_timeout_ms: 2_000,
+            authority_pending_timeout_ms: Some(2_000),
         };
         let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
@@ -2369,7 +2369,7 @@ mod tests {
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
             retry_delay_ms: 1,
-            authority_pending_timeout_ms: 2_000,
+            authority_pending_timeout_ms: Some(2_000),
         };
         let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
@@ -2551,7 +2551,7 @@ mod tests {
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
             retry_delay_ms: 1,
-            authority_pending_timeout_ms: 2_000,
+            authority_pending_timeout_ms: Some(2_000),
         };
         let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
@@ -2602,7 +2602,7 @@ mod tests {
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
             retry_delay_ms: 1,
-            authority_pending_timeout_ms: 5,
+            authority_pending_timeout_ms: Some(5),
         };
         let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
@@ -2649,7 +2649,7 @@ mod tests {
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
             retry_delay_ms: 1,
-            authority_pending_timeout_ms: 2_000,
+            authority_pending_timeout_ms: Some(2_000),
         };
         let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
