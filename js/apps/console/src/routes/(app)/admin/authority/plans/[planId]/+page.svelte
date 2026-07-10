@@ -3,9 +3,10 @@
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import type { TrellisContractGetOutput } from "@qlever-llc/trellis/sdk/core";
   import { goto } from "$app/navigation";
-  import { base, resolve } from "$app/paths";
+  import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import Panel from "$lib/components/Panel.svelte";
@@ -35,6 +36,7 @@
   type SummaryEntry = PlanSummaryEntry;
   type SummaryKind = PlanSummaryKind;
   type SummaryGroup = PlanSummaryGroup;
+  type PageError = { kind: "load" | "decision"; message: string };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityPlansRequest = {
     (method: "Auth.DeploymentAuthority.Plans.Get", input: { planId: string }): RpcTakeable<{ plan: DeploymentAuthorityPlan }>;
@@ -49,11 +51,10 @@
   const trellis = getTrellis();
   const request = trellis.request.bind(trellis) as AuthorityPlansRequest;
   const planId = $derived(decodeURIComponent(page.params.planId ?? ""));
-  const plansHref = `${base}/admin/authority/plans`;
 
   let loading = $state(true);
   let acting = $state(false);
-  let error = $state<string | null>(null);
+  let error = $state<PageError | null>(null);
   let notice = $state<string | null>(null);
   let plan = $state.raw<DeploymentAuthorityPlan | null>(null);
   let previousContract = $state.raw<ContractDetail | null>(null);
@@ -86,7 +87,7 @@
   let expandedDetails = $state<Set<string>>(new Set());
 
   function toggleGap(gapIndex: number) {
-    const next = new Set(expandedGaps);
+    const next = new SvelteSet(expandedGaps);
     if (next.has(gapIndex)) next.delete(gapIndex);
     else next.add(gapIndex);
     expandedGaps = next;
@@ -95,7 +96,7 @@
     return expandedGaps.has(gapIndex);
   }
   function expandAllGaps() {
-    const all = new Set<number>();
+    const all = new SvelteSet<number>();
     for (const row of diffRows) {
       if (row.kind === "gap") all.add(row.gapIndex);
     }
@@ -759,7 +760,7 @@
         15000,
         "Loading the plan timed out.",
       );
-      if (isErr(response)) { error = errorMessage(response); return; }
+      if (isErr(response)) { error = { kind: "load", message: errorMessage(response) }; return; }
       plan = response.plan;
       previousContract = await withTimeout(
         previousContractFor(response.plan),
@@ -773,7 +774,7 @@
       );
       authorityKind = isErr(authorityResponse) ? null : authorityResponse.authority.kind;
     } catch (cause) {
-      error = errorMessage(cause);
+      error = { kind: "load", message: errorMessage(cause) };
     } finally {
       loading = false;
     }
@@ -817,7 +818,7 @@
       void goto(resolve("/admin/devices"));
       return;
     }
-    void goto(plansHref);
+    void goto(resolve("/admin/authority/plans"));
   }
 
   async function runDecision(action: () => Promise<unknown | Result<never, BaseError>>, message: string) {
@@ -826,11 +827,11 @@
     notice = null;
     try {
       const response = await action();
-      if (isErr(response)) { error = errorMessage(response); return; }
+      if (isErr(response)) { error = { kind: "decision", message: errorMessage(response) }; return; }
       notice = message;
       await load(false);
     } catch (cause) {
-      error = errorMessage(cause);
+      error = { kind: "decision", message: errorMessage(cause) };
     } finally {
       acting = false;
     }
@@ -844,10 +845,12 @@
 {#if error}
   <Notice variant="error" class="flex flex-wrap items-start justify-between gap-3">
     <div class="min-w-0">
-      <div class="font-medium">Failed to load authority plan</div>
-      <div class="mt-1 text-sm">{error}</div>
+      <div class="font-medium">{error.kind === "load" ? "Failed to load authority plan" : "Failed to update authority plan"}</div>
+      <div class="mt-1 text-sm">{error.message}</div>
     </div>
-    <button class="btn btn-sm" onclick={() => void load()} disabled={loading}>Retry</button>
+    {#if error.kind === "load"}
+      <button class="btn btn-sm" onclick={() => void load()} disabled={loading}>Retry</button>
+    {/if}
   </Notice>
 {/if}
 {#if notice}<Notice variant="success">{notice}</Notice>{/if}
@@ -965,7 +968,7 @@
                               </div>
                               {#if field.details && field.details.length > 0 && expandedDetails.has(`${entry.id}-${fieldIndex}`)}
                                 <div class="ml-4 mt-1 space-y-0.5 border-l border-base-300 pl-2">
-                                  {#each field.details as detail}
+                                  {#each field.details as detail (detail)}
                                     <div class="text-[11px] text-base-content/60">
                                       <span class="font-medium">{detail.label}:</span>
                                       {#if detail.before === "—"}
@@ -998,7 +1001,7 @@
                               </div>
                               {#if field.details && field.details.length > 0 && expandedDetails.has(`${entry.id}-${fieldIndex}`)}
                                 <div class="ml-4 mt-1 space-y-0.5 border-l border-base-300 pl-2">
-                                  {#each field.details as detail}
+                                  {#each field.details as detail (detail)}
                                     <div class="text-[11px] text-base-content/60">
                                       <span class="font-medium">{detail.label}:</span>
                                       {#if detail.before === "—" || detail.after === "—"}
