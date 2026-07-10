@@ -10,25 +10,37 @@ and this project adheres to
 
 ### Added
 
-- Added the Console Events admin route and nav entry for browsing persisted
-  platform events.
+- Added signed event proofs, `Auth.Events.Validate`, and retained publisher
+  session snapshots so event consumers can verify historical event provenance
+  after ordinary session expiry or closure.
+- Added the optional Rust Event Log service, its generated TypeScript and Rust
+  SDKs, and Console Events route for browsing persisted platform events,
+  publisher verification, and durable-consumer health.
+- Added job trigger and parent/root lineage, active-job wait evidence for child
+  jobs and operations, and corresponding Jobs admin inspection fields.
 
 ### Changed
 
-- Updated the Console job detail view so the error panel reads the Trellis
-  error payload directly (typed headline, cause message, optional stack), the
-  raw error JSON is hidden behind a collapsed disclosure, the header surfaces
-  the deployment name as a linked eyebrow, and the timeline classifies events
-  by type with PROGRESS events taking precedence over STARTED so progress
-  updates are not mislabeled as the job's start.
+- Updated Jobs projections and Console timelines to retain and display active
+  wait edges, related wait targets, and elapsed time between lifecycle events.
+- Updated the Console job detail view so the error panel reads the Trellis error
+  payload directly (typed headline, cause message, optional stack), the raw
+  error JSON is hidden behind a collapsed disclosure, the header surfaces the
+  deployment name as a linked eyebrow, and the timeline classifies events by
+  type with PROGRESS events taking precedence over STARTED so progress updates
+  are not mislabeled as the job's start.
 - Updated the Console deployment authority plan view so the Decision panel
-  sticks to the top of the viewport on wide screens, keeping the Accept
-  update action visible while reviewing long contract changes.
+  sticks to the top of the viewport on wide screens, keeping the Accept update
+  action visible while reviewing long contract changes.
 - Updated Jobs guide pages and service-author LLM guidance for the current
   job-type diagnostics and related-job matching behavior.
 
 ### Fixed
 
+- Fixed deployment authority acceptance to return after committing desired state
+  while physical reconciliation continues in the background, preventing
+  successful accepts from surfacing client timeouts, and fixed the Console plan
+  view's decision errors, reactive expansion state, and return navigation.
 - Fixed Rust service bootstrap to poll pending deployment authority indefinitely
   by default, matching TypeScript, while retaining an optional overall deadline.
 - Fixed service bootstrap authority planning so additive provided RPC,
