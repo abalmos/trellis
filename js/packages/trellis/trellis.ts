@@ -4815,14 +4815,7 @@ export class Trellis<
     }
 
     const payloadHash = await sha256(msg.data ?? new Uint8Array());
-    let auth:
-      | AuthEventsValidateResponse
-      | AuthError
-      | RemoteError
-      | TransportError
-      | ValidationError
-      | UnexpectedError
-      | undefined;
+    let auth: AuthEventsValidateResponse | BaseError | undefined;
     for (
       let attempt = 0;
       attempt < DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS;
