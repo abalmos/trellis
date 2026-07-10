@@ -1310,7 +1310,7 @@ async fn control_plane_bootstrap_rejects_unknown_contract_digest() {
         response.body.get("status").and_then(Value::as_str),
         Some("auth_required")
     );
-    assert_session_absent(&runtime.control_plane_sqlite(), &session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), &session_key);
 }
 
 #[tokio::test]
@@ -1708,7 +1708,7 @@ async fn control_plane_session_logout_deletes_session_and_denies_reuse() {
     assert_eq!(response.status, 200);
     let body: Value = serde_json::from_str(&response.body).expect("parse logout response JSON");
     assert_eq!(body, json!({ "success": true }));
-    assert_session_absent(&runtime.control_plane_sqlite(), &session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), &session_key);
 
     let reuse = fetch_client_bootstrap(runtime.trellis_url(), &seed)
         .await
@@ -1845,7 +1845,7 @@ async fn control_plane_session_logout_uses_provider_logout_redirect() {
         body,
         json!({ "success": true, "redirectTo": expected.to_string() })
     );
-    assert_session_absent(&runtime.control_plane_sqlite(), &session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), &session_key);
 }
 
 #[tokio::test]
@@ -1910,7 +1910,7 @@ async fn control_plane_session_logout_validates_return_to() {
     let body: Value =
         serde_json::from_str(&accepted.body).expect("parse valid returnTo response JSON");
     assert_eq!(body, json!({ "success": true, "redirectTo": return_to }));
-    assert_session_absent(&runtime.control_plane_sqlite(), &session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), &session_key);
 }
 
 #[tokio::test]
@@ -6641,7 +6641,7 @@ async fn assert_bootstrap_rejects_stored_contract(
         response.body.get("status").and_then(Value::as_str),
         Some("auth_required")
     );
-    assert_session_absent(&runtime.control_plane_sqlite(), &session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), &session_key);
 }
 
 async fn connect_bootstrap_client_session(
@@ -6671,7 +6671,7 @@ async fn assert_bootstrap_auth_required_and_session_deleted(
         response.body.get("status").and_then(Value::as_str),
         Some("auth_required")
     );
-    assert_session_absent(&runtime.control_plane_sqlite(), session_key);
+    assert_session_inactive(&runtime.control_plane_sqlite(), session_key);
 }
 
 fn session_row_user_id(
@@ -6855,16 +6855,22 @@ fn rewrite_session_contract(
     Ok(())
 }
 
-fn assert_session_absent(sqlite: &trellis_test::TrellisControlPlaneSqlite, session_key: &str) {
+fn assert_session_inactive(sqlite: &trellis_test::TrellisControlPlaneSqlite, session_key: &str) {
     let rows = sqlite
         .query(
-            "SELECT 1 FROM sessions WHERE session_key = ?",
+            "SELECT status, ended_at AS endedAt FROM sessions WHERE session_key = ?",
             [session_key],
         )
-        .expect("query session row after bootstrap rejection");
+        .expect("query retained session row after session invalidation");
+    assert!(rows.len() == 1, "expected retained session {session_key}");
+    assert_ne!(
+        rows[0].get("status").and_then(Value::as_str),
+        Some("active"),
+        "expected retained session {session_key} to be inactive"
+    );
     assert!(
-        rows.is_empty(),
-        "expected session {session_key} to be deleted"
+        rows[0].get("endedAt").and_then(Value::as_str).is_some(),
+        "expected retained session {session_key} to record an end time"
     );
 }
 

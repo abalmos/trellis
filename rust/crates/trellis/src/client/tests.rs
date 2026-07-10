@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::client::proof::{base64url_encode, build_proof_input, sha256};
-use crate::client::{verify_proof, SessionAuth};
+use crate::client::proof::{base64url_encode, build_event_proof_input, build_proof_input, sha256};
+use crate::client::{verify_event_proof, verify_proof, SessionAuth};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,4 +147,64 @@ fn auth_proof_matches_shared_conformance_vectors() {
         )
         .unwrap());
     }
+}
+
+#[test]
+fn event_proof_matches_typescript_byte_encoding() {
+    let auth = SessionAuth::from_seed_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
+        .expect("session auth");
+    let subject = "events.v1.Thing.Changed.one";
+    let payload = br#"{"value":"one"}"#;
+    let event_id = "evt_123";
+    let event_time = "2026-04-26T00:00:00.000Z";
+    let payload_hash = sha256(payload);
+
+    assert_eq!(
+        auth.session_key,
+        "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg"
+    );
+    assert_eq!(
+        base64url_encode(&payload_hash),
+        "8MGs1k0aqs-bFg6Kt_g8bnO40DhjibIusT1A6ABYYic"
+    );
+
+    let proof_input = build_event_proof_input(
+        &auth.session_key,
+        subject,
+        &payload_hash,
+        event_id,
+        event_time,
+    );
+    assert_eq!(
+        base64url_encode(&proof_input),
+        "AAAAFnRyZWxsaXMtZXZlbnQtcHJvb2YtdjEAAAArQTZFSHZfUE9FTDRkY04wWTUwdkFtV2ZrMWpDYnBRMWZIZHlHWkJKVk1iZwAAABtldmVudHMudjEuVGhpbmcuQ2hhbmdlZC5vbmUAAAAg8MGs1k0aqs-bFg6Kt_g8bnO40DhjibIusT1A6ABYYicAAAAHZXZ0XzEyMwAAABgyMDI2LTA0LTI2VDAwOjAwOjAwLjAwMFo"
+    );
+    assert_eq!(
+        base64url_encode(&sha256(&proof_input)),
+        "VwB4GO64q3oXEFe1BIs7t0vV8ytzkJ64bLCieL5q_LY"
+    );
+
+    let proof = auth.create_event_proof(subject, payload, event_id, event_time);
+    assert_eq!(
+        proof,
+        "9YyUCXtu8zoxXhF4Bs5nxJvMw_vusLXlR2jOfjdTtmIbm1TOWbI4aqsN_yCXR7UlXw0iDyTj1unjv0RXle1gCw"
+    );
+    assert!(verify_event_proof(
+        &auth.session_key,
+        subject,
+        payload,
+        event_id,
+        event_time,
+        &proof,
+    )
+    .expect("event proof verifies"));
+    assert!(!verify_event_proof(
+        &auth.session_key,
+        subject,
+        payload,
+        "evt_other",
+        event_time,
+        &proof,
+    )
+    .expect("changed event id rejects"));
 }

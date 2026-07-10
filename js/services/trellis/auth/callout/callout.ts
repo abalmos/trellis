@@ -82,6 +82,7 @@ type DeviceInstance = StaticDecode<typeof DeviceSchema>;
 type ParsedNatsAuthToken = StaticDecode<typeof NatsAuthTokenV1Schema>;
 const SERVICE_CAPABILITY = "service";
 const AUTH_REQUESTS_VALIDATE_SUBJECT = "rpc.v1.Auth.Requests.Validate";
+const AUTH_EVENTS_VALIDATE_SUBJECT = "rpc.v1.Auth.Events.Validate";
 type CalloutContractDeps = Pick<
   ContractsModule,
   | "getActiveEntries"
@@ -437,7 +438,10 @@ function serviceOperationStorePublishSubjects(
 
 function servicePlatformPublishSubjects(capabilities: string[]): string[] {
   return capabilities.includes(SERVICE_CAPABILITY)
-    ? [AUTH_REQUESTS_VALIDATE_SUBJECT]
+    ? [
+      AUTH_REQUESTS_VALIDATE_SUBJECT,
+      AUTH_EVENTS_VALIDATE_SUBJECT,
+    ]
     : [];
 }
 
@@ -1647,6 +1651,7 @@ export function startAuthCallout(
     const permissions = buildAuthCalloutPermissions({
       publishAllow: [
         ...(isService ? servicePublishSubjects : delegatedPublish),
+        AUTH_EVENTS_VALIDATE_SUBJECT,
         ...(isService
           ? serviceOperationStorePublishSubjects(
             sessionKey,

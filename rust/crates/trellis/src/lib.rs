@@ -64,6 +64,9 @@ pub mod sdk {
     /// Health contract SDK surface.
     pub mod health;
 
+    /// Event Log contract SDK surface.
+    pub mod eventlog;
+
     /// Jobs contract SDK surface.
     pub mod jobs;
 
@@ -106,6 +109,7 @@ mod tests {
             "local-bootstrap/Cargo.toml",
             "runtime/Cargo.toml",
             "service/Cargo.toml",
+            "service-eventlog/Cargo.toml",
             "service-jobs/Cargo.toml",
             "service-runtime/Cargo.toml",
             "trellis-test/Cargo.toml",

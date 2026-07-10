@@ -1645,7 +1645,7 @@ async fn connect_consumer(
         session_key_seed_base64url: &service_key.seed,
         timeout_ms: 5_000,
         retry_delay_ms: 100,
-        authority_pending_timeout_ms: 30_000,
+        authority_pending_timeout_ms: Some(30_000),
     })
     .await
     .expect("connect event consumer service");

@@ -364,6 +364,24 @@ impl<'a> AuthRpc<'a> {
             .call::<super::rpc::AuthDevicesRemoveRpc>(input)
             .await
     }
+    /// Call `Auth.EventConsumers.List`.
+    pub async fn event_consumers_list(
+        &self,
+        input: &super::types::AuthEventConsumersListRequest,
+    ) -> Result<super::types::AuthEventConsumersListResponse, TrellisClientError> {
+        self.inner
+            .call::<super::rpc::AuthEventConsumersListRpc>(input)
+            .await
+    }
+    /// Call `Auth.Events.Validate`.
+    pub async fn events_validate(
+        &self,
+        input: &super::types::AuthEventsValidateRequest,
+    ) -> Result<super::types::AuthEventsValidateResponse, TrellisClientError> {
+        self.inner
+            .call::<super::rpc::AuthEventsValidateRpc>(input)
+            .await
+    }
     /// Call `Auth.Identities.List`.
     pub async fn identities_list(
         &self,

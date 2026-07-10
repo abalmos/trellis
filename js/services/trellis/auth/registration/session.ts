@@ -4,6 +4,7 @@ import type { Config } from "../../config.ts";
 import {
   createAuthConnectionsKickHandler,
   createAuthConnectionsListHandler,
+  createAuthEventsValidateHandler,
   createAuthRequestsValidateHandler,
   createAuthSessionsListHandler,
   createAuthSessionsLogoutHandler,
@@ -105,6 +106,12 @@ export async function registerSessionRpcs(deps: {
       deviceInstanceStorage: deps.deviceInstanceStorage,
       loadServiceInstance: serviceLookup.loadServiceInstanceByKey,
       loadServiceDeployment: serviceLookup.loadServiceDeployment,
+    }),
+  );
+  await deps.trellis.handle.rpc.auth.eventsValidate(
+    createAuthEventsValidateHandler({
+      logger: deps.logger,
+      sessionStorage: deps.sessionStorage,
     }),
   );
   await deps.trellis.handle.rpc.auth.sessionsLogout(

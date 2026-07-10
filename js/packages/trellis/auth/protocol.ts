@@ -594,6 +594,39 @@ export type AuthDeploymentAuthorityListResponse = StaticDecode<
   typeof AuthDeploymentAuthorityListResponseSchema
 >;
 
+export const AuthEventConsumerBindingSchema = Type.Object({
+  deploymentId: Type.String({ minLength: 1 }),
+  group: Type.String({ minLength: 1 }),
+  stream: Type.String({ minLength: 1 }),
+  consumerName: Type.String({ minLength: 1 }),
+  filterSubjects: Type.Array(Type.String({ minLength: 1 })),
+  replay: Type.String({ minLength: 1 }),
+  ordering: Type.String({ minLength: 1 }),
+  concurrency: Type.Integer({ minimum: 1 }),
+  ackWaitMs: Type.Integer({ minimum: 1 }),
+  maxDeliver: Type.Integer({ minimum: 1 }),
+  backoffMs: Type.Array(Type.Integer({ minimum: 1 })),
+});
+export type AuthEventConsumerBinding = StaticDecode<
+  typeof AuthEventConsumerBindingSchema
+>;
+
+export const AuthEventConsumersListSchema = Type.Object({
+  deploymentId: Type.Optional(Type.String({ minLength: 1 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  limit: Type.Integer({ minimum: 0, maximum: 500 }),
+});
+export type AuthEventConsumersListInput = StaticDecode<
+  typeof AuthEventConsumersListSchema
+>;
+
+export const AuthEventConsumersListResponseSchema = Type.Object({
+  ...PageResponseSchema(AuthEventConsumerBindingSchema).properties,
+});
+export type AuthEventConsumersListResponse = StaticDecode<
+  typeof AuthEventConsumersListResponseSchema
+>;
+
 export const AuthDeploymentAuthorityGetSchema = Type.Object({
   deploymentId: Type.String({ minLength: 1 }),
 });
@@ -957,6 +990,15 @@ export const AuthRequestsValidateSchema = Type.Object({
   requestId: Type.String({ minLength: 1 }),
   capabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
 });
+
+export const AuthEventsValidateSchema = Type.Object({
+  sessionKey: Type.String({ minLength: 1 }),
+  proof: Type.String({ minLength: 1 }),
+  subject: Type.String({ minLength: 1 }),
+  payloadHash: Type.String({ minLength: 1 }),
+  eventId: Type.String({ minLength: 1 }),
+  eventTime: IsoDateStringSchema,
+});
 export const AuthenticatedServiceSchema = Type.Object({
   type: Type.Literal("service"),
   id: Type.String(),
@@ -1031,6 +1073,39 @@ export const AuthRequestsValidateResponseSchema = Type.Object({
   allowed: Type.Boolean(),
   inboxPrefix: Type.String(),
   caller: CallerViewSchema,
+});
+
+export const AuthEventValidationStatusSchema = Type.Union([
+  Type.Literal("verified"),
+  Type.Literal("missing-session"),
+  Type.Literal("invalid-signature"),
+  Type.Literal("subject-denied"),
+  Type.Literal("outside-session-window"),
+]);
+
+export const AuthEventPublisherSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("service"),
+    Type.Literal("device"),
+    Type.Literal("user"),
+  ]),
+  deploymentId: Type.Optional(Type.String({ minLength: 1 })),
+  instanceId: Type.Optional(Type.String({ minLength: 1 })),
+  contractId: Type.Optional(Type.String({ minLength: 1 })),
+  contractDigest: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]+$" })),
+  sessionStatus: Type.Union([
+    Type.Literal("active"),
+    Type.Literal("ended"),
+    Type.Literal("revoked"),
+    Type.Literal("expired"),
+  ]),
+});
+
+export const AuthEventsValidateResponseSchema = Type.Object({
+  allowed: Type.Boolean(),
+  status: AuthEventValidationStatusSchema,
+  caller: Type.Optional(CallerViewSchema),
+  publisher: Type.Optional(AuthEventPublisherSchema),
 });
 
 export const AuthIdentitiesListSchema = Type.Object({

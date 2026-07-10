@@ -1410,6 +1410,91 @@ pub struct AuthDevicesRemoveRequest {
 pub struct AuthDevicesRemoveResponse {
     pub success: bool,
 }
+/// Generated schema type `AuthEventConsumersListRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventConsumersListRequest {
+    #[serde(rename = "deploymentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    pub limit: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+}
+/// Generated schema type `AuthEventConsumersListResponse`.
+/// Generated schema type `AuthEventConsumersListResponseEntriesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventConsumersListResponseEntriesItem {
+    #[serde(rename = "ackWaitMs")]
+    pub ack_wait_ms: i64,
+    #[serde(rename = "backoffMs")]
+    pub backoff_ms: Vec<i64>,
+    pub concurrency: i64,
+    #[serde(rename = "consumerName")]
+    pub consumer_name: String,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: String,
+    #[serde(rename = "filterSubjects")]
+    pub filter_subjects: Vec<String>,
+    pub group: String,
+    #[serde(rename = "maxDeliver")]
+    pub max_deliver: i64,
+    pub ordering: String,
+    pub replay: String,
+    pub stream: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventConsumersListResponse {
+    pub count: i64,
+    pub entries: Vec<AuthEventConsumersListResponseEntriesItem>,
+    pub limit: i64,
+    #[serde(rename = "nextOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<i64>,
+    pub offset: i64,
+}
+/// Generated schema type `AuthEventsValidateRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventsValidateRequest {
+    #[serde(rename = "eventId")]
+    pub event_id: String,
+    #[serde(rename = "eventTime")]
+    pub event_time: String,
+    #[serde(rename = "payloadHash")]
+    pub payload_hash: String,
+    pub proof: String,
+    #[serde(rename = "sessionKey")]
+    pub session_key: String,
+    pub subject: String,
+}
+/// Generated schema type `AuthEventsValidateResponse`.
+/// Generated schema type `AuthEventsValidateResponsePublisher`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventsValidateResponsePublisher {
+    #[serde(rename = "contractDigest")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_digest: Option<String>,
+    #[serde(rename = "contractId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_id: Option<String>,
+    #[serde(rename = "deploymentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    #[serde(rename = "instanceId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    pub kind: String,
+    #[serde(rename = "sessionStatus")]
+    pub session_status: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthEventsValidateResponse {
+    pub allowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caller: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<AuthEventsValidateResponsePublisher>,
+    pub status: String,
+}
 /// Generated schema type `AuthIdentitiesListRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthIdentitiesListRequest {

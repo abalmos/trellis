@@ -5039,6 +5039,198 @@ export const AuthDevicesRemoveResponseSchema = {
   "type": "object",
 } as const;
 
+export const AuthEventConsumersListRequestSchema = {
+  "properties": {
+    "deploymentId": { "minLength": 1, "type": "string" },
+    "limit": { "maximum": 500, "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["limit"],
+  "type": "object",
+} as const;
+
+export const AuthEventConsumersListResponseSchema = {
+  "properties": {
+    "count": { "minimum": 0, "type": "integer" },
+    "entries": {
+      "default": [],
+      "items": {
+        "properties": {
+          "ackWaitMs": { "minimum": 1, "type": "integer" },
+          "backoffMs": {
+            "items": { "minimum": 1, "type": "integer" },
+            "type": "array",
+          },
+          "concurrency": { "minimum": 1, "type": "integer" },
+          "consumerName": { "minLength": 1, "type": "string" },
+          "deploymentId": { "minLength": 1, "type": "string" },
+          "filterSubjects": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "group": { "minLength": 1, "type": "string" },
+          "maxDeliver": { "minimum": 1, "type": "integer" },
+          "ordering": { "minLength": 1, "type": "string" },
+          "replay": { "minLength": 1, "type": "string" },
+          "stream": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "deploymentId",
+          "group",
+          "stream",
+          "consumerName",
+          "filterSubjects",
+          "replay",
+          "ordering",
+          "concurrency",
+          "ackWaitMs",
+          "maxDeliver",
+          "backoffMs",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "limit": { "minimum": 0, "type": "integer" },
+    "nextOffset": { "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["entries", "count", "offset", "limit"],
+  "type": "object",
+} as const;
+
+export const AuthEventsValidateRequestSchema = {
+  "properties": {
+    "eventId": { "minLength": 1, "type": "string" },
+    "eventTime": { "format": "date-time", "type": "string" },
+    "payloadHash": { "minLength": 1, "type": "string" },
+    "proof": { "minLength": 1, "type": "string" },
+    "sessionKey": { "minLength": 1, "type": "string" },
+    "subject": { "minLength": 1, "type": "string" },
+  },
+  "required": [
+    "sessionKey",
+    "proof",
+    "subject",
+    "payloadHash",
+    "eventId",
+    "eventTime",
+  ],
+  "type": "object",
+} as const;
+
+export const AuthEventsValidateResponseSchema = {
+  "properties": {
+    "allowed": { "type": "boolean" },
+    "caller": {
+      "anyOf": [{
+        "properties": {
+          "active": { "type": "boolean" },
+          "capabilities": { "items": { "type": "string" }, "type": "array" },
+          "email": { "type": "string" },
+          "identity": {
+            "properties": {
+              "identityId": { "minLength": 1, "type": "string" },
+              "provider": { "minLength": 1, "type": "string" },
+              "subject": { "minLength": 1, "type": "string" },
+            },
+            "required": ["identityId", "provider", "subject"],
+            "type": "object",
+          },
+          "image": { "type": "string" },
+          "lastAuth": { "format": "date-time", "type": "string" },
+          "name": { "type": "string" },
+          "participantKind": {
+            "anyOf": [{ "const": "app", "type": "string" }, {
+              "const": "agent",
+              "type": "string",
+            }],
+          },
+          "type": { "const": "user", "type": "string" },
+          "userId": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "type",
+          "participantKind",
+          "userId",
+          "identity",
+          "active",
+          "name",
+          "email",
+          "capabilities",
+          "lastAuth",
+        ],
+        "type": "object",
+      }, {
+        "properties": {
+          "active": { "type": "boolean" },
+          "capabilities": { "items": { "type": "string" }, "type": "array" },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "const": "service", "type": "string" },
+        },
+        "required": ["type", "id", "name", "active", "capabilities"],
+        "type": "object",
+      }, {
+        "properties": {
+          "active": { "type": "boolean" },
+          "capabilities": { "items": { "type": "string" }, "type": "array" },
+          "deploymentId": { "minLength": 1, "type": "string" },
+          "deviceId": { "minLength": 1, "type": "string" },
+          "deviceType": { "minLength": 1, "type": "string" },
+          "runtimePublicKey": { "minLength": 1, "type": "string" },
+          "type": { "const": "device", "type": "string" },
+        },
+        "required": [
+          "type",
+          "deviceId",
+          "deviceType",
+          "runtimePublicKey",
+          "deploymentId",
+          "active",
+          "capabilities",
+        ],
+        "type": "object",
+      }],
+    },
+    "publisher": {
+      "properties": {
+        "contractDigest": { "pattern": "^[A-Za-z0-9_-]+$", "type": "string" },
+        "contractId": { "minLength": 1, "type": "string" },
+        "deploymentId": { "minLength": 1, "type": "string" },
+        "instanceId": { "minLength": 1, "type": "string" },
+        "kind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }, { "const": "user", "type": "string" }],
+        },
+        "sessionStatus": {
+          "anyOf": [
+            { "const": "active", "type": "string" },
+            { "const": "ended", "type": "string" },
+            { "const": "revoked", "type": "string" },
+            { "const": "expired", "type": "string" },
+          ],
+        },
+      },
+      "required": ["kind", "sessionStatus"],
+      "type": "object",
+    },
+    "status": {
+      "anyOf": [
+        { "const": "verified", "type": "string" },
+        { "const": "missing-session", "type": "string" },
+        { "const": "invalid-signature", "type": "string" },
+        { "const": "subject-denied", "type": "string" },
+        { "const": "outside-session-window", "type": "string" },
+      ],
+    },
+  },
+  "required": ["allowed", "status"],
+  "type": "object",
+} as const;
+
 export const AuthIdentitiesListRequestSchema = {
   "properties": {
     "limit": { "maximum": 500, "minimum": 0, "type": "integer" },

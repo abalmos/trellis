@@ -14,6 +14,7 @@ import {
   createAuthDeploymentAuthorityPlansListHandler,
   createAuthDeploymentAuthorityReconcileHandler,
   createAuthDeploymentAuthorityRejectHandler,
+  createAuthEventConsumersListHandler,
 } from "../admin/authority_rpc.ts";
 import {
   createAuthServiceInstancesDisableHandler,
@@ -200,6 +201,12 @@ export async function registerServiceAdminRpcs(deps: {
 
   await deps.trellis.handle.rpc.auth.deploymentAuthorityList(
     listDeploymentAuthorities,
+  );
+  await deps.trellis.handle.rpc.auth.eventConsumersList(
+    createAuthEventConsumersListHandler({
+      materializedAuthorityStorage: deps.materializedAuthorityStorage,
+      logger: deps.logger,
+    }),
   );
   await deps.trellis.handle.rpc.auth.deploymentAuthorityGet(
     getDeploymentAuthority,

@@ -83,6 +83,19 @@ export async function sessionExists(
   return rows.length > 0;
 }
 
+/** Returns whether a retained session has been made inactive. */
+export async function sessionIsInactive(
+  sqlite: ControlPlaneSqlite,
+  sessionKey: string,
+): Promise<boolean> {
+  const rows = await sqlite.query(
+    "SELECT status, ended_at AS endedAt FROM sessions WHERE session_key = ?",
+    [sessionKey],
+  );
+  return rows.length === 1 && rows[0]?.status !== "active" &&
+    typeof rows[0]?.endedAt === "string";
+}
+
 /** Marks the user projection backing a session inactive. */
 export async function markSessionUserInactive(
   sqlite: ControlPlaneSqlite,

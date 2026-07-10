@@ -9,6 +9,11 @@ import {
   AuthCapabilityGroupsListSchema,
   AuthCapabilityGroupsPutResponseSchema,
   AuthCapabilityGroupsPutSchema,
+  AuthEventConsumerBindingSchema,
+  AuthEventConsumersListResponseSchema,
+  AuthEventConsumersListSchema,
+  AuthEventsValidateResponseSchema,
+  AuthEventsValidateSchema,
   AuthIdentitiesListResponseSchema,
   AuthIdentitiesListSchema,
   AuthRequestsValidateResponseSchema,
@@ -357,6 +362,11 @@ const schemas = {
   AuthDevicesRemoveResponse: AuthDevicesRemoveResponseSchema,
   AuthRequestsValidateRequest: AuthRequestsValidateSchema,
   AuthRequestsValidateResponse: AuthRequestsValidateResponseSchema,
+  AuthEventsValidateRequest: AuthEventsValidateSchema,
+  AuthEventsValidateResponse: AuthEventsValidateResponseSchema,
+  AuthEventConsumerBinding: AuthEventConsumerBindingSchema,
+  AuthEventConsumersListRequest: AuthEventConsumersListSchema,
+  AuthEventConsumersListResponse: AuthEventConsumersListResponseSchema,
   AuthConnectionsOpenedEvent: AuthConnectionsOpenedEventSchema,
   AuthConnectionsKickedEvent: AuthConnectionsKickedEventSchema,
   AuthConnectionsClosedEvent: AuthConnectionsClosedEventSchema,
@@ -456,6 +466,21 @@ export const TRELLIS_AUTH_RPC = {
     output: schemaRef("AuthRequestsValidateResponse"),
     capabilities: { call: ["service"] },
     authRequired: false,
+    errors: ["AuthError", "ValidationError", "UnexpectedError"],
+  },
+  "Auth.Events.Validate": {
+    version: "v1",
+    input: schemaRef("AuthEventsValidateRequest"),
+    output: schemaRef("AuthEventsValidateResponse"),
+    capabilities: { call: [] },
+    authRequired: false,
+    errors: ["AuthError", "ValidationError", "UnexpectedError"],
+  },
+  "Auth.EventConsumers.List": {
+    version: "v1",
+    input: schemaRef("AuthEventConsumersListRequest"),
+    output: schemaRef("AuthEventConsumersListResponse"),
+    capabilities: { call: ["event-consumers.read"] },
     errors: ["AuthError", "ValidationError", "UnexpectedError"],
   },
   "Auth.Deployments.Create": {
@@ -984,6 +1009,16 @@ const TRELLIS_AUTH_RPC_DOCS = {
     markdown:
       "Validates an inbound request envelope for service-side authorization.",
   },
+  "Auth.Events.Validate": {
+    summary: "Validate event auth.",
+    markdown:
+      "Validates an inbound event proof for service-side authorization.",
+  },
+  "Auth.EventConsumers.List": {
+    summary: "List expected event consumers.",
+    markdown:
+      "Lists deployment-derived durable event consumer bindings for platform observability.",
+  },
   "Auth.Deployments.Create": {
     summary: "Create deployment.",
     markdown: "Creates a deployment boundary for services, apps, or devices.",
@@ -1287,6 +1322,10 @@ const baseTrellisAuth = defineServiceContract(
       "events.auth": {
         displayName: "Observe auth events",
         description: "Publish or subscribe to Trellis auth lifecycle events.",
+      },
+      "event-consumers.read": {
+        displayName: "Read expected event consumers",
+        description: "Read deployment-derived durable event consumer bindings.",
       },
     },
     rpc: attachDocs(TRELLIS_AUTH_RPC, TRELLIS_AUTH_RPC_DOCS),

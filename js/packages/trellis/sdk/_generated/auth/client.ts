@@ -247,6 +247,14 @@ export interface TrellisAuthClient {
         input: Types.AuthDevicesRemoveInput,
         opts?: RequestOpts,
       ): AsyncResult<Types.AuthDevicesRemoveOutput, BaseError>;
+      eventConsumersList(
+        input: Types.AuthEventConsumersListInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.AuthEventConsumersListOutput, BaseError>;
+      eventsValidate(
+        input: Types.AuthEventsValidateInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.AuthEventsValidateOutput, BaseError>;
       identitiesList(
         input: Types.AuthIdentitiesListInput,
         opts?: RequestOpts,
@@ -787,6 +795,10 @@ export interface ServiceHandle {
         handler: Types.AuthDevicesProvisionHandler,
       ): Promise<void>;
       devicesRemove(handler: Types.AuthDevicesRemoveHandler): Promise<void>;
+      eventConsumersList(
+        handler: Types.AuthEventConsumersListHandler,
+      ): Promise<void>;
+      eventsValidate(handler: Types.AuthEventsValidateHandler): Promise<void>;
       identitiesList(handler: Types.AuthIdentitiesListHandler): Promise<void>;
       identityGrantsList(
         handler: Types.AuthIdentityGrantsListHandler,

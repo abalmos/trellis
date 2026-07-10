@@ -554,7 +554,8 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
     if (!requestOrigin) return undefined;
 
     const flow = await loadBrowserFlow(flowId);
-    return flow?.app?.origin === requestOrigin ? requestOrigin : undefined;
+    if (!flow) return resolveCorsOrigin(requestOrigin, config.web.origins);
+    return flow.app?.origin === requestOrigin ? requestOrigin : undefined;
   }
 
   function registrationAvailability(

@@ -75,7 +75,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `EventLog.Consumers.Query`, and `EventLog.Watch`. Declare it as an optional
   dependency unless the app cannot operate without historical event data.
   Publisher deployment attribution comes from verified event session proof;
-  owner contract/event comes from subject/catalog matching.
+  owner contract/event comes from subject/catalog matching. `EventLog.Query`
+  accepts `includeEventTypes` and `excludeEventTypes` arrays of owner
+  contract/event pairs; `EventLog.Metrics` returns the available pairs and
+  counts in `summary.eventTypes`.
 - Use job `keyConcurrency` for service-private work that must have at most one
   active job per logical key across service instances. The existing numeric job
   `concurrency` setting remains worker-count concurrency. Keyed concurrency

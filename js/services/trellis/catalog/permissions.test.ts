@@ -5,6 +5,10 @@ import {
   CONTRACT_DIGEST as TRELLIS_JOBS_CONTRACT_DIGEST,
 } from "#trellis-generated-sdk/jobs";
 import {
+  CONTRACT as TRELLIS_EVENTLOG_CONTRACT,
+  CONTRACT_DIGEST as TRELLIS_EVENTLOG_CONTRACT_DIGEST,
+} from "../../../../generated/packages/jsr/eventlog/mod.ts";
+import {
   CONTRACT as TRELLIS_CORE_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_CORE_CONTRACT_DIGEST,
 } from "#trellis-generated-sdk/core";
@@ -12,6 +16,10 @@ import {
   CONTRACT as TRELLIS_HEALTH_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_HEALTH_CONTRACT_DIGEST,
 } from "#trellis-generated-sdk/health";
+import {
+  CONTRACT as TRELLIS_AUTH_CONTRACT,
+  CONTRACT_DIGEST as TRELLIS_AUTH_CONTRACT_DIGEST,
+} from "../contracts/trellis_auth.ts";
 
 import {
   getServicePublishSubjectsForContracts,
@@ -1131,6 +1139,10 @@ Deno.test("user event control publish subjects require subscribe capability", ()
       publishSubjects.includes("events.v1.Partner.Changed.*.*"),
       true,
     );
+    assertEquals(
+      publishSubjects.includes("rpc.v1.Auth.Events.Validate"),
+      true,
+    );
     assertEquals(publishSubjects.includes("$JS.API.INFO"), false);
     assertEquals(publishSubjects.includes("$JS.ACK.>"), false);
   });
@@ -1177,7 +1189,8 @@ Deno.test("jobs admin service receives built-in Jobs runtime subjects", () => {
   withContracts([
     ...TEST_CONTRACTS.filter((entry) =>
       entry.contract.id !== "trellis.core@v1" &&
-      entry.contract.id !== "trellis.health@v1"
+      entry.contract.id !== "trellis.health@v1" &&
+      entry.contract.id !== "trellis.auth@v1"
     ),
     coreContract,
     healthContract,
@@ -1234,6 +1247,62 @@ Deno.test("forged jobs contract digest does not receive built-in Jobs runtime su
     });
     assertEquals(publishSubjects.includes("$JS.API.STREAM.INFO.JOBS"), false);
     assertEquals(publishSubjects.includes("trellis.jobs.>"), false);
+  });
+});
+
+Deno.test("event log service receives built-in event stream runtime subjects", () => {
+  const eventLogContract = {
+    digest: TRELLIS_EVENTLOG_CONTRACT_DIGEST,
+    contract: {
+      ...TRELLIS_EVENTLOG_CONTRACT,
+      format: "trellis.contract.v1",
+      displayName: "Trellis Event Log",
+      description: "Event Log runtime shell contract.",
+      kind: "service",
+    },
+  } satisfies { digest: string; contract: TrellisContractV1 };
+
+  withContracts([
+    ...TEST_CONTRACTS.filter((entry) =>
+      entry.contract.id !== "trellis.core@v1" &&
+      entry.contract.id !== "trellis.health@v1" &&
+      entry.contract.id !== "trellis.auth@v1"
+    ),
+    {
+      digest: TRELLIS_CORE_CONTRACT_DIGEST,
+      contract: TRELLIS_CORE_CONTRACT,
+    },
+    {
+      digest: TRELLIS_HEALTH_CONTRACT_DIGEST,
+      contract: TRELLIS_HEALTH_CONTRACT,
+    },
+    {
+      digest: TRELLIS_AUTH_CONTRACT_DIGEST,
+      contract: TRELLIS_AUTH_CONTRACT,
+    },
+    eventLogContract,
+  ], () => {
+    const publishSubjects = getServicePublishSubjects(["service"], {
+      sessionKey: "eventlog-key",
+      contractDigest: TRELLIS_EVENTLOG_CONTRACT_DIGEST,
+    });
+    assertEquals(
+      publishSubjects.includes("$JS.API.STREAM.INFO.trellis"),
+      true,
+    );
+    assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.DURABLE.CREATE.trellis.>"),
+      true,
+    );
+    assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.LIST.trellis"),
+      true,
+    );
+    assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.MSG.NEXT.trellis.>"),
+      true,
+    );
+    assertEquals(publishSubjects.includes("$JS.ACK.trellis.>"), true);
   });
 });
 

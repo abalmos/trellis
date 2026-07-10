@@ -38,10 +38,13 @@ use super::{
     UploadTransferSession,
 };
 use crate::client::{
-    EventMessage, EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode,
-    ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
+    verify_event_proof, EventMessage, EventReplayPolicy, EventSubscribeOptions,
+    EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
-use crate::sdk::auth::types::{AuthRequestsValidateRequest, AuthRequestsValidateResponse};
+use crate::sdk::auth::types::{
+    AuthEventsValidateRequest, AuthEventsValidateResponse, AuthEventsValidateResponsePublisher,
+    AuthRequestsValidateRequest, AuthRequestsValidateResponse,
+};
 use crate::sdk::auth::AuthClient;
 use crate::sdk::core::types::TrellisBindingsGetResponseBinding;
 
@@ -83,6 +86,41 @@ struct ServiceEventListenerRegistration {
 
 struct ServiceEventListenerRegistryCleanup {
     event_listeners: SharedDurableEventListeners,
+}
+
+#[derive(Debug, Clone)]
+struct EventProofValidationError {
+    message: String,
+    transient: bool,
+}
+
+impl EventProofValidationError {
+    fn permanent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            transient: false,
+        }
+    }
+
+    fn transient(error: TrellisClientError) -> Self {
+        Self {
+            message: error.to_string(),
+            transient: true,
+        }
+    }
+
+    fn is_transient(&self) -> bool {
+        self.transient
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EventProofValidation {
+    publisher: Option<ServiceEventPublisherContext>,
 }
 
 impl ServiceEventListenerRegistryCleanup {
@@ -142,7 +180,7 @@ async fn validate_request_with_session_retry(
         {
             Ok(response) => return Ok(response),
             Err(error)
-                if is_transient_session_not_found(&error)
+                if is_transient_event_validate_error(&error)
                     && attempt + 1 < AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS =>
             {
                 tokio::time::sleep(Duration::from_millis(
@@ -168,6 +206,121 @@ fn is_transient_session_not_found(error: &TrellisClientError) -> bool {
             .and_then(|value| value.get("reason"))
             .and_then(serde_json::Value::as_str)
             == Some("session_not_found")
+}
+
+async fn validate_event_with_session_retry(
+    client: &Arc<TrellisClient>,
+    request: &AuthEventsValidateRequest,
+) -> Result<AuthEventsValidateResponse, TrellisClientError> {
+    for attempt in 0..AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS {
+        match AuthClient::new(client.as_ref())
+            .rpc()
+            .auth()
+            .events_validate(request)
+            .await
+        {
+            Ok(response) => return Ok(response),
+            Err(error)
+                if is_transient_session_not_found(&error)
+                    && attempt + 1 < AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS =>
+            {
+                tokio::time::sleep(Duration::from_millis(
+                    AUTH_VALIDATE_SESSION_RETRY_MS * (attempt as u64 + 1),
+                ))
+                .await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("retry loop always returns on the final attempt")
+}
+
+async fn validate_event_message(
+    client: &Arc<TrellisClient>,
+    subject: &str,
+    payload: &[u8],
+    headers: Option<&HeaderMap>,
+) -> Result<EventProofValidation, EventProofValidationError> {
+    let Some(headers) = headers else {
+        return Err(EventProofValidationError::permanent(
+            "missing event proof headers",
+        ));
+    };
+    let session_key = required_event_header(headers, "session-key")?;
+    let proof = required_event_header(headers, "proof")?;
+    let event_id = required_event_header(headers, "Nats-Msg-Id")?;
+    let event_time = required_event_header(headers, "Trellis-Event-Time")?;
+
+    match verify_event_proof(
+        &session_key,
+        subject,
+        payload,
+        &event_id,
+        &event_time,
+        &proof,
+    ) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(EventProofValidationError::permanent(
+                "invalid event proof signature",
+            ))
+        }
+        Err(error) => {
+            return Err(EventProofValidationError::permanent(format!(
+                "invalid event proof: {error}"
+            )))
+        }
+    }
+
+    let request = AuthEventsValidateRequest {
+        event_id,
+        event_time,
+        payload_hash: payload_hash_base64url(payload),
+        proof,
+        session_key,
+        subject: subject.to_string(),
+    };
+    let response = validate_event_with_session_retry(client, &request)
+        .await
+        .map_err(|error| {
+            if is_transient_event_validate_error(&error) {
+                EventProofValidationError::transient(error)
+            } else {
+                EventProofValidationError::permanent(format!(
+                    "Auth.Events.Validate failed for {subject}: {error}"
+                ))
+            }
+        })?;
+    if !response.allowed {
+        return Err(EventProofValidationError::permanent(format!(
+            "Auth.Events.Validate rejected event with status {}",
+            response.status
+        )));
+    }
+
+    Ok(EventProofValidation {
+        publisher: response.publisher.map(Into::into),
+    })
+}
+
+fn required_event_header(
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<String, EventProofValidationError> {
+    headers
+        .get(name)
+        .map(|value| value.as_str().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| EventProofValidationError::permanent(format!("missing event {name} header")))
+}
+
+fn is_transient_event_validate_error(error: &TrellisClientError) -> bool {
+    is_transient_session_not_found(error)
+        || matches!(
+            error,
+            TrellisClientError::Timeout | TrellisClientError::NatsRequest(_)
+        )
 }
 
 fn make_validate_request(
@@ -382,6 +535,38 @@ pub struct ServiceEventListenerContext {
     pub traceparent: Option<String>,
     /// Raw event transport headers delivered with the message.
     pub headers: HeaderMap,
+    /// Verified publisher metadata returned by `Auth.Events.Validate`, when available.
+    pub publisher: Option<ServiceEventPublisherContext>,
+}
+
+/// Verified event publisher metadata returned by `Auth.Events.Validate`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceEventPublisherContext {
+    /// Publisher participant kind.
+    pub kind: String,
+    /// Publisher deployment id, when the publisher is deployment-backed.
+    pub deployment_id: Option<String>,
+    /// Publisher runtime instance id, when known.
+    pub instance_id: Option<String>,
+    /// Publisher contract id, when known.
+    pub contract_id: Option<String>,
+    /// Publisher contract digest, when known.
+    pub contract_digest: Option<String>,
+    /// Retained session lifecycle status used for validation.
+    pub session_status: String,
+}
+
+impl From<AuthEventsValidateResponsePublisher> for ServiceEventPublisherContext {
+    fn from(publisher: AuthEventsValidateResponsePublisher) -> Self {
+        Self {
+            kind: publisher.kind,
+            deployment_id: publisher.deployment_id,
+            instance_id: publisher.instance_id,
+            contract_id: publisher.contract_id,
+            contract_digest: publisher.contract_digest,
+            session_status: publisher.session_status,
+        }
+    }
 }
 
 /// Event listener delivery mode.
@@ -538,9 +723,9 @@ impl ServiceHandle {
             })
     }
 
-    /// Return an event publisher backed by the connected NATS client.
+    /// Return an event publisher backed by the connected Trellis client.
     pub fn event_publisher(&self) -> EventPublisher {
-        EventPublisher::new(self.client().nats().clone())
+        EventPublisher::new(Arc::clone(self.client()))
     }
 
     /// Start a descriptor-backed event listener.
@@ -775,7 +960,7 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Return an event publisher backed by the connected NATS client.
     pub fn event_publisher(&self) -> EventPublisher {
-        EventPublisher::new(self.client().nats().clone())
+        EventPublisher::new(Arc::clone(self.client()))
     }
 
     /// Start a descriptor-backed event listener.
@@ -1354,14 +1539,16 @@ fn service_event_context_from_message<T>(
     mode: ServiceEventListenerMode,
     group: Option<String>,
     message: &EventMessage<T>,
+    publisher: Option<ServiceEventPublisherContext>,
 ) -> ServiceEventListenerContext {
-    service_event_context_from_headers(mode, group, message.headers())
+    service_event_context_from_headers(mode, group, message.headers(), publisher)
 }
 
 fn service_event_context_from_headers(
     mode: ServiceEventListenerMode,
     group: Option<String>,
     headers: Option<&HeaderMap>,
+    publisher: Option<ServiceEventPublisherContext>,
 ) -> ServiceEventListenerContext {
     let headers = headers.cloned().unwrap_or_default();
     ServiceEventListenerContext {
@@ -1377,6 +1564,7 @@ fn service_event_context_from_headers(
             .get("traceparent")
             .map(|value| value.as_str().to_string()),
         headers,
+        publisher,
     }
 }
 
@@ -1406,13 +1594,33 @@ where
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         client.flush().await?;
+        let event_client = Arc::clone(client);
         return Ok(ServiceEventListenerHandle::new(
             tokio::spawn(async move {
                 while let Some(message) = events.next().await {
+                    let validation = match validate_event_message(
+                        &event_client,
+                        message.subject.as_ref(),
+                        &message.payload,
+                        message.headers.as_ref(),
+                    )
+                    .await
+                    {
+                        Ok(validation) => validation,
+                        Err(error) => {
+                            tracing::warn!(
+                                subject = %message.subject,
+                                error = %error.message(),
+                                "Event auth validation failed"
+                            );
+                            continue;
+                        }
+                    };
                     let context = service_event_context_from_headers(
                         ServiceEventListenerMode::Ephemeral,
                         None,
                         message.headers.as_ref(),
+                        validation.publisher,
                     );
                     let event = serde_json::from_slice::<D::Event>(&message.payload)
                         .map_err(TrellisClientError::from)?;
@@ -1439,6 +1647,7 @@ where
         time: None,
         traceparent: None,
         headers: HeaderMap::new(),
+        publisher: None,
     };
     let handler = Arc::new(handler);
     let handler_id = SERVICE_EVENT_HANDLER_ID.fetch_add(1, Ordering::Relaxed);
@@ -1529,12 +1738,36 @@ where
                     .get(&pull_key)
                     .and_then(|listener| listener.handlers.get(message.subject()).cloned())
                     .unwrap_or_default();
+                let validation = match validate_event_message(
+                    &pull_client,
+                    message.subject(),
+                    message.payload(),
+                    message.headers(),
+                )
+                .await
+                {
+                    Ok(validation) => validation,
+                    Err(error) => {
+                        tracing::warn!(
+                            subject = %message.subject(),
+                            error = %error.message(),
+                            "Event auth validation failed"
+                        );
+                        if error.is_transient() {
+                            let _ = message.nak().await;
+                        } else {
+                            let _ = message.term().await;
+                        }
+                        continue;
+                    }
+                };
                 let mut handled = true;
                 for handler in handlers.values() {
                     let context = service_event_context_from_message(
                         context.mode,
                         context.group.clone(),
                         &message,
+                        validation.publisher.clone(),
                     );
                     if let Err(_error) =
                         handler(Bytes::copy_from_slice(message.payload()), context).await

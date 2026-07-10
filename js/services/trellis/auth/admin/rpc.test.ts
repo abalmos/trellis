@@ -47,6 +47,7 @@ import {
   createAuthDeploymentAuthorityPlansGetHandler,
   createAuthDeploymentAuthorityPlansListHandler,
   createAuthDeploymentAuthorityRejectHandler,
+  createAuthEventConsumersListHandler,
 } from "./authority_rpc.ts";
 import {
   classifyDeploymentAuthorityPlan,
@@ -59,6 +60,7 @@ import type {
   DeploymentAuthorityMaterialization,
   DeploymentAuthorityPlan,
   DeploymentAuthorityUpdate,
+  DeploymentResourceBinding,
   ImplementationOffer,
 } from "../schemas.ts";
 
@@ -721,6 +723,79 @@ Deno.test("Auth.DeploymentAuthority.Plans.List filters pending and historical pl
   ]);
 });
 
+Deno.test("Auth.EventConsumers.List exposes materialized event-consumer bindings", async () => {
+  const bindings: DeploymentResourceBinding[] = [
+    {
+      deploymentId: "svc-a",
+      kind: "event-consumer",
+      alias: "ingest",
+      binding: {
+        stream: "trellis",
+        consumerName: "svc-a-ingest",
+        filterSubjects: ["events.v1.orders.Shipped"],
+        replay: "new",
+        ordering: "parallel",
+        concurrency: 4,
+        ackWaitMs: 30_000,
+        maxDeliver: 5,
+        backoffMs: [1000, 5000],
+      },
+      limits: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      deploymentId: "svc-b",
+      kind: "event-consumer",
+      alias: "audit",
+      binding: {
+        stream: "trellis",
+        consumerName: "svc-b-audit",
+        filterSubjects: ["events.v1.audit.>"],
+        replay: "all",
+        ordering: "serial",
+        concurrency: 1,
+        ackWaitMs: 10_000,
+        maxDeliver: 3,
+        backoffMs: [],
+      },
+      limits: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+  const handler = createAuthEventConsumersListHandler({
+    materializedAuthorityStorage: {
+      listBindingsByKind: async (kind) =>
+        bindings.filter((binding) => binding.kind === kind),
+    },
+    logger: { trace: () => {} },
+  });
+
+  const result = await handler({
+    input: { deploymentId: "svc-a", limit: 10 },
+    context: adminContext,
+  });
+
+  assert(!result.isErr());
+  const value = result.take();
+  if (isErr(value)) throw value.error;
+  assertEquals(value.count, 1);
+  assertEquals(value.entries[0], {
+    deploymentId: "svc-a",
+    group: "ingest",
+    stream: "trellis",
+    consumerName: "svc-a-ingest",
+    filterSubjects: ["events.v1.orders.Shipped"],
+    replay: "new",
+    ordering: "parallel",
+    concurrency: 4,
+    ackWaitMs: 30_000,
+    maxDeliver: 5,
+    backoffMs: [1000, 5000],
+  });
+});
+
 Deno.test("Auth.DeploymentAuthority.Plans.Get returns one plan", async () => {
   const plans = new InMemoryDeploymentAuthorityPlanStorage([
     deploymentAuthorityPlan({ planId: "plan-a" }),
@@ -858,6 +933,52 @@ Deno.test("Auth.DeploymentAuthority.AcceptUpdate accepts pending plan without ma
     deploymentId: "svc-a",
     definitions: [capabilityDefinition],
   }]);
+});
+
+Deno.test("Auth.DeploymentAuthority.AcceptUpdate returns before reconciliation finishes", async () => {
+  const authorities = new InMemoryDeploymentAuthorityStorage(
+    deploymentAuthority(),
+  );
+  const plans = new InMemoryDeploymentAuthorityPlanStorage([
+    deploymentAuthorityPlan(),
+  ]);
+  let reconciliationStarted!: () => void;
+  let finishReconciliation!: () => void;
+  const started = new Promise<void>((resolve) => {
+    reconciliationStarted = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    finishReconciliation = resolve;
+  });
+  const handler = createAuthDeploymentAuthorityAcceptUpdateHandler({
+    deploymentAuthorityStorage: authorities,
+    deploymentAuthorityPlanStorage: plans,
+    authorityReconciler: {
+      reconcileDeployment: async () => {
+        reconciliationStarted();
+        await finished;
+        throw new Error("test reconciliation finished");
+      },
+    },
+    logger: { trace: () => {} },
+  });
+  let responded = false;
+  const response = handler({
+    input: { planId: "plan-a" },
+    context: adminContext,
+  }).then((result) => {
+    responded = true;
+    return result;
+  });
+
+  await started;
+  await Promise.resolve();
+
+  assert(responded);
+  assert((await response).isOk());
+  assertEquals(plans.getValue("plan-a")?.state, "accepted");
+  finishReconciliation();
+  await Promise.resolve();
 });
 
 Deno.test("Auth.DeploymentAuthority.AcceptUpdate supersedes sibling pending plans", async () => {

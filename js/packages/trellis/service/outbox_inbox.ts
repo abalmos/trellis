@@ -2,12 +2,13 @@ import {
   type AsyncResult,
   type BaseError,
   isErr,
-  UnexpectedError,
+  type UnexpectedError,
 } from "@qlever-llc/result";
 import { type StaticDecode, Type } from "typebox";
-import type { PreparedTrellisEvent } from "../trellis.ts";
-import { TypedKV } from "../kv.ts";
+
+import type { TypedKV } from "../kv.ts";
 import { recordTrellisError } from "../telemetry/mod.ts";
+import type { PreparedTrellisEvent } from "../trellis.ts";
 
 export type OutboxMessageState = "pending" | "dispatched" | "failed";
 
@@ -954,12 +955,16 @@ export function preparedTrellisEventToOutboxRecord(
   event: PreparedTrellisEvent,
 ): PreparedOutboxRecord {
   return {
-    id: event.headers["Nats-Msg-Id"] ?? event.header.id,
+    id: event.header.id,
     kind: "event.publish",
     name: event.event,
     subject: event.subject,
     payload: event.encodedPayload,
-    headers: event.headers,
+    headers: {
+      ...event.headers,
+      "Nats-Msg-Id": event.header.id,
+      "Trellis-Event-Time": event.header.time,
+    },
   };
 }
 

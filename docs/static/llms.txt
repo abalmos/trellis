@@ -77,7 +77,9 @@ commands.
   observability. Declare it as an optional dependency unless the app cannot
   operate without historical event data. Publisher deployment attribution comes
   from verified event session proof, while owner contract/event comes from
-  subject/catalog matching.
+  subject/catalog matching. `EventLog.Query` accepts `includeEventTypes` and
+  `excludeEventTypes` arrays of owner contract/event pairs; `EventLog.Metrics`
+  returns the available pairs and counts in `summary.eventTypes`.
 - For service-private work that must be singleton per logical entity, declare
   job `keyConcurrency` instead of building ad hoc scheduler dedupe. Defaults
   should fail clearly (`stalePolicy: "fail-stale"`, `whenFull: "reject"`);

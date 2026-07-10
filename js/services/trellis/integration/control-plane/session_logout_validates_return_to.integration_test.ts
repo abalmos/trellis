@@ -13,6 +13,7 @@ import {
 } from "@qlever-llc/trellis-test/integration";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
+import { sessionIsInactive } from "./_bootstrap_client.ts";
 
 const CASE_ID = "control-plane.session-logout-validates-return-to";
 const clientName = caseScopedName("session-logout-return-to-client", CASE_ID);
@@ -73,7 +74,7 @@ liveTrellisTest({
       success: true,
       redirectTo: returnTo,
     });
-    assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+    assertEquals(await sessionIsInactive(sqlite, clientKey.sessionKey), true);
   },
 });
 

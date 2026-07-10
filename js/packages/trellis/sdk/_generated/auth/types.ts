@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "wvLFGaWPpVvGJ17Z16k15ygYmjMEU5sw0adZZVqf3Gk" as const;
+  "cbLLQ4HqcHOrFD6PH1fmJd1OABJ5q6CbmpjtdRAfkCU" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -1656,6 +1656,85 @@ export type AuthDevicesProvisionOutput = {
 export type AuthDevicesRemoveInput = { instanceId: string };
 export type AuthDevicesRemoveOutput = { success: boolean };
 
+export type AuthEventConsumersListInput = {
+  deploymentId?: string;
+  limit: number;
+  offset?: number;
+};
+export type AuthEventConsumersListOutput = {
+  count: number;
+  entries: Array<
+    {
+      ackWaitMs: number;
+      backoffMs: Array<number>;
+      concurrency: number;
+      consumerName: string;
+      deploymentId: string;
+      filterSubjects: Array<string>;
+      group: string;
+      maxDeliver: number;
+      ordering: string;
+      replay: string;
+      stream: string;
+    }
+  >;
+  limit: number;
+  nextOffset?: number;
+  offset: number;
+};
+
+export type AuthEventsValidateInput = {
+  eventId: string;
+  eventTime: string;
+  payloadHash: string;
+  proof: string;
+  sessionKey: string;
+  subject: string;
+};
+export type AuthEventsValidateOutput = {
+  allowed: boolean;
+  caller?: {
+    active: boolean;
+    capabilities: Array<string>;
+    email: string;
+    identity: { identityId: string; provider: string; subject: string };
+    image?: string;
+    lastAuth: string;
+    name: string;
+    participantKind: "app" | "agent";
+    type: "user";
+    userId: string;
+  } | {
+    active: boolean;
+    capabilities: Array<string>;
+    id: string;
+    name: string;
+    type: "service";
+  } | {
+    active: boolean;
+    capabilities: Array<string>;
+    deploymentId: string;
+    deviceId: string;
+    deviceType: string;
+    runtimePublicKey: string;
+    type: "device";
+  };
+  publisher?: {
+    contractDigest?: string;
+    contractId?: string;
+    deploymentId?: string;
+    instanceId?: string;
+    kind: "service" | "device" | "user";
+    sessionStatus: "active" | "ended" | "revoked" | "expired";
+  };
+  status:
+    | "verified"
+    | "missing-session"
+    | "invalid-signature"
+    | "subject-denied"
+    | "outside-session-window";
+};
+
 export type AuthIdentitiesListInput = {
   limit: number;
   offset?: number;
@@ -2849,6 +2928,14 @@ export interface RpcMap {
     input: AuthDevicesRemoveInput;
     output: AuthDevicesRemoveOutput;
   };
+  "Auth.EventConsumers.List": {
+    input: AuthEventConsumersListInput;
+    output: AuthEventConsumersListOutput;
+  };
+  "Auth.Events.Validate": {
+    input: AuthEventsValidateInput;
+    output: AuthEventsValidateOutput;
+  };
   "Auth.Identities.List": {
     input: AuthIdentitiesListInput;
     output: AuthIdentitiesListOutput;
@@ -3458,6 +3545,32 @@ export type AuthDevicesRemoveHandler = (
     client: HandlerClient;
   },
 ) => AuthDevicesRemoveHandlerResult | Promise<AuthDevicesRemoveHandlerResult>;
+export type AuthEventConsumersListHandlerError = TrellisErrorInstance;
+export type AuthEventConsumersListHandlerResult = Result<
+  AuthEventConsumersListOutput,
+  AuthEventConsumersListHandlerError
+>;
+export type AuthEventConsumersListHandler = (
+  args: {
+    input: AuthEventConsumersListInput;
+    context: RpcHandlerContext;
+    client: HandlerClient;
+  },
+) =>
+  | AuthEventConsumersListHandlerResult
+  | Promise<AuthEventConsumersListHandlerResult>;
+export type AuthEventsValidateHandlerError = TrellisErrorInstance;
+export type AuthEventsValidateHandlerResult = Result<
+  AuthEventsValidateOutput,
+  AuthEventsValidateHandlerError
+>;
+export type AuthEventsValidateHandler = (
+  args: {
+    input: AuthEventsValidateInput;
+    context: RpcHandlerContext;
+    client: HandlerClient;
+  },
+) => AuthEventsValidateHandlerResult | Promise<AuthEventsValidateHandlerResult>;
 export type AuthIdentitiesListHandlerError = TrellisErrorInstance;
 export type AuthIdentitiesListHandlerResult = Result<
   AuthIdentitiesListOutput,

@@ -1663,12 +1663,19 @@ Deno.test("session storage expires sessions from last auth when TTL is configure
       fresh,
     );
     const rows = await storage.db.select().from(sessions);
-    assertEquals(rows.length, 1);
-    assertEquals(rows[0].sessionKey, "fresh-session-key");
+    assertEquals(rows.length, 2);
+    assertEquals(
+      rows.find((row) => row.sessionKey === "expired-session-key")?.status,
+      "expired",
+    );
+    assertEquals(
+      rows.find((row) => row.sessionKey === "fresh-session-key")?.status,
+      "active",
+    );
   });
 });
 
-Deno.test("session storage deletes by session key", async () => {
+Deno.test("session storage marks deleted sessions inactive", async () => {
   await withRepositories(async ({ sessions: sessionRepo }) => {
     const first = makeUserSession();
     const second = makeUserSession({
@@ -1694,6 +1701,10 @@ Deno.test("session storage deletes by session key", async () => {
     assertEquals(
       await sessionRepo.getOneBySessionKey("first-session-key"),
       undefined,
+    );
+    assertEquals(
+      (await sessionRepo.getRetainedBySessionKey("first-session-key"))?.status,
+      "revoked",
     );
     assertEquals(await sessionRepo.listPage({ limit: 10 }), [second, service]);
 

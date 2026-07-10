@@ -38,7 +38,7 @@ pub use operations::{
     OperationTransferInputBuilder, OperationTransferProgress, OperationTransferStartError,
     OperationTransport, StartedOperationTransfer, TransferOperationDescriptor,
 };
-pub use proof::verify_proof;
+pub use proof::{build_event_proof_input, verify_event_proof, verify_proof};
 pub use state::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateEntry, MapStateListResult,
     MapStateStore, PutStateOptions, StateDeleteResult, StateEntry, StateGetResult,

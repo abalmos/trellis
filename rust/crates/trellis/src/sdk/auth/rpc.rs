@@ -484,6 +484,33 @@ impl RpcDescriptor for AuthDevicesRemoveRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
+/// Descriptor for `Auth.EventConsumers.List`.
+pub struct AuthEventConsumersListRpc;
+impl RpcDescriptor for AuthEventConsumersListRpc {
+    type Input = super::types::AuthEventConsumersListRequest;
+    type Output = super::types::AuthEventConsumersListResponse;
+    const INPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_EVENT_CONSUMERS_LIST_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_EVENT_CONSUMERS_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.EventConsumers.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.EventConsumers.List";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::event-consumers.read"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
+/// Descriptor for `Auth.Events.Validate`.
+pub struct AuthEventsValidateRpc;
+impl RpcDescriptor for AuthEventsValidateRpc {
+    type Input = super::types::AuthEventsValidateRequest;
+    type Output = super::types::AuthEventsValidateResponse;
+    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_EVENTS_VALIDATE_INPUT_SCHEMA_JSON;
+    const OUTPUT_SCHEMA_JSON: &'static str =
+        super::schemas::AUTH_EVENTS_VALIDATE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.Events.Validate";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
+}
 /// Descriptor for `Auth.Identities.List`.
 pub struct AuthIdentitiesListRpc;
 impl RpcDescriptor for AuthIdentitiesListRpc {

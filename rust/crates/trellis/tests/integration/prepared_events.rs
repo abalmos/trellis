@@ -104,7 +104,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         session_key_seed_base64url: &service_key.seed,
         timeout_ms: 5_000,
         retry_delay_ms: 100,
-        authority_pending_timeout_ms: 30_000,
+        authority_pending_timeout_ms: Some(30_000),
     })
     .await
     .expect("connect prepared-events service");

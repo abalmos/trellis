@@ -78,6 +78,7 @@
     "@tailwindcss/vite": "npm:@tailwindcss/vite@4.2.4",
     "@types/cookie": "npm:@types/cookie@^1.0.0",
     "@types/node": "npm:@types/node@25.6.0",
+    "@qlever-llc/trellis/sdk/eventlog": "./packages/trellis/sdk/eventlog.ts",
     "#trellis-generated-sdk/auth": "./../generated/packages/jsr/auth/mod.ts",
     "#trellis-generated-sdk/core": "./../generated/packages/jsr/trellis-core/mod.ts",
     "#trellis-generated-sdk/health": "./../generated/packages/jsr/health/mod.ts",

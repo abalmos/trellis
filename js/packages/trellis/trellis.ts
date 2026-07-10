@@ -28,9 +28,12 @@ import {
 } from "./contract_support/mod.ts";
 import type { StaticDecode } from "typebox";
 import {
+  AuthEventsValidateResponseSchema,
+  AuthEventsValidateSchema,
   AuthRequestsValidateResponseSchema,
   AuthRequestsValidateSchema,
 } from "./auth/protocol.ts";
+import { buildEventProofInput } from "./auth/proof.ts";
 import {
   AsyncResult,
   BaseError,
@@ -141,6 +144,12 @@ export type AuthRequestsValidateResponse = StaticDecode<
 >;
 export type AuthRequestsValidateInput = StaticDecode<
   typeof AuthRequestsValidateSchema
+>;
+export type AuthEventsValidateResponse = StaticDecode<
+  typeof AuthEventsValidateResponseSchema
+>;
+export type AuthEventsValidateInput = StaticDecode<
+  typeof AuthEventsValidateSchema
 >;
 
 export type SessionCaller = AuthRequestsValidateResponse["caller"];
@@ -1970,6 +1979,12 @@ const DEFAULT_NO_RESPONDER_MAX_RETRIES = 2;
 const DEFAULT_NO_RESPONDER_RETRY_MS = 200;
 const DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS = 3;
 const DEFAULT_AUTH_VALIDATE_SESSION_RETRY_MS = 25;
+const AUTH_EVENTS_VALIDATE_RPC = {
+  subject: "rpc.v1.Auth.Events.Validate",
+  input: AuthEventsValidateSchema,
+  output: AuthEventsValidateResponseSchema,
+  callerCapabilities: [] as const,
+};
 
 function activeTraceId(span: Span): string | undefined {
   const traceId = span.spanContext().traceId;
@@ -4092,8 +4107,6 @@ export class Trellis<
       }
 
       const headers = natsHeaders();
-      headers.set("Nats-Msg-Id", header.id);
-      headers.set("Trellis-Event-Time", header.time);
       injectTraceContext(createNatsHeaderCarrier(headers));
 
       const headerRecord: Record<string, string> = {};
@@ -4137,6 +4150,11 @@ export class Trellis<
         for (const [key, value] of Object.entries(event.headers)) {
           headers.set(key, value);
         }
+        headers.set("session-key", this.#auth.sessionKey);
+        headers.set("Nats-Msg-Id", event.header.id);
+        headers.set("Trellis-Event-Time", event.header.time);
+        const proof = await this.#createEventProof(event);
+        headers.set("proof", proof);
 
         logger.trace(
           { subject: event.subject },
@@ -4276,6 +4294,16 @@ export class Trellis<
 
     const task = AsyncResult.try(async () => {
       for await (const msg of sub) {
+        const proofResult = await this.#validateEventProof(event, msg);
+        const proofValue = proofResult.take();
+        if (isErr(proofValue)) {
+          this.#log.warn(
+            { error: proofValue.error, event, subject: msg.subject },
+            "Event auth validation failed",
+          );
+          continue;
+        }
+
         const parsedEvent = this.#parseEventMessage(event, ctx, msg);
         const m = parsedEvent.take();
         if (isErr(m)) {
@@ -4590,6 +4618,18 @@ export class Trellis<
   ): AsyncResult<void, ValidationError | UnexpectedError> {
     return AsyncResult.try(async () => {
       for await (const msg of messages) {
+        const proofResult = await this.#validateEventProof(event, msg);
+        const proofValue = proofResult.take();
+        if (isErr(proofValue)) {
+          this.#log.warn(
+            { error: proofValue.error, event, subject: msg.subject },
+            "Event auth validation failed",
+          );
+          if (isTransientAuthValidateSessionError(proofValue.error)) msg.nak();
+          else msg.term();
+          continue;
+        }
+
         const parsedEvent = this.#parseEventMessage(event, ctx, msg);
         const m = parsedEvent.take();
         if (isErr(m)) {
@@ -4653,6 +4693,33 @@ export class Trellis<
 
         let failed = false;
         for (const registration of matching) {
+          const proofResult = await this.#validateEventProof(
+            registration.event,
+            msg,
+          );
+          const proofValue = proofResult.take();
+          if (isErr(proofValue)) {
+            recordRuntimeError(proofValue.error, {
+              surface: "event",
+              direction: "consumer",
+              operation: String(registration.event),
+              phase: "auth",
+            });
+            this.#log.warn(
+              {
+                error: proofValue.error,
+                event: registration.event,
+                subject: msg.subject,
+              },
+              "Event auth validation failed",
+            );
+            if (isTransientAuthValidateSessionError(proofValue.error)) {
+              msg.nak();
+            } else msg.term();
+            failed = true;
+            break;
+          }
+
           const parsedEvent = this.#parseEventMessage(
             registration.event,
             registration.ctx,
@@ -4729,6 +4796,77 @@ export class Trellis<
     }
 
     return parseRuntimeSchema(ctx.event, json);
+  }
+
+  async #validateEventProof(
+    event: EventsOf<TA>,
+    msg: Pick<Msg, "data" | "headers" | "subject">,
+  ): Promise<Result<void, BaseError>> {
+    const sessionKey = msg.headers?.get("session-key");
+    const proof = msg.headers?.get("proof");
+    const eventId = msg.headers?.get("Nats-Msg-Id");
+    const eventTime = msg.headers?.get("Trellis-Event-Time");
+    if (!sessionKey) {
+      return err(new AuthError({ reason: "missing_session_key" }));
+    }
+    if (!proof) return err(new AuthError({ reason: "missing_proof" }));
+    if (!eventId || !eventTime) {
+      return err(new AuthError({ reason: "invalid_signature" }));
+    }
+
+    const payloadHash = await sha256(msg.data ?? new Uint8Array());
+    let auth:
+      | AuthEventsValidateResponse
+      | AuthError
+      | RemoteError
+      | TransportError
+      | ValidationError
+      | UnexpectedError
+      | undefined;
+    for (
+      let attempt = 0;
+      attempt < DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS;
+      attempt++
+    ) {
+      const authValue = await this.requestAuthEventValidate({
+        sessionKey,
+        proof,
+        subject: msg.subject,
+        payloadHash: base64urlEncode(payloadHash),
+        eventId,
+        eventTime,
+      }).take();
+      if (!isErr(authValue)) {
+        auth = authValue;
+        break;
+      }
+      const authError = authValue.error;
+      if (
+        !isTransientAuthValidateSessionError(authError) ||
+        attempt === DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS - 1
+      ) {
+        auth = authError;
+        break;
+      }
+      await sleep(DEFAULT_AUTH_VALIDATE_SESSION_RETRY_MS * (attempt + 1));
+    }
+
+    if (!auth) return err(new UnexpectedError({ context: { event } }));
+    if (auth instanceof BaseError) return err(auth);
+    if (auth instanceof Error) return err(new UnexpectedError({ cause: auth }));
+    if (!auth.allowed) {
+      return err(
+        new AuthError({
+          reason: "insufficient_permissions",
+          context: {
+            event,
+            status: auth.status,
+            userCapabilities: auth.caller?.capabilities ?? [],
+          },
+        }),
+      );
+    }
+    return ok(undefined);
   }
 
   wait(): AsyncResult<void, BaseError> {
@@ -4821,6 +4959,21 @@ export class Trellis<
     const digest = await sha256(input);
     const sigBytes = await this.#auth.sign(digest);
     return { proof: base64urlEncode(sigBytes), iat, requestId };
+  }
+
+  async #createEventProof(event: PreparedTrellisEvent): Promise<string> {
+    const payloadHash = await sha256(
+      new TextEncoder().encode(event.encodedPayload),
+    );
+    const input = buildEventProofInput(
+      this.#auth.sessionKey,
+      event.subject,
+      payloadHash,
+      event.header.id,
+      event.header.time,
+    );
+    const digest = await sha256(input);
+    return base64urlEncode(await this.#auth.sign(digest));
   }
 
   async #requestMessageWithRetry(args: {
@@ -5088,5 +5241,15 @@ export class Trellis<
       | ValidationError
       | UnexpectedError
     >;
+  }
+
+  protected requestAuthEventValidate(
+    input: AuthEventsValidateInput,
+  ): AsyncResult<AuthEventsValidateResponse, BaseError> {
+    return this.#requestBuiltRpc<AuthEventsValidateResponse>(
+      "Auth.Events.Validate",
+      input,
+      AUTH_EVENTS_VALIDATE_RPC,
+    );
   }
 }

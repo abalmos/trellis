@@ -1,5 +1,6 @@
 import { connect, credsAuthenticator } from "@nats-io/transport-deno";
 import { createAuth, isErr } from "@qlever-llc/trellis";
+import { trellisIdFromOriginId } from "@qlever-llc/trellis/auth";
 import {
   connectTrellisServiceInternal,
   Trellis as InternalTrellis,
@@ -10,7 +11,10 @@ import { Value } from "typebox/value";
 import type { Config } from "../config.ts";
 import { trellisControlPlaneApi } from "./control_plane_api.ts";
 import { createStorage } from "./storage.ts";
-import { CONTRACT_DIGEST as TRELLIS_CORE_CONTRACT_DIGEST } from "../contracts/trellis_core.ts";
+import {
+  CONTRACT_DIGEST as TRELLIS_CORE_CONTRACT_DIGEST,
+  CONTRACT_ID as TRELLIS_CORE_CONTRACT_ID,
+} from "../contracts/trellis_core.ts";
 import {
   AuthBrowserFlowSchema,
   ConnectionSchema,
@@ -224,6 +228,23 @@ export async function createRuntimeGlobals(config: Config) {
     if (isErr(stateKV)) {
       throw new Error(`Failed to open state KV: ${stateKV.error.message}`);
     }
+
+    const controlPlaneSessionNow = new Date();
+    await storageBootstrap.sessionStorage.put(auth.sessionKey, {
+      type: "service",
+      trellisId: await trellisIdFromOriginId("service", auth.sessionKey),
+      origin: "service",
+      id: auth.sessionKey,
+      email: "trellis@trellis.internal",
+      name: "trellis",
+      instanceId: "trellis-control-plane",
+      deploymentId: "trellis",
+      instanceKey: auth.sessionKey,
+      contractId: TRELLIS_CORE_CONTRACT_ID,
+      contractDigest: TRELLIS_CORE_CONTRACT_DIGEST,
+      createdAt: controlPlaneSessionNow,
+      lastAuth: controlPlaneSessionNow,
+    });
 
     // Bootstrap the Trellis control-plane directly instead of using the normal
     // TrellisService.connect(...) bootstrap flow. The control-plane is the component

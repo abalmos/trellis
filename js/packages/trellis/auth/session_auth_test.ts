@@ -2,12 +2,14 @@ import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import {
   base64urlDecode,
   base64urlEncode,
+  buildEventProofInput,
   correctedIatSeconds,
   createAuth,
   sha256,
   toArrayBuffer,
   trellisIdFromOriginId,
   utf8,
+  verifyEventProof,
   verifyProof,
 } from "./mod.ts";
 
@@ -99,6 +101,52 @@ Deno.test("proof creation and verification match ADR format", async () => {
     proof,
   );
   assertEquals(bad, false);
+});
+
+Deno.test("event proof uses event id and event time domain", async () => {
+  const seed = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const auth = await createAuth({ sessionKeySeed: seed });
+  const payloadHash = await sha256(utf8(JSON.stringify({ value: "one" })));
+  const eventId = "evt_123";
+  const eventTime = "2026-04-26T00:00:00.000Z";
+  const digest = await sha256(
+    buildEventProofInput(
+      auth.sessionKey,
+      "events.v1.Thing.Changed.one",
+      payloadHash,
+      eventId,
+      eventTime,
+    ),
+  );
+  const proof = base64urlEncode(await auth.sign(digest));
+
+  assert(
+    await verifyEventProof(
+      auth.sessionKey,
+      {
+        sessionKey: auth.sessionKey,
+        subject: "events.v1.Thing.Changed.one",
+        payloadHash,
+        eventId,
+        eventTime,
+      },
+      proof,
+    ),
+  );
+  assertEquals(
+    await verifyEventProof(
+      auth.sessionKey,
+      {
+        sessionKey: auth.sessionKey,
+        subject: "events.v1.Thing.Changed.one",
+        payloadHash,
+        eventId: "evt_other",
+        eventTime,
+      },
+      proof,
+    ),
+    false,
+  );
 });
 
 Deno.test("trellisIdFromOriginId is stable and 22 chars", async () => {

@@ -76,6 +76,11 @@ export type SessionStorageEntry = {
   session: Session;
 };
 
+export type RetainedSessionEntry = SessionStorageEntry & {
+  status: string;
+  endedAt: string | null;
+};
+
 export type CreateUserWithLocalIdentityResult =
   | { ok: true }
   | { ok: false; error: "user_already_exists" | "identity_already_exists" };
@@ -386,6 +391,14 @@ function decodeSessionEntry(row: SessionRow): SessionStorageEntry {
   };
 }
 
+function decodeRetainedSessionEntry(row: SessionRow): RetainedSessionEntry {
+  return {
+    ...decodeSessionEntry(row),
+    status: row.status,
+    endedAt: row.endedAt,
+  };
+}
+
 function sessionPrincipalId(session: Session): string {
   if (session.type === "user") return session.userId;
   return session.type === "device" ? session.instanceId : session.trellisId;
@@ -401,6 +414,9 @@ function encodeSessionRecord(
     type: session.type,
     createdAt: isoString(session.createdAt),
     lastAuth: isoString(session.lastAuth),
+    status: "active",
+    endedAt: null,
+    endedReason: null,
     session: JSON.stringify(session),
   };
 
@@ -1509,22 +1525,57 @@ export class SqlSessionRepository {
     this.#now = options.now ?? (() => new Date());
   }
 
-  async #deleteExpiredSessions(): Promise<void> {
+  async #deactivateExpiredSessions(): Promise<void> {
     if (this.#sessionTtlMs <= 0) return;
     const cutoff = new Date(this.#now().getTime() - this.#sessionTtlMs);
-    await this.#db.delete(sessions).where(
-      lt(sessions.lastAuth, isoString(cutoff)),
+    const expiredRows = await this.#db.select({
+      sessionKey: sessions.sessionKey,
+      lastAuth: sessions.lastAuth,
+    }).from(sessions).where(
+      and(
+        eq(sessions.status, "active"),
+        lt(sessions.lastAuth, isoString(cutoff)),
+      ),
     );
+    for (const row of expiredRows) {
+      await this.#db.update(sessions).set({
+        status: "expired",
+        endedAt: new Date(
+          new Date(row.lastAuth).getTime() + this.#sessionTtlMs,
+        ).toISOString(),
+        endedReason: "session_ttl",
+      }).where(eq(sessions.sessionKey, row.sessionKey));
+    }
+  }
+
+  async #deactivateWhere(where: SQL, reason: string): Promise<void> {
+    await this.#db.update(sessions).set({
+      status: "revoked",
+      endedAt: this.#now().toISOString(),
+      endedReason: reason,
+    }).where(and(eq(sessions.status, "active"), where));
   }
 
   /** Returns the only session for a session key, or undefined when absent. */
   async getOneBySessionKey(sessionKey: string): Promise<Session | undefined> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
+    const rows = await this.#db.select().from(sessions).where(
+      and(eq(sessions.sessionKey, sessionKey), eq(sessions.status, "active")),
+    ).limit(1);
+    const row = rows[0];
+    return row === undefined ? undefined : decodeSessionRow(row);
+  }
+
+  /** Returns a retained session row regardless of lifecycle status. */
+  async getRetainedBySessionKey(
+    sessionKey: string,
+  ): Promise<RetainedSessionEntry | undefined> {
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
       eq(sessions.sessionKey, sessionKey),
     ).limit(1);
     const row = rows[0];
-    return row === undefined ? undefined : decodeSessionRow(row);
+    return row === undefined ? undefined : decodeRetainedSessionEntry(row);
   }
 
   /** Inserts or replaces a session keyed by session key. */
@@ -1547,6 +1598,9 @@ export class SqlSessionRepository {
         publicIdentityKey: row.publicIdentityKey,
         createdAt: row.createdAt,
         lastAuth: row.lastAuth,
+        status: row.status,
+        endedAt: row.endedAt,
+        endedReason: row.endedReason,
         revokedAt: row.revokedAt,
         session: row.session,
       },
@@ -1555,33 +1609,40 @@ export class SqlSessionRepository {
 
   /** Deletes the session for a session key. */
   async deleteBySessionKey(sessionKey: string): Promise<void> {
-    await this.#db.delete(sessions).where(eq(sessions.sessionKey, sessionKey));
+    await this.#deactivateWhere(
+      eq(sessions.sessionKey, sessionKey),
+      "session_revoke",
+    );
   }
 
   /** Deletes all sessions for one canonical user id. */
   async deleteByUser(userId: string): Promise<void> {
-    await this.#db.delete(sessions).where(eq(sessions.trellisId, userId));
+    await this.#deactivateWhere(eq(sessions.trellisId, userId), "user_revoke");
   }
 
   /** Deletes all service sessions for one service instance key. */
   async deleteByInstanceKey(instanceKey: string): Promise<void> {
-    await this.#db.delete(sessions).where(
+    await this.#deactivateWhere(
       eq(sessions.instanceKey, instanceKey),
+      "instance_revoke",
     );
   }
 
   /** Deletes all device sessions for one public identity key. */
   async deleteByPublicIdentityKey(publicIdentityKey: string): Promise<void> {
-    await this.#db.delete(sessions).where(
+    await this.#deactivateWhere(
       eq(sessions.publicIdentityKey, publicIdentityKey),
+      "device_revoke",
     );
   }
 
   /** Returns a bounded page of sessions ordered by session key and principal id. */
   async listPage(query: BoundedListQuery): Promise<Session[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const { offset, limit } = boundedListQuery(query);
-    const rows = await this.#db.select().from(sessions).orderBy(
+    const rows = await this.#db.select().from(sessions).where(
+      eq(sessions.status, "active"),
+    ).orderBy(
       sessions.sessionKey,
       sessions.trellisId,
     ).limit(limit).offset(offset);
@@ -1590,9 +1651,11 @@ export class SqlSessionRepository {
 
   /** Returns a bounded page of session entries ordered by session key and principal id. */
   async listEntries(query: BoundedListQuery): Promise<SessionStorageEntry[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const { offset, limit } = boundedListQuery(query);
-    const rows = await this.#db.select().from(sessions).orderBy(
+    const rows = await this.#db.select().from(sessions).where(
+      eq(sessions.status, "active"),
+    ).orderBy(
       sessions.sessionKey,
       sessions.trellisId,
     ).limit(limit).offset(offset);
@@ -1603,10 +1666,12 @@ export class SqlSessionRepository {
   async listEntriesPage(
     query: BoundedListQuery,
   ): Promise<ListPage<SessionStorageEntry>> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const { offset, limit } = boundedListQuery(query);
-    const [countRow] = await this.#db.select({ count: count() }).from(sessions);
-    const rows = await this.#db.select().from(sessions).orderBy(
+    const where = eq(sessions.status, "active");
+    const [countRow] = await this.#db.select({ count: count() }).from(sessions)
+      .where(where);
+    const rows = await this.#db.select().from(sessions).where(where).orderBy(
       sessions.sessionKey,
       sessions.trellisId,
     ).limit(limit).offset(offset);
@@ -1621,27 +1686,30 @@ export class SqlSessionRepository {
   async listEntriesForDeploymentAuthorityPreview(
     deploymentId: string,
   ): Promise<SessionStorageEntry[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
-      or(eq(sessions.deploymentId, deploymentId), eq(sessions.type, "user")),
+      and(
+        eq(sessions.status, "active"),
+        or(eq(sessions.deploymentId, deploymentId), eq(sessions.type, "user")),
+      ),
     ).orderBy(sessions.sessionKey, sessions.trellisId);
     return rows.map((row: SessionRow) => decodeSessionEntry(row));
   }
 
   /** Returns sessions for one canonical user id ordered by session key. */
   async listByUser(userId: string): Promise<Session[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
-      eq(sessions.trellisId, userId),
+      and(eq(sessions.trellisId, userId), eq(sessions.status, "active")),
     ).orderBy(sessions.sessionKey);
     return rows.map((row: SessionRow) => decodeSessionRow(row));
   }
 
   /** Returns session entries for one canonical user id ordered by session key. */
   async listEntriesByUser(userId: string): Promise<SessionStorageEntry[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
-      eq(sessions.trellisId, userId),
+      and(eq(sessions.trellisId, userId), eq(sessions.status, "active")),
     ).orderBy(sessions.sessionKey);
     return rows.map((row: SessionRow) => decodeSessionEntry(row));
   }
@@ -1651,8 +1719,11 @@ export class SqlSessionRepository {
     userId: string,
     query: BoundedListQuery,
   ): Promise<ListPage<SessionStorageEntry>> {
-    await this.#deleteExpiredSessions();
-    const where = eq(sessions.trellisId, userId);
+    await this.#deactivateExpiredSessions();
+    const where = and(
+      eq(sessions.trellisId, userId),
+      eq(sessions.status, "active"),
+    );
     const { offset, limit } = boundedListQuery(query);
     const [countRow] = await this.#db.select({ count: count() }).from(sessions)
       .where(where);
@@ -1669,18 +1740,21 @@ export class SqlSessionRepository {
 
   /** Returns sessions for one service instance key ordered by session key. */
   async listByInstanceKey(instanceKey: string): Promise<Session[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
-      eq(sessions.instanceKey, instanceKey),
+      and(eq(sessions.instanceKey, instanceKey), eq(sessions.status, "active")),
     ).orderBy(sessions.sessionKey);
     return rows.map((row: SessionRow) => decodeSessionRow(row));
   }
 
   /** Returns sessions for one contract digest ordered by session key. */
   async listByContractDigest(contractDigest: string): Promise<Session[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const rows = await this.#db.select().from(sessions).where(
-      eq(sessions.contractDigest, contractDigest),
+      and(
+        eq(sessions.contractDigest, contractDigest),
+        eq(sessions.status, "active"),
+      ),
     ).orderBy(sessions.sessionKey, sessions.trellisId);
     return rows.map((row: SessionRow) => decodeSessionRow(row));
   }
@@ -1689,11 +1763,14 @@ export class SqlSessionRepository {
   async listEntriesByContractDigests(
     contractDigests: Iterable<string>,
   ): Promise<SessionStorageEntry[]> {
-    await this.#deleteExpiredSessions();
+    await this.#deactivateExpiredSessions();
     const requested = [...new Set(contractDigests)];
     if (requested.length === 0) return [];
     const rows = await this.#db.select().from(sessions).where(
-      inArray(sessions.contractDigest, requested),
+      and(
+        inArray(sessions.contractDigest, requested),
+        eq(sessions.status, "active"),
+      ),
     ).orderBy(sessions.contractDigest, sessions.sessionKey, sessions.trellisId);
     return rows.map((row: SessionRow) => decodeSessionEntry(row));
   }

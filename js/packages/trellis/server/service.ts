@@ -2185,6 +2185,8 @@ function snapshotFromLifecycleEvent<TPayload, TResult>(
     tries: event.tries,
     ...(event.maxTries !== undefined ? { maxTries: event.maxTries } : {}),
     ...(event.deadline !== undefined ? { deadline: event.deadline } : {}),
+    ...(event.trigger !== undefined ? { trigger: event.trigger } : {}),
+    ...(event.lineage !== undefined ? { lineage: event.lineage } : {}),
   };
 
   switch (event.eventType) {
@@ -2205,6 +2207,20 @@ function snapshotFromLifecycleEvent<TPayload, TResult>(
       return event.logs === undefined ? base : {
         ...base,
         logs: [...(current.logs ?? []), ...event.logs],
+      };
+    case "waiting": {
+      if (event.waitEdge === undefined) return base;
+      const waitingOn = (current.waitingOn ?? []).filter((edge) =>
+        edge.id !== event.waitEdge?.id
+      );
+      return { ...base, waitingOn: [...waitingOn, event.waitEdge] };
+    }
+    case "resumed":
+      return event.waitEdge === undefined ? base : {
+        ...base,
+        waitingOn: (current.waitingOn ?? []).filter((edge) =>
+          edge.id !== event.waitEdge?.id
+        ),
       };
     case "completed":
       return {
@@ -2699,6 +2715,7 @@ function createJobsFacade<
                       wrapVoidTask(() => job.updateProgress(value)),
                     log: (entry: JobLogEntry) =>
                       wrapVoidTask(() => job.log(entry.level, entry.message)),
+                    waitFor: (target, fn) => job.waitFor(target, fn),
                     redeliveryCount: job.redeliveryCount(),
                   },
                 );

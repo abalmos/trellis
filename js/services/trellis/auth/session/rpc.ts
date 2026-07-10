@@ -1,4 +1,8 @@
-import { base64urlDecode, verifyProof } from "@qlever-llc/trellis/auth";
+import {
+  base64urlDecode,
+  verifyEventProof,
+  verifyProof,
+} from "@qlever-llc/trellis/auth";
 import {
   type AsyncResult,
   type BaseError,
@@ -22,6 +26,7 @@ import { terminateSession } from "./logout.ts";
 export { createAuthSessionsRevokeHandler } from "./revoke.ts";
 import { createAuthSessionsRevokeHandler } from "./revoke.ts";
 import type {
+  SessionStorageEntry,
   SqlDeviceActivationRepository,
   SqlDeviceDeploymentRepository,
   SqlSessionRepository,
@@ -108,6 +113,7 @@ type SessionStorage = Pick<
   | "listEntriesPage"
   | "listEntriesByUser"
   | "listEntriesPageByUser"
+  | "getRetainedBySessionKey"
   | "deleteBySessionKey"
 >;
 
@@ -171,6 +177,15 @@ type ValidateRequestInput = {
   capabilities?: string[];
 };
 
+type ValidateEventInput = {
+  sessionKey: string;
+  subject: string;
+  payloadHash: string;
+  proof: string;
+  eventId: string;
+  eventTime: string;
+};
+
 const DEFAULT_REQUEST_IAT_SKEW_SECONDS = 30;
 
 type UserRefFilter = { user?: string; offset?: number; limit?: number };
@@ -202,6 +217,52 @@ function sessionCanPublishSubject(session: Session, subject: string): boolean {
   return session.delegatedPublishSubjects.some((pattern) =>
     subjectMatches(pattern, subject)
   );
+}
+
+type RetainedSessionStatus = "active" | "ended" | "revoked" | "expired";
+
+function retainedSessionStatus(status: string): RetainedSessionStatus {
+  switch (status) {
+    case "active":
+    case "ended":
+    case "revoked":
+    case "expired":
+      return status;
+    default:
+      return "ended";
+  }
+}
+
+function eventPublisher(session: Session, status: string) {
+  const sessionStatus = retainedSessionStatus(status);
+  if (session.type === "service") {
+    return {
+      kind: "service" as const,
+      deploymentId: session.deploymentId,
+      instanceId: session.instanceId,
+      ...(session.contractId ? { contractId: session.contractId } : {}),
+      ...(session.contractDigest
+        ? { contractDigest: session.contractDigest }
+        : {}),
+      sessionStatus,
+    };
+  }
+  if (session.type === "device") {
+    return {
+      kind: "device" as const,
+      deploymentId: session.deploymentId,
+      instanceId: session.instanceId,
+      contractId: session.contractId,
+      contractDigest: session.contractDigest,
+      sessionStatus,
+    };
+  }
+  return {
+    kind: "user" as const,
+    contractId: session.contractId,
+    contractDigest: session.contractDigest,
+    sessionStatus,
+  };
 }
 
 function iso(value: string | Date): string {
@@ -883,6 +944,92 @@ export function createAuthRequestsValidateHandler(deps: {
   };
 }
 
+/** Creates the Auth.Events.Validate RPC handler backed by retained SQL sessions. */
+export function createAuthEventsValidateHandler(deps: {
+  logger: Pick<SessionRpcLogger, "trace">;
+  sessionStorage: Pick<SessionStorage, "getRetainedBySessionKey">;
+}) {
+  return async ({ input: req }: { input: ValidateEventInput }) => {
+    deps.logger.trace({
+      rpc: "Auth.Events.Validate",
+      sessionKey: req.sessionKey,
+      subject: req.subject,
+      eventId: req.eventId,
+    }, "RPC request");
+
+    let payloadHashBytes: Uint8Array;
+    try {
+      payloadHashBytes = base64urlDecode(req.payloadHash);
+    } catch {
+      return Result.err(new AuthError({ reason: "invalid_signature" }));
+    }
+
+    const proofOk = await verifyEventProof(
+      req.sessionKey,
+      {
+        sessionKey: req.sessionKey,
+        subject: req.subject,
+        payloadHash: payloadHashBytes,
+        eventId: req.eventId,
+        eventTime: req.eventTime,
+      },
+      req.proof,
+    );
+    if (!proofOk) {
+      return Result.err(new AuthError({ reason: "invalid_signature" }));
+    }
+
+    const entry = await deps.sessionStorage.getRetainedBySessionKey(
+      req.sessionKey,
+    );
+    if (!entry) {
+      return Result.ok({
+        allowed: false,
+        status: "missing-session" as const,
+      });
+    }
+
+    const eventTime = new Date(req.eventTime);
+    if (Number.isNaN(eventTime.getTime())) {
+      return Result.err(new AuthError({ reason: "invalid_request" }));
+    }
+    const sessionStart = new Date(entry.session.createdAt);
+    const sessionEnd = entry.endedAt ? new Date(entry.endedAt) : null;
+    const caller = formatCaller(entry.session, {
+      active: entry.status === "active",
+      capabilities: entry.session.type === "service"
+        ? [SERVICE_CAPABILITY]
+        : entry.session.delegatedCapabilities,
+      email: entry.session.type === "device"
+        ? `device:${entry.session.instanceId}`
+        : entry.session.email,
+      name: entry.session.type === "device"
+        ? entry.session.instanceId
+        : entry.session.name,
+    });
+    const publisher = eventPublisher(entry.session, entry.status);
+    if (
+      eventTime < sessionStart ||
+      (sessionEnd !== null && eventTime > sessionEnd)
+    ) {
+      return Result.ok({
+        allowed: false,
+        status: "outside-session-window" as const,
+        caller,
+        publisher,
+      });
+    }
+
+    const allowed = sessionCanPublishSubject(entry.session, req.subject);
+    return Result.ok({
+      allowed,
+      status: allowed ? "verified" as const : "subject-denied" as const,
+      caller,
+      publisher,
+    });
+  };
+}
+
 function capabilitySatisfied(
   capabilities: string[],
   required: string,
@@ -947,7 +1094,13 @@ export function createAuthSessionsListHandler(deps: {
       "RPC request",
     );
     const userFilter = typeof req.user === "string" ? req.user : undefined;
-    let page;
+    let page: {
+      entries: SessionStorageEntry[];
+      count: number;
+      offset: number;
+      limit: number;
+      nextOffset?: number;
+    };
     if (userFilter) {
       const query = {
         offset: req.offset,

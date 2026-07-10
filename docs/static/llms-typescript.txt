@@ -175,7 +175,10 @@ For Event Log admin clients, use the read-only `EventLog.Query`,
 apps should declare it as an optional dependency unless they cannot operate
 without historical event data. Treat publisher deployment as verified session
 attribution, not subject inference; subject/catalog matching identifies owner
-contract/event.
+contract/event. `EventLog.Query` accepts `includeEventTypes` and
+`excludeEventTypes` arrays of `{ ownerContractId, ownerEventName }` pairs;
+`EventLog.Metrics` returns the available pairs and counts in
+`summary.eventTypes`.
 
 ## Register handlers with `service.handle`
 

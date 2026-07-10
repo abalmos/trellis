@@ -11,7 +11,7 @@ import {
   createBoundClientSession,
   fetchClientBootstrap,
   requireControlPlaneSqlite,
-  sessionExists,
+  sessionIsInactive,
 } from "./_bootstrap_client.ts";
 
 const CASE_ID =
@@ -55,6 +55,6 @@ liveTrellisTest({
 
     assertEquals(response.status, 200);
     assertEquals(body.status, "auth_required");
-    assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+    assertEquals(await sessionIsInactive(sqlite, clientKey.sessionKey), true);
   },
 });

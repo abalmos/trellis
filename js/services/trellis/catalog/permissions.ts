@@ -11,6 +11,7 @@ import {
 } from "./uses.ts";
 import { getKvPermissionGrants } from "./resources.ts";
 import { CONTRACT_DIGEST as TRELLIS_JOBS_CONTRACT_DIGEST } from "@qlever-llc/trellis/sdk/jobs";
+import { CONTRACT_DIGEST as TRELLIS_EVENTLOG_CONTRACT_DIGEST } from "../../../../generated/packages/jsr/eventlog/mod.ts";
 import { CONTRACT as trellisAuthContract } from "../contracts/trellis_auth.ts";
 import type { DeploymentAuthoritySurface } from "../auth/schemas.ts";
 
@@ -43,12 +44,17 @@ type PermissionState = {
 const AUTH_VALIDATE_SUBJECT = trellisAuthContract.rpc
   ?.["Auth.Requests.Validate"]
   ?.subject;
+const AUTH_EVENTS_VALIDATE_SUBJECT = trellisAuthContract.rpc
+  ?.["Auth.Events.Validate"]
+  ?.subject;
 export const TRANSFER_UPLOAD_SUBJECT_PREFIX = "transfer.v1.upload";
 export const TRANSFER_DOWNLOAD_SUBJECT_PREFIX = "transfer.v1.download";
 export const TRELLIS_JOBS_CONTRACT_ID = "trellis.jobs@v1";
+export const TRELLIS_EVENTLOG_CONTRACT_ID = "trellis.eventlog@v1";
 const JOBS_STREAM = "JOBS";
 const JOBS_WORK_STREAM = "JOBS_WORK";
 const JOBS_ADVISORIES_STREAM = "JOBS_ADVISORIES";
+const EVENTLOG_STREAM = "trellis";
 const JOBS_WORKER_PRESENCE_BUCKET = "JOBS_WORKER_PRESENCE";
 
 function operationStoreBucket(sessionKey: string): string {
@@ -463,6 +469,16 @@ function implementsJobsAdminService(
   );
 }
 
+function implementsEventLogService(
+  service: ServiceDescriptor,
+  permissionState: PermissionState,
+): boolean {
+  return implementedContracts(service, permissionState).some((entry) =>
+    entry.contract.id === TRELLIS_EVENTLOG_CONTRACT_ID &&
+    entry.digest === TRELLIS_EVENTLOG_CONTRACT_DIGEST
+  );
+}
+
 export function jobsAdminRuntimePublishSubjects(): string[] {
   return [
     "trellis.jobs.>",
@@ -485,6 +501,18 @@ export function jobsAdminRuntimePublishSubjects(): string[] {
   ];
 }
 
+export function eventLogRuntimePublishSubjects(): string[] {
+  return [
+    `$JS.API.STREAM.INFO.${EVENTLOG_STREAM}`,
+    `$JS.API.CONSUMER.CREATE.${EVENTLOG_STREAM}.>`,
+    `$JS.API.CONSUMER.DURABLE.CREATE.${EVENTLOG_STREAM}.>`,
+    `$JS.API.CONSUMER.INFO.${EVENTLOG_STREAM}.>`,
+    `$JS.API.CONSUMER.LIST.${EVENTLOG_STREAM}`,
+    `$JS.API.CONSUMER.MSG.NEXT.${EVENTLOG_STREAM}.>`,
+    `$JS.ACK.${EVENTLOG_STREAM}.>`,
+  ];
+}
+
 /**
  * Derive publish subjects for a user/app session against an explicit contract set.
  * This is used when the caller app contract is known but is not part of the
@@ -501,6 +529,9 @@ export function getUserPublishSubjectsForContracts(
 
   return dedupe([
     ...permittedRuleSubjects(rules, capabilities, caller.identityAuthority),
+    ...(AUTH_EVENTS_VALIDATE_SUBJECT
+      ? [templateToWildcard(AUTH_EVENTS_VALIDATE_SUBJECT)]
+      : []),
   ]);
 }
 
@@ -548,8 +579,16 @@ export function getServicePublishSubjectsForContracts(
       ? [templateToWildcard(AUTH_VALIDATE_SUBJECT)]
       : []),
     ...(hasRequiredCapabilities(capabilities, ["service"]) &&
+        AUTH_EVENTS_VALIDATE_SUBJECT
+      ? [templateToWildcard(AUTH_EVENTS_VALIDATE_SUBJECT)]
+      : []),
+    ...(hasRequiredCapabilities(capabilities, ["service"]) &&
         implementsJobsAdminService(service, permissionState)
       ? jobsAdminRuntimePublishSubjects()
+      : []),
+    ...(hasRequiredCapabilities(capabilities, ["service"]) &&
+        implementsEventLogService(service, permissionState)
+      ? eventLogRuntimePublishSubjects()
       : []),
   ]);
 }

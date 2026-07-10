@@ -19,6 +19,7 @@
     "./jobs": "./jobs.ts",
     "./sdk/auth": "./sdk/auth.ts",
     "./sdk/core": "./sdk/core.ts",
+    "./sdk/eventlog": "./sdk/eventlog.ts",
     "./sdk/health": "./sdk/health.ts",
     "./sdk/jobs": "./sdk/jobs.ts",
     "./sdk/state": "./sdk/state.ts",

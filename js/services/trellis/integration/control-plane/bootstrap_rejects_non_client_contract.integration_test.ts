@@ -18,6 +18,7 @@ import {
 } from "@qlever-llc/trellis-test/integration";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
+import { sessionIsInactive } from "./_bootstrap_client.ts";
 
 const CASE_ID = "control-plane.bootstrap-rejects-non-client-contract";
 const clientName = caseScopedName(
@@ -172,7 +173,7 @@ async function assertRejectedNonClientDigest(
 
   assertEquals(response.status, 200);
   assertEquals(body.status, "auth_required");
-  assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+  assertEquals(await sessionIsInactive(sqlite, clientKey.sessionKey), true);
 }
 
 async function rewriteSessionContract(
@@ -198,17 +199,6 @@ async function rewriteSessionContract(
     "UPDATE sessions SET contract_digest = ?, contract_id = ?, session = ? WHERE session_key = ?",
     [contract.digest, contract.id, JSON.stringify(session), sessionKey],
   );
-}
-
-async function sessionExists(
-  sqlite: NonNullable<LiveTrellisRuntime["controlPlane"]>["sqlite"],
-  sessionKey: string,
-): Promise<boolean> {
-  const rows = await sqlite.query(
-    "SELECT 1 FROM sessions WHERE session_key = ?",
-    [sessionKey],
-  );
-  return rows.length > 0;
 }
 
 async function fetchClientBootstrap(

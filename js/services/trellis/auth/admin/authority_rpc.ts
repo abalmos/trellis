@@ -26,6 +26,7 @@ import type {
   DeploymentAuthorityPlan,
   DeploymentAuthorityReconciliationStatus,
   DeploymentPortalRoute,
+  DeploymentResourceBinding,
 } from "../schemas.ts";
 import type { BoundedListQuery, ListPage } from "../storage.ts";
 import { type AdminCaller, requireAdmin } from "./shared.ts";
@@ -83,6 +84,12 @@ type MaterializedAuthorityStorage = {
   get(
     deploymentId: string,
   ): Promise<DeploymentAuthorityMaterialization | undefined>;
+};
+
+type EventConsumerBindingStorage = {
+  listBindingsByKind(
+    kind: DeploymentResourceBinding["kind"],
+  ): Promise<DeploymentResourceBinding[]>;
 };
 
 type DeploymentPortalRouteStorage = {
@@ -172,6 +179,54 @@ function desiredVersion(): string {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function numberArray(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is number => Number.isInteger(entry))
+    : [];
+}
+
+function integerField(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : 1;
+}
+
+function eventConsumerBindingRow(binding: DeploymentResourceBinding) {
+  if (!isRecord(binding.binding)) return undefined;
+  const consumerName = binding.binding.consumerName;
+  const stream = binding.binding.stream;
+  if (typeof consumerName !== "string" || typeof stream !== "string") {
+    return undefined;
+  }
+  return {
+    deploymentId: binding.deploymentId,
+    group: binding.alias,
+    stream,
+    consumerName,
+    filterSubjects: stringArray(binding.binding.filterSubjects),
+    replay: typeof binding.binding.replay === "string"
+      ? binding.binding.replay
+      : "new",
+    ordering: typeof binding.binding.ordering === "string"
+      ? binding.binding.ordering
+      : "parallel",
+    concurrency: integerField(binding.binding, "concurrency"),
+    ackWaitMs: integerField(binding.binding, "ackWaitMs"),
+    maxDeliver: integerField(binding.binding, "maxDeliver"),
+    backoffMs: numberArray(binding.binding.backoffMs),
+  };
+}
+
+type EventConsumerBindingRow = Exclude<
+  ReturnType<typeof eventConsumerBindingRow>,
+  undefined
+>;
 
 function isAuthorityNeedSetContract(value: unknown): boolean {
   return isRecord(value) && typeof value.contractId === "string" &&
@@ -731,17 +786,15 @@ function createAcceptDeploymentAuthorityPlanHandler(
         updatedAuthority.deploymentId,
         authorityCapabilityDefinitions(plan),
       );
-      try {
-        await deps.authorityReconciler.reconcileDeployment(
-          updatedAuthority.deploymentId,
-          { desiredVersion: newVersion },
-        );
-      } catch (error) {
+      void deps.authorityReconciler.reconcileDeployment(
+        updatedAuthority.deploymentId,
+        { desiredVersion: newVersion },
+      ).catch((error) => {
         deps.logger.warn?.({
           err: toError(error),
           deploymentId: updatedAuthority.deploymentId,
         }, "Deployment authority reconciliation trigger failed");
-      }
+      });
       return Result.ok({ authority: updatedAuthority });
     } catch (error) {
       return Result.err(new UnexpectedError({ cause: toError(error) }));
@@ -901,6 +954,51 @@ export function createAuthDeploymentAuthorityListHandler(deps: {
       return Result.ok(
         await deps.deploymentAuthorityStorage.listFilteredPage(filters, req),
       );
+    } catch (error) {
+      return Result.err(new UnexpectedError({ cause: toError(error) }));
+    }
+  };
+}
+
+/** Creates the expected event consumer inventory RPC handler. */
+export function createAuthEventConsumersListHandler(deps: {
+  materializedAuthorityStorage: EventConsumerBindingStorage;
+  logger: Pick<AuthRuntimeDeps["logger"], "trace">;
+}) {
+  return async (
+    { input: req, context: { caller } }: {
+      input: BoundedListQuery & { deploymentId?: string };
+      context: { caller: RpcUser };
+    },
+  ): Promise<
+    Result<ListPage<EventConsumerBindingRow>, UnexpectedError>
+  > => {
+    deps.logger.trace(
+      {
+        rpc: "Auth.EventConsumers.List",
+        caller,
+        deploymentId: req.deploymentId,
+      },
+      "RPC request",
+    );
+    try {
+      const offset = req.offset ?? 0;
+      const limit = req.limit;
+      const rows = (await deps.materializedAuthorityStorage
+        .listBindingsByKind("event-consumer"))
+        .filter((binding) =>
+          req.deploymentId === undefined ||
+          binding.deploymentId === req.deploymentId
+        )
+        .map(eventConsumerBindingRow)
+        .filter((row): row is EventConsumerBindingRow => row !== undefined);
+      return Result.ok({
+        entries: rows.slice(offset, offset + limit),
+        count: rows.length,
+        offset,
+        limit,
+        ...(offset + limit < rows.length ? { nextOffset: offset + limit } : {}),
+      });
     } catch (error) {
       return Result.err(new UnexpectedError({ cause: toError(error) }));
     }

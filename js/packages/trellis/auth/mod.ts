@@ -73,9 +73,13 @@ export {
   submitPortalApproval,
 } from "./browser.ts";
 export {
+  buildEventProofInput,
   buildProofInput,
+  createEventProof,
   createProof,
+  type EventProofParams,
   type ProofParams,
+  verifyEventProof,
   verifyProof,
 } from "./proof.ts";
 export {
@@ -178,6 +182,14 @@ export {
   AuthenticatedDeviceSchema,
   type AuthenticatedService,
   type AuthenticatedUser,
+  type AuthEventConsumerBinding,
+  AuthEventConsumerBindingSchema,
+  type AuthEventConsumersListInput,
+  type AuthEventConsumersListResponse,
+  AuthEventConsumersListResponseSchema,
+  AuthEventConsumersListSchema,
+  AuthEventsValidateResponseSchema,
+  AuthEventsValidateSchema,
   AuthIdentitiesListResponseSchema,
   AuthIdentitiesListSchema,
   AuthIdentityGrantsListResponseSchema,

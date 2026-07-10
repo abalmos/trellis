@@ -1,5 +1,6 @@
 import {
   ApprovalDecisionSchema,
+  AuthEventsValidateSchema as AuthEventsValidateRequestSchema,
   type AuthLogoutRequest,
   AuthLogoutRequestSchema,
   type AuthLogoutResponse,
@@ -1029,4 +1030,4 @@ export type AuthSessionsLogoutResponse = StaticDecode<
   typeof AuthSessionsLogoutResponseSchema
 >;
 
-export { AuthRequestsValidateRequestSchema };
+export { AuthEventsValidateRequestSchema, AuthRequestsValidateRequestSchema };

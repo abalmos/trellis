@@ -133,6 +133,7 @@ pub fn write_contract_outputs(
             ),
         })
         .into_diagnostic()?;
+        rewrite_local_generated_ts_sdk_imports(ts_out, runtime_source)?;
         format_generated_typescript_artifacts(ts_out, runtime_repo_root.as_deref())?;
         copy_embedded_trellis_owned_ts_sdk(
             &resolved.loaded.manifest.id,
@@ -439,6 +440,7 @@ fn is_trellis_owned_sdk_contract(contract_id: &str) -> bool {
         "trellis.auth@v1"
             | "trellis.core@v1"
             | "trellis.health@v1"
+            | "trellis.eventlog@v1"
             | "trellis.jobs@v1"
             | "trellis.state@v1"
     )
@@ -524,6 +526,33 @@ fn ts_shell_deno_json(
         }),
     );
     root
+}
+
+fn rewrite_local_generated_ts_sdk_imports(
+    ts_out: &Path,
+    runtime_source: RuntimeSource,
+) -> miette::Result<()> {
+    if !matches!(runtime_source, RuntimeSource::Local) {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(ts_out).into_diagnostic()? {
+        let entry = entry.into_diagnostic()?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|extension| extension != "ts") {
+            continue;
+        }
+        let contents = fs::read_to_string(&path).into_diagnostic()?;
+        let rewritten = contents.replace(
+            "from \"@qlever-llc/trellis/errors\"",
+            "from \"../../../../js/packages/trellis/errors/index.ts\"",
+        );
+        if rewritten != contents {
+            write_if_changed(&path, &rewritten)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn ts_shell_extends(runtime_deps: &TsRuntimeDeps) -> Option<String> {
@@ -1134,6 +1163,10 @@ fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
             "from \"@qlever-llc/trellis/contracts\"",
             "from \"../../../contracts.ts\"",
         )
+        .replace(
+            "from \"../../../../js/packages/trellis/errors/index.ts\"",
+            "from \"../../../errors/index.ts\"",
+        )
         .replace("from \"@qlever-llc/trellis\"", "from \"../../../index.ts\"");
 
     for sdk_name in ["auth", "core", "health", "jobs", "state"] {
@@ -1367,6 +1400,7 @@ pub fn ts_package_name_from_id(contract_id: &str, prefix: &str) -> String {
         "trellis-auth" => "@qlever-llc/trellis/sdk/auth".to_string(),
         "trellis-core" => "@qlever-llc/trellis/sdk/core".to_string(),
         "trellis-health" => "@qlever-llc/trellis/sdk/health".to_string(),
+        "trellis-eventlog" => "@qlever-llc/trellis/sdk/eventlog".to_string(),
         "trellis-jobs" => "@qlever-llc/trellis/sdk/jobs".to_string(),
         "trellis-state" => "@qlever-llc/trellis/sdk/state".to_string(),
         other => format!("{prefix}{other}"),
@@ -1386,6 +1420,7 @@ fn embedded_trellis_owned_rust_sdk_module(contract_id: &str) -> Option<&'static 
         "trellis.auth@v1" => Some("auth"),
         "trellis.core@v1" => Some("core"),
         "trellis.health@v1" => Some("health"),
+        "trellis.eventlog@v1" => Some("eventlog"),
         "trellis.jobs@v1" => Some("jobs"),
         "trellis.state@v1" => Some("state"),
         _ => None,

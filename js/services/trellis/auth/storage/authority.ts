@@ -1029,6 +1029,18 @@ export class SqlMaterializedAuthorityRepository {
       );
     return rows.map(decodeBindingRow);
   }
+  /** Returns materialized resource bindings for one resource kind. */
+  async listBindingsByKind(
+    kind: DeploymentResourceBinding["kind"],
+  ): Promise<DeploymentResourceBinding[]> {
+    const rows = await this.#db.select().from(materializedResourceBindings)
+      .where(eq(materializedResourceBindings.resourceKind, kind))
+      .orderBy(
+        materializedResourceBindings.deploymentId,
+        materializedResourceBindings.resourceAlias,
+      );
+    return rows.map(decodeBindingRow);
+  }
 }
 
 export class SqlMaterializedResourceBindingRepository

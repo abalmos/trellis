@@ -2146,6 +2146,35 @@ Deno.test({
 });
 
 Deno.test({
+  name: "auth HTTP bind preflight allows expired flows to be reported",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerTestRoutes({}, {}, {}, {}, {
+      browserFlowsKV: {
+        get: () => AsyncResult.err(new KVError({ operation: "get" })),
+      },
+    });
+
+    const response = await app.request(
+      "http://trellis/auth/flow/missing-flow/bind",
+      {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://app.example",
+          "access-control-request-method": "POST",
+        },
+      },
+    );
+
+    assertEquals(response.status, 204);
+    assertEquals(
+      response.headers.get("access-control-allow-origin"),
+      "https://app.example",
+    );
+  },
+});
+
+Deno.test({
   name: "auth HTTP bind ignores legacy provider logout return URLs",
   sanitizeResources: false,
   fn: async () => {

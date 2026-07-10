@@ -1,14 +1,16 @@
-use super::{EventDescriptor, ServerError};
-use crate::client::PreparedTrellisEvent;
+use std::sync::Arc;
 
-/// A thin descriptor-backed event publisher over NATS.
-#[derive(Debug, Clone)]
+use super::{EventDescriptor, ServerError};
+use crate::client::{PreparedTrellisEvent, TrellisClient};
+
+/// A descriptor-backed event publisher using the connected Trellis client.
+#[derive(Clone)]
 pub struct EventPublisher {
-    client: async_nats::Client,
+    client: Arc<TrellisClient>,
 }
 
 impl EventPublisher {
-    pub(crate) fn new(client: async_nats::Client) -> Self {
+    pub(crate) fn new(client: Arc<TrellisClient>) -> Self {
         Self { client }
     }
 
@@ -20,11 +22,7 @@ impl EventPublisher {
         let prepared =
             PreparedTrellisEvent::new(D::SUBJECT, bytes::Bytes::from(serde_json::to_vec(event)?));
         self.client
-            .publish_with_headers(
-                prepared.subject().to_string(),
-                prepared.publish_headers(),
-                prepared.payload_bytes(),
-            )
+            .publish_prepared(&prepared)
             .await
             .map_err(|error| ServerError::Nats(error.to_string()))?;
         Ok(())

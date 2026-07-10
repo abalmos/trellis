@@ -174,6 +174,23 @@ const jobsContract: TrellisContractV1 = {
   },
 };
 
+const eventLogContract: TrellisContractV1 = {
+  format: "trellis.contract.v1",
+  id: "trellis.eventlog@v1",
+  displayName: "Trellis Event Log",
+  description: "Event Log service contract.",
+  kind: "service",
+  schemas: { Empty: { type: "object" } },
+  rpc: {
+    "EventLog.Query": {
+      version: "v1",
+      subject: "rpc.v1.EventLog.Query",
+      input: { schema: "Empty" },
+      output: { schema: "Empty" },
+    },
+  },
+};
+
 Deno.test("accepted-offer NATS materializer keeps trellis-prefixed providers owned", async () => {
   const contracts = new Map([
     [providerContract.id, providerContract],
@@ -511,6 +528,58 @@ Deno.test("accepted-offer NATS materializer adds Jobs runtime grants", async () 
     ),
     true,
   );
+});
+
+Deno.test("accepted-offer NATS materializer adds EventLog runtime grants", async () => {
+  const grants = await __testing__.materializeAcceptedOfferNatsGrants({
+    authority: {
+      deploymentId: "eventlog",
+      kind: "service",
+      disabled: false,
+      version: "authority_v1",
+      createdAt: TEST_NOW,
+      updatedAt: TEST_NOW,
+      desiredState: {
+        capabilities: [],
+        resources: [],
+        needs: { contracts: [], surfaces: [], capabilities: [], resources: [] },
+        surfaces: [{
+          contractId: eventLogContract.id,
+          kind: "rpc",
+          name: "EventLog.Query",
+          action: "call",
+        }],
+      },
+    },
+    contracts: {
+      getKnownContract: async (digest) =>
+        digest === "eventlog-digest" ? eventLogContract : undefined,
+      getKnownContractsById: async () => [],
+    },
+    implementationOfferStorage: {
+      listByDeployment: async () => [offer({
+        deploymentId: "eventlog",
+        contractId: eventLogContract.id,
+        contractDigest: "eventlog-digest",
+        lineageKey: JSON.stringify([
+          "service",
+          "eventlog",
+          eventLogContract.id,
+        ]),
+      })],
+    },
+  });
+  const subjects = grants
+    .filter((grant) => grant.grantSource === "platform-service")
+    .map((grant) => grant.subject);
+
+  assertEquals(subjects.includes("$JS.API.STREAM.INFO.trellis"), true);
+  assertEquals(
+    subjects.includes("$JS.API.CONSUMER.DURABLE.CREATE.trellis.>"),
+    true,
+  );
+  assertEquals(subjects.includes("$JS.API.CONSUMER.LIST.trellis"), true);
+  assertEquals(subjects.includes("$JS.ACK.trellis.>"), true);
 });
 
 Deno.test("accepted-offer NATS materializer finds used surfaces in later known digests", async () => {

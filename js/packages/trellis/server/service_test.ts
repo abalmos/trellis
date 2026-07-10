@@ -253,6 +253,7 @@ async function connectJobsHandlerTestService(opts?: {
 
 async function connectHandlerSurfaceTestService(opts?: {
   published?: PublishedNatsMessage[];
+  requestJson?: (subject: string) => unknown;
   subscriptions?: Array<{ subject: string; queue?: string }>;
 }) {
   const originalFetch = globalThis.fetch;
@@ -299,6 +300,7 @@ async function connectHandlerSurfaceTestService(opts?: {
   try {
     const connection = createFakeNatsConnection({
       published: opts?.published,
+      requestJson: opts?.requestJson,
       subscriptions: opts?.subscriptions,
     });
     const service = await connectTrellisServiceWithRuntimeDeps({
@@ -662,12 +664,16 @@ function createFakeNatsConnection(args: {
       if (args.jetstreamJobs && subject.startsWith("$JS.API.")) {
         return createMessage(subject, createJetStreamResponse(subject));
       }
-      if (args.requestJson) {
-        return createMessage(subject, args.requestJson(subject));
-      }
       const bytes = payloadBytes(payload);
       if (isJetStreamPublishSubject(subject)) {
-        return createMessage(subject, { stream: "EVENTS", seq: 1 });
+        deliverToSubscriptions(subject, bytes, opts?.headers);
+        return createMessage(
+          subject,
+          args.requestJson?.(subject) ?? { stream: "EVENTS", seq: 1 },
+        );
+      }
+      if (args.requestJson) {
+        return createMessage(subject, args.requestJson(subject));
       }
       const subscription = subscriptions.find((candidate) =>
         subjectMatches(candidate.getSubject(), subject)
@@ -2058,8 +2064,13 @@ Deno.test("internal service connect cleans up the connection when bootstrap prob
 });
 
 Deno.test("bound service event listeners receive object args with deps", async () => {
-  const { connection, service, restore } =
-    await connectHandlerSurfaceTestService();
+  const { service, restore } = await connectHandlerSurfaceTestService({
+    requestJson: (subject) => {
+      return subject === "rpc.v1.Auth.Events.Validate"
+        ? { allowed: true, status: "verified" }
+        : { stream: "EVENTS", seq: 1 };
+    },
+  });
   const deps = { prefix: "dep" };
   let observed:
     | {
@@ -2090,23 +2101,15 @@ Deno.test("bound service event listeners receive object args with deps", async (
     ).orThrow();
     assertEquals(registered, undefined);
 
-    const prepared = service.event.test.pinged.prepare({ value: "one" })
-      .orThrow();
-    const headers = natsHeaders();
-    for (const [key, value] of Object.entries(prepared.headers)) {
-      headers.set(key, value);
-    }
-    connection.publish(prepared.subject, prepared.encodedPayload, { headers });
+    await service.event.test.pinged.publish({ value: "one" }).orThrow();
     await delay(10);
 
-    assertEquals(observed, {
-      value: "one",
-      eventId: prepared.header.id,
-      eventTime: prepared.header.time,
-      subject: prepared.subject,
-      mode: "ephemeral",
-      prefix: "dep",
-    });
+    assertEquals(observed?.value, "one");
+    assertNotEquals(observed?.eventId, undefined);
+    assertNotEquals(observed?.eventTime, undefined);
+    assertEquals(observed?.subject, "events.v1.Test.Pinged");
+    assertEquals(observed?.mode, "ephemeral");
+    assertEquals(observed?.prefix, "dep");
   } finally {
     await service.stop();
     restore();

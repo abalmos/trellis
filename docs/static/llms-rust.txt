@@ -94,6 +94,9 @@ Rules:
   Declare it as an optional dependency unless the app cannot operate without
   historical event data. Publisher deployment attribution comes from verified
   event session proof; owner contract/event comes from subject/catalog matching.
+  `EventLog.Query` accepts `include_event_types` and `exclude_event_types`
+  vectors of owner contract/event pairs; `EventLog.Metrics` returns the available
+  pairs and counts in `summary.eventTypes`.
 
 ## Use generated descriptors and facades
 

@@ -1411,7 +1411,7 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
             session_key_seed_base64url: &service_key.seed,
             timeout_ms: 15_000,
             retry_delay_ms: 100,
-            authority_pending_timeout_ms: 1_000,
+            authority_pending_timeout_ms: Some(1_000),
         },
     )
     .await
@@ -1443,7 +1443,7 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
             session_key_seed_base64url: &service_key.seed,
             timeout_ms: 2_000,
             retry_delay_ms: 100,
-            authority_pending_timeout_ms: 500,
+            authority_pending_timeout_ms: Some(500),
         },
     )
     .await;

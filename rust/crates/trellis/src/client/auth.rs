@@ -1,7 +1,9 @@
 use ed25519_dalek::{Signature, Signer, SigningKey};
 use serde::Serialize;
 
-use crate::client::proof::{base64url_decode, base64url_encode, build_proof_input, sha256};
+use crate::client::proof::{
+    base64url_decode, base64url_encode, build_event_proof_input, build_proof_input, sha256,
+};
 use crate::client::TrellisClientError;
 
 #[derive(Serialize)]
@@ -89,6 +91,27 @@ impl SessionAuth {
     ) -> String {
         let payload_hash = sha256(payload);
         let input = build_proof_input(&self.session_key, subject, &payload_hash, iat, request_id);
+        let digest = sha256(&input);
+        let signature: Signature = self.signing_key.sign(&digest);
+        base64url_encode(&signature.to_bytes())
+    }
+
+    /// Create the `proof` header for a signed event payload.
+    pub fn create_event_proof(
+        &self,
+        subject: &str,
+        payload: &[u8],
+        event_id: &str,
+        event_time: &str,
+    ) -> String {
+        let payload_hash = sha256(payload);
+        let input = build_event_proof_input(
+            &self.session_key,
+            subject,
+            &payload_hash,
+            event_id,
+            event_time,
+        );
         let digest = sha256(&input);
         let signature: Signature = self.signing_key.sign(&digest);
         base64url_encode(&signature.to_bytes())

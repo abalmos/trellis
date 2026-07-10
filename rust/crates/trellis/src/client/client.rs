@@ -29,7 +29,6 @@ const HEALTH_HEARTBEAT_SUBJECT: &str = "events.v1.Health.Heartbeat";
 const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
 const DEFAULT_AUTHORITY_RETRY_DELAY_MS: u64 = 1_000;
-static HEALTH_HEARTBEAT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 static FEED_INBOX_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn signed_headers(auth: &SessionAuth, subject: &str, payload: &[u8]) -> HeaderMap {
@@ -761,12 +760,6 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn next_health_heartbeat_id() -> String {
-    let sequence = HEALTH_HEARTBEAT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let now = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    format!("rust-{}-{now}-{sequence}", std::process::id())
-}
-
 fn new_service_instance_id() -> String {
     format!(
         "rust-{}-{}",
@@ -797,29 +790,69 @@ fn build_health_heartbeat(config: &HealthHeartbeatConfig) -> HealthHeartbeat {
     }
 }
 
-fn health_heartbeat_headers() -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.insert(EVENT_ID_HEADER, next_health_heartbeat_id());
-    headers.insert(EVENT_TIME_HEADER, now_rfc3339());
+fn signed_event_headers(auth: &SessionAuth, event: &PreparedTrellisEvent) -> HeaderMap {
+    let mut headers = event.publish_headers();
+    headers.insert("session-key", auth.session_key.as_str());
+    headers.insert(
+        "proof",
+        auth.create_event_proof(
+            event.subject(),
+            event.payload(),
+            event.event_id(),
+            event.event_time(),
+        )
+        .as_str(),
+    );
     headers
 }
 
-async fn publish_health_heartbeat(nats: &async_nats::Client, config: &HealthHeartbeatConfig) {
+async fn publish_prepared_event(
+    nats: &async_nats::Client,
+    auth: &SessionAuth,
+    timeout_ms: u64,
+    event: &PreparedTrellisEvent,
+) -> Result<(), TrellisClientError> {
+    let jetstream = jetstream::new(nats.clone());
+    let headers = signed_event_headers(auth, event);
+    let publish = async {
+        jetstream
+            .publish_with_headers(event.subject().to_string(), headers, event.payload_bytes())
+            .await
+    };
+    let ack = timeout(std::time::Duration::from_millis(timeout_ms), publish)
+        .await
+        .map_err(|_| TrellisClientError::Timeout)?
+        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    timeout(std::time::Duration::from_millis(timeout_ms), ack)
+        .await
+        .map_err(|_| TrellisClientError::Timeout)?
+        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    Ok(())
+}
+
+fn prepare_health_heartbeat(
+    config: &HealthHeartbeatConfig,
+) -> Result<PreparedTrellisEvent, serde_json::Error> {
     let heartbeat = build_health_heartbeat(config);
-    let Ok(payload) = serde_json::to_vec(&heartbeat) else {
+    prepare_event_value(HEALTH_HEARTBEAT_SUBJECT, &heartbeat)
+}
+
+async fn publish_health_heartbeat(
+    nats: &async_nats::Client,
+    auth: &SessionAuth,
+    timeout_ms: u64,
+    config: &HealthHeartbeatConfig,
+) {
+    let Ok(event) = prepare_health_heartbeat(config) else {
         return;
     };
-    let _ = nats
-        .publish_with_headers(
-            HEALTH_HEARTBEAT_SUBJECT.to_string(),
-            health_heartbeat_headers(),
-            Bytes::from(payload),
-        )
-        .await;
+    let _ = publish_prepared_event(nats, auth, timeout_ms, &event).await;
 }
 
 fn spawn_health_heartbeat_task(
     nats: async_nats::Client,
+    auth: SessionAuth,
+    timeout_ms: u64,
     config: HealthHeartbeatConfig,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -828,7 +861,7 @@ fn spawn_health_heartbeat_task(
         interval.tick().await;
         loop {
             interval.tick().await;
-            publish_health_heartbeat(&nats, &config).await;
+            publish_health_heartbeat(&nats, &auth, timeout_ms, &config).await;
         }
     })
 }
@@ -907,9 +940,12 @@ async fn connect_bootstrapped_service(
         publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
         info: None,
     };
-    publish_health_heartbeat(&nats, &health_heartbeat_config).await;
+    publish_health_heartbeat(&nats, &auth, timeout_ms, &health_heartbeat_config).await;
+    let health_heartbeat_auth = SessionAuth::from_seed_base64url(session_key_seed_base64url)?;
     let health_heartbeat_task = Some(spawn_health_heartbeat_task(
         nats.clone(),
+        health_heartbeat_auth,
+        timeout_ms,
         health_heartbeat_config,
     ));
 
@@ -1093,9 +1129,12 @@ impl TrellisClient {
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
             info: Some(serde_json::json!({ "deploymentId": deployment_id })),
         };
-        publish_health_heartbeat(&nats, &health_heartbeat_config).await;
+        publish_health_heartbeat(&nats, &auth, opts.timeout_ms, &health_heartbeat_config).await;
+        let health_heartbeat_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
         let health_heartbeat_task = Some(spawn_health_heartbeat_task(
             nats.clone(),
+            health_heartbeat_auth,
+            opts.timeout_ms,
             health_heartbeat_config,
         ));
 
@@ -1235,26 +1274,7 @@ impl TrellisClient {
         &self,
         event: &PreparedTrellisEvent,
     ) -> Result<(), TrellisClientError> {
-        let jetstream = jetstream::new(self.nats.clone());
-        let publish = async {
-            jetstream
-                .publish_with_headers(
-                    event.subject().to_string(),
-                    event.publish_headers(),
-                    event.payload_bytes(),
-                )
-                .await
-        };
-        let ack = timeout(std::time::Duration::from_millis(self.timeout_ms), publish)
-            .await
-            .map_err(|_| TrellisClientError::Timeout)?
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        timeout(std::time::Duration::from_millis(self.timeout_ms), ack)
-            .await
-            .map_err(|_| TrellisClientError::Timeout)?
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-        Ok(())
+        publish_prepared_event(&self.nats, &self.auth, self.timeout_ms, event).await
     }
 
     /// Subscribe to one descriptor-backed event subject from the default JetStream event stream.
@@ -1799,8 +1819,21 @@ mod tests {
     }
 
     #[test]
-    fn health_heartbeat_metadata_uses_event_headers() {
-        let headers = health_heartbeat_headers();
+    fn health_heartbeat_uses_signed_event_headers() {
+        let auth = SessionAuth::from_seed_base64url("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            .expect("auth");
+        let event = prepare_health_heartbeat(&HealthHeartbeatConfig {
+            service_name: "trellis.eventlog@v1".to_string(),
+            kind: HealthHeartbeatServiceKind::Service,
+            instance_id: "rust-1".to_string(),
+            contract_id: "trellis.eventlog@v1".to_string(),
+            contract_digest: "digest-alpha".to_string(),
+            started_at: "2026-01-02T03:04:05Z".to_string(),
+            publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
+            info: None,
+        })
+        .expect("heartbeat event");
+        let headers = signed_event_headers(&auth, &event);
 
         assert!(headers
             .get(EVENT_ID_HEADER)
@@ -1808,6 +1841,13 @@ mod tests {
         assert!(headers
             .get(EVENT_TIME_HEADER)
             .is_some_and(|time| time.as_str().ends_with('Z')));
+        assert_eq!(
+            headers.get("session-key").map(|value| value.as_str()),
+            Some(auth.session_key.as_str()),
+        );
+        assert!(headers
+            .get("proof")
+            .is_some_and(|proof| !proof.as_str().is_empty()));
     }
 
     #[test]

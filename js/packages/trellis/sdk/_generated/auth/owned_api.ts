@@ -78,6 +78,10 @@ import {
   AuthDeviceUserAuthoritiesReviewsListResponseSchema,
   AuthDeviceUserAuthoritiesRevokeRequestSchema,
   AuthDeviceUserAuthoritiesRevokeResponseSchema,
+  AuthEventConsumersListRequestSchema,
+  AuthEventConsumersListResponseSchema,
+  AuthEventsValidateRequestSchema,
+  AuthEventsValidateResponseSchema,
   AuthIdentitiesListRequestSchema,
   AuthIdentitiesListResponseSchema,
   AuthIdentityGrantsListRequestSchema,
@@ -693,6 +697,38 @@ export const OWNED_API = {
         AuthDevicesRemoveResponseSchema,
       ),
       callerCapabilities: ["admin"] as const,
+      errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+      declaredErrorTypes: [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError",
+      ] as const,
+    },
+    "Auth.EventConsumers.List": {
+      subject: "rpc.v1.Auth.EventConsumers.List",
+      input: schema<Types.AuthEventConsumersListInput>(
+        AuthEventConsumersListRequestSchema,
+      ),
+      output: schema<Types.AuthEventConsumersListOutput>(
+        AuthEventConsumersListResponseSchema,
+      ),
+      callerCapabilities: ["trellis.auth::event-consumers.read"] as const,
+      errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+      declaredErrorTypes: [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError",
+      ] as const,
+    },
+    "Auth.Events.Validate": {
+      subject: "rpc.v1.Auth.Events.Validate",
+      input: schema<Types.AuthEventsValidateInput>(
+        AuthEventsValidateRequestSchema,
+      ),
+      output: schema<Types.AuthEventsValidateOutput>(
+        AuthEventsValidateResponseSchema,
+      ),
+      callerCapabilities: [] as const,
       errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
       declaredErrorTypes: [
         "AuthError",

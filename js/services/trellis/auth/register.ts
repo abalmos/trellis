@@ -8,11 +8,13 @@ import type {
 } from "@qlever-llc/trellis/contracts";
 import { templateToWildcard } from "../catalog/uses.ts";
 import {
+  eventLogRuntimePublishSubjects,
   jobsAdminRuntimePublishSubjects,
   operationCancelCapabilities,
   operationObserveCapabilities,
   TRANSFER_DOWNLOAD_SUBJECT_PREFIX,
   TRANSFER_UPLOAD_SUBJECT_PREFIX,
+  TRELLIS_EVENTLOG_CONTRACT_ID,
   TRELLIS_JOBS_CONTRACT_ID,
 } from "../catalog/permissions.ts";
 import type { SqlContractStorageRepository } from "../catalog/storage.ts";
@@ -253,6 +255,18 @@ function jobsAdminRuntimeGrants(
   }));
 }
 
+function eventLogRuntimeGrants(
+  contract: TrellisContractV1,
+): MaterializedAuthorityNatsGrant[] {
+  if (contract.id !== TRELLIS_EVENTLOG_CONTRACT_ID) return [];
+  return eventLogRuntimePublishSubjects().map((subject) => ({
+    direction: "publish" as const,
+    subject,
+    requiredCapabilities: ["service"],
+    grantSource: "platform-service" as const,
+  }));
+}
+
 function latestAcceptedOffersByLineage(
   offers: ImplementationOffer[],
 ): ImplementationOffer[] {
@@ -373,7 +387,12 @@ export async function materializeAcceptedOfferNatsGrants(input: {
       : [grant, ...transferGrantsForUsedSurface({ contract, surface })];
   }).concat([...ownedContractIds].flatMap((contractId) => {
     const contract = contracts.get(contractId);
-    return contract ? jobsAdminRuntimeGrants(contract) : [];
+    return contract
+      ? [
+        ...jobsAdminRuntimeGrants(contract),
+        ...eventLogRuntimeGrants(contract),
+      ]
+      : [];
   }));
   return [...new Map(grants.map((grant) => [
     JSON.stringify([

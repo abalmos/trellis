@@ -1,11 +1,12 @@
+import type { Msg, NatsConnection, Subscription } from "@nats-io/nats-core";
 import { assert, assertEquals } from "@std/assert";
-import {
-  type Msg,
-  type NatsConnection,
-  type Subscription,
-} from "@nats-io/nats-core";
 import { Type } from "typebox";
+
 import { defineServiceContract } from "../contract.ts";
+import {
+  outboxMessageToPreparedEvent,
+  preparedTrellisEventToOutboxRecord,
+} from "../service/outbox_inbox.ts";
 import { Trellis, type TrellisAuth } from "../trellis.ts";
 
 // Retained unit coverage: only deterministic prepare-time invariants remain.
@@ -125,8 +126,9 @@ Deno.test("prepare creates stable frozen event without contract metadata", () =>
   assertEquals(prepared.subject, "events.v1.Thing.Changed.test.one");
   assertEquals("contractId" in prepared, false);
   assertEquals("contractDigest" in prepared, false);
-  assertEquals(prepared.headers["Nats-Msg-Id"], prepared.header.id);
-  assertEquals(prepared.headers["Trellis-Event-Time"], prepared.header.time);
+  assertEquals(prepared.headers["Nats-Msg-Id"], undefined);
+  assertEquals(prepared.headers["Trellis-Event-Time"], undefined);
+  assertEquals(prepared.headers["proof"], undefined);
   assertEquals(
     JSON.parse(prepared.encodedPayload),
     {
@@ -159,11 +161,43 @@ Deno.test("prepare preserves user body field named header when it is not runtime
     "events.v1.Thing.HeaderNamed.user-header-value.one",
   );
   assertEquals(prepared.payload.header, "user-header-value");
-  assertEquals(prepared.header.id, prepared.headers["Nats-Msg-Id"]);
-  assertEquals(prepared.header.time, prepared.headers["Trellis-Event-Time"]);
+  assertEquals(prepared.headers["Nats-Msg-Id"], undefined);
+  assertEquals(prepared.headers["Trellis-Event-Time"], undefined);
+  assertEquals(prepared.headers["proof"], undefined);
   assertEquals(JSON.parse(prepared.encodedPayload), {
     header: "user-header-value",
     id: "one",
     value: "first",
   });
+});
+
+Deno.test("outbox records preserve prepared event runtime metadata", () => {
+  const trellis = new Trellis(
+    "test",
+    createMockNatsConnection(),
+    createMockAuth(),
+    {
+      api: contract.API.owned,
+    },
+  );
+  const prepared = trellis.event.thing.changed.prepare({
+    origin: "test",
+    id: "one",
+    value: "first",
+  }).orThrow();
+
+  const record = preparedTrellisEventToOutboxRecord(prepared);
+  assertEquals(record.id, prepared.header.id);
+  assertEquals(record.headers["Nats-Msg-Id"], prepared.header.id);
+  assertEquals(record.headers["Trellis-Event-Time"], prepared.header.time);
+
+  const rehydrated = outboxMessageToPreparedEvent({
+    ...record,
+    headers: { ...record.headers },
+    state: "pending",
+    attempts: 0,
+    createdAt: "2026-04-26T00:00:00.000Z",
+    updatedAt: "2026-04-26T00:00:00.000Z",
+  });
+  assertEquals(rehydrated.header, prepared.header);
 });

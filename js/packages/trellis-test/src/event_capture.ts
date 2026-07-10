@@ -8,6 +8,7 @@ import {
   type TrellisAPI,
   type TrellisApiLike,
 } from "@qlever-llc/trellis";
+import { sdk as auth } from "@qlever-llc/trellis/sdk/auth";
 import type {
   TrellisTestClientContract,
   TrellisTestConnectedClient,
@@ -369,6 +370,7 @@ export async function startTrellisTestEventCapture<
       "Synthetic app/client participant for live test event capture.",
     uses: {
       required: {
+        auth: auth.use({ rpc: { call: ["Auth.Events.Validate"] } }),
         source: args.options.contract.use({
           events: { subscribe: events },
         }),

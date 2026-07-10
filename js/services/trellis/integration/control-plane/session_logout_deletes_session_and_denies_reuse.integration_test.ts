@@ -14,6 +14,7 @@ import {
 } from "@qlever-llc/trellis-test/integration";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
+import { sessionIsInactive } from "./_bootstrap_client.ts";
 
 const CASE_ID = "control-plane.session-logout-deletes-session-and-denies-reuse";
 const clientName = caseScopedName("session-logout-delete-client", CASE_ID);
@@ -60,7 +61,7 @@ liveTrellisTest({
     );
     assertEquals(response.status, 200);
     assertEquals(await response.json(), { success: true });
-    assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+    assertEquals(await sessionIsInactive(sqlite, clientKey.sessionKey), true);
 
     const reuse = await fetchClientBootstrap(
       runtime.trellisUrl,
@@ -106,15 +107,4 @@ async function fetchClientBootstrap(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ sessionKey: auth.sessionKey, iat, sig }),
   });
-}
-
-async function sessionExists(
-  sqlite: NonNullable<LiveTrellisRuntime["controlPlane"]>["sqlite"],
-  sessionKey: string,
-): Promise<boolean> {
-  const rows = await sqlite.query(
-    "SELECT 1 FROM sessions WHERE session_key = ?",
-    [sessionKey],
-  );
-  return rows.length > 0;
 }

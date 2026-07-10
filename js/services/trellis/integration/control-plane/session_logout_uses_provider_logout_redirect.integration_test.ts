@@ -13,6 +13,7 @@ import {
 } from "@qlever-llc/trellis-test/integration";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
+import { sessionIsInactive } from "./_bootstrap_client.ts";
 
 const CASE_ID = "control-plane.session-logout-uses-provider-logout-redirect";
 const providerId = "logout_oidc";
@@ -86,7 +87,7 @@ liveTrellisTest({
 
     assertEquals(response.status, 200);
     assertEquals(body, { success: true, redirectTo: expected.href });
-    assertEquals(await sessionExists(sqlite, clientKey.sessionKey), false);
+    assertEquals(await sessionIsInactive(sqlite, clientKey.sessionKey), true);
 
     const noLogoutKey = await runtime.registerClient({
       name: caseScopedName("session-logout-no-provider-url-client", CASE_ID),
@@ -112,7 +113,7 @@ liveTrellisTest({
       success: true,
       redirectTo: returnTo,
     });
-    assertEquals(await sessionExists(sqlite, noLogoutKey.sessionKey), false);
+    assertEquals(await sessionIsInactive(sqlite, noLogoutKey.sessionKey), true);
   },
 });
 
@@ -160,15 +161,4 @@ async function rewriteSessionProvider(
     "UPDATE sessions SET origin = ?, session = ? WHERE session_key = ?",
     [provider, JSON.stringify(session), sessionKey],
   );
-}
-
-async function sessionExists(
-  sqlite: NonNullable<LiveTrellisRuntime["controlPlane"]>["sqlite"],
-  sessionKey: string,
-): Promise<boolean> {
-  const rows = await sqlite.query(
-    "SELECT 1 FROM sessions WHERE session_key = ?",
-    [sessionKey],
-  );
-  return rows.length > 0;
 }

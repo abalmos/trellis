@@ -559,8 +559,12 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
     if !loaded.manifest.errors.is_empty() {
         lines.extend([
             format!(
-                "import {{ TrellisError, type SerializableErrorData }} from {};",
-                js_string(&trellis_import)
+                "import type {{ SerializableErrorData }} from {};",
+                js_string(&trellis_contracts_import(opts))
+            ),
+            format!(
+                "import {{ TrellisError }} from {};",
+                js_string(&format!("{trellis_import}/errors"))
             ),
             String::new(),
         ]);
@@ -4712,8 +4716,9 @@ mod tests {
         let owned_api = render_owned_api_ts(&opts, &loaded);
 
         assert!(types.contains(
-            "import { TrellisError, type SerializableErrorData } from \"@qlever-llc/trellis\";"
+            "import type { SerializableErrorData } from \"@qlever-llc/trellis/contracts\";"
         ));
+        assert!(types.contains("import { TrellisError } from \"@qlever-llc/trellis/errors\";"));
         assert!(types.contains(
             "import type { BaseError, HandlerTrellis, Result, RpcHandlerContext, TrellisErrorInstance } from \"@qlever-llc/trellis\";"
         ));
