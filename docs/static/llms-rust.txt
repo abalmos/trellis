@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-08).
+Last verified against Trellis main (2026-07-10).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -15,6 +15,9 @@ Rules:
   `cargo xtask prepare`
 - generated SDKs, manifests, and package outputs belong under the service repo's
   generated output locations; do not edit generated files by hand
+- public contract object schemas are open by default; omit `additionalProperties`
+  from raw JSON Schema unless a security-sensitive proof boundary or another
+  documented requirement must reject unknown fields
 - Trellis caches manifests by digest at runtime. If auth/bootstrap reports a
   missing digest after the cache is pruned, regenerate from source and present the
   full manifest; do not patch deployment authority or implementation offers by

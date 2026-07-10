@@ -182,7 +182,7 @@ export const ContractResourcesSchema = Type.Object({
   store: Type.Optional(
     Type.Record(Type.String({ minLength: 1 }), ContractStoreResourceSchema),
   ),
-}, { additionalProperties: false });
+});
 
 export type ContractResources = Static<typeof ContractResourcesSchema>;
 

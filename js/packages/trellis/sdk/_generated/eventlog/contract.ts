@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.eventlog@v1" as const;
 export const CONTRACT_DIGEST =
-  "A-5LNMwhnF1jpE7COy2chzjy8BNPs4TvO-oFutFMWpE" as const;
+  "dbrWayHMjo4A774xb0ovz2hd5qG6lfMBqXKxQ8wYyTw" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.eventlog::events.read": {
@@ -104,7 +104,6 @@ export const CONTRACT = {
   },
   "schemas": {
     "EventConsumerStatusRow": {
-      "additionalProperties": false,
       "properties": {
         "ackPending": { "type": "integer" },
         "ackWaitMs": { "type": "integer" },
@@ -146,7 +145,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogConsumersInspectRequest": {
-      "additionalProperties": false,
       "properties": {
         "consumerName": { "type": "string" },
         "stream": { "type": "string" },
@@ -159,7 +157,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogConsumersQueryRequest": {
-      "additionalProperties": false,
       "properties": {
         "contractId": { "type": "string" },
         "deploymentId": { "type": "string" },
@@ -187,7 +184,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogConsumersQueryResponse": {
-      "additionalProperties": false,
       "properties": {
         "consumers": {
           "items": { "schema": "EventConsumerStatusRow" },
@@ -201,7 +197,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogInspectRequest": {
-      "additionalProperties": false,
       "properties": {
         "eventId": { "type": "string" },
         "streamSequence": { "type": "integer" },
@@ -213,7 +208,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogMetricsRequest": {
-      "additionalProperties": false,
       "properties": {
         "window": {
           "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
@@ -224,17 +218,14 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogMetricsResponse": {
-      "additionalProperties": false,
       "properties": {
         "buckets": {
           "items": { "additionalProperties": true, "type": "object" },
           "type": "array",
         },
         "summary": {
-          "additionalProperties": false,
           "properties": {
             "byResolution": {
-              "additionalProperties": false,
               "properties": {
                 "malformed": { "type": "integer" },
                 "resolved": { "type": "integer" },
@@ -243,7 +234,6 @@ export const CONTRACT = {
               "type": "object",
             },
             "byVerificationStatus": {
-              "additionalProperties": false,
               "properties": {
                 "auth-unavailable": { "type": "integer" },
                 "invalid-signature": { "type": "integer" },
@@ -257,7 +247,6 @@ export const CONTRACT = {
             },
             "eventTypes": {
               "items": {
-                "additionalProperties": false,
                 "properties": {
                   "count": { "type": "integer" },
                   "ownerContractId": { "type": "string" },
@@ -287,13 +276,11 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogQueryRequest": {
-      "additionalProperties": false,
       "properties": {
         "consumerDeploymentId": { "type": "string" },
         "consumerName": { "type": "string" },
         "excludeEventTypes": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "ownerContractId": { "type": "string" },
               "ownerEventName": { "type": "string" },
@@ -305,7 +292,6 @@ export const CONTRACT = {
         },
         "includeEventTypes": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "ownerContractId": { "type": "string" },
               "ownerEventName": { "type": "string" },
@@ -356,7 +342,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogQueryResponse": {
-      "additionalProperties": false,
       "properties": {
         "events": { "items": { "schema": "EventLogRow" }, "type": "array" },
         "limit": { "type": "integer" },
@@ -367,7 +352,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "EventLogRow": {
-      "additionalProperties": false,
       "properties": {
         "eventId": { "type": "string" },
         "eventTime": { "type": "string" },

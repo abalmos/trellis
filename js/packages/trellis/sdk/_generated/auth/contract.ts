@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "cbLLQ4HqcHOrFD6PH1fmJd1OABJ5q6CbmpjtdRAfkCU" as const;
+  "2VOyWZ0HfFatZ12sf_tTUl9eDWeGjgmnQB63Jg9Aq7o" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -8502,7 +8502,6 @@ export const CONTRACT = {
       "type": "object",
     },
     "AuthSessionsLogoutResponse": {
-      "additionalProperties": false,
       "properties": { "success": { "type": "boolean" } },
       "required": ["success"],
       "type": "object",

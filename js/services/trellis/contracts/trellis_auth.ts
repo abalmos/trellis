@@ -172,13 +172,15 @@ import {
   AuthConnectionsOpenedEventSchema,
   AuthSessionsListRequestSchema as AuthSessionsListSchema,
   AuthSessionsListResponseSchema,
-  AuthSessionsLogoutRequestSchema as AuthSessionsLogoutSchema,
-  AuthSessionsLogoutResponseSchema,
   type AuthSessionsRevokedEvent,
   AuthSessionsRevokedEventSchema,
   AuthSessionsRevokeRequestSchema as AuthSessionsRevokeSchema,
   AuthSessionsRevokeResponseSchema,
 } from "@qlever-llc/trellis/sdk/auth";
+import {
+  AuthSessionsLogoutResponseSchema,
+  AuthSessionsLogoutSchema,
+} from "../../../packages/trellis/models/auth/rpc/Logout.ts";
 
 const schemas = {
   AuthDeviceUserAuthoritiesReviewsDecideRequest:

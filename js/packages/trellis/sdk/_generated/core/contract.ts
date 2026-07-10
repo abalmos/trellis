@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.core@v1" as const;
 export const CONTRACT_DIGEST =
-  "fC_8TooWSn7C2O7S-jvc6rLvJKQzfwWuBZk_ONihuCY" as const;
+  "X7MYhzOix9chzsosCsRElkoRO63_O_AdncRIPHQ0FEs" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.core::catalog.read": {
@@ -606,7 +606,6 @@ export const CONTRACT = {
               "type": "object",
             },
             "resources": {
-              "additionalProperties": false,
               "properties": {
                 "kv": {
                   "patternProperties": {

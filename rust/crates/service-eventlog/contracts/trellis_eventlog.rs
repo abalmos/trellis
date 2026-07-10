@@ -117,7 +117,6 @@ fn not_found_error_schema() -> Value {
 fn page_schema(field: &str, item_schema: &str) -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             field: { "type": "array", "items": { "schema": item_schema } },
             "total": { "type": "integer" },
@@ -135,7 +134,6 @@ fn string_enum(values: &[&str]) -> Value {
 fn event_query_request_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "search": { "type": "string" },
             "subject": { "type": "string" },
@@ -161,7 +159,6 @@ fn event_query_request_schema() -> Value {
 fn event_type_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "ownerContractId": { "type": "string" },
             "ownerEventName": { "type": "string" }
@@ -173,7 +170,6 @@ fn event_type_schema() -> Value {
 fn event_row_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "eventId": { "type": "string" },
             "eventTime": { "type": "string" },
@@ -211,7 +207,6 @@ fn verification_status_schema() -> Value {
 fn event_inspect_request_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": { "eventId": { "type": "string" }, "streamSequence": { "type": "integer" } }
     })
 }
@@ -219,7 +214,6 @@ fn event_inspect_request_schema() -> Value {
 fn metrics_request_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": { "window": string_enum(&["15m", "1h", "6h", "24h", "7d"]) }
     })
 }
@@ -227,18 +221,15 @@ fn metrics_request_schema() -> Value {
 fn metrics_response_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "summary": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                     "total": { "type": "integer" },
                     "uniqueSubjects": { "type": "integer" },
                     "payloadSizeBytes": { "type": "integer" },
                     "byResolution": {
                         "type": "object",
-                        "additionalProperties": false,
                         "properties": {
                             "resolved": { "type": "integer" },
                             "unresolved": { "type": "integer" },
@@ -247,7 +238,6 @@ fn metrics_response_schema() -> Value {
                     },
                     "byVerificationStatus": {
                         "type": "object",
-                        "additionalProperties": false,
                         "properties": {
                             "verified": { "type": "integer" },
                             "missing-proof": { "type": "integer" },
@@ -262,7 +252,6 @@ fn metrics_response_schema() -> Value {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "additionalProperties": false,
                             "properties": {
                                 "ownerContractId": { "type": "string" },
                                 "ownerEventName": { "type": "string" },
@@ -283,7 +272,6 @@ fn metrics_response_schema() -> Value {
 fn consumers_query_request_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "deploymentId": { "type": "string" },
             "contractId": { "type": "string" },
@@ -300,7 +288,6 @@ fn consumers_query_request_schema() -> Value {
 fn consumers_inspect_request_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": { "consumerName": { "type": "string" }, "stream": { "type": "string" } },
         "required": ["consumerName"]
     })
@@ -309,7 +296,6 @@ fn consumers_inspect_request_schema() -> Value {
 fn consumer_row_schema() -> Value {
     json!({
         "type": "object",
-        "additionalProperties": false,
         "properties": {
             "deploymentId": { "type": "string" },
             "contractId": { "type": "string" },

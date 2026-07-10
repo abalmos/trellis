@@ -260,12 +260,14 @@ const configSchema = z.object({
 Rules:
 
 - TypeBox for RPC, event, and operation wire schemas
-- do not default wire payload object schemas to closed-object
-  additional-property rejection
+- public wire payload object schemas are open by default in every language
 - same-lineage Trellis rollouts rely on older runtimes accepting newer payloads
   that add optional fields they do not know about yet
-- in TypeBox, prefer omitting `additionalProperties` for wire payload objects
-  unless the boundary is intentionally closed for a documented reason
+- omit `additionalProperties` from ordinary public wire object schemas; use
+  `Type.Object({ ... })` without the option in TypeScript and omit the keyword
+  from raw JSON Schema authored in Rust
+- use `additionalProperties: false` only when a security-sensitive proof
+  boundary or another documented requirement must reject unknown fields
 - Zod for environment parsing and config loading
 - use one validation library per use case instead of stacking multiple libraries
   on the same boundary
@@ -413,8 +415,10 @@ RPC rule:
   not the preferred shape for declared contract errors
 
 Operation rule:
+
 - declared operation errors follow the same rules as declared RPC errors;
-  local-or-builtin enforcement, wire open format, reconstructable class instances
+  local-or-builtin enforcement, wire open format, reconstructable class
+  instances
 
 Wire rule:
 

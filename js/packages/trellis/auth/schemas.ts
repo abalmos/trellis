@@ -170,7 +170,7 @@ export const AuthLogoutResponseSchema = Type.Object({
   redirectTo: Type.Optional(
     Type.String({ format: "uri", pattern: "^https?://", minLength: 1 }),
   ),
-}, { additionalProperties: false });
+});
 
 export type AuthLogoutRequest = StaticDecode<typeof AuthLogoutRequestSchema>;
 export type AuthLogoutResponse = StaticDecode<typeof AuthLogoutResponseSchema>;

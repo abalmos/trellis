@@ -78,9 +78,9 @@ Deno.test("AuthLogoutResponseSchema validates JSON logout responses", () => {
     redirectTo: "https://tenant.example.com/signed-out",
   }));
   assertFalse(Value.Check(AuthLogoutResponseSchema, { success: false }));
-  assertFalse(Value.Check(AuthLogoutResponseSchema, {
+  assert(Value.Check(AuthLogoutResponseSchema, {
     success: true,
-    extraField: "not part of the clean-break response",
+    futureField: "accepted for forward compatibility",
   }));
 });
 

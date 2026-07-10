@@ -7113,7 +7113,6 @@ export const AuthSessionsLogoutRequestSchema = {
 } as const;
 
 export const AuthSessionsLogoutResponseSchema = {
-  "additionalProperties": false,
   "properties": { "success": { "type": "boolean" } },
   "required": ["success"],
   "type": "object",

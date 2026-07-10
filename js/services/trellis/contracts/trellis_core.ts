@@ -4,11 +4,13 @@ import {
   TrellisBindingsGetResponseSchema,
   TrellisCatalogRequestSchema,
   TrellisCatalogResponseSchema,
-  TrellisContractGetRequestSchema,
-  TrellisContractGetResponseSchema,
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
 } from "@qlever-llc/trellis/sdk/core";
+import {
+  TrellisContractGetRequestSchema,
+  TrellisContractGetResponseSchema,
+} from "../../../packages/trellis/models/trellis/rpc/TrellisContractGet.ts";
 
 const schemas = {
   TrellisCatalogRequest: TrellisCatalogRequestSchema,

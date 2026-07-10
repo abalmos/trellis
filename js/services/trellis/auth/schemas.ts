@@ -1025,7 +1025,7 @@ export type AuthSessionsLogoutRequest = StaticDecode<
 
 export const AuthSessionsLogoutResponseSchema = Type.Object({
   success: Type.Boolean(),
-}, { additionalProperties: false });
+});
 export type AuthSessionsLogoutResponse = StaticDecode<
   typeof AuthSessionsLogoutResponseSchema
 >;

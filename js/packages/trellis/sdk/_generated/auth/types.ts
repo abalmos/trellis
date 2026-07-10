@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "cbLLQ4HqcHOrFD6PH1fmJd1OABJ5q6CbmpjtdRAfkCU" as const;
+  "2VOyWZ0HfFatZ12sf_tTUl9eDWeGjgmnQB63Jg9Aq7o" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {

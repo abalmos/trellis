@@ -22,7 +22,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.eventlog@v1" as const;
 export const CONTRACT_DIGEST =
-  "A-5LNMwhnF1jpE7COy2chzjy8BNPs4TvO-oFutFMWpE" as const;
+  "dbrWayHMjo4A774xb0ovz2hd5qG6lfMBqXKxQ8wYyTw" as const;
 
 export type EventLogConsumersInspectInput = {
   consumerName: string;

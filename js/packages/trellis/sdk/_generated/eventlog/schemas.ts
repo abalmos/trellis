@@ -1,6 +1,5 @@
 // Generated from ./generated/contracts/manifests/trellis.eventlog@v1.json
 export const EventLogConsumersInspectRequestSchema = {
-  "additionalProperties": false,
   "properties": {
     "consumerName": { "type": "string" },
     "stream": { "type": "string" },
@@ -15,7 +14,6 @@ export const EventLogConsumersInspectResponseSchema = {
 } as const;
 
 export const EventLogConsumersQueryRequestSchema = {
-  "additionalProperties": false,
   "properties": {
     "contractId": { "type": "string" },
     "deploymentId": { "type": "string" },
@@ -44,7 +42,6 @@ export const EventLogConsumersQueryRequestSchema = {
 } as const;
 
 export const EventLogConsumersQueryResponseSchema = {
-  "additionalProperties": false,
   "properties": {
     "consumers": {
       "items": { "schema": "EventConsumerStatusRow" },
@@ -59,7 +56,6 @@ export const EventLogConsumersQueryResponseSchema = {
 } as const;
 
 export const EventLogInspectRequestSchema = {
-  "additionalProperties": false,
   "properties": {
     "eventId": { "type": "string" },
     "streamSequence": { "type": "integer" },
@@ -73,7 +69,6 @@ export const EventLogInspectResponseSchema = {
 } as const;
 
 export const EventLogMetricsRequestSchema = {
-  "additionalProperties": false,
   "properties": {
     "window": {
       "anyOf": [{ "const": "15m" }, { "const": "1h" }, { "const": "6h" }, {
@@ -85,17 +80,14 @@ export const EventLogMetricsRequestSchema = {
 } as const;
 
 export const EventLogMetricsResponseSchema = {
-  "additionalProperties": false,
   "properties": {
     "buckets": {
       "items": { "additionalProperties": true, "type": "object" },
       "type": "array",
     },
     "summary": {
-      "additionalProperties": false,
       "properties": {
         "byResolution": {
-          "additionalProperties": false,
           "properties": {
             "malformed": { "type": "integer" },
             "resolved": { "type": "integer" },
@@ -104,7 +96,6 @@ export const EventLogMetricsResponseSchema = {
           "type": "object",
         },
         "byVerificationStatus": {
-          "additionalProperties": false,
           "properties": {
             "auth-unavailable": { "type": "integer" },
             "invalid-signature": { "type": "integer" },
@@ -118,7 +109,6 @@ export const EventLogMetricsResponseSchema = {
         },
         "eventTypes": {
           "items": {
-            "additionalProperties": false,
             "properties": {
               "count": { "type": "integer" },
               "ownerContractId": { "type": "string" },
@@ -149,13 +139,11 @@ export const EventLogMetricsResponseSchema = {
 } as const;
 
 export const EventLogQueryRequestSchema = {
-  "additionalProperties": false,
   "properties": {
     "consumerDeploymentId": { "type": "string" },
     "consumerName": { "type": "string" },
     "excludeEventTypes": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "ownerContractId": { "type": "string" },
           "ownerEventName": { "type": "string" },
@@ -167,7 +155,6 @@ export const EventLogQueryRequestSchema = {
     },
     "includeEventTypes": {
       "items": {
-        "additionalProperties": false,
         "properties": {
           "ownerContractId": { "type": "string" },
           "ownerEventName": { "type": "string" },
@@ -219,7 +206,6 @@ export const EventLogQueryRequestSchema = {
 } as const;
 
 export const EventLogQueryResponseSchema = {
-  "additionalProperties": false,
   "properties": {
     "events": { "items": { "schema": "EventLogRow" }, "type": "array" },
     "limit": { "type": "integer" },

@@ -241,9 +241,9 @@ Deno.test("AuthLogout schemas validate signed HTTP logout requests", () => {
     redirectTo: "https://tenant.example.com/signed-out",
   }));
   assertFalse(Value.Check(AuthLogoutResponseSchema, { success: false }));
-  assertFalse(Value.Check(AuthLogoutResponseSchema, {
+  assert(Value.Check(AuthLogoutResponseSchema, {
     success: true,
-    extraField: "not part of the clean-break response",
+    futureField: "accepted for forward compatibility",
   }));
 });
 
@@ -274,9 +274,9 @@ Deno.test("AuthSessionsLogout schemas validate terminal logout shape", () => {
     },
   }));
   assert(Value.Check(AuthSessionsLogoutResponseSchema, { success: true }));
-  assertFalse(Value.Check(AuthSessionsLogoutResponseSchema, {
+  assert(Value.Check(AuthSessionsLogoutResponseSchema, {
     success: true,
-    extraField: "not part of the response",
+    futureField: "accepted for forward compatibility",
   }));
   assertFalse(Value.Check(AuthSessionsLogoutResponseSchema, {
     extraField: "not part of the response",

@@ -100,7 +100,7 @@ Deno.test("TrellisContractGetResponseSchema accepts contract docs", () => {
   assertEquals(Value.Check(TrellisContractGetResponseSchema, response), true);
 });
 
-Deno.test("TrellisContractGetResponseSchema rejects legacy resources.jobs", () => {
+Deno.test("TrellisContractGetResponseSchema accepts unknown resource kinds", () => {
   const response = {
     contract: {
       format: "trellis.contract.v1",
@@ -120,5 +120,5 @@ Deno.test("TrellisContractGetResponseSchema rejects legacy resources.jobs", () =
     },
   };
 
-  assertEquals(Value.Check(TrellisContractGetResponseSchema, response), false);
+  assertEquals(Value.Check(TrellisContractGetResponseSchema, response), true);
 });

@@ -500,7 +500,6 @@ export const TrellisContractGetResponseSchema = {
           "type": "object",
         },
         "resources": {
-          "additionalProperties": false,
           "properties": {
             "kv": {
               "patternProperties": {
