@@ -387,6 +387,41 @@ Deno.test("reduceAcquireActiveSlot blocks replaced queued work that is no longer
   }
 });
 
+Deno.test("reduceAcquireActiveSlot allows manual retried work without queued reservation", async () => {
+  const policy = normalizeJobKeyPolicy({
+    keyConcurrency: { key: ["/tenant"] },
+  });
+  const derived = await deriveJobKey({
+    service: "svc",
+    jobType: "sync",
+    payload: { tenant: "a" },
+    template: policy.key,
+  });
+
+  const acquired = reduceAcquireActiveSlot({
+    state: undefined,
+    derived,
+    request: {
+      service: "svc",
+      jobType: "sync",
+      jobId: "job-retried",
+      context,
+      workEventType: "retried",
+      lifecycleState: "pending",
+      tries: 1,
+      instanceId: "worker-1",
+      now: "2024-01-01T00:00:02.000Z",
+    },
+    policy,
+    slotToken: "slot-1",
+  });
+
+  assertEquals(acquired.kind, "acquired");
+  if (acquired.kind === "acquired") {
+    assertEquals(acquired.state.active[0]?.jobId, "job-retried");
+  }
+});
+
 Deno.test("reduceRemoveQueuedJob releases pending keyed reservation", async () => {
   const policy = normalizeJobKeyPolicy({
     keyConcurrency: { key: ["/tenant"] },

@@ -46,5 +46,7 @@ function seedJobFromEvent<TPayload = unknown, TResult = unknown>(
     tries: event.tries,
     maxTries: event.maxTries ?? 1,
     ...(event.deadline !== undefined ? { deadline: event.deadline } : {}),
+    ...(event.trigger !== undefined ? { trigger: event.trigger } : {}),
+    ...(event.lineage !== undefined ? { lineage: event.lineage } : {}),
   };
 }

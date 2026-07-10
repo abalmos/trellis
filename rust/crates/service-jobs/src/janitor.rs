@@ -177,6 +177,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 
@@ -267,6 +268,10 @@ pub async fn start_janitor_loop(
     store: SqliteJobsStore,
     interval: std::time::Duration,
 ) -> Result<JanitorHandle, ServerError> {
+    tracing::info!(
+        interval_ms = interval.as_millis(),
+        "started jobs janitor loop"
+    );
     let task = tokio::spawn(async move {
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
         loop {
@@ -274,13 +279,20 @@ pub async fn start_janitor_loop(
             let now = time::OffsetDateTime::now_utc()
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
-            run_janitor_once(jobs_runtime.clone(), &store, &now)
+            let stats = run_janitor_once(jobs_runtime.clone(), &store, &now)
                 .await
                 .map_err(|error| {
                     ServerError::Nats(format!(
                         "jobs janitor loop failed for SQLite projection: {error}"
                     ))
                 })?;
+            tracing::debug!(
+                scanned = stats.scanned,
+                eligible = stats.eligible,
+                published = stats.published,
+                now = %now,
+                "completed jobs janitor run"
+            );
         }
     });
 

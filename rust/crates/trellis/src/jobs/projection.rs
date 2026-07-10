@@ -59,6 +59,7 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
         queue_policy: current.queue_policy.clone(),
         trigger: current.trigger.clone(),
         lineage: current.lineage.clone(),
+        waiting_on: current.waiting_on.clone(),
     };
 
     if let Some(concurrency) = &event.concurrency {
@@ -88,9 +89,25 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
             }
             next.logs = Some(logs);
         }
+        JobEventType::Waiting => {
+            if let Some(wait_edge) = &event.wait_edge {
+                let mut waiting_on = next.waiting_on.take().unwrap_or_default();
+                waiting_on.retain(|edge| edge.id != wait_edge.id);
+                waiting_on.push(wait_edge.clone());
+                next.waiting_on = Some(waiting_on);
+            }
+        }
+        JobEventType::Resumed => {
+            if let Some(wait_edge) = &event.wait_edge {
+                let mut waiting_on = next.waiting_on.take().unwrap_or_default();
+                waiting_on.retain(|edge| edge.id != wait_edge.id);
+                next.waiting_on = (!waiting_on.is_empty()).then_some(waiting_on);
+            }
+        }
         JobEventType::Completed => {
             next.result = event.result.clone();
             next.completed_at = Some(event.timestamp.clone());
+            next.waiting_on = None;
         }
         JobEventType::Failed
         | JobEventType::Cancelled
@@ -102,6 +119,7 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
             next.last_error = event.error.clone();
             next.error_detail = error_detail_from_event(event);
             next.completed_at = Some(event.timestamp.clone());
+            next.waiting_on = None;
         }
         JobEventType::Heartbeat => {}
         JobEventType::StaleCompletionIgnored => {
@@ -128,6 +146,7 @@ pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> 
             next.logs = None;
             next.concurrency = event.concurrency.clone();
             next.queue_policy = event.queue_policy.clone();
+            next.waiting_on = None;
             next.tries = 0;
         }
         JobEventType::Created => {}
@@ -147,6 +166,9 @@ fn is_legal_transition(current: &Job, event: &JobEvent) -> bool {
             current.state == JobState::Active && event.previous_state == Some(JobState::Active)
         }
         JobEventType::Progress | JobEventType::Logged | JobEventType::Completed => {
+            current.state == JobState::Active && event.previous_state == Some(JobState::Active)
+        }
+        JobEventType::Waiting | JobEventType::Resumed => {
             current.state == JobState::Active && event.previous_state == Some(JobState::Active)
         }
         JobEventType::Failed => {
@@ -215,6 +237,7 @@ fn seed_job_from_event(event: &JobEvent) -> Option<Job> {
         queue_policy: event.queue_policy.clone(),
         trigger: event.trigger.clone(),
         lineage: event.lineage.clone(),
+        waiting_on: None,
     })
 }
 

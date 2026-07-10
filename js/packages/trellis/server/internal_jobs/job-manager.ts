@@ -1,7 +1,12 @@
 import { headers as natsHeaders, type MsgHdrs } from "@nats-io/nats-core";
 import { ulid } from "ulid";
 
-import { JobNotEnqueuedError } from "../../jobs.ts";
+import {
+  getActiveJobSnapshot,
+  JobNotEnqueuedError,
+  type JobSnapshot,
+  runWithActiveJobContext,
+} from "../../jobs.ts";
 import {
   createMapCarrier,
   injectTraceContext,
@@ -26,8 +31,12 @@ import type {
   Job,
   JobContext,
   JobEvent,
+  JobLineage,
   JobLogEntry,
   JobProgress,
+  JobTrigger,
+  JobWaitEdge,
+  JobWaitTarget,
 } from "./types.ts";
 
 type Publisher = {
@@ -54,6 +63,7 @@ type ActiveJobRuntimeMetadata = {
   redeliveryCount?: number;
   instanceId?: string;
   latestState?: Job["state"];
+  workEventType?: JobEvent["eventType"];
 };
 
 type JobProcessValidation<TPayload, TResult> = {
@@ -123,6 +133,8 @@ export type PreparedJobSubmission<TPayload = unknown> = {
   readonly payload: TPayload;
   readonly createdAt: string;
   readonly context: JobContext;
+  readonly trigger?: JobTrigger;
+  readonly lineage?: JobLineage;
 };
 
 export class JobManager<TPayload = unknown, TResult = unknown> {
@@ -267,6 +279,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const meta = this.#meta();
     const now = meta.nowIso();
     const id = meta.nextJobId();
+    const parent = getActiveJobSnapshot();
     const context = createJobContext();
     const serviceName = this.#context.jobs!.serviceName;
 
@@ -279,6 +292,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       payload,
       createdAt: now,
       context,
+      trigger: parent ? parentJobTrigger(parent) : { kind: "serviceCode" },
+      ...(parent ? { lineage: childJobLineage(parent) } : {}),
     };
 
     return await this.#submitPrepared(submission, strictCreate);
@@ -296,6 +311,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       context,
       service,
       payload,
+      trigger = { kind: "serviceCode" },
+      lineage,
     } = submission;
     const binding = this.#getQueueBinding(type);
     const deadline = computeDeadline(now, binding.defaultDeadlineMs);
@@ -311,6 +328,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       tries: 0,
       maxTries: binding.maxDeliver,
       ...(deadline ? { deadline } : {}),
+      trigger,
+      ...(lineage ? { lineage } : {}),
     };
     const event: JobEvent<TPayload, TResult> = {
       jobId: id,
@@ -323,6 +342,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       maxTries: binding.maxDeliver,
       payload,
       ...(deadline ? { deadline } : {}),
+      trigger,
+      ...(lineage ? { lineage } : {}),
       timestamp: now,
     };
 
@@ -548,6 +569,9 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
         instanceId: metadata.instanceId ?? "unknown",
         now: this.#meta().nowIso(),
         policy: keyedPolicy,
+        ...(metadata.workEventType
+          ? { workEventType: metadata.workEventType }
+          : {}),
       });
       if (acquired.kind === "blocked") {
         return { outcome: "deferred", tries, reason: acquired.reason };
@@ -787,6 +811,58 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     });
   }
 
+  async waitFor<T>(
+    job: Job<TPayload, TResult>,
+    target: JobWaitTarget,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const edge: JobWaitEdge = {
+      id: ulid(),
+      target,
+      startedAt: this.#meta().nowIso(),
+      ...(target.label ? { label: target.label } : {}),
+    };
+
+    await this.#publishJobEvent(job.type, job.id, {
+      jobId: job.id,
+      service: job.service,
+      jobType: job.type,
+      eventType: "waiting",
+      state: "active",
+      previousState: "active",
+      context: job.context,
+      tries: job.tries,
+      waitEdge: edge,
+      timestamp: edge.startedAt,
+    });
+
+    try {
+      return await fn();
+    } finally {
+      try {
+        await this.#publishJobEvent(job.type, job.id, {
+          jobId: job.id,
+          service: job.service,
+          jobType: job.type,
+          eventType: "resumed",
+          state: "active",
+          previousState: "active",
+          context: job.context,
+          tries: job.tries,
+          waitEdge: edge,
+          timestamp: this.#meta().nowIso(),
+        });
+      } catch (error) {
+        recordTrellisError(error, {
+          surface: "job",
+          direction: "worker",
+          operation: job.type,
+          phase: "publish",
+        });
+      }
+    }
+  }
+
   withActiveJob<T>(
     job: Job<TPayload, TResult>,
     cancellation: JobCancellationToken,
@@ -902,6 +978,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const activeJob = new ActiveJob(job, cancellation, {
       updateProgress: (progress) => this.emitProgress(job, progress),
       log: (entry) => this.emitLog(job, entry),
+      waitFor: (target, fn) => this.waitFor(job, target, fn),
       heartbeat: async () => {
         try {
           await heartbeat();
@@ -919,7 +996,10 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     });
 
     try {
-      return await f(activeJob);
+      return await runWithActiveJobContext({
+        job,
+        waitFor: (target, fn) => this.waitFor(job, target, fn),
+      }, () => f(activeJob));
     } finally {
       stopAutoHeartbeat();
     }
@@ -928,6 +1008,32 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   #coordinationService(): string {
     return this.#context.jobs!.namespace;
   }
+}
+
+function parentJobTrigger(
+  parent: JobSnapshot<unknown, unknown>,
+): JobTrigger {
+  return {
+    kind: "parentJob",
+    parentJobId: parent.id,
+    traceId: parent.context.traceId,
+    requestId: parent.context.requestId,
+    ...(parent.lineage?.operationId
+      ? { operationId: parent.lineage.operationId }
+      : {}),
+  };
+}
+
+function childJobLineage(
+  parent: JobSnapshot<unknown, unknown>,
+): JobLineage {
+  return {
+    parentJobId: parent.id,
+    rootJobId: parent.lineage?.rootJobId ?? parent.id,
+    ...(parent.lineage?.operationId
+      ? { operationId: parent.lineage.operationId }
+      : {}),
+  };
 }
 
 function getKeyPolicy(
@@ -969,6 +1075,11 @@ function computeDeadline(now: string, deadlineMs?: number): string | undefined {
 }
 
 export function createJobContext(): JobContext {
+  const parent = getActiveJobSnapshot();
+  if (parent) {
+    return parent.context;
+  }
+
   const carrier = createMapCarrier();
   injectTraceContext(carrier);
   const inheritedTraceparent = carrier.get("traceparent");

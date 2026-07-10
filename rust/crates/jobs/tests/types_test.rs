@@ -58,6 +58,7 @@ fn job_and_event_serde_use_expected_wire_keys() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
     let job_json = serde_json::to_value(job).unwrap();
     assert_eq!(job_json.get("type"), Some(&json!("document-process")));
@@ -91,6 +92,7 @@ fn job_and_event_serde_use_expected_wire_keys() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        wait_edge: None,
         admin_action: None,
         timestamp: "2026-03-28T12:00:00.000Z".to_string(),
     };

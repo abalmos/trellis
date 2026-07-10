@@ -1,5 +1,6 @@
 //! Runtime-facing active job handle.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -7,7 +8,7 @@ use futures_util::future::BoxFuture;
 use crate::manager::{JobManager, JobManagerError, JobMetaSource};
 use crate::publisher::JobEventPublisher;
 use crate::runtime_worker::JobCancellationToken;
-use crate::types::{Job, JobContext, JobLogEntry, JobLogLevel, JobProgress};
+use crate::types::{Job, JobContext, JobLogEntry, JobLogLevel, JobProgress, JobWaitEdge};
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
@@ -117,5 +118,19 @@ where
                 },
             )
             .await
+    }
+
+    /// Record that this active job is waiting while a future runs.
+    pub async fn wait_for<T, Fut>(&self, wait_edge: JobWaitEdge, future: Fut) -> T
+    where
+        Fut: Future<Output = T>,
+    {
+        let _ = self
+            .manager
+            .emit_waiting(&self.job, wait_edge.clone())
+            .await;
+        let output = future.await;
+        let _ = self.manager.emit_resumed(&self.job, wait_edge).await;
+        output
     }
 }

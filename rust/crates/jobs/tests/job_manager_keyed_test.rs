@@ -505,6 +505,7 @@ fn active_job() -> Job {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     }
 }
 

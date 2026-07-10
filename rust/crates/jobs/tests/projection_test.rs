@@ -2,6 +2,7 @@ use serde_json::json;
 use trellis_jobs::projection::{job_from_work_event, reduce_job_event};
 use trellis_jobs::types::{
     Job, JobContext, JobEvent, JobEventType, JobLogEntry, JobLogLevel, JobProgress, JobState,
+    JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
 };
 
 fn sample_context() -> JobContext {
@@ -39,11 +40,31 @@ fn event(
         queue_policy: None,
         trigger: None,
         lineage: None,
+        wait_edge: None,
         admin_action: None,
         timestamp: "2026-03-28T12:00:00.000Z".to_string(),
     };
     overrides(&mut value);
     value
+}
+
+fn wait_edge() -> JobWaitEdge {
+    JobWaitEdge {
+        id: "wait-1".to_string(),
+        target: JobWaitTarget {
+            kind: JobWaitTargetKind::Job,
+            id: Some("child-1".to_string()),
+            operation_id: None,
+            label: None,
+            service: Some("documents".to_string()),
+            target_type: Some("document-process".to_string()),
+            system: None,
+            operation: None,
+            key: None,
+        },
+        started_at: "2026-03-28T12:00:30.000Z".to_string(),
+        label: None,
+    }
 }
 
 #[test]
@@ -172,6 +193,38 @@ fn reduce_job_event_happy_path_created_started_progress_logged_completed() {
 }
 
 #[test]
+fn reduce_job_event_tracks_waiting_edges_without_leaving_active_state() {
+    let created = event(JobEventType::Created, JobState::Pending, |value| {
+        value.payload = Some(json!({ "documentId": "doc-1" }));
+        value.max_tries = Some(5);
+    });
+    let pending = job_from_work_event(&created).expect("created job");
+    let started = event(JobEventType::Started, JobState::Active, |value| {
+        value.previous_state = Some(JobState::Pending);
+        value.tries = 1;
+    });
+    let active = reduce_job_event(Some(&pending), &started).expect("started job");
+    let waiting = event(JobEventType::Waiting, JobState::Active, |value| {
+        value.previous_state = Some(JobState::Active);
+        value.tries = 1;
+        value.wait_edge = Some(wait_edge());
+    });
+
+    let waiting_job = reduce_job_event(Some(&active), &waiting).expect("waiting job");
+    assert_eq!(waiting_job.state, JobState::Active);
+    assert_eq!(waiting_job.waiting_on.as_ref().map(Vec::len), Some(1));
+
+    let resumed = event(JobEventType::Resumed, JobState::Active, |value| {
+        value.previous_state = Some(JobState::Active);
+        value.tries = 1;
+        value.wait_edge = Some(wait_edge());
+    });
+    let resumed_job = reduce_job_event(Some(&waiting_job), &resumed).expect("resumed job");
+    assert_eq!(resumed_job.state, JobState::Active);
+    assert_eq!(resumed_job.waiting_on, None);
+}
+
+#[test]
 fn reduce_job_event_rejects_completed_from_pending() {
     let created = event(JobEventType::Created, JobState::Pending, |value| {
         value.payload = Some(json!({ "documentId": "doc-1" }));
@@ -235,6 +288,7 @@ fn reduce_job_event_rejects_started_when_previous_state_does_not_match_current()
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
 
     let started = event(JobEventType::Started, JobState::Active, |value| {
@@ -394,6 +448,7 @@ fn reduce_job_event_preserves_terminal_state_for_non_retried_event() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
 
     let too_late_failed = event(JobEventType::Failed, JobState::Failed, |value| {
@@ -441,6 +496,7 @@ fn reduce_job_event_allows_retried_from_terminal_and_clears_runtime_fields() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
 
     let retried = event(JobEventType::Retried, JobState::Pending, |value| {
@@ -598,6 +654,7 @@ fn reduce_job_event_rejects_non_retried_transitions_from_all_terminal_states() {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         };
 
         let started = event(JobEventType::Started, JobState::Active, |value| {

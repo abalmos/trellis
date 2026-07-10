@@ -1,12 +1,13 @@
 //! SQLite-backed query and mutation helpers for the Jobs admin service.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::jobs::types::{
     Job, JobAdminAction, JobErrorDetail, JobEvent, JobState, JobTrigger, JobTriggerKind,
+    JobWaitEdge,
 };
 use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{
@@ -21,7 +22,7 @@ use trellis_rs::sdk::jobs::types::{
     JobsInspectResponseErrorsItem, JobsInspectResponseRelatedItem,
     JobsInspectResponseRelatedItemContext, JobsInspectResponseRelatedItemProgress,
     JobsInspectResponseTimelineItem, JobsInspectResponseTimelineItemErrorDetail,
-    JobsListDLQRequest, JobsListDLQResponse, JobsListDLQResponseEntriesItem,
+    JobsInspectResponseTimelineItemWaitEdge, JobsListDLQRequest, JobsListDLQResponse,
     JobsListServicesRequest, JobsListServicesResponse, JobsListServicesResponseEntriesItem,
     JobsListServicesResponseEntriesItemWorkersItem, JobsMetricsRequest, JobsMetricsResponse,
     JobsMetricsResponseBucketsItem, JobsMetricsResponseBucketsItemGroupsItem,
@@ -98,16 +99,33 @@ impl JobsQuery {
         }
     }
 
+    async fn with_projection<T, F>(&self, f: F) -> Result<T, JobsQueryError>
+    where
+        T: Send + 'static,
+        F: FnOnce(SqliteJobsStore) -> Result<T, JobsQueryError> + Send + 'static,
+    {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || f(store))
+            .await
+            .map_err(|error| JobsQueryError::ProjectionStore {
+                details: format!("projection task failed: {error}"),
+            })?
+    }
+
     /// List registered service instances grouped by service name.
     pub async fn list_services(
         &self,
         request: &JobsListServicesRequest,
     ) -> Result<JobsListServicesResponse, JobsQueryError> {
+        let started = Instant::now();
         let (offset, limit) = parse_page_request(request.offset, request.limit)?;
+        tracing::debug!(offset, limit, "jobs rpc list_services started");
         let now = OffsetDateTime::now_utc();
         let workers = self
-            .store
-            .list_fresh_workers(now, WORKER_PRESENCE_FRESH_FOR)?;
+            .with_projection(move |store| {
+                Ok(store.list_fresh_workers(now, WORKER_PRESENCE_FRESH_FOR)?)
+            })
+            .await?;
 
         let mut grouped =
             BTreeMap::<String, Vec<JobsListServicesResponseEntriesItemWorkersItem>>::new();
@@ -139,6 +157,13 @@ impl JobsQuery {
             .take(usize::try_from(limit).unwrap_or(usize::MAX))
             .collect();
         let next_offset = offset.checked_add(limit).filter(|next| *next < count);
+        tracing::debug!(
+            count,
+            offset,
+            limit,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc list_services completed"
+        );
 
         Ok(JobsListServicesResponse {
             count: to_wire_integer(count),
@@ -154,8 +179,20 @@ impl JobsQuery {
         &self,
         request: &JobsQueryRequest,
     ) -> Result<JobsQueryResponse, JobsQueryError> {
+        let started = Instant::now();
         let (offset, limit) = parse_page_request(request.offset, request.limit)?;
         let since = parse_window_filter(request.window.as_deref())?;
+        tracing::debug!(
+            service = ?request.service,
+            job_type = ?request.r#type,
+            state = ?request.state,
+            window = ?request.window,
+            group_by = ?request.group_by,
+            search = request.search.is_some(),
+            offset,
+            limit,
+            "jobs rpc query started"
+        );
         let filter = JobsWorkbenchFilter {
             service: request.service.clone(),
             job_type: request.r#type.clone(),
@@ -170,8 +207,18 @@ impl JobsQuery {
             offset,
             limit,
         };
-        let page = self.store.query_jobs(&filter)?;
-        let groups = self.store.query_job_groups(&filter)?;
+        let (page, groups) = self
+            .with_projection(move |store| {
+                Ok((store.query_jobs(&filter)?, store.query_job_groups(&filter)?))
+            })
+            .await?;
+        tracing::debug!(
+            count = page.count,
+            entries = page.entries.len(),
+            groups = groups.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc query completed"
+        );
 
         Ok(JobsQueryResponse {
             count: to_wire_integer(page.count),
@@ -196,8 +243,18 @@ impl JobsQuery {
         &self,
         request: &JobsMetricsRequest,
     ) -> Result<JobsMetricsResponse, JobsQueryError> {
+        let started = Instant::now();
         let until = OffsetDateTime::now_utc();
         let window = parse_metrics_window(&request.window)?;
+        tracing::debug!(
+            service = ?request.service,
+            job_type = ?request.r#type,
+            state = ?request.state,
+            window = %request.window,
+            step = %request.step,
+            group_by = %request.group_by,
+            "jobs rpc metrics started"
+        );
         let filter = JobsMetricsFilter {
             service: request.service.clone(),
             job_type: request.r#type.clone(),
@@ -217,7 +274,15 @@ impl JobsQuery {
             trigger: request.trigger.clone(),
             group_by: parse_metrics_group_by(&request.group_by)?,
         };
-        let page = self.store.query_metrics(&filter)?;
+        let page = self
+            .with_projection(move |store| Ok(store.query_metrics(&filter)?))
+            .await?;
+        tracing::debug!(
+            buckets = page.buckets.len(),
+            summary = page.summary.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc metrics completed"
+        );
         Ok(JobsMetricsResponse {
             buckets: page
                 .buckets
@@ -246,29 +311,57 @@ impl JobsQuery {
         &self,
         request: &JobsInspectRequest,
     ) -> Result<JobsInspectResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(job_id = %request.id, "jobs rpc inspect started");
+        let request_id = request.id.clone();
         let job = self
-            .store
-            .get_job_by_global_id(&request.id)?
-            .ok_or_else(|| JobsQueryError::JobNotFound {
-                key: request.id.clone(),
-            })?;
+            .with_projection(move |store| {
+                store
+                    .get_job_by_global_id(&request_id)?
+                    .ok_or(JobsQueryError::JobNotFound { key: request_id })
+            })
+            .await?;
 
-        let metadata = self.job_metadata(&job)?;
-        let lineage = self.store.get_job_lineage_by_global_id(&job.id)?;
+        let metadata = self.job_metadata(&job).await?;
+        let errors = self.error_details(&job).await?;
+        let job_id = job.id.clone();
+        let related_job = job.clone();
+        let (lineage, related, timeline, waiting_on) = self
+            .with_projection(move |store| {
+                Ok((
+                    store.get_job_lineage_by_global_id(&job_id)?,
+                    store.list_related_jobs(&related_job, 10)?,
+                    store.list_timeline_events(&job_id, 200)?,
+                    store
+                        .list_current_waits(&job_id)?
+                        .into_iter()
+                        .map(|wait| wait.wait_edge)
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await?;
+        let mut response_job = job.clone();
+        response_job.waiting_on = (!waiting_on.is_empty()).then_some(waiting_on);
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            timeline = timeline.len(),
+            related = related.len(),
+            errors = errors.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc inspect completed"
+        );
         Ok(JobsInspectResponse {
             attempts: Vec::new(),
-            errors: self.error_details(&job)?,
-            job: job_to_inspect_item(&job, &metadata)?,
+            errors,
+            job: job_to_inspect_item(&response_job, &metadata)?,
             lineage: map_optional_wire(&lineage.lineage, "job inspect lineage")?,
-            related: self
-                .store
-                .list_related_jobs(&job, 10)?
+            related: related
                 .iter()
                 .map(related_entry_to_wire)
                 .collect::<Result<Vec<_>, _>>()?,
-            timeline: self
-                .store
-                .list_timeline_events(&request.id, 200)?
+            timeline: timeline
                 .iter()
                 .map(timeline_event_to_wire)
                 .collect::<Result<Vec<_>, _>>()?,
@@ -285,13 +378,35 @@ impl JobsQuery {
         &self,
         request: &JobsGetKeyRequest,
     ) -> Result<JobsGetKeyResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(
+            service = ?request.service,
+            job_type = ?request.r#type,
+            key = %request.key,
+            "jobs rpc get_key started"
+        );
+        let service = request.service.clone();
+        let job_type = request.r#type.clone();
+        let request_key = request.key.clone();
         let key = self
-            .store
-            .get_projected_key(&request.service, &request.r#type, &request.key)?
-            .ok_or_else(|| JobsQueryError::JobNotFound {
-                key: format!("{}/{}/{}", request.service, request.r#type, request.key),
-            })?;
+            .with_projection(move |store| {
+                store
+                    .get_projected_key(&service, &job_type, &request_key)?
+                    .ok_or_else(|| JobsQueryError::JobNotFound {
+                        key: format!("{service}/{job_type}/{request_key}"),
+                    })
+            })
+            .await?;
         let now = OffsetDateTime::now_utc();
+        tracing::debug!(
+            service = %key.service,
+            job_type = %key.job_type,
+            key = %key.key,
+            active = key.active.len(),
+            queued = key.queued.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc get_key completed"
+        );
 
         Ok(JobsGetKeyResponse {
             active: key
@@ -334,12 +449,16 @@ impl JobsQuery {
         &self,
         request: &JobsCancelRequest,
     ) -> Result<JobsCancelResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(job_id = %request.id, "jobs rpc cancel started");
+        let request_id = request.id.clone();
         let existing = self
-            .store
-            .get_job_by_global_id(&request.id)?
-            .ok_or_else(|| JobsQueryError::JobNotFound {
-                key: request.id.clone(),
-            })?;
+            .with_projection(move |store| {
+                store
+                    .get_job_by_global_id(&request_id)?
+                    .ok_or(JobsQueryError::JobNotFound { key: request_id })
+            })
+            .await?;
         let job = if is_terminal(existing.state) {
             existing
         } else {
@@ -364,9 +483,17 @@ impl JobsQuery {
             })
             .await?
         };
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            state = ?job.state,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc cancel completed"
+        );
 
         Ok(JobsCancelResponse {
-            job: job_to_cancel_item(&job, &self.job_metadata(&job)?)?,
+            job: job_to_cancel_item(&job, &self.job_metadata(&job).await?)?,
         })
     }
 
@@ -375,6 +502,8 @@ impl JobsQuery {
         &self,
         request: &JobsRetryRequest,
     ) -> Result<JobsRetryResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(job_id = %request.id, "jobs rpc retry started");
         let job = self
             .transition_job(&request.id, "failed", |job, now| match job.state {
                 JobState::Failed => Some(retried_event_with_admin_reason(
@@ -392,9 +521,17 @@ impl JobsQuery {
                 _ => None,
             })
             .await?;
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            state = ?job.state,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc retry completed"
+        );
 
         Ok(JobsRetryResponse {
-            job: job_to_retry_item(&job, &self.job_metadata(&job)?)?,
+            job: job_to_retry_item(&job, &self.job_metadata(&job).await?)?,
         })
     }
 
@@ -403,26 +540,47 @@ impl JobsQuery {
         &self,
         request: &JobsListDLQRequest,
     ) -> Result<JobsListDLQResponse, JobsQueryError> {
+        let started = Instant::now();
         let (offset, limit) = parse_page_request(request.offset, request.limit)?;
         let since = parse_since_filter(request.since.as_deref())?;
-        let page = self.store.list_jobs(&ListJobsFilter {
-            service: request.service.clone(),
-            job_type: request.r#type.clone(),
-            states: Some(vec![JobState::Dead]),
-            since,
-            offset: Some(offset),
+        tracing::debug!(
+            service = ?request.service,
+            job_type = ?request.r#type,
+            since = ?request.since,
+            offset,
             limit,
-        })?;
+            "jobs rpc list_dlq started"
+        );
+        let service = request.service.clone();
+        let job_type = request.r#type.clone();
+        let page = self
+            .with_projection(move |store| {
+                Ok(store.list_jobs(&ListJobsFilter {
+                    service,
+                    job_type,
+                    states: Some(vec![JobState::Dead]),
+                    since,
+                    offset: Some(offset),
+                    limit,
+                })?)
+            })
+            .await?;
+        let mut entries = Vec::new();
+        for job in &page.jobs {
+            let metadata = self.job_metadata(job).await?;
+            entries.push(job_to_dlq_item(job, &metadata)?);
+        }
+        tracing::debug!(
+            count = page.count,
+            entries = entries.len(),
+            offset = page.offset,
+            limit = page.limit,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc list_dlq completed"
+        );
         Ok(JobsListDLQResponse {
             count: to_wire_integer(page.count),
-            entries: page
-                .jobs
-                .iter()
-                .map(|job| {
-                    let metadata = self.job_metadata(job)?;
-                    job_to_dlq_item(job, &metadata)
-                })
-                .collect::<Result<Vec<JobsListDLQResponseEntriesItem>, _>>()?,
+            entries,
             limit: to_wire_integer(page.limit),
             next_offset: page.next_offset.map(to_wire_integer),
             offset: to_wire_integer(page.offset),
@@ -434,6 +592,8 @@ impl JobsQuery {
         &self,
         request: &JobsReplayDLQRequest,
     ) -> Result<JobsReplayDLQResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(job_id = %request.id, "jobs rpc replay_dlq started");
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
                 JobState::Dead => {
@@ -470,9 +630,17 @@ impl JobsQuery {
                 _ => None,
             })
             .await?;
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            state = ?job.state,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc replay_dlq completed"
+        );
 
         Ok(JobsReplayDLQResponse {
-            job: job_to_replay_item(&job, &self.job_metadata(&job)?)?,
+            job: job_to_replay_item(&job, &self.job_metadata(&job).await?)?,
         })
     }
 
@@ -481,6 +649,8 @@ impl JobsQuery {
         &self,
         request: &JobsDismissDLQRequest,
     ) -> Result<JobsDismissDLQResponse, JobsQueryError> {
+        let started = Instant::now();
+        tracing::debug!(job_id = %request.id, "jobs rpc dismiss_dlq started");
         let job = self
             .transition_job(&request.id, "dead", |job, now| match job.state {
                 JobState::Dead => {
@@ -502,20 +672,33 @@ impl JobsQuery {
                 _ => None,
             })
             .await?;
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            state = ?job.state,
+            elapsed_ms = started.elapsed().as_millis(),
+            "jobs rpc dismiss_dlq completed"
+        );
 
         Ok(JobsDismissDLQResponse {
-            job: job_to_dismiss_item(&job, &self.job_metadata(&job)?)?,
+            job: job_to_dismiss_item(&job, &self.job_metadata(&job).await?)?,
         })
     }
 
-    fn job_metadata(&self, job: &Job) -> Result<JobProjectionMetadata, JobsQueryError> {
-        Ok(self
-            .store
-            .get_job_metadata(&job.service, &job.job_type, &job.id)?
-            .unwrap_or_default())
+    async fn job_metadata(&self, job: &Job) -> Result<JobProjectionMetadata, JobsQueryError> {
+        let service = job.service.clone();
+        let job_type = job.job_type.clone();
+        let id = job.id.clone();
+        self.with_projection(move |store| {
+            Ok(store
+                .get_job_metadata(&service, &job_type, &id)?
+                .unwrap_or_default())
+        })
+        .await
     }
 
-    fn error_details(
+    async fn error_details(
         &self,
         job: &Job,
     ) -> Result<Vec<JobsInspectResponseErrorsItem>, JobsQueryError> {
@@ -526,7 +709,10 @@ impl JobsQuery {
         let Some(detail) = job.error_detail.as_ref().or(fallback_detail.as_ref()) else {
             return Ok(Vec::new());
         };
-        let projection = self.store.get_error_projection(&detail.fingerprint)?;
+        let fingerprint = detail.fingerprint.clone();
+        let projection = self
+            .with_projection(move |store| Ok(store.get_error_projection(&fingerprint)?))
+            .await?;
         let mut detail = detail.clone();
         if let Some(projection) = projection {
             detail.first_seen = Some(projection.first_seen);
@@ -553,12 +739,14 @@ impl JobsQuery {
     where
         F: FnOnce(&Job, &str) -> Option<JobEvent>,
     {
-        let job =
-            self.store
-                .get_job_by_global_id(id)?
-                .ok_or_else(|| JobsQueryError::JobNotFound {
-                    key: id.to_string(),
-                })?;
+        let id_string = id.to_string();
+        let job = self
+            .with_projection(move |store| {
+                store
+                    .get_job_by_global_id(&id_string)?
+                    .ok_or(JobsQueryError::JobNotFound { key: id_string })
+            })
+            .await?;
         let key = projection_key(&job);
 
         let now = now_timestamp_string();
@@ -567,7 +755,16 @@ impl JobsQuery {
             expected: expected_states.to_string(),
             actual: format!("{:?}", job.state).to_lowercase(),
         })?;
-        let subject = self.transition_event_subject(&job, &event);
+        let subject = self.transition_event_subject(&job, &event).await;
+        tracing::debug!(
+            service = %job.service,
+            job_type = %job.job_type,
+            job_id = %job.id,
+            from_state = ?job.state,
+            event_type = event.event_type.as_token(),
+            subject = %subject,
+            "publishing jobs admin transition event"
+        );
         let payload = serde_json::to_vec(&event).map_err(|error| JobsQueryError::EncodeEvent {
             key: key.clone(),
             details: error.to_string(),
@@ -589,23 +786,36 @@ impl JobsQuery {
             }
         })?;
         let projected = self.await_job_projection(&predicted, &event).await?;
+        tracing::debug!(
+            service = %projected.service,
+            job_type = %projected.job_type,
+            job_id = %projected.id,
+            state = ?projected.state,
+            "jobs admin transition projected"
+        );
 
         Ok(projected)
     }
 
-    fn transition_event_subject(&self, job: &Job, event: &JobEvent) -> String {
-        self.store
-            .list_timeline_events(&job.id, 1)
-            .ok()
-            .and_then(|events| {
-                events
-                    .first()
-                    .and_then(|timeline_event| raw_event_subject(&timeline_event.raw_event_json))
-            })
-            .and_then(|subject| sibling_event_subject(&subject, event.event_type.as_token()))
-            .unwrap_or_else(|| {
-                job_event_subject(&job.service, &job.job_type, &job.id, event.event_type)
-            })
+    async fn transition_event_subject(&self, job: &Job, event: &JobEvent) -> String {
+        let fallback = job_event_subject(&job.service, &job.job_type, &job.id, event.event_type);
+        let job_id = job.id.clone();
+        let event_type = event.event_type.as_token().to_string();
+        self.with_projection(move |store| {
+            Ok(store
+                .list_timeline_events(&job_id, 1)
+                .ok()
+                .and_then(|events| {
+                    events.first().and_then(|timeline_event| {
+                        raw_event_subject(&timeline_event.raw_event_json)
+                    })
+                })
+                .and_then(|subject| sibling_event_subject(&subject, &event_type)))
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(fallback)
     }
 
     async fn await_job_projection(
@@ -613,20 +823,40 @@ impl JobsQuery {
         predicted: &Job,
         event: &JobEvent,
     ) -> Result<Job, JobsQueryError> {
-        for _ in 0..20 {
-            if let Some(job) =
-                self.store
-                    .get_job(&predicted.service, &predicted.job_type, &predicted.id)?
+        let started = Instant::now();
+        for attempt in 0..20 {
+            let service = predicted.service.clone();
+            let job_type = predicted.job_type.clone();
+            let id = predicted.id.clone();
+            if let Some(job) = self
+                .with_projection(move |store| Ok(store.get_job(&service, &job_type, &id)?))
+                .await?
             {
                 if plan_mutation_response(Some(&job), predicted, event, false)
                     == MutationResponsePlan::ReturnProjected
                 {
+                    tracing::debug!(
+                        service = %job.service,
+                        job_type = %job.job_type,
+                        job_id = %job.id,
+                        attempts = attempt + 1,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "observed projected jobs admin transition"
+                    );
                     return Ok(job);
                 }
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
 
+        tracing::debug!(
+            service = %predicted.service,
+            job_type = %predicted.job_type,
+            job_id = %predicted.id,
+            event_type = event.event_type.as_token(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "returning predicted jobs admin transition before projection caught up"
+        );
         Ok(predicted.clone())
     }
 }
@@ -865,6 +1095,7 @@ fn workbench_entry_to_wire(
         trigger: map_optional_wire(&job.trigger, "job query trigger")?,
         r#type: job.job_type.clone(),
         updated_at: job.updated_at.clone(),
+        waiting_on: map_wait_edges(&entry.waiting_on, "job query waitingOn")?,
     })
 }
 
@@ -921,12 +1152,20 @@ fn related_entry_to_wire(
         trigger: map_optional_wire(&job.trigger, "job inspect related trigger")?,
         r#type: job.job_type.clone(),
         updated_at: job.updated_at.clone(),
+        waiting_on: map_wait_edges(&entry.waiting_on, "job inspect related waitingOn")?,
     })
 }
 
 fn timeline_event_to_wire(
     event: &JobTimelineEvent,
 ) -> Result<JobsInspectResponseTimelineItem, JobsQueryError> {
+    let raw_event: serde_json::Value =
+        serde_json::from_str(&event.raw_event_json).map_err(|error| {
+            JobsQueryError::ConvertWireModel {
+                model: "job timeline raw event",
+                details: error.to_string(),
+            }
+        })?;
     Ok(JobsInspectResponseTimelineItem {
         error: event.error_message.clone(),
         error_detail: timeline_error_detail(event)?,
@@ -935,21 +1174,46 @@ fn timeline_event_to_wire(
         previous_state: event.previous_state.clone(),
         progress: decode_optional_json(&event.progress_json, "job timeline progress")?,
         projected: event.projected,
-        raw_event: Some(
-            serde_json::from_str(&event.raw_event_json).map_err(|error| {
-                JobsQueryError::ConvertWireModel {
-                    model: "job timeline raw event",
-                    details: error.to_string(),
-                }
-            })?,
-        ),
+        raw_event: Some(raw_event.clone()),
         reason: event.reason.clone(),
         sequence: to_wire_integer(event.sequence),
         state: event.state.clone(),
         timestamp: event.timestamp.clone(),
         tries: Some(to_wire_integer(event.tries)),
         r#type: event.event_type.clone(),
+        wait_edge: raw_event
+            .get("waitEdge")
+            .cloned()
+            .map(|value| serde_json::from_value::<JobsInspectResponseTimelineItemWaitEdge>(value))
+            .transpose()
+            .map_err(|error| JobsQueryError::ConvertWireModel {
+                model: "job timeline waitEdge",
+                details: error.to_string(),
+            })?,
         worker_instance_id: event.worker_instance_id.clone(),
+    })
+}
+
+fn map_wait_edges<T>(
+    value: &[JobWaitEdge],
+    model: &'static str,
+) -> Result<Option<Vec<T>>, JobsQueryError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if value.is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_value(serde_json::to_value(value).map_err(|error| {
+        JobsQueryError::ConvertWireModel {
+            model,
+            details: error.to_string(),
+        }
+    })?)
+    .map(Some)
+    .map_err(|error| JobsQueryError::ConvertWireModel {
+        model,
+        details: error.to_string(),
     })
 }
 
@@ -1235,7 +1499,9 @@ fn sibling_event_subject(subject: &str, event_type: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use trellis_rs::jobs::types::{Job, JobContext, JobEvent, JobState};
+    use trellis_rs::jobs::types::{
+        Job, JobContext, JobEvent, JobState, JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
+    };
     use trellis_rs::jobs::{cancelled_event, retried_event};
     use trellis_rs::sdk::core::types::{
         TrellisBindingsGetResponseBinding, TrellisBindingsGetResponseBindingResources,
@@ -1244,8 +1510,10 @@ mod tests {
     use super::parse_since_filter;
     use super::{
         dismissed_event, jobs_admin_resources_from_binding, plan_mutation_response,
-        reduce_job_event, JobsQueryError, MutationResponsePlan,
+        reduce_job_event, timeline_event_to_wire, workbench_entry_to_wire, JobsQueryError,
+        MutationResponsePlan,
     };
+    use crate::storage::{JobTimelineEvent, JobsWorkbenchEntry};
 
     fn sample_binding_with_resources() -> TrellisBindingsGetResponseBinding {
         TrellisBindingsGetResponseBinding {
@@ -1297,6 +1565,26 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
+        }
+    }
+
+    fn sample_wait_edge() -> JobWaitEdge {
+        JobWaitEdge {
+            id: "wait-1".to_string(),
+            target: JobWaitTarget {
+                kind: JobWaitTargetKind::Job,
+                id: Some("child-job".to_string()),
+                operation_id: None,
+                label: None,
+                service: Some("documents".to_string()),
+                target_type: Some("import".to_string()),
+                system: None,
+                operation: None,
+                key: None,
+            },
+            started_at: "2026-03-28T12:01:00Z".to_string(),
+            label: Some("child job".to_string()),
         }
     }
 
@@ -1414,6 +1702,52 @@ mod tests {
         assert_eq!(
             plan_mutation_response(Some(&projected), &predicted, &event, false),
             MutationResponsePlan::ReturnProjected
+        );
+    }
+
+    #[test]
+    fn query_wire_maps_waiting_on_and_timeline_wait_edge() {
+        let entry = JobsWorkbenchEntry {
+            job: sample_job(JobState::Active),
+            runtime_ms: None,
+            queue_age_anchor_nanos: None,
+            queue_key: None,
+            runtime_band: None,
+            last_error_fingerprint: None,
+            matched_by: None,
+            waiting_on: vec![sample_wait_edge()],
+        };
+
+        let row = workbench_entry_to_wire(&entry).expect("query row should map");
+        assert_eq!(
+            row.waiting_on
+                .as_ref()
+                .and_then(|waits| waits.first())
+                .map(|wait| wait.id.as_str()),
+            Some("wait-1")
+        );
+
+        let timeline = JobTimelineEvent {
+            sequence: 1,
+            event_type: "waiting".to_string(),
+            state: "active".to_string(),
+            previous_state: Some("active".to_string()),
+            timestamp: "2026-03-28T12:01:00Z".to_string(),
+            tries: 1,
+            message: None,
+            error_message: None,
+            progress_json: None,
+            logs_json: None,
+            worker_instance_id: None,
+            raw_event_json: json!({ "waitEdge": sample_wait_edge() }).to_string(),
+            projected: Some(true),
+            reason: None,
+        };
+
+        let timeline_row = timeline_event_to_wire(&timeline).expect("timeline row should map");
+        assert_eq!(
+            timeline_row.wait_edge.map(|wait| wait.id),
+            Some("wait-1".to_string())
         );
     }
 

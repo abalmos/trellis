@@ -116,8 +116,19 @@ pub async fn start_advisory_loop(
                 "failed to start jobs advisory consumer '{ADVISORY_CONSUMER_NAME}' message stream: {error}"
             ))
         })?;
+    tracing::info!(
+        stream = %jobs_advisories_stream,
+        consumer = ADVISORY_CONSUMER_NAME,
+        filter = MAX_DELIVERIES_ADVISORY_SUBJECT_WILDCARD,
+        "started jobs advisory consumer"
+    );
 
     let task = tokio::spawn(async move {
+        tracing::debug!(
+            stream = %jobs_advisories_stream,
+            consumer = ADVISORY_CONSUMER_NAME,
+            "jobs advisory loop running"
+        );
         while let Some(message) = messages.next().await {
             let message = message.map_err(|error| {
                 ServerError::Nats(format!(
@@ -126,9 +137,20 @@ pub async fn start_advisory_loop(
             })?;
             let Ok(advisory) = serde_json::from_slice::<MaxDeliveriesAdvisory>(message.payload())
             else {
+                tracing::debug!(
+                    subject = %message.subject(),
+                    "acking non-advisory jobs message"
+                );
                 let _ = message.ack().await;
                 continue;
             };
+            tracing::debug!(
+                stream = %advisory.stream,
+                stream_seq = advisory.stream_seq,
+                consumer = %advisory.consumer,
+                deliveries = advisory.deliveries,
+                "processing max-deliveries advisory"
+            );
 
             let raw_payload = jobs_runtime
                 .raw_payload(&advisory.stream, advisory.stream_seq)
@@ -140,10 +162,21 @@ pub async fn start_advisory_loop(
                     ))
                 })?;
             let Ok(work_event) = serde_json::from_slice::<JobEvent>(&raw_payload) else {
+                tracing::debug!(
+                    stream = %advisory.stream,
+                    stream_seq = advisory.stream_seq,
+                    "acking advisory for non-job payload"
+                );
                 let _ = message.ack().await;
                 continue;
             };
             let Some(work_job) = job_from_work_event(&work_event) else {
+                tracing::debug!(
+                    service = %work_event.service,
+                    job_type = %work_event.job_type,
+                    job_id = %work_event.job_id,
+                    "acking advisory for non-work event"
+                );
                 let _ = message.ack().await;
                 continue;
             };
@@ -156,10 +189,17 @@ pub async fn start_advisory_loop(
                     ))
                 },
             )? else {
+                tracing::debug!(
+                    service = %work_job.service,
+                    job_type = %work_job.job_type,
+                    job_id = %work_job.id,
+                    "advisory did not map to dead event"
+                );
                 let _ = message.ack().await;
                 continue;
             };
 
+            let subject = mapped.subject.clone();
             jobs_runtime
                 .publish_event(mapped.subject, &mapped.event)
                 .await
@@ -168,8 +208,20 @@ pub async fn start_advisory_loop(
                         "jobs advisory loop failed to publish dead event: {error}"
                     ))
                 })?;
+            tracing::debug!(
+                service = %work_job.service,
+                job_type = %work_job.job_type,
+                job_id = %work_job.id,
+                subject = %subject,
+                "published dead event from max-deliveries advisory"
+            );
             let _ = message.ack().await;
         }
+        tracing::info!(
+            stream = %jobs_advisories_stream,
+            consumer = ADVISORY_CONSUMER_NAME,
+            "jobs advisory loop ended"
+        );
         Ok(())
     });
 
@@ -220,6 +272,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 

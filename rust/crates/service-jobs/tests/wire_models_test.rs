@@ -26,6 +26,7 @@ fn job_model_serializes_expected_wire_keys() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
     let job_json = serde_json::to_value(job).expect("serialize job");
     assert_eq!(job_json.get("type"), Some(&json!("document-process")));

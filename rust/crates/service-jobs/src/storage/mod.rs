@@ -3,12 +3,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rusqlite::{params, params_from_iter, types::Value as SqlValue, Connection, OptionalExtension};
+use rusqlite::{
+    params, params_from_iter, types::Value as SqlValue, Connection, OptionalExtension, Transaction,
+};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::jobs::types::{
-    error_fingerprint, Job, JobErrorDetail, JobEvent, JobLineage, JobState, JobTrigger,
-    JobTriggerKind,
+    error_fingerprint, Job, JobErrorDetail, JobEvent, JobEventType, JobLineage, JobState,
+    JobTrigger, JobTriggerKind, JobWaitEdge, JobWaitTargetKind,
 };
 
 use crate::worker_presence::WorkerPresenceRecord;
@@ -129,6 +131,16 @@ pub struct JobsWorkbenchEntry {
     pub runtime_band: Option<String>,
     pub last_error_fingerprint: Option<String>,
     pub matched_by: Option<String>,
+    pub waiting_on: Vec<JobWaitEdge>,
+}
+
+/// One active wait projected for a job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobWaitProjection {
+    pub service: String,
+    pub job_type: String,
+    pub job_id: String,
+    pub wait_edge: JobWaitEdge,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -496,6 +508,24 @@ impl SqliteJobsStore {
             CREATE INDEX IF NOT EXISTS idx_jobs_events_projection_type_time
                 ON jobs_events_projection (event_type, timestamp_nanos DESC);
 
+            CREATE TABLE IF NOT EXISTS jobs_wait_projection (
+                service TEXT NOT NULL,
+                job_type TEXT NOT NULL,
+                id TEXT NOT NULL,
+                wait_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                target_kind TEXT NOT NULL,
+                target_id TEXT,
+                target_service TEXT,
+                target_type TEXT,
+                wait_edge_json TEXT NOT NULL,
+                PRIMARY KEY (service, job_type, id, wait_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_wait_projection_job
+                ON jobs_wait_projection (id, started_at ASC, wait_id ASC);
+            CREATE INDEX IF NOT EXISTS idx_jobs_wait_projection_target_job
+                ON jobs_wait_projection (target_kind, target_id);
+
             CREATE TABLE IF NOT EXISTS jobs_error_projection (
                 fingerprint TEXT PRIMARY KEY,
                 message TEXT NOT NULL,
@@ -561,96 +591,27 @@ impl SqliteJobsStore {
             .map_err(SqliteJobsStoreError::from)
     }
 
+    pub(crate) fn with_write_transaction<T>(
+        &self,
+        f: impl FnOnce(&Transaction<'_>) -> Result<T, SqliteJobsStoreError>,
+    ) -> Result<T, SqliteJobsStoreError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        let transaction = connection.transaction()?;
+        let value = f(&transaction)?;
+        transaction.commit()?;
+        Ok(value)
+    }
+
     /// Upsert one projected job row.
     pub fn upsert_job(&self, job: &Job) -> Result<(), SqliteJobsStoreError> {
-        let state = job_state_token(job.state);
-        let updated_at_nanos = timestamp_str_nanos(&job.updated_at);
-        let created_at_nanos = timestamp_str_nanos(&job.created_at);
-        let started_at_nanos = job.started_at.as_deref().map(timestamp_str_nanos);
-        let completed_at_nanos = job.completed_at.as_deref().map(timestamp_str_nanos);
-        let runtime_ms = runtime_ms(started_at_nanos, completed_at_nanos, updated_at_nanos);
-        let queue_age_anchor_nanos = queue_age_anchor_nanos(job, created_at_nanos);
-        let last_error_fingerprint = job
-            .error_detail
-            .as_ref()
-            .map(|detail| detail.fingerprint.clone())
-            .or_else(|| {
-                job.last_error
-                    .as_deref()
-                    .map(|message| error_fingerprint(&job.service, &job.job_type, message))
-            });
-        let deadline_nanos = job.deadline.as_deref().map(timestamp_str_nanos);
-        let payload_json = serde_json::to_string(&job.payload).map_err(|error| {
-            SqliteJobsStoreError::EncodeJson {
-                model: "job payload",
-                details: error.to_string(),
-            }
-        })?;
-        let job_json =
-            serde_json::to_string(job).map_err(|error| SqliteJobsStoreError::EncodeJson {
-                model: "job",
-                details: error.to_string(),
-            })?;
         let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        let old_fts = fts_row_for_job(&connection, &job.service, &job.job_type, &job.id)?;
-        connection.execute(
-            r#"
-            INSERT INTO jobs_projection
-                (service, job_type, id, state, created_at, updated_at, updated_at_nanos,
-                 request_id, trace_id, traceparent, started_at_nanos, completed_at_nanos,
-                 created_at_nanos, runtime_ms, queue_age_anchor_nanos, last_error_message,
-                 last_error_fingerprint, deadline, deadline_nanos, payload_json, job_json)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
-            ON CONFLICT(service, job_type, id) DO UPDATE SET
-                state = excluded.state,
-                created_at = excluded.created_at,
-                updated_at = excluded.updated_at,
-                updated_at_nanos = excluded.updated_at_nanos,
-                request_id = excluded.request_id,
-                trace_id = excluded.trace_id,
-                traceparent = excluded.traceparent,
-                started_at_nanos = excluded.started_at_nanos,
-                completed_at_nanos = excluded.completed_at_nanos,
-                created_at_nanos = excluded.created_at_nanos,
-                runtime_ms = excluded.runtime_ms,
-                queue_age_anchor_nanos = excluded.queue_age_anchor_nanos,
-                last_error_message = excluded.last_error_message,
-                last_error_fingerprint = excluded.last_error_fingerprint,
-                deadline = excluded.deadline,
-                deadline_nanos = excluded.deadline_nanos,
-                payload_json = excluded.payload_json,
-                job_json = excluded.job_json
-            "#,
-            params![
-                job.service,
-                job.job_type,
-                job.id,
-                state,
-                job.created_at,
-                job.updated_at,
-                updated_at_nanos,
-                job.context.request_id,
-                job.context.trace_id,
-                job.context.traceparent,
-                started_at_nanos,
-                completed_at_nanos,
-                created_at_nanos,
-                runtime_ms,
-                queue_age_anchor_nanos,
-                job.last_error.as_deref(),
-                last_error_fingerprint,
-                job.deadline,
-                deadline_nanos,
-                payload_json,
-                job_json
-            ],
-        )?;
-        let new_fts = fts_row_for_job(&connection, &job.service, &job.job_type, &job.id)?;
-        replace_fts_row(&connection, old_fts.as_ref(), new_fts.as_ref())?;
-        Ok(())
+        upsert_job_on_connection(&connection, job)
     }
 
     /// Fetch a job by its fully-qualified projection key.
@@ -664,78 +625,15 @@ impl SqliteJobsStore {
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        connection
-            .query_row(
-                "SELECT job_json FROM jobs_projection WHERE service = ?1 AND job_type = ?2 AND id = ?3",
-                params![service, job_type, id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .map(|json| decode_job_json(&json))
-            .transpose()
+        get_job_from_connection(&connection, service, job_type, id)
     }
 
     pub fn upsert_job_lineage(&self, job: &Job) -> Result<(), SqliteJobsStoreError> {
-        if job.trigger.is_none() && job.lineage.is_none() {
-            return Ok(());
-        }
-        let trigger_kind = job
-            .trigger
-            .as_ref()
-            .map(|trigger| trigger_kind_token(trigger.kind));
         let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        connection.execute(
-            r#"
-            INSERT INTO jobs_lineage_projection
-                (service, job_type, id, parent_job_id, root_job_id, operation_id,
-                 trigger_kind, trigger_id, trace_id, request_id, updated_at_nanos)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            ON CONFLICT(service, job_type, id) DO UPDATE SET
-                parent_job_id = excluded.parent_job_id,
-                root_job_id = excluded.root_job_id,
-                operation_id = excluded.operation_id,
-                trigger_kind = excluded.trigger_kind,
-                trigger_id = excluded.trigger_id,
-                trace_id = excluded.trace_id,
-                request_id = excluded.request_id,
-                updated_at_nanos = excluded.updated_at_nanos
-            "#,
-            params![
-                job.service,
-                job.job_type,
-                job.id,
-                job.lineage
-                    .as_ref()
-                    .and_then(|lineage| lineage.parent_job_id.as_deref()),
-                job.lineage
-                    .as_ref()
-                    .and_then(|lineage| lineage.root_job_id.as_deref()),
-                job.lineage
-                    .as_ref()
-                    .and_then(|lineage| lineage.operation_id.as_deref())
-                    .or_else(|| job
-                        .trigger
-                        .as_ref()
-                        .and_then(|trigger| trigger.operation_id.as_deref())),
-                trigger_kind,
-                job.trigger
-                    .as_ref()
-                    .and_then(|trigger| trigger.id.as_deref()),
-                job.trigger
-                    .as_ref()
-                    .and_then(|trigger| trigger.trace_id.as_deref())
-                    .or(Some(job.context.trace_id.as_str())),
-                job.trigger
-                    .as_ref()
-                    .and_then(|trigger| trigger.request_id.as_deref())
-                    .or(Some(job.context.request_id.as_str())),
-                timestamp_str_nanos(&job.updated_at),
-            ],
-        )?;
-        Ok(())
+        upsert_job_lineage_on_connection(&connection, job)
     }
 
     pub fn get_job_lineage_by_global_id(
@@ -760,82 +658,11 @@ impl SqliteJobsStore {
         timestamp: &str,
         patch: &JobProjectionMetadataPatch,
     ) -> Result<(), SqliteJobsStoreError> {
-        if patch.concurrency.is_none() && patch.queue_policy.is_none() {
-            return Ok(());
-        }
-
-        let existing = self
-            .get_job_metadata(service, job_type, id)?
-            .unwrap_or_default();
-        let concurrency =
-            merge_concurrency_metadata(existing.concurrency, patch.concurrency.clone());
-        let queue_policy =
-            merge_queue_policy_metadata(existing.queue_policy, patch.queue_policy.clone());
-
-        let stale_takeover_count = concurrency
-            .as_ref()
-            .and_then(|metadata| metadata.stale_takeover_count)
-            .map(|count| i64::try_from(count).unwrap_or(i64::MAX));
         let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        let old_fts = fts_row_for_job(&connection, service, job_type, id)?;
-        connection.execute(
-            r#"
-            INSERT INTO jobs_metadata_projection
-                (service, job_type, id, concurrency_key, concurrency_key_hash, concurrency_instance_id,
-                 concurrency_heartbeat_at, concurrency_lease_expires_at, concurrency_stale_takeover_count,
-                 queue_policy_outcome, queue_policy_reason, queue_policy_existing_job_id,
-                 queue_policy_replaced_job_id, updated_at, updated_at_nanos)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-            ON CONFLICT(service, job_type, id) DO UPDATE SET
-                concurrency_key = excluded.concurrency_key,
-                concurrency_key_hash = excluded.concurrency_key_hash,
-                concurrency_instance_id = excluded.concurrency_instance_id,
-                concurrency_heartbeat_at = excluded.concurrency_heartbeat_at,
-                concurrency_lease_expires_at = excluded.concurrency_lease_expires_at,
-                concurrency_stale_takeover_count = excluded.concurrency_stale_takeover_count,
-                queue_policy_outcome = excluded.queue_policy_outcome,
-                queue_policy_reason = excluded.queue_policy_reason,
-                queue_policy_existing_job_id = excluded.queue_policy_existing_job_id,
-                queue_policy_replaced_job_id = excluded.queue_policy_replaced_job_id,
-                updated_at = excluded.updated_at,
-                updated_at_nanos = excluded.updated_at_nanos
-            "#,
-            params![
-                service,
-                job_type,
-                id,
-                concurrency.as_ref().map(|metadata| metadata.key.as_str()),
-                concurrency.as_ref().map(|metadata| metadata.key_hash.as_str()),
-                concurrency
-                    .as_ref()
-                    .and_then(|metadata| metadata.instance_id.as_deref()),
-                concurrency
-                    .as_ref()
-                    .and_then(|metadata| metadata.heartbeat_at.as_deref()),
-                concurrency
-                    .as_ref()
-                    .and_then(|metadata| metadata.lease_expires_at.as_deref()),
-                stale_takeover_count,
-                queue_policy.as_ref().map(|metadata| metadata.outcome.as_str()),
-                queue_policy
-                    .as_ref()
-                    .and_then(|metadata| metadata.reason.as_deref()),
-                queue_policy
-                    .as_ref()
-                    .and_then(|metadata| metadata.existing_job_id.as_deref()),
-                queue_policy
-                    .as_ref()
-                    .and_then(|metadata| metadata.replaced_job_id.as_deref()),
-                timestamp,
-                timestamp_str_nanos(timestamp),
-            ],
-        )?;
-        let new_fts = fts_row_for_job(&connection, service, job_type, id)?;
-        replace_fts_row(&connection, old_fts.as_ref(), new_fts.as_ref())?;
-        Ok(())
+        apply_job_metadata_patch_on_connection(&connection, service, job_type, id, timestamp, patch)
     }
 
     /// Fetch projected admin metadata for one job.
@@ -849,21 +676,7 @@ impl SqliteJobsStore {
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        Ok(connection
-            .query_row(
-                r#"
-                SELECT concurrency_key, concurrency_key_hash, concurrency_instance_id,
-                       concurrency_heartbeat_at, concurrency_lease_expires_at,
-                       concurrency_stale_takeover_count, queue_policy_outcome,
-                       queue_policy_reason, queue_policy_existing_job_id,
-                       queue_policy_replaced_job_id
-                FROM jobs_metadata_projection
-                WHERE service = ?1 AND job_type = ?2 AND id = ?3
-                "#,
-                params![service, job_type, id],
-                metadata_from_row,
-            )
-            .optional()?)
+        get_job_metadata_from_connection(&connection, service, job_type, id)
     }
 
     /// Fetch a job by the globally addressable admin id.
@@ -872,15 +685,7 @@ impl SqliteJobsStore {
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        connection
-            .query_row(
-                "SELECT job_json FROM jobs_projection WHERE id = ?1",
-                params![id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
-            .map(|json| decode_job_json(&json))
-            .transpose()
+        get_job_by_global_id_from_connection(&connection, id)
     }
 
     /// Append one lifecycle event row to a job evidence timeline.
@@ -891,84 +696,11 @@ impl SqliteJobsStore {
         projected: Option<bool>,
         reason: Option<&str>,
     ) -> Result<(), SqliteJobsStoreError> {
-        let raw_event_json =
-            serde_json::to_string(raw_event).map_err(|error| SqliteJobsStoreError::EncodeJson {
-                model: "job raw event",
-                details: error.to_string(),
-            })?;
-        let progress_json = event
-            .progress
-            .as_ref()
-            .map(|progress| serde_json::to_string(progress))
-            .transpose()
-            .map_err(|error| SqliteJobsStoreError::EncodeJson {
-                model: "job event progress",
-                details: error.to_string(),
-            })?;
-        let logs_json = event
-            .logs
-            .as_ref()
-            .map(|logs| serde_json::to_string(logs))
-            .transpose()
-            .map_err(|error| SqliteJobsStoreError::EncodeJson {
-                model: "job event logs",
-                details: error.to_string(),
-            })?;
-        let admin_reason = event
-            .admin_action
-            .as_ref()
-            .and_then(|action| action.reason.as_deref());
-        let message = event
-            .progress
-            .as_ref()
-            .and_then(|progress| progress.message.as_deref())
-            .or(admin_reason);
         let connection = self
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        let sequence = connection.query_row(
-            r#"
-            SELECT COALESCE(MAX(sequence), 0) + 1
-            FROM jobs_events_projection
-            WHERE service = ?1 AND job_type = ?2 AND id = ?3
-            "#,
-            params![event.service, event.job_type, event.job_id],
-            |row| row.get::<_, i64>(0),
-        )?;
-        connection.execute(
-            r#"
-            INSERT INTO jobs_events_projection
-                (service, job_type, id, sequence, event_type, state, previous_state,
-                 timestamp, timestamp_nanos, tries, message, error_message, progress_json,
-                 logs_json, worker_instance_id, raw_event_json, projected, reason)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
-            "#,
-            params![
-                event.service,
-                event.job_type,
-                event.job_id,
-                sequence,
-                event.event_type.as_token(),
-                job_state_token(event.state),
-                event.previous_state.map(job_state_token),
-                event.timestamp,
-                timestamp_str_nanos(&event.timestamp),
-                sql_u64(event.tries),
-                message,
-                event.error.as_deref(),
-                progress_json,
-                logs_json,
-                event
-                    .concurrency
-                    .as_ref()
-                    .and_then(|value| value.instance_id.as_deref()),
-                raw_event_json,
-                projected.map(i64::from),
-                reason,
-            ],
-        )?;
-        Ok(())
+        project_timeline_event_on_connection(&connection, event, raw_event, projected, reason)
     }
 
     /// Upsert one observed job error into the fingerprint aggregate projection.
@@ -984,31 +716,58 @@ impl SqliteJobsStore {
             .connection
             .lock()
             .map_err(|_| SqliteJobsStoreError::Poisoned)?;
-        connection.execute(
-            r#"
-            INSERT INTO jobs_error_projection
-                (fingerprint, message, first_seen, first_seen_nanos, last_seen, last_seen_nanos,
-                 occurrence_count, sample_service, sample_job_type, sample_state)
-            VALUES (?1, ?2, ?3, ?4, ?3, ?4, 1, ?5, ?6, ?7)
-            ON CONFLICT(fingerprint) DO UPDATE SET
-                last_seen = excluded.last_seen,
-                last_seen_nanos = excluded.last_seen_nanos,
-                occurrence_count = jobs_error_projection.occurrence_count + 1,
-                sample_service = excluded.sample_service,
-                sample_job_type = excluded.sample_job_type,
-                sample_state = excluded.sample_state
-            "#,
-            params![
-                detail.fingerprint,
-                detail.message,
-                timestamp,
-                timestamp_str_nanos(timestamp),
-                service,
-                job_type,
-                job_state_token(state),
-            ],
-        )?;
-        Ok(())
+        upsert_error_projection_on_connection(
+            &connection,
+            service,
+            job_type,
+            state,
+            timestamp,
+            detail,
+        )
+    }
+
+    /// Project one wait-edge lifecycle event into the current active waits table.
+    pub fn project_wait_edge(&self, event: &JobEvent) -> Result<(), SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        project_wait_edge_on_connection(&connection, event)
+    }
+
+    /// Fetch current active waits for one globally addressable job id.
+    pub fn list_current_waits(
+        &self,
+        id: &str,
+    ) -> Result<Vec<JobWaitProjection>, SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        list_current_waits_on_connection(&connection, id)
+    }
+
+    /// Fetch one current active wait by globally addressable job id and wait id.
+    pub fn get_current_wait(
+        &self,
+        id: &str,
+        wait_id: &str,
+    ) -> Result<Option<JobWaitProjection>, SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        Ok(connection
+            .query_row(
+                r#"
+                SELECT service, job_type, id, wait_edge_json
+                FROM jobs_wait_projection
+                WHERE id = ?1 AND wait_id = ?2
+                "#,
+                params![id, wait_id],
+                wait_projection_from_row,
+            )
+            .optional()?)
     }
 
     /// Fetch one projected error aggregate by fingerprint.
@@ -1075,6 +834,34 @@ impl SqliteJobsStore {
         let mut clauses = Vec::new();
         let mut match_arms = Vec::new();
         let mut query_params = vec![SqlValue::Text(job.id.clone())];
+        let wait_target_job_ids = self
+            .list_current_waits(&job.id)?
+            .into_iter()
+            .filter_map(|wait| match wait.wait_edge.target.kind {
+                JobWaitTargetKind::Job => wait.wait_edge.target.id,
+                JobWaitTargetKind::Operation | JobWaitTargetKind::External => None,
+            })
+            .collect::<Vec<_>>();
+        if !wait_target_job_ids.is_empty() {
+            let placeholders = wait_target_job_ids
+                .iter()
+                .map(|id| {
+                    query_params.push(SqlValue::Text(id.clone()));
+                    format!("?{}", query_params.len())
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let clause = format!("j.id IN ({placeholders})");
+            match_arms.push(format!("WHEN {clause} THEN 'wait'"));
+            clauses.push(clause);
+        }
+        query_params.push(SqlValue::Text(job.id.clone()));
+        let reverse_wait_clause = format!(
+            "EXISTS (SELECT 1 FROM jobs_wait_projection w WHERE w.id = j.id AND w.target_kind = 'job' AND w.target_id = ?{})",
+            query_params.len()
+        );
+        match_arms.push(format!("WHEN {reverse_wait_clause} THEN 'wait'"));
+        clauses.push(reverse_wait_clause);
         if !job.context.trace_id.is_empty() {
             query_params.push(SqlValue::Text(job.context.trace_id.clone()));
             let clause = format!("COALESCE(l.trace_id, j.trace_id) = ?{}", query_params.len());
@@ -1180,8 +967,10 @@ impl SqliteJobsStore {
                 runtime_band,
                 last_error_fingerprint,
                 matched_by,
+                waiting_on: Vec::new(),
             });
         }
+        attach_waits_to_entries(&connection, &mut entries)?;
         Ok(entries)
     }
 
@@ -1312,8 +1101,10 @@ impl SqliteJobsStore {
                 runtime_band,
                 last_error_fingerprint,
                 matched_by: None,
+                waiting_on: Vec::new(),
             });
         }
+        attach_waits_to_entries(&connection, &mut entries)?;
 
         let next_offset = filter
             .offset
@@ -1772,6 +1563,473 @@ impl SqliteJobsStore {
     }
 }
 
+pub(crate) fn upsert_job_on_connection(
+    connection: &Connection,
+    job: &Job,
+) -> Result<(), SqliteJobsStoreError> {
+    let state = job_state_token(job.state);
+    let updated_at_nanos = timestamp_str_nanos(&job.updated_at);
+    let created_at_nanos = timestamp_str_nanos(&job.created_at);
+    let started_at_nanos = job.started_at.as_deref().map(timestamp_str_nanos);
+    let completed_at_nanos = job.completed_at.as_deref().map(timestamp_str_nanos);
+    let runtime_ms = runtime_ms(started_at_nanos, completed_at_nanos, updated_at_nanos);
+    let queue_age_anchor_nanos = queue_age_anchor_nanos(job, created_at_nanos);
+    let last_error_fingerprint = job
+        .error_detail
+        .as_ref()
+        .map(|detail| detail.fingerprint.clone())
+        .or_else(|| {
+            job.last_error
+                .as_deref()
+                .map(|message| error_fingerprint(&job.service, &job.job_type, message))
+        });
+    let deadline_nanos = job.deadline.as_deref().map(timestamp_str_nanos);
+    let payload_json =
+        serde_json::to_string(&job.payload).map_err(|error| SqliteJobsStoreError::EncodeJson {
+            model: "job payload",
+            details: error.to_string(),
+        })?;
+    let job_json =
+        serde_json::to_string(job).map_err(|error| SqliteJobsStoreError::EncodeJson {
+            model: "job",
+            details: error.to_string(),
+        })?;
+    let old_fts = fts_row_for_job(connection, &job.service, &job.job_type, &job.id)?;
+    connection.execute(
+        r#"
+        INSERT INTO jobs_projection
+            (service, job_type, id, state, created_at, updated_at, updated_at_nanos,
+             request_id, trace_id, traceparent, started_at_nanos, completed_at_nanos,
+             created_at_nanos, runtime_ms, queue_age_anchor_nanos, last_error_message,
+             last_error_fingerprint, deadline, deadline_nanos, payload_json, job_json)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+        ON CONFLICT(service, job_type, id) DO UPDATE SET
+            state = excluded.state,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            updated_at_nanos = excluded.updated_at_nanos,
+            request_id = excluded.request_id,
+            trace_id = excluded.trace_id,
+            traceparent = excluded.traceparent,
+            started_at_nanos = excluded.started_at_nanos,
+            completed_at_nanos = excluded.completed_at_nanos,
+            created_at_nanos = excluded.created_at_nanos,
+            runtime_ms = excluded.runtime_ms,
+            queue_age_anchor_nanos = excluded.queue_age_anchor_nanos,
+            last_error_message = excluded.last_error_message,
+            last_error_fingerprint = excluded.last_error_fingerprint,
+            deadline = excluded.deadline,
+            deadline_nanos = excluded.deadline_nanos,
+            payload_json = excluded.payload_json,
+            job_json = excluded.job_json
+        "#,
+        params![
+            job.service,
+            job.job_type,
+            job.id,
+            state,
+            job.created_at,
+            job.updated_at,
+            updated_at_nanos,
+            job.context.request_id,
+            job.context.trace_id,
+            job.context.traceparent,
+            started_at_nanos,
+            completed_at_nanos,
+            created_at_nanos,
+            runtime_ms,
+            queue_age_anchor_nanos,
+            job.last_error.as_deref(),
+            last_error_fingerprint,
+            job.deadline,
+            deadline_nanos,
+            payload_json,
+            job_json
+        ],
+    )?;
+    let new_fts = fts_row_for_job(connection, &job.service, &job.job_type, &job.id)?;
+    replace_fts_row(connection, old_fts.as_ref(), new_fts.as_ref())?;
+    Ok(())
+}
+
+pub(crate) fn get_job_from_connection(
+    connection: &Connection,
+    service: &str,
+    job_type: &str,
+    id: &str,
+) -> Result<Option<Job>, SqliteJobsStoreError> {
+    connection
+        .query_row(
+            "SELECT job_json FROM jobs_projection WHERE service = ?1 AND job_type = ?2 AND id = ?3",
+            params![service, job_type, id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .map(|json| decode_job_json(&json))
+        .transpose()
+}
+
+pub(crate) fn upsert_job_lineage_on_connection(
+    connection: &Connection,
+    job: &Job,
+) -> Result<(), SqliteJobsStoreError> {
+    if job.trigger.is_none() && job.lineage.is_none() {
+        return Ok(());
+    }
+    let trigger_kind = job
+        .trigger
+        .as_ref()
+        .map(|trigger| trigger_kind_token(trigger.kind));
+    connection.execute(
+        r#"
+        INSERT INTO jobs_lineage_projection
+            (service, job_type, id, parent_job_id, root_job_id, operation_id,
+             trigger_kind, trigger_id, trace_id, request_id, updated_at_nanos)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ON CONFLICT(service, job_type, id) DO UPDATE SET
+            parent_job_id = excluded.parent_job_id,
+            root_job_id = excluded.root_job_id,
+            operation_id = excluded.operation_id,
+            trigger_kind = excluded.trigger_kind,
+            trigger_id = excluded.trigger_id,
+            trace_id = excluded.trace_id,
+            request_id = excluded.request_id,
+            updated_at_nanos = excluded.updated_at_nanos
+        "#,
+        params![
+            job.service,
+            job.job_type,
+            job.id,
+            job.lineage
+                .as_ref()
+                .and_then(|lineage| lineage.parent_job_id.as_deref()),
+            job.lineage
+                .as_ref()
+                .and_then(|lineage| lineage.root_job_id.as_deref()),
+            job.lineage
+                .as_ref()
+                .and_then(|lineage| lineage.operation_id.as_deref())
+                .or_else(|| job
+                    .trigger
+                    .as_ref()
+                    .and_then(|trigger| trigger.operation_id.as_deref())),
+            trigger_kind,
+            job.trigger
+                .as_ref()
+                .and_then(|trigger| trigger.id.as_deref()),
+            job.trigger
+                .as_ref()
+                .and_then(|trigger| trigger.trace_id.as_deref())
+                .or(Some(job.context.trace_id.as_str())),
+            job.trigger
+                .as_ref()
+                .and_then(|trigger| trigger.request_id.as_deref())
+                .or(Some(job.context.request_id.as_str())),
+            timestamp_str_nanos(&job.updated_at),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn apply_job_metadata_patch_on_connection(
+    connection: &Connection,
+    service: &str,
+    job_type: &str,
+    id: &str,
+    timestamp: &str,
+    patch: &JobProjectionMetadataPatch,
+) -> Result<(), SqliteJobsStoreError> {
+    if patch.concurrency.is_none() && patch.queue_policy.is_none() {
+        return Ok(());
+    }
+
+    let existing =
+        get_job_metadata_from_connection(connection, service, job_type, id)?.unwrap_or_default();
+    let concurrency = merge_concurrency_metadata(existing.concurrency, patch.concurrency.clone());
+    let queue_policy =
+        merge_queue_policy_metadata(existing.queue_policy, patch.queue_policy.clone());
+
+    let stale_takeover_count = concurrency
+        .as_ref()
+        .and_then(|metadata| metadata.stale_takeover_count)
+        .map(|count| i64::try_from(count).unwrap_or(i64::MAX));
+    let old_fts = fts_row_for_job(connection, service, job_type, id)?;
+    connection.execute(
+        r#"
+        INSERT INTO jobs_metadata_projection
+            (service, job_type, id, concurrency_key, concurrency_key_hash, concurrency_instance_id,
+             concurrency_heartbeat_at, concurrency_lease_expires_at, concurrency_stale_takeover_count,
+             queue_policy_outcome, queue_policy_reason, queue_policy_existing_job_id,
+             queue_policy_replaced_job_id, updated_at, updated_at_nanos)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+        ON CONFLICT(service, job_type, id) DO UPDATE SET
+            concurrency_key = excluded.concurrency_key,
+            concurrency_key_hash = excluded.concurrency_key_hash,
+            concurrency_instance_id = excluded.concurrency_instance_id,
+            concurrency_heartbeat_at = excluded.concurrency_heartbeat_at,
+            concurrency_lease_expires_at = excluded.concurrency_lease_expires_at,
+            concurrency_stale_takeover_count = excluded.concurrency_stale_takeover_count,
+            queue_policy_outcome = excluded.queue_policy_outcome,
+            queue_policy_reason = excluded.queue_policy_reason,
+            queue_policy_existing_job_id = excluded.queue_policy_existing_job_id,
+            queue_policy_replaced_job_id = excluded.queue_policy_replaced_job_id,
+            updated_at = excluded.updated_at,
+            updated_at_nanos = excluded.updated_at_nanos
+        "#,
+        params![
+            service,
+            job_type,
+            id,
+            concurrency.as_ref().map(|metadata| metadata.key.as_str()),
+            concurrency.as_ref().map(|metadata| metadata.key_hash.as_str()),
+            concurrency
+                .as_ref()
+                .and_then(|metadata| metadata.instance_id.as_deref()),
+            concurrency
+                .as_ref()
+                .and_then(|metadata| metadata.heartbeat_at.as_deref()),
+            concurrency
+                .as_ref()
+                .and_then(|metadata| metadata.lease_expires_at.as_deref()),
+            stale_takeover_count,
+            queue_policy.as_ref().map(|metadata| metadata.outcome.as_str()),
+            queue_policy
+                .as_ref()
+                .and_then(|metadata| metadata.reason.as_deref()),
+            queue_policy
+                .as_ref()
+                .and_then(|metadata| metadata.existing_job_id.as_deref()),
+            queue_policy
+                .as_ref()
+                .and_then(|metadata| metadata.replaced_job_id.as_deref()),
+            timestamp,
+            timestamp_str_nanos(timestamp),
+        ],
+    )?;
+    let new_fts = fts_row_for_job(connection, service, job_type, id)?;
+    replace_fts_row(connection, old_fts.as_ref(), new_fts.as_ref())?;
+    Ok(())
+}
+
+pub(crate) fn get_job_metadata_from_connection(
+    connection: &Connection,
+    service: &str,
+    job_type: &str,
+    id: &str,
+) -> Result<Option<JobProjectionMetadata>, SqliteJobsStoreError> {
+    Ok(connection
+        .query_row(
+            r#"
+            SELECT concurrency_key, concurrency_key_hash, concurrency_instance_id,
+                   concurrency_heartbeat_at, concurrency_lease_expires_at,
+                   concurrency_stale_takeover_count, queue_policy_outcome,
+                   queue_policy_reason, queue_policy_existing_job_id,
+                   queue_policy_replaced_job_id
+            FROM jobs_metadata_projection
+            WHERE service = ?1 AND job_type = ?2 AND id = ?3
+            "#,
+            params![service, job_type, id],
+            metadata_from_row,
+        )
+        .optional()?)
+}
+
+pub(crate) fn get_job_by_global_id_from_connection(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<Job>, SqliteJobsStoreError> {
+    connection
+        .query_row(
+            "SELECT job_json FROM jobs_projection WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .map(|json| decode_job_json(&json))
+        .transpose()
+}
+
+pub(crate) fn project_timeline_event_on_connection(
+    connection: &Connection,
+    event: &JobEvent,
+    raw_event: &serde_json::Value,
+    projected: Option<bool>,
+    reason: Option<&str>,
+) -> Result<(), SqliteJobsStoreError> {
+    let raw_event_json =
+        serde_json::to_string(raw_event).map_err(|error| SqliteJobsStoreError::EncodeJson {
+            model: "job raw event",
+            details: error.to_string(),
+        })?;
+    let progress_json = event
+        .progress
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| SqliteJobsStoreError::EncodeJson {
+            model: "job event progress",
+            details: error.to_string(),
+        })?;
+    let logs_json = event
+        .logs
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| SqliteJobsStoreError::EncodeJson {
+            model: "job event logs",
+            details: error.to_string(),
+        })?;
+    let admin_reason = event
+        .admin_action
+        .as_ref()
+        .and_then(|action| action.reason.as_deref());
+    let message = event
+        .progress
+        .as_ref()
+        .and_then(|progress| progress.message.as_deref())
+        .or(admin_reason);
+    let sequence = connection.query_row(
+        r#"
+        SELECT COALESCE(MAX(sequence), 0) + 1
+        FROM jobs_events_projection
+        WHERE service = ?1 AND job_type = ?2 AND id = ?3
+        "#,
+        params![event.service, event.job_type, event.job_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    connection.execute(
+        r#"
+        INSERT INTO jobs_events_projection
+            (service, job_type, id, sequence, event_type, state, previous_state,
+             timestamp, timestamp_nanos, tries, message, error_message, progress_json,
+             logs_json, worker_instance_id, raw_event_json, projected, reason)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+        "#,
+        params![
+            event.service,
+            event.job_type,
+            event.job_id,
+            sequence,
+            event.event_type.as_token(),
+            job_state_token(event.state),
+            event.previous_state.map(job_state_token),
+            event.timestamp,
+            timestamp_str_nanos(&event.timestamp),
+            sql_u64(event.tries),
+            message,
+            event.error.as_deref(),
+            progress_json,
+            logs_json,
+            event
+                .concurrency
+                .as_ref()
+                .and_then(|value| value.instance_id.as_deref()),
+            raw_event_json,
+            projected.map(i64::from),
+            reason,
+        ],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn project_wait_edge_on_connection(
+    connection: &Connection,
+    event: &JobEvent,
+) -> Result<(), SqliteJobsStoreError> {
+    if trellis_rs::jobs::is_terminal(event.state) {
+        connection.execute(
+            r#"
+            DELETE FROM jobs_wait_projection
+            WHERE service = ?1 AND job_type = ?2 AND id = ?3
+            "#,
+            params![event.service, event.job_type, event.job_id],
+        )?;
+        return Ok(());
+    }
+
+    match (event.event_type, event.wait_edge.as_ref()) {
+        (JobEventType::Waiting, Some(wait_edge)) => {
+            let wait_edge_json = serde_json::to_string(wait_edge).map_err(|error| {
+                SqliteJobsStoreError::EncodeJson {
+                    model: "job wait edge",
+                    details: error.to_string(),
+                }
+            })?;
+            connection.execute(
+                r#"
+                INSERT OR REPLACE INTO jobs_wait_projection
+                    (service, job_type, id, wait_id, started_at, target_kind, target_id,
+                     target_service, target_type, wait_edge_json)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                "#,
+                params![
+                    event.service,
+                    event.job_type,
+                    event.job_id,
+                    wait_edge.id,
+                    wait_edge.started_at,
+                    wait_target_kind_token(wait_edge.target.kind),
+                    wait_edge
+                        .target
+                        .id
+                        .as_deref()
+                        .or(wait_edge.target.operation_id.as_deref()),
+                    wait_edge.target.service.as_deref(),
+                    wait_edge.target.target_type.as_deref(),
+                    wait_edge_json,
+                ],
+            )?;
+        }
+        (JobEventType::Resumed, Some(wait_edge)) => {
+            connection.execute(
+                r#"
+                DELETE FROM jobs_wait_projection
+                WHERE service = ?1 AND job_type = ?2 AND id = ?3 AND wait_id = ?4
+                "#,
+                params![event.service, event.job_type, event.job_id, wait_edge.id],
+            )?;
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+pub(crate) fn upsert_error_projection_on_connection(
+    connection: &Connection,
+    service: &str,
+    job_type: &str,
+    state: JobState,
+    timestamp: &str,
+    detail: &JobErrorDetail,
+) -> Result<(), SqliteJobsStoreError> {
+    connection.execute(
+        r#"
+        INSERT INTO jobs_error_projection
+            (fingerprint, message, first_seen, first_seen_nanos, last_seen, last_seen_nanos,
+             occurrence_count, sample_service, sample_job_type, sample_state)
+        VALUES (?1, ?2, ?3, ?4, ?3, ?4, 1, ?5, ?6, ?7)
+        ON CONFLICT(fingerprint) DO UPDATE SET
+            last_seen = excluded.last_seen,
+            last_seen_nanos = excluded.last_seen_nanos,
+            occurrence_count = jobs_error_projection.occurrence_count + 1,
+            sample_service = excluded.sample_service,
+            sample_job_type = excluded.sample_job_type,
+            sample_state = excluded.sample_state
+        "#,
+        params![
+            detail.fingerprint,
+            detail.message,
+            timestamp,
+            timestamp_str_nanos(timestamp),
+            service,
+            job_type,
+            job_state_token(state),
+        ],
+    )?;
+    Ok(())
+}
+
 fn ensure_projection_timestamp_columns(
     connection: &Connection,
 ) -> Result<(), SqliteJobsStoreError> {
@@ -1996,6 +2254,49 @@ fn timeline_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobTimel
         projected: row.get::<_, Option<i64>>(12)?.map(|value| value != 0),
         reason: row.get(13)?,
     })
+}
+
+fn list_current_waits_on_connection(
+    connection: &Connection,
+    id: &str,
+) -> Result<Vec<JobWaitProjection>, SqliteJobsStoreError> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT service, job_type, id, wait_edge_json
+        FROM jobs_wait_projection
+        WHERE id = ?1
+        ORDER BY started_at ASC, wait_id ASC
+        "#,
+    )?;
+    let rows = statement.query_map(params![id], wait_projection_from_row)?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(SqliteJobsStoreError::from)
+}
+
+fn wait_projection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobWaitProjection> {
+    let wait_edge_json: String = row.get(3)?;
+    let wait_edge = serde_json::from_str(&wait_edge_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(JobWaitProjection {
+        service: row.get(0)?,
+        job_type: row.get(1)?,
+        job_id: row.get(2)?,
+        wait_edge,
+    })
+}
+
+fn attach_waits_to_entries(
+    connection: &Connection,
+    entries: &mut [JobsWorkbenchEntry],
+) -> Result<(), SqliteJobsStoreError> {
+    for entry in entries {
+        entry.waiting_on = list_current_waits_on_connection(connection, &entry.job.id)?
+            .into_iter()
+            .map(|wait| wait.wait_edge)
+            .collect();
+    }
+    Ok(())
 }
 
 fn error_projection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobErrorProjection> {
@@ -2812,6 +3113,14 @@ fn trigger_kind_token(kind: JobTriggerKind) -> &'static str {
     }
 }
 
+fn wait_target_kind_token(kind: JobWaitTargetKind) -> &'static str {
+    match kind {
+        JobWaitTargetKind::Job => "job",
+        JobWaitTargetKind::Operation => "operation",
+        JobWaitTargetKind::External => "external",
+    }
+}
+
 fn parse_timestamp(timestamp: &str) -> OffsetDateTime {
     OffsetDateTime::parse(timestamp, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
@@ -2834,7 +3143,8 @@ fn timestamp_nanos(timestamp: OffsetDateTime) -> i64 {
 mod tests {
     use serde_json::json;
     use trellis_rs::jobs::types::{
-        JobContext, JobEvent, JobEventType, JobLineage, JobLogEntry, JobLogLevel,
+        JobContext, JobEvent, JobEventType, JobLineage, JobLogEntry, JobLogLevel, JobWaitEdge,
+        JobWaitTarget, JobWaitTargetKind,
     };
 
     use super::*;
@@ -2863,6 +3173,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 
@@ -2902,8 +3213,28 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            wait_edge: None,
             admin_action: None,
             timestamp: timestamp.to_string(),
+        }
+    }
+
+    fn wait_edge(id: &str, target_job_id: &str) -> JobWaitEdge {
+        JobWaitEdge {
+            id: id.to_string(),
+            target: JobWaitTarget {
+                kind: JobWaitTargetKind::Job,
+                id: Some(target_job_id.to_string()),
+                operation_id: None,
+                label: None,
+                service: Some("svc".to_string()),
+                target_type: Some("sync".to_string()),
+                system: None,
+                operation: None,
+                key: None,
+            },
+            started_at: "2026-01-01T00:01:00Z".to_string(),
+            label: Some("child job".to_string()),
         }
     }
 
@@ -3518,6 +3849,61 @@ mod tests {
     }
 
     #[test]
+    fn wait_projection_tracks_current_wait_by_job_and_wait_id() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Active,
+        );
+        let mut waiting = event(
+            &current,
+            JobEventType::Waiting,
+            JobState::Active,
+            "2026-01-01T00:01:00Z",
+        );
+        waiting.wait_edge = Some(wait_edge("wait-1", "child"));
+
+        store
+            .project_wait_edge(&waiting)
+            .expect("wait should project");
+
+        let waits = store
+            .list_current_waits("current")
+            .expect("waits should list");
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].job_id, "current");
+        assert_eq!(waits[0].wait_edge.id, "wait-1");
+        assert_eq!(
+            store
+                .get_current_wait("current", "wait-1")
+                .expect("wait should read")
+                .expect("wait should exist")
+                .wait_edge
+                .target
+                .id
+                .as_deref(),
+            Some("child")
+        );
+
+        let terminal = event(
+            &current,
+            JobEventType::Completed,
+            JobState::Completed,
+            "2026-01-01T00:02:00Z",
+        );
+        store
+            .project_wait_edge(&terminal)
+            .expect("terminal should clear waits");
+        assert!(store
+            .list_current_waits("current")
+            .expect("waits should list")
+            .is_empty());
+    }
+
+    #[test]
     fn query_jobs_groups_and_sorts() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         let mut active = job(
@@ -4040,6 +4426,49 @@ mod tests {
         assert_eq!(related.len(), 1);
         assert_eq!(related[0].job.id, "peer");
         assert_eq!(related[0].matched_by.as_deref(), Some("concurrency"));
+    }
+
+    #[test]
+    fn list_related_jobs_marks_wait_matches() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let mut current = job(
+            "current",
+            "svc",
+            "sync",
+            "2026-01-01T00:02:00Z",
+            JobState::Active,
+        );
+        let mut child = job(
+            "child",
+            "svc",
+            "sync",
+            "2026-01-01T00:01:00Z",
+            JobState::Active,
+        );
+        set_trace(&mut current, "0000000000000000000000000000000e");
+        set_trace(&mut child, "0000000000000000000000000000000f");
+        store
+            .upsert_job(&current)
+            .expect("current job should insert");
+        store.upsert_job(&child).expect("child job should insert");
+        let mut waiting = event(
+            &current,
+            JobEventType::Waiting,
+            JobState::Active,
+            "2026-01-01T00:01:00Z",
+        );
+        waiting.wait_edge = Some(wait_edge("wait-1", "child"));
+        store
+            .project_wait_edge(&waiting)
+            .expect("wait should project");
+
+        let related = store
+            .list_related_jobs(&current, 10)
+            .expect("related query should succeed");
+
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].job.id, "child");
+        assert_eq!(related[0].matched_by.as_deref(), Some("wait"));
     }
 
     #[test]

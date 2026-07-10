@@ -6,8 +6,13 @@ import {
   assertMatch,
   assertRejects,
 } from "@std/assert";
+import { AsyncResult } from "@qlever-llc/result";
 
-import { JobNotEnqueuedError } from "../../jobs.ts";
+import {
+  JobNotEnqueuedError,
+  JobRef,
+  runWithActiveJobContext,
+} from "../../jobs.ts";
 import type { JobsBinding } from "./bindings.ts";
 import {
   JobCancellationToken,
@@ -192,6 +197,212 @@ Deno.test("JobManager preserves structured failure error string", async () => {
     JSON.parse(failedEvent.error ?? ""),
     JSON.parse(serializedError),
   );
+});
+
+Deno.test("JobManager child jobs inherit active job lineage", async () => {
+  const published: PublishedMessage[] = [];
+  let childId = 0;
+  const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
+    nc: {
+      publish(subject, payload, opts) {
+        published.push({ subject, payload, headers: opts?.headers });
+      },
+    },
+    jobs: {
+      serviceName: "svc",
+      namespace: "svc",
+      queues: {
+        refresh: {
+          queueType: "refresh",
+          publishPrefix: "trellis.jobs.svc.refresh",
+          workSubject: "trellis.work.svc.refresh",
+          consumerName: "svc-refresh",
+          payload: { schema: "RefreshPayload" },
+          result: { schema: "RefreshResult" },
+          maxDeliver: 3,
+          backoffMs: [],
+          ackWaitMs: 1_000,
+          progress: false,
+          logs: false,
+          dlq: false,
+          concurrency: 1,
+        },
+      },
+    },
+    meta: {
+      nextJobId: () => `child-${++childId}`,
+      nowIso: () => "2024-01-01T00:00:00.000Z",
+    },
+  });
+  const parent: Job<{ siteId: string }, { ok: boolean }> = {
+    id: "parent-1",
+    service: "svc",
+    type: "refresh",
+    state: "pending",
+    context: jobContext,
+    payload: { siteId: "parent" },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 0,
+    maxTries: 3,
+    lineage: { rootJobId: "root-1", operationId: "operation-1" },
+  };
+
+  const outcome = await manager.process(
+    parent,
+    new JobCancellationToken(),
+    async () => {
+      await manager.create("refresh", { siteId: "child" });
+      return { ok: true };
+    },
+  );
+
+  assertEquals(outcome.outcome, "completed");
+  const childCreated = published.map((message) =>
+    JSON.parse(new TextDecoder().decode(message.payload)) as {
+      eventType: string;
+      context: JobContext;
+      trigger?: Record<string, unknown>;
+      lineage?: Record<string, unknown>;
+    }
+  ).find((event) => event.eventType === "created");
+  assertExists(childCreated);
+  assertEquals(childCreated.context, jobContext);
+  assertEquals(childCreated.trigger, {
+    kind: "parentJob",
+    parentJobId: "parent-1",
+    operationId: "operation-1",
+    traceId: jobContext.traceId,
+    requestId: jobContext.requestId,
+  });
+  assertEquals(childCreated.lineage, {
+    parentJobId: "parent-1",
+    rootJobId: "root-1",
+    operationId: "operation-1",
+  });
+});
+
+Deno.test("JobManager active waitFor publishes wait edge and preserves result or error", async () => {
+  const published: PublishedMessage[] = [];
+  const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
+    nc: {
+      publish(subject, payload, opts) {
+        published.push({ subject, payload, headers: opts?.headers });
+      },
+    },
+    jobs: {
+      serviceName: "svc",
+      namespace: "svc",
+      queues: {
+        refresh: {
+          queueType: "refresh",
+          publishPrefix: "trellis.jobs.svc.refresh",
+          workSubject: "trellis.work.svc.refresh",
+          consumerName: "svc-refresh",
+          payload: { schema: "RefreshPayload" },
+          result: { schema: "RefreshResult" },
+          maxDeliver: 3,
+          backoffMs: [],
+          ackWaitMs: 1_000,
+          progress: false,
+          logs: false,
+          dlq: false,
+          concurrency: 1,
+        },
+      },
+    },
+    meta: {
+      nextJobId: () => "unused",
+      nowIso: () => "2024-01-01T00:00:00.000Z",
+    },
+  });
+  const active: Job<{ siteId: string }, { ok: boolean }> = {
+    id: "job-1",
+    service: "svc",
+    type: "refresh",
+    state: "active",
+    context: jobContext,
+    payload: { siteId: "site-1" },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 1,
+    maxTries: 3,
+  };
+
+  const value = await manager.withActiveJob(
+    active,
+    new JobCancellationToken(),
+    (job) => job.waitFor({ kind: "external", label: "remote API" }, () => 7),
+  );
+  assertEquals(value, 7);
+  assertEquals(published.map(eventType), ["waiting", "resumed"]);
+
+  published.length = 0;
+  const thrown = await assertRejects(
+    () =>
+      manager.withActiveJob(
+        active,
+        new JobCancellationToken(),
+        (job) =>
+          job.waitFor({ kind: "external", label: "remote API" }, () => {
+            throw new Error("external failed");
+          }),
+      ),
+    Error,
+    "external failed",
+  );
+  assertEquals(thrown.message, "external failed");
+  assertEquals(published.map(eventType), ["waiting", "resumed"]);
+});
+
+Deno.test("JobRef wait inside active job uses active wait edge", async () => {
+  const calls: string[] = [];
+  const terminal = {
+    id: "child-1",
+    service: "svc",
+    type: "refresh",
+    state: "completed" as const,
+    context: jobContext,
+    payload: { siteId: "child" },
+    result: { ok: true },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    completedAt: "2024-01-01T00:00:00.000Z",
+    tries: 1,
+    maxTries: 3,
+  };
+  const ref = new JobRef<{ siteId: string }, { ok: boolean }>(
+    { id: "child-1", service: "svc", jobType: "refresh" },
+    {
+      get: () => AsyncResult.ok(terminal),
+      wait: () => AsyncResult.ok(terminal),
+      cancel: () => AsyncResult.ok(terminal),
+    },
+  );
+
+  const result = await runWithActiveJobContext({
+    job: {
+      id: "parent-1",
+      service: "svc",
+      type: "refresh",
+      state: "active",
+      context: jobContext,
+      payload: { siteId: "parent" },
+      createdAt: "2024-01-01T00:00:00.000Z",
+      updatedAt: "2024-01-01T00:00:00.000Z",
+      tries: 1,
+      maxTries: 3,
+    },
+    waitFor: async (target, fn) => {
+      calls.push(
+        `${target.kind}:${target.service}:${target.type}:${target.id}`,
+      );
+      return await fn();
+    },
+  }, async () => await ref.wait().orThrow());
+
+  assertEquals(result, terminal);
+  assertEquals(calls, ["job:svc:refresh:child-1"]);
 });
 
 Deno.test("JobManager marks retryable failure dead at max tries", async () => {

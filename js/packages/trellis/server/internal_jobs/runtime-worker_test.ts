@@ -1,7 +1,8 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { assertEquals, assertRejects } from "@std/assert";
-import type { JobKeyCoordinator } from "./key-coordinator.ts";
+
 import { JobManager, JobProcessError } from "./job-manager.ts";
+import type { JobKeyCoordinator, JobKeyState } from "./key-coordinator.ts";
 import {
   ackActionForOutcome,
   JobsInfrastructureMissingError,
@@ -450,6 +451,101 @@ Deno.test("startQueueWorkerLoop delays NAK for keyed active-limit deferrals", as
 
   assertEquals(handled, 0);
   assertEquals(nakDelays, [2_500]);
+});
+
+Deno.test("startQueueWorkerLoop processes keyed manual retried work", async () => {
+  let handled = 0;
+  let acked = 0;
+  let nacked = 0;
+  const workEventTypes: string[] = [];
+  const job: Job = {
+    id: "job-retried",
+    service: "svc",
+    type: "sync",
+    state: "pending",
+    context: jobContext,
+    payload: { tenant: "a" },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 0,
+    maxTries: 5,
+  };
+  const event = {
+    ...createdEvent(job),
+    eventType: "retried" as const,
+    previousState: "failed" as const,
+  };
+  const keyState: JobKeyState = {
+    version: 1,
+    service: "svc",
+    jobType: "sync",
+    key: "a",
+    keyHash: "hash",
+    maxActive: 1,
+    active: [],
+    queued: [],
+    staleTakeoverCount: 0,
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  };
+  const coordinator: JobKeyCoordinator = {
+    admitCreate: () => Promise.reject(new Error("unexpected admit")),
+    restoreReplacedQueuedJob: () =>
+      Promise.reject(new Error("unexpected restore")),
+    removeQueuedJob: () => Promise.reject(new Error("unexpected remove")),
+    acquireActiveSlot: (request) => {
+      workEventTypes.push(request.workEventType ?? "missing");
+      return Promise.resolve({
+        kind: "acquired",
+        key: "a",
+        keyHash: "hash",
+        slotToken: "slot-1",
+        stale: [],
+        state: keyState,
+      });
+    },
+    renewHeartbeat: () => Promise.reject(new Error("unexpected renew")),
+    releaseActiveSlot: () =>
+      Promise.resolve({ kind: "released", state: keyState }),
+  };
+
+  const loop = await startQueueWorkerLoop({
+    manager: new JobManager({
+      nc: { publish: () => {} },
+      jobs: keyedJobsBinding,
+      keyCoordinator: coordinator,
+    }),
+    consumer: {
+      consume() {
+        return Promise.resolve((async function* () {
+          yield {
+            data: new TextEncoder().encode(JSON.stringify(event)),
+            subject: "trellis.work.svc.sync",
+            ack: () => {
+              acked += 1;
+            },
+            nak: () => {
+              nacked += 1;
+            },
+            inProgress: () => {},
+          };
+        })());
+      },
+    },
+    cancelSubscription: cancelSubscription(() => {}),
+    getLatestLifecycleEvent: () => Promise.resolve(event),
+    handler: () => {
+      handled += 1;
+      return Promise.resolve({});
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await loop.stop();
+
+  assertEquals(handled, 1);
+  assertEquals(acked, 1);
+  assertEquals(nacked, 0);
+  assertEquals(workEventTypes, ["retried"]);
 });
 
 Deno.test("startNatsQueueWorker reads approved existing consumer only", async () => {

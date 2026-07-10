@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::jobs::types::{
     JobAdminAction, JobConcurrency, JobContext, JobErrorDetail, JobEvent, JobEventType,
-    JobLogEntry, JobProgress, JobQueuePolicy, JobState,
+    JobLogEntry, JobProgress, JobQueuePolicy, JobState, JobWaitEdge,
 };
 
 fn admin_action(reason: Option<&str>) -> Option<JobAdminAction> {
@@ -43,6 +43,7 @@ fn base_event(
         queue_policy: None,
         trigger: None,
         lineage: None,
+        wait_edge: None,
         admin_action: None,
         timestamp: timestamp.to_string(),
     }
@@ -214,6 +215,56 @@ pub fn logged_event(
         timestamp,
     );
     event.logs = Some(logs);
+    event
+}
+
+/// Construct a `waiting` lifecycle evidence event without changing job state.
+pub fn waiting_event(
+    service: &str,
+    job_type: &str,
+    job_id: &str,
+    context: &JobContext,
+    tries: u64,
+    timestamp: &str,
+    wait_edge: JobWaitEdge,
+) -> JobEvent {
+    let mut event = base_event(
+        service,
+        job_type,
+        job_id,
+        context,
+        JobEventType::Waiting,
+        JobState::Active,
+        Some(JobState::Active),
+        tries,
+        timestamp,
+    );
+    event.wait_edge = Some(wait_edge);
+    event
+}
+
+/// Construct a `resumed` lifecycle evidence event without changing job state.
+pub fn resumed_event(
+    service: &str,
+    job_type: &str,
+    job_id: &str,
+    context: &JobContext,
+    tries: u64,
+    timestamp: &str,
+    wait_edge: JobWaitEdge,
+) -> JobEvent {
+    let mut event = base_event(
+        service,
+        job_type,
+        job_id,
+        context,
+        JobEventType::Resumed,
+        JobState::Active,
+        Some(JobState::Active),
+        tries,
+        timestamp,
+    );
+    event.wait_edge = Some(wait_edge);
     event
 }
 

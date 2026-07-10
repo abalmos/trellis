@@ -67,23 +67,35 @@ impl RuntimeLoops {
         resources: &JobsAdminResources,
         store: SqliteJobsStore,
     ) -> Result<Self, ServerError> {
+        tracing::info!(
+            jobs_stream = %resources.jobs_stream,
+            advisories_stream = %resources.jobs_advisories_stream,
+            "starting jobs service owner loops"
+        );
         let advisory = start_advisory_loop(
             jobs_runtime.clone(),
             store.clone(),
             resources.jobs_advisories_stream.clone(),
         )
         .await?;
+        tracing::debug!(loop_name = "advisory", "jobs service owner loop started");
         let janitor =
             start_janitor_loop(jobs_runtime.clone(), store.clone(), janitor_interval()).await?;
+        tracing::debug!(loop_name = "janitor", "jobs service owner loop started");
         let projector = start_jobs_projector(
             jobs_runtime.clone(),
             store.clone(),
             resources.jobs_stream.clone(),
         )
         .await?;
+        tracing::debug!(loop_name = "projector", "jobs service owner loop started");
         let worker_presence =
             start_worker_presence_projector(jobs_runtime, resources.jobs_stream.clone(), store)
                 .await?;
+        tracing::debug!(
+            loop_name = "worker_presence",
+            "jobs service owner loop started"
+        );
         Ok(Self {
             advisory,
             janitor,
@@ -93,12 +105,14 @@ impl RuntimeLoops {
     }
 
     async fn stop(self) {
+        tracing::info!("stopping jobs service owner loops");
         let ((), (), ()) = tokio::join!(
             self.projector.stop(),
             self.janitor.stop(),
             self.advisory.stop(),
         );
         self.worker_presence.stop().await;
+        tracing::info!("stopped jobs service owner loops");
     }
 
     async fn wait_for_failure(&mut self) -> Result<(), ServerError> {
@@ -177,6 +191,7 @@ impl ConnectedJobsService {
 
     /// Run the Jobs admin service with an explicit loop ownership mode.
     pub async fn run_with_mode(mut self, mode: JobsServiceMode) -> Result<(), ServerError> {
+        tracing::info!(?mode, "registering jobs admin runtime surfaces");
         let jobs_runtime = self.jobs_runtime.clone();
         let (resources, query, store) = build_jobs_runtime(
             jobs_runtime.clone(),
@@ -189,6 +204,7 @@ impl ConnectedJobsService {
             jobs_runtime.clone(),
             resources.jobs_stream.clone(),
         );
+        tracing::debug!(?mode, "jobs admin RPC handlers and watch feed registered");
         run_jobs_service_runtime(jobs_runtime, resources, store, mode, async move {
             self.runtime
                 .run()
@@ -205,6 +221,11 @@ fn build_jobs_runtime(
     store: SqliteJobsStore,
 ) -> Result<(JobsAdminResources, JobsQuery, SqliteJobsStore), ServerError> {
     let resources = jobs_admin_resources_from_binding(binding);
+    tracing::debug!(
+        jobs_stream = %resources.jobs_stream,
+        advisories_stream = %resources.jobs_advisories_stream,
+        "resolved jobs admin resources"
+    );
     let query = JobsQuery::with_store(jobs_runtime, store.clone());
     Ok((resources, query, store))
 }
@@ -215,6 +236,7 @@ fn open_jobs_store_from_env() -> Result<SqliteJobsStore, ServerError> {
 }
 
 fn open_jobs_store(path: &Path) -> Result<SqliteJobsStore, ServerError> {
+    tracing::info!(path = %path.display(), "opening jobs SQLite projection");
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -227,12 +249,14 @@ fn open_jobs_store(path: &Path) -> Result<SqliteJobsStore, ServerError> {
         })?;
     }
 
-    SqliteJobsStore::open(path).map_err(|error| {
+    let store = SqliteJobsStore::open(path).map_err(|error| {
         ServerError::Nats(format!(
             "failed to open Jobs SQLite projection at '{}': {error}",
             path.display()
         ))
-    })
+    })?;
+    tracing::info!(path = %path.display(), "opened jobs SQLite projection");
+    Ok(store)
 }
 
 async fn run_jobs_service_runtime<F>(
@@ -245,9 +269,11 @@ async fn run_jobs_service_runtime<F>(
 where
     F: std::future::Future<Output = Result<(), ServerError>>,
 {
+    tracing::info!(?mode, "starting jobs service runtime");
     let mut loops = if mode.starts_runtime_loops() {
         Some(RuntimeLoops::start(jobs_runtime, &resources, store).await?)
     } else {
+        tracing::info!(?mode, "jobs service owner loops disabled");
         None
     };
 
@@ -262,6 +288,11 @@ where
 
     if let Some(loops) = loops {
         loops.stop().await;
+    }
+    if let Err(error) = &result {
+        tracing::error!(%error, "jobs service runtime stopped with error");
+    } else {
+        tracing::info!("jobs service runtime stopped");
     }
     result
 }

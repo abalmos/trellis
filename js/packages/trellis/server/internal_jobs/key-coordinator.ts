@@ -1,6 +1,7 @@
 import { type KV, type KvEntry, Kvm } from "@nats-io/kv";
 import type { NatsConnection } from "@nats-io/nats-core";
-import type { JobContext, JobState } from "./types.ts";
+
+import type { JobContext, JobEvent, JobState } from "./types.ts";
 
 const JOBS_KEYS_BUCKET = "JOBS_KEYS";
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -139,6 +140,7 @@ export type ActiveSlotAcquireRequest = {
   jobId: string;
   payload: unknown;
   context: JobContext;
+  workEventType?: JobEvent["eventType"];
   lifecycleState?: JobState;
   tries: number;
   instanceId: string;
@@ -546,7 +548,8 @@ export function reduceAcquireActiveSlot(args: {
   const isAlreadyActive = base.active.some((slot) =>
     slot.jobId === args.request.jobId
   );
-  const isRetry = args.request.lifecycleState === "retry";
+  const isRetry = args.request.lifecycleState === "retry" ||
+    args.request.workEventType === "retried";
   if (!isQueued && !isAlreadyActive && !isRetry) {
     return {
       kind: "blocked",

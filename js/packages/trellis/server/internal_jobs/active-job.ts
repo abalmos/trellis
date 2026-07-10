@@ -1,4 +1,10 @@
-import type { Job, JobContext, JobLogEntry, JobProgress } from "./types.ts";
+import type {
+  Job,
+  JobContext,
+  JobLogEntry,
+  JobProgress,
+  JobWaitTarget,
+} from "./types.ts";
 
 export class ActiveJobRuntimeError extends Error {
   constructor(message: string) {
@@ -49,6 +55,7 @@ type ActiveJobHooks = {
   updateProgress: (progress: JobProgress) => Promise<void>;
   log: (entry: JobLogEntry) => Promise<void>;
   heartbeat: () => Promise<void>;
+  waitFor: <T>(target: JobWaitTarget, fn: () => Promise<T>) => Promise<T>;
 };
 
 export class ActiveJob<TPayload = unknown, TResult = unknown> {
@@ -111,5 +118,9 @@ export class ActiveJob<TPayload = unknown, TResult = unknown> {
       level,
       message,
     });
+  }
+
+  waitFor<T>(target: JobWaitTarget, fn: () => Promise<T> | T): Promise<T> {
+    return this.#hooks.waitFor(target, async () => await fn());
   }
 }

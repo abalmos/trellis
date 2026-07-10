@@ -126,6 +126,7 @@ fn sample_job(tries: u64, max_tries: u64) -> Job {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     }
 }
 

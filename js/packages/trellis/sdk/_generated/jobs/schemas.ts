@@ -156,6 +156,38 @@ export const JobsCancelResponseSchema = {
         },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
+        "waitingOn": {
+          "items": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
       },
       "required": [
         "id",
@@ -333,6 +365,38 @@ export const JobsDismissDLQResponseSchema = {
         },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
+        "waitingOn": {
+          "items": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
       },
       "required": [
         "id",
@@ -647,6 +711,38 @@ export const JobsInspectResponseSchema = {
         },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
+        "waitingOn": {
+          "items": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
       },
       "required": [
         "id",
@@ -709,6 +805,7 @@ export const JobsInspectResponseSchema = {
               { "const": "root", "type": "string" },
               { "const": "operation", "type": "string" },
               { "const": "concurrency", "type": "string" },
+              { "const": "wait", "type": "string" },
             ],
           },
           "maxTries": { "minimum": 1, "type": "integer" },
@@ -768,6 +865,38 @@ export const JobsInspectResponseSchema = {
           },
           "type": { "minLength": 1, "type": "string" },
           "updatedAt": { "format": "date-time", "type": "string" },
+          "waitingOn": {
+            "items": {
+              "properties": {
+                "id": { "minLength": 1, "type": "string" },
+                "label": { "minLength": 1, "type": "string" },
+                "startedAt": { "format": "date-time", "type": "string" },
+                "target": {
+                  "properties": {
+                    "id": { "minLength": 1, "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "kind": {
+                      "anyOf": [{ "const": "job", "type": "string" }, {
+                        "const": "operation",
+                        "type": "string",
+                      }, { "const": "external", "type": "string" }],
+                    },
+                    "label": { "minLength": 1, "type": "string" },
+                    "operation": { "minLength": 1, "type": "string" },
+                    "operationId": { "minLength": 1, "type": "string" },
+                    "service": { "minLength": 1, "type": "string" },
+                    "system": { "minLength": 1, "type": "string" },
+                    "type": { "minLength": 1, "type": "string" },
+                  },
+                  "required": ["kind"],
+                  "type": "object",
+                },
+              },
+              "required": ["id", "target", "startedAt"],
+              "type": "object",
+            },
+            "type": "array",
+          },
         },
         "required": [
           "id",
@@ -873,6 +1002,35 @@ export const JobsInspectResponseSchema = {
           "timestamp": { "format": "date-time", "type": "string" },
           "tries": { "minimum": 0, "type": "integer" },
           "type": { "minLength": 1, "type": "string" },
+          "waitEdge": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
           "workerInstanceId": { "type": "string" },
         },
         "required": ["sequence", "type", "state", "timestamp"],
@@ -1069,6 +1227,38 @@ export const JobsListDLQResponseSchema = {
           },
           "type": { "minLength": 1, "type": "string" },
           "updatedAt": { "format": "date-time", "type": "string" },
+          "waitingOn": {
+            "items": {
+              "properties": {
+                "id": { "minLength": 1, "type": "string" },
+                "label": { "minLength": 1, "type": "string" },
+                "startedAt": { "format": "date-time", "type": "string" },
+                "target": {
+                  "properties": {
+                    "id": { "minLength": 1, "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "kind": {
+                      "anyOf": [{ "const": "job", "type": "string" }, {
+                        "const": "operation",
+                        "type": "string",
+                      }, { "const": "external", "type": "string" }],
+                    },
+                    "label": { "minLength": 1, "type": "string" },
+                    "operation": { "minLength": 1, "type": "string" },
+                    "operationId": { "minLength": 1, "type": "string" },
+                    "service": { "minLength": 1, "type": "string" },
+                    "system": { "minLength": 1, "type": "string" },
+                    "type": { "minLength": 1, "type": "string" },
+                  },
+                  "required": ["kind"],
+                  "type": "object",
+                },
+              },
+              "required": ["id", "target", "startedAt"],
+              "type": "object",
+            },
+            "type": "array",
+          },
         },
         "required": [
           "id",
@@ -1500,6 +1690,38 @@ export const JobsQueryResponseSchema = {
           },
           "type": { "minLength": 1, "type": "string" },
           "updatedAt": { "format": "date-time", "type": "string" },
+          "waitingOn": {
+            "items": {
+              "properties": {
+                "id": { "minLength": 1, "type": "string" },
+                "label": { "minLength": 1, "type": "string" },
+                "startedAt": { "format": "date-time", "type": "string" },
+                "target": {
+                  "properties": {
+                    "id": { "minLength": 1, "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "kind": {
+                      "anyOf": [{ "const": "job", "type": "string" }, {
+                        "const": "operation",
+                        "type": "string",
+                      }, { "const": "external", "type": "string" }],
+                    },
+                    "label": { "minLength": 1, "type": "string" },
+                    "operation": { "minLength": 1, "type": "string" },
+                    "operationId": { "minLength": 1, "type": "string" },
+                    "service": { "minLength": 1, "type": "string" },
+                    "system": { "minLength": 1, "type": "string" },
+                    "type": { "minLength": 1, "type": "string" },
+                  },
+                  "required": ["kind"],
+                  "type": "object",
+                },
+              },
+              "required": ["id", "target", "startedAt"],
+              "type": "object",
+            },
+            "type": "array",
+          },
         },
         "required": [
           "id",
@@ -1727,6 +1949,38 @@ export const JobsReplayDLQResponseSchema = {
         },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
+        "waitingOn": {
+          "items": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
       },
       "required": [
         "id",
@@ -1904,6 +2158,38 @@ export const JobsRetryResponseSchema = {
         },
         "type": { "minLength": 1, "type": "string" },
         "updatedAt": { "format": "date-time", "type": "string" },
+        "waitingOn": {
+          "items": {
+            "properties": {
+              "id": { "minLength": 1, "type": "string" },
+              "label": { "minLength": 1, "type": "string" },
+              "startedAt": { "format": "date-time", "type": "string" },
+              "target": {
+                "properties": {
+                  "id": { "minLength": 1, "type": "string" },
+                  "key": { "minLength": 1, "type": "string" },
+                  "kind": {
+                    "anyOf": [{ "const": "job", "type": "string" }, {
+                      "const": "operation",
+                      "type": "string",
+                    }, { "const": "external", "type": "string" }],
+                  },
+                  "label": { "minLength": 1, "type": "string" },
+                  "operation": { "minLength": 1, "type": "string" },
+                  "operationId": { "minLength": 1, "type": "string" },
+                  "service": { "minLength": 1, "type": "string" },
+                  "system": { "minLength": 1, "type": "string" },
+                  "type": { "minLength": 1, "type": "string" },
+                },
+                "required": ["kind"],
+                "type": "object",
+              },
+            },
+            "required": ["id", "target", "startedAt"],
+            "type": "object",
+          },
+          "type": "array",
+        },
       },
       "required": [
         "id",

@@ -280,6 +280,7 @@
   {:else}
     <div class="timeline-list">
       {#each steps as step, index (step.rawEvents[0]?.sequence ?? index)}
+        {@const deltaLabel = index > 0 ? elapsedLabel(steps[index - 1].timestamp, step.timestamp) : null}
         <div class="timeline-step">
           <div class="timeline-marker">
             <div class={["timeline-dot", stepColor(step.kind, step.state)]}></div>
@@ -290,6 +291,9 @@
           <div class="timeline-content">
             <div class="timeline-type-row">
               <span class="timeline-type">{step.type}</span>
+              {#if deltaLabel}
+                <span class="timeline-delta" title="Elapsed since previous event">+{deltaLabel}</span>
+              {/if}
             </div>
             <div class="timeline-label">{step.label}</div>
             {#if step.detail}
@@ -407,6 +411,18 @@
     font-weight: 600;
     padding: 0.1rem 0.4rem;
     text-transform: uppercase;
+  }
+
+  .timeline-delta {
+    border: 1px solid color-mix(in oklab, var(--color-base-300) 70%, transparent);
+    border-radius: 9999px;
+    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+    font-size: 0.55rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 0.05rem 0.35rem;
+    white-space: nowrap;
   }
 
   .timeline-label {

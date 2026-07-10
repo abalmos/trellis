@@ -26,6 +26,7 @@ fn sample_job(id: &str, state: JobState, tries: u64) -> Job {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     }
 }
 

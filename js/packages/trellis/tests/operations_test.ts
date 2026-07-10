@@ -15,6 +15,11 @@ import {
   type StartedTransfer,
 } from "../operations.ts";
 import {
+  type JobSnapshot,
+  type JobWaitTarget,
+  runWithActiveJobContext,
+} from "../jobs.ts";
+import {
   OperationAlreadyTerminalError,
   OperationMismatchError,
   OperationNotFoundError,
@@ -1478,6 +1483,92 @@ Deno.test("OperationRef.wait() watches until a terminal snapshot without a reque
   ]);
   assertEquals(terminal.state, "completed");
   assertEquals(terminal.output, { refundId: "rf_123" });
+});
+
+Deno.test("OperationRef.wait() records active job wait context", async () => {
+  const transport = new FakeOperationTransport([
+    {
+      kind: "accepted",
+      ref: {
+        id: "op_123",
+        service: "billing",
+        operation: "Billing.Refund",
+      },
+      snapshot: {
+        revision: 1,
+        state: "pending",
+      },
+    },
+    {
+      kind: "snapshot",
+      snapshot: {
+        revision: 2,
+        state: "running",
+      },
+    },
+    {
+      kind: "event",
+      event: {
+        type: "completed",
+        snapshot: {
+          revision: 3,
+          state: "completed",
+          output: {
+            refundId: "rf_123",
+          },
+        },
+      },
+    },
+  ]);
+  const operation = new OperationInvoker(transport, refundOperation);
+  const reference = await operation.input({ chargeId: "ch_123" }).start().match(
+    {
+      ok: (value) => value,
+      err: (error) => {
+        throw error;
+      },
+    },
+  );
+  const waits: JobWaitTarget[] = [];
+  const activeJob: JobSnapshot<unknown, unknown> = {
+    id: "job_parent",
+    service: "orders",
+    type: "process-order",
+    state: "active",
+    context: {
+      requestId: "req_123",
+      traceId: "trace_123",
+      traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+    },
+    payload: {},
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    tries: 1,
+    maxTries: 1,
+  };
+
+  const terminal = await runWithActiveJobContext({
+    job: activeJob,
+    waitFor: async (target, fn) => {
+      waits.push(target);
+      return await fn();
+    },
+  }, async () =>
+    await reference.wait().match({
+      ok: (value) => value,
+      err: (error) => {
+        throw error;
+      },
+    }));
+
+  assertEquals(terminal.state, "completed");
+  assertEquals(waits, [{
+    kind: "operation",
+    id: "op_123",
+    operationId: "op_123",
+    service: "billing",
+    type: "Billing.Refund",
+  }]);
 });
 
 Deno.test("OperationRef.wait() surfaces control error frames with the runtime error details", async () => {

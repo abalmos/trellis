@@ -14,8 +14,9 @@ use crate::active_job::ActiveJob;
 use crate::bindings::{JobQueueWhenFull, JobsBinding, JobsQueueBinding};
 use crate::events::{
     cancelled_event, completed_event, created_event, created_event_with_policy, failed_event,
-    logged_event, progress_event, retry_event, skipped_event, stale_completion_ignored_event,
-    stale_event, started_event, started_event_with_concurrency,
+    logged_event, progress_event, resumed_event, retry_event, skipped_event,
+    stale_completion_ignored_event, stale_event, started_event, started_event_with_concurrency,
+    waiting_event,
 };
 use crate::keys::{
     derive_job_key, AdmitJobInput, AdmitJobOutcome, JobKeyActiveSlot, JobKeyCoordinator,
@@ -25,7 +26,7 @@ use crate::publisher::{JobEventHeaders, JobEventPublisher};
 use crate::runtime_worker::JobCancellationToken;
 use crate::types::{
     Job, JobConcurrency, JobContext, JobEventType, JobLineage, JobLogEntry, JobProgress,
-    JobQueuePolicy, JobQueuePolicyOutcome, JobState, JobTrigger, JobTriggerKind,
+    JobQueuePolicy, JobQueuePolicyOutcome, JobState, JobTrigger, JobTriggerKind, JobWaitEdge,
 };
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
@@ -505,6 +506,7 @@ where
                 queue_policy: None,
                 trigger: Some(trigger),
                 lineage,
+                waiting_on: None,
             },
             payload_value,
         ))
@@ -984,6 +986,62 @@ where
             job.tries,
             &self.now_iso(),
             vec![log],
+        );
+        self.publish_queue_event(queue, &job.id, event.event_type, &event)
+            .await
+    }
+
+    /// Publish `waiting` evidence for an active job.
+    pub async fn emit_waiting(
+        &self,
+        job: &Job,
+        wait_edge: JobWaitEdge,
+    ) -> Result<(), JobManagerError<P::Error>> {
+        let queue = self.queue_binding_for_job(job)?;
+        if job.state != JobState::Active {
+            return Err(JobManagerError::InvalidTransition {
+                job_id: job.id.clone(),
+                state: job.state,
+                action: "emit_waiting",
+            });
+        }
+
+        let event = waiting_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.tries,
+            &self.now_iso(),
+            wait_edge,
+        );
+        self.publish_queue_event(queue, &job.id, event.event_type, &event)
+            .await
+    }
+
+    /// Publish `resumed` evidence for an active job.
+    pub async fn emit_resumed(
+        &self,
+        job: &Job,
+        wait_edge: JobWaitEdge,
+    ) -> Result<(), JobManagerError<P::Error>> {
+        let queue = self.queue_binding_for_job(job)?;
+        if job.state != JobState::Active {
+            return Err(JobManagerError::InvalidTransition {
+                job_id: job.id.clone(),
+                state: job.state,
+                action: "emit_resumed",
+            });
+        }
+
+        let event = resumed_event(
+            &job.service,
+            &job.job_type,
+            &job.id,
+            &job.context,
+            job.tries,
+            &self.now_iso(),
+            wait_edge,
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
             .await

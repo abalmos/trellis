@@ -77,6 +77,65 @@ pub struct JobAdminAction {
     pub reason: Option<String>,
 }
 
+/// Kind of work an active job is waiting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobWaitTargetKind {
+    /// Another Trellis job.
+    Job,
+    /// A Trellis operation.
+    Operation,
+    /// External async work declared by the job handler.
+    External,
+}
+
+/// Target of a current or historical active-job wait edge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobWaitTarget {
+    /// Target kind.
+    pub kind: JobWaitTargetKind,
+    /// Target id when the runtime or handler has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Operation id when the target is an operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    /// Human-readable target label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Owning service for Trellis-owned targets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    /// Target type for Trellis-owned targets.
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<String>,
+    /// External system name, such as a vendor API or database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    /// External operation name, route, query, or verb.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// Safe external correlation key. Never store secrets here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// Evidence that an active job is waiting on another unit of work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobWaitEdge {
+    /// Stable id for this wait edge.
+    pub id: String,
+    /// Work being waited on.
+    pub target: JobWaitTarget,
+    /// Timestamp when the wait started.
+    pub started_at: String,
+    /// Optional human-readable edge label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
@@ -101,6 +160,8 @@ pub enum JobEventType {
     Retry,
     Progress,
     Logged,
+    Waiting,
+    Resumed,
     Completed,
     Failed,
     Cancelled,
@@ -123,6 +184,8 @@ impl JobEventType {
             Self::Retry => "retry",
             Self::Progress => "progress",
             Self::Logged => "logged",
+            Self::Waiting => "waiting",
+            Self::Resumed => "resumed",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -307,6 +370,8 @@ pub struct Job {
     pub trigger: Option<JobTrigger>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<JobLineage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobWaitEdge>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -345,6 +410,8 @@ pub struct JobEvent {
     pub trigger: Option<JobTrigger>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<JobLineage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_edge: Option<JobWaitEdge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_action: Option<JobAdminAction>,
     pub timestamp: String,

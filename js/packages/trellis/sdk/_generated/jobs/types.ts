@@ -13,7 +13,8 @@ import type {
 
 import type { Api } from "./api.ts";
 
-import { type SerializableErrorData, TrellisError } from "../../../index.ts";
+import type { SerializableErrorData } from "../../../contracts.ts";
+import { TrellisError } from "../../../errors/index.ts";
 
 import { NotFoundErrorDataSchema } from "./schemas.ts";
 
@@ -21,7 +22,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "w3tzV0hwJkaIXCeSlpZQq7hgsEPDlghrc0iOs_Bpxpg" as const;
+  "oJscfQceI0MPL8xIweZL22qWvZP6fSznGFqUr8yJ-VY" as const;
 
 export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {
@@ -116,6 +117,24 @@ export type JobsCancelOutput = {
     };
     type: string;
     updatedAt: string;
+    waitingOn?: Array<
+      {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      }
+    >;
   };
 };
 
@@ -212,6 +231,24 @@ export type JobsDismissDLQOutput = {
     };
     type: string;
     updatedAt: string;
+    waitingOn?: Array<
+      {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      }
+    >;
   };
 };
 
@@ -381,6 +418,24 @@ export type JobsInspectOutput = {
     };
     type: string;
     updatedAt: string;
+    waitingOn?: Array<
+      {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      }
+    >;
   };
   lineage?: {
     operationId?: string;
@@ -407,7 +462,13 @@ export type JobsInspectOutput = {
         relatedKeys?: Array<string>;
         rootJobId?: string;
       };
-      matchedBy?: "trace" | "parent" | "root" | "operation" | "concurrency";
+      matchedBy?:
+        | "trace"
+        | "parent"
+        | "root"
+        | "operation"
+        | "concurrency"
+        | "wait";
       maxTries: number;
       progress?: {
         current?: number;
@@ -452,6 +513,24 @@ export type JobsInspectOutput = {
       };
       type: string;
       updatedAt: string;
+      waitingOn?: Array<
+        {
+          id: string;
+          label?: string;
+          startedAt: string;
+          target: {
+            id?: string;
+            key?: string;
+            kind: "job" | "operation" | "external";
+            label?: string;
+            operation?: string;
+            operationId?: string;
+            service?: string;
+            system?: string;
+            type?: string;
+          };
+        }
+      >;
     }
   >;
   timeline: Array<
@@ -513,6 +592,22 @@ export type JobsInspectOutput = {
       timestamp: string;
       tries?: number;
       type: string;
+      waitEdge?: {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      };
       workerInstanceId?: string;
     }
   >;
@@ -635,6 +730,24 @@ export type JobsListDLQOutput = {
       };
       type: string;
       updatedAt: string;
+      waitingOn?: Array<
+        {
+          id: string;
+          label?: string;
+          startedAt: string;
+          target: {
+            id?: string;
+            key?: string;
+            kind: "job" | "operation" | "external";
+            label?: string;
+            operation?: string;
+            operationId?: string;
+            service?: string;
+            system?: string;
+            type?: string;
+          };
+        }
+      >;
     }
   >;
   limit: number;
@@ -865,6 +978,24 @@ export type JobsQueryOutput = {
       };
       type: string;
       updatedAt: string;
+      waitingOn?: Array<
+        {
+          id: string;
+          label?: string;
+          startedAt: string;
+          target: {
+            id?: string;
+            key?: string;
+            kind: "job" | "operation" | "external";
+            label?: string;
+            operation?: string;
+            operationId?: string;
+            service?: string;
+            system?: string;
+            type?: string;
+          };
+        }
+      >;
     }
   >;
   groups: Array<
@@ -997,6 +1128,24 @@ export type JobsReplayDLQOutput = {
     };
     type: string;
     updatedAt: string;
+    waitingOn?: Array<
+      {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      }
+    >;
   };
 };
 
@@ -1093,6 +1242,24 @@ export type JobsRetryOutput = {
     };
     type: string;
     updatedAt: string;
+    waitingOn?: Array<
+      {
+        id: string;
+        label?: string;
+        startedAt: string;
+        target: {
+          id?: string;
+          key?: string;
+          kind: "job" | "operation" | "external";
+          label?: string;
+          operation?: string;
+          operationId?: string;
+          service?: string;
+          system?: string;
+          type?: string;
+        };
+      }
+    >;
   };
 };
 

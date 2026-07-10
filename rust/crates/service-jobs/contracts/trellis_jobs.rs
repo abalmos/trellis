@@ -59,6 +59,8 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("JobErrorDetail", job_error_detail_schema())
     .schema("JobTrigger", job_trigger_schema())
     .schema("JobLineage", job_lineage_schema())
+    .schema("JobWaitTarget", job_wait_target_schema())
+    .schema("JobWaitEdge", job_wait_edge_schema())
     .schema("Job", job_schema())
     .schema("JobsListServicesRequest", page_request_schema())
     .schema(
@@ -389,6 +391,43 @@ fn job_context_schema() -> Value {
     })
 }
 
+fn job_wait_target_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+            "kind": {
+                "anyOf": [
+                    { "const": "job", "type": "string" },
+                    { "const": "operation", "type": "string" },
+                    { "const": "external", "type": "string" }
+                ]
+            },
+            "id": { "type": "string", "minLength": 1 },
+            "operationId": { "type": "string", "minLength": 1 },
+            "service": { "type": "string", "minLength": 1 },
+            "system": { "type": "string", "minLength": 1 },
+            "type": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 },
+            "label": { "type": "string", "minLength": 1 }
+        }
+    })
+}
+
+fn job_wait_edge_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "target", "startedAt"],
+        "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "target": job_wait_target_schema(),
+            "startedAt": { "type": "string", "format": "date-time" },
+            "label": { "type": "string", "minLength": 1 }
+        }
+    })
+}
+
 fn job_schema() -> Value {
     json!({
         "type": "object",
@@ -425,6 +464,7 @@ fn job_schema() -> Value {
             "progress": job_progress_schema(),
             "trigger": job_trigger_schema(),
             "lineage": job_lineage_schema(),
+            "waitingOn": { "type": "array", "items": job_wait_edge_schema() },
             "queuePolicy": job_queue_policy_metadata_schema(),
             "logs": { "type": "array", "items": job_log_entry_schema() }
         }
@@ -668,6 +708,7 @@ fn jobs_workbench_job_row_schema() -> Value {
             "runtimeBand": { "type": "string" },
             "trigger": job_trigger_schema(),
             "lineage": job_lineage_schema(),
+            "waitingOn": { "type": "array", "items": job_wait_edge_schema() },
             "lastError": { "type": "string" },
             "errorFingerprint": { "type": "string" },
             "context": job_context_schema(),
@@ -687,7 +728,8 @@ fn jobs_inspect_related_job_row_schema() -> Value {
                     { "const": "parent", "type": "string" },
                     { "const": "root", "type": "string" },
                     { "const": "operation", "type": "string" },
-                    { "const": "concurrency", "type": "string" }
+                    { "const": "concurrency", "type": "string" },
+                    { "const": "wait", "type": "string" }
                 ]
             }),
         );
@@ -869,6 +911,7 @@ fn job_timeline_event_schema() -> Value {
             "error": { "type": "string" },
             "errorDetail": job_error_detail_schema(),
             "progress": job_progress_schema(),
+            "waitEdge": job_wait_edge_schema(),
             "logs": { "type": "array", "items": job_log_entry_schema() },
             "workerInstanceId": { "type": "string" },
             "projected": { "type": "boolean" },

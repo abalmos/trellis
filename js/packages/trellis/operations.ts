@@ -1,7 +1,7 @@
-import type { InferSchemaType } from "./contracts.ts";
 import { AsyncResult, err, isErr, ok, type Result } from "@qlever-llc/result";
 
 import { type JsonValue, parseUnknownSchema } from "./codec.ts";
+import type { InferSchemaType } from "./contracts.ts";
 import {
   getBuiltinRpcError,
   OperationAlreadyTerminalError,
@@ -12,6 +12,26 @@ import {
   UnexpectedError,
 } from "./errors/index.ts";
 import type { FileInfo, SendTransferGrant, TransferBody } from "./transfer.ts";
+
+type ActiveJobWaitTarget = {
+  kind: "operation";
+  id: string;
+  operationId: string;
+  service: string;
+  type: string;
+};
+
+type ActiveJobWaitHook = <T>(
+  target: ActiveJobWaitTarget,
+  fn: () => Promise<T>,
+) => Promise<T> | undefined;
+
+let activeJobWaitHook: ActiveJobWaitHook | undefined;
+
+/** @internal Registers the Jobs runtime hook used to track operation waits inside job handlers. */
+export function setActiveJobWaitHook(hook: ActiveJobWaitHook): void {
+  activeJobWaitHook = hook;
+}
 
 export type OperationState =
   | "pending"
@@ -1220,6 +1240,28 @@ function createPublicOperationRef<
     get: () => operation.get(),
     wait: () =>
       AsyncResult.from((async () => {
+        const waited = activeJobWaitHook?.({
+          kind: "operation",
+          id: operation.id,
+          operationId: operation.id,
+          service: operation.service,
+          type: operation.operation,
+        }, async () => {
+          if (observation.task) {
+            const terminal = await observation.task;
+            const terminalValue = terminal.take();
+            if (!isErr(terminalValue)) {
+              return ok(terminalValue);
+            }
+            if (isObservedCallbackError(terminalValue.error)) {
+              return terminalValue;
+            }
+          }
+
+          return await operation.wait();
+        });
+        if (waited) return await waited;
+
         if (observation.task) {
           const terminal = await observation.task;
           const terminalValue = terminal.take();

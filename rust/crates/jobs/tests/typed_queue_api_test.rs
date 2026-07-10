@@ -58,6 +58,7 @@ fn snapshot_round_trips_to_typed_payload_and_result() {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     };
 
     let snapshot: JobSnapshot<serde_json::Value, serde_json::Value> =

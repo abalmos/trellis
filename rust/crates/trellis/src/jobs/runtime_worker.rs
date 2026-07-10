@@ -1580,6 +1580,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 

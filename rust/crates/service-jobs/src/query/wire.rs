@@ -67,6 +67,7 @@ macro_rules! impl_job_to_wire {
                 tries: map_count(job.tries, $tries_model)?,
                 r#type: job.job_type.clone(),
                 updated_at: job.updated_at.clone(),
+                waiting_on: map_optional_wire(&job.waiting_on, "job waitingOn")?,
             })
         }
     };
@@ -463,6 +464,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 

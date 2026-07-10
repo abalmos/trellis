@@ -32,7 +32,6 @@ use crate::registry::{
     start_worker_heartbeat_loop, ActiveJobCancellationRegistry, ServiceRegistryError,
     WorkerHeartbeatHandle,
 };
-use crate::subjects::job_event_subject;
 use crate::types::{Job, JobConcurrency, JobEvent, JobEventType};
 
 const JOBS_STREAM: &str = "JOBS";
@@ -1384,10 +1383,6 @@ async fn stream_work_decision(
     publish_prefix: &str,
     work: &Job,
 ) -> Result<ProjectedWorkDecision, RuntimeWorkerError> {
-    if exact_terminal_lifecycle_event_exists(lifecycle_stream, publish_prefix, work).await? {
-        return Ok(ProjectedWorkDecision::SkipAck);
-    }
-
     let subject = format!("{publish_prefix}.{}.*", work.id);
     let latest = match latest_lifecycle_message(lifecycle_stream, &subject).await {
         Ok(Some(message)) => message,
@@ -1410,53 +1405,6 @@ async fn stream_work_decision(
     })?;
 
     Ok(lifecycle_work_decision(Some(&latest), work))
-}
-
-async fn exact_terminal_lifecycle_event_exists(
-    lifecycle_stream: &stream::Stream<()>,
-    publish_prefix: &str,
-    work: &Job,
-) -> Result<bool, RuntimeWorkerError> {
-    for event_type in [
-        JobEventType::Completed,
-        JobEventType::Failed,
-        JobEventType::Cancelled,
-        JobEventType::Expired,
-        JobEventType::Skipped,
-        JobEventType::Stale,
-        JobEventType::Dead,
-        JobEventType::Dismissed,
-    ] {
-        let bound_subject = format!("{publish_prefix}.{}.{}", work.id, event_type.as_token());
-        let canonical_subject =
-            job_event_subject(&work.service, &work.job_type, &work.id, event_type);
-        for subject in [bound_subject, canonical_subject] {
-            let Some(message) = latest_lifecycle_message(lifecycle_stream, &subject)
-                .await
-                .map_err(|error| RuntimeWorkerError::LifecycleRead {
-                    stream: JOBS_STREAM.to_string(),
-                    subject: subject.clone(),
-                    details: error,
-                })?
-            else {
-                continue;
-            };
-            let event = serde_json::from_slice::<JobEvent>(&message.payload).map_err(|error| {
-                RuntimeWorkerError::LifecycleDecode {
-                    stream: JOBS_STREAM.to_string(),
-                    subject: subject.clone(),
-                    details: error.to_string(),
-                }
-            })?;
-            if event.service == work.service
-                && event.job_type == work.job_type
-                && event.job_id == work.id
-            {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
 }
 
 fn lifecycle_work_decision(latest: Option<&JobEvent>, work: &Job) -> ProjectedWorkDecision {
@@ -1568,7 +1516,7 @@ mod tests {
         ack_action_for_outcome, ack_action_for_process_result, lifecycle_work_decision,
         ProjectedWorkDecision, RuntimeWorkerError, WorkerAckAction,
     };
-    use crate::events::{cancelled_event, completed_event, started_event};
+    use crate::events::{cancelled_event, completed_event, retried_event, started_event};
     use crate::manager::JobProcessOutcome;
     use crate::types::{Job, JobContext, JobState};
 
@@ -1605,6 +1553,7 @@ mod tests {
             queue_policy: None,
             trigger: None,
             lineage: None,
+            waiting_on: None,
         }
     }
 
@@ -1676,6 +1625,27 @@ mod tests {
             JobState::Pending,
             1,
             &work.updated_at,
+        );
+
+        assert_eq!(
+            lifecycle_work_decision(Some(&latest), &work),
+            ProjectedWorkDecision::Process
+        );
+    }
+
+    #[test]
+    fn lifecycle_work_decision_processes_when_latest_event_is_retried() {
+        let work = sample_job(JobState::Pending, 0);
+        let latest = retried_event(
+            &work.service,
+            &work.job_type,
+            &work.id,
+            &work.context,
+            JobState::Failed,
+            &work.updated_at,
+            Some(work.payload.clone()),
+            Some(work.max_tries),
+            None,
         );
 
         assert_eq!(

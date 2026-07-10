@@ -11,6 +11,62 @@ export const JobContextSchema = Type.Object({
 
 export type JobContext = StaticDecode<typeof JobContextSchema>;
 
+export const JobTriggerSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("schedule"),
+    Type.Literal("operation"),
+    Type.Literal("rpc"),
+    Type.Literal("event"),
+    Type.Literal("manualReplay"),
+    Type.Literal("serviceCode"),
+    Type.Literal("parentJob"),
+  ]),
+  id: Type.Optional(Type.String({ minLength: 1 })),
+  subject: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  parentJobId: Type.Optional(Type.String({ minLength: 1 })),
+  traceId: Type.Optional(Type.String({ pattern: "^[0-9a-f]{32}$" })),
+  requestId: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export type JobTrigger = StaticDecode<typeof JobTriggerSchema>;
+
+export const JobLineageSchema = Type.Object({
+  parentJobId: Type.Optional(Type.String({ minLength: 1 })),
+  rootJobId: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  relatedKeys: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+});
+
+export type JobLineage = StaticDecode<typeof JobLineageSchema>;
+
+export const JobWaitTargetSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("job"),
+    Type.Literal("operation"),
+    Type.Literal("external"),
+  ]),
+  id: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  service: Type.Optional(Type.String({ minLength: 1 })),
+  system: Type.Optional(Type.String({ minLength: 1 })),
+  type: Type.Optional(Type.String({ minLength: 1 })),
+  operation: Type.Optional(Type.String({ minLength: 1 })),
+  key: Type.Optional(Type.String({ minLength: 1 })),
+  label: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export type JobWaitTarget = StaticDecode<typeof JobWaitTargetSchema>;
+
+export const JobWaitEdgeSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  target: JobWaitTargetSchema,
+  startedAt: Type.String({ format: "date-time" }),
+  label: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export type JobWaitEdge = StaticDecode<typeof JobWaitEdgeSchema>;
+
 export const JobStateSchema = Type.Union([
   Type.Literal("pending"),
   Type.Literal("active"),
@@ -66,6 +122,9 @@ export const JobSchema = Type.Object({
   deadline: Type.Optional(Type.String({ format: "date-time" })),
   progress: Type.Optional(JobProgressSchema),
   logs: Type.Optional(Type.Array(JobLogEntrySchema)),
+  trigger: Type.Optional(JobTriggerSchema),
+  lineage: Type.Optional(JobLineageSchema),
+  waitingOn: Type.Optional(Type.Array(JobWaitEdgeSchema)),
 });
 
 export type Job<TPayload = unknown, TResult = unknown> =
@@ -96,6 +155,8 @@ export const JobEventSchema = Type.Object({
     Type.Literal("retried"),
     Type.Literal("dead"),
     Type.Literal("dismissed"),
+    Type.Literal("waiting"),
+    Type.Literal("resumed"),
   ]),
   state: JobStateSchema,
   previousState: Type.Optional(JobStateSchema),
@@ -108,6 +169,9 @@ export const JobEventSchema = Type.Object({
   payload: Type.Optional(Type.Unknown()),
   result: Type.Optional(Type.Unknown()),
   deadline: Type.Optional(Type.String({ format: "date-time" })),
+  trigger: Type.Optional(JobTriggerSchema),
+  lineage: Type.Optional(JobLineageSchema),
+  waitEdge: Type.Optional(JobWaitEdgeSchema),
   timestamp: Type.String({ format: "date-time" }),
 });
 

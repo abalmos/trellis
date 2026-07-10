@@ -97,8 +97,19 @@ pub async fn start_worker_presence_projector(
                 "failed to start worker presence consumer '{WORKER_PRESENCE_CONSUMER_NAME}' message stream: {error}"
             ))
         })?;
+    tracing::info!(
+        stream = %jobs_stream,
+        consumer = WORKER_PRESENCE_CONSUMER_NAME,
+        filter = WORKER_HEARTBEATS_WILDCARD,
+        "started worker presence projector"
+    );
 
     let task = tokio::spawn(async move {
+        tracing::debug!(
+            stream = %jobs_stream,
+            consumer = WORKER_PRESENCE_CONSUMER_NAME,
+            "worker presence projector loop running"
+        );
         while let Some(message) = messages.next().await {
             let message = message.map_err(|error| {
                 ServerError::Nats(format!(
@@ -108,6 +119,10 @@ pub async fn start_worker_presence_projector(
             let Some((subject_service, job_type, instance_id)) =
                 parse_worker_heartbeat_subject(message.subject())
             else {
+                tracing::debug!(
+                    subject = %message.subject(),
+                    "acking non-worker-heartbeat message"
+                );
                 let _ = message.ack().await;
                 continue;
             };
@@ -116,6 +131,12 @@ pub async fn start_worker_presence_projector(
                     heartbeat
                 }
                 _ => {
+                    tracing::debug!(
+                        service = %subject_service,
+                        job_type = %job_type,
+                        instance_id = %instance_id,
+                        "acking invalid worker heartbeat"
+                    );
                     let _ = message.ack().await;
                     continue;
                 }
@@ -126,8 +147,20 @@ pub async fn start_worker_presence_projector(
                     "worker presence projector failed to project worker '{subject_service}/{job_type}/{instance_id}': {error}"
                 ))
             })?;
+            tracing::debug!(
+                service = %subject_service,
+                job_type = %job_type,
+                instance_id = %instance_id,
+                timestamp = %heartbeat.timestamp,
+                "projected worker heartbeat"
+            );
             let _ = message.ack().await;
         }
+        tracing::info!(
+            stream = %jobs_stream,
+            consumer = WORKER_PRESENCE_CONSUMER_NAME,
+            "worker presence projector loop ended"
+        );
         Ok(())
     });
 

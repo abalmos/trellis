@@ -77,6 +77,49 @@ pub struct JobAdminAction {
     pub reason: Option<String>,
 }
 
+/// Kind of work an active job is waiting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobWaitTargetKind {
+    Job,
+    Operation,
+    External,
+}
+
+/// Target of a current or historical active-job wait edge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobWaitTarget {
+    pub kind: JobWaitTargetKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub target_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+}
+
+/// Evidence that an active job is waiting on another unit of work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobWaitEdge {
+    pub id: String,
+    pub target: JobWaitTarget,
+    pub started_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum JobState {
@@ -101,6 +144,8 @@ pub enum JobEventType {
     Retry,
     Progress,
     Logged,
+    Waiting,
+    Resumed,
     Completed,
     Failed,
     Cancelled,
@@ -123,6 +168,8 @@ impl JobEventType {
             Self::Retry => "retry",
             Self::Progress => "progress",
             Self::Logged => "logged",
+            Self::Waiting => "waiting",
+            Self::Resumed => "resumed",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -307,6 +354,8 @@ pub struct Job {
     pub trigger: Option<JobTrigger>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<JobLineage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobWaitEdge>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -345,6 +394,8 @@ pub struct JobEvent {
     pub trigger: Option<JobTrigger>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage: Option<JobLineage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_edge: Option<JobWaitEdge>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_action: Option<JobAdminAction>,
     pub timestamp: String,

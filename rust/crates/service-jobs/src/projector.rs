@@ -1,17 +1,30 @@
-use futures_util::StreamExt;
+use std::time::Instant;
+
+use futures_util::{FutureExt, StreamExt};
+use rusqlite::Connection;
 use serde_json::Value;
 use trellis_rs::jobs::reduce_job_event;
 use trellis_rs::jobs::types::{Job, JobEvent, JobEventType};
-use trellis_rs::jobs::JobsRuntime;
+use trellis_rs::jobs::{JobsRuntime, JobsRuntimeMessage};
 use trellis_rs::service::ServerError;
 
 use crate::storage::{
-    JobConcurrencyMetadata, JobProjectionMetadataPatch, JobQueuePolicyMetadata, SqliteJobsStore,
-    SqliteJobsStoreError,
+    apply_job_metadata_patch_on_connection, get_job_from_connection,
+    project_timeline_event_on_connection, project_wait_edge_on_connection,
+    upsert_error_projection_on_connection, upsert_job_lineage_on_connection,
+    upsert_job_on_connection, JobConcurrencyMetadata, JobProjectionMetadataPatch,
+    JobQueuePolicyMetadata, SqliteJobsStore, SqliteJobsStoreError,
 };
 
 const JOBS_EVENTS_SUBJECT_WILDCARD: &str = "trellis.jobs.>";
 const PROJECTOR_CONSUMER_NAME: &str = "jobs-projector";
+const PROJECTOR_BATCH_SIZE: usize = 100;
+
+#[derive(Clone)]
+struct ProjectorEvent {
+    event: JobEvent,
+    raw_event: Value,
+}
 
 pub struct JobsProjectorHandle {
     task: Option<tokio::task::JoinHandle<Result<(), ServerError>>>,
@@ -62,49 +75,117 @@ pub async fn start_jobs_projector(
                 "failed to start jobs projector consumer '{consumer_name}' message stream: {error}"
             ))
         })?;
+    tracing::info!(
+        stream = %jobs_stream,
+        consumer = %consumer_name,
+        filter = JOBS_EVENTS_SUBJECT_WILDCARD,
+        batch_size = PROJECTOR_BATCH_SIZE,
+        "started jobs projector consumer"
+    );
 
     let task = tokio::spawn(async move {
+        tracing::debug!(
+            stream = %jobs_stream,
+            consumer = %consumer_name,
+            "jobs projector loop running"
+        );
         while let Some(message) = messages.next().await {
-            let message = message.map_err(|error| {
-                ServerError::Nats(format!(
-                    "jobs projector failed to pull from consumer '{consumer_name}' on stream '{jobs_stream}': {error}"
-                ))
-            })?;
-            let raw_event = match serde_json::from_slice::<Value>(message.payload()) {
-                Ok(mut raw_event) => {
-                    if let Value::Object(fields) = &mut raw_event {
-                        fields.insert(
-                            "_trellisSubject".to_string(),
-                            Value::String(message.subject().to_string()),
-                        );
-                    }
-                    raw_event
-                }
-                Err(_) => {
-                    let _ = message.ack().await;
-                    continue;
-                }
-            };
-            let event = match serde_json::from_value::<JobEvent>(raw_event.clone()) {
-                Ok(event) => event,
-                Err(_) => {
-                    let _ = message.ack().await;
-                    continue;
-                }
-            };
+            let mut batch = Vec::new();
+            collect_projector_message(message, &consumer_name, &jobs_stream, &mut batch).await?;
+            while batch.len() < PROJECTOR_BATCH_SIZE {
+                let Some(message) = messages.next().now_or_never() else {
+                    break;
+                };
+                let Some(message) = message else {
+                    break;
+                };
+                collect_projector_message(message, &consumer_name, &jobs_stream, &mut batch)
+                    .await?;
+            }
+            if batch.is_empty() {
+                continue;
+            }
 
-            project_job_event_with_payload(&store, &event, &raw_event).map_err(|error| {
-                ServerError::Nats(format!(
-                    "jobs projector failed to project job '{}/{}/{}': {error}",
-                    event.service, event.job_type, event.job_id
-                ))
+            let started = Instant::now();
+            let events = batch
+                .iter()
+                .map(|(_, event)| event.clone())
+                .collect::<Vec<_>>();
+            let batch_store = store.clone();
+            let projected = tokio::task::spawn_blocking(move || {
+                project_job_events_with_payloads(&batch_store, &events)
+            })
+            .await
+            .map_err(|error| ServerError::Nats(format!("jobs projector task failed: {error}")))?
+            .map_err(|error| {
+                ServerError::Nats(format!("jobs projector failed to project batch: {error}"))
             })?;
-            let _ = message.ack().await;
+            let projected_count = projected.iter().filter(|job| job.is_some()).count();
+            tracing::debug!(
+                stream = %jobs_stream,
+                consumer = %consumer_name,
+                events = batch.len(),
+                projected = projected_count,
+                elapsed_ms = started.elapsed().as_millis(),
+                "projected jobs event batch"
+            );
+
+            let ack_count = batch.len();
+            for (message, _) in batch {
+                let _ = message.ack().await;
+            }
+            tracing::debug!(
+                stream = %jobs_stream,
+                consumer = %consumer_name,
+                events = ack_count,
+                "acked jobs projector batch"
+            );
         }
+        tracing::info!(
+            stream = %jobs_stream,
+            consumer = %consumer_name,
+            "jobs projector loop ended"
+        );
         Ok(())
     });
 
     Ok(JobsProjectorHandle { task: Some(task) })
+}
+
+async fn collect_projector_message(
+    message: Result<JobsRuntimeMessage, String>,
+    consumer_name: &str,
+    jobs_stream: &str,
+    batch: &mut Vec<(JobsRuntimeMessage, ProjectorEvent)>,
+) -> Result<(), ServerError> {
+    let message = message.map_err(|error| {
+        ServerError::Nats(format!(
+            "jobs projector failed to pull from consumer '{consumer_name}' on stream '{jobs_stream}': {error}"
+        ))
+    })?;
+    let Some(event) = parse_projector_message(&message) else {
+        tracing::debug!(
+            subject = %message.subject(),
+            consumer = consumer_name,
+            "acking non-projectable jobs message"
+        );
+        let _ = message.ack().await;
+        return Ok(());
+    };
+    batch.push((message, event));
+    Ok(())
+}
+
+fn parse_projector_message(message: &JobsRuntimeMessage) -> Option<ProjectorEvent> {
+    let mut raw_event = serde_json::from_slice::<Value>(message.payload()).ok()?;
+    if let Value::Object(fields) = &mut raw_event {
+        fields.insert(
+            "_trellisSubject".to_string(),
+            Value::String(message.subject().to_string()),
+        );
+    }
+    let event = serde_json::from_value::<JobEvent>(raw_event.clone()).ok()?;
+    Some(ProjectorEvent { event, raw_event })
 }
 
 fn projector_consumer_name(projection_id: &str) -> String {
@@ -124,12 +205,42 @@ fn project_job_event(
     project_job_event_with_payload(store, event, &raw_event)
 }
 
-pub fn project_job_event_with_payload(
+#[cfg(test)]
+fn project_job_event_with_payload(
     store: &SqliteJobsStore,
     event: &JobEvent,
     raw_event: &Value,
 ) -> Result<Option<Job>, SqliteJobsStoreError> {
-    let current = store.get_job(&event.service, &event.job_type, &event.job_id)?;
+    store.with_write_transaction(|connection| {
+        project_job_event_with_payload_on_connection(connection, event, raw_event)
+    })
+}
+
+fn project_job_events_with_payloads(
+    store: &SqliteJobsStore,
+    events: &[ProjectorEvent],
+) -> Result<Vec<Option<Job>>, SqliteJobsStoreError> {
+    store.with_write_transaction(|connection| {
+        events
+            .iter()
+            .map(|event| {
+                project_job_event_with_payload_on_connection(
+                    connection,
+                    &event.event,
+                    &event.raw_event,
+                )
+            })
+            .collect()
+    })
+}
+
+fn project_job_event_with_payload_on_connection(
+    connection: &Connection,
+    event: &JobEvent,
+    raw_event: &Value,
+) -> Result<Option<Job>, SqliteJobsStoreError> {
+    let current =
+        get_job_from_connection(connection, &event.service, &event.job_type, &event.job_id)?;
     let next = reduce_job_event(current.as_ref(), event).or_else(|| job_from_terminal_event(event));
     let projected = next
         .as_ref()
@@ -149,7 +260,14 @@ pub fn project_job_event_with_payload(
     } else {
         None
     };
-    store.project_timeline_event(event, raw_event, projected.or(Some(next.is_some())), reason)?;
+    project_timeline_event_on_connection(
+        connection,
+        event,
+        raw_event,
+        projected.or(Some(next.is_some())),
+        reason,
+    )?;
+    project_wait_edge_on_connection(connection, event)?;
     let fallback_detail = event.error.as_deref().map(|message| {
         trellis_rs::jobs::types::JobErrorDetail::from_message(
             &event.service,
@@ -158,7 +276,8 @@ pub fn project_job_event_with_payload(
         )
     });
     if let Some(detail) = event.error_detail.as_ref().or(fallback_detail.as_ref()) {
-        store.upsert_error_projection(
+        upsert_error_projection_on_connection(
+            connection,
             &event.service,
             &event.job_type,
             event.state,
@@ -169,10 +288,11 @@ pub fn project_job_event_with_payload(
     let Some(next) = next else {
         return Ok(None);
     };
-    store.upsert_job(&next)?;
-    store.upsert_job_lineage(&next)?;
+    upsert_job_on_connection(connection, &next)?;
+    upsert_job_lineage_on_connection(connection, &next)?;
     let metadata = metadata_patch_from_event_payload(raw_event);
-    store.apply_job_metadata_patch(
+    apply_job_metadata_patch_on_connection(
+        connection,
         &event.service,
         &event.job_type,
         &event.job_id,
@@ -229,6 +349,7 @@ fn job_from_terminal_event(event: &JobEvent) -> Option<Job> {
         queue_policy: event.queue_policy.clone(),
         trigger: event.trigger.clone(),
         lineage: event.lineage.clone(),
+        waiting_on: None,
     };
 
     if event.event_type == JobEventType::Completed {
@@ -271,11 +392,12 @@ fn optional_string(value: &Value, field: &str) -> Option<String> {
 mod tests {
     use serde_json::json;
     use trellis_rs::jobs::events::{
-        cancelled_event_with_admin_reason, created_event, failed_event,
-        started_event_with_concurrency,
+        cancelled_event_with_admin_reason, created_event, failed_event, resumed_event,
+        started_event_with_concurrency, waiting_event,
     };
     use trellis_rs::jobs::types::{
-        JobConcurrency, JobContext, JobLineage, JobState, JobTrigger, JobTriggerKind,
+        JobConcurrency, JobContext, JobLineage, JobState, JobTrigger, JobTriggerKind, JobWaitEdge,
+        JobWaitTarget, JobWaitTargetKind,
     };
 
     use super::*;
@@ -513,6 +635,132 @@ mod tests {
         assert_eq!(timeline[1].sequence, 2);
         assert_eq!(timeline[1].event_type, "started");
         assert_eq!(timeline[1].worker_instance_id.as_deref(), Some("worker-1"));
+    }
+
+    #[test]
+    fn project_job_event_projects_and_clears_current_waits() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let created = created_event(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            json!({ "documentId": "doc-1" }),
+            3,
+            "2026-03-28T12:00:00.000Z",
+            None,
+        );
+        let started = started_event_with_concurrency(
+            "documents",
+            "document-process",
+            "job-1",
+            &context(),
+            JobState::Pending,
+            1,
+            "2026-03-28T12:01:00.000Z",
+            JobConcurrency {
+                key: "tenant-1:document:doc-1".to_string(),
+                key_hash: "hash-1".to_string(),
+                instance_id: Some("worker-1".to_string()),
+                slot_token: Some("slot-1".to_string()),
+                heartbeat_at: None,
+                lease_expires_at: None,
+                stale_takeover_count: None,
+            },
+        );
+        let wait_edge = JobWaitEdge {
+            id: "wait-1".to_string(),
+            target: JobWaitTarget {
+                kind: JobWaitTargetKind::Job,
+                id: Some("child-job".to_string()),
+                operation_id: None,
+                label: None,
+                service: Some("documents".to_string()),
+                target_type: Some("document-process".to_string()),
+                system: None,
+                operation: None,
+                key: None,
+            },
+            started_at: "2026-03-28T12:02:00.000Z".to_string(),
+            label: None,
+        };
+
+        project_job_event(&store, &created).expect("created projection should succeed");
+        project_job_event(&store, &started).expect("started projection should succeed");
+        project_job_event(
+            &store,
+            &waiting_event(
+                "documents",
+                "document-process",
+                "job-1",
+                &context(),
+                1,
+                "2026-03-28T12:02:00.000Z",
+                wait_edge.clone(),
+            ),
+        )
+        .expect("waiting projection should succeed");
+
+        let waits = store
+            .list_current_waits("job-1")
+            .expect("waits should list");
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].wait_edge.id, "wait-1");
+        let timeline = store
+            .list_timeline_events("job-1", 10)
+            .expect("timeline should list");
+        assert_eq!(timeline[2].event_type, "waiting");
+        assert!(timeline[2].raw_event_json.contains("waitEdge"));
+
+        project_job_event(
+            &store,
+            &resumed_event(
+                "documents",
+                "document-process",
+                "job-1",
+                &context(),
+                1,
+                "2026-03-28T12:03:00.000Z",
+                wait_edge,
+            ),
+        )
+        .expect("resumed projection should succeed");
+        assert!(store
+            .list_current_waits("job-1")
+            .expect("waits should list")
+            .is_empty());
+    }
+
+    #[test]
+    fn project_job_events_with_payloads_replays_many_events() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let events = (0..500)
+            .map(|index| {
+                let event = created_event(
+                    "documents",
+                    "document-process",
+                    &format!("job-{index}"),
+                    &context(),
+                    json!({ "documentId": format!("doc-{index}") }),
+                    3,
+                    "2026-03-28T12:00:00.000Z",
+                    None,
+                );
+                let raw_event = serde_json::to_value(&event).expect("event should encode");
+                ProjectorEvent { event, raw_event }
+            })
+            .collect::<Vec<_>>();
+
+        let projected = project_job_events_with_payloads(&store, &events)
+            .expect("batch projection should succeed");
+
+        assert_eq!(projected.len(), 500);
+        assert!(projected.iter().all(Option::is_some));
+        let stored = store
+            .get_job("documents", "document-process", "job-499")
+            .expect("get should succeed")
+            .expect("last job should be stored");
+        assert_eq!(stored.payload, json!({ "documentId": "doc-499" }));
     }
 
     #[test]

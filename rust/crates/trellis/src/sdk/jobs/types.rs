@@ -140,6 +140,38 @@ pub struct JobsCancelResponseJobTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsCancelResponseJobWaitingOnItem`.
+/// Generated schema type `JobsCancelResponseJobWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsCancelResponseJobWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsCancelResponseJobWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsCancelResponseJobWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsCancelResponseJob {
     #[serde(rename = "completedAt")]
@@ -184,6 +216,9 @@ pub struct JobsCancelResponseJob {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsCancelResponseJobWaitingOnItem>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsCancelResponse {
@@ -327,6 +362,38 @@ pub struct JobsDismissDLQResponseJobTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsDismissDLQResponseJobWaitingOnItem`.
+/// Generated schema type `JobsDismissDLQResponseJobWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsDismissDLQResponseJobWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsDismissDLQResponseJobWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsDismissDLQResponseJobWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsDismissDLQResponseJob {
     #[serde(rename = "completedAt")]
@@ -371,6 +438,9 @@ pub struct JobsDismissDLQResponseJob {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsDismissDLQResponseJobWaitingOnItem>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsDismissDLQResponse {
@@ -641,6 +711,38 @@ pub struct JobsInspectResponseJobTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsInspectResponseJobWaitingOnItem`.
+/// Generated schema type `JobsInspectResponseJobWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseJobWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseJobWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsInspectResponseJobWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsInspectResponseJob {
     #[serde(rename = "completedAt")]
@@ -685,6 +787,9 @@ pub struct JobsInspectResponseJob {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsInspectResponseJobWaitingOnItem>>,
 }
 /// Generated schema type `JobsInspectResponseLineage`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -763,6 +868,38 @@ pub struct JobsInspectResponseRelatedItemTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsInspectResponseRelatedItemWaitingOnItem`.
+/// Generated schema type `JobsInspectResponseRelatedItemWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseRelatedItemWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseRelatedItemWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsInspectResponseRelatedItemWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsInspectResponseRelatedItem {
     #[serde(rename = "completedAt")]
@@ -811,6 +948,9 @@ pub struct JobsInspectResponseRelatedItem {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsInspectResponseRelatedItemWaitingOnItem>>,
 }
 /// Generated schema type `JobsInspectResponseTimelineItem`.
 /// Generated schema type `JobsInspectResponseTimelineItemErrorDetail`.
@@ -865,6 +1005,38 @@ pub struct JobsInspectResponseTimelineItemProgress {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total: Option<i64>,
 }
+/// Generated schema type `JobsInspectResponseTimelineItemWaitEdge`.
+/// Generated schema type `JobsInspectResponseTimelineItemWaitEdgeTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseTimelineItemWaitEdgeTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsInspectResponseTimelineItemWaitEdge {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsInspectResponseTimelineItemWaitEdgeTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsInspectResponseTimelineItem {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -894,6 +1066,9 @@ pub struct JobsInspectResponseTimelineItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tries: Option<i64>,
     pub r#type: String,
+    #[serde(rename = "waitEdge")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_edge: Option<JobsInspectResponseTimelineItemWaitEdge>,
     #[serde(rename = "workerInstanceId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_instance_id: Option<String>,
@@ -1075,6 +1250,38 @@ pub struct JobsListDLQResponseEntriesItemTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsListDLQResponseEntriesItemWaitingOnItem`.
+/// Generated schema type `JobsListDLQResponseEntriesItemWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsListDLQResponseEntriesItemWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsListDLQResponseEntriesItemWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsListDLQResponseEntriesItemWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsListDLQResponseEntriesItem {
     #[serde(rename = "completedAt")]
@@ -1119,6 +1326,9 @@ pub struct JobsListDLQResponseEntriesItem {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsListDLQResponseEntriesItemWaitingOnItem>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsListDLQResponse {
@@ -1410,6 +1620,38 @@ pub struct JobsQueryResponseEntriesItemTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsQueryResponseEntriesItemWaitingOnItem`.
+/// Generated schema type `JobsQueryResponseEntriesItemWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsQueryResponseEntriesItemWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsQueryResponseEntriesItemWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsQueryResponseEntriesItemWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsQueryResponseEntriesItem {
     #[serde(rename = "completedAt")]
@@ -1455,6 +1697,9 @@ pub struct JobsQueryResponseEntriesItem {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsQueryResponseEntriesItemWaitingOnItem>>,
 }
 /// Generated schema type `JobsQueryResponseGroupsItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1643,6 +1888,38 @@ pub struct JobsReplayDLQResponseJobTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsReplayDLQResponseJobWaitingOnItem`.
+/// Generated schema type `JobsReplayDLQResponseJobWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsReplayDLQResponseJobWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsReplayDLQResponseJobWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsReplayDLQResponseJobWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsReplayDLQResponseJob {
     #[serde(rename = "completedAt")]
@@ -1687,6 +1964,9 @@ pub struct JobsReplayDLQResponseJob {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsReplayDLQResponseJobWaitingOnItem>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsReplayDLQResponse {
@@ -1830,6 +2110,38 @@ pub struct JobsRetryResponseJobTrigger {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
+/// Generated schema type `JobsRetryResponseJobWaitingOnItem`.
+/// Generated schema type `JobsRetryResponseJobWaitingOnItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsRetryResponseJobWaitingOnItemTarget {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(rename = "operationId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobsRetryResponseJobWaitingOnItem {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    pub target: JobsRetryResponseJobWaitingOnItemTarget,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsRetryResponseJob {
     #[serde(rename = "completedAt")]
@@ -1874,6 +2186,9 @@ pub struct JobsRetryResponseJob {
     pub r#type: String,
     #[serde(rename = "updatedAt")]
     pub updated_at: String,
+    #[serde(rename = "waitingOn")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_on: Option<Vec<JobsRetryResponseJobWaitingOnItem>>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobsRetryResponse {

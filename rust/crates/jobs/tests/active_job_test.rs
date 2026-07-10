@@ -7,6 +7,7 @@ use trellis_jobs::manager::{JobManager, JobManagerError, JobMetaSource};
 use trellis_jobs::publisher::{JobEventHeaders, JobEventPublisher};
 use trellis_jobs::{
     Job, JobCancellationToken, JobContext, JobEvent, JobEventType, JobLogLevel, JobState,
+    JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
 };
 
 #[derive(Default)]
@@ -98,6 +99,7 @@ fn sample_job(state: JobState) -> Job {
         queue_policy: None,
         trigger: None,
         lineage: None,
+        waiting_on: None,
     }
 }
 
@@ -107,6 +109,25 @@ fn sample_context() -> JobContext {
         trace_id: "0123456789abcdef0123456789abcdef".to_string(),
         traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01".to_string(),
         tracestate: None,
+    }
+}
+
+fn sample_wait_edge() -> JobWaitEdge {
+    JobWaitEdge {
+        id: "wait-1".to_string(),
+        target: JobWaitTarget {
+            kind: JobWaitTargetKind::External,
+            id: Some("external-1".to_string()),
+            operation_id: None,
+            label: Some("external call".to_string()),
+            service: None,
+            target_type: None,
+            system: Some("vendor".to_string()),
+            operation: Some("GET /status".to_string()),
+            key: Some("request-1".to_string()),
+        },
+        started_at: "2026-03-28T12:00:00Z".to_string(),
+        label: Some("external call".to_string()),
     }
 }
 
@@ -152,6 +173,51 @@ async fn active_job_log_publishes_logged_event() {
     let event: JobEvent = serde_json::from_slice(&calls[0].2).expect("decode logged event");
     assert_eq!(event.event_type, JobEventType::Logged);
     assert_eq!(event.state, JobState::Active);
+}
+
+#[tokio::test]
+async fn active_job_wait_for_publishes_waiting_then_resumed_and_preserves_output() {
+    let publisher = RecordingPublisher::default();
+    let manager = JobManager::new(publisher, sample_bindings(), FixedMetaSource);
+
+    let output = manager
+        .with_active_job(
+            sample_job(JobState::Active),
+            JobCancellationToken::new(),
+            |job| async move {
+                Ok::<_, JobManagerError<&'static str>>(
+                    job.wait_for(sample_wait_edge(), async {
+                        Err::<(), &'static str>("future failed")
+                    })
+                    .await,
+                )
+            },
+        )
+        .await
+        .expect("wait_for wrapper should not fail");
+
+    assert_eq!(output, Err("future failed"));
+    let calls = manager.publisher().calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[0].0.ends_with(".waiting"));
+    assert!(calls[1].0.ends_with(".resumed"));
+
+    let waiting: JobEvent = serde_json::from_slice(&calls[0].2).expect("decode waiting event");
+    assert_eq!(waiting.event_type, JobEventType::Waiting);
+    assert_eq!(waiting.state, JobState::Active);
+    assert_eq!(waiting.previous_state, Some(JobState::Active));
+    assert_eq!(
+        waiting.wait_edge.as_ref().map(|edge| edge.id.as_str()),
+        Some("wait-1")
+    );
+
+    let resumed: JobEvent = serde_json::from_slice(&calls[1].2).expect("decode resumed event");
+    assert_eq!(resumed.event_type, JobEventType::Resumed);
+    assert_eq!(resumed.state, JobState::Active);
+    assert_eq!(
+        resumed.wait_edge.as_ref().map(|edge| edge.id.as_str()),
+        Some("wait-1")
+    );
 }
 
 #[tokio::test]

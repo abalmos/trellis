@@ -379,7 +379,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
             session_key_seed_base64url: &service_key.seed,
             timeout_ms: 5000,
             retry_delay_ms: 1000,
-            authority_pending_timeout_ms: 60000,
+            authority_pending_timeout_ms: Some(60000),
         })
         .await
         .expect("connect live Rust jobs service");

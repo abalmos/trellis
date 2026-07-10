@@ -1,6 +1,7 @@
 import { jetstream, jetstreamManager } from "@nats-io/jetstream";
 import type { ConsumerInfo, JsMsg } from "@nats-io/jetstream";
 import type { NatsConnection, Subscription } from "@nats-io/nats-core";
+
 import type { JobsQueueBinding, JobsRuntimeBinding } from "./bindings.ts";
 import { ActiveJobCancellationRegistry } from "./cancellation-registry.ts";
 import { startWorkerHeartbeatLoop } from "./heartbeat.ts";
@@ -258,6 +259,7 @@ export async function processWorkPayloadWithContextAndHeartbeat<TResult>(
   runtime?: {
     latestState?: Job["state"];
     latestTries?: number;
+    workEventType?: JobEvent["eventType"];
     redeliveryCount?: number;
   },
   instanceId?: string,
@@ -293,6 +295,7 @@ export async function processWorkPayloadWithContextAndHeartbeat<TResult>(
     },
     {
       latestState: runtime?.latestState,
+      workEventType: runtime?.workEventType,
       redeliveryCount: runtime?.redeliveryCount,
       instanceId,
     },
@@ -376,9 +379,11 @@ export async function startQueueWorkerLoop<TResult>(
   const workTask = (async () => {
     for await (const msg of messages) {
       const event = parseWorkPayloadEvent(msg.data);
-      const job = event
-        ? jobFromWorkEvent(event) as Job<unknown, TResult> | undefined
-        : undefined;
+      if (!event) {
+        await msg.ack();
+        continue;
+      }
+      const job = jobFromWorkEvent(event) as Job<unknown, TResult> | undefined;
       if (!job) {
         await msg.ack();
         continue;
@@ -441,6 +446,7 @@ export async function startQueueWorkerLoop<TResult>(
           {
             latestState: latestLifecycle?.state,
             latestTries: latestLifecycle?.tries,
+            workEventType: event.eventType,
             redeliveryCount: msg.info?.redeliveryCount,
           },
           options.instanceId,

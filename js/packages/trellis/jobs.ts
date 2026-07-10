@@ -1,6 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AsyncResult, BaseError, Result } from "@qlever-llc/result";
-import { UnexpectedError } from "./errors/index.ts";
 import { type StaticDecode, Type } from "typebox";
+
+import { UnexpectedError } from "./errors/index.ts";
+import { setActiveJobWaitHook } from "./operations.ts";
 
 export const JobLogEntrySchema = Type.Object({
   timestamp: Type.String({ format: "date-time" }),
@@ -32,6 +35,59 @@ export const JobContextSchema = Type.Object({
 });
 
 export type JobContext = StaticDecode<typeof JobContextSchema>;
+
+export const JobTriggerSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("schedule"),
+    Type.Literal("operation"),
+    Type.Literal("rpc"),
+    Type.Literal("event"),
+    Type.Literal("manualReplay"),
+    Type.Literal("serviceCode"),
+    Type.Literal("parentJob"),
+  ]),
+  id: Type.Optional(Type.String({ minLength: 1 })),
+  subject: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  parentJobId: Type.Optional(Type.String({ minLength: 1 })),
+  traceId: Type.Optional(Type.String({ pattern: "^[0-9a-f]{32}$" })),
+  requestId: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const JobLineageSchema = Type.Object({
+  parentJobId: Type.Optional(Type.String({ minLength: 1 })),
+  rootJobId: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  relatedKeys: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+});
+
+export const JobWaitTargetSchema = Type.Object({
+  kind: Type.Union([
+    Type.Literal("job"),
+    Type.Literal("operation"),
+    Type.Literal("external"),
+  ]),
+  id: Type.Optional(Type.String({ minLength: 1 })),
+  operationId: Type.Optional(Type.String({ minLength: 1 })),
+  service: Type.Optional(Type.String({ minLength: 1 })),
+  system: Type.Optional(Type.String({ minLength: 1 })),
+  type: Type.Optional(Type.String({ minLength: 1 })),
+  operation: Type.Optional(Type.String({ minLength: 1 })),
+  key: Type.Optional(Type.String({ minLength: 1 })),
+  label: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const JobWaitEdgeSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  target: JobWaitTargetSchema,
+  startedAt: Type.String({ format: "date-time" }),
+  label: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export type JobTrigger = StaticDecode<typeof JobTriggerSchema>;
+export type JobLineage = StaticDecode<typeof JobLineageSchema>;
+export type JobWaitTarget = StaticDecode<typeof JobWaitTargetSchema>;
+export type JobWaitEdge = StaticDecode<typeof JobWaitEdgeSchema>;
 
 export type JobState =
   | "pending"
@@ -209,6 +265,9 @@ export type JobSnapshot<TPayload, TResult> = {
   deadline?: string;
   progress?: JobProgress;
   logs?: JobLogEntry[];
+  trigger?: JobTrigger;
+  lineage?: JobLineage;
+  waitingOn?: JobWaitEdge[];
 };
 
 export type Job<TPayload = unknown, TResult = unknown> = JobSnapshot<
@@ -262,6 +321,38 @@ function toUnexpectedError(cause: unknown): UnexpectedError {
     : new UnexpectedError({ cause });
 }
 
+type ActiveJobContext = {
+  readonly job: JobSnapshot<unknown, unknown>;
+  waitFor<T>(target: JobWaitTarget, fn: () => Promise<T>): Promise<T>;
+};
+
+const activeJobStorage = new AsyncLocalStorage<ActiveJobContext>();
+
+/** @internal Runs work with the current active job available to child job creation and waits. */
+export function runWithActiveJobContext<T>(
+  context: ActiveJobContext,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return activeJobStorage.run(context, fn);
+}
+
+/** @internal Returns the current active job, if called inside a job handler. */
+export function getActiveJobSnapshot():
+  | JobSnapshot<unknown, unknown>
+  | undefined {
+  return activeJobStorage.getStore()?.job;
+}
+
+/** @internal Records a current active-job wait if called inside a job handler. */
+export function runActiveJobWait<T>(
+  target: JobWaitTarget,
+  fn: () => Promise<T>,
+): Promise<T> | undefined {
+  return activeJobStorage.getStore()?.waitFor(target, fn);
+}
+
+setActiveJobWaitHook(runActiveJobWait);
+
 export class JobRef<TPayload, TResult> {
   readonly id: string;
   readonly service: string;
@@ -299,11 +390,20 @@ export class JobRef<TPayload, TResult> {
   }
 
   wait(): AsyncResult<TerminalJob<TPayload, TResult>, BaseError> {
-    try {
-      return this.#wait();
-    } catch (cause) {
-      return AsyncResult.err(toUnexpectedError(cause));
-    }
+    return AsyncResult.from((async () => {
+      try {
+        const waited = runActiveJobWait({
+          kind: "job",
+          id: this.id,
+          service: this.service,
+          type: this.type,
+        }, async () => await this.#wait());
+        if (waited) return await waited;
+        return await this.#wait();
+      } catch (cause) {
+        return Result.err(toUnexpectedError(cause));
+      }
+    })());
   }
 
   cancel(): AsyncResult<JobSnapshot<TPayload, TResult>, BaseError> {
@@ -324,6 +424,10 @@ export class ActiveJob<TPayload, TResult> {
   readonly #heartbeat: () => AsyncResult<void, BaseError>;
   readonly #progress: (value: JobProgress) => AsyncResult<void, BaseError>;
   readonly #log: (entry: JobLogEntry) => AsyncResult<void, BaseError>;
+  readonly #waitFor: <T>(
+    target: JobWaitTarget,
+    fn: () => Promise<T>,
+  ) => Promise<T>;
   readonly #redeliveryCount: number;
 
   constructor(
@@ -335,6 +439,7 @@ export class ActiveJob<TPayload, TResult> {
       heartbeat: () => AsyncResult<void, BaseError>;
       progress: (value: JobProgress) => AsyncResult<void, BaseError>;
       log: (entry: JobLogEntry) => AsyncResult<void, BaseError>;
+      waitFor: <T>(target: JobWaitTarget, fn: () => Promise<T>) => Promise<T>;
       redeliveryCount?: number;
     },
   ) {
@@ -347,6 +452,7 @@ export class ActiveJob<TPayload, TResult> {
     this.#heartbeat = impl.heartbeat;
     this.#progress = impl.progress;
     this.#log = impl.log;
+    this.#waitFor = impl.waitFor;
     this.#redeliveryCount = impl.redeliveryCount ?? 0;
   }
 
@@ -380,6 +486,14 @@ export class ActiveJob<TPayload, TResult> {
     } catch (cause) {
       return AsyncResult.err(toUnexpectedError(cause));
     }
+  }
+
+  /**
+   * Records that this job is waiting on another job, operation, or external async work.
+   * The wrapped function's return value or thrown error is preserved.
+   */
+  waitFor<T>(target: JobWaitTarget, fn: () => Promise<T> | T): Promise<T> {
+    return this.#waitFor(target, async () => await fn());
   }
 
   redeliveryCount(): number {
