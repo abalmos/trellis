@@ -21,15 +21,21 @@ workspace = true
 [dependencies]
 async-nats = { workspace = true, optional = true }
 axum.workspace = true
+base64.workspace = true
 bytes = { workspace = true, optional = true }
 clap.workspace = true
+futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rusqlite = { workspace = true, optional = true }
 refinery = { workspace = true, optional = true }
 thiserror.workspace = true
+time.workspace = true
 tokio = { workspace = true, features = ["net", "signal"] }
 toml = "1.1.2"
+tracing.workspace = true
+trellis-rs = { path = "../trellis" }
+ulid = "1.2.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -483,31 +483,17 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
-    id: "health.client-subscribes-to-heartbeats",
-    file: "health/client_subscribes_to_heartbeats.integration_test.ts",
+    id: "health.service-publishes-authorized-sample",
+    file: "health/service_publishes_authorized_sample.integration_test.ts",
     testName:
-      "health.client-subscribes-to-heartbeats subscribes and receives a service heartbeat",
+      "health.service-publishes-authorized-sample publishes on the authorized transport subject",
     runtime: "live-trellis",
   },
   {
-    id: "health.heartbeat-includes-service-metadata",
-    file: "health/heartbeat_includes_service_metadata.integration_test.ts",
+    id: "health.projection-lifecycle-and-recovery",
+    file: "health/projection_lifecycle_and_recovery.integration_test.ts",
     testName:
-      "health.heartbeat-includes-service-metadata includes service metadata in heartbeat",
-    runtime: "live-trellis",
-  },
-  {
-    id: "health.heartbeat-includes-custom-checks",
-    file: "health/heartbeat_includes_custom_checks.integration_test.ts",
-    testName:
-      "health.heartbeat-includes-custom-checks includes built-in and custom checks",
-    runtime: "live-trellis",
-  },
-  {
-    id: "health.heartbeat-event-context-is-populated",
-    file: "health/heartbeat_event_context_is_populated.integration_test.ts",
-    testName:
-      "health.heartbeat-event-context-is-populated has populated event context",
+      "health.projection-lifecycle-and-recovery projects lifecycle and replays downtime samples",
     runtime: "live-trellis",
   },
   {

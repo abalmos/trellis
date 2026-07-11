@@ -54,28 +54,50 @@ export interface TrellisHealthClient {
   readonly connection: TrellisConnection;
   transfer(grant: SendTransferGrant): SendTransferHandle;
   transfer(grant: ReceiveTransferGrant): ReceiveTransferHandle;
-  readonly rpc: {};
+  readonly rpc: {
+    readonly health: {
+      inspect(
+        input: Types.HealthInspectInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.HealthInspectOutput, BaseError>;
+      metrics(
+        input: Types.HealthMetricsInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.HealthMetricsOutput, BaseError>;
+      query(
+        input: Types.HealthQueryInput,
+        opts?: RequestOpts,
+      ): AsyncResult<Types.HealthQueryOutput, BaseError>;
+    };
+  };
   readonly event: {
     readonly health: {
-      heartbeat: {
+      statusChanged: {
         publish(
-          event: Types.HealthHeartbeatEvent,
+          event: Types.HealthStatusChangedEvent,
         ): AsyncResult<void, ValidationError | UnexpectedError>;
         prepare(
-          event: Types.HealthHeartbeatEvent,
+          event: Types.HealthStatusChangedEvent,
         ): Result<
-          PreparedTrellisEvent<Types.HealthHeartbeatEvent>,
+          PreparedTrellisEvent<Types.HealthStatusChangedEvent>,
           ValidationError | UnexpectedError
         >;
         listen(
-          handler: EventCallback<Types.HealthHeartbeatEvent>,
+          handler: EventCallback<Types.HealthStatusChangedEvent>,
           subjectData?: Record<string, unknown>,
           opts?: EventOpts,
         ): AsyncResult<void, ValidationError | UnexpectedError>;
       };
     };
   };
-  readonly feed: {};
+  readonly feed: {
+    readonly health: {
+      watch(
+        input: Types.HealthWatchInput,
+        opts?: FeedSubscribeOpts,
+      ): AsyncResult<FeedSubscription<Types.HealthWatchEvent>, BaseError>;
+    };
+  };
   readonly operation: {};
   wait(): AsyncResult<void, BaseError>;
 }
@@ -86,18 +108,18 @@ export interface Service extends TrellisHealthClient {
 
 export interface ServiceEventSurface {
   readonly health: {
-    heartbeat: {
+    statusChanged: {
       publish(
-        event: Types.HealthHeartbeatEvent,
+        event: Types.HealthStatusChangedEvent,
       ): AsyncResult<void, ValidationError | UnexpectedError>;
       prepare(
-        event: Types.HealthHeartbeatEvent,
+        event: Types.HealthStatusChangedEvent,
       ): Result<
-        PreparedTrellisEvent<Types.HealthHeartbeatEvent>,
+        PreparedTrellisEvent<Types.HealthStatusChangedEvent>,
         ValidationError | UnexpectedError
       >;
       listen(
-        handler: Types.HealthHeartbeatEventHandler,
+        handler: Types.HealthStatusChangedEventHandler,
         subjectData?: Record<string, unknown>,
         opts?: EventOpts,
       ): AsyncResult<void, ValidationError | UnexpectedError>;
@@ -106,8 +128,18 @@ export interface ServiceEventSurface {
 }
 
 export interface ServiceHandle {
-  readonly rpc: {};
-  readonly feed: {};
+  readonly rpc: {
+    readonly health: {
+      inspect(handler: Types.HealthInspectHandler): Promise<void>;
+      metrics(handler: Types.HealthMetricsHandler): Promise<void>;
+      query(handler: Types.HealthQueryHandler): Promise<void>;
+    };
+  };
+  readonly feed: {
+    readonly health: {
+      watch(handler: Types.HealthWatchFeedHandler): Promise<void>;
+    };
+  };
   readonly operation: {};
 }
 

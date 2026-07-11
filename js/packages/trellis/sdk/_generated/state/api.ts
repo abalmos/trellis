@@ -1,6 +1,5 @@
 // Generated from ./generated/contracts/manifests/trellis.state@v1.json
 import { OWNED_API } from "./owned_api.ts";
-import { OWNED_API as HealthApi } from "../health/mod.ts";
 
 export { OWNED_API };
 
@@ -26,9 +25,7 @@ type __TrellisGeneratedOperationApi<TApi> = {
 export type UsedApi = {
   rpc: {};
   operations: {};
-  events: {
-    readonly "Health.Heartbeat": typeof HealthApi.events["Health.Heartbeat"];
-  };
+  events: {};
   feeds: {};
   subjects: {};
 };
@@ -36,11 +33,7 @@ export type UsedApi = {
 export const USED_API: UsedApi = {
   rpc: {},
   operations: {},
-  events: {
-    get "Health.Heartbeat"() {
-      return HealthApi.events["Health.Heartbeat"];
-    },
-  },
+  events: {},
   feeds: {},
   subjects: {},
 };

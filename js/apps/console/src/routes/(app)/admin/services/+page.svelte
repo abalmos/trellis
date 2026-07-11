@@ -1,13 +1,12 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
-  import { ok } from "@qlever-llc/result";
-  import type { HealthHeartbeat } from "@qlever-llc/trellis/health";
   import type { DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
   import type {
     AuthDeploymentsListOutput,
     AuthServiceInstancesListOutput,
   } from "@qlever-llc/trellis/sdk/auth";
   import type { TrellisCatalogOutput } from "@qlever-llc/trellis/sdk/core";
+  import type { HealthQueryOutput } from "@qlever-llc/trellis/sdk/health";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -18,13 +17,6 @@
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
   import { deploymentAuthorityRows, type AuthorityRow } from "$lib/authority_console";
-  import {
-    pruneExpiredHealthInstances,
-    summarizeHealthServices,
-    upsertHealthInstance,
-    type HealthInstanceView,
-    type HealthServiceView,
-  } from "../../../../lib/health_events.ts";
   import { errorMessage, formatDate } from "../../../../lib/format";
   import { getTrellis } from "../../../../lib/trellis";
 
@@ -33,6 +25,7 @@
   type CatalogContract = TrellisCatalogOutput["catalog"]["contracts"][number];
   type DeploymentAuthority = Parameters<typeof deploymentAuthorityRows>[0][number];
   type ContractRef = { contractId: string; digest: string };
+  type HealthParticipant = HealthQueryOutput["entries"][number];
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type CoreRequest = {
     (method: "Trellis.Catalog", input: Record<string, never>): RpcTakeable<TrellisCatalogOutput>;
@@ -45,8 +38,7 @@
   const trellis = getTrellis();
   const coreRequest = trellis.request.bind(trellis) as CoreRequest;
   const authorityRequest = trellis.request.bind(trellis) as AuthorityRequest;
-  const STALE_REFRESH_MS = 5_000;
-  const authorityPlanPreviewLimit = 10;
+  const RPC_TIMEOUT_MS = 10_000;
 
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -57,11 +49,9 @@
   let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
   let pendingAuthorityPlans = $state.raw<DeploymentAuthorityPlan[]>([]);
   let catalogContracts = $state.raw<CatalogContract[]>([]);
-  let healthInstances = $state.raw<Record<string, HealthInstanceView>>({});
-  let now = $state(Date.now());
+  let healthParticipants = $state.raw<HealthParticipant[]>([]);
   let search = $state("");
 
-  const healthServices = $derived(summarizeHealthServices(healthInstances, now));
   const serviceDeploymentIds = $derived(new Set(deployments.map((deployment) => deployment.deploymentId)));
   const serviceAuthorityRows = $derived.by(() =>
     deploymentAuthorityRows(deploymentAuthorities)
@@ -82,25 +72,18 @@
     return counts;
   });
 
-  function contractRefsForHealthService(service: HealthServiceView | null): ContractRef[] {
-    const refs: ContractRef[] = [];
-    for (const instance of service?.instances ?? []) {
-      const id = instance.contractId.trim();
-      const digest = instance.contractDigest.trim();
-      if (!id || !digest) continue;
-      const exists = refs.some((ref) => ref.contractId === id && ref.digest === digest);
-      if (!exists) refs.push({ contractId: id, digest });
-    }
-    return refs;
+  function contractRefsForHealthService(service: HealthParticipant | null): ContractRef[] {
+    return service?.contractDigests.map((digest) => ({
+      contractId: service.contractId,
+      digest,
+    })) ?? [];
   }
 
-  function healthServiceForDeployment(deploymentId: string, serviceInstances: ServiceInstance[], services: HealthServiceView[]): HealthServiceView | null {
-    const byServiceName = services.find((service) => service.serviceName === deploymentId);
-    if (byServiceName) return byServiceName;
-    const instanceIds = serviceInstances.map((instance) => instance.instanceId);
-    const byRuntimeInstance = services.find((service) => service.instances.some((instance) => instanceIds.includes(instance.instanceId)));
-    if (byRuntimeInstance) return byRuntimeInstance;
-    return null;
+  function healthServiceForDeployment(deploymentId: string): HealthParticipant | null {
+    return healthParticipants.find((participant) =>
+      participant.participantKind === "service" &&
+      participant.deploymentIds.includes(deploymentId)
+    ) ?? null;
   }
 
   function statusLabel(status: string): string {
@@ -125,8 +108,8 @@
     return "bg-base-content/30";
   }
 
-  function formatSeenAt(value?: number): string {
-    return value ? formatDate(new Date(value).toISOString()) : "-";
+  function formatSeenAt(value?: string): string {
+    return value ? formatDate(value) : "-";
   }
 
   function objectRecord(value: unknown): Record<string, unknown> | null {
@@ -166,7 +149,7 @@
         trellis.request("Auth.Deployments.List", { kind: "service", limit: 500, offset: 0 }).take(),
         trellis.request("Auth.ServiceInstances.List", { limit: 500, offset: 0 }).take(),
         authorityRequest("Auth.DeploymentAuthority.List", { kind: "service", limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.Plans.List", { kind: "service", state: "pending", limit: authorityPlanPreviewLimit, offset: 0 }).take(),
+        authorityRequest("Auth.DeploymentAuthority.Plans.List", { kind: "service", state: "pending", limit: 500, offset: 0 }).take(),
         coreRequest("Trellis.Catalog", {}).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
@@ -190,42 +173,49 @@
     }
   }
 
-  function ingestHeartbeat(heartbeat: HealthHeartbeat) {
-    const receivedAt = Date.now();
-    healthInstances = upsertHealthInstance(pruneExpiredHealthInstances(healthInstances, receivedAt), heartbeat, receivedAt);
-    now = receivedAt;
-  }
-
-  function handleHeartbeat(heartbeat: HealthHeartbeat) {
-    ingestHeartbeat(heartbeat);
-    return ok(undefined);
+  async function loadHealth(): Promise<void> {
+    const result = await trellis.request(
+      "Health.Query",
+      { participantKinds: ["service"], limit: 200, offset: 0 },
+      { timeout: RPC_TIMEOUT_MS },
+    ).take();
+    if (isErr(result)) {
+      subscriptionError = errorMessage(result);
+      return;
+    }
+    healthParticipants = result.entries;
+    subscriptionError = null;
   }
 
   onMount(() => {
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      const currentTime = Date.now();
-      healthInstances = pruneExpiredHealthInstances(healthInstances, currentTime);
-      now = currentTime;
-    }, STALE_REFRESH_MS);
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
     void load();
+    void loadHealth();
     void (async () => {
       try {
-        const result = await trellis.event.health.heartbeat.listen(handleHeartbeat, {}, {
-          mode: "ephemeral",
-          replay: "new",
-          signal: controller.signal,
-        });
-        if (result.isErr()) subscriptionError = errorMessage(result.error);
+        const result = await trellis.feed.health.watch(
+          { participantKinds: ["service"] },
+          { signal: controller.signal },
+        ).take();
+        if (isErr(result)) {
+          subscriptionError = errorMessage(result);
+          return;
+        }
+        for await (const event of result) {
+          if (event.type === "ready") continue;
+          if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => void loadHealth(), 250);
+        }
       } catch (cause) {
-        subscriptionError = errorMessage(cause);
+        if (!controller.signal.aborted) subscriptionError = errorMessage(cause);
       }
     })();
 
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
     };
   });
 </script>
@@ -240,7 +230,7 @@
   </PageToolbar>
 
   {#if error}<Notice variant="error">{error}</Notice>{/if}
-  {#if subscriptionError}<Notice variant="warning">Heartbeat subscription unavailable: {subscriptionError}</Notice>{/if}
+  {#if subscriptionError}<Notice variant="warning">Health projection unavailable: {subscriptionError}</Notice>{/if}
   {#if catalogError}<Notice variant="warning">Contract catalog unavailable: {catalogError}</Notice>{/if}
 
   {#if loading}
@@ -288,8 +278,8 @@
             {#each filteredDeployments as deployment (deployment.deploymentId)}
               {@const serviceInstances = instances.filter((instance) => instance.deploymentId === deployment.deploymentId)}
               {@const activeServiceInstances = serviceInstances.filter((instance) => !instance.disabled)}
-              {@const healthService = healthServiceForDeployment(deployment.deploymentId, serviceInstances, healthServices)}
-              {@const rowStatus = deployment.disabled ? "Disabled" : (healthService ? statusLabel(healthService.status) : (activeServiceInstances.length > 0 ? "Enabled" : "No instances"))}
+               {@const healthService = healthServiceForDeployment(deployment.deploymentId)}
+               {@const rowStatus = deployment.disabled ? "Disabled" : (healthService ? statusLabel(healthService.effectiveStatus) : (activeServiceInstances.length > 0 ? "Enabled" : "No instances"))}
               {@const refs = contractRefsForHealthService(healthService)}
               <tr class="hover:bg-base-200/60">
                 <td class="min-w-72">

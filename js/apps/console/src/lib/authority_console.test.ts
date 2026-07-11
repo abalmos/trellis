@@ -102,7 +102,7 @@ const healthPublishState: DeploymentAuthority["desiredState"] = {
     surfaces: [{
       contractId: "trellis.health@v1",
       kind: "event",
-      name: "Health.Heartbeat",
+      name: "Health.StatusChanged",
       action: "publish",
       required: true,
     }],
@@ -114,7 +114,7 @@ const healthPublishState: DeploymentAuthority["desiredState"] = {
   surfaces: [{
     contractId: "trellis.health@v1",
     kind: "event",
-    name: "Health.Heartbeat",
+    name: "Health.StatusChanged",
     action: "publish",
   }],
 };

@@ -338,10 +338,10 @@ Rules:
   disconnect, reconnect attempts, reconnect success, stale connections, and
   connection errors should each log a distinct message so operators can tell
   whether the service is recovering or stuck
-- when the connected contract uses the shared `Health.Heartbeat` event,
-  `TrellisService.connect(...)` publishes baseline heartbeats automatically and
-  service code may enrich them through `service.health.setInfo(...)` and
-  `service.health.add(...)`
+- `TrellisService.connect(...)` publishes baseline samples automatically through
+  the private health transport, using its bootstrap-authorized deployment and
+  instance identity; service code may enrich them through
+  `service.health.setInfo(...)` and `service.health.add(...)`
 - health heartbeats refresh freshness and operator-visible status only for the
   already accepted matching implementation offer; they must not create offers or
   change the offered digest

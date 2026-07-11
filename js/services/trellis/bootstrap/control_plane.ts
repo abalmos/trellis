@@ -2,19 +2,17 @@ import {
   digestContractManifest,
   type TrellisContractV1,
 } from "@qlever-llc/trellis/contracts";
+import { CONTRACT as trellisHealthContract } from "@qlever-llc/trellis/sdk/health";
 import { CONTRACT as trellisJobsContract } from "@qlever-llc/trellis/sdk/jobs";
 
+import { createServiceLookup } from "../auth/admin/service_lookup.ts";
 import {
   startAuthCallout,
   startDisconnectCleanup,
 } from "../auth/callout/callout.ts";
-import { CONTRACT as trellisAuthContract } from "../contracts/trellis_auth.ts";
-import { CONTRACT as trellisCoreContract } from "../contracts/trellis_core.ts";
-import { CONTRACT as trellisHealthContract } from "../contracts/trellis_health.ts";
-import { CONTRACT as trellisStateContract } from "../contracts/trellis_state.ts";
-import type { ContractsModule } from "../catalog/runtime.ts";
-import { createNatsAuthorityPhysicalResourceManager } from "../catalog/resources.ts";
-import type { SqlContractStorageRepository } from "../catalog/storage.ts";
+import { createAuthorityReconciler } from "../auth/reconciliation/authority_reconciler.ts";
+import { materializeAcceptedOfferNatsGrants } from "../auth/register.ts";
+import type { AuthRuntimeDeps } from "../auth/runtime_deps.ts";
 import type {
   SqlAuthorityReconciliationRepository,
   SqlCapabilityGroupRepository,
@@ -28,11 +26,13 @@ import type {
   SqlSessionRepository,
   SqlUserProjectionRepository,
 } from "../auth/storage.ts";
-import type { AuthRuntimeDeps } from "../auth/runtime_deps.ts";
-import { createServiceLookup } from "../auth/admin/service_lookup.ts";
-import { materializeAcceptedOfferNatsGrants } from "../auth/register.ts";
-import { createAuthorityReconciler } from "../auth/reconciliation/authority_reconciler.ts";
+import { createNatsAuthorityPhysicalResourceManager } from "../catalog/resources.ts";
+import type { ContractsModule } from "../catalog/runtime.ts";
+import type { SqlContractStorageRepository } from "../catalog/storage.ts";
 import type { Config } from "../config.ts";
+import { CONTRACT as trellisAuthContract } from "../contracts/trellis_auth.ts";
+import { CONTRACT as trellisCoreContract } from "../contracts/trellis_core.ts";
+import { CONTRACT as trellisStateContract } from "../contracts/trellis_state.ts";
 
 type BuiltinContract = { digest: string; contract: TrellisContractV1 };
 

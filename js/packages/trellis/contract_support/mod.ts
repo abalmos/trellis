@@ -1134,16 +1134,6 @@ type BaselineStateApi = {
   subjects: {};
 };
 
-type BaselineHealthApi = {
-  rpc: {};
-  operations: {};
-  events: {
-    "Health.Heartbeat": EventDesc<Schema<Record<string, unknown>>>;
-  };
-  feeds: {};
-  subjects: {};
-};
-
 export type ContractApiViews<
   TOwnedApi extends ApiShape,
   TUsedApi extends ApiShape,
@@ -1435,7 +1425,6 @@ type BuiltRpcDesc = {
 
 const TRELLIS_AUTH_CONTRACT_ID = "trellis.auth@v1";
 const TRELLIS_STATE_CONTRACT_ID = "trellis.state@v1";
-const TRELLIS_HEALTH_CONTRACT_ID = "trellis.health@v1";
 
 const BASELINE_AUTH_RPC_CALL = [
   "Auth.Sessions.Me",
@@ -1447,8 +1436,6 @@ const BASELINE_STATE_RPC_CALL = [
   "State.Delete",
   "State.List",
 ] as const;
-const BASELINE_HEALTH_EVENTS_PUBLISH = ["Health.Heartbeat"] as const;
-
 const UnknownRuntimeSchema = schema(Type.Unknown());
 
 function typedUnknownRuntimeSchema<T>(): Schema<T> {
@@ -1463,17 +1450,6 @@ function trellisRpcDesc<TInput, TOutput>(
     input: typedUnknownRuntimeSchema<TInput>(),
     output: typedUnknownRuntimeSchema<TOutput>(),
     callerCapabilities: [],
-  };
-}
-
-function trellisEventDesc<TEvent>(
-  name: string,
-): EventDesc<Schema<TEvent>> {
-  return {
-    subject: eventSubject(name, "v1", undefined),
-    event: typedUnknownRuntimeSchema<TEvent>(),
-    publishCapabilities: [],
-    subscribeCapabilities: [],
   };
 }
 
@@ -1511,18 +1487,6 @@ const BASELINE_STATE_API: BaselineStateApi = {
   },
   operations: {},
   events: {},
-  feeds: {},
-  subjects: {},
-};
-
-const BASELINE_HEALTH_API: BaselineHealthApi = {
-  rpc: {},
-  operations: {},
-  events: {
-    "Health.Heartbeat": trellisEventDesc<Record<string, unknown>>(
-      "Health.Heartbeat",
-    ),
-  },
   feeds: {},
   subjects: {},
 };
@@ -1742,19 +1706,8 @@ type ImplicitStateApiForSource<T> = [StateFromSource<T>] extends [undefined]
   ? EmptyApi
   : BaselineStateApi;
 
-type ImplicitHealthApiForSource<T> = T extends {
-  kind: infer TKind;
-  id: infer TId;
-} ? TId extends "trellis.health@v1" ? EmptyApi
-  : TKind extends "service" | "device" ? BaselineHealthApi
-  : EmptyApi
-  : EmptyApi;
-
 type ImplicitTrellisApiFromSource<T> = T extends { kind: infer TKind }
-  ? MergeApis<
-    MergeApis<ImplicitAuthApiForKind<TKind>, ImplicitStateApiForSource<T>>,
-    ImplicitHealthApiForSource<T>
-  >
+  ? MergeApis<ImplicitAuthApiForKind<TKind>, ImplicitStateApiForSource<T>>
   : EmptyApi;
 
 export type UsedApiFromSource<T extends { uses?: unknown }> = MergeApis<
@@ -5085,17 +5038,6 @@ function deriveImplicitTrellisUses(source: DefineContractSource): Record<
       TRELLIS_STATE_CONTRACT_ID,
       { rpc: { call: [...BASELINE_STATE_RPC_CALL] } },
       BASELINE_STATE_API,
-    );
-  }
-
-  if (
-    (source.kind === "service" || source.kind === "device") &&
-    source.id !== TRELLIS_HEALTH_CONTRACT_ID
-  ) {
-    uses.health = baselineUse(
-      TRELLIS_HEALTH_CONTRACT_ID,
-      { events: { publish: [...BASELINE_HEALTH_EVENTS_PUBLISH] } },
-      BASELINE_HEALTH_API,
     );
   }
 

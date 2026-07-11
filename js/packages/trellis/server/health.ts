@@ -9,10 +9,10 @@
  */
 
 import type { JsonValue } from "../contracts.ts";
+import type { HealthHeartbeatSample } from "../sdk/_generated/health/types.ts";
 import { ulid } from "ulid";
 
 type MaybePromise<T> = T | Promise<T>;
-type HealthStatus = "healthy" | "unhealthy" | "degraded";
 
 /**
  * Result of a single health check.
@@ -49,28 +49,9 @@ export type ServiceHealthInfoFn = () => MaybePromise<
   ServiceHealthInfo | undefined
 >;
 
-export type HealthHeartbeat = {
-  service: {
-    name: string;
-    kind: "service" | "device";
-    instanceId: string;
-    contractId: string;
-    contractDigest: string;
-    startedAt: string;
-    publishIntervalMs: number;
-    runtime: "deno" | "node" | "rust" | "unknown";
-    runtimeVersion?: string;
-    version?: string;
-    info?: Record<string, JsonValue>;
-  };
-  status: HealthStatus;
-  summary?: string;
-  checks: HealthCheckResult[];
-};
-
 function summarizeHealthStatus(
   results: readonly Pick<HealthCheckResult, "status">[],
-): HealthStatus {
+): HealthHeartbeatSample["reportedStatus"] {
   const allOk = results.every((r) => r.status === "ok");
   const anyOk = results.some((r) => r.status === "ok");
   return allOk ? "healthy" : anyOk ? "degraded" : "unhealthy";
@@ -107,7 +88,7 @@ function annotateServiceHealthCheck(
 }
 
 function detectRuntime(): {
-  runtime: HealthHeartbeat["service"]["runtime"];
+  runtime: HealthHeartbeatSample["participant"]["runtime"];
   runtimeVersion?: string;
 } {
   const maybeDeno = Reflect.get(globalThis, "Deno") as
@@ -169,10 +150,10 @@ export async function runAllServiceHealthChecks(
   );
 }
 
-/** Builds a `Health.Heartbeat` event payload from service metadata and checks. */
-export function createHealthHeartbeat(args: {
+/** Builds a private health transport sample from participant metadata and checks. */
+export function createHealthHeartbeatSample(args: {
   serviceName: string;
-  kind?: HealthHeartbeat["service"]["kind"];
+  kind?: HealthHeartbeatSample["participant"]["kind"];
   instanceId: string;
   contractId: string;
   contractDigest: string;
@@ -180,12 +161,16 @@ export function createHealthHeartbeat(args: {
   publishIntervalMs: number;
   checks: HealthCheckResult[];
   info?: ServiceHealthInfo;
-}): HealthHeartbeat {
+}): HealthHeartbeatSample {
   const runtime = detectRuntime();
   const summary = summarizeHealthChecks(args.checks);
 
   return {
-    service: {
+    sample: {
+      id: ulid(),
+      time: new Date().toISOString(),
+    },
+    participant: {
       name: args.serviceName,
       kind: args.kind ?? "service",
       instanceId: args.instanceId,
@@ -200,16 +185,16 @@ export function createHealthHeartbeat(args: {
       ...(args.info?.version ? { version: args.info.version } : {}),
       ...(args.info?.info ? { info: args.info.info } : {}),
     },
-    status: summarizeHealthStatus(args.checks),
+    reportedStatus: summarizeHealthStatus(args.checks),
     ...(summary ? { summary } : {}),
     checks: args.checks,
   };
 }
 
-/** Mutable health heartbeat state owned by a connected service or device. */
+/** Mutable health sample state owned by a connected service or device. */
 export class ServiceHealth {
   readonly serviceName: string;
-  readonly kind: HealthHeartbeat["service"]["kind"];
+  readonly kind: HealthHeartbeatSample["participant"]["kind"];
   readonly instanceId: string;
   readonly contractId: string;
   readonly contractDigest: string;
@@ -221,7 +206,7 @@ export class ServiceHealth {
 
   constructor(args: {
     serviceName: string;
-    kind?: HealthHeartbeat["service"]["kind"];
+    kind?: HealthHeartbeatSample["participant"]["kind"];
     instanceId?: string;
     contractId: string;
     contractDigest: string;
@@ -265,10 +250,10 @@ export class ServiceHealth {
     );
   }
 
-  async heartbeat(): Promise<HealthHeartbeat> {
+  async sample(): Promise<HealthHeartbeatSample> {
     const checks = await this.checks();
     const info = this.#info ? await this.#info() : undefined;
-    return createHealthHeartbeat({
+    return createHealthHeartbeatSample({
       serviceName: this.serviceName,
       kind: this.kind,
       instanceId: this.instanceId,

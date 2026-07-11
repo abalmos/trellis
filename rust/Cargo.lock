@@ -4148,17 +4148,23 @@ version = "0.11.0"
 dependencies = [
  "async-nats",
  "axum",
+ "base64",
  "bytes",
  "clap",
+ "futures-util",
  "refinery",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "toml",
  "tower",
+ "tracing",
+ "trellis-rs",
+ "ulid",
 ]
 
 [[package]]

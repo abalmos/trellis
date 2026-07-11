@@ -8,9 +8,8 @@
  */
 
 export {
-  createHealthHeartbeat,
+  createHealthHeartbeatSample,
   type HealthCheckResult,
-  type HealthHeartbeat,
   runAllServiceHealthChecks,
   runServiceHealthCheck,
   ServiceHealth,
@@ -21,10 +20,12 @@ export {
 } from "../server/health.ts";
 export {
   HealthCheckResultSchema,
-  HealthHeartbeatSchema,
-  HealthHeartbeatServiceSchema,
   HealthInfoSchema,
 } from "../server/health_schemas.ts";
+export {
+  type HealthHeartbeatSample,
+  HealthHeartbeatSampleSchema,
+} from "../health.ts";
 export {
   type HealthCheckHandler,
   type HealthInfoHandler,

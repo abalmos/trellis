@@ -28,13 +28,6 @@ const baseSchemas = {
   StringValue: StringSchema,
 } as const;
 
-function baselineHealthUse() {
-  return {
-    contract: "trellis.health@v1",
-    events: { publish: ["Health.Heartbeat"] },
-  };
-}
-
 function requiredUses(
   uses: ContractUses | undefined,
 ): ContractUses["required"] | undefined {
@@ -203,10 +196,6 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
           rpc: { call: ["Auth.Sessions.Me"] },
           events: { subscribe: ["Auth.Connections.Opened"] },
         },
-        health: {
-          contract: "trellis.health@v1",
-          events: { publish: ["Health.Heartbeat"] },
-        },
       },
     },
     rpc: {
@@ -267,7 +256,7 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
   });
 });
 
-Deno.test("service contracts automatically use baseline health heartbeat", () => {
+Deno.test("service contracts do not model runtime heartbeats as contract uses", () => {
   const contract = defineServiceContract({}, () => ({
     id: "baseline-health.service@v1",
     displayName: "Baseline Health Service",
@@ -275,23 +264,14 @@ Deno.test("service contracts automatically use baseline health heartbeat", () =>
       "Verify service contracts publish runtime heartbeat by default.",
   }));
 
-  assertEquals(
-    requiredUses(contract.CONTRACT.uses)?.health,
-    baselineHealthUse(),
-  );
-  assertEquals(
-    (contract.API.used.events as Record<string, { subject: string }>)[
-      "Health.Heartbeat"
-    ].subject,
-    "events.v1.Health.Heartbeat",
-  );
+  assertEquals(contract.CONTRACT.uses, undefined);
 });
 
 Deno.test("health contract does not automatically use itself", () => {
   const contract = defineServiceContract({}, () => ({
     id: "trellis.health@v1",
     displayName: "Trellis Health",
-    description: "Expose shared Trellis heartbeat events.",
+    description: "Expose shared Trellis health projection APIs.",
   }));
 
   assertEquals(contract.CONTRACT.uses, undefined);
@@ -301,17 +281,17 @@ function typecheckHealthContractDoesNotInferSelfUse(): void {
   const contract = defineServiceContract({}, () => ({
     id: "trellis.health@v1",
     displayName: "Trellis Health",
-    description: "Expose shared Trellis heartbeat events.",
+    description: "Expose shared Trellis health projection APIs.",
   }));
 
   // @ts-expect-error health contract should not infer an implicit self-use.
-  const invalid = contract.API.used.events["Health.Heartbeat"];
+  const invalid = contract.API.used.events["Health.StatusChanged"];
   void invalid;
 }
 
 void typecheckHealthContractDoesNotInferSelfUse;
 
-Deno.test("device contracts keep implicit auth state and baseline health", () => {
+Deno.test("device contracts keep implicit auth and state uses", () => {
   const contract = defineDeviceContract(
     { schemas: baseSchemas },
     (ref) => ({
@@ -335,30 +315,23 @@ Deno.test("device contracts keep implicit auth state and baseline health", () =>
     requiredUses(contract.CONTRACT.uses)?.state?.contract,
     "trellis.state@v1",
   );
-  assertEquals(
-    requiredUses(contract.CONTRACT.uses)?.health,
-    baselineHealthUse(),
-  );
 });
 
-Deno.test("explicit health use preserves selections and gains baseline heartbeat", () => {
+Deno.test("explicit health use preserves only selected public surfaces", () => {
   const contract = defineServiceContract({}, () => ({
     id: "explicit-health.service@v1",
     displayName: "Explicit Health Service",
-    description: "Verify explicit health use merges with baseline heartbeat.",
+    description: "Verify explicit health use remains explicit.",
     uses: {
       required: {
-        health: health.use({ events: { subscribe: ["Health.Heartbeat"] } }),
+        health: health.use({ rpc: { call: ["Health.Query"] } }),
       },
     },
   }));
 
   assertEquals(requiredUses(contract.CONTRACT.uses)?.health, {
     contract: "trellis.health@v1",
-    events: {
-      publish: ["Health.Heartbeat"],
-      subscribe: ["Health.Heartbeat"],
-    },
+    rpc: { call: ["Health.Query"] },
   });
 });
 
@@ -1475,7 +1448,6 @@ Deno.test("grouped required uses emit grouped manifest", () => {
         rpc: { call: ["Dependency.Read"] },
         events: { subscribe: ["Dependency.Changed"] },
       },
-      health: baselineHealthUse(),
     },
   });
   assertEquals(
@@ -1560,7 +1532,6 @@ Deno.test("grouped optional uses normalize selectors and affect digest", () => {
         contract: "grouped.optional-dependency@v1",
         rpc: { call: ["Dependency.Read"] },
       },
-      health: baselineHealthUse(),
     },
     optional: {
       optionalDependency: {

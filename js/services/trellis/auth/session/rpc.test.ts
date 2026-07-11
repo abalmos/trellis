@@ -265,7 +265,7 @@ Deno.test("Auth.Events.Validate accepts retained service publisher session", asy
   const auth = await createAuth({
     sessionKeySeed: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))),
   });
-  const subject = "events.v1.Health.Heartbeat";
+  const subject = "events.v1.Health.StatusChanged";
   const eventTime = "2026-04-26T00:00:02.000Z";
   const signed = await eventProof({
     sessionKey: auth.sessionKey,

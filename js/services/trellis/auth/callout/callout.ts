@@ -12,6 +12,7 @@ import type {
 } from "@qlever-llc/trellis/contracts";
 import { AsyncResult, isErr } from "@qlever-llc/result";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
+import { healthHeartbeatSubject } from "@qlever-llc/trellis/health";
 import type { StaticDecode } from "typebox";
 import { Value } from "typebox/value";
 
@@ -1648,6 +1649,18 @@ export function startAuthCallout(
     const delegatedSubscribe = session.type === "service"
       ? []
       : session.delegatedSubscribeSubjects;
+    const heartbeatPublish =
+      (session.type === "service" || session.type === "device") &&
+        session.contractId && session.contractDigest
+        ? [healthHeartbeatSubject({
+          sessionKey,
+          participantKind: session.type,
+          contractId: session.contractId,
+          contractDigest: session.contractDigest,
+          deploymentId: session.deploymentId,
+          instanceId: session.instanceId,
+        })]
+        : [];
     const permissions = buildAuthCalloutPermissions({
       publishAllow: [
         ...(isService ? servicePublishSubjects : delegatedPublish),
@@ -1662,6 +1675,7 @@ export function startAuthCallout(
           ? servicePlatformPublishSubjects(effectiveCapabilities)
           : []),
         ...resourcePermissions.publish,
+        ...heartbeatPublish,
       ],
       subscribeAllow: isService
         ? [

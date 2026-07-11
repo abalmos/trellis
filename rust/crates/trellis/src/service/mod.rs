@@ -67,6 +67,15 @@ pub use transfer::{
     TRANSFER_SEQUENCE_HEADER,
 };
 
+/// Run one router over multiple exact NATS subjects.
+pub async fn run_router_service(
+    client: async_nats::Client,
+    subjects: &[&str],
+    router: Router,
+) -> Result<(), ServerError> {
+    runtime::run_multi_subject_service(client, subjects, router).await
+}
+
 #[doc(hidden)]
 pub mod internal {
     pub use super::connected::{

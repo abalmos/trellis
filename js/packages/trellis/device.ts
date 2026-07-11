@@ -44,6 +44,7 @@ import {
   selectRuntimeTransportServers,
 } from "./runtime_transport.ts";
 import { ServiceHealth } from "./health.ts";
+import { publishHealthHeartbeatSample } from "./health_transport.ts";
 import { type RuntimeStateStoresForContract, Trellis } from "./trellis.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
 import { TransferError, TransportError } from "./errors/index.ts";
@@ -924,10 +925,6 @@ export async function connectDeviceWithDeps<
     ...(nc.isClosed() ? { summary: "NATS connection closed" } : {}),
   }));
 
-  const heartbeatEventEnabled = Boolean(
-    (args.contract.API.trellis.events as Record<string, unknown> | undefined)
-      ?.["Health.Heartbeat"],
-  );
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let publishingHeartbeat = false;
   const stopHeartbeat = () => {
@@ -937,29 +934,36 @@ export async function connectDeviceWithDeps<
     }
   };
   const publishHeartbeat = async (): Promise<void> => {
-    if (!heartbeatEventEnabled || publishingHeartbeat) {
+    if (publishingHeartbeat) {
       return;
     }
 
     publishingHeartbeat = true;
     try {
-      const heartbeat = await health.heartbeat();
-      await trellis.publish(
-        "Health.Heartbeat" as never,
-        heartbeat as never,
-      );
+      await publishHealthHeartbeatSample({
+        nc,
+        identity: {
+          sessionKey: identity.publicIdentityKey,
+          participantKind: "device",
+          contractId: connectInfo.contractId,
+          contractDigest: connectInfo.contractDigest,
+          deploymentId: connectInfo.deploymentId,
+          instanceId: connectInfo.instanceId,
+        },
+        sample: await health.sample(),
+      });
+    } catch (error) {
+      log.warn({ error }, "Failed to build or publish health heartbeat");
     } finally {
       publishingHeartbeat = false;
     }
   };
 
-  if (heartbeatEventEnabled) {
-    await publishHeartbeat();
-    heartbeatTimer = setInterval(() => {
-      void publishHeartbeat();
-    }, health.publishIntervalMs);
-    void nc.closed().finally(stopHeartbeat);
-  }
+  await publishHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    void publishHeartbeat();
+  }, health.publishIntervalMs);
+  void nc.closed().finally(stopHeartbeat);
 
   return {
     request: trellis.request.bind(trellis),

@@ -634,14 +634,11 @@ Rules:
 - a service contract MUST NOT receive cross-contract runtime permissions unless
   that access is declared in `uses` or is a Trellis-defined baseline surface
   automatically available to that participant kind
-- connected service and device manifests receive the Trellis-defined baseline
-  `health` use automatically, targeting `trellis.health@v1` with
-  `events.publish: ["Health.Heartbeat"]`; `trellis.health@v1` itself is excluded
-  from this self-use
-- if a service or device author explicitly declares `uses.required.health` or
-  `uses.optional.health` for `trellis.health@v1`, authoring helpers merge the
-  baseline heartbeat publish selector into that alias rather than requiring a
-  second alias
+- connected service and device sessions receive one exact private heartbeat
+  transport publish subject from Auth; this runtime protocol grant is not a
+  contract `uses` dependency and never adds `Health.Heartbeat` to a manifest
+- consumers that query projected health explicitly declare the
+  `trellis.health@v1` RPC and feed surfaces they use
 - manifest validation is structural and MAY accept referenced contracts that are
   not active yet, but authority planning, reconciliation, and runtime
   authorization MUST NOT derive dependency surfaces from inactive historical

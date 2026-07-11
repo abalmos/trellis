@@ -83,11 +83,6 @@ export const contract = defineAppContract(
             call: ["Trellis.Catalog", "Trellis.Contract.Get"],
           },
         }),
-        health: trellisHealth.use({
-          events: {
-            subscribe: ["Health.Heartbeat"],
-          },
-        }),
         jobs: trellisJobs.use({
           rpc: {
             call: [
@@ -120,6 +115,14 @@ export const contract = defineAppContract(
           },
           feeds: {
             subscribe: ["EventLog.Watch"],
+          },
+        }),
+        health: trellisHealth.use({
+          rpc: {
+            call: ["Health.Query", "Health.Inspect", "Health.Metrics"],
+          },
+          feeds: {
+            subscribe: ["Health.Watch"],
           },
         }),
       },

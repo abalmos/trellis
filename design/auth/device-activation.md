@@ -518,10 +518,10 @@ Rules:
   connections, and connection errors
 - device runtime helpers SHOULD fetch current connect info on startup rather
   than persisting stale connect info across restarts
-- when the connected device contract uses the shared `Health.Heartbeat` event,
-  the TypeScript runtime connect helper publishes baseline heartbeats
-  automatically and exposes the same callback-based `health` helper surface used
-  by services for enriching those heartbeats
+- the TypeScript runtime connect helper publishes baseline samples automatically
+  through its exact Auth-granted private health subject and exposes the same
+  callback-based `health` helper surface used by services for enriching those
+  samples
 - Deno device runtimes MAY use the high-level device-user authority helper after
   registration when they need user-delegated authority; runtime connectivity
   itself is still controlled by lifecycle checks, deployment authority, and

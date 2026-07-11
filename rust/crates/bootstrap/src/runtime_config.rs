@@ -29,6 +29,7 @@ pub fn render_trellis_config(options: &TrellisBootstrapOptions) -> String {
 pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfig {
     RuntimeConfig {
         instance_name: Some(options.runtime.name.clone()),
+        event_session_seed_file: Some(PathBuf::from("../session.seed")),
         http: Some(HttpConfig {
             port: Some(options.runtime.trellis_port),
             public_origin: Some(options.runtime.public_origin.clone()),
@@ -82,6 +83,8 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
         platform: Some(SubsystemConfig {
             storage: Some(sqlite_storage("./data/platform.sqlite")),
             history_retention_days: None,
+            transport_retention_hours: None,
+            transport_max_bytes: None,
             retention_days: None,
             ttl_ms: Some(PlatformTtlConfig {
                 sessions: Some(86_400_000),
@@ -95,18 +98,24 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
         jobs: Some(SubsystemConfig {
             storage: Some(sqlite_storage("./data/jobs.sqlite")),
             history_retention_days: None,
+            transport_retention_hours: None,
+            transport_max_bytes: None,
             retention_days: None,
             ttl_ms: None,
         }),
         health: Some(SubsystemConfig {
             storage: Some(sqlite_storage("./data/health.sqlite")),
             history_retention_days: Some(30),
+            transport_retention_hours: Some(24),
+            transport_max_bytes: Some(1_073_741_824),
             retention_days: None,
             ttl_ms: None,
         }),
         eventlog: Some(SubsystemConfig {
             storage: Some(sqlite_storage("./data/eventlog.sqlite")),
             history_retention_days: None,
+            transport_retention_hours: None,
+            transport_max_bytes: None,
             retention_days: Some(7),
             ttl_ms: None,
         }),

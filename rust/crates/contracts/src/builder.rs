@@ -173,17 +173,6 @@ impl ContractManifestBuilder {
     }
 
     fn apply_baseline_uses(&mut self) -> Result<(), ContractsError> {
-        if matches!(
-            self.manifest.kind,
-            ContractKind::Service | ContractKind::Device
-        ) && self.manifest.id != "trellis.health@v1"
-        {
-            merge_use_ref(
-                &mut self.manifest.uses,
-                "health",
-                use_contract("trellis.health@v1").with_event_publish(["Health.Heartbeat"]),
-            )?;
-        }
         Ok(())
     }
 
@@ -389,82 +378,6 @@ fn assert_capability_list_external(
                 context: context.to_string(),
                 capability: capability.clone(),
             });
-        }
-    }
-    Ok(())
-}
-
-fn add_unique_strings(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
-    for value in values {
-        if !target.contains(&value) {
-            target.push(value);
-        }
-    }
-}
-
-fn merge_use_ref(
-    uses: &mut crate::ContractUses,
-    alias: impl Into<String>,
-    use_ref: ContractUseRef,
-) -> Result<(), ContractsError> {
-    merge_use_ref_map(uses.required_mut(), alias, use_ref)
-}
-
-fn merge_use_ref_map(
-    uses: &mut std::collections::BTreeMap<String, ContractUseRef>,
-    alias: impl Into<String>,
-    use_ref: ContractUseRef,
-) -> Result<(), ContractsError> {
-    let alias = alias.into();
-    let Some(existing) = uses.get_mut(&alias) else {
-        uses.insert(alias, use_ref);
-        return Ok(());
-    };
-
-    if existing.contract != use_ref.contract {
-        return Err(ContractsError::ContractUseConflict {
-            alias,
-            existing_contract: existing.contract.clone(),
-            new_contract: use_ref.contract,
-        });
-    }
-
-    if let Some(rpc) = use_ref.rpc {
-        let existing_rpc = existing.rpc.get_or_insert_with(ContractUseRpc::default);
-        if let Some(next_call) = rpc.call {
-            let call = existing_rpc.call.get_or_insert_with(Vec::new);
-            add_unique_strings(call, next_call);
-        }
-    }
-
-    if let Some(operations) = use_ref.operations {
-        let existing_operations = existing
-            .operations
-            .get_or_insert_with(ContractUseOperation::default);
-        if let Some(next_call) = operations.call {
-            let call = existing_operations.call.get_or_insert_with(Vec::new);
-            add_unique_strings(call, next_call);
-        }
-    }
-
-    if let Some(events) = use_ref.events {
-        let existing_events = existing
-            .events
-            .get_or_insert_with(ContractUsePubSub::default);
-        if let Some(next_publish) = events.publish {
-            let publish = existing_events.publish.get_or_insert_with(Vec::new);
-            add_unique_strings(publish, next_publish);
-        }
-        if let Some(next_subscribe) = events.subscribe {
-            let subscribe = existing_events.subscribe.get_or_insert_with(Vec::new);
-            add_unique_strings(subscribe, next_subscribe);
-        }
-    }
-    if let Some(feeds) = use_ref.feeds {
-        let existing_feeds = existing.feeds.get_or_insert_with(ContractUseFeed::default);
-        if let Some(next_subscribe) = feeds.subscribe {
-            let subscribe = existing_feeds.subscribe.get_or_insert_with(Vec::new);
-            add_unique_strings(subscribe, next_subscribe);
         }
     }
     Ok(())

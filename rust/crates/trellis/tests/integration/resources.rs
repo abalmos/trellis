@@ -44,14 +44,6 @@ const RESOURCES_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "resources": {
     "kv": {
       "records": {
@@ -102,7 +94,7 @@ struct ResourcesServiceContract;
 
 impl GeneratedServiceContract for ResourcesServiceContract {
     const CONTRACT_ID: &'static str = RESOURCES_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "PHtCj_5TUZkzgCVWwjKW3CP4WX44xiczn3KwUK4bqZs";
+    const CONTRACT_DIGEST: &'static str = "dAH7D3LHHELNMsQpJDYYXc20xWTC2jRvysUo3UQkq9U";
     const CONTRACT_JSON: &'static str = RESOURCES_SERVICE_CONTRACT_JSON;
 }
 

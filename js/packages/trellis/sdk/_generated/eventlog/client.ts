@@ -32,7 +32,6 @@ import type {
 import type { API, Api } from "./api.ts";
 import type * as Types from "./types.ts";
 import type * as AuthSdk from "../auth/mod.ts";
-import type * as HealthSdk from "../health/mod.ts";
 
 type EventCallback<TMessage> = {
   bivarianceHack(
@@ -86,26 +85,7 @@ export interface TrellisEventlogClient {
       ): AsyncResult<Types.EventLogQueryOutput, BaseError>;
     };
   };
-  readonly event: {
-    readonly health: {
-      heartbeat: {
-        publish(
-          event: HealthSdk.HealthHeartbeatEvent,
-        ): AsyncResult<void, ValidationError | UnexpectedError>;
-        prepare(
-          event: HealthSdk.HealthHeartbeatEvent,
-        ): Result<
-          PreparedTrellisEvent<HealthSdk.HealthHeartbeatEvent>,
-          ValidationError | UnexpectedError
-        >;
-        listen(
-          handler: EventCallback<HealthSdk.HealthHeartbeatEvent>,
-          subjectData?: Record<string, unknown>,
-          opts?: EventOpts,
-        ): AsyncResult<void, ValidationError | UnexpectedError>;
-      };
-    };
-  };
+  readonly event: {};
   readonly feed: {
     readonly eventLog: {
       watch(
@@ -122,26 +102,7 @@ export interface Service extends TrellisEventlogClient {
   readonly handle: ServiceHandle;
 }
 
-export interface ServiceEventSurface {
-  readonly health: {
-    heartbeat: {
-      publish(
-        event: HealthSdk.HealthHeartbeatEvent,
-      ): AsyncResult<void, ValidationError | UnexpectedError>;
-      prepare(
-        event: HealthSdk.HealthHeartbeatEvent,
-      ): Result<
-        PreparedTrellisEvent<HealthSdk.HealthHeartbeatEvent>,
-        ValidationError | UnexpectedError
-      >;
-      listen(
-        handler: DependencyServiceEventHandler<HealthSdk.HealthHeartbeatEvent>,
-        subjectData?: Record<string, unknown>,
-        opts?: EventOpts,
-      ): AsyncResult<void, ValidationError | UnexpectedError>;
-    };
-  };
-}
+export type ServiceEventSurface = {};
 
 export interface ServiceHandle {
   readonly rpc: {

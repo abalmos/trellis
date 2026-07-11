@@ -38,14 +38,6 @@ const FEEDS_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "feeds": {
     "Entity.Live": {
       "version": "v1",
@@ -61,7 +53,7 @@ struct FeedsServiceContract;
 
 impl trellis_rs::service::GeneratedServiceContract for FeedsServiceContract {
     const CONTRACT_ID: &'static str = FEEDS_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "qLQNm6CIyYRca0ejRThbr6v2hFx8bvtJqX89v-5UJHw";
+    const CONTRACT_DIGEST: &'static str = "qvVpkRAxOjqK8Ft6sV6Y_ZNfVtumEQwEkAF5awKgXO8";
     const CONTRACT_JSON: &'static str = FEEDS_SERVICE_CONTRACT_JSON;
 }
 

@@ -298,7 +298,7 @@ type AuthClient = Client;
 type ProviderProps = TrellisProviderProps;
 
 const authUse = auth.use({ rpc: { call: ["Auth.Sessions.Me"] } });
-const healthUse = health.use({ events: { publish: ["Health.Heartbeat"] } });
+const healthUse = health.use({ rpc: { call: ["Health.Query"] } });
 const stateUse = state.use({ rpc: { call: ["State.Get"] } });
 const rpc = API.owned.rpc;
 

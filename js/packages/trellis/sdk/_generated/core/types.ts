@@ -12,7 +12,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.core@v1" as const;
 export const CONTRACT_DIGEST =
-  "X7MYhzOix9chzsosCsRElkoRO63_O_AdncRIPHQ0FEs" as const;
+  "kgKiOaKFG18mEtNxWqh-NigshVL7xsNDTMzDI1bmDKA" as const;
 
 export type TrellisBindingsGetInput = { contractId?: string; digest?: string };
 export type TrellisBindingsGetOutput = {

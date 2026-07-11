@@ -22,7 +22,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "oJscfQceI0MPL8xIweZL22qWvZP6fSznGFqUr8yJ-VY" as const;
+  "Kdfzu18EAjSVk1UlsMKMZDgUTkTgbb3x7HihXsmiJCY" as const;
 
 export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {

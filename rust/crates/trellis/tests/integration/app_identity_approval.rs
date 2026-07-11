@@ -49,10 +49,6 @@ const SERVICE_CONTRACT_JSON: &str = r#"{
   },
   "uses": {
     "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      },
       "auth": {
         "contract": "trellis.auth@v1",
         "rpc": { "call": ["Auth.Sessions.Me"] }
@@ -74,7 +70,7 @@ struct GrantPingServiceContract;
 
 impl GeneratedServiceContract for GrantPingServiceContract {
     const CONTRACT_ID: &'static str = SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "bC6KgWVTO-8tk9jD_vSgEQ55Mfb2ri-04LTMU-M45Bg";
+    const CONTRACT_DIGEST: &'static str = "_S-nK_6ABg0LGC21T3UeH5XkTqxNmzOoSteAMIyZXJ4";
     const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
 }
 

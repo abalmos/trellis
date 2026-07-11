@@ -98,14 +98,6 @@ const RPC_SERVICE_CONTRACT_JSON: &str = r#"{
       "schema": { "schema": "EntityGetInput" }
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "rpc": {
     "Entity.Get": {
       "version": "v1",

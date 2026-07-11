@@ -1,7 +1,7 @@
 use serde_json::json;
 use trellis_contracts::{
     schema_ref, state, store, use_contract, ContractCapabilityMetadata, ContractKind,
-    ContractManifestBuilder, ContractStateKind, ContractsError, CONTRACT_FORMAT_V1,
+    ContractManifestBuilder, ContractStateKind, CONTRACT_FORMAT_V1,
 };
 
 #[test]
@@ -20,7 +20,7 @@ fn builder_minimal_manifest_defaults_format_and_validates() {
 }
 
 #[test]
-fn builder_adds_baseline_health_for_service_contracts() {
+fn builder_does_not_model_runtime_health_transport_as_a_contract_use() {
     let manifest = ContractManifestBuilder::new(
         "example.service@v1",
         "Example Service",
@@ -30,21 +30,7 @@ fn builder_adds_baseline_health_for_service_contracts() {
     .build()
     .expect("builder should produce a valid service manifest");
 
-    let health = manifest.uses.get("health").expect("baseline health use");
-    assert_eq!(health.contract, "trellis.health@v1");
-    assert_eq!(
-        health
-            .events
-            .as_ref()
-            .and_then(|events| events.publish.as_ref()),
-        Some(&vec!["Health.Heartbeat".to_string()])
-    );
-
-    let serialized = serde_json::to_value(&manifest).expect("serialize manifest");
-    assert_eq!(
-        serialized["uses"]["required"]["health"]["contract"],
-        json!("trellis.health@v1")
-    );
+    assert!(!manifest.uses.contains_key("health"));
 }
 
 #[test]
@@ -62,7 +48,7 @@ fn builder_does_not_add_baseline_health_to_health_contract_itself() {
 }
 
 #[test]
-fn builder_adds_baseline_health_for_device_contracts_with_state() {
+fn builder_does_not_add_health_contract_use_for_devices() {
     let manifest = ContractManifestBuilder::new(
         "example.device@v1",
         "Example Device",
@@ -77,11 +63,11 @@ fn builder_adds_baseline_health_for_device_contracts_with_state() {
     .build()
     .expect("builder should produce a valid device manifest");
 
-    assert!(manifest.uses.contains_key("health"));
+    assert!(!manifest.uses.contains_key("health"));
 }
 
 #[test]
-fn builder_merges_explicit_health_use_with_baseline_heartbeat() {
+fn builder_preserves_explicit_health_use_without_implicit_publish() {
     let manifest = ContractManifestBuilder::new(
         "example.explicit-health@v1",
         "Example Explicit Health",
@@ -90,7 +76,7 @@ fn builder_merges_explicit_health_use_with_baseline_heartbeat() {
     )
     .use_ref(
         "health",
-        use_contract("trellis.health@v1").with_event_subscribe(["Health.Heartbeat"]),
+        use_contract("trellis.health@v1").with_event_subscribe(["Health.StatusChanged"]),
     )
     .build()
     .expect("builder should produce a valid service manifest");
@@ -99,8 +85,11 @@ fn builder_merges_explicit_health_use_with_baseline_heartbeat() {
         .events
         .as_ref()
         .expect("health events");
-    assert_eq!(events.publish, Some(vec!["Health.Heartbeat".to_string()]));
-    assert_eq!(events.subscribe, Some(vec!["Health.Heartbeat".to_string()]));
+    assert_eq!(events.publish, None);
+    assert_eq!(
+        events.subscribe,
+        Some(vec!["Health.StatusChanged".to_string()])
+    );
 }
 
 #[test]
@@ -123,31 +112,6 @@ fn builder_preserves_event_publish_and_subscribe_on_same_use() {
     let events = manifest.uses["events"].events.as_ref().expect("events use");
     assert_eq!(events.publish, Some(vec!["Example.Changed".to_string()]));
     assert_eq!(events.subscribe, Some(vec!["Example.Changed".to_string()]));
-}
-
-#[test]
-fn builder_returns_error_for_conflicting_implicit_health_alias() {
-    let error = ContractManifestBuilder::new(
-        "example.bad-health@v1",
-        "Example Bad Health",
-        "Example bad health manifest.",
-        ContractKind::Service,
-    )
-    .use_ref("health", use_contract("example.health@v1"))
-    .build()
-    .expect_err("conflicting implicit health alias should fail");
-
-    let ContractsError::ContractUseConflict {
-        alias,
-        existing_contract,
-        new_contract,
-    } = error
-    else {
-        panic!("expected contract use conflict error");
-    };
-    assert_eq!(alias, "health");
-    assert_eq!(existing_contract, "example.health@v1");
-    assert_eq!(new_contract, "trellis.health@v1");
 }
 
 #[test]

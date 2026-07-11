@@ -822,17 +822,6 @@ fn is_runtime_owned_baseline_use(
     alias: &str,
     use_ref: &ContractUseRef,
 ) -> bool {
-    if alias == "health"
-        && use_ref.contract == "trellis.health@v1"
-        && use_ref.rpc.is_none()
-        && use_ref.operations.is_none()
-    {
-        return use_ref.events.as_ref().is_some_and(|events| {
-            events.subscribe.as_deref().unwrap_or(&[]).is_empty()
-                && events.publish.as_deref().unwrap_or(&[]) == ["Health.Heartbeat"]
-        });
-    }
-
     if alias == "state"
         && use_ref.contract == "trellis.state@v1"
         && !local.manifest.state.is_empty()
@@ -3874,25 +3863,25 @@ mod tests {
         fs::create_dir_all(&out_dir).unwrap();
         let manifest_path = write_remote_manifest(
             &out_dir,
-            "trellis.health@v1.json",
+            "example.events@v1.json",
             json!({
                 "format": "trellis.contract.v1",
-                "id": "trellis.health@v1",
-                "displayName": "Trellis Health",
-                "description": "Trellis health events.",
+                "id": "example.events@v1",
+                "displayName": "Example Events",
+                "description": "Example event-only contract.",
                 "kind": "service",
                 "schemas": {
-                    "Heartbeat": {
+                    "Updated": {
                         "type": "object",
                         "properties": { "service": { "type": "string" } },
                         "required": ["service"]
                     }
                 },
                 "events": {
-                    "Health.Heartbeat": {
+                    "Example.Updated": {
                         "version": "v1",
-                        "subject": "events.v1.Health.Heartbeat",
-                        "event": { "schema": "Heartbeat" }
+                        "subject": "events.v1.Example.Updated",
+                        "event": { "schema": "Updated" }
                     }
                 }
             }),
@@ -4212,54 +4201,6 @@ mod tests {
             CodegenRustError::MissingParticipantMappingAlias { alias, contract }
                 if alias == "auth" && contract == "trellis.auth@v1"
         ));
-
-        fs::remove_dir_all(out_dir).unwrap();
-    }
-
-    #[test]
-    fn generated_participant_facade_allows_runtime_owned_health_baseline_without_mapping() {
-        let out_dir = unique_temp_dir("participant-health-baseline-alias");
-        fs::create_dir_all(&out_dir).unwrap();
-
-        let local_manifest = write_remote_manifest(
-            &out_dir,
-            "device@v1.json",
-            json!({
-                "format": "trellis.contract.v1",
-                "id": "device@v1",
-                "displayName": "Device",
-                "description": "Device.",
-                "kind": "device",
-                "uses": {
-                    "required": {
-                        "health": {
-                            "contract": "trellis.health@v1",
-                            "events": { "publish": ["Health.Heartbeat"] }
-                        }
-                    }
-                }
-            }),
-        );
-
-        generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-            manifest_path: local_manifest,
-            out_dir: out_dir.join("facade"),
-            crate_name: "device-participant".to_string(),
-            crate_version: "0.1.0".to_string(),
-            runtime_deps: RustRuntimeDeps {
-                source: RustRuntimeSource::Registry,
-                version: "0.1.0".to_string(),
-                repo_root: None,
-            },
-            owned_sdk_crate_name: None,
-            owned_sdk_path: None,
-            alias_mappings: vec![],
-        })
-        .unwrap();
-
-        let cargo_toml = fs::read_to_string(out_dir.join("facade/Cargo.toml")).unwrap();
-        assert!(cargo_toml.contains("trellis-rs = \"0.1.0\""));
-        assert!(!out_dir.join("facade/contracts/health.json").exists());
 
         fs::remove_dir_all(out_dir).unwrap();
     }

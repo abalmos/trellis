@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 use tokio::task::JoinHandle;
+use ulid::Ulid;
 
 use crate::shutdown::StopHandle;
 use crate::storage::{RuntimeStores, StoreError};
@@ -32,6 +33,12 @@ pub enum RuntimeError {
     /// Runtime storage failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+    /// Runtime NATS connection failed.
+    #[error("runtime NATS connection failed: {0}")]
+    Nats(String),
+    /// Health subsystem setup or runtime failed.
+    #[error("health subsystem failed: {0}")]
+    Health(String),
     /// A subsystem scaffold failed to start.
     #[error("failed to start runtime subsystem {subsystem}: {reason}")]
     Subsystem {
@@ -49,6 +56,12 @@ pub enum RuntimeError {
         #[source]
         source: tokio::task::JoinError,
     },
+    /// A long-running subsystem exited without a stop request.
+    #[error("runtime subsystem {subsystem} exited unexpectedly")]
+    SubsystemExited {
+        /// Subsystem that stopped unexpectedly.
+        subsystem: SubsystemName,
+    },
 }
 
 /// Shared runtime context passed to subsystem startup scaffolds.
@@ -59,11 +72,11 @@ pub(crate) struct RuntimeContext {
     /// Runtime mode selected for this process.
     pub(crate) mode: RuntimeMode,
     /// SQLite stores opened for the selected subsystems.
-    #[expect(
-        dead_code,
-        reason = "subsystem scaffolds will consume migrated stores in follow-up runtime slices"
-    )]
     pub(crate) stores: RuntimeStores,
+    /// Trellis-account runtime NATS client shared by built-in subsystems.
+    pub(crate) trellis_nats: async_nats::Client,
+    /// Process-unique owner identity used for runtime leases.
+    pub(crate) owner_id: String,
 }
 
 /// Handle for a started subsystem scaffold.
@@ -83,25 +96,68 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     config.validate_for_mode(options.mode)?;
     let stores = RuntimeStores::from_config(&config, options.mode)?;
     stores.migrate_all()?;
+    let nats = config.resolve_nats_runtime()?;
+    let trellis_nats = async_nats::ConnectOptions::new()
+        .credentials_file(&nats.trellis_creds_path)
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?
+        .connect(&nats.servers)
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    let owner_id = format!(
+        "{}-{}",
+        config.instance_name.as_deref().unwrap_or("trellis-runtime"),
+        Ulid::new()
+    );
 
     let context = RuntimeContext {
         config,
         mode: options.mode,
         stores,
+        trellis_nats,
+        owner_id,
     };
-    let handles = start_subsystems(&context)?;
-
-    let server_result = crate::run_http_server(
+    let mut handles = start_subsystems(&context).await?;
+    let server = crate::run_http_server(
         &context.config,
         context.mode,
         crate::shutdown::shutdown_signal(),
-    )
-    .await;
+    );
+    tokio::pin!(server);
 
-    stop_subsystems(handles).await?;
-    server_result?;
+    tokio::select! {
+        server_result = &mut server => {
+            stop_subsystems(handles).await?;
+            server_result?;
+            Ok(())
+        }
+        (index, task_result) = wait_for_subsystem(&mut handles), if !handles.is_empty() => {
+            let failed = handles.swap_remove(index);
+            stop_subsystems(handles).await?;
+            match task_result {
+                Ok(Ok(())) => Err(RuntimeError::SubsystemExited { subsystem: failed.name }),
+                Ok(Err(error)) => Err(error),
+                Err(source) => Err(RuntimeError::SubsystemTask {
+                    subsystem: failed.name,
+                    source,
+                }),
+            }
+        }
+    }
+}
 
-    Ok(())
+async fn wait_for_subsystem(
+    handles: &mut [SubsystemHandle],
+) -> (
+    usize,
+    Result<Result<(), RuntimeError>, tokio::task::JoinError>,
+) {
+    let waits = handles
+        .iter_mut()
+        .enumerate()
+        .map(|(index, handle)| Box::pin(async move { (index, (&mut handle.join).await) }))
+        .collect::<Vec<_>>();
+    futures_util::future::select_all(waits).await.0
 }
 
 async fn stop_subsystems(handles: Vec<SubsystemHandle>) -> Result<(), RuntimeError> {
@@ -120,13 +176,13 @@ async fn stop_subsystems(handles: Vec<SubsystemHandle>) -> Result<(), RuntimeErr
     Ok(())
 }
 
-fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandle>, RuntimeError> {
+async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandle>, RuntimeError> {
     let mut handles = Vec::new();
     for subsystem in context.mode.subsystems() {
         let handle = match subsystem {
             SubsystemName::Platform => platform::start(context)?,
             SubsystemName::Jobs => jobs::start(context)?,
-            SubsystemName::Health => health::start(context)?,
+            SubsystemName::Health => health::start(context).await?,
             SubsystemName::Eventlog => eventlog::start(context)?,
         };
         handles.push(handle);

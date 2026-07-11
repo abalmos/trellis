@@ -31,17 +31,16 @@ export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
 export type {
   HealthCheckResult,
-  HealthHeartbeat,
+  HealthHeartbeatSample,
   ServiceHealthCheck,
   ServiceHealthCheckFn,
   ServiceHealthInfo,
   ServiceHealthInfoFn,
 } from "./health.ts";
 export {
-  createHealthHeartbeat,
+  createHealthHeartbeatSample,
   HealthCheckResultSchema,
-  HealthHeartbeatSchema,
-  HealthHeartbeatServiceSchema,
+  HealthHeartbeatSampleSchema,
   HealthInfoSchema,
   runAllServiceHealthChecks,
   runServiceHealthCheck,

@@ -15,6 +15,12 @@ use crate::{RuntimeConfig, RuntimeMode, StorageBackend};
 /// Runtime storage error.
 #[derive(Debug, Error)]
 pub enum StoreError {
+    /// The selected subsystem has no configured store.
+    #[error("runtime store for {subsystem} is not configured")]
+    NotConfigured {
+        /// Missing subsystem store.
+        subsystem: SubsystemName,
+    },
     /// SQLite parent directory creation failed.
     #[error("failed to create sqlite parent directory {path}: {source}")]
     CreateDirectory {
@@ -95,6 +101,10 @@ impl SqliteStore {
     pub fn migrate(&self) -> Result<(), StoreError> {
         migrate_sqlite(self.subsystem, &self.config)
     }
+
+    pub(crate) fn open(&self) -> Result<Connection, StoreError> {
+        open_sqlite(&self.config)
+    }
 }
 
 /// Subsystem-scoped collection of open runtime stores.
@@ -159,6 +169,12 @@ impl RuntimeStores {
             store.migrate()?;
         }
         Ok(())
+    }
+
+    pub(crate) fn health(&self) -> Result<&SqliteStore, StoreError> {
+        self.health.as_ref().ok_or(StoreError::NotConfigured {
+            subsystem: SubsystemName::Health,
+        })
     }
 }
 

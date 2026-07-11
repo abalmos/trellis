@@ -365,24 +365,14 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "jobs_admin_list_services_filters_stale_worker_heartbeats",
     ),
     IntegrationCase::live(
-        "health.client-subscribes-to-heartbeats",
+        "health.service-publishes-authorized-sample",
         "health",
-        "health_client_subscribes_to_heartbeats",
+        "health_projection_lifecycle_and_recovery",
     ),
     IntegrationCase::live(
-        "health.heartbeat-includes-service-metadata",
+        "health.projection-lifecycle-and-recovery",
         "health",
-        "health_heartbeat_includes_service_metadata",
-    ),
-    IntegrationCase::live(
-        "health.heartbeat-includes-custom-checks",
-        "health",
-        "health_heartbeat_includes_custom_checks",
-    ),
-    IntegrationCase::live(
-        "health.heartbeat-event-context-is-populated",
-        "health",
-        "health_heartbeat_event_context_is_populated",
+        "health_projection_lifecycle_and_recovery",
     ),
     IntegrationCase::live(
         "authority-plan.preapproved-contract-connects",

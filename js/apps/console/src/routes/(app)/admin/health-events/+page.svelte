@@ -1,73 +1,70 @@
 <script lang="ts">
-  import type { EventListenerContext } from "@qlever-llc/trellis";
-  import type { HealthHeartbeat } from "@qlever-llc/trellis/health";
-  import { ok } from "@qlever-llc/result";
+  import { isErr } from "@qlever-llc/result";
+  import type {
+    HealthInspectOutput,
+    HealthMetricsOutput,
+    HealthQueryOutput,
+  } from "@qlever-llc/trellis/sdk/health";
   import { onMount } from "svelte";
-  import {
-    appendHealthEvent,
-    heartbeatInstanceKey,
-    pruneExpiredHealthInstances,
-    summarizeHealthServices,
-    upsertHealthInstance,
-    type HealthFeedEvent,
-    type HealthInstanceView,
-  } from "../../../../lib/health_events.ts";
-  import DataTable from "../../../../lib/components/DataTable.svelte";
-  import EmptyState from "../../../../lib/components/EmptyState.svelte";
-  import InlineMetricsStrip from "../../../../lib/components/InlineMetricsStrip.svelte";
-  import Notice from "../../../../lib/components/Notice.svelte";
-  import PageToolbar from "../../../../lib/components/PageToolbar.svelte";
-  import Panel from "../../../../lib/components/Panel.svelte";
-  import StatusBadge from "../../../../lib/components/StatusBadge.svelte";
-  import { errorMessage, formatDate } from "../../../../lib/format";
-  import { getTrellis } from "../../../../lib/trellis";
+  import DataTable from "$lib/components/DataTable.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import InlineMetricsStrip from "$lib/components/InlineMetricsStrip.svelte";
+  import LoadingState from "$lib/components/LoadingState.svelte";
+  import Notice from "$lib/components/Notice.svelte";
+  import PageToolbar from "$lib/components/PageToolbar.svelte";
+  import Panel from "$lib/components/Panel.svelte";
+  import StatusBadge from "$lib/components/StatusBadge.svelte";
+  import { errorMessage, formatDate } from "$lib/format";
+  import { getTrellis } from "$lib/trellis";
+
+  type Participant = HealthQueryOutput["entries"][number];
 
   const trellis = getTrellis();
-  const STALE_REFRESH_MS = 5_000;
+  const RPC_TIMEOUT_MS = 10_000;
 
-  let recentEvents = $state.raw<HealthFeedEvent[]>([]);
-  let instances = $state.raw<Record<string, HealthInstanceView>>({});
-  let now = $state(Date.now());
-  let subscriptionError = $state<string | null>(null);
-  let selectedParticipantKey = $state<string | null>(null);
+  let snapshot = $state.raw<HealthQueryOutput | null>(null);
+  let inspection = $state.raw<HealthInspectOutput | null>(null);
+  let healthMetrics = $state.raw<HealthMetricsOutput | null>(null);
+  let loading = $state(true);
+  let detailLoading = $state(false);
+  let error = $state<string | null>(null);
+  let watchError = $state<string | null>(null);
+  let selectedKey = $state<string | null>(null);
 
-  const services = $derived(summarizeHealthServices(instances, now));
-  const hasEvents = $derived(recentEvents.length > 0);
-  const selectedService = $derived(
-    services.find((service) => service.key === selectedParticipantKey) ??
-      services[0] ?? null,
+  const participants = $derived(snapshot?.entries ?? []);
+  const selectedParticipant = $derived(
+    participants.find((participant) => participantKey(participant) === selectedKey) ??
+      participants[0] ?? null,
   );
-  const selectedInstance = $derived(selectedService?.instances[0] ?? null);
-  const selectedHeartbeat = $derived.by(() => {
-    if (!selectedInstance) return null;
-    return recentEvents.find((event) =>
-      heartbeatInstanceKey(event.heartbeat) === selectedInstance.key
-    )?.heartbeat ?? null;
-  });
-  const serviceCount = $derived(services.length);
-  const instanceCount = $derived(Object.keys(instances).length);
-  const offlineCount = $derived(services.filter((service) => service.status === "offline").length);
+  const instances = $derived(inspection?.instances ?? []);
+  const selectedInstance = $derived(instances[0] ?? null);
+  const offlineCount = $derived(
+    participants.filter((participant) => participant.effectiveStatus === "offline").length,
+  );
+  const instanceCount = $derived(
+    participants.reduce(
+      (count, participant) =>
+        count + participant.onlineInstances + participant.offlineInstances,
+      0,
+    ),
+  );
   const metrics = $derived([
-    { label: "Participants", value: serviceCount, detail: "Service and device groups" },
-    { label: "Instances", value: instanceCount, detail: "Live heartbeat identities" },
-    { label: "Offline", value: offlineCount, detail: "Stale beyond heartbeat TTL" },
-    { label: "Events", value: recentEvents.length, detail: "Buffered heartbeat feed" },
+    { label: "Participants", value: snapshot?.count ?? 0, detail: "Service and device groups" },
+    { label: "Instances", value: instanceCount, detail: "Retained runtime identities" },
+    { label: "Offline", value: offlineCount, detail: "Past heartbeat deadline" },
+    { label: "Revision", value: snapshot?.projection.revision ?? 0, detail: "Committed projection state" },
   ]);
 
-  function formatKind(kind: HealthHeartbeat["service"]["kind"]): string {
+  function participantKey(participant: Participant): string {
+    return `${participant.participantKind}:${participant.contractId}`;
+  }
+
+  function formatKind(kind: string): string {
     return kind === "device" ? "Device" : "Service";
   }
 
-  function formatSeenAt(value: number): string {
-    return `${formatDate(new Date(value).toISOString())} (${formatRelativeTime(value, now)})`;
-  }
-
-  function formatRuntime(runtime: string, runtimeVersion?: string): string {
-    return runtimeVersion ? `${runtime} ${runtimeVersion}` : runtime;
-  }
-
-  function formatRelativeTime(value: number, reference = Date.now()): string {
-    const seconds = Math.max(0, Math.floor((reference - value) / 1000));
+  function formatRelativeTime(value: string, reference = Date.now()): string {
+    const seconds = Math.max(0, Math.floor((reference - Date.parse(value)) / 1000));
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
@@ -76,222 +73,293 @@
     return `${Math.floor(hours / 24)}d ago`;
   }
 
-  function selectParticipant(key: string) {
-    selectedParticipantKey = key;
+  function formatAvailability(value: number | null | undefined): string {
+    return value == null ? "No observations" : `${(value * 100).toFixed(2)}%`;
   }
 
   function formatJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
   }
 
-  function ingestHeartbeat(heartbeat: HealthHeartbeat, context: EventListenerContext) {
-    const receivedAt = Date.now();
-    const activeInstances = pruneExpiredHealthInstances(instances, receivedAt);
-    recentEvents = appendHealthEvent(recentEvents, heartbeat, context, receivedAt);
-    instances = upsertHealthInstance(activeInstances, heartbeat, receivedAt);
-    now = receivedAt;
+  async function loadParticipants(): Promise<void> {
+    const result = await trellis.request(
+      "Health.Query",
+      { limit: 200, offset: 0 },
+      { timeout: RPC_TIMEOUT_MS },
+    ).take();
+    if (isErr(result)) throw result;
+    snapshot = result;
+    if (!selectedKey && result.entries[0]) {
+      selectedKey = participantKey(result.entries[0]);
+    }
   }
 
-  function handleHeartbeat(heartbeat: HealthHeartbeat, context: EventListenerContext) {
-    ingestHeartbeat(heartbeat, context);
-    return ok(undefined);
+  async function loadDetail(participant: Participant | null): Promise<void> {
+    if (!participant) {
+      inspection = null;
+      healthMetrics = null;
+      return;
+    }
+    detailLoading = true;
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    try {
+      const [inspectResult, metricsResult] = await Promise.all([
+        trellis.request(
+          "Health.Inspect",
+          {
+            participantKind: participant.participantKind,
+            contractId: participant.contractId,
+            historyLimit: 100,
+          },
+          { timeout: RPC_TIMEOUT_MS },
+        ).take(),
+        trellis.request(
+          "Health.Metrics",
+          {
+            participantKind: participant.participantKind,
+            contractId: participant.contractId,
+            start: start.toISOString(),
+            end: end.toISOString(),
+            stepMs: 60 * 60 * 1000,
+          },
+          { timeout: RPC_TIMEOUT_MS },
+        ).take(),
+      ]);
+      if (isErr(inspectResult)) throw inspectResult;
+      if (isErr(metricsResult)) throw metricsResult;
+      inspection = inspectResult;
+      healthMetrics = metricsResult;
+    } finally {
+      detailLoading = false;
+    }
+  }
+
+  async function refresh(): Promise<void> {
+    await loadParticipants();
+    await loadDetail(selectedParticipant);
+  }
+
+  async function selectParticipant(participant: Participant): Promise<void> {
+    selectedKey = participantKey(participant);
+    error = null;
+    try {
+      await loadDetail(participant);
+    } catch (cause) {
+      error = errorMessage(cause);
+    }
   }
 
   onMount(() => {
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      const currentTime = Date.now();
-      instances = pruneExpiredHealthInstances(instances, currentTime);
-      now = currentTime;
-    }, STALE_REFRESH_MS);
-
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
       try {
-        const result = await trellis.event.health.heartbeat.listen(
-          handleHeartbeat,
-          {},
-          { mode: "ephemeral", replay: "new", signal: controller.signal },
-        );
+        await refresh();
+      } catch (cause) {
+        error = errorMessage(cause);
+      } finally {
+        loading = false;
+      }
 
-        if (result.isErr()) {
-          subscriptionError = errorMessage(result.error);
+      try {
+        const result = await trellis.feed.health.watch(
+          {},
+          { signal: controller.signal },
+        ).take();
+        if (isErr(result)) {
+          watchError = errorMessage(result);
+          return;
         }
-      } catch (error) {
-        subscriptionError = errorMessage(error);
+        for await (const event of result) {
+          if (event.type === "ready") continue;
+          if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => {
+            void refresh().catch((cause) => {
+              watchError = errorMessage(cause);
+            });
+          }, 250);
+        }
+      } catch (cause) {
+        if (!controller.signal.aborted) watchError = errorMessage(cause);
       }
     })();
 
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
     };
   });
 </script>
 
 <section class="space-y-4">
   <PageToolbar
-    title="Health Events"
-    description="Live participant heartbeat stream and current status snapshot for services and devices."
+    title="Participant Health"
+    description="Current service and device health from the retained runtime projection."
   />
 
   <InlineMetricsStrip {metrics} />
 
-  {#if subscriptionError}
-    <Notice variant="error">{subscriptionError}</Notice>
+  {#if error}<Notice variant="error">{error}</Notice>{/if}
+  {#if watchError}<Notice variant="warning">Live refresh unavailable: {watchError}</Notice>{/if}
+  {#if snapshot?.projection.gapDetected}
+    <Notice variant="warning">Projection history contains a transport retention gap. Current participant state may be incomplete.</Notice>
   {/if}
 
-  <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
-    <Panel title="Participants" eyebrow="Primary" class="min-w-0">
-      {#snippet actions()}
-        <span class="inline-flex items-center gap-2 text-xs text-base-content/60">
-          <span class="relative flex size-2">
-            <span class="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60"></span>
-            <span class="relative inline-flex size-2 rounded-full bg-success"></span>
+  {#if loading}
+    <LoadingState label="Loading participant health" />
+  {:else}
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
+      <Panel title="Participants" eyebrow="Primary" class="min-w-0">
+        {#snippet actions()}
+          <span class="text-xs text-base-content/50">
+            As of {snapshot ? formatDate(snapshot.asOf) : "-"}
           </span>
-          Live updates
-        </span>
-      {/snippet}
-      {#if !hasEvents}
-        <EmptyState title="Waiting for heartbeat events" description="Participants will appear here as soon as new service or device heartbeats are published." />
-      {:else}
+        {/snippet}
+        {#if participants.length === 0}
+          <EmptyState title="No health participants" description="Participants appear after their first runtime heartbeat sample is projected." />
+        {:else}
           <DataTable>
-              <thead>
-                <tr>
-                  <th>Participant</th>
-                  <th>Status</th>
-                  <th>Instances</th>
-                  <th>Version / Runtime</th>
-                  <th>Last seen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each services as service (service.key)}
-                  <tr class={selectedService?.key === service.key ? "bg-base-200/70" : "hover"}>
-                    <td>
-                      <button
-                        type="button"
-                        class="group text-left"
-                        aria-pressed={selectedService?.key === service.key}
-                        onclick={() => selectParticipant(service.key)}
-                      >
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="font-medium group-hover:underline">{service.serviceName}</span>
-                          <span class="badge badge-outline badge-xs">{formatKind(service.kind)}</span>
-                        </div>
-                      </button>
-                      <div class="trellis-identifier text-base-content/50">{service.contractId}</div>
-                    </td>
-                    <td>
-                      <StatusBadge label={service.status} status={service.status} />
-                    </td>
-                    <td>
-                      <div class="flex flex-wrap gap-1">
-                        <span class="badge badge-success badge-outline badge-sm">{service.liveInstances} live</span>
-                        <span class="badge badge-warning badge-outline badge-sm">{service.staleInstances} stale</span>
+            <thead>
+              <tr>
+                <th>Participant</th>
+                <th>Status</th>
+                <th>Instances</th>
+                <th>Version / Runtime</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each participants as participant (participantKey(participant))}
+                <tr class={participantKey(participant) === participantKey(selectedParticipant ?? participant) ? "bg-base-200/70" : "hover"}>
+                  <td>
+                    <button
+                      type="button"
+                      class="group text-left"
+                      aria-pressed={selectedParticipant === participant}
+                      onclick={() => void selectParticipant(participant)}
+                    >
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium group-hover:underline">{participant.participantName}</span>
+                        <span class="badge badge-outline badge-xs">{formatKind(participant.participantKind)}</span>
                       </div>
-                    </td>
-                    <td class="text-sm text-base-content/70">
-                      <div>{service.version ?? "—"}</div>
-                      <div class="text-xs text-base-content/50">{formatRuntime(service.runtime, service.instances[0]?.runtimeVersion)}</div>
-                    </td>
-                    <td class="text-sm text-base-content/70">
-                      <div>{formatDate(new Date(service.lastSeenAt).toISOString())}</div>
-                      <div class="text-xs text-base-content/50">{formatRelativeTime(service.lastSeenAt, now)}</div>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
+                    </button>
+                    <div class="trellis-identifier text-base-content/50">{participant.contractId}</div>
+                  </td>
+                  <td><StatusBadge label={participant.effectiveStatus} status={participant.effectiveStatus} /></td>
+                  <td>
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge badge-success badge-outline badge-sm">{participant.onlineInstances} online</span>
+                      <span class="badge badge-neutral badge-outline badge-sm">{participant.offlineInstances} offline</span>
+                    </div>
+                  </td>
+                  <td class="text-sm text-base-content/70">
+                    <div>{participant.versions.join(", ") || "-"}</div>
+                    <div class="text-xs text-base-content/50">{participant.runtimes.join(", ") || "-"}</div>
+                  </td>
+                  <td class="text-sm text-base-content/70">
+                    <div>{formatDate(participant.lastSeenAt)}</div>
+                    <div class="text-xs text-base-content/50">{formatRelativeTime(participant.lastSeenAt)}</div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
           </DataTable>
-      {/if}
-    </Panel>
-
-    <Panel title="Participant Heartbeat" eyebrow="Secondary" class="min-w-0">
-      {#snippet actions()}
-        {#if selectedService}
-          <span class="text-xs text-base-content/50">{formatRelativeTime(selectedService.lastSeenAt, now)}</span>
         {/if}
-      {/snippet}
-      {#if !hasEvents}
-        <EmptyState title="No heartbeat events yet" description={`Stale/offline state recalculates every ${STALE_REFRESH_MS / 1000}s once events arrive.`} class="py-4" />
-      {:else if selectedService && selectedInstance}
-        <div class="space-y-4">
-          <div class="rounded-box border border-base-300 bg-base-200/40 p-3">
-            <div class="mb-3 flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <h2 class="truncate font-medium text-sm">{selectedService.serviceName}</h2>
-                  <span class="badge badge-outline badge-xs">{formatKind(selectedService.kind)}</span>
+      </Panel>
+
+      <Panel title="Participant Detail" eyebrow="Secondary" class="min-w-0">
+        {#if detailLoading}
+          <LoadingState label="Loading participant detail" />
+        {:else if inspection && selectedParticipant}
+          <div class="space-y-4">
+            <div class="rounded-box border border-base-300 bg-base-200/40 p-3">
+              <div class="mb-3 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h2 class="truncate text-sm font-medium">{inspection.participant.participantName}</h2>
+                  <div class="trellis-identifier truncate text-base-content/50">{inspection.participant.contractId}</div>
                 </div>
-                <div class="trellis-identifier truncate text-base-content/50">{selectedInstance.instanceId}</div>
+                <StatusBadge label={inspection.participant.effectiveStatus} status={inspection.participant.effectiveStatus} />
               </div>
-              <StatusBadge label={selectedService.status} status={selectedService.status} />
+              <dl class="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                <dt class="text-base-content/60">24h availability</dt>
+                <dd>{formatAvailability(healthMetrics?.summary.availability)}</dd>
+                <dt class="text-base-content/60">Samples</dt>
+                <dd>{healthMetrics?.summary.sampleCount ?? 0}</dd>
+                <dt class="text-base-content/60">Transitions</dt>
+                <dd>{healthMetrics?.summary.transitions ?? 0}</dd>
+                <dt class="text-base-content/60">Instances</dt>
+                <dd>{inspection.participant.onlineInstances} online / {inspection.participant.offlineInstances} offline</dd>
+              </dl>
             </div>
 
-            <dl class="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-              <dt class="text-base-content/60">Last seen</dt>
-              <dd>{formatSeenAt(selectedService.lastSeenAt)}</dd>
-              <dt class="text-base-content/60">Runtime</dt>
-              <dd>{formatRuntime(selectedInstance.runtime, selectedInstance.runtimeVersion)}</dd>
-              <dt class="text-base-content/60">Version</dt>
-              <dd>{selectedInstance.version ?? "—"}</dd>
-              <dt class="text-base-content/60">Interval</dt>
-              <dd>{selectedInstance.publishIntervalMs / 1000}s</dd>
-            </dl>
-          </div>
+            {#if selectedInstance}
+              <div>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Latest instance</h3>
+                <dl class="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
+                  <dt class="text-base-content/60">Instance</dt>
+                  <dd class="trellis-identifier truncate">{selectedInstance.instanceId}</dd>
+                  <dt class="text-base-content/60">Deployment</dt>
+                  <dd class="trellis-identifier truncate">{selectedInstance.deploymentId}</dd>
+                  <dt class="text-base-content/60">Observed</dt>
+                  <dd>{formatDate(selectedInstance.observedAt)} ({formatRelativeTime(selectedInstance.observedAt)})</dd>
+                  <dt class="text-base-content/60">Deadline</dt>
+                  <dd>{formatDate(selectedInstance.heartbeatDeadline)}</dd>
+                </dl>
+              </div>
 
-          <div>
-            <div class="mb-2 flex items-center justify-between gap-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Heartbeat checks</h3>
-              <span class="badge badge-ghost badge-sm">{selectedInstance.checks.length}</span>
-            </div>
+              <div>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Heartbeat checks</h3>
+                {#if selectedInstance.latestSample.checks.length === 0}
+                  <EmptyState title="No custom checks" description="The latest sample only contains participant metadata." class="py-3" />
+                {:else}
+                  <div class="overflow-x-auto rounded-box border border-base-300">
+                    <table class="table table-xs">
+                      <thead><tr><th>Check</th><th>Status</th><th>Latency</th><th>Summary</th></tr></thead>
+                      <tbody>
+                        {#each selectedInstance.latestSample.checks as check (check.name)}
+                          <tr>
+                            <td class="font-medium">{check.name}</td>
+                            <td><StatusBadge label={check.status} status={check.status === "ok" ? "healthy" : "unhealthy"} /></td>
+                            <td>{check.latencyMs.toFixed(1)} ms</td>
+                            <td class="max-w-48 text-base-content/70">{check.summary ?? "-"}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  </div>
+                {/if}
+              </div>
 
-            {#if selectedInstance.checks.length === 0}
-              <EmptyState title="No custom checks" description="This heartbeat only contains baseline participant metadata." class="py-3" />
-            {:else}
-              <div class="overflow-x-auto rounded-box border border-base-300">
-                <table class="table table-xs">
-                  <thead>
-                    <tr>
-                      <th>Check</th>
-                      <th>Status</th>
-                      <th>Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each selectedInstance.checks as check (check.name)}
-                      <tr>
-                        <td class="font-medium">{check.name}</td>
-                        <td><StatusBadge label={check.status} status={check.status === "ok" ? "healthy" : "unhealthy"} /></td>
-                        <td class="max-w-48 text-base-content/70">
-                          {#if check.summary}
-                            <div>{check.summary}</div>
-                          {/if}
-                          {#if check.info}
-                            <pre class="mt-1 overflow-x-auto rounded bg-base-100 p-2 text-[11px] leading-5">{formatJson(check.info)}</pre>
-                          {:else if !check.summary}
-                            <span class="text-base-content/40">—</span>
-                          {/if}
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
+              <div>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Status history</h3>
+                <div class="overflow-x-auto rounded-box border border-base-300">
+                  <table class="table table-xs">
+                    <thead><tr><th>Status</th><th>Started</th><th>Ended</th><th>Reason</th></tr></thead>
+                    <tbody>
+                      {#each inspection.history as interval (interval.intervalId)}
+                        <tr>
+                          <td><StatusBadge label={interval.effectiveStatus} status={interval.effectiveStatus} /></td>
+                          <td>{formatDate(interval.startedAt)}</td>
+                          <td>{interval.endedAt ? formatDate(interval.endedAt) : "Current"}</td>
+                          <td class="text-base-content/70">{interval.reason}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">Latest heartbeat payload</h3>
+                <pre class="max-h-80 overflow-auto rounded-box border border-base-300 bg-base-100 p-3 text-[11px] leading-5 text-base-content/80">{formatJson(selectedInstance.latestSample)}</pre>
               </div>
             {/if}
           </div>
-
-          {#if selectedHeartbeat}
-            <details class="collapse collapse-arrow rounded-box border border-base-300 bg-base-200/30">
-              <summary class="collapse-title min-h-0 py-3 text-sm font-medium">Latest heartbeat payload</summary>
-              <div class="collapse-content">
-                <pre class="overflow-x-auto rounded bg-base-100 p-2 text-[11px] leading-5 text-base-content/80">{formatJson(selectedHeartbeat)}</pre>
-              </div>
-            </details>
-          {/if}
-        </div>
-      {:else}
-        <EmptyState title="Select a participant" description="Choose a participant from the table to inspect its latest heartbeat values." class="py-4" />
-      {/if}
-    </Panel>
-  </div>
+        {:else}
+          <EmptyState title="Select a participant" description="Choose a participant to inspect current instances and retained status history." class="py-4" />
+        {/if}
+      </Panel>
+    </div>
+  {/if}
 </section>

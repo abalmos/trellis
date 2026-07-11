@@ -1,8 +1,5 @@
 use super::*;
 
-#[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
-use crate::{RuntimeConfig, RuntimeMode};
-
 fn sqlite_config(path: PathBuf) -> SqliteStorageConfig {
     SqliteStorageConfig {
         path,
@@ -24,6 +21,8 @@ fn subsystem_config(path: PathBuf) -> crate::SubsystemConfig {
             single_writer: Some(true),
         }),
         history_retention_days: None,
+        transport_retention_hours: None,
+        transport_max_bytes: None,
         retention_days: None,
         ttl_ms: None,
     }
@@ -41,6 +40,8 @@ fn invalid_postgres_subsystem_config() -> crate::SubsystemConfig {
             single_writer: None,
         }),
         history_retention_days: None,
+        transport_retention_hours: None,
+        transport_max_bytes: None,
         retention_days: None,
         ttl_ms: None,
     }
@@ -50,6 +51,7 @@ fn invalid_postgres_subsystem_config() -> crate::SubsystemConfig {
 fn runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         instance_name: None,
+        event_session_seed_file: Some(PathBuf::from("session.seed")),
         http: None,
         nats: Some(crate::NatsConfig {
             servers: Some("nats://127.0.0.1:4222".to_owned()),
@@ -223,7 +225,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&path, "trellis_health_projection_store_marker")?;
     assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&path, &[1000, 2000, 3000, 4000])?;
+    assert_migration_order(&path, &[1000, 2000, 3000, 3001, 4000])?;
     Ok(())
 }
 

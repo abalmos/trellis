@@ -12,7 +12,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.state@v1" as const;
 export const CONTRACT_DIGEST =
-  "XfWDYLTBlYFjDqMPBEXrTBccZbFvHp0MnqscehdRKT4" as const;
+  "tZjPt_mJqNYwA2A7hlo7I6-bEz5Nsx32tlIws71dCWk" as const;
 
 export type StateAdminDeleteInput = {
   contractDigest: string;

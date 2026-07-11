@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "2VOyWZ0HfFatZ12sf_tTUl9eDWeGjgmnQB63Jg9Aq7o" as const;
+  "rOmVuKA-H2Qz1g2k_4z2OZDamjBJ4SiaC5J03Rs7v7Y" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -11162,14 +11162,6 @@ export const CONTRACT = {
         "createdAt",
       ],
       "type": "object",
-    },
-  },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] },
-      },
     },
   },
 } as TrellisContractV1;

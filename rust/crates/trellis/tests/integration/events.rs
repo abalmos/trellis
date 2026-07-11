@@ -33,14 +33,6 @@ const EVENTS_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "events": {
     "Entity.Changed": {
       "version": "v1",
@@ -54,7 +46,7 @@ const EVENTS_SERVICE_CONTRACT_JSON: &str = r#"{
   }
 }"#;
 
-const EVENTS_SERVICE_CONTRACT_DIGEST: &str = "EeWk_ywRCCDx7idAtZsh9pFQCLJvxv_f3adMgcxEJVs";
+const EVENTS_SERVICE_CONTRACT_DIGEST: &str = "Qdc-dRpd1pJ-Bll7QWOng4tC5Ls0PF9Mmzrj8WaXuzU";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityChangedEvent {

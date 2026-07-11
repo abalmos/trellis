@@ -1,19 +1,138 @@
-//! Health subsystem scaffold.
+//! Rust-owned participant health projection and API subsystem.
 
+mod query;
+mod store;
+
+use std::collections::HashSet;
 use std::time::Duration;
 
+use async_nats::jetstream::{self, consumer, stream, AckKind};
+use async_nats::HeaderMap;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use bytes::Bytes;
+use futures_util::{stream as futures_stream, StreamExt};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use time::OffsetDateTime;
+use tokio::sync::broadcast;
+use trellis_rs::client::SessionAuth;
+use trellis_rs::sdk::health::feeds::HealthWatchFeedDescriptor;
+use trellis_rs::sdk::health::rpc::{HealthInspectRpc, HealthMetricsRpc, HealthQueryRpc};
+use trellis_rs::sdk::health::types::{HealthHeartbeatSample, HealthWatchEvent, HealthWatchInput};
+use trellis_rs::service::{run_router_service, DeclaredRpcError, Router, ServerError};
+use ulid::Ulid;
+
+use crate::leases::{LeaseError, LeaseKey, LeaseManager};
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::SubsystemName;
 
-pub(crate) fn start(_context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
+use self::store::{HealthStore, HeartbeatIdentity, ProjectionCommit};
+
+const HEALTH_STREAM: &str = "TRELLIS_HEALTH";
+const HEALTH_SUBJECT: &str = "health.v1.heartbeat.>";
+const STATUS_CHANGED_SUBJECT: &str = "events.v1.Health.StatusChanged";
+const INVALIDATION_PREFIX: &str = "health.v1.invalidation";
+const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
+const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
+const DEFAULT_TRANSPORT_MAX_BYTES: i64 = 1_073_741_824;
+const DEFAULT_HISTORY_RETENTION_DAYS: i64 = 30;
+const RPC_SUBJECTS: &[&str] = &[
+    "rpc.v1.Health.Query",
+    "rpc.v1.Health.Inspect",
+    "rpc.v1.Health.Metrics",
+    "feed.v1.Health.Watch",
+];
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Invalidation {
+    projection_revision: i64,
+    changes: Vec<InvalidationChange>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InvalidationChange {
+    participant_kind: String,
+    contract_id: String,
+    deployment_id: String,
+    instance_id: String,
+}
+
+impl From<ProjectionCommit> for Invalidation {
+    fn from(commit: ProjectionCommit) -> Self {
+        Self {
+            projection_revision: commit.revision,
+            changes: commit
+                .changes
+                .into_iter()
+                .map(|change| InvalidationChange {
+                    participant_kind: change.participant_kind,
+                    contract_id: change.contract_id,
+                    deployment_id: change.deployment_id,
+                    instance_id: change.instance_id,
+                })
+                .collect(),
+        }
+    }
+}
+
+pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
+    let store = HealthStore::new(context.stores.health()?.open()?)
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let projection_id = store
+        .projection_id()
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let jetstream = jetstream::new(context.trellis_nats.clone());
+    ensure_health_stream(context, &jetstream).await?;
+    let leases = LeaseManager::open(
+        jetstream.clone(),
+        &context.config.resolve_leases()?,
+        context.owner_id.clone(),
+    )
+    .await
+    .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let invalidation_subject = format!("{INVALIDATION_PREFIX}.{projection_id}");
+    let (invalidation_tx, _) = broadcast::channel(256);
+    let router = build_router(store.clone(), invalidation_tx.clone());
     let stop = StopHandle::new();
     let task_stop = stop.clone();
+    let nats = context.trellis_nats.clone();
+    let history_days = context
+        .config
+        .health
+        .as_ref()
+        .and_then(|health| health.history_retention_days)
+        .map(i64::from)
+        .unwrap_or(DEFAULT_HISTORY_RETENTION_DAYS);
+    let event_auth = load_event_auth(&context.config)?;
     let join = tokio::spawn(async move {
-        while !task_stop.is_stopped() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        let invalidation_loop = run_invalidation_subscriber(
+            nats.clone(),
+            invalidation_subject.clone(),
+            invalidation_tx,
+        );
+        let owner_loop = run_owner(
+            nats.clone(),
+            jetstream,
+            leases,
+            store,
+            projection_id,
+            invalidation_subject,
+            history_days,
+            event_auth,
+            task_stop.clone(),
+        );
+        let api_loop = run_router_service(nats, RPC_SUBJECTS, router);
+        tokio::pin!(invalidation_loop, owner_loop, api_loop);
+        tokio::select! {
+            result = &mut invalidation_loop => result,
+            result = &mut owner_loop => result,
+            result = &mut api_loop => result.map_err(|error| RuntimeError::Health(error.to_string())),
+            () = wait_for_stop(task_stop) => Ok(()),
         }
-        Ok(())
     });
 
     Ok(SubsystemHandle {
@@ -21,4 +140,578 @@ pub(crate) fn start(_context: &RuntimeContext) -> Result<SubsystemHandle, Runtim
         stop,
         join,
     })
+}
+
+async fn ensure_health_stream(
+    context: &RuntimeContext,
+    jetstream: &jetstream::Context,
+) -> Result<(), RuntimeError> {
+    let health = context.config.health.as_ref();
+    let max_age = Duration::from_secs(
+        health
+            .and_then(|health| health.transport_retention_hours)
+            .map(u64::from)
+            .unwrap_or(DEFAULT_TRANSPORT_RETENTION_HOURS)
+            * 60
+            * 60,
+    );
+    let max_bytes = health
+        .and_then(|health| health.transport_max_bytes)
+        .map(|bytes| i64::try_from(bytes).unwrap_or(i64::MAX))
+        .unwrap_or(DEFAULT_TRANSPORT_MAX_BYTES);
+    let config = stream::Config {
+        name: HEALTH_STREAM.to_string(),
+        subjects: vec![HEALTH_SUBJECT.to_string()],
+        retention: stream::RetentionPolicy::Limits,
+        storage: stream::StorageType::File,
+        discard: stream::DiscardPolicy::Old,
+        max_age,
+        max_bytes,
+        ..Default::default()
+    };
+    match jetstream.get_stream(HEALTH_STREAM).await {
+        Ok(mut existing) => {
+            let info = existing
+                .info()
+                .await
+                .map_err(|error| RuntimeError::Health(error.to_string()))?;
+            if info.config.subjects != config.subjects
+                || info.config.max_age != config.max_age
+                || info.config.max_bytes != config.max_bytes
+            {
+                jetstream
+                    .update_stream(config)
+                    .await
+                    .map_err(|error| RuntimeError::Health(error.to_string()))?;
+            }
+        }
+        Err(_) => {
+            jetstream
+                .create_stream(config)
+                .await
+                .map_err(|error| RuntimeError::Health(error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidation>) -> Router {
+    let mut router = Router::new();
+    let query_store = store.clone();
+    router.register_rpc::<HealthQueryRpc, _, _>(move |_context, input| {
+        let store = query_store.clone();
+        async move { store.query(&input, now_ns()).map_err(map_store_error) }
+    });
+    let inspect_store = store.clone();
+    router.register_rpc::<HealthInspectRpc, _, _>(move |_context, input| {
+        let store = inspect_store.clone();
+        async move {
+            store
+                .inspect(&input, now_ns())
+                .map_err(map_store_error)?
+                .ok_or_else(|| {
+                    ServerError::DeclaredRpc(DeclaredRpcError::new(
+                        "NotFoundError",
+                        "Health participant was not found.",
+                        [
+                            ("resource", json!("health-participant")),
+                            (
+                                "id",
+                                json!(format!("{}:{}", input.participant_kind, input.contract_id)),
+                            ),
+                        ],
+                    ))
+                })
+        }
+    });
+    let metrics_store = store.clone();
+    router.register_rpc::<HealthMetricsRpc, _, _>(move |_context, input| {
+        let store = metrics_store.clone();
+        async move { store.metrics(&input, now_ns()).map_err(map_store_error) }
+    });
+    let feed_store = store.clone();
+    router.register_feed::<HealthWatchFeedDescriptor, _, _>(move |_context, input| {
+        let store = feed_store.clone();
+        let receiver = invalidations.subscribe();
+        let ready = HealthWatchEvent(json!({
+            "type": "ready",
+            "projectionRevision": current_revision(&store).unwrap_or_default(),
+        }));
+        futures_stream::once(async move { Ok(ready) }).chain(futures_stream::unfold(
+            (receiver, input, store),
+            |(mut receiver, input, store)| async move {
+                loop {
+                    match receiver.recv().await {
+                        Ok(invalidation) => {
+                            let changes = invalidation
+                                .changes
+                                .iter()
+                                .filter(|change| watch_matches(&input, change))
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            if !changes.is_empty() || invalidation.changes.is_empty() {
+                                return Some((
+                                    Ok(HealthWatchEvent(json!({
+                                        "type": "healthInvalidated",
+                                        "projectionRevision": invalidation.projection_revision,
+                                        "changes": changes,
+                                    }))),
+                                    (receiver, input, store),
+                                ));
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            return Some((
+                                Ok(HealthWatchEvent(json!({
+                                    "type": "healthInvalidated",
+                                    "projectionRevision": current_revision(&store).unwrap_or_default(),
+                                }))),
+                                (receiver, input, store),
+                            ));
+                        }
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    }
+                }
+            },
+        ))
+    });
+    router
+}
+
+async fn run_invalidation_subscriber(
+    nats: async_nats::Client,
+    subject: String,
+    sender: broadcast::Sender<Invalidation>,
+) -> Result<(), RuntimeError> {
+    let mut subscriber = nats
+        .subscribe(subject)
+        .await
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    while let Some(message) = subscriber.next().await {
+        if let Ok(invalidation) = serde_json::from_slice::<Invalidation>(&message.payload) {
+            let _ = sender.send(invalidation);
+        }
+    }
+    Err(RuntimeError::Health(
+        "health invalidation subscription ended".to_string(),
+    ))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "owner loop owns one complete projection runtime"
+)]
+async fn run_owner(
+    nats: async_nats::Client,
+    jetstream: jetstream::Context,
+    leases: LeaseManager,
+    store: HealthStore,
+    projection_id: String,
+    invalidation_subject: String,
+    history_days: i64,
+    event_auth: SessionAuth,
+    stop: StopHandle,
+) -> Result<(), RuntimeError> {
+    let lease_key = LeaseKey::new(format!("health.owner.{projection_id}"));
+    while !stop.is_stopped() {
+        let mut guard = match leases.acquire(lease_key.clone()).await {
+            Ok(guard) => guard,
+            Err(LeaseError::Held { .. }) => {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+            Err(error) => return Err(RuntimeError::Health(error.to_string())),
+        };
+        let stream = jetstream
+            .get_stream(HEALTH_STREAM)
+            .await
+            .map_err(|error| RuntimeError::Health(error.to_string()))?;
+        let durable = format!("health-projector-{projection_id}").to_lowercase();
+        let consumer = stream
+            .get_or_create_consumer(
+                &durable,
+                consumer::pull::Config {
+                    durable_name: Some(durable.clone()),
+                    filter_subject: HEALTH_SUBJECT.to_string(),
+                    ack_policy: consumer::AckPolicy::Explicit,
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|error| RuntimeError::Health(error.to_string()))?;
+        let mut messages = consumer
+            .messages()
+            .await
+            .map_err(|error| RuntimeError::Health(error.to_string()))?;
+        let mut deadlines = tokio::time::interval(Duration::from_secs(1));
+        let mut outbox = tokio::time::interval(Duration::from_millis(250));
+        let mut retention = tokio::time::interval(Duration::from_secs(60 * 60));
+        let mut renew = tokio::time::interval(leases.renew);
+        let mut stop_poll = tokio::time::interval(Duration::from_millis(100));
+
+        loop {
+            tokio::select! {
+                message = messages.next() => {
+                    let Some(message) = message else {
+                        return Err(RuntimeError::Health("health projector consumer ended".to_string()));
+                    };
+                    let message = message.map_err(|error| RuntimeError::Health(error.to_string()))?;
+                    project_message(&nats, &store, &invalidation_subject, message).await?;
+                }
+                _ = deadlines.tick() => {
+                    if let Some(commit) = store.expire_due(now_ns()).map_err(map_runtime_store_error)? {
+                        publish_invalidation(&nats, &invalidation_subject, commit).await?;
+                    }
+                }
+                _ = outbox.tick() => publish_outbox(&nats, &store, &event_auth).await?,
+                _ = retention.tick() => {
+                    let cutoff = now_ns().saturating_sub(
+                        history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
+                    );
+                    if let Some(commit) = store.cleanup(cutoff).map_err(map_runtime_store_error)? {
+                        publish_invalidation(&nats, &invalidation_subject, commit).await?;
+                    }
+                }
+                _ = renew.tick() => {
+                    if leases.renew(&mut guard).await.is_err() {
+                        break;
+                    }
+                }
+                _ = stop_poll.tick() => {
+                    if stop.is_stopped() {
+                        let _ = leases.release(guard).await;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn project_message(
+    nats: &async_nats::Client,
+    store: &HealthStore,
+    invalidation_subject: &str,
+    message: jetstream::Message,
+) -> Result<(), RuntimeError> {
+    let info = message
+        .info()
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let observed_at_ns = i64::try_from(info.published.unix_timestamp_nanos()).map_err(|_| {
+        RuntimeError::Health("health message timestamp is out of range".to_string())
+    })?;
+    let stream_sequence = info.stream_sequence;
+    let result = parse_heartbeat(message.subject.as_str(), &message.payload);
+    let (identity, sample) = match result {
+        Ok(value) => value,
+        Err(reason) => {
+            store
+                .record_rejection(
+                    stream_sequence,
+                    message.subject.as_str(),
+                    observed_at_ns,
+                    &reason,
+                )
+                .map_err(map_runtime_store_error)?;
+            message
+                .ack_with(AckKind::Term)
+                .await
+                .map_err(|error| RuntimeError::Health(error.to_string()))?;
+            return Ok(());
+        }
+    };
+    let commit = store
+        .project_sample(
+            &identity,
+            &sample,
+            observed_at_ns,
+            now_ns(),
+            stream_sequence,
+        )
+        .map_err(map_runtime_store_error)?;
+    message
+        .ack()
+        .await
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    if let Some(commit) = commit {
+        publish_invalidation(nats, invalidation_subject, commit).await?;
+    }
+    Ok(())
+}
+
+fn parse_heartbeat(
+    subject: &str,
+    payload: &[u8],
+) -> Result<(HeartbeatIdentity, HealthHeartbeatSample), String> {
+    if payload.len() > 65_536 {
+        return Err("payload exceeds 64 KiB".to_string());
+    }
+    let parts = subject.split('.').collect::<Vec<_>>();
+    if parts.len() != 9 || parts[..3] != ["health", "v1", "heartbeat"] {
+        return Err("subject does not match health protocol".to_string());
+    }
+    let identity = HeartbeatIdentity {
+        participant_kind: parts[3].to_string(),
+        contract_id: decode_token(parts[4])?,
+        contract_digest: decode_token(parts[5])?,
+        deployment_id: decode_token(parts[6])?,
+        instance_id: decode_token(parts[7])?,
+        session_key: parts[8].to_string(),
+    };
+    if !matches!(identity.participant_kind.as_str(), "service" | "device")
+        || identity.session_key.is_empty()
+        || !identity
+            .session_key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return Err("subject identity is invalid".to_string());
+    }
+    let sample = serde_json::from_slice::<HealthHeartbeatSample>(payload)
+        .map_err(|error| format!("sample JSON is invalid: {error}"))?;
+    validate_sample(&identity, &sample)?;
+    Ok((identity, sample))
+}
+
+fn validate_sample(
+    identity: &HeartbeatIdentity,
+    sample: &HealthHeartbeatSample,
+) -> Result<(), String> {
+    if sample.participant.kind != identity.participant_kind
+        || sample.participant.contract_id != identity.contract_id
+        || sample.participant.contract_digest != identity.contract_digest
+        || sample.participant.instance_id != identity.instance_id
+    {
+        return Err("sample identity does not match authorized subject".to_string());
+    }
+    if !matches!(
+        sample.reported_status.as_str(),
+        "healthy" | "degraded" | "unhealthy"
+    ) || !(1_000..=600_000).contains(&sample.participant.publish_interval_ms)
+        || sample.checks.len() > 64
+        || Ulid::from_string(&sample.sample.id).is_err()
+        || time::OffsetDateTime::parse(
+            &sample.sample.time,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_err()
+        || time::OffsetDateTime::parse(
+            &sample.participant.started_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .is_err()
+    {
+        return Err("sample fields are invalid".to_string());
+    }
+    let mut names = HashSet::new();
+    for check in &sample.checks {
+        if check.name.is_empty()
+            || check.name.len() > 128
+            || !names.insert(&check.name)
+            || !matches!(check.status.as_str(), "ok" | "failed")
+            || !check.latency_ms.is_finite()
+            || !(0.0..=3_600_000.0).contains(&check.latency_ms)
+        {
+            return Err("sample check is invalid".to_string());
+        }
+    }
+    Ok(())
+}
+
+async fn publish_outbox(
+    nats: &async_nats::Client,
+    store: &HealthStore,
+    auth: &SessionAuth,
+) -> Result<(), RuntimeError> {
+    let jetstream = jetstream::new(nats.clone());
+    for transition in store
+        .pending_transitions(100)
+        .map_err(map_runtime_store_error)?
+    {
+        let headers = transition_headers(auth, &transition)?;
+        match jetstream
+            .publish_with_headers(
+                STATUS_CHANGED_SUBJECT.to_string(),
+                headers,
+                Bytes::from(transition.payload),
+            )
+            .await
+        {
+            Ok(ack) => match ack.await {
+                Ok(_) => store
+                    .mark_transition_published(&transition.event_id, now_ns())
+                    .map_err(map_runtime_store_error)?,
+                Err(error) => store
+                    .mark_transition_failed(&transition.event_id, &error.to_string())
+                    .map_err(map_runtime_store_error)?,
+            },
+            Err(error) => store
+                .mark_transition_failed(&transition.event_id, &error.to_string())
+                .map_err(map_runtime_store_error)?,
+        }
+    }
+    Ok(())
+}
+
+fn transition_headers(
+    auth: &SessionAuth,
+    transition: &store::PendingTransition,
+) -> Result<HeaderMap, RuntimeError> {
+    let event_time = store::rfc3339(transition.created_at_ns).map_err(map_runtime_store_error)?;
+    let mut headers = HeaderMap::new();
+    headers.insert("Nats-Msg-Id", transition.event_id.as_str());
+    headers.insert(EVENT_TIME_HEADER, event_time.as_str());
+    headers.insert("session-key", auth.session_key.as_str());
+    headers.insert(
+        "proof",
+        auth.create_event_proof(
+            STATUS_CHANGED_SUBJECT,
+            &transition.payload,
+            &transition.event_id,
+            &event_time,
+        )
+        .as_str(),
+    );
+    Ok(headers)
+}
+
+fn load_event_auth(config: &crate::RuntimeConfig) -> Result<SessionAuth, RuntimeError> {
+    let path = config.event_session_seed_file.as_ref().ok_or_else(|| {
+        RuntimeError::Health("event_session_seed_file is required for health mode".to_string())
+    })?;
+    let seed = std::fs::read_to_string(path).map_err(|error| {
+        RuntimeError::Health(format!("failed to read '{}': {error}", path.display()))
+    })?;
+    SessionAuth::from_seed_base64url(seed.trim())
+        .map_err(|error| RuntimeError::Health(format!("invalid event session seed: {error}")))
+}
+
+async fn publish_invalidation(
+    nats: &async_nats::Client,
+    subject: &str,
+    commit: ProjectionCommit,
+) -> Result<(), RuntimeError> {
+    nats.publish(
+        subject.to_string(),
+        Bytes::from(
+            serde_json::to_vec(&Invalidation::from(commit))
+                .map_err(|error| RuntimeError::Health(error.to_string()))?,
+        ),
+    )
+    .await
+    .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    Ok(())
+}
+
+fn watch_matches(input: &HealthWatchInput, change: &InvalidationChange) -> bool {
+    matches_filter(input.participant_kinds.as_ref(), &change.participant_kind)
+        && matches_filter(input.contract_ids.as_ref(), &change.contract_id)
+        && matches_filter(input.deployment_ids.as_ref(), &change.deployment_id)
+        && matches_filter(input.instance_ids.as_ref(), &change.instance_id)
+}
+
+fn matches_filter(filter: Option<&Vec<String>>, value: &String) -> bool {
+    filter.is_none_or(|filter| filter.is_empty() || filter.contains(value))
+}
+
+fn decode_token(token: &str) -> Result<String, String> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(token)
+        .map_err(|_| "subject identity token is not base64url".to_string())?;
+    String::from_utf8(bytes).map_err(|_| "subject identity token is not UTF-8".to_string())
+}
+
+fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
+    let response = store
+        .query(
+            &trellis_rs::sdk::health::types::HealthQueryRequest {
+                contract_ids: None,
+                deployment_ids: None,
+                limit: Some(1),
+                offset: Some(0),
+                participant_kinds: None,
+                search: None,
+                statuses: None,
+            },
+            now_ns(),
+        )
+        .map_err(map_runtime_store_error)?;
+    Ok(response.projection.revision)
+}
+
+fn map_store_error(error: store::HealthStoreError) -> ServerError {
+    ServerError::Nats(error.to_string())
+}
+
+fn map_runtime_store_error(error: store::HealthStoreError) -> RuntimeError {
+    RuntimeError::Health(error.to_string())
+}
+
+fn now_ns() -> i64 {
+    i64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()).unwrap_or(i64::MAX)
+}
+
+async fn wait_for_stop(stop: StopHandle) {
+    while !stop.is_stopped() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trellis_rs::client::verify_event_proof;
+
+    #[test]
+    fn heartbeat_subject_identity_is_authoritative() {
+        let payload = serde_json::to_vec(&json!({
+            "sample": {"id": "01J00000000000000000000000", "time": "2026-01-01T00:00:00Z"},
+            "participant": {
+                "name": "Jobs",
+                "kind": "service",
+                "instanceId": "rust-1",
+                "contractId": "trellis.jobs@v1",
+                "contractDigest": "digest-alpha",
+                "startedAt": "2026-01-01T00:00:00Z",
+                "publishIntervalMs": 30000,
+                "runtime": "rust"
+            },
+            "reportedStatus": "healthy",
+            "checks": [{"name": "nats", "status": "ok", "latencyMs": 0}]
+        }))
+        .expect("serialize sample");
+        let (identity, _) = parse_heartbeat(
+            "health.v1.heartbeat.service.dHJlbGxpcy5qb2JzQHYx.ZGlnZXN0LWFscGhh.am9icy5kZWZhdWx0.cnVzdC0x.session_key",
+            &payload,
+        )
+        .expect("parse heartbeat");
+        assert_eq!(identity.contract_id, "trellis.jobs@v1");
+        assert_eq!(identity.deployment_id, "jobs.default");
+        assert_eq!(identity.instance_id, "rust-1");
+    }
+
+    #[test]
+    fn status_transition_headers_are_signed() {
+        let auth = SessionAuth::from_seed_base64url("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            .expect("session auth");
+        let transition = store::PendingTransition {
+            event_id: "01J00000000000000000000000".to_string(),
+            created_at_ns: 1_767_225_600_000_000_000,
+            payload: br#"{"status":"offline"}"#.to_vec(),
+        };
+        let headers = transition_headers(&auth, &transition).expect("signed headers");
+        let event_time = headers.get(EVENT_TIME_HEADER).expect("event time").as_str();
+        let proof = headers.get("proof").expect("proof").as_str();
+
+        assert!(verify_event_proof(
+            &auth.session_key,
+            STATUS_CHANGED_SUBJECT,
+            &transition.payload,
+            &transition.event_id,
+            event_time,
+            proof,
+        )
+        .expect("verify event proof"));
+    }
 }

@@ -1,6 +1,8 @@
 use async_nats::header::HeaderMap;
 use async_nats::jetstream::{self, consumer, AckKind};
 use async_nats::ConnectOptions;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use bytes::Bytes;
 use futures_util::stream::{self, BoxStream};
 use futures_util::StreamExt;
@@ -25,7 +27,7 @@ use crate::client::{
     RpcDescriptor, RpcErrorPayload, SessionAuth, TrellisClientError,
 };
 
-const HEALTH_HEARTBEAT_SUBJECT: &str = "events.v1.Health.Heartbeat";
+const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
 const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
 const DEFAULT_AUTHORITY_RETRY_DELAY_MS: u64 = 1_000;
@@ -287,14 +289,15 @@ struct IatClock {
 
 #[derive(Clone, Debug)]
 struct HealthHeartbeatConfig {
+    session_key: String,
     service_name: String,
     kind: HealthHeartbeatServiceKind,
+    deployment_id: String,
     instance_id: String,
     contract_id: String,
     contract_digest: String,
     started_at: String,
     publish_interval_ms: u64,
-    info: Option<Value>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -302,37 +305,6 @@ struct HealthHeartbeatConfig {
 enum HealthHeartbeatServiceKind {
     Service,
     Device,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HealthHeartbeat {
-    service: HealthHeartbeatService,
-    status: &'static str,
-    checks: Vec<HealthHeartbeatCheck>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HealthHeartbeatService {
-    name: String,
-    kind: HealthHeartbeatServiceKind,
-    instance_id: String,
-    contract_id: String,
-    contract_digest: String,
-    started_at: String,
-    publish_interval_ms: u64,
-    runtime: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    info: Option<Value>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HealthHeartbeatCheck {
-    name: &'static str,
-    status: &'static str,
-    latency_ms: u64,
 }
 
 impl IatClock {
@@ -369,6 +341,8 @@ impl IatClock {
 #[serde(rename_all = "camelCase")]
 struct ServiceBootstrapConnectInfo {
     contract_digest: String,
+    instance_id: String,
+    deployment_id: String,
     transports: ServiceBootstrapTransports,
     transport: ServiceBootstrapTransport,
 }
@@ -760,34 +734,48 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-fn new_service_instance_id() -> String {
+fn health_subject_token(value: &str) -> String {
+    URL_SAFE_NO_PAD.encode(value.as_bytes())
+}
+
+fn health_heartbeat_subject(config: &HealthHeartbeatConfig) -> String {
+    let kind = match config.kind {
+        HealthHeartbeatServiceKind::Service => "service",
+        HealthHeartbeatServiceKind::Device => "device",
+    };
     format!(
-        "rust-{}-{}",
-        std::process::id(),
-        OffsetDateTime::now_utc().unix_timestamp_nanos()
+        "{HEALTH_HEARTBEAT_SUBJECT_PREFIX}.{kind}.{}.{}.{}.{}.{}",
+        health_subject_token(&config.contract_id),
+        health_subject_token(&config.contract_digest),
+        health_subject_token(&config.deployment_id),
+        health_subject_token(&config.instance_id),
+        config.session_key,
     )
 }
 
-fn build_health_heartbeat(config: &HealthHeartbeatConfig) -> HealthHeartbeat {
-    HealthHeartbeat {
-        service: HealthHeartbeatService {
-            name: config.service_name.clone(),
-            kind: config.kind,
-            instance_id: config.instance_id.clone(),
-            contract_id: config.contract_id.clone(),
-            contract_digest: config.contract_digest.clone(),
-            started_at: config.started_at.clone(),
-            publish_interval_ms: config.publish_interval_ms,
-            runtime: "rust",
-            info: config.info.clone(),
+fn build_health_heartbeat(config: &HealthHeartbeatConfig) -> Value {
+    serde_json::json!({
+        "sample": {
+            "id": ulid::Ulid::new().to_string(),
+            "time": now_rfc3339(),
         },
-        status: "healthy",
-        checks: vec![HealthHeartbeatCheck {
-            name: "nats",
-            status: "ok",
-            latency_ms: 0,
+        "participant": {
+            "name": config.service_name,
+            "kind": config.kind,
+            "instanceId": config.instance_id,
+            "contractId": config.contract_id,
+            "contractDigest": config.contract_digest,
+            "startedAt": config.started_at,
+            "publishIntervalMs": config.publish_interval_ms,
+            "runtime": "rust",
+        },
+        "reportedStatus": "healthy",
+        "checks": [{
+            "name": "nats",
+            "status": "ok",
+            "latencyMs": 0.0,
         }],
-    }
+    })
 }
 
 fn signed_event_headers(auth: &SessionAuth, event: &PreparedTrellisEvent) -> HeaderMap {
@@ -830,28 +818,27 @@ async fn publish_prepared_event(
     Ok(())
 }
 
-fn prepare_health_heartbeat(
-    config: &HealthHeartbeatConfig,
-) -> Result<PreparedTrellisEvent, serde_json::Error> {
-    let heartbeat = build_health_heartbeat(config);
-    prepare_event_value(HEALTH_HEARTBEAT_SUBJECT, &heartbeat)
-}
-
 async fn publish_health_heartbeat(
     nats: &async_nats::Client,
-    auth: &SessionAuth,
     timeout_ms: u64,
     config: &HealthHeartbeatConfig,
-) {
-    let Ok(event) = prepare_health_heartbeat(config) else {
-        return;
-    };
-    let _ = publish_prepared_event(nats, auth, timeout_ms, &event).await;
+) -> Result<(), TrellisClientError> {
+    let payload = Bytes::from(serde_json::to_vec(&build_health_heartbeat(config))?);
+    let jetstream = jetstream::new(nats.clone());
+    let publish = jetstream.publish(health_heartbeat_subject(config), payload);
+    let ack = timeout(std::time::Duration::from_millis(timeout_ms), publish)
+        .await
+        .map_err(|_| TrellisClientError::Timeout)?
+        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    timeout(std::time::Duration::from_millis(timeout_ms), ack)
+        .await
+        .map_err(|_| TrellisClientError::Timeout)?
+        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    Ok(())
 }
 
 fn spawn_health_heartbeat_task(
     nats: async_nats::Client,
-    auth: SessionAuth,
     timeout_ms: u64,
     config: HealthHeartbeatConfig,
 ) -> JoinHandle<()> {
@@ -861,7 +848,9 @@ fn spawn_health_heartbeat_task(
         interval.tick().await;
         loop {
             interval.tick().await;
-            publish_health_heartbeat(&nats, &auth, timeout_ms, &config).await;
+            if let Err(error) = publish_health_heartbeat(&nats, timeout_ms, &config).await {
+                tracing::warn!(%error, "failed to publish health heartbeat");
+            }
         }
     })
 }
@@ -907,6 +896,9 @@ async fn connect_bootstrapped_service(
     );
     let sentinel_jwt = bootstrap.connect_info.transport.sentinel.jwt;
     let callback_contract_digest = bootstrap.connect_info.contract_digest;
+    let health_instance_id = bootstrap.connect_info.instance_id;
+    let health_deployment_id = bootstrap.connect_info.deployment_id;
+    let health_session_key = auth.session_key.clone();
 
     let nats = ConnectOptions::with_auth_callback(move |nonce| {
         let auth = callback_auth.clone();
@@ -931,20 +923,22 @@ async fn connect_bootstrapped_service(
     })?;
 
     let health_heartbeat_config = HealthHeartbeatConfig {
+        session_key: health_session_key,
         service_name: contract_id.to_string(),
         kind: HealthHeartbeatServiceKind::Service,
-        instance_id: new_service_instance_id(),
+        deployment_id: health_deployment_id,
+        instance_id: health_instance_id,
         contract_id: contract_id.to_string(),
         contract_digest: contract_digest.to_string(),
         started_at: now_rfc3339(),
         publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
-        info: None,
     };
-    publish_health_heartbeat(&nats, &auth, timeout_ms, &health_heartbeat_config).await;
-    let health_heartbeat_auth = SessionAuth::from_seed_base64url(session_key_seed_base64url)?;
+    if let Err(error) = publish_health_heartbeat(&nats, timeout_ms, &health_heartbeat_config).await
+    {
+        tracing::warn!(%error, "failed to publish initial health heartbeat");
+    }
     let health_heartbeat_task = Some(spawn_health_heartbeat_task(
         nats.clone(),
-        health_heartbeat_auth,
         timeout_ms,
         health_heartbeat_config,
     ));
@@ -1120,20 +1114,23 @@ impl TrellisClient {
         })?;
 
         let health_heartbeat_config = HealthHeartbeatConfig {
+            session_key: auth.session_key.clone(),
             service_name: contract_id.clone(),
             kind: HealthHeartbeatServiceKind::Device,
+            deployment_id,
             instance_id,
             contract_id,
             contract_digest,
             started_at: now_rfc3339(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
-            info: Some(serde_json::json!({ "deploymentId": deployment_id })),
         };
-        publish_health_heartbeat(&nats, &auth, opts.timeout_ms, &health_heartbeat_config).await;
-        let health_heartbeat_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
+        if let Err(error) =
+            publish_health_heartbeat(&nats, opts.timeout_ms, &health_heartbeat_config).await
+        {
+            tracing::warn!(%error, "failed to publish initial health heartbeat");
+        }
         let health_heartbeat_task = Some(spawn_health_heartbeat_task(
             nats.clone(),
-            health_heartbeat_auth,
             opts.timeout_ms,
             health_heartbeat_config,
         ));
@@ -1783,22 +1780,26 @@ mod tests {
 
     #[test]
     fn service_health_heartbeat_matches_wire_shape() {
-        let heartbeat = build_health_heartbeat(&HealthHeartbeatConfig {
+        let config = HealthHeartbeatConfig {
+            session_key: "session_key".to_string(),
             service_name: "trellis.jobs@v1".to_string(),
             kind: HealthHeartbeatServiceKind::Service,
+            deployment_id: "jobs.default".to_string(),
             instance_id: "rust-1".to_string(),
             contract_id: "trellis.jobs@v1".to_string(),
             contract_digest: "digest-alpha".to_string(),
             started_at: "2026-01-02T03:04:05Z".to_string(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
-            info: None,
-        });
+        };
+        let heartbeat = build_health_heartbeat(&config);
         let value = serde_json::to_value(&heartbeat).expect("heartbeat json");
 
-        assert_eq!(HEALTH_HEARTBEAT_SUBJECT, "events.v1.Health.Heartbeat");
-        assert!(value.get("header").is_none());
         assert_eq!(
-            value["service"],
+            health_heartbeat_subject(&config),
+            "health.v1.heartbeat.service.dHJlbGxpcy5qb2JzQHYx.ZGlnZXN0LWFscGhh.am9icy5kZWZhdWx0.cnVzdC0x.session_key"
+        );
+        assert_eq!(
+            value["participant"],
             json!({
                 "name": "trellis.jobs@v1",
                 "kind": "service",
@@ -1810,69 +1811,34 @@ mod tests {
                 "runtime": "rust"
             })
         );
-        assert_eq!(value["status"], "healthy");
+        assert_eq!(value["reportedStatus"], "healthy");
+        assert!(value["sample"]["id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()));
         assert_eq!(
             value["checks"],
-            json!([{ "name": "nats", "status": "ok", "latencyMs": 0 }])
+            json!([{ "name": "nats", "status": "ok", "latencyMs": 0.0 }])
         );
-        assert!(value.get("summary").is_none());
-    }
-
-    #[test]
-    fn health_heartbeat_uses_signed_event_headers() {
-        let auth = SessionAuth::from_seed_base64url("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-            .expect("auth");
-        let event = prepare_health_heartbeat(&HealthHeartbeatConfig {
-            service_name: "trellis.eventlog@v1".to_string(),
-            kind: HealthHeartbeatServiceKind::Service,
-            instance_id: "rust-1".to_string(),
-            contract_id: "trellis.eventlog@v1".to_string(),
-            contract_digest: "digest-alpha".to_string(),
-            started_at: "2026-01-02T03:04:05Z".to_string(),
-            publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
-            info: None,
-        })
-        .expect("heartbeat event");
-        let headers = signed_event_headers(&auth, &event);
-
-        assert!(headers
-            .get(EVENT_ID_HEADER)
-            .is_some_and(|id| !id.as_str().is_empty()));
-        assert!(headers
-            .get(EVENT_TIME_HEADER)
-            .is_some_and(|time| time.as_str().ends_with('Z')));
-        assert_eq!(
-            headers.get("session-key").map(|value| value.as_str()),
-            Some(auth.session_key.as_str()),
-        );
-        assert!(headers
-            .get("proof")
-            .is_some_and(|proof| !proof.as_str().is_empty()));
     }
 
     #[test]
     fn device_health_heartbeat_uses_connect_info_identity() {
         let heartbeat = build_health_heartbeat(&HealthHeartbeatConfig {
+            session_key: "device_key".to_string(),
             service_name: "acme.reader@v1".to_string(),
             kind: HealthHeartbeatServiceKind::Device,
+            deployment_id: "reader.default".to_string(),
             instance_id: "dev_123".to_string(),
             contract_id: "acme.reader@v1".to_string(),
             contract_digest: "digest-a".to_string(),
             started_at: "2026-01-02T03:04:05Z".to_string(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
-            info: Some(json!({ "deploymentId": "reader.default" })),
         });
         let value = serde_json::to_value(&heartbeat).expect("heartbeat json");
 
-        assert_eq!(value["service"]["name"], "acme.reader@v1");
-        assert_eq!(value["service"]["kind"], "device");
-        assert_eq!(value["service"]["instanceId"], "dev_123");
-        assert_eq!(value["service"]["contractId"], "acme.reader@v1");
-        assert_eq!(value["service"]["contractDigest"], "digest-a");
-        assert_eq!(
-            value["service"]["info"],
-            json!({ "deploymentId": "reader.default" })
-        );
+        assert_eq!(value["participant"]["name"], "acme.reader@v1");
+        assert_eq!(value["participant"]["kind"], "device");
+        assert_eq!(value["participant"]["instanceId"], "dev_123");
     }
 
     #[test]

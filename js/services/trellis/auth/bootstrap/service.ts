@@ -1707,6 +1707,8 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
       serverNow: nowSeconds,
       connectInfo: {
         sessionKey: request.sessionKey,
+        instanceId: service.instanceId,
+        deploymentId: service.deploymentId,
         contractId: request.contractId,
         contractDigest: request.contractDigest,
         transports: deps.transports,

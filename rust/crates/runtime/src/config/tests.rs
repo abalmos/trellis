@@ -8,6 +8,7 @@ use crate::RuntimeMode;
 
 const COMPLETE_CONFIG: &str = r#"
 instance_name = "Trellis"
+event_session_seed_file = "./session.seed"
 
 [http]
 port = 39123
@@ -58,6 +59,10 @@ fn loads_toml_config_from_path() {
     let config = RuntimeConfig::load_from_path(&path).expect("load config");
 
     assert_eq!(config.instance_name.as_deref(), Some("Trellis"));
+    assert_eq!(
+        config.event_session_seed_file,
+        Some(directory.path().join("./session.seed"))
+    );
     assert_eq!(config.http_port(), 39123);
     assert_eq!(
         config
@@ -83,6 +88,7 @@ fn parses_plan_shaped_toml_config() {
     let config = RuntimeConfig::from_toml_str(
         r#"
 instance_name = "Trellis"
+event_session_seed_file = "./session.seed"
 
 [http]
 port = 3000

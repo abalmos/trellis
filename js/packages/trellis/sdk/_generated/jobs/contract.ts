@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "oJscfQceI0MPL8xIweZL22qWvZP6fSznGFqUr8yJ-VY" as const;
+  "Kdfzu18EAjSVk1UlsMKMZDgUTkTgbb3x7HihXsmiJCY" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.jobs::admin.mutate": {
@@ -3399,14 +3399,6 @@ export const CONTRACT = {
       },
       "required": ["id", "type", "message", "resource"],
       "type": "object",
-    },
-  },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] },
-      },
     },
   },
 } as TrellisContractV1;

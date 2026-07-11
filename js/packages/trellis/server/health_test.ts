@@ -1,13 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
 import Value from "typebox/value";
 import {
-  createHealthHeartbeat,
-  type HealthCheckResult,
+  createHealthHeartbeatSample,
   runAllServiceHealthChecks,
   runServiceHealthCheck,
   ServiceHealth,
 } from "./health.ts";
-import { HealthHeartbeatSchema } from "./health_schemas.ts";
+import { HealthHeartbeatSampleSchema } from "../sdk/_generated/health/schemas.ts";
+import { healthHeartbeatSubject } from "../health_transport.ts";
 
 Deno.test("runServiceHealthCheck returns check results", async () => {
   const ok = await runServiceHealthCheck("db", () => ({ status: "ok" }));
@@ -48,8 +48,8 @@ Deno.test("runAllServiceHealthChecks runs named checks", async () => {
   );
 });
 
-Deno.test("createHealthHeartbeat includes baseline service metadata", () => {
-  const heartbeat = createHealthHeartbeat({
+Deno.test("createHealthHeartbeatSample includes participant metadata", () => {
+  const heartbeat = createHealthHeartbeatSample({
     serviceName: "activity",
     instanceId: "instance-1",
     contractId: "trellis.audit@v1",
@@ -63,10 +63,24 @@ Deno.test("createHealthHeartbeat includes baseline service metadata", () => {
     },
   });
 
-  assertEquals(heartbeat.service.name, "activity");
-  assertEquals(heartbeat.service.instanceId, "instance-1");
-  assertEquals(heartbeat.service.version, "1.2.3");
-  assertEquals(heartbeat.status, "healthy");
+  assertEquals(heartbeat.participant.name, "activity");
+  assertEquals(heartbeat.participant.instanceId, "instance-1");
+  assertEquals(heartbeat.participant.version, "1.2.3");
+  assertEquals(heartbeat.reportedStatus, "healthy");
+});
+
+Deno.test("healthHeartbeatSubject encodes authoritative identity tokens", () => {
+  assertEquals(
+    healthHeartbeatSubject({
+      sessionKey: "session_key",
+      participantKind: "service",
+      contractId: "trellis.jobs@v1",
+      contractDigest: "digest-alpha",
+      deploymentId: "jobs.default",
+      instanceId: "rust-1",
+    }),
+    "health.v1.heartbeat.service.dHJlbGxpcy5qb2JzQHYx.ZGlnZXN0LWFscGhh.am9icy5kZWZhdWx0.cnVzdC0x.session_key",
+  );
 });
 
 Deno.test("ServiceHealth aggregates registered checks and info", async () => {
@@ -88,27 +102,26 @@ Deno.test("ServiceHealth aggregates registered checks and info", async () => {
   }));
 
   const checks = await health.checks();
-  const heartbeat = await health.heartbeat();
+  const heartbeat = await health.sample();
   const dbCheck = checks.find((check) => check.name === "db");
 
-  assertEquals(heartbeat.status, "degraded");
+  assertEquals(heartbeat.reportedStatus, "degraded");
   assertEquals(checks.length, 2);
   assertEquals(dbCheck?.info?.service, "activity");
   assertEquals(dbCheck?.info?.contractId, "trellis.audit@v1");
   assertEquals(dbCheck?.info?.contractDigest, "digest");
-  assertEquals(heartbeat.service.contractId, "trellis.audit@v1");
-  assertEquals(heartbeat.service.version, "1.2.3");
+  assertEquals(heartbeat.participant.contractId, "trellis.audit@v1");
+  assertEquals(heartbeat.participant.version, "1.2.3");
 });
 
-Deno.test("health heartbeat wire schema accepts additive fields", () => {
-  const checks: HealthCheckResult[] = [{
-    name: "nats",
-    status: "ok",
-    latencyMs: 1,
-  }];
-
-  assert(Value.Check(HealthHeartbeatSchema, {
-    service: {
+Deno.test("health sample wire schema accepts additive fields", () => {
+  assert(Value.Check(HealthHeartbeatSampleSchema, {
+    sample: {
+      id: "01J00000000000000000000000",
+      time: "2026-01-01T00:00:00.000Z",
+      source: "activity",
+    },
+    participant: {
       name: "activity",
       kind: "service",
       instanceId: "instance-1",
@@ -119,8 +132,13 @@ Deno.test("health heartbeat wire schema accepts additive fields", () => {
       runtime: "deno",
       region: "primary",
     },
-    status: "healthy",
-    checks,
+    reportedStatus: "healthy",
+    checks: [{
+      name: "nats",
+      status: "ok",
+      latencyMs: 1,
+      region: "primary",
+    }],
     requestId: "req_123",
   }));
 });

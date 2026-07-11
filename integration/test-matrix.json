@@ -2452,21 +2452,17 @@
     },
     {
       "kind": "client",
-      "id": "health.client-subscribes-to-heartbeats",
+      "id": "health.service-publishes-authorized-sample",
       "fixture": "health",
-      "title": "Client subscribes to service health heartbeats",
+      "title": "Service publishes an authorized health sample",
       "coverage": [
-        "health-heartbeat-event",
-        "observability-trace-matrix"
+        "health-heartbeat-transport",
+        "health-subject-authorization",
+        "cross-runtime-health"
       ],
-      "description": "An authorized observer subscribes to Health.Heartbeat and receives a heartbeat for the service.",
+      "description": "A connected service automatically publishes its typed health sample on the dedicated subject that Auth grants to that exact runtime identity.",
       "scenario": {
         "participants": [
-          {
-            "name": "observer",
-            "kind": "app",
-            "contract": "trellis.integration.health-observer@v1"
-          },
           {
             "name": "service",
             "kind": "service",
@@ -2474,13 +2470,15 @@
           }
         ],
         "given": [
-          "a service is connected that emits health heartbeats"
+          "a service connects with automatic health publishing enabled"
         ],
         "when": [
-          "the observer subscribes to Health.Heartbeat"
+          "the runtime emits its first health sample"
         ],
         "then": [
-          "the observer receives a heartbeat for the service"
+          "the sample uses the dedicated health transport subject",
+          "the subject carries the authorized service identity",
+          "the payload carries matching participant metadata and checks"
         ]
       },
       "completion": {
@@ -2490,14 +2488,17 @@
     },
     {
       "kind": "client",
-      "id": "health.heartbeat-includes-service-metadata",
+      "id": "health.projection-lifecycle-and-recovery",
       "fixture": "health",
-      "title": "Heartbeat includes service identity metadata",
+      "title": "Health projection materializes lifecycle and recovers",
       "coverage": [
-        "health-heartbeat-event",
-        "observability-trace-matrix"
+        "health-heartbeat-transport",
+        "health-projection",
+        "health-status-transition",
+        "health-watch",
+        "health-recovery"
       ],
-      "description": "The heartbeat includes status, service kind, name, contract id, digest, runtime, version, instance id, startedAt, and publish interval.",
+      "description": "The Rust health runtime projects an authenticated service heartbeat, derives offline state, serves current/history/metrics/watch APIs, publishes a signed status transition, and replays samples accepted while the projector is stopped.",
       "scenario": {
         "participants": [
           {
@@ -2509,106 +2510,29 @@
             "name": "service",
             "kind": "service",
             "contract": "trellis.integration.health-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected that emits health heartbeats"
-        ],
-        "when": [
-          "the observer receives a heartbeat"
-        ],
-        "then": [
-          "the heartbeat includes status",
-          "the heartbeat includes service kind",
-          "the heartbeat includes service name",
-          "the heartbeat includes contract id",
-          "the heartbeat includes digest",
-          "the heartbeat includes runtime",
-          "the heartbeat includes version",
-          "the heartbeat includes instance id",
-          "the heartbeat includes startedAt",
-          "the heartbeat includes publish interval"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
-      "id": "health.heartbeat-includes-custom-checks",
-      "fixture": "health",
-      "title": "Heartbeat includes built-in and custom health checks",
-      "coverage": [
-        "health-heartbeat-event",
-        "observability-trace-matrix"
-      ],
-      "description": "The heartbeat includes the built-in nats ok check and a custom fixture ok check with summary and info.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "observer",
-            "kind": "app",
-            "contract": "trellis.integration.health-observer@v1"
           },
           {
-            "name": "service",
+            "name": "health-runtime",
             "kind": "service",
-            "contract": "trellis.integration.health-service@v1"
+            "contract": "trellis.health@v1"
           }
         ],
         "given": [
-          "a service is connected that emits health heartbeats with custom checks"
+          "the Rust health runtime owns the dedicated heartbeat projection",
+          "an authorized service publishes heartbeat samples"
         ],
         "when": [
-          "the observer receives a heartbeat"
+          "the heartbeat deadline expires",
+          "a sample is accepted while the projector is stopped",
+          "the projector restarts"
         ],
         "then": [
-          "the heartbeat includes a built-in nats ok check",
-          "the heartbeat includes a custom fixture ok check with summary and info"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
-      "id": "health.heartbeat-event-context-is-populated",
-      "fixture": "health",
-      "title": "Heartbeat event context is populated",
-      "coverage": [
-        "health-heartbeat-event",
-        "observability-trace-matrix"
-      ],
-      "description": "The heartbeat event context has subject, mode, id, and time populated, with subject events.v1.Health.Heartbeat.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "observer",
-            "kind": "app",
-            "contract": "trellis.integration.health-observer@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.health-service@v1"
-          }
-        ],
-        "given": [
-          "a service is connected that emits health heartbeats"
-        ],
-        "when": [
-          "the observer receives a heartbeat"
-        ],
-        "then": [
-          "the event context subject is populated",
-          "the event context mode is populated",
-          "the event context id is populated",
-          "the event context time is populated",
-          "the event context subject is events.v1.Health.Heartbeat"
+          "Health.Query reports current and derived offline state",
+          "Health.Inspect reports status intervals",
+          "Health.Metrics reports samples and transitions",
+          "Health.Watch emits post-commit invalidations",
+          "Health.StatusChanged carries a valid runtime event proof",
+          "the stopped-period sample is replayed without a projection gap"
         ]
       },
       "completion": {

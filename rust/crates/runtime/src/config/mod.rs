@@ -12,6 +12,9 @@ pub struct RuntimeConfig {
     /// Human-readable Trellis instance name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_name: Option<String>,
+    /// Session seed used to sign Trellis-owned runtime events.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_session_seed_file: Option<PathBuf>,
     /// HTTP listener configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpConfig>,
@@ -216,6 +219,7 @@ impl RuntimeConfig {
     }
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        resolve_path(base_dir, &mut self.event_session_seed_file);
         if let Some(nats) = &mut self.nats {
             if let Some(runtime) = &mut nats.runtime {
                 resolve_path(base_dir, &mut runtime.auth_creds_path);
@@ -544,6 +548,12 @@ pub struct SubsystemConfig {
     /// Health history retention in days.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_retention_days: Option<u32>,
+    /// Health transport replay retention in hours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_retention_hours: Option<u32>,
+    /// Health transport maximum retained bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_max_bytes: Option<u64>,
     /// Eventlog retention in days.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,

@@ -75,14 +75,6 @@ const TRANSFER_SERVICE_CONTRACT_JSON: &str = r#"{
       "type": "object"
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "resources": {
     "store": {
       "uploads": {
@@ -129,7 +121,7 @@ struct TransferServiceContract;
 
 impl GeneratedServiceContract for TransferServiceContract {
     const CONTRACT_ID: &'static str = TRANSFER_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "0aEKAhM7M7zMUgq2tXOh7k2DYrOALuk2-n2BoegmhiE";
+    const CONTRACT_DIGEST: &'static str = "bq8Xs8YdOJ2e5tWXbH6K7FXtyJhqSBCoh3SiXvV6SEY";
     const CONTRACT_JSON: &'static str = TRANSFER_SERVICE_CONTRACT_JSON;
 }
 

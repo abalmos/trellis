@@ -53,6 +53,7 @@ import {
   type ServiceHealthCheckFn,
   type ServiceHealthInfoFn,
 } from "./health.ts";
+import { publishHealthHeartbeatSample } from "../health_transport.ts";
 import type { EventDesc, RPCDesc } from "../contracts.ts";
 import type {
   AcceptedOperation,
@@ -284,6 +285,8 @@ const ClientTransportsSchema = Type.Object({
 
 type ServiceBootstrapConnectInfo = {
   sessionKey: string;
+  instanceId: string;
+  deploymentId: string;
   contractId: string;
   contractDigest: string;
   transports: {
@@ -555,6 +558,8 @@ const ServiceBootstrapReadySchema = Type.Object({
   serverNow: Type.Integer(),
   connectInfo: Type.Object({
     sessionKey: Type.String({ minLength: 1 }),
+    instanceId: Type.String({ minLength: 1 }),
+    deploymentId: Type.String({ minLength: 1 }),
     contractId: Type.String({ minLength: 1 }),
     contractDigest: Type.String({ minLength: 1 }),
     transports: ClientTransportsSchema,
@@ -1661,6 +1666,10 @@ export async function createConnectedService<
   contractEventConsumers?: ContractEventConsumers;
   server: TrellisServiceRuntimeCreateOpts<TOwnedApi, TTrellisApi>;
   bindings: ResourceBindings;
+  healthIdentity?: {
+    instanceId: string;
+    deploymentId: string;
+  };
   durableEventConsumerBeforeReadinessCheck?: TrellisServiceRuntimeDeps[
     "durableEventConsumerBeforeReadinessCheck"
   ];
@@ -1775,6 +1784,7 @@ export async function createConnectedService<
 
   const health = new ServiceHealth({
     serviceName: args.name,
+    instanceId: args.healthIdentity?.instanceId,
     contractId: args.contractId ?? "unknown",
     contractDigest: args.contractDigest ?? "unknown",
     publishIntervalMs: args.server.health?.publishIntervalMs ?? 30_000,
@@ -1784,33 +1794,28 @@ export async function createConnectedService<
     ...(args.nc.isClosed() ? { summary: "NATS connection closed" } : {}),
   }));
 
-  const heartbeatEventEnabled = Boolean(
-    (currentApi.events as Record<string, unknown> | undefined)
-      ?.["Health.Heartbeat"],
-  );
+  const heartbeatEnabled = args.healthIdentity !== undefined;
   let healthPublishTimer: ReturnType<typeof setInterval> | undefined;
   let publishingHeartbeat = false;
   const publishHealthHeartbeat = async (): Promise<void> => {
-    if (!heartbeatEventEnabled || publishingHeartbeat) {
+    if (!args.healthIdentity || publishingHeartbeat) {
       return;
     }
 
     publishingHeartbeat = true;
     try {
-      const heartbeat = await health.heartbeat();
-      const published = await (
-        outbound.publish as (
-          event: string,
-          data: Record<string, unknown>,
-        ) => AsyncResult<void, BaseError>
-      )("Health.Heartbeat", heartbeat as Record<string, unknown>);
-      const value = published.take();
-      if (isErr(value)) {
-        resolvedLog.warn(
-          { error: value.error },
-          "Failed to publish health heartbeat",
-        );
-      }
+      await publishHealthHeartbeatSample({
+        nc: args.nc,
+        identity: {
+          sessionKey: args.auth.sessionKey,
+          participantKind: "service",
+          contractId: health.contractId,
+          contractDigest: health.contractDigest,
+          deploymentId: args.healthIdentity.deploymentId,
+          instanceId: health.instanceId,
+        },
+        sample: await health.sample(),
+      });
     } catch (error) {
       resolvedLog.warn(
         { error },
@@ -1868,7 +1873,7 @@ export async function createConnectedService<
   };
   transfer = operationTransfer;
 
-  if (heartbeatEventEnabled) {
+  if (heartbeatEnabled) {
     await publishHealthHeartbeat();
     healthPublishTimer = setInterval(() => {
       void publishHealthHeartbeat();
@@ -3010,6 +3015,10 @@ export function connectTrellisServiceWithRuntimeDeps<
           contractEventConsumers: args.contract.CONTRACT.eventConsumers,
           server,
           bindings: bootstrap.binding.resources,
+          healthIdentity: {
+            instanceId: bootstrap.connectInfo.instanceId,
+            deploymentId: bootstrap.connectInfo.deploymentId,
+          },
           durableEventConsumerBeforeReadinessCheck:
             runtimeDeps.durableEventConsumerBeforeReadinessCheck,
         });
