@@ -83,6 +83,7 @@ export type JobKeyState = {
     string,
     { existingJobId: string; reason: "queue-full" | "active-limit" }
   >;
+  acceptedBySubmissionId?: Record<string, { jobId: string }>;
   replacedBySubmissionId?: Record<string, ReplacedQueuedJob>;
 };
 
@@ -200,6 +201,13 @@ export type JobKeyCoordinator = {
     payload: unknown;
     now: string;
     policy: NormalizedJobKeyPolicy;
+    submissionId?: string;
+  }): Promise<QueuedJobRemovalOutcome>;
+  removeQueuedJobById?(args: {
+    service: string;
+    jobType: string;
+    jobId: string;
+    now: string;
   }): Promise<QueuedJobRemovalOutcome>;
   acquireActiveSlot(
     request: ActiveSlotAcquireRequest,
@@ -333,6 +341,15 @@ export function reduceAdmission(args: {
           id: coalescedEntry.existingJobId,
         },
         reason: coalescedEntry.reason,
+      };
+    }
+
+    if (state.acceptedBySubmissionId?.[submissionId]) {
+      return {
+        kind: "accepted",
+        key: state.key,
+        keyHash: state.keyHash,
+        state,
       };
     }
 
@@ -487,8 +504,10 @@ export function reduceRestoreReplacedQueuedJob(args: {
   }, ...queuedWithoutReplacement];
 
   const replacedBySubmissionId = { ...base.replacedBySubmissionId };
+  const acceptedBySubmissionId = { ...base.acceptedBySubmissionId };
   if (args.submissionId) {
     delete replacedBySubmissionId[args.submissionId];
+    delete acceptedBySubmissionId[args.submissionId];
   }
 
   return {
@@ -500,6 +519,9 @@ export function reduceRestoreReplacedQueuedJob(args: {
       queued: restoredQueued,
       replacedBySubmissionId: Object.keys(replacedBySubmissionId).length > 0
         ? replacedBySubmissionId
+        : undefined,
+      acceptedBySubmissionId: Object.keys(acceptedBySubmissionId).length > 0
+        ? acceptedBySubmissionId
         : undefined,
       updatedAt: args.now,
     },
@@ -550,7 +572,8 @@ export function reduceAcquireActiveSlot(args: {
   );
   const isRetry = args.request.lifecycleState === "retry" ||
     args.request.workEventType === "retried";
-  if (!isQueued && !isAlreadyActive && !isRetry) {
+  const isActiveRedelivery = args.request.lifecycleState === "active";
+  if (!isQueued && !isAlreadyActive && !isRetry && !isActiveRedelivery) {
     return {
       kind: "blocked",
       key: base.key,
@@ -610,6 +633,7 @@ export function reduceRemoveQueuedJob(args: {
   state: JobKeyState | undefined;
   jobId: string;
   now: string;
+  submissionId?: string;
 }): QueuedJobRemovalOutcome {
   if (!args.state) {
     return { kind: "not-found" };
@@ -620,9 +644,20 @@ export function reduceRemoveQueuedJob(args: {
   if (queued.length === args.state.queued.length) {
     return { kind: "not-found" };
   }
+  const acceptedBySubmissionId = { ...args.state.acceptedBySubmissionId };
+  if (args.submissionId) {
+    delete acceptedBySubmissionId[args.submissionId];
+  }
   return {
     kind: "removed",
-    state: { ...args.state, queued, updatedAt: args.now },
+    state: {
+      ...args.state,
+      queued,
+      acceptedBySubmissionId: Object.keys(acceptedBySubmissionId).length > 0
+        ? acceptedBySubmissionId
+        : undefined,
+      updatedAt: args.now,
+    },
   };
 }
 
@@ -756,8 +791,41 @@ export function createNatsJobKeyCoordinator(
             state,
             jobId: args.jobId,
             now: args.now,
+            submissionId: args.submissionId,
           }),
       );
+    },
+    async removeQueuedJobById(args) {
+      const kv = await openKv(args.service);
+      const keys = await kv.keys(`${args.service}.${args.jobType}.>`);
+      for await (const kvKey of keys) {
+        const entry = await getStateEntry(kv, kvKey);
+        const state = entry?.json<unknown>();
+        if (
+          !isJobKeyState(state) || state.service !== args.service ||
+          state.jobType !== args.jobType ||
+          !state.queued.some((queued) => queued.jobId === args.jobId)
+        ) {
+          continue;
+        }
+        return await updateState(
+          () => Promise.resolve(kv),
+          {
+            service: state.service,
+            jobType: state.jobType,
+            key: state.key,
+            keyHash: state.keyHash,
+            kvKey,
+          },
+          (current) =>
+            reduceRemoveQueuedJob({
+              state: current,
+              jobId: args.jobId,
+              now: args.now,
+            }),
+        );
+      }
+      return { kind: "not-found" };
     },
     async acquireActiveSlot(request) {
       const derived = await deriveJobKey({
@@ -847,6 +915,12 @@ function appendQueued(
         ...(request.submissionId ? { submissionId: request.submissionId } : {}),
       },
     ],
+    acceptedBySubmissionId: request.submissionId
+      ? {
+        ...state.acceptedBySubmissionId,
+        [request.submissionId]: { jobId: request.jobId },
+      }
+      : state.acceptedBySubmissionId,
     updatedAt: request.createdAt,
   };
 }
@@ -984,10 +1058,22 @@ export function isJobKeyState(value: unknown): value is JobKeyState {
     Array.isArray(state.queued) && state.queued.every(isJobKeyQueued) &&
     isNonNegativeInteger(state.staleTakeoverCount) &&
     isValidIsoTimestamp(state.updatedAt) &&
+    (state.acceptedBySubmissionId === undefined ||
+      isRecordOfAccepted(state.acceptedBySubmissionId)) &&
     (state.coalescedBySubmissionId === undefined ||
       isRecordOfCoalesced(state.coalescedBySubmissionId)) &&
     (state.replacedBySubmissionId === undefined ||
       isRecordOfReplaced(state.replacedBySubmissionId));
+}
+
+function isRecordOfAccepted(
+  value: unknown,
+): value is Record<string, { jobId: string }> {
+  if (value === null || typeof value !== "object") return false;
+  return Object.values(value).every((entry) => {
+    if (entry === null || typeof entry !== "object") return false;
+    return isNonEmptyString((entry as Record<string, unknown>).jobId);
+  });
 }
 
 function isRecordOfCoalesced(

@@ -68,6 +68,7 @@ export {
   type OutboxDispatcherOptions,
   type OutboxDispatchResult,
   type OutboxDispatchRuntime,
+  type OutboxJobDispatchOutcome,
   type OutboxKvEntry,
   type OutboxKvStore,
   type OutboxMessage,

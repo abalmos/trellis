@@ -941,6 +941,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "outbox.dispatches-jobs-through-sql-outbox",
+    file: "outbox/dispatches_jobs_through_sql_outbox.integration_test.ts",
+    testName:
+      "outbox.dispatches-jobs-through-sql-outbox creates and submits durable jobs after commit",
+    runtime: "live-trellis",
+  },
+  {
     id: "outbox.rollback-does-not-publish",
     file: "outbox/rollback_does_not_publish.integration_test.ts",
     testName:

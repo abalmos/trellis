@@ -8,6 +8,7 @@ import {
   JobsInfrastructureMissingError,
   startNatsQueueWorker,
   startQueueWorkerLoop,
+  startWorkerHostFromBinding,
 } from "./runtime-worker.ts";
 import type { Job, JobContext } from "./types.ts";
 
@@ -33,7 +34,6 @@ const jobsBinding = {
       progress: true,
       logs: true,
       dlq: true,
-      concurrency: 1,
     },
   },
 };
@@ -54,7 +54,6 @@ const keyedJobsBinding = {
       progress: true,
       logs: true,
       dlq: true,
-      concurrency: 1,
       keyConcurrency: {
         key: ["/tenant"],
         maxActive: 1,
@@ -66,6 +65,41 @@ const keyedJobsBinding = {
     },
   },
 };
+
+Deno.test("startWorkerHostFromBinding uses per-queue implementation concurrency", async () => {
+  const workers: number[] = [];
+  const host = await startWorkerHostFromBinding(
+    { jobs: jobsBinding, workStream: "JOBS_WORK" },
+    {
+      instanceId: "worker-1",
+      queueConcurrency: { refresh: 3 },
+      startWorker: ({ workerIndex }) => {
+        workers.push(workerIndex);
+        return Promise.resolve({ stop: () => Promise.resolve() });
+      },
+    },
+  );
+
+  assertEquals(workers, [0, 1, 2]);
+  assertEquals(host.workerCount(), 3);
+  await host.stop();
+});
+
+Deno.test("startWorkerHostFromBinding rejects invalid implementation concurrency", async () => {
+  await assertRejects(
+    () =>
+      startWorkerHostFromBinding(
+        { jobs: jobsBinding, workStream: "JOBS_WORK" },
+        {
+          instanceId: "worker-1",
+          queueConcurrency: { refresh: 0 },
+          startWorker: () => Promise.resolve({ stop: () => Promise.resolve() }),
+        },
+      ),
+    Error,
+    "expected a positive integer",
+  );
+});
 
 Deno.test("ackActionForOutcome naks keyed deferred work", () => {
   assertEquals(
@@ -161,6 +195,66 @@ Deno.test("startQueueWorkerLoop skips terminal projected jobs before processing"
 
   assertEquals(acked, 1);
   assertEquals(handled, 0);
+});
+
+Deno.test("startQueueWorkerLoop naks unexpected failures and continues", async () => {
+  let acked = 0;
+  let nacked = 0;
+  let projectedCalls = 0;
+  let handled = 0;
+  const first: Job = {
+    id: "job-fails",
+    service: "svc",
+    type: "refresh",
+    state: "pending",
+    context: jobContext,
+    payload: { siteId: "site-1" },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 0,
+    maxTries: 5,
+  };
+  const second = { ...first, id: "job-continues" };
+
+  const loop = await startQueueWorkerLoop({
+    manager: new JobManager({ nc: { publish: () => {} }, jobs: jobsBinding }),
+    consumer: {
+      consume() {
+        return Promise.resolve((async function* () {
+          for (const job of [first, second]) {
+            yield {
+              data: new TextEncoder().encode(JSON.stringify(createdEvent(job))),
+              subject: "trellis.work.svc.refresh",
+              ack: () => {
+                acked += 1;
+              },
+              nak: () => {
+                nacked += 1;
+              },
+              inProgress: () => {},
+            };
+          }
+        })());
+      },
+    },
+    cancelSubscription: cancelSubscription(() => {}),
+    getProjectedJob: () => {
+      projectedCalls += 1;
+      if (projectedCalls === 1) throw new Error("projection unavailable");
+      return Promise.resolve(undefined);
+    },
+    handler: () => {
+      handled += 1;
+      return Promise.resolve({});
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await loop.stop();
+
+  assertEquals(nacked, 1);
+  assertEquals(acked, 1);
+  assertEquals(handled, 1);
 });
 
 Deno.test("startQueueWorkerLoop prefers latest lifecycle event over stale projection", async () => {
@@ -381,6 +475,78 @@ Deno.test("startQueueWorkerLoop cleans queued key state for terminal lifecycle b
   assertEquals(acked, 1);
   assertEquals(handled, 0);
   assertEquals(removed, 1);
+});
+
+Deno.test("startQueueWorkerLoop acks terminal work when keyed cleanup fails", async () => {
+  let acked = 0;
+  let nacked = 0;
+  let fallbackCleanup = 0;
+  const job: Job = {
+    id: "job-old-payload",
+    service: "svc",
+    type: "sync",
+    state: "pending",
+    context: jobContext,
+    payload: { input: { tenant: "a" } },
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+    tries: 0,
+    maxTries: 5,
+  };
+  const event = createdEvent(job);
+  const coordinator: JobKeyCoordinator = {
+    admitCreate: () => Promise.reject(new Error("unexpected admit")),
+    restoreReplacedQueuedJob: () =>
+      Promise.reject(new Error("unexpected restore")),
+    removeQueuedJob: () => Promise.reject(new Error("old payload schema")),
+    removeQueuedJobById: () => {
+      fallbackCleanup += 1;
+      return Promise.reject(new Error("coordinator unavailable"));
+    },
+    acquireActiveSlot: () => Promise.reject(new Error("unexpected acquire")),
+    renewHeartbeat: () => Promise.reject(new Error("unexpected renew")),
+    releaseActiveSlot: () => Promise.reject(new Error("unexpected release")),
+  };
+
+  const loop = await startQueueWorkerLoop({
+    manager: new JobManager({
+      nc: { publish: () => {} },
+      jobs: keyedJobsBinding,
+      keyCoordinator: coordinator,
+    }),
+    consumer: {
+      consume() {
+        return Promise.resolve((async function* () {
+          yield {
+            data: new TextEncoder().encode(JSON.stringify(event)),
+            subject: "trellis.work.svc.sync",
+            ack: () => {
+              acked += 1;
+            },
+            nak: () => {
+              nacked += 1;
+            },
+            inProgress: () => {},
+          };
+        })());
+      },
+    },
+    cancelSubscription: cancelSubscription(() => {}),
+    getLatestLifecycleEvent: () =>
+      Promise.resolve({
+        ...event,
+        eventType: "completed",
+        state: "completed",
+      }),
+    handler: () => Promise.reject(new Error("terminal work was handled")),
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await loop.stop();
+
+  assertEquals(fallbackCleanup, 1);
+  assertEquals(acked, 1);
+  assertEquals(nacked, 0);
 });
 
 Deno.test("startQueueWorkerLoop delays NAK for keyed active-limit deferrals", async () => {

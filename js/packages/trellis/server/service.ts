@@ -102,6 +102,7 @@ import {
 import type { ReceiveTransferGrant } from "../transfer.ts";
 import {
   ActiveJob as PublicActiveJob,
+  type JobHandlerOptions,
   type JobIdentity,
   type JobLogEntry,
   JobNotEnqueuedError,
@@ -115,9 +116,9 @@ import {
 } from "../jobs.ts";
 import { ulid } from "ulid";
 import {
-  createJobContext,
   JobManager as InternalJobManager,
   JobProcessError as InternalJobProcessError,
+  prepareJobSubmission,
 } from "./internal_jobs/job-manager.ts";
 import { startNatsWorkerHostFromBinding } from "./internal_jobs/runtime-worker.ts";
 import {
@@ -138,6 +139,8 @@ import {
   type JobContext as InternalJobContext,
   type JobEvent as InternalJobEvent,
   JobEventSchema,
+  type PreparedJobSubmission as InternalPreparedJobSubmission,
+  PreparedJobSubmissionSchema,
 } from "./internal_jobs/types.ts";
 import {
   observeNatsTrellisConnection,
@@ -150,6 +153,7 @@ import {
   OutboxDispatcher,
   type OutboxDispatcherOptions,
   type OutboxDispatchRuntime,
+  type OutboxJobDispatchOutcome,
   type OutboxMessage,
   type PreparedOutboxRecord,
   preparedTrellisEventToOutboxRecord,
@@ -178,7 +182,6 @@ type ResourceBindingJobsQueue = {
   progress: boolean;
   logs: boolean;
   dlq: boolean;
-  concurrency: number;
   keyConcurrency?: JobKeyConcurrencyBinding;
   queue?: JobQueuePolicyBinding;
 };
@@ -246,7 +249,6 @@ function baseJobsQueueBinding(
     progress: queue.progress,
     logs: queue.logs,
     dlq: queue.dlq,
-    concurrency: queue.concurrency,
   };
 }
 
@@ -1200,6 +1202,7 @@ export type JobQueue<
       job: PublicActiveJob<TPayload, TResult>;
       client: Trellis<TTrellisApi, TKv, TJobs>;
     }) => Promise<Result<TResult, BaseError>>,
+    options?: JobHandlerOptions,
   ): void;
 };
 
@@ -1326,6 +1329,10 @@ export type SqlOutbox<
       | Promise<TResult>
       | TResult,
   ): AsyncResult<TResult, ValidationError | UnexpectedError>;
+  /** Returns the durable queue-admission outcome once a job submission dispatches. */
+  jobSubmissionOutcome(
+    submissionId: string,
+  ): AsyncResult<OutboxJobDispatchOutcome | undefined, UnexpectedError>;
 };
 
 const MANAGED_JOB_WORKERS = Symbol("trellis.managedJobWorkers");
@@ -1951,7 +1958,6 @@ function createSqlOutboxEventEnqueueFacade<TEventApi extends TrellisAPI>(args: {
 
 function createSqlOutboxJobEnqueueFacade<TJobs extends ContractJobsMetadata>(
   args: {
-    serviceName: string;
     contractJobs: TJobs;
     jobsBinding?: ResourceBindingJobs;
     repository: SqlOutboxRepository;
@@ -1963,7 +1969,8 @@ function createSqlOutboxJobEnqueueFacade<TJobs extends ContractJobsMetadata>(
   for (
     const queueType of Object.keys(args.contractJobs as Record<string, unknown>)
   ) {
-    const queueBinding = args.jobsBinding?.queues[queueType];
+    const jobsBinding = args.jobsBinding;
+    const queueBinding = jobsBinding?.queues[queueType];
     const queue = queueType;
     facade[queue] = {
       create: (payload: unknown) => {
@@ -1979,22 +1986,28 @@ function createSqlOutboxJobEnqueueFacade<TJobs extends ContractJobsMetadata>(
         }
         const submissionId = ulid();
         const jobId = ulid();
-        const context = createJobContext();
+        const submission = prepareJobSubmission({
+          submissionId,
+          mode: "create",
+          service: jobsBinding.serviceName,
+          queue,
+          jobId,
+          payload,
+          createdAt: new Date().toISOString(),
+        });
 
         const record: PreparedOutboxRecord = {
           id: submissionId,
           kind: "job.create",
           name: queue,
           subject: `${queueBinding.publishPrefix}.${jobId}.created`,
-          payload: JSON.stringify({
-            ...(payload as Record<string, unknown>),
-            jobId,
-            submissionId,
-          }),
+          payload: JSON.stringify(submission),
           headers: {
-            "request-id": context.requestId,
-            "traceparent": context.traceparent,
-            ...(context.tracestate ? { "tracestate": context.tracestate } : {}),
+            "request-id": submission.context.requestId,
+            "traceparent": submission.context.traceparent,
+            ...(submission.context.tracestate
+              ? { "tracestate": submission.context.tracestate }
+              : {}),
           },
         };
 
@@ -2026,22 +2039,28 @@ function createSqlOutboxJobEnqueueFacade<TJobs extends ContractJobsMetadata>(
         }
         const submissionId = ulid();
         const jobId = ulid();
-        const context = createJobContext();
+        const submission = prepareJobSubmission({
+          submissionId,
+          mode: "submit",
+          service: jobsBinding.serviceName,
+          queue,
+          jobId,
+          payload,
+          createdAt: new Date().toISOString(),
+        });
 
         const record: PreparedOutboxRecord = {
           id: submissionId,
           kind: "job.submit",
           name: queue,
           subject: `${queueBinding.publishPrefix}.${jobId}.created`,
-          payload: JSON.stringify({
-            ...(payload as Record<string, unknown>),
-            jobId,
-            submissionId,
-          }),
+          payload: JSON.stringify(submission),
           headers: {
-            "request-id": context.requestId,
-            "traceparent": context.traceparent,
-            ...(context.tracestate ? { "tracestate": context.tracestate } : {}),
+            "request-id": submission.context.requestId,
+            "traceparent": submission.context.traceparent,
+            ...(submission.context.tracestate
+              ? { "tracestate": submission.context.tracestate }
+              : {}),
           },
         };
 
@@ -2496,7 +2515,10 @@ function createJobsFacade<
   jobsBinding?: ResourceBindingJobs;
   workStream?: string;
 }): ManagedJobsFacade<TJobs, TTrellisApi, TKv> {
-  const handlers = new Map<string, RegisteredJobHandler<unknown, unknown>>();
+  const handlers = new Map<string, {
+    handler: RegisteredJobHandler<unknown, unknown>;
+    concurrency: number;
+  }>();
   const jobsFacade: Record<string, unknown> = {};
   const lifecycle = createJobLifecycleTracker(args.nc);
   const keyCoordinator = createNatsJobKeyCoordinator(args.nc);
@@ -2611,7 +2633,7 @@ function createJobsFacade<
             return Result.err(toUnexpectedError(cause));
           }
         })()),
-      handle: (handler) => {
+      handle: (handler, options) => {
         if (handlers.has(queueType)) {
           throw new Error(
             `Job handler for queue '${queueType}' is already registered`,
@@ -2622,14 +2644,20 @@ function createJobsFacade<
             `Job handler for queue '${queueType}' cannot be registered after worker startup has begun`,
           );
         }
-        handlers.set(
-          queueType,
-          async (job) =>
+        const concurrency = options?.concurrency ?? 1;
+        if (!Number.isInteger(concurrency) || concurrency < 1) {
+          throw new Error(
+            `Job handler for queue '${queueType}' has invalid concurrency ${concurrency}; expected a positive integer`,
+          );
+        }
+        handlers.set(queueType, {
+          concurrency,
+          handler: async (job) =>
             await handler({
               job,
               client: args.client,
             }),
-        );
+        });
       },
     } satisfies JobQueue<unknown, unknown, TTrellisApi, TKv, TJobs>;
   }
@@ -2668,8 +2696,8 @@ function createJobsFacade<
             if (!queueBinding) {
               throw new Error(`Unknown jobs queue '${queueType}'`);
             }
-            const handler = handlers.get(queueType);
-            if (!handler) {
+            const registration = handlers.get(queueType);
+            if (!registration) {
               throw new Error(
                 `No job handler registered for queue '${queueType}'`,
               );
@@ -2687,6 +2715,9 @@ function createJobsFacade<
               nats: args.nc,
               instanceId: `${args.serviceName}-worker`,
               queueTypes: [queueType],
+              queueConcurrency: {
+                [queueType]: registration.concurrency,
+              },
               manager,
               heartbeatPublisher: args.nc,
               getProjectedJob: async (job) => {
@@ -2717,6 +2748,7 @@ function createJobsFacade<
                       wrapVoidTask(() => job.log(entry.level, entry.message)),
                     waitFor: (target, fn) => job.waitFor(target, fn),
                     redeliveryCount: job.redeliveryCount(),
+                    signal: job.signal,
                   },
                 );
 
@@ -2731,7 +2763,7 @@ function createJobsFacade<
 
                 let handled: unknown | Result<never, BaseError>;
                 try {
-                  handled = (await handler(publicJob)).take();
+                  handled = (await registration.handler(publicJob)).take();
                 } catch (cause) {
                   const annotatedError = annotateHandlerBoundaryError(
                     cause,
@@ -3188,6 +3220,7 @@ export class TrellisService<
     readonly tables: SqlOutboxTables;
     readonly transaction: SqlOutboxTransactionRunner<TTx>;
     readonly dispatcher: OutboxDispatcher;
+    readonly repository: SqlOutboxRepository;
   } {
     const tables = resolveSqlOutboxTables(options.tables);
     const executor = createSqlOutboxBaseExecutor(options);
@@ -3199,7 +3232,111 @@ export class TrellisService<
     const dispatchRuntime: OutboxDispatchRuntime = {
       publishPreparedEvent: (event) =>
         this.#handlerTrellis.publishPrepared(event),
-      // dispatchJobSubmission: stub — filled in by Phase 3
+      dispatchJobSubmission: (message) =>
+        AsyncResult.from((async () => {
+          try {
+            if (!this.#jobsBinding) {
+              return Result.ok({
+                kind: "invalid",
+                error: "Jobs bindings are unavailable",
+              });
+            }
+            const jobsBinding = normalizeResourceJobsBinding(this.#jobsBinding);
+            const queueBinding = jobsBinding.queues[message.name];
+            if (!queueBinding) {
+              return Result.ok({
+                kind: "invalid",
+                error:
+                  `Jobs binding for queue '${message.name}' is unavailable`,
+              });
+            }
+
+            let submission: InternalPreparedJobSubmission;
+            try {
+              submission = Value.Parse(
+                PreparedJobSubmissionSchema,
+                JSON.parse(message.payload),
+              );
+            } catch (cause) {
+              return Result.ok({
+                kind: "invalid",
+                error: cause instanceof Error ? cause.message : String(cause),
+              });
+            }
+            const expectedMode = message.kind === "job.create"
+              ? "create"
+              : "submit";
+            const expectedSubject =
+              `${queueBinding.publishPrefix}.${submission.jobId}.created`;
+            if (
+              submission.submissionId !== message.id ||
+              submission.mode !== expectedMode ||
+              submission.service !== jobsBinding.serviceName ||
+              submission.queue !== message.name ||
+              message.subject !== expectedSubject ||
+              message.headers["request-id"] !==
+                submission.context.requestId ||
+              message.headers.traceparent !== submission.context.traceparent ||
+              message.headers.tracestate !== submission.context.tracestate
+            ) {
+              return Result.ok({
+                kind: "invalid",
+                error: "Outbox job submission metadata is inconsistent",
+              });
+            }
+
+            const manager = new InternalJobManager<unknown, unknown>({
+              nc: this.#nc,
+              jobs: jobsBinding,
+              keyCoordinator: createNatsJobKeyCoordinator(this.#nc),
+            });
+            if (submission.mode === "create") {
+              const job = await manager.createPrepared(submission);
+              await this.#nc.flush();
+              return Result.ok({ kind: "accepted", jobId: job.id });
+            }
+
+            const outcome = await manager.submitPrepared(submission);
+            await this.#nc.flush();
+            if (outcome.kind === "accepted") {
+              return Result.ok({
+                kind: outcome.kind,
+                jobId: outcome.job.id,
+                ...(outcome.key ? { key: outcome.key } : {}),
+              });
+            }
+            if (outcome.kind === "replaced") {
+              return Result.ok({
+                kind: outcome.kind,
+                jobId: outcome.job.id,
+                key: outcome.key,
+                replaced: outcome.replaced,
+              });
+            }
+            return Result.ok(outcome);
+          } catch (cause) {
+            if (cause instanceof JobNotEnqueuedError) {
+              return Result.ok({
+                kind: "rejected",
+                reason: cause.reason,
+                key: cause.key,
+                active: cause.active,
+                queued: cause.queued,
+                limit: cause.limit,
+                ...(cause.existingJobId
+                  ? { existingJobId: cause.existingJobId }
+                  : {}),
+              });
+            }
+            if (cause instanceof ValidationError) {
+              return Result.ok({ kind: "invalid", error: cause.message });
+            }
+            if (cause instanceof UnexpectedError) {
+              return Result.err(cause);
+            }
+            return Result.err(toUnexpectedError(cause));
+          }
+        })()),
     };
     const dispatcher = new OutboxDispatcher(
       repository,
@@ -3212,6 +3349,7 @@ export class TrellisService<
       tables,
       transaction: createSqlOutboxTransactionRunner(options),
       dispatcher,
+      repository,
     };
   }
 
@@ -3220,8 +3358,32 @@ export class TrellisService<
     readonly tables: SqlOutboxTables;
     readonly transaction: SqlOutboxTransactionRunner<TTx>;
     readonly dispatcher: OutboxDispatcher;
+    readonly repository: SqlOutboxRepository;
   }): SqlOutbox<TTx, TTrellisApi, TJobs> {
     return {
+      jobSubmissionOutcome: (submissionId: string) =>
+        AsyncResult.from((async () => {
+          try {
+            const message = await binding.repository.get(submissionId);
+            if (message?.state !== "dispatched") {
+              return Result.ok(undefined);
+            }
+            const outcome = message.outcome;
+            if (
+              !outcome || typeof outcome !== "object" ||
+              !("kind" in outcome) || typeof outcome.kind !== "string"
+            ) {
+              return Result.err(toUnexpectedError(
+                new Error(
+                  `Outbox job submission '${submissionId}' has no valid outcome`,
+                ),
+              ));
+            }
+            return Result.ok({ ...outcome, kind: outcome.kind });
+          } catch (cause) {
+            return Result.err(toUnexpectedError(cause));
+          }
+        })()),
       transaction: <TResult>(
         work: (
           context: SqlOutboxTransactionContext<TTx, TTrellisApi, TJobs>,
@@ -3256,7 +3418,6 @@ export class TrellisService<
                 },
               });
               const job = createSqlOutboxJobEnqueueFacade({
-                serviceName: this.name,
                 contractJobs: this.#contractJobs,
                 jobsBinding: this.#jobsBinding,
                 repository,

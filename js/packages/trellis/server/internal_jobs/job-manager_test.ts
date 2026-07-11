@@ -74,7 +74,6 @@ Deno.test("JobManager creates and publishes job context", async () => {
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
         },
       },
     },
@@ -153,7 +152,6 @@ Deno.test("JobManager preserves structured failure error string", async () => {
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
         },
       },
     },
@@ -225,7 +223,6 @@ Deno.test("JobManager child jobs inherit active job lineage", async () => {
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
         },
       },
     },
@@ -307,7 +304,6 @@ Deno.test("JobManager active waitFor publishes wait edge and preserves result or
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
         },
       },
     },
@@ -430,7 +426,6 @@ Deno.test("JobManager marks retryable failure dead at max tries", async () => {
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
         },
       },
     },
@@ -459,7 +454,7 @@ Deno.test("JobManager marks retryable failure dead at max tries", async () => {
   assertEquals(deadEvent.error, "try again");
 });
 
-Deno.test("JobManager keyed create rejects before publishing created", async () => {
+Deno.test("JobManager keyed create rejects and prepared create publishes skipped", async () => {
   const published: PublishedMessage[] = [];
   const coordinator: JobKeyCoordinator = {
     ...unsupportedCoordinator(),
@@ -495,7 +490,6 @@ Deno.test("JobManager keyed create rejects before publishing created", async () 
           progress: false,
           logs: false,
           dlq: false,
-          concurrency: 1,
           keyConcurrency: {
             key: ["/tenant"],
             maxActive: 1,
@@ -521,6 +515,29 @@ Deno.test("JobManager keyed create rejects before publishing created", async () 
   assertInstanceOf(error, JobNotEnqueuedError);
   assertEquals(error.reason, "queue-depth");
   assertEquals(published.length, 0);
+
+  await assertRejects(
+    () =>
+      manager.createPrepared({
+        submissionId: "submission-1",
+        mode: "create",
+        service: "svc",
+        queue: "sync",
+        jobId: "job-prepared",
+        payload: { tenant: "a" },
+        createdAt: "2024-01-01T00:00:00.000Z",
+        context: jobContext,
+        trigger: { kind: "serviceCode" },
+      }),
+    JobNotEnqueuedError,
+  );
+  assertEquals(published.length, 1);
+  const skipped = JSON.parse(
+    new TextDecoder().decode(published[0]!.payload),
+  );
+  assertEquals(skipped.eventType, "skipped");
+  assertEquals(skipped.state, "skipped");
+  assertEquals(skipped.error, "job submission not enqueued: queue-depth");
 });
 
 Deno.test("JobManager submit returns keyed policy outcomes", async () => {
@@ -1021,7 +1038,6 @@ function keyedJobsBinding(): JobsBinding {
         progress: false,
         logs: false,
         dlq: false,
-        concurrency: 1,
         keyConcurrency: {
           key: ["/tenant"],
           maxActive: 1,

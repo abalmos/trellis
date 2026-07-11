@@ -250,6 +250,54 @@ Deno.test("reduceAdmission keeps create strict for coalesce and replace-oldest q
   }
 });
 
+Deno.test("reduceAdmission remembers an accepted submission after its queue entry is removed", async () => {
+  const derived = await deriveJobKey({
+    service: "svc",
+    jobType: "sync",
+    payload: { tenant: "a" },
+    template: ["/tenant"],
+  });
+  const policy = normalizeJobKeyPolicy({
+    keyConcurrency: { key: ["/tenant"] },
+  });
+  const request = {
+    service: "svc",
+    jobType: "sync",
+    jobId: "job-1",
+    context,
+    createdAt: "2024-01-01T00:00:00.000Z",
+    strictCreate: true,
+    submissionId: "submission-1",
+  };
+  const accepted = reduceAdmission({
+    state: undefined,
+    derived,
+    request,
+    policy,
+  });
+  if (accepted.kind !== "accepted") return;
+  const removed = reduceRemoveQueuedJob({
+    state: accepted.state,
+    jobId: request.jobId,
+    now: "2024-01-01T00:00:01.000Z",
+  });
+  if (removed.kind !== "removed") return;
+
+  const replayed = reduceAdmission({
+    state: removed.state,
+    derived,
+    request,
+    policy,
+  });
+  assertEquals(replayed.kind, "accepted");
+  if (replayed.kind === "accepted") {
+    assertEquals(replayed.state.queued, []);
+    assertEquals(replayed.state.acceptedBySubmissionId, {
+      "submission-1": { jobId: "job-1" },
+    });
+  }
+});
+
 Deno.test("active slot reducers acquire renew release and detect stale completion", async () => {
   const policy = normalizeJobKeyPolicy({
     keyConcurrency: { key: ["/tenant"] },
@@ -422,6 +470,41 @@ Deno.test("reduceAcquireActiveSlot allows manual retried work without queued res
   }
 });
 
+Deno.test("reduceAcquireActiveSlot allows active redelivery without queued reservation", async () => {
+  const policy = normalizeJobKeyPolicy({
+    keyConcurrency: { key: ["/tenant"] },
+  });
+  const derived = await deriveJobKey({
+    service: "svc",
+    jobType: "sync",
+    payload: { tenant: "a" },
+    template: policy.key,
+  });
+
+  const acquired = reduceAcquireActiveSlot({
+    state: undefined,
+    derived,
+    request: {
+      service: "svc",
+      jobType: "sync",
+      jobId: "job-active",
+      context,
+      workEventType: "created",
+      lifecycleState: "active",
+      tries: 1,
+      instanceId: "worker-1",
+      now: "2024-01-01T00:00:02.000Z",
+    },
+    policy,
+    slotToken: "slot-1",
+  });
+
+  assertEquals(acquired.kind, "acquired");
+  if (acquired.kind === "acquired") {
+    assertEquals(acquired.state.active[0]?.jobId, "job-active");
+  }
+});
+
 Deno.test("reduceRemoveQueuedJob releases pending keyed reservation", async () => {
   const policy = normalizeJobKeyPolicy({
     keyConcurrency: { key: ["/tenant"] },
@@ -442,6 +525,7 @@ Deno.test("reduceRemoveQueuedJob releases pending keyed reservation", async () =
       context,
       createdAt: "2024-01-01T00:00:00.000Z",
       strictCreate: true,
+      submissionId: "submission-1",
     },
     policy,
   });
@@ -451,11 +535,13 @@ Deno.test("reduceRemoveQueuedJob releases pending keyed reservation", async () =
     state: admitted.state,
     jobId: "job-1",
     now: "2024-01-01T00:00:01.000Z",
+    submissionId: "submission-1",
   });
 
   assertEquals(removed.kind, "removed");
   if (removed.kind === "removed") {
     assertEquals(removed.state.queued, []);
+    assertEquals(removed.state.acceptedBySubmissionId, undefined);
   }
 });
 

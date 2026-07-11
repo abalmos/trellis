@@ -419,6 +419,7 @@ export class ActiveJob<TPayload, TResult> {
   readonly ref: JobRef<TPayload, TResult>;
   readonly payload: TPayload;
   readonly context: Readonly<JobContext>;
+  readonly signal: AbortSignal;
 
   readonly #cancelled: () => boolean;
   readonly #heartbeat: () => AsyncResult<void, BaseError>;
@@ -441,6 +442,7 @@ export class ActiveJob<TPayload, TResult> {
       log: (entry: JobLogEntry) => AsyncResult<void, BaseError>;
       waitFor: <T>(target: JobWaitTarget, fn: () => Promise<T>) => Promise<T>;
       redeliveryCount?: number;
+      signal?: AbortSignal;
     },
   ) {
     this.ref = ref;
@@ -454,6 +456,7 @@ export class ActiveJob<TPayload, TResult> {
     this.#log = impl.log;
     this.#waitFor = impl.waitFor;
     this.#redeliveryCount = impl.redeliveryCount ?? 0;
+    this.signal = impl.signal ?? new AbortController().signal;
   }
 
   get cancelled(): boolean {
@@ -513,6 +516,7 @@ export class JobQueue<TPayload, TResult> {
     handler: (
       job: ActiveJob<TPayload, TResult>,
     ) => Promise<Result<TResult, BaseError>>,
+    options?: JobHandlerOptions,
   ) => void;
   readonly #submit: (
     payload: TPayload,
@@ -526,6 +530,7 @@ export class JobQueue<TPayload, TResult> {
       handler: (
         job: ActiveJob<TPayload, TResult>,
       ) => Promise<Result<TResult, BaseError>>,
+      options?: JobHandlerOptions,
     ) => void;
     submit?: (
       payload: TPayload,
@@ -564,10 +569,17 @@ export class JobQueue<TPayload, TResult> {
     handler: (
       job: ActiveJob<TPayload, TResult>,
     ) => Promise<Result<TResult, BaseError>>,
+    options?: JobHandlerOptions,
   ): void {
-    this.#handle(handler);
+    this.#handle(handler, options);
   }
 }
+
+/** Per-service-instance job handler configuration. */
+export type JobHandlerOptions = {
+  /** Worker loops started for this job type. Defaults to one. */
+  concurrency?: number;
+};
 
 export interface JobWorkerHost {
   stop(): AsyncResult<void, BaseError>;

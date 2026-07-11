@@ -37,6 +37,7 @@ import type {
   JobTrigger,
   JobWaitEdge,
   JobWaitTarget,
+  PreparedJobSubmission,
 } from "./types.ts";
 
 type Publisher = {
@@ -123,19 +124,6 @@ export type JobManagerSubmitOutcome<TPayload, TResult> =
     replaced: { service: string; jobType: string; id: string };
     job: Job<TPayload, TResult>;
   };
-
-export type PreparedJobSubmission<TPayload = unknown> = {
-  readonly submissionId: string;
-  readonly mode: "create" | "submit";
-  readonly service: string;
-  readonly queue: string;
-  readonly jobId: string;
-  readonly payload: TPayload;
-  readonly createdAt: string;
-  readonly context: JobContext;
-  readonly trigger?: JobTrigger;
-  readonly lineage?: JobLineage;
-};
 
 export class JobManager<TPayload = unknown, TResult = unknown> {
   readonly #context: JobManagerContext;
@@ -236,6 +224,19 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     if (outcome.kind === "accepted") {
       return outcome.job;
     }
+    await this.#publishSkipped(
+      submission.queue,
+      { id: submission.jobId, context: submission.context },
+      submission.createdAt,
+      `trellis-job-skipped:${submission.submissionId}:${submission.jobId}`,
+      `job submission not enqueued: ${
+        outcome.kind === "coalesced"
+          ? "coalesced"
+          : outcome.kind === "replaced"
+          ? "queue-depth"
+          : outcome.reason
+      }`,
+    );
     if (outcome.kind === "coalesced") {
       throw new JobNotEnqueuedError({
         reason: "coalesced",
@@ -268,7 +269,19 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   async submitPrepared(
     submission: PreparedJobSubmission<TPayload>,
   ): Promise<JobManagerSubmitOutcome<TPayload, TResult>> {
-    return await this.#submitPrepared(submission, false, true);
+    const outcome = await this.#submitPrepared(submission, false, true);
+    if (outcome.kind === "rejected" || outcome.kind === "coalesced") {
+      await this.#publishSkipped(
+        submission.queue,
+        { id: submission.jobId, context: submission.context },
+        submission.createdAt,
+        `trellis-job-skipped:${submission.submissionId}:${submission.jobId}`,
+        `job submission not enqueued: ${
+          outcome.kind === "coalesced" ? "coalesced" : outcome.reason
+        }`,
+      );
+    }
+    return outcome;
   }
 
   async #submit(
@@ -283,7 +296,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const context = createJobContext();
     const serviceName = this.#context.jobs!.serviceName;
 
-    const submission: PreparedJobSubmission<TPayload> = {
+    const submission = prepareJobSubmission({
       submissionId: id,
       mode: strictCreate ? "create" : "submit",
       service: serviceName,
@@ -292,9 +305,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       payload,
       createdAt: now,
       context,
-      trigger: parent ? parentJobTrigger(parent) : { kind: "serviceCode" },
-      ...(parent ? { lineage: childJobLineage(parent) } : {}),
-    };
+      parent,
+    });
 
     return await this.#submitPrepared(submission, strictCreate);
   }
@@ -349,13 +361,16 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
 
     const keyedPolicy = getKeyPolicy(binding);
     if (keyedPolicy) {
+      const stableSubmissionId = stableMessageIds
+        ? submission.submissionId
+        : undefined;
       const admission = await this.#admitKeyedCreate({
         type,
         job,
         event,
         policy: keyedPolicy,
         strictCreate,
-        submissionId: submission.submissionId,
+        ...(stableSubmissionId ? { submissionId: stableSubmissionId } : {}),
       });
       if (admission.kind !== "accepted" && admission.kind !== "replaced") {
         return admission;
@@ -365,7 +380,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
           job,
           admission.replaced,
           keyedPolicy,
-          submission.submissionId,
+          stableSubmissionId,
         );
         return {
           kind: "rejected",
@@ -378,8 +393,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       }
       if (admission.kind === "replaced") {
         try {
-          const skippedMsgId = stableMessageIds
-            ? `trellis-job-skipped:${submission.submissionId}:${admission.replaced.id}`
+          const skippedMsgId = stableSubmissionId
+            ? `trellis-job-skipped:${stableSubmissionId}:${admission.replaced.id}`
             : undefined;
           await this.#publishSkipped(
             type,
@@ -392,18 +407,22 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
             job,
             admission.replaced,
             keyedPolicy,
-            submission.submissionId,
+            stableSubmissionId,
           );
           throw error;
         }
       }
       try {
-        const createdMsgId = stableMessageIds
-          ? `trellis-job-created:${submission.submissionId}`
+        const createdMsgId = stableSubmissionId
+          ? `trellis-job-created:${stableSubmissionId}`
           : undefined;
         await this.#publishJobEvent(type, id, event, createdMsgId);
       } catch (error) {
-        await this.#removeQueuedKeyedReservation(job, keyedPolicy);
+        await this.#removeQueuedKeyedReservation(
+          job,
+          keyedPolicy,
+          stableSubmissionId,
+        );
         throw error;
       }
       if (admission.kind === "replaced") {
@@ -460,12 +479,24 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     const queue = this.#getQueueBinding(job.type);
     const keyedPolicy = getKeyPolicy(queue);
     if (!keyedPolicy) return;
-    await this.#removeQueuedKeyedReservation(job, keyedPolicy);
+    try {
+      await this.#removeQueuedKeyedReservation(job, keyedPolicy);
+    } catch (cause) {
+      const coordinator = this.#context.keyCoordinator;
+      if (!coordinator?.removeQueuedJobById) throw cause;
+      await coordinator.removeQueuedJobById({
+        service: this.#coordinationService(),
+        jobType: job.type,
+        jobId: job.id,
+        now: this.#meta().nowIso(),
+      });
+    }
   }
 
   async #removeQueuedKeyedReservation(
     job: Job<TPayload, TResult>,
     policy: NormalizedJobKeyPolicy,
+    submissionId?: string,
   ): Promise<void> {
     const coordinator = this.#context.keyCoordinator;
     if (!coordinator) return;
@@ -476,6 +507,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       payload: job.payload,
       now: this.#meta().nowIso(),
       policy,
+      ...(submissionId ? { submissionId } : {}),
     });
   }
 
@@ -504,6 +536,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     replaced: { id: string; context: JobContext },
     timestamp: string,
     stableMessageId?: string,
+    error = "replaced by newer keyed job",
   ): Promise<void> {
     await this.#publishJobEvent(type, replaced.id, {
       jobId: replaced.id,
@@ -514,7 +547,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       previousState: "pending",
       context: replaced.context,
       tries: 0,
-      error: "replaced by newer keyed job",
+      error,
       timestamp,
     }, stableMessageId);
   }
@@ -1008,6 +1041,33 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   #coordinationService(): string {
     return this.#context.jobs!.namespace;
   }
+}
+
+/** Builds a durable job submission that can be dispatched after a transaction commits. */
+export function prepareJobSubmission<TPayload>(args: {
+  submissionId: string;
+  mode: "create" | "submit";
+  service: string;
+  queue: string;
+  jobId: string;
+  payload: TPayload;
+  createdAt: string;
+  context?: JobContext;
+  parent?: JobSnapshot<unknown, unknown>;
+}): PreparedJobSubmission<TPayload> {
+  const parent = args.parent ?? getActiveJobSnapshot();
+  return {
+    submissionId: args.submissionId,
+    mode: args.mode,
+    service: args.service,
+    queue: args.queue,
+    jobId: args.jobId,
+    payload: args.payload,
+    createdAt: args.createdAt,
+    context: args.context ?? createJobContext(),
+    trigger: parent ? parentJobTrigger(parent) : { kind: "serviceCode" },
+    ...(parent ? { lineage: childJobLineage(parent) } : {}),
+  };
 }
 
 function parentJobTrigger(

@@ -44,6 +44,12 @@ export type OutboxDispatchResult = {
   failed: number;
 };
 
+/** Queue-admission result persisted after a SQL-outboxed job is dispatched. */
+export type OutboxJobDispatchOutcome = {
+  readonly kind: string;
+  readonly [key: string]: unknown;
+};
+
 /** Options for {@link OutboxDispatcher}. */
 export type OutboxDispatcherOptions = {
   /** Maximum number of messages claimed by each `dispatchOutbox` batch. */
@@ -63,14 +69,15 @@ export type OutboxDispatchRuntime = {
   publishPreparedEvent(
     event: PreparedTrellisEvent,
   ): AsyncResult<void, UnexpectedError>;
-  /** Dispatches a job create/submit outbox record. Stub until Phase 3. */
+  /** Dispatches a job create/submit outbox record and returns its queue-admission outcome. */
   dispatchJobSubmission?(
     message: OutboxMessage,
-  ): AsyncResult<void, BaseError>;
+  ): AsyncResult<OutboxJobDispatchOutcome, BaseError>;
 };
 
 export type OutboxRepository = {
   enqueue(record: PreparedOutboxRecord): Promise<OutboxMessage>;
+  get(id: string): Promise<OutboxMessage | undefined>;
   claimDue(limit: number, now: Date): Promise<OutboxMessage[]>;
   markDispatched(id: string, now: Date, outcome?: unknown): Promise<void>;
   markFailed(
@@ -319,6 +326,13 @@ export class MemoryOutboxRepository implements OutboxRepository {
     return message;
   }
 
+  get(id: string): Promise<OutboxMessage | undefined> {
+    const message = this.#messages.get(id);
+    return Promise.resolve(
+      message ? { ...message, headers: { ...message.headers } } : undefined,
+    );
+  }
+
   async claimDue(limit: number, now: Date): Promise<OutboxMessage[]> {
     const dueAt = now.toISOString();
     const claimed: OutboxMessage[] = [];
@@ -438,6 +452,16 @@ export class SqlOutboxRepository implements OutboxRepository {
       ],
     );
     return message;
+  }
+
+  async get(id: string): Promise<OutboxMessage | undefined> {
+    const rows = await this.executor.query(
+      `SELECT id, kind, name, subject, payload, headers, state, attempts, created_at, updated_at, next_attempt_at, last_error, outcome FROM ${this.tables.outbox} WHERE id = ${
+        placeholder(this.dialect, 1)
+      } LIMIT 1`,
+      [id],
+    );
+    return rows[0] ? rowToOutboxMessage(rows[0]) : undefined;
   }
 
   async claimDue(limit: number, now: Date): Promise<OutboxMessage[]> {
@@ -588,6 +612,15 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     const existing = await this.kv.get(record.id).take();
     if (isErr(existing)) throw existing.error;
     return kvRecordToOutboxMessage(existing.value);
+  }
+
+  async get(id: string): Promise<OutboxMessage | undefined> {
+    const loaded = await this.kv.get(id).take();
+    if (isErr(loaded)) {
+      if (hasKvReason(loaded.error, "not found")) return undefined;
+      throw loaded.error;
+    }
+    return kvRecordToOutboxMessage(loaded.value);
   }
 
   async claimDue(limit: number, now: Date): Promise<OutboxMessage[]> {
@@ -903,7 +936,7 @@ export async function dispatchOutbox(
           continue;
         }
         dispatched += 1;
-        await repository.markDispatched(message.id, now);
+        await repository.markDispatched(message.id, now, value);
       } else {
         recordTrellisError(new Error(`job dispatch not supported`), {
           surface: "outbox",
@@ -993,7 +1026,7 @@ function rowToOutboxMessage(row: SqlRow): OutboxMessage {
     updatedAt: stringField(row, "updated_at"),
     nextAttemptAt: optionalStringField(row, "next_attempt_at"),
     lastError: optionalStringField(row, "last_error"),
-    outcome: optionalStringField(row, "outcome"),
+    outcome: parseOutcome(row["outcome"]),
   };
 }
 
@@ -1011,8 +1044,13 @@ function kvRecordToOutboxMessage(record: KvOutboxRecord): OutboxMessage {
     updatedAt: record.updatedAt,
     nextAttemptAt: record.nextAttemptAt,
     lastError: record.lastError,
-    outcome: record.outcome,
+    outcome: parseOutcome(record.outcome),
   };
+}
+
+function parseOutcome(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  return typeof value === "string" ? JSON.parse(value) : value;
 }
 
 function placeholder(dialect: SqlDialect, index: number): string {

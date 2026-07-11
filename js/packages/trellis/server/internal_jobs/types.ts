@@ -40,6 +40,26 @@ export const JobLineageSchema = Type.Object({
 
 export type JobLineage = StaticDecode<typeof JobLineageSchema>;
 
+export const PreparedJobSubmissionSchema = Type.Object({
+  submissionId: Type.String({ minLength: 1 }),
+  mode: Type.Union([Type.Literal("create"), Type.Literal("submit")]),
+  service: Type.String({ minLength: 1 }),
+  queue: Type.String({ minLength: 1 }),
+  jobId: Type.String({ minLength: 1 }),
+  payload: Type.Unknown(),
+  createdAt: Type.String({ format: "date-time" }),
+  context: JobContextSchema,
+  trigger: Type.Optional(JobTriggerSchema),
+  lineage: Type.Optional(JobLineageSchema),
+});
+
+export type PreparedJobSubmission<TPayload = unknown> =
+  & Omit<
+    StaticDecode<typeof PreparedJobSubmissionSchema>,
+    "payload"
+  >
+  & { payload: TPayload };
+
 export const JobWaitTargetSchema = Type.Object({
   kind: Type.Union([
     Type.Literal("job"),

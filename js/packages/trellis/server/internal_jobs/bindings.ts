@@ -12,7 +12,6 @@ export type JobsQueueBinding = {
   progress: boolean;
   logs: boolean;
   dlq: boolean;
-  concurrency: number;
   keyConcurrency?: {
     key: string[];
     maxActive: number;

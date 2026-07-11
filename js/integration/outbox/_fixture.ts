@@ -104,6 +104,7 @@ function createSqlJsExecutor(db: SqlJsDatabase): SqlExecutor {
 
 export function createOutboxFixture(caseId: string) {
   const slug = integrationSlug(caseId);
+  const serviceName = caseScopedName("outbox-fixture-service", caseId);
   const schemas = {
     DocInput: Type.Object({ documentId: Type.String() }),
     DocOutput: Type.Object({
@@ -184,6 +185,11 @@ export function createOutboxFixture(caseId: string) {
         payload: ref.schema("SyncInput"),
         result: ref.schema("SyncOutput"),
       },
+      keyedCustomer: {
+        payload: ref.schema("SyncInput"),
+        result: ref.schema("SyncOutput"),
+        keyConcurrency: { key: ["customer", "/customerId"] },
+      },
     },
     events: {
       "Document.Processed": {
@@ -251,8 +257,10 @@ export function createOutboxFixture(caseId: string) {
     return db;
   }
 
-  async function connectService(runtime: LiveTrellisRuntime) {
-    const serviceName = caseScopedName("outbox-fixture-service", caseId);
+  async function connectService(
+    runtime: LiveTrellisRuntime,
+    runtimeName = serviceName,
+  ) {
     const serviceKey = await runtime.registerService({
       name: serviceName,
       contract: serviceContract,
@@ -260,14 +268,17 @@ export function createOutboxFixture(caseId: string) {
     return await TrellisService.connect({
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
-      name: serviceName,
+      name: runtimeName,
       sessionKeySeed: serviceKey.seed,
       telemetry: false,
       server: { log: false },
     }).orThrow();
   }
 
-  function createOutbox(service: TrellisService, db: SqlJsDatabase) {
+  function createOutbox(
+    service: Awaited<ReturnType<typeof connectService>>,
+    db: SqlJsDatabase,
+  ) {
     const executor = createSqlJsExecutor(db);
     return service.createSqlOutbox({
       dialect: "sqlite",
@@ -281,7 +292,10 @@ export function createOutboxFixture(caseId: string) {
     });
   }
 
-  function createRollbackOutbox(service: TrellisService, db: SqlJsDatabase) {
+  function createRollbackOutbox(
+    service: Awaited<ReturnType<typeof connectService>>,
+    db: SqlJsDatabase,
+  ) {
     const executor = createSqlJsExecutor(db);
     return service.createSqlOutbox({
       dialect: "sqlite",
@@ -304,7 +318,7 @@ export function createOutboxFixture(caseId: string) {
     slug,
     serviceContract,
     clientContract,
-    serviceName: caseScopedName("outbox-fixture-service", caseId),
+    serviceName,
     clientName: caseScopedName("outbox-fixture-client", caseId),
     captureName: caseScopedName("outbox-fixture-capture", caseId),
     rollbackClientName: caseScopedName(

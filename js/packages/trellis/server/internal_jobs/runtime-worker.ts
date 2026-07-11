@@ -2,6 +2,7 @@ import { jetstream, jetstreamManager } from "@nats-io/jetstream";
 import type { ConsumerInfo, JsMsg } from "@nats-io/jetstream";
 import type { NatsConnection, Subscription } from "@nats-io/nats-core";
 
+import { recordTrellisError } from "../../telemetry/mod.ts";
 import type { JobsQueueBinding, JobsRuntimeBinding } from "./bindings.ts";
 import { ActiveJobCancellationRegistry } from "./cancellation-registry.ts";
 import { startWorkerHeartbeatLoop } from "./heartbeat.ts";
@@ -129,6 +130,7 @@ type StartWorkerArgs = {
 type StartWorkerHostOptions = {
   instanceId: string;
   queueTypes?: string[];
+  queueConcurrency?: Record<string, number>;
   heartbeatPublisher?: {
     publish(subject: string, payload: Uint8Array): void | Promise<void>;
   };
@@ -347,6 +349,22 @@ export function ackActionForOutcome(
   }
 }
 
+async function cleanupTerminalKeyState(
+  manager: JobManager<unknown, unknown>,
+  job: Job,
+): Promise<void> {
+  try {
+    await manager.cleanupQueuedKeyedJob(job);
+  } catch (error) {
+    recordTrellisError(error, {
+      surface: "job",
+      direction: "worker",
+      phase: "terminal_key_cleanup",
+      messagingSystem: "nats",
+    });
+  }
+}
+
 export async function startQueueWorkerLoop<TResult>(
   options: StartQueueWorkerLoopOptions<TResult>,
 ): Promise<{ stop(): Promise<void> }> {
@@ -378,89 +396,110 @@ export async function startQueueWorkerLoop<TResult>(
 
   const workTask = (async () => {
     for await (const msg of messages) {
-      const event = parseWorkPayloadEvent(msg.data);
-      if (!event) {
-        await msg.ack();
-        continue;
-      }
-      const job = jobFromWorkEvent(event) as Job<unknown, TResult> | undefined;
-      if (!job) {
-        await msg.ack();
-        continue;
-      }
-      const key = `${job.service}.${job.type}.${job.id}`;
-      if (hostCancellation?.isHostShutdown()) {
-        await msg.nak();
-        continue;
-      }
-      const latestLifecycle = options.getLatestLifecycleEvent
-        ? await options.getLatestLifecycleEvent(job)
-        : undefined;
-      if (hostCancellation?.isHostShutdown()) {
-        await msg.nak();
-        continue;
-      }
-      if (lifecycleWorkDecision(latestLifecycle) === "skip-ack") {
-        await options.manager.cleanupQueuedKeyedJob(job);
-        registry.clearPending(key);
-        await msg.ack();
-        continue;
-      }
-      if (!latestLifecycle) {
-        const projected = options.getProjectedJob
-          ? await options.getProjectedJob(job)
+      try {
+        const event = parseWorkPayloadEvent(msg.data);
+        if (!event) {
+          await msg.ack();
+          continue;
+        }
+        const job = jobFromWorkEvent(event) as
+          | Job<unknown, TResult>
+          | undefined;
+        if (!job) {
+          await msg.ack();
+          continue;
+        }
+        const key = `${job.service}.${job.type}.${job.id}`;
+        if (hostCancellation?.isHostShutdown()) {
+          await msg.nak();
+          continue;
+        }
+        const latestLifecycle = options.getLatestLifecycleEvent
+          ? await options.getLatestLifecycleEvent(job)
           : undefined;
         if (hostCancellation?.isHostShutdown()) {
           await msg.nak();
           continue;
         }
-        if (projectedWorkDecision(projected, job) === "skip-ack") {
-          await options.manager.cleanupQueuedKeyedJob(job);
+        if (lifecycleWorkDecision(latestLifecycle) === "skip-ack") {
+          await cleanupTerminalKeyState(options.manager, job);
           registry.clearPending(key);
           await msg.ack();
           continue;
         }
-      }
-
-      const token = new JobCancellationToken();
-      if (hostCancellation?.isHostShutdown()) {
-        token.cancelForShutdown();
-      }
-      activeTokens.add(token);
-      const guard = registry.register(key, token);
-      try {
-        const outcome = await processWorkPayloadWithContextAndHeartbeat(
-          options.manager,
-          msg.data,
-          token,
-          async () => {
-            await msg.inProgress();
-          },
-          options.handler,
-          {
-            payloadSchema: options.payloadSchema,
-            validatePayload: options.validatePayload,
-            resultSchema: options.resultSchema,
-            validateResult: options.validateResult,
-          },
-          {
-            latestState: latestLifecycle?.state,
-            latestTries: latestLifecycle?.tries,
-            workEventType: event.eventType,
-            redeliveryCount: msg.info?.redeliveryCount,
-          },
-          options.instanceId,
-        );
-        if (ackActionForOutcome(outcome) === "ack") {
-          await msg.ack();
-        } else if (outcome?.outcome === "deferred") {
-          await msg.nak(options.deferralBackoffMs ?? 1_000);
-        } else {
-          await msg.nak();
+        if (!latestLifecycle) {
+          const projected = options.getProjectedJob
+            ? await options.getProjectedJob(job)
+            : undefined;
+          if (hostCancellation?.isHostShutdown()) {
+            await msg.nak();
+            continue;
+          }
+          if (projectedWorkDecision(projected, job) === "skip-ack") {
+            await cleanupTerminalKeyState(options.manager, job);
+            registry.clearPending(key);
+            await msg.ack();
+            continue;
+          }
         }
-      } finally {
-        guard.dispose();
-        activeTokens.delete(token);
+
+        const token = new JobCancellationToken();
+        if (hostCancellation?.isHostShutdown()) {
+          token.cancelForShutdown();
+        }
+        activeTokens.add(token);
+        const guard = registry.register(key, token);
+        try {
+          const outcome = await processWorkPayloadWithContextAndHeartbeat(
+            options.manager,
+            msg.data,
+            token,
+            async () => {
+              await msg.inProgress();
+            },
+            options.handler,
+            {
+              payloadSchema: options.payloadSchema,
+              validatePayload: options.validatePayload,
+              resultSchema: options.resultSchema,
+              validateResult: options.validateResult,
+            },
+            {
+              latestState: latestLifecycle?.state,
+              latestTries: latestLifecycle?.tries,
+              workEventType: event.eventType,
+              redeliveryCount: msg.info?.redeliveryCount,
+            },
+            options.instanceId,
+          );
+          if (ackActionForOutcome(outcome) === "ack") {
+            await msg.ack();
+          } else if (outcome?.outcome === "deferred") {
+            await msg.nak(options.deferralBackoffMs ?? 1_000);
+          } else {
+            await msg.nak();
+          }
+        } finally {
+          guard.dispose();
+          activeTokens.delete(token);
+        }
+      } catch (error) {
+        recordTrellisError(error, {
+          surface: "job",
+          direction: "worker",
+          phase: "queue_loop",
+          messagingSystem: "nats",
+        });
+        try {
+          await msg.nak(options.deferralBackoffMs ?? 1_000);
+        } catch (nakError) {
+          recordTrellisError(nakError, {
+            surface: "job",
+            direction: "worker",
+            phase: "queue_loop_nak",
+            messagingSystem: "nats",
+          });
+        }
       }
     }
   })();
@@ -552,6 +591,7 @@ export async function startWorkerHostFromBinding(
 ): Promise<{ workerCount(): number; stop(): Promise<void> }> {
   const queueTypes = options.queueTypes ??
     Object.keys(binding.jobs.queues).sort();
+  const queueConcurrency: Record<string, number> = {};
   for (const queueType of queueTypes) {
     const queue = binding.jobs.queues[queueType];
     if (!queue) {
@@ -559,11 +599,13 @@ export async function startWorkerHostFromBinding(
         `Requested worker queue binding '${queueType}' is missing`,
       );
     }
-    if (queue.concurrency < 1) {
+    const concurrency = options.queueConcurrency?.[queueType] ?? 1;
+    if (!Number.isInteger(concurrency) || concurrency < 1) {
       throw new Error(
-        `Worker queue '${queueType}' has invalid concurrency ${queue.concurrency}; expected >= 1`,
+        `Worker queue '${queueType}' has invalid concurrency ${concurrency}; expected a positive integer`,
       );
     }
+    queueConcurrency[queueType] = concurrency;
   }
 
   const cancellation = new JobCancellationToken();
@@ -579,7 +621,7 @@ export async function startWorkerHostFromBinding(
         subjectService: binding.jobs.namespace,
         jobType: queueType,
         instanceId: options.instanceId,
-        concurrency: queue.concurrency,
+        concurrency: queueConcurrency[queueType],
         version: options.version,
         intervalMs: options.heartbeatIntervalMs,
         nowIso: options.nowIso,
@@ -595,7 +637,7 @@ export async function startWorkerHostFromBinding(
     }
     for (
       let workerIndex = 0;
-      workerIndex < queue.concurrency;
+      workerIndex < queueConcurrency[queueType]!;
       workerIndex += 1
     ) {
       const handle = await options.startWorker({
@@ -641,6 +683,7 @@ export async function startNatsWorkerHostFromBinding<TResult>(
   return await startWorkerHostFromBinding(binding, {
     instanceId: options.instanceId,
     queueTypes: options.queueTypes,
+    queueConcurrency: options.queueConcurrency,
     heartbeatPublisher: options.heartbeatPublisher,
     heartbeatIntervalMs: options.heartbeatIntervalMs,
     version: options.version,
@@ -710,11 +753,6 @@ function getQueueBinding(
   const queue = binding.jobs.queues[queueType];
   if (!queue) {
     throw new Error(`Requested worker queue binding '${queueType}' is missing`);
-  }
-  if (queue.concurrency < 1) {
-    throw new Error(
-      `Worker queue '${queueType}' has invalid concurrency ${queue.concurrency}; expected >= 1`,
-    );
   }
   return queue;
 }
