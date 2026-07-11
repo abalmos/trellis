@@ -64,16 +64,6 @@ commands.
   lifecycle status and shutdown.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background execution.
-- Operations and job queues may declare one optional `update` schema. Keep
-  `progress` for low-frequency durable telemetry/snapshots; updates are typed
-  live-only, at-most-once content with no persistence, replay, admin, or Event
-  Log surface. Watchers must opt in, late subscribers may miss frames, cumulative
-  payloads are preferred, and terminal output/result is authoritative.
-- Active jobs emit updates and `JobRef` or queue-by-job-id subscriptions consume
-  them. Job update subscriptions filter stale attempts and duplicate or
-  out-of-order attempt-local sequences and must be cleaned up. SQL-outbox callers
-  subscribe using the preallocated `jobId` before dispatch when early frames
-  matter. Job update subjects are private Core NATS outside `JOBS`.
 - Jobs admin is a clean-break workbench surface: use `Jobs.Query` for server-side
   search/sort/group/stats, `Jobs.Metrics` for grouped operational summaries and
   time buckets, and `Jobs.Inspect` for one-job detail, timeline, attempts,
@@ -96,8 +86,7 @@ commands.
 - For service-private work that must be singleton per logical entity, declare
   job `keyConcurrency` instead of building ad hoc scheduler dedupe. Defaults
   should fail clearly (`stalePolicy: "fail-stale"`, `whenFull: "reject"`);
-  coalescing or replacing queued work must be explicit. Configure worker counts
-  in each service implementation, never in the contract or resource binding.
+  coalescing or replacing queued work must be explicit.
 - TypeScript job handlers that need JetStream redelivery should return or throw
   `RetryJobError` from `@qlever-llc/trellis/jobs`; ordinary errors remain
   terminal job failures.
@@ -149,9 +138,6 @@ commands.
 - Event subject `params` must point at string, number, or integer-compatible
   payload fields. For `anyOf` or `oneOf` event payload schemas, every variant must
   contain each routed pointer.
-- Feed subscriptions are connection-scoped. Closing or aborting a client feed
-  propagates cancellation to the provider; watch feeds must not create a durable
-  consumer per viewer.
 
 ## Service repo setup
 

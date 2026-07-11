@@ -82,11 +82,24 @@ impl EventLogQuery {
 
     /// Run `EventLog.Metrics`.
     pub async fn metrics(&self, input: &Value) -> Result<Value, EventLogQueryError> {
-        let since = input
+        let window = input
             .get("window")
             .and_then(Value::as_str)
-            .and_then(window_since);
-        Ok(self.store.metrics(since.as_deref())?)
+            .and_then(|window| {
+                let (window_seconds, bucket_seconds) = window_config(window)?;
+                Some((
+                    window_since(window_seconds)?,
+                    window_seconds,
+                    bucket_seconds,
+                ))
+            });
+        Ok(self.store.metrics(
+            window
+                .as_ref()
+                .map(|(since, window_seconds, bucket_seconds)| {
+                    (since.as_str(), *window_seconds, *bucket_seconds)
+                }),
+        )?)
     }
 
     /// Run `EventLog.Consumers.Query`.
@@ -148,10 +161,16 @@ fn parse_event_filter(input: &Value) -> Result<EventLogFilter, EventLogQueryErro
             .map(str::to_string),
         resolution: string_array(input, "resolution"),
         verification_status: string_array(input, "verificationStatus"),
+        integrity_exception_only: input
+            .get("integrityExceptionOnly")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         since: input
             .get("window")
             .and_then(Value::as_str)
-            .and_then(window_since),
+            .and_then(|window| {
+                window_config(window).and_then(|(seconds, _)| window_since(seconds))
+            }),
         offset: input.get("offset").and_then(Value::as_u64).unwrap_or(0),
         limit,
         sort_field: sort
@@ -196,15 +215,18 @@ fn string_array(input: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn window_since(window: &str) -> Option<String> {
-    let seconds = match window {
-        "15m" => 15 * 60,
-        "1h" => 60 * 60,
-        "6h" => 6 * 60 * 60,
-        "24h" => 24 * 60 * 60,
-        "7d" => 7 * 24 * 60 * 60,
+fn window_config(window: &str) -> Option<(i64, i64)> {
+    match window {
+        "15m" => Some((15 * 60, 60)),
+        "1h" => Some((60 * 60, 5 * 60)),
+        "6h" => Some((6 * 60 * 60, 30 * 60)),
+        "24h" => Some((24 * 60 * 60, 60 * 60)),
+        "7d" => Some((7 * 24 * 60 * 60, 6 * 60 * 60)),
         _ => return None,
-    };
+    }
+}
+
+fn window_since(seconds: i64) -> Option<String> {
     let since = time::OffsetDateTime::now_utc() - time::Duration::seconds(seconds);
     since
         .format(&time::format_description::well_known::Rfc3339)

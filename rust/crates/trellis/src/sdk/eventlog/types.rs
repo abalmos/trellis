@@ -55,6 +55,54 @@ pub struct EventLogMetricsRequest {
     pub window: Option<String>,
 }
 /// Generated schema type `EventLogMetricsResponse`.
+/// Generated schema type `EventLogMetricsResponseBucketsItem`.
+/// Generated schema type `EventLogMetricsResponseBucketsItemByResolution`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventLogMetricsResponseBucketsItemByResolution {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub malformed: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unresolved: Option<i64>,
+}
+/// Generated schema type `EventLogMetricsResponseBucketsItemByVerificationStatus`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventLogMetricsResponseBucketsItemByVerificationStatus {
+    #[serde(rename = "auth-unavailable")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_unavailable: Option<i64>,
+    #[serde(rename = "invalid-signature")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalid_signature: Option<i64>,
+    #[serde(rename = "missing-proof")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_proof: Option<i64>,
+    #[serde(rename = "missing-session")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_session: Option<i64>,
+    #[serde(rename = "outside-session-window")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside_session_window: Option<i64>,
+    #[serde(rename = "subject-denied")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject_denied: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventLogMetricsResponseBucketsItem {
+    #[serde(rename = "byResolution")]
+    pub by_resolution: EventLogMetricsResponseBucketsItemByResolution,
+    #[serde(rename = "byVerificationStatus")]
+    pub by_verification_status: EventLogMetricsResponseBucketsItemByVerificationStatus,
+    #[serde(rename = "integrityExceptions")]
+    pub integrity_exceptions: i64,
+    #[serde(rename = "payloadSizeBytes")]
+    pub payload_size_bytes: i64,
+    pub start: String,
+    pub total: i64,
+}
 /// Generated schema type `EventLogMetricsResponseSummary`.
 /// Generated schema type `EventLogMetricsResponseSummaryByResolution`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -107,6 +155,8 @@ pub struct EventLogMetricsResponseSummary {
     pub by_verification_status: EventLogMetricsResponseSummaryByVerificationStatus,
     #[serde(rename = "eventTypes")]
     pub event_types: Vec<EventLogMetricsResponseSummaryEventTypesItem>,
+    #[serde(rename = "integrityExceptions")]
+    pub integrity_exceptions: i64,
     #[serde(rename = "payloadSizeBytes")]
     pub payload_size_bytes: i64,
     pub total: i64,
@@ -115,7 +165,7 @@ pub struct EventLogMetricsResponseSummary {
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EventLogMetricsResponse {
-    pub buckets: Vec<BTreeMap<String, Value>>,
+    pub buckets: Vec<EventLogMetricsResponseBucketsItem>,
     pub summary: EventLogMetricsResponseSummary,
 }
 /// Generated schema type `EventLogQueryRequest`.
@@ -149,6 +199,9 @@ pub struct EventLogQueryRequest {
     #[serde(rename = "includeEventTypes")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_event_types: Option<Vec<EventLogQueryRequestIncludeEventTypesItem>>,
+    #[serde(rename = "integrityExceptionOnly")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity_exception_only: Option<bool>,
     pub limit: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<i64>,

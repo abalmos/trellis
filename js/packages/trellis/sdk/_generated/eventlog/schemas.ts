@@ -82,7 +82,43 @@ export const EventLogMetricsRequestSchema = {
 export const EventLogMetricsResponseSchema = {
   "properties": {
     "buckets": {
-      "items": { "additionalProperties": true, "type": "object" },
+      "items": {
+        "properties": {
+          "byResolution": {
+            "properties": {
+              "malformed": { "type": "integer" },
+              "resolved": { "type": "integer" },
+              "unresolved": { "type": "integer" },
+            },
+            "type": "object",
+          },
+          "byVerificationStatus": {
+            "properties": {
+              "auth-unavailable": { "type": "integer" },
+              "invalid-signature": { "type": "integer" },
+              "missing-proof": { "type": "integer" },
+              "missing-session": { "type": "integer" },
+              "outside-session-window": { "type": "integer" },
+              "subject-denied": { "type": "integer" },
+              "verified": { "type": "integer" },
+            },
+            "type": "object",
+          },
+          "integrityExceptions": { "type": "integer" },
+          "payloadSizeBytes": { "type": "integer" },
+          "start": { "type": "string" },
+          "total": { "type": "integer" },
+        },
+        "required": [
+          "start",
+          "total",
+          "payloadSizeBytes",
+          "integrityExceptions",
+          "byResolution",
+          "byVerificationStatus",
+        ],
+        "type": "object",
+      },
       "type": "array",
     },
     "summary": {
@@ -119,6 +155,7 @@ export const EventLogMetricsResponseSchema = {
           },
           "type": "array",
         },
+        "integrityExceptions": { "type": "integer" },
         "payloadSizeBytes": { "type": "integer" },
         "total": { "type": "integer" },
         "uniqueSubjects": { "type": "integer" },
@@ -127,6 +164,7 @@ export const EventLogMetricsResponseSchema = {
         "total",
         "uniqueSubjects",
         "payloadSizeBytes",
+        "integrityExceptions",
         "byResolution",
         "byVerificationStatus",
         "eventTypes",
@@ -164,6 +202,7 @@ export const EventLogQueryRequestSchema = {
       },
       "type": "array",
     },
+    "integrityExceptionOnly": { "type": "boolean" },
     "limit": { "maximum": 500, "minimum": 1, "type": "integer" },
     "offset": { "minimum": 0, "type": "integer" },
     "ownerContractId": { "type": "string" },

@@ -1,214 +1,182 @@
 <script lang="ts">
+  import type { JobsMetricsOutput } from "@qlever-llc/trellis/sdk/jobs";
   import { compactDuration } from "../format";
-  import { Line, LineY, Plot } from "svelteplot";
-
-  type Latency = {
-    count: number;
-    p50Ms?: number;
-    p95Ms?: number;
-    maxMs?: number;
-  };
-
-  type BucketGroup = {
-    key: string;
-    label: string;
-    failed: number;
-    dead: number;
-    runtime: Latency;
-    queueWait: Latency;
-  };
-
-  type Bucket = {
-    start: string;
-    end: string;
-    groups: BucketGroup[];
-  };
 
   type Props = {
-    buckets: Bucket[];
-    selectedKey: string;
+    buckets: JobsMetricsOutput["buckets"];
+    selectedKey?: string | null;
+    windowLabel: string;
   };
 
-  let { buckets, selectedKey }: Props = $props();
+  let { buckets, selectedKey = null, windowLabel }: Props = $props();
 
-  const failures = $derived.by(() =>
+  const rows = $derived.by(() =>
     buckets.map((bucket) => {
-      const group = bucket.groups.find((entry) => entry.key === selectedKey);
+      const groups = selectedKey ? bucket.groups.filter((group) => group.key === selectedKey) : bucket.groups;
       return {
-        time: new Date(bucket.start).getTime(),
-        failed: group?.failed ?? 0,
-        dead: group?.dead ?? 0,
+        completed: groups.reduce((sum, group) => sum + group.completed, 0),
+        failures: groups.reduce((sum, group) => sum + group.failed + group.dead, 0),
+        queueP95: Math.max(...groups.map((group) => group.queueWait.p95Ms ?? 0), 0),
       };
     }),
   );
 
-  const latency = $derived.by(() =>
-    buckets.map((bucket) => {
-      const group = bucket.groups.find((entry) => entry.key === selectedKey);
-      return {
-        time: new Date(bucket.start).getTime(),
-        runtimeP50: group?.runtime.p50Ms ?? 0,
-        runtimeP95: group?.runtime.p95Ms ?? 0,
-        queueWaitP95: group?.queueWait.p95Ms ?? 0,
-      };
-    }),
-  );
+  const completed = $derived(rows.reduce((sum, row) => sum + row.completed, 0));
+  const failures = $derived(rows.reduce((sum, row) => sum + row.failures, 0));
+  const latestQueueP95 = $derived(rows.at(-1)?.queueP95 ?? 0);
+  const queueLabel = $derived(selectedKey ? "Queue wait p95" : "Highest queue p95");
 
-  const hasData = $derived(
-    failures.some((row) => row.failed + row.dead > 0) ||
-      latency.some((row) => row.runtimeP95 + row.queueWaitP95 > 0),
-  );
-
-  const latestRuntime = $derived(latency.at(-1)?.runtimeP95 ?? 0);
-  const latestQueue = $derived(latency.at(-1)?.queueWaitP95 ?? 0);
-
-  function formatMs(value: number | undefined): string {
-    if (!value || value <= 0) return "—";
-    return compactDuration(value);
+  function points(values: number[]): string {
+    const maximum = Math.max(...values, 1);
+    const denominator = Math.max(values.length - 1, 1);
+    return values.map((value, index) => `${(index / denominator) * 100},${52 - (value / maximum) * 46}`).join(" ");
   }
 </script>
 
-<div class="jobs-scoped">
-  <header class="jobs-scoped-header">
-    <h3>Job type · <span class="jobs-scoped-key">{selectedKey}</span></h3>
-    <p class="jobs-scoped-help">Failure pressure and runtime/queue latency for the selected job type over the active window.</p>
+<aside class="jobs-trends" aria-label="Jobs trends">
+  <header class="jobs-trends-header">
+    <div>
+      <h2>{windowLabel}</h2>
+      <p>{selectedKey ?? "All job types"}</p>
+    </div>
   </header>
 
-  <div class="jobs-scoped-stats">
-    <div><span>Runtime p95</span><strong>{formatMs(latestRuntime)}</strong></div>
-    <div><span>Queue wait p95</span><strong>{formatMs(latestQueue)}</strong></div>
+  <div class="jobs-trend">
+    <div class="jobs-trend-label"><span>Completed</span><strong>{completed.toLocaleString()}</strong></div>
+    <svg viewBox="0 0 100 58" preserveAspectRatio="none" role="img" aria-label={`${completed} completed jobs over ${windowLabel.toLowerCase()}`}>
+      <path d={`M0,58 L${points(rows.map((row) => row.completed))} L100,58 Z`} />
+      <polyline points={points(rows.map((row) => row.completed))} />
+    </svg>
   </div>
 
-  {#if !hasData}
-    <p class="jobs-scoped-empty">No activity recorded for this job type in the selected window.</p>
-  {:else}
-    <div class="jobs-scoped-plot">
-      <Plot
-        marginTop={6}
-        marginRight={6}
-        marginBottom={28}
-        marginLeft={48}
-        x={{ grid: true, type: "utc" }}
-        y={{ grid: true, label: "failures / bucket" }}
-        height={150}
-      >
-        <LineY {...({ x: "time" } as Record<string, unknown>)} data={failures} y="failed" stroke="oklch(0.62 0.18 25)" strokeWidth={1.6} />
-        <LineY {...({ x: "time" } as Record<string, unknown>)} data={failures} y="dead" stroke="oklch(0.55 0.22 320)" strokeWidth={1.2} />
-      </Plot>
-      <div class="jobs-scoped-legend">
-        <span><span class="dot" style="background: oklch(0.62 0.18 25)"></span> failed</span>
-        <span><span class="dot" style="background: oklch(0.55 0.22 320)"></span> dead</span>
-      </div>
-    </div>
+  <div class="jobs-trend queue">
+    <div class="jobs-trend-label"><span>{queueLabel}</span><strong>{latestQueueP95 > 0 ? compactDuration(latestQueueP95) : "—"}</strong></div>
+    <svg viewBox="0 0 100 58" preserveAspectRatio="none" role="img" aria-label={`${queueLabel} over ${windowLabel.toLowerCase()}`}>
+      <polyline points={points(rows.map((row) => row.queueP95))} />
+    </svg>
+  </div>
 
-    <div class="jobs-scoped-plot">
-      <Plot
-        marginTop={6}
-        marginRight={6}
-        marginBottom={28}
-        marginLeft={48}
-        x={{ grid: true, type: "utc" }}
-        y={{ grid: true, label: "ms" }}
-        height={150}
-      >
-        <Line {...({ x: "time" } as Record<string, unknown>)} data={latency} y="queueWaitP95" stroke="oklch(0.55 0.18 60)" strokeWidth={1.6} />
-        <Line {...({ x: "time" } as Record<string, unknown>)} data={latency} y="runtimeP50" stroke="oklch(0.7 0.13 145)" strokeWidth={1.2} strokeDasharray="3 3" />
-        <Line {...({ x: "time" } as Record<string, unknown>)} data={latency} y="runtimeP95" stroke="oklch(0.55 0.18 250)" strokeWidth={1.6} />
-      </Plot>
-      <div class="jobs-scoped-legend">
-        <span><span class="dot" style="background: oklch(0.55 0.18 60)"></span> queue wait p95</span>
-        <span><span class="dot" style="background: oklch(0.55 0.18 250)"></span> runtime p95</span>
-        <span><span class="dot" style="background: oklch(0.7 0.13 145)"></span> runtime p50</span>
-      </div>
-    </div>
-  {/if}
-</div>
+  <div class="jobs-trend failures">
+    <div class="jobs-trend-label"><span>Failed + dead</span><strong>{failures.toLocaleString()}</strong></div>
+    <svg viewBox="0 0 100 58" preserveAspectRatio="none" role="img" aria-label={`${failures} failed or dead jobs over ${windowLabel.toLowerCase()}`}>
+      <polyline points={points(rows.map((row) => row.failures))} />
+    </svg>
+  </div>
+</aside>
 
 <style>
-  .jobs-scoped {
-    background: color-mix(in oklab, var(--color-base-100) 92%, var(--color-base-200));
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 82%, transparent);
-    border-radius: var(--radius-box, 1rem);
-    display: grid;
-    gap: 0.75rem;
-    padding: 0.9rem 1rem;
+  .jobs-trends {
+    border-left: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
+    min-width: 0;
+    padding-left: 1.25rem;
   }
 
-  .jobs-scoped-header {
-    display: grid;
-    gap: 0.1rem;
+  .jobs-trends-header {
+    margin-bottom: 0.25rem;
   }
 
-  .jobs-scoped-header h3 {
-    font-size: 0.78rem;
+  .jobs-trends h2 {
+    font-size: 0.85rem;
     font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+    margin: 0;
   }
 
-  .jobs-scoped-key {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    color: color-mix(in oklab, var(--color-base-content) 90%, transparent);
+  .jobs-trends p {
+    color: color-mix(in oklab, var(--color-base-content) 52%, transparent);
+    font-size: 0.68rem;
+    margin: 0.15rem 0 0;
   }
 
-  .jobs-scoped-help {
-    font-size: 0.72rem;
-    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+  .jobs-trend {
+    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
+    padding: 0.9rem 0 1rem;
   }
 
-  .jobs-scoped-stats {
-    display: grid;
-    gap: 0.5rem;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .jobs-trend:last-child {
+    border-bottom: 0;
   }
 
-  .jobs-scoped-stats > div {
-    background: color-mix(in oklab, var(--color-base-100) 78%, var(--color-base-200));
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 78%, transparent);
-    border-radius: var(--radius-field, 0.5rem);
-    display: grid;
-    gap: 0.1rem;
-    padding: 0.5rem 0.65rem;
+  .jobs-trend-label {
+    align-items: center;
+    display: flex;
+    font-size: 0.68rem;
+    justify-content: space-between;
   }
 
-  .jobs-scoped-stats span {
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-size: 0.66rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+  .jobs-trend-label span {
+    color: color-mix(in oklab, var(--color-base-content) 58%, transparent);
   }
 
-  .jobs-scoped-stats strong {
-    font-size: 0.95rem;
+  .jobs-trend-label strong {
     font-variant-numeric: tabular-nums;
   }
 
-  .jobs-scoped-plot :global(svg) {
+  .jobs-trend svg {
     display: block;
+    height: 3.75rem;
+    margin-top: 0.45rem;
+    overflow: visible;
     width: 100%;
   }
 
-  .jobs-scoped-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    font-size: 0.7rem;
-    color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+  .jobs-trend path {
+    fill: color-mix(in oklab, var(--color-success) 12%, transparent);
   }
 
-  .jobs-scoped-legend .dot {
-    display: inline-block;
-    height: 0.45rem;
-    margin-right: 0.25rem;
-    vertical-align: middle;
-    width: 0.45rem;
-    border-radius: 0.1rem;
+  .jobs-trend polyline {
+    fill: none;
+    stroke: color-mix(in oklab, var(--color-success) 72%, var(--color-base-content));
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
 
-  .jobs-scoped-empty {
-    font-size: 0.78rem;
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-style: italic;
+  .jobs-trend.queue polyline {
+    stroke: color-mix(in oklab, var(--color-primary) 75%, var(--color-base-content));
+  }
+
+  .jobs-trend.failures polyline {
+    stroke: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
+  }
+
+  .jobs-trend.failures strong {
+    color: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
+  }
+
+  @media (max-width: 980px) {
+    .jobs-trends {
+      border-left: 0;
+      border-top: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      padding: 1rem 0 0;
+    }
+
+    .jobs-trends-header {
+      grid-column: 1 / -1;
+      margin: 0;
+    }
+
+    .jobs-trend {
+      border-bottom: 0;
+      padding: 0;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .jobs-trends {
+      grid-template-columns: 1fr;
+    }
+
+    .jobs-trends-header {
+      grid-column: auto;
+    }
+
+    .jobs-trend {
+      border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
+      padding-bottom: 0.75rem;
+    }
   }
 </style>

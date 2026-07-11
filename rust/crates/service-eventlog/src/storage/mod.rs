@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -91,6 +92,8 @@ pub struct EventLogFilter {
     pub resolution: Vec<String>,
     /// Verification statuses.
     pub verification_status: Vec<String>,
+    /// Whether to include only events with a resolution or verification exception.
+    pub integrity_exception_only: bool,
     /// Lower bound for event time.
     pub since: Option<String>,
     /// Page offset.
@@ -372,14 +375,14 @@ impl EventLogStore {
     }
 
     /// Return simple Event Log metrics from the projection.
-    pub fn metrics(&self, since: Option<&str>) -> Result<Value, EventLogStoreError> {
+    pub fn metrics(&self, window: Option<(&str, i64, i64)>) -> Result<Value, EventLogStoreError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| EventLogStoreError::Poisoned)?;
         let mut where_sql = String::new();
         let mut params = Vec::new();
-        if let Some(since) = since {
+        if let Some((since, _, _)) = window {
             where_sql.push_str("WHERE event_time >= ?");
             params.push(SqlValue::from(since.to_string()));
         }
@@ -396,6 +399,14 @@ impl EventLogStore {
         let payload_bytes = connection.query_row(
             &format!(
                 "SELECT COALESCE(SUM(payload_size_bytes), 0) FROM eventlog_events {where_sql}"
+            ),
+            params_from_iter(params.clone()),
+            |row| row.get::<_, u64>(0),
+        )?;
+        let integrity_exceptions = connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM eventlog_events {where_sql} {} (resolution != 'resolved' OR verification_status != 'verified')",
+                if where_sql.is_empty() { "WHERE" } else { " AND" }
             ),
             params_from_iter(params.clone()),
             |row| row.get::<_, u64>(0),
@@ -419,16 +430,115 @@ impl EventLogStore {
                 }))
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        let buckets = if let Some((since, window_seconds, bucket_seconds)) = window {
+            let mut bucket_params = vec![
+                SqlValue::from(bucket_seconds),
+                SqlValue::from(bucket_seconds),
+            ];
+            bucket_params.extend(params.iter().cloned());
+            let mut statement = connection.prepare(&format!(
+                r#"
+                SELECT
+                    strftime('%Y-%m-%dT%H:%M:%SZ', (CAST(strftime('%s', event_time) AS INTEGER) / ?) * ?, 'unixepoch'),
+                    COUNT(*),
+                    COALESCE(SUM(payload_size_bytes), 0),
+                    SUM(resolution != 'resolved' OR verification_status != 'verified'),
+                    SUM(resolution = 'resolved'),
+                    SUM(resolution = 'unresolved'),
+                    SUM(resolution = 'malformed'),
+                    SUM(verification_status = 'verified'),
+                    SUM(verification_status = 'missing-proof'),
+                    SUM(verification_status = 'invalid-signature'),
+                    SUM(verification_status = 'missing-session'),
+                    SUM(verification_status = 'subject-denied'),
+                    SUM(verification_status = 'outside-session-window'),
+                    SUM(verification_status = 'auth-unavailable')
+                FROM eventlog_events {where_sql}
+                GROUP BY 1
+                ORDER BY 1
+                "#
+            ))?;
+            let buckets = statement
+                .query_map(params_from_iter(bucket_params), |row| {
+                    Ok(json!({
+                        "start": row.get::<_, String>(0)?,
+                        "total": row.get::<_, u64>(1)?,
+                        "payloadSizeBytes": row.get::<_, u64>(2)?,
+                        "integrityExceptions": row.get::<_, u64>(3)?,
+                        "byResolution": {
+                            "resolved": row.get::<_, u64>(4)?,
+                            "unresolved": row.get::<_, u64>(5)?,
+                            "malformed": row.get::<_, u64>(6)?,
+                        },
+                        "byVerificationStatus": {
+                            "verified": row.get::<_, u64>(7)?,
+                            "missing-proof": row.get::<_, u64>(8)?,
+                            "invalid-signature": row.get::<_, u64>(9)?,
+                            "missing-session": row.get::<_, u64>(10)?,
+                            "subject-denied": row.get::<_, u64>(11)?,
+                            "outside-session-window": row.get::<_, u64>(12)?,
+                            "auth-unavailable": row.get::<_, u64>(13)?,
+                        }
+                    }))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut buckets_by_start = buckets
+                .into_iter()
+                .filter_map(|bucket| Some((bucket.get("start")?.as_str()?.to_string(), bucket)))
+                .collect::<BTreeMap<_, _>>();
+            OffsetDateTime::parse(since, &Rfc3339)
+                .ok()
+                .map(|since| {
+                    let start = since.unix_timestamp().div_euclid(bucket_seconds) * bucket_seconds;
+                    let end = (since.unix_timestamp() + window_seconds).div_euclid(bucket_seconds)
+                        * bucket_seconds;
+                    (start..=end)
+                        .step_by(bucket_seconds as usize)
+                        .filter_map(|timestamp| {
+                            let start = OffsetDateTime::from_unix_timestamp(timestamp)
+                                .ok()?
+                                .format(&Rfc3339)
+                                .ok()?;
+                            Some(buckets_by_start.remove(&start).unwrap_or_else(|| {
+                                json!({
+                                    "start": start,
+                                    "total": 0,
+                                    "payloadSizeBytes": 0,
+                                    "integrityExceptions": 0,
+                                    "byResolution": {
+                                        "resolved": 0,
+                                        "unresolved": 0,
+                                        "malformed": 0,
+                                    },
+                                    "byVerificationStatus": {
+                                        "verified": 0,
+                                        "missing-proof": 0,
+                                        "invalid-signature": 0,
+                                        "missing-session": 0,
+                                        "subject-denied": 0,
+                                        "outside-session-window": 0,
+                                        "auth-unavailable": 0,
+                                    }
+                                })
+                            }))
+                        })
+                        .collect()
+                })
+                .unwrap_or_else(|| buckets_by_start.into_values().collect())
+        } else {
+            Vec::new()
+        };
         Ok(json!({
             "summary": {
                 "total": total,
                 "uniqueSubjects": unique_subjects,
                 "payloadSizeBytes": payload_bytes,
+                "integrityExceptions": integrity_exceptions,
                 "byResolution": grouped_counts(&connection, "resolution", &where_sql, &params)?,
                 "byVerificationStatus": grouped_counts(&connection, "verification_status", &where_sql, &params)?,
                 "eventTypes": event_types,
             },
-            "buckets": []
+            "buckets": buckets
         }))
     }
 }
@@ -491,6 +601,9 @@ fn event_where_clause(filter: &EventLogFilter) -> (String, Vec<SqlValue>) {
         &mut clauses,
         &mut params,
     );
+    if filter.integrity_exception_only {
+        clauses.push("(resolution != 'resolved' OR verification_status != 'verified')".to_string());
+    }
     if let Some(value) = filter
         .search
         .as_ref()
@@ -776,6 +889,12 @@ mod tests {
                 "unresolved"
             }
             .to_string();
+            projected.verification_status = if sequence == 2 {
+                "invalid-signature"
+            } else {
+                "verified"
+            }
+            .to_string();
             store.insert_event(&projected).expect("insert event");
         }
 
@@ -809,5 +928,28 @@ mod tests {
             metrics["summary"]["eventTypes"].as_array().map(Vec::len),
             Some(2)
         );
+
+        let metrics = store
+            .metrics(Some(("2025-12-31T23:00:00Z", 60 * 60, 5 * 60)))
+            .expect("query bucketed metrics");
+        let event_bucket = metrics["buckets"]
+            .as_array()
+            .and_then(|buckets| buckets.iter().find(|bucket| bucket["total"] == 3))
+            .expect("find populated bucket");
+        assert_eq!(metrics["buckets"].as_array().map(Vec::len), Some(13));
+        assert_eq!(metrics["summary"]["integrityExceptions"], 2);
+        assert_eq!(event_bucket["integrityExceptions"], 2);
+        assert_eq!(event_bucket["byResolution"]["unresolved"], 1);
+        assert_eq!(event_bucket["byVerificationStatus"]["invalid-signature"], 1);
+
+        let filter = EventLogFilter {
+            integrity_exception_only: true,
+            limit: 100,
+            ..EventLogFilter::default()
+        };
+        let (_, total) = store
+            .query_events(&filter)
+            .expect("query integrity exceptions");
+        assert_eq!(total, 2);
     }
 }

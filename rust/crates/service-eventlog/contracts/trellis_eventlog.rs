@@ -146,6 +146,7 @@ fn event_query_request_schema() -> Value {
             "consumerDeploymentId": { "type": "string" },
             "resolution": { "type": "array", "items": string_enum(&["resolved", "unresolved", "malformed"]) },
             "verificationStatus": { "type": "array", "items": verification_status_schema() },
+            "integrityExceptionOnly": { "type": "boolean" },
             "consumerName": { "type": "string" },
             "window": string_enum(&["15m", "1h", "6h", "24h", "7d"]),
             "offset": { "type": "integer", "minimum": 0 },
@@ -228,26 +229,9 @@ fn metrics_response_schema() -> Value {
                     "total": { "type": "integer" },
                     "uniqueSubjects": { "type": "integer" },
                     "payloadSizeBytes": { "type": "integer" },
-                    "byResolution": {
-                        "type": "object",
-                        "properties": {
-                            "resolved": { "type": "integer" },
-                            "unresolved": { "type": "integer" },
-                            "malformed": { "type": "integer" }
-                        }
-                    },
-                    "byVerificationStatus": {
-                        "type": "object",
-                        "properties": {
-                            "verified": { "type": "integer" },
-                            "missing-proof": { "type": "integer" },
-                            "invalid-signature": { "type": "integer" },
-                            "missing-session": { "type": "integer" },
-                            "subject-denied": { "type": "integer" },
-                            "outside-session-window": { "type": "integer" },
-                            "auth-unavailable": { "type": "integer" }
-                        }
-                    },
+                    "integrityExceptions": { "type": "integer" },
+                    "byResolution": resolution_counts_schema(),
+                    "byVerificationStatus": verification_counts_schema(),
                     "eventTypes": {
                         "type": "array",
                         "items": {
@@ -261,11 +245,51 @@ fn metrics_response_schema() -> Value {
                         }
                     }
                 },
-                "required": ["total", "uniqueSubjects", "payloadSizeBytes", "byResolution", "byVerificationStatus", "eventTypes"]
+                "required": ["total", "uniqueSubjects", "payloadSizeBytes", "integrityExceptions", "byResolution", "byVerificationStatus", "eventTypes"]
             },
-            "buckets": { "type": "array", "items": open_schema() }
+            "buckets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "start": { "type": "string" },
+                        "total": { "type": "integer" },
+                        "payloadSizeBytes": { "type": "integer" },
+                        "integrityExceptions": { "type": "integer" },
+                        "byResolution": resolution_counts_schema(),
+                        "byVerificationStatus": verification_counts_schema()
+                    },
+                    "required": ["start", "total", "payloadSizeBytes", "integrityExceptions", "byResolution", "byVerificationStatus"]
+                }
+            }
         },
         "required": ["summary", "buckets"]
+    })
+}
+
+fn resolution_counts_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "resolved": { "type": "integer" },
+            "unresolved": { "type": "integer" },
+            "malformed": { "type": "integer" }
+        }
+    })
+}
+
+fn verification_counts_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "verified": { "type": "integer" },
+            "missing-proof": { "type": "integer" },
+            "invalid-signature": { "type": "integer" },
+            "missing-session": { "type": "integer" },
+            "subject-denied": { "type": "integer" },
+            "outside-session-window": { "type": "integer" },
+            "auth-unavailable": { "type": "integer" }
+        }
     })
 }
 

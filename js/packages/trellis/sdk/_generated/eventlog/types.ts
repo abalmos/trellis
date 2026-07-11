@@ -22,7 +22,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.eventlog@v1" as const;
 export const CONTRACT_DIGEST =
-  "CWzE2IP7FIjcJBa-lU9zF4LZuueTDp7JWXCaZ1mldU4" as const;
+  "f829n1xpdsRGJTNFqrwiClbWfol7-iTSx25ijPl--io" as const;
 
 export type EventLogConsumersInspectInput = {
   consumerName: string;
@@ -67,7 +67,28 @@ export type EventLogMetricsInput = {
   window?: "15m" | "1h" | "6h" | "24h" | "7d";
 };
 export type EventLogMetricsOutput = {
-  buckets: Array<{ [k: string]: unknown }>;
+  buckets: Array<
+    {
+      byResolution: {
+        malformed?: number;
+        resolved?: number;
+        unresolved?: number;
+      };
+      byVerificationStatus: {
+        "auth-unavailable"?: number;
+        "invalid-signature"?: number;
+        "missing-proof"?: number;
+        "missing-session"?: number;
+        "outside-session-window"?: number;
+        "subject-denied"?: number;
+        verified?: number;
+      };
+      integrityExceptions: number;
+      payloadSizeBytes: number;
+      start: string;
+      total: number;
+    }
+  >;
   summary: {
     byResolution: {
       malformed?: number;
@@ -86,6 +107,7 @@ export type EventLogMetricsOutput = {
     eventTypes: Array<
       { count: number; ownerContractId: string; ownerEventName: string }
     >;
+    integrityExceptions: number;
     payloadSizeBytes: number;
     total: number;
     uniqueSubjects: number;
@@ -101,6 +123,7 @@ export type EventLogQueryInput = {
   includeEventTypes?: Array<
     { ownerContractId: string; ownerEventName: string }
   >;
+  integrityExceptionOnly?: boolean;
   limit: number;
   offset?: number;
   ownerContractId?: string;

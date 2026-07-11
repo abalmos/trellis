@@ -1,48 +1,9 @@
 <script lang="ts">
+  import type { JobsMetricsOutput } from "@qlever-llc/trellis/sdk/jobs";
   import { compactDuration } from "../format";
 
-  type Latency = {
-    count: number;
-    p50Ms?: number;
-    p95Ms?: number;
-    maxMs?: number;
-  };
-
-  type SummaryGroup = {
-    key: string;
-    label: string;
-    total: number;
-    byState: { [k: string]: number };
-    running?: number;
-    queued?: number;
-    failed?: number;
-    dead?: number;
-    slow?: number;
-    failureRate?: number;
-    runtime: Latency;
-    queueWait: Latency;
-    oldestCreatedAt?: string;
-    latestUpdatedAt?: string;
-  };
-
-  type Bucket = {
-    start: string;
-    end: string;
-    groups: Array<{
-      key: string;
-      label: string;
-      submitted: number;
-      started: number;
-      completed: number;
-      failed: number;
-      retried: number;
-      dead: number;
-      cancelled: number;
-      dismissed: number;
-      runtime: Latency;
-      queueWait: Latency;
-    }>;
-  };
+  type SummaryGroup = JobsMetricsOutput["summary"][number];
+  type Bucket = JobsMetricsOutput["buckets"][number];
 
   type Props = {
     summary: SummaryGroup[];
@@ -54,176 +15,127 @@
   let { summary, buckets, selectedKey = null, onSelect }: Props = $props();
 
   const sparklineByKey = $derived.by(() => {
-    const map = new Map<string, number[]>();
+    const values: Record<string, number[]> = {};
     for (const bucket of buckets) {
       for (const group of bucket.groups) {
-        if (!map.has(group.key)) map.set(group.key, []);
         const failures = group.failed + group.dead + group.retried;
-        const list = map.get(group.key);
-        if (list) list.push(failures);
+        values[group.key] = [...(values[group.key] ?? []), failures];
       }
     }
-    return map;
+    return values;
   });
 
   const sortedSummary = $derived.by(() =>
     [...summary].sort((left, right) => {
-      const leftPressure = (left.failed ?? 0) + (left.dead ?? 0) * 2;
-      const rightPressure = (right.failed ?? 0) + (right.dead ?? 0) * 2;
-      if (rightPressure !== leftPressure) return rightPressure - leftPressure;
-      return right.total - left.total;
+      const leftPressure = (left.failed ?? 0) + (left.dead ?? 0) * 2 + (left.queued ?? 0) / 20;
+      const rightPressure = (right.failed ?? 0) + (right.dead ?? 0) * 2 + (right.queued ?? 0) / 20;
+      return rightPressure - leftPressure || right.total - left.total;
     }),
   );
 
-  function severity(failed: number, total: number): string {
-    if (total === 0) return "badge-ghost";
-    const rate = failed / total;
-    if (rate >= 0.25) return "badge-error";
-    if (rate >= 0.1) return "badge-warning";
-    return "badge-success";
+  function severity(group: SummaryGroup): string {
+    const failures = (group.failed ?? 0) + (group.dead ?? 0);
+    if (failures > 0) return "danger";
+    if ((group.queued ?? 0) > 0 || (group.slow ?? 0) > 0) return "warning";
+    return "healthy";
   }
 
   function formatMs(value: number | undefined): string {
-    if (value === undefined) return "—";
-    return compactDuration(value);
+    return value === undefined ? "—" : compactDuration(value);
   }
 
-  function handleSelect(key: string | null) {
-    if (onSelect) onSelect(key);
+  function sparkPoints(values: number[]): string {
+    const maximum = Math.max(...values, 1);
+    const denominator = Math.max(values.length - 1, 1);
+    return values.map((value, index) => `${(index / denominator) * 100},${19 - (value / maximum) * 17}`).join(" ");
+  }
+
+  function select(key: string) {
+    onSelect?.(selectedKey === key ? null : key);
   }
 
   function handleKey(event: KeyboardEvent, key: string) {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
-    handleSelect(key);
+    select(key);
   }
 </script>
 
-<div class="jobs-matrix">
-  <header class="jobs-matrix-header">
-    <h3>Job-type health</h3>
-    <p class="jobs-matrix-help">One row per job type. Click a row to scope the charts and filter the jobs table to that type.</p>
-  </header>
-  {#if sortedSummary.length === 0}
-    <p class="jobs-matrix-empty">No job types reported for this window.</p>
-  {:else}
-    <div class="jobs-matrix-table" role="table" aria-label="Job type health">
-      <div class="jobs-matrix-row jobs-matrix-row-head" role="row">
-        <span role="columnheader">Job type</span>
-        <span role="columnheader" class="ta-right">Backlog</span>
-        <span role="columnheader" class="ta-right">Running</span>
-        <span role="columnheader" class="ta-right">Failed</span>
-        <span role="columnheader" class="ta-right">DLQ</span>
-        <span role="columnheader" class="ta-right">Queue p95</span>
-        <span role="columnheader" class="ta-right">Runtime p95</span>
-        <span role="columnheader">Trend</span>
-      </div>
-      {#each sortedSummary as group (group.key)}
-        {@const isSelected = selectedKey === group.key}
-        {@const spark = sparklineByKey.get(group.key) ?? []}
-        {@const failedTotal = (group.failed ?? 0) + (group.dead ?? 0)}
-        {@const sparkMax = Math.max(...spark, 1)}
-        <div
-          class={['jobs-matrix-row', isSelected && 'selected']}
-          role="row"
-          tabindex="0"
-          onclick={() => handleSelect(isSelected ? null : group.key)}
-          onkeydown={(event) => handleKey(event, group.key)}
-        >
-          <span role="cell" class="jobs-matrix-label">
-            <span class="jobs-matrix-key">{group.label}</span>
-            <span class={['badge', 'badge-sm', severity(failedTotal, group.total)]}>
-              {group.failureRate === undefined ? "—" : `${(group.failureRate * 100).toFixed(1)}%`}
-            </span>
-          </span>
-          <span role="cell" class="ta-right tabular-nums">{group.queued ?? 0}</span>
-          <span role="cell" class="ta-right tabular-nums">{group.running ?? 0}</span>
-          <span role="cell" class="ta-right tabular-nums">{group.failed ?? 0}</span>
-          <span role="cell" class="ta-right tabular-nums">{group.dead ?? 0}</span>
-          <span role="cell" class="ta-right tabular-nums">{formatMs(group.queueWait.p95Ms)}</span>
-          <span role="cell" class="ta-right tabular-nums">{formatMs(group.runtime.p95Ms)}</span>
-          <span role="cell" class="jobs-matrix-sparkline">
-            {#if spark.length === 0}
-              <span class="jobs-matrix-sparkline-empty">no data</span>
-            {:else}
-              <svg viewBox="0 0 {spark.length * 4} 20" preserveAspectRatio="none" aria-hidden="true">
-                <polyline
-                  points={spark
-                    .map((value, index) => `${index * 4},${20 - (value / sparkMax) * 18 - 1}`)
-                    .join(" ")}
-                  fill="none"
-                  stroke="oklch(0.62 0.18 25)"
-                  stroke-width="1.5"
-                  stroke-linejoin="round"
-                  stroke-linecap="round"
-                />
-              </svg>
-            {/if}
-          </span>
-        </div>
-      {/each}
+<div class="jobs-matrix" role="table" aria-label="Job type health">
+  <div class="jobs-matrix-row jobs-matrix-head" role="row">
+    <span role="columnheader">Job type</span>
+    <span role="columnheader">Backlog</span>
+    <span role="columnheader">Running</span>
+    <span role="columnheader">Failed</span>
+    <span role="columnheader">Dead</span>
+    <span role="columnheader">Queue p95</span>
+    <span role="columnheader">Runtime p95</span>
+    <span role="columnheader">Failure trend</span>
+  </div>
+
+  {#each sortedSummary as group (group.key)}
+    {@const spark = sparklineByKey[group.key] ?? []}
+    <div
+      class={["jobs-matrix-row", selectedKey === group.key && "selected"]}
+      role="row"
+      tabindex="0"
+      aria-label={`${group.label}: ${group.queued ?? 0} queued, ${group.running ?? 0} running, ${group.failed ?? 0} failed, ${group.dead ?? 0} dead`}
+      onclick={() => select(group.key)}
+      onkeydown={(event) => handleKey(event, group.key)}
+    >
+      <span role="cell" class="jobs-matrix-type">
+        <span class="jobs-matrix-key">{group.label}</span>
+        <span class={["jobs-health", severity(group)]}>
+          {group.failureRate === undefined ? "No completions" : `${(group.failureRate * 100).toFixed(1)}% failed`}
+        </span>
+      </span>
+      <span role="cell" class:warning={(group.queued ?? 0) > 0} data-label="Backlog">{group.queued ?? 0}</span>
+      <span role="cell" data-label="Running">{group.running ?? 0}</span>
+      <span role="cell" class:danger={(group.failed ?? 0) > 0} data-label="Failed">{group.failed ?? 0}</span>
+      <span role="cell" class:danger={(group.dead ?? 0) > 0} data-label="Dead">{group.dead ?? 0}</span>
+      <span role="cell" class="latency" data-label="Queue p95">{formatMs(group.queueWait.p95Ms)}</span>
+      <span role="cell" class="latency" data-label="Runtime p95">{formatMs(group.runtime.p95Ms)}</span>
+      <span role="cell" class="jobs-sparkline" aria-label="Recent failure trend">
+        {#if spark.length > 0}
+          <svg viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+            <polyline points={sparkPoints(spark)} />
+          </svg>
+        {:else}
+          <span>no data</span>
+        {/if}
+      </span>
     </div>
-  {/if}
+  {:else}
+    <p class="jobs-matrix-empty">No job types reported activity in this window.</p>
+  {/each}
 </div>
 
 <style>
   .jobs-matrix {
-    background: color-mix(in oklab, var(--color-base-100) 92%, var(--color-base-200));
-    border: 1px solid color-mix(in oklab, var(--color-base-300) 82%, transparent);
-    border-radius: var(--radius-box, 1rem);
-    display: grid;
-    gap: 0.5rem;
-    padding: 0.9rem 1rem;
-  }
-
-  .jobs-matrix-header {
-    display: grid;
-    gap: 0.1rem;
-  }
-
-  .jobs-matrix-header h3 {
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
-  }
-
-  .jobs-matrix-help {
-    font-size: 0.72rem;
-    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
-  }
-
-  .jobs-matrix-empty {
-    font-size: 0.78rem;
-    color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-    font-style: italic;
-  }
-
-  .jobs-matrix-table {
-    display: grid;
-    gap: 0.2rem;
+    border-top: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
+    min-width: 0;
   }
 
   .jobs-matrix-row {
     align-items: center;
-    border-radius: var(--radius-field, 0.5rem);
+    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 75%, transparent);
     cursor: pointer;
     display: grid;
-    gap: 0.5rem;
-    grid-template-columns: minmax(0, 2.4fr) repeat(6, minmax(0, 0.9fr)) minmax(0, 1.4fr);
-    padding: 0.45rem 0.55rem;
-    transition: background-color 120ms ease-out;
+    font-size: 0.75rem;
+    gap: 0.75rem;
+    grid-template-columns: minmax(10rem, 2fr) repeat(6, minmax(3.5rem, 0.72fr)) minmax(5.5rem, 1fr);
+    min-height: 3rem;
+    padding: 0.35rem 0.5rem;
+    transition: background-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .jobs-matrix-row:hover {
-    background: color-mix(in oklab, var(--color-base-200) 60%, transparent);
+    background: color-mix(in oklab, var(--color-base-200) 55%, transparent);
   }
 
   .jobs-matrix-row.selected {
-    background: color-mix(in oklab, var(--color-accent) 12%, transparent);
-    outline: 1px solid color-mix(in oklab, var(--color-accent) 46%, transparent);
-    outline-offset: -1px;
+    background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));
+    box-shadow: inset 2px 0 color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
   }
 
   .jobs-matrix-row:focus-visible {
@@ -231,21 +143,26 @@
     outline: none;
   }
 
-  .jobs-matrix-row-head {
-    background: color-mix(in oklab, var(--color-base-200) 70%, transparent);
+  .jobs-matrix-head {
+    color: color-mix(in oklab, var(--color-base-content) 48%, transparent);
     cursor: default;
-    font-size: 0.66rem;
+    font-size: 0.62rem;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.07em;
+    min-height: 2.25rem;
     text-transform: uppercase;
-    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
   }
 
-  .jobs-matrix-row-head:hover {
-    background: color-mix(in oklab, var(--color-base-200) 70%, transparent);
+  .jobs-matrix-head:hover {
+    background: transparent;
   }
 
-  .jobs-matrix-label {
+  .jobs-matrix-head span:not(:first-child),
+  .jobs-matrix-row > span:not(:first-child) {
+    text-align: right;
+  }
+
+  .jobs-matrix-type {
     align-items: center;
     display: flex;
     gap: 0.5rem;
@@ -253,46 +170,114 @@
   }
 
   .jobs-matrix-key {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.78rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 650;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .ta-right {
-    text-align: right;
+  .jobs-health {
+    border-radius: 0.3rem;
+    flex: none;
+    font-size: 0.62rem;
+    font-weight: 650;
+    padding: 0.14rem 0.32rem;
   }
 
-  .jobs-matrix-sparkline {
+  .jobs-health.danger {
+    background: color-mix(in oklab, var(--color-error) 13%, transparent);
+    color: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
+  }
+
+  .jobs-health.warning {
+    background: color-mix(in oklab, var(--color-warning) 14%, transparent);
+    color: color-mix(in oklab, var(--color-warning) 65%, var(--color-base-content));
+  }
+
+  .jobs-health.healthy {
+    background: color-mix(in oklab, var(--color-success) 12%, transparent);
+    color: color-mix(in oklab, var(--color-success) 70%, var(--color-base-content));
+  }
+
+  .danger {
+    color: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
+    font-weight: 700;
+  }
+
+  .warning {
+    color: color-mix(in oklab, var(--color-warning) 62%, var(--color-base-content));
+    font-weight: 700;
+  }
+
+  .latency {
+    color: color-mix(in oklab, var(--color-base-content) 68%, transparent);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .jobs-sparkline {
     align-items: center;
+    color: color-mix(in oklab, var(--color-base-content) 42%, transparent);
     display: flex;
-    height: 1.4rem;
+    height: 1.35rem;
+    justify-content: flex-end;
   }
 
-  .jobs-matrix-sparkline svg {
-    display: block;
+  .jobs-sparkline svg {
     height: 100%;
     width: 100%;
   }
 
-  .jobs-matrix-sparkline-empty {
-    color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
-    font-size: 0.66rem;
-    font-style: italic;
+  .jobs-sparkline polyline {
+    fill: none;
+    stroke: color-mix(in oklab, var(--color-error) 75%, var(--color-base-content));
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
 
-  @media (max-width: 900px) {
-    .jobs-matrix-row {
-      grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 0.7fr)) minmax(0, 1.2fr);
-      grid-template-areas:
-        "label label sparkline sparkline"
-        "backlog running failed dlq"
-        "qp95 rp95 qp95 rp95";
-      row-gap: 0.25rem;
+  .jobs-matrix-empty {
+    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+    font-size: 0.78rem;
+    margin: 0;
+    padding: 1.5rem 0.5rem;
+  }
+
+  @media (max-width: 760px) {
+    .jobs-matrix-head {
+      display: none;
     }
 
-    .jobs-matrix-row-head {
+    .jobs-matrix-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      min-height: auto;
+      padding: 0.8rem 0.25rem;
+      row-gap: 0.7rem;
+    }
+
+    .jobs-matrix-type {
+      grid-column: 1 / -1;
+      justify-content: space-between;
+    }
+
+    .jobs-matrix-row > span:not(:first-child) {
+      display: grid;
+      gap: 0.2rem;
+      text-align: left;
+    }
+
+    .jobs-matrix-row > span:not(:first-child)::before {
+      color: color-mix(in oklab, var(--color-base-content) 48%, transparent);
+      content: attr(data-label);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .jobs-matrix-row .latency,
+    .jobs-matrix-row .jobs-sparkline {
       display: none;
     }
   }
