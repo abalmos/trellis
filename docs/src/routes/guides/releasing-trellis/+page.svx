@@ -185,11 +185,13 @@ finalizing the changelog:
 /usr/bin/git diff "$PREVIOUS_TAG..HEAD"
 ```
 
-For exact path-limited release evidence, use direct Git or the unfiltered `rtk proxy` path. Do not rely on condensed wrapper output for evidence that must be copied into release notes, approvals, or audit records:
+For exact path-limited release evidence, use direct Git. Do not rely on
+condensed wrapper output for evidence that must be copied into release notes,
+approvals, or audit records:
 
 ```sh
 /usr/bin/git diff -- <paths>
-rtk proxy git diff -- <paths>
+git diff -- <paths>
 ```
 
 Use the code review, not just the commit subjects, to verify the changelog is
