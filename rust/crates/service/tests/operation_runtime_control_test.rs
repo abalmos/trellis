@@ -1,11 +1,12 @@
 use bytes::Bytes;
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use trellis_service::internal::{dispatch_one, InboundRequest};
 use trellis_service::{
     control_subject, InMemoryOperationRuntime, OperationDescriptor, OperationFailure,
-    OperationRefData, OperationState, RequestContext, Router, ServerError,
+    OperationLiveEvent, OperationRefData, OperationState, OperationUpdateDescriptor,
+    RequestContext, Router, ServerError,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -21,6 +22,11 @@ struct RefundProgress {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct RefundOutput {
     refund_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct RefundUpdate {
+    processed: u64,
 }
 
 struct RefundOperation;
@@ -39,6 +45,54 @@ impl OperationDescriptor for RefundOperation {
     const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","properties":{},"required":[]}"#;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
+}
+
+impl OperationUpdateDescriptor for RefundOperation {
+    type Update = RefundUpdate;
+
+    const UPDATE_SCHEMA_JSON: &'static str = r#"{"type":"object","properties":{"processed":{"type":"integer"}},"required":["processed"]}"#;
+}
+
+#[tokio::test]
+async fn live_updates_are_ordered_and_never_mutate_the_snapshot() {
+    let runtime = InMemoryOperationRuntime::new("billing");
+    let refunds = runtime.operation::<RefundOperation>();
+    refunds
+        .accept("op_updates")
+        .await
+        .expect("accept operation");
+    let mut events = refunds
+        .live_events("op_updates")
+        .await
+        .expect("watch live events");
+    let control = refunds.control("op_updates").await.expect("control");
+
+    let update = control
+        .emit_update(RefundUpdate { processed: 3 })
+        .await
+        .expect("emit update");
+    assert_eq!(update.sequence, 2);
+    control
+        .complete(RefundOutput {
+            refund_id: "refund-1".to_string(),
+        })
+        .await
+        .expect("complete operation");
+
+    assert!(matches!(
+        events.next().await.expect("initial").expect("initial event"),
+        OperationLiveEvent::Snapshot(snapshot) if snapshot.state == OperationState::Pending
+    ));
+    assert!(matches!(
+        events.next().await.expect("update").expect("update event"),
+        OperationLiveEvent::Update(event) if event.update.processed == 3
+    ));
+    assert!(matches!(
+        events.next().await.expect("terminal").expect("terminal event"),
+        OperationLiveEvent::Snapshot(snapshot)
+            if snapshot.state == OperationState::Completed && snapshot.progress.is_none()
+    ));
+    assert!(events.next().await.is_none());
 }
 
 struct CaptureOperation;

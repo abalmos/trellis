@@ -488,7 +488,6 @@ Deno.test("defineServiceContract emits keyed job concurrency policy", () => {
       jobs: {
         syncTickets: {
           payload: ref.schema("StringValue"),
-          concurrency: 8,
           keyConcurrency: {
             key: ["zendesk", "/value", "tickets"],
             maxActive: 1,
@@ -507,7 +506,6 @@ Deno.test("defineServiceContract emits keyed job concurrency policy", () => {
 
   assertEquals(contract.CONTRACT.jobs?.syncTickets, {
     payload: { schema: "StringValue" },
-    concurrency: 8,
     keyConcurrency: {
       key: ["zendesk", "/value", "tickets"],
       maxActive: 1,
@@ -1958,13 +1956,14 @@ Deno.test("defineServiceContract emits KV resources with schema-backed defaults"
 });
 
 Deno.test("defineServiceContract emits top-level jobs with defaults", () => {
-  const contract = defineServiceContract({}, () => ({
+  const contract = defineServiceContract({ schemas: baseSchemas }, () => ({
     id: "jobs.example@v1",
     displayName: "Jobs Example",
     description: "Expose top-level jobs declarations in emitted manifests.",
     jobs: {
       refresh: {
         payload: { schema: "Empty" },
+        update: { schema: "StringValue" },
         result: { schema: "StringValue" },
       },
     },
@@ -1972,6 +1971,7 @@ Deno.test("defineServiceContract emits top-level jobs with defaults", () => {
 
   assertEquals(contract.CONTRACT.jobs?.refresh, {
     payload: { schema: "Empty" },
+    update: { schema: "StringValue" },
     result: { schema: "StringValue" },
   });
   assertEquals("jobs" in (contract.CONTRACT.resources ?? {}), false);
@@ -2015,6 +2015,7 @@ Deno.test("defineServiceContract emits dependency event consumer groups", () => 
           uses: {
             source: ["Source.Updated", "Source.Created"],
           },
+          ordering: "parallel",
           ackWaitMs: 1_000,
           maxDeliver: 3,
           backoffMs: [0, 100],
@@ -2029,8 +2030,7 @@ Deno.test("defineServiceContract emits dependency event consumer groups", () => 
       source: ["Source.Created", "Source.Updated"],
     },
     replay: "new",
-    ordering: "strict",
-    concurrency: 1,
+    ordering: "parallel",
     ackWaitMs: 1_000,
     maxDeliver: 3,
     backoffMs: [0, 100],
@@ -2175,7 +2175,6 @@ Deno.test("defineServiceContract emits mixed dependency and self event consumer 
     self: ["Self.Created"],
     replay: "new",
     ordering: "strict",
-    concurrency: 1,
   });
 });
 
@@ -2351,31 +2350,6 @@ Deno.test("defineServiceContract validates event consumer group uses", () => {
     Error,
     "does not subscribe to",
   );
-
-  assertThrows(
-    () =>
-      defineServiceContract(
-        { schemas: baseSchemas },
-        () => ({
-          id: "events.invalid-concurrency@v1",
-          displayName: "Invalid Concurrency",
-          description: "Reject strict event consumers above concurrency one.",
-          uses: {
-            required: {
-              source: source.use({ events: { subscribe: ["Source.Created"] } }),
-            },
-          },
-          eventConsumers: {
-            ingest: {
-              uses: { source: ["Source.Created"] },
-              concurrency: 2,
-            },
-          },
-        }),
-      ),
-    Error,
-    "requires concurrency 1",
-  );
 });
 
 Deno.test("defineServiceContract rejects unknown owned event consumer refs", () => {
@@ -2505,6 +2479,7 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
           version: "v1",
           input: schemaRef<typeof baseSchemas, "Empty">("Empty"),
           progress: schemaRef<typeof baseSchemas, "StringValue">("StringValue"),
+          update: schemaRef<typeof baseSchemas, "StringValue">("StringValue"),
           output: schemaRef<typeof baseSchemas, "StringValue">("StringValue"),
           capabilities: {
             call: ["refund"],
@@ -2569,6 +2544,7 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
     "operations.v1.Billing.Refund",
   );
   const refundOperation = billing.CONTRACT.operations?.["Billing.Refund"];
+  assertEquals(refundOperation?.update, { schema: "StringValue" });
   assertEquals(refundOperation?.signals, {
     selectReason: { input: { schema: "SelectReason" } },
   });

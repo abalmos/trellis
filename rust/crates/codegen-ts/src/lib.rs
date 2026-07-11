@@ -195,6 +195,15 @@ fn render_contract_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> Stri
     let trellis_contracts_import = trellis_contracts_import(opts);
     let contract_jobs_type = render_contract_jobs_type(loaded);
     let has_contract_jobs = contract_jobs_type.is_some();
+    let public_schema_exports = public_schema_exports(loaded);
+    let job_update_schema_names = top_level_contract_jobs(loaded)
+        .into_iter()
+        .flat_map(|jobs| jobs.values())
+        .filter_map(|queue| queue.get("update"))
+        .filter_map(Value::as_object)
+        .filter_map(|update| update.get("schema"))
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
     let sdk_contract_module_type = if has_contract_jobs {
         "SdkContractModule<typeof CONTRACT_ID, typeof API.owned, ContractJobs>"
     } else {
@@ -247,6 +256,27 @@ fn render_contract_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> Stri
             format!(
                 "import {{ CONTRACT_JOBS_METADATA, type ContractJobsMetadata }} from {};",
                 js_string(&trellis_contracts_import)
+            ),
+        );
+    }
+    if !job_update_schema_names.is_empty() {
+        lines.insert(
+            2,
+            format!(
+                "import {{ schema }} from {};",
+                js_string(&trellis_contracts_import)
+            ),
+        );
+        lines.insert(
+            3,
+            format!(
+                "import {{ {} }} from \"./schemas.ts\";",
+                public_schema_exports
+                    .iter()
+                    .filter(|export| job_update_schema_names.contains(export.key.as_str()))
+                    .map(|export| export.const_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         );
     }
@@ -353,6 +383,12 @@ fn render_contract_jobs_type(loaded: &LoadedManifest) -> Option<String> {
             .and_then(Value::as_str)
             .expect("contract jobs queue payload must include a schema ref");
         let payload = schema_to_ts(resolve_schema_ref(loaded, payload_schema));
+        let update = queue
+            .get("update")
+            .and_then(Value::as_object)
+            .and_then(|update| update.get("schema"))
+            .and_then(Value::as_str)
+            .map(|schema_name| schema_to_ts(resolve_schema_ref(loaded, schema_name)));
         let result = queue
             .get("result")
             .and_then(Value::as_object)
@@ -363,6 +399,9 @@ fn render_contract_jobs_type(loaded: &LoadedManifest) -> Option<String> {
 
         lines.push(format!("  {}: {{", js_string(queue_type)));
         lines.push(format!("    payload: {payload};"));
+        if let Some(update) = update {
+            lines.push(format!("    update: {update};"));
+        }
         lines.push(format!("    result: {result};"));
         lines.push("  };".to_string());
     }
@@ -376,12 +415,35 @@ fn render_contract_jobs_value(loaded: &LoadedManifest) -> Vec<String> {
         return Vec::new();
     };
 
-    jobs.keys()
-        .map(|queue_type| {
-            format!(
-                "  {}: {{ payload: undefined, result: undefined }},",
-                js_string(queue_type)
-            )
+    let schema_const_names = public_schema_exports(loaded)
+        .into_iter()
+        .map(|export| (export.key, export.const_name))
+        .collect::<BTreeMap<_, _>>();
+    jobs.iter()
+        .map(|(queue_type, queue)| {
+            let update_schema = queue
+                .get("update")
+                .and_then(Value::as_object)
+                .and_then(|update| update.get("schema"))
+                .and_then(Value::as_str)
+                .map(|schema_name| {
+                    let const_name = schema_const_names
+                        .get(schema_name)
+                        .expect("missing public schema export for job update");
+                    format!(", updateSchema: schema({const_name})")
+                })
+                .unwrap_or_default();
+            if update_schema.is_empty() {
+                format!(
+                    "  {}: {{ payload: undefined, result: undefined }},",
+                    js_string(queue_type)
+                )
+            } else {
+                format!(
+                    "  {}: {{ payload: undefined, update: undefined{update_schema}, result: undefined }},",
+                    js_string(queue_type)
+                )
+            }
         })
         .collect()
 }
@@ -657,6 +719,16 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
                 )
             ));
         }
+        if let Some(update) = &operation.update {
+            let update_type = schema_to_ts_with_aliases(
+                resolve_schema_ref(loaded, &update.schema),
+                &schema_type_aliases,
+                None,
+            );
+            if update_type != format!("{base}Update") {
+                lines.push(format!("export type {base}Update = {update_type};"));
+            }
+        }
         if let Some(output) = &operation.output {
             lines.push(format!(
                 "export type {base}Output = {};",
@@ -699,7 +771,7 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
 
         // Then emit the handler with narrowed OperationRuntimeHandle (3 type args)
         lines.push(format!(
-            "export type {base}OperationHandler = (args: {{ input: {base}Input; op: OperationRuntimeHandle<{}, {}, {base}OperationHandlerError>; caller: SessionCaller; client: HandlerClient; }}{}) => unknown | Promise<unknown>;",
+            "export type {base}OperationHandler = (args: {{ input: {base}Input; op: OperationRuntimeHandle<{}, {}, {base}OperationHandlerError{}>; caller: SessionCaller; client: HandlerClient; }}{}) => unknown | Promise<unknown>;",
             operation
                 .progress
                 .as_ref()
@@ -708,6 +780,10 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
                 .output
                 .as_ref()
                 .map_or_else(|| "unknown".to_string(), |_| format!("{base}Output")),
+            operation
+                .update
+                .as_ref()
+                .map_or_else(String::new, |_| format!(", {base}Update")),
             if operation.transfer.is_some() {
                 " & { transfer: OperationTransferHandle }"
             } else {
@@ -773,6 +849,7 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
                 .and_then(Value::as_str)
                 .expect("contract jobs queue payload must include a schema ref");
             let payload_type = format!("{base}JobPayload");
+            let update_type = format!("{base}JobUpdate");
             let result_type = format!("{base}JobResult");
             lines.push(format!(
                 "export type {payload_type} = {};",
@@ -781,6 +858,20 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
                     &schema_type_aliases,
                     None,
                 )
+            ));
+            lines.push(format!(
+                "export type {update_type} = {};",
+                queue
+                    .get("update")
+                    .and_then(Value::as_object)
+                    .and_then(|update| update.get("schema"))
+                    .and_then(Value::as_str)
+                    .map(|schema_name| schema_to_ts_with_aliases(
+                        resolve_schema_ref(loaded, schema_name),
+                        &schema_type_aliases,
+                        None,
+                    ))
+                    .unwrap_or_else(|| "never".to_string())
             ));
             lines.push(format!(
                 "export type {result_type} = {};",
@@ -796,8 +887,13 @@ fn render_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String 
                     ))
                     .unwrap_or_else(|| "unknown".to_string())
             ));
+            let update_parameter = if queue.contains_key("update") {
+                format!(", {update_type}")
+            } else {
+                String::new()
+            };
             lines.push(format!(
-                "export type {base}JobHandler = (args: {{ job: ActiveJob<{payload_type}, {result_type}>; client: HandlerClient; }}) => Promise<Result<{result_type}, BaseError>>;"
+                "export type {base}JobHandler = (args: {{ job: ActiveJob<{payload_type}, {result_type}{update_parameter}>; client: HandlerClient; }}) => Promise<Result<{result_type}, BaseError>>;"
             ));
             lines.push(String::new());
         }
@@ -981,6 +1077,9 @@ fn render_owned_api_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> Str
         if let Some(progress) = &operation.progress {
             api_schema_imports.insert(progress.schema.as_str());
         }
+        if let Some(update) = &operation.update {
+            api_schema_imports.insert(update.schema.as_str());
+        }
         if let Some(output) = &operation.output {
             api_schema_imports.insert(output.schema.as_str());
         }
@@ -1158,6 +1257,21 @@ fn render_owned_api_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> Str
                             .as_str(),
                     )
                     .expect("missing public schema export for operation progress")
+            ));
+        }
+        if operation.update.is_some() {
+            lines.push(format!(
+                "      update: schema<Types.{base}Update>({}),",
+                schema_const_names
+                    .get(
+                        operation
+                            .update
+                            .as_ref()
+                            .expect("checked above")
+                            .schema
+                            .as_str(),
+                    )
+                    .expect("missing public schema export for operation update")
             ));
         }
         if operation.output.is_some() {
@@ -3012,6 +3126,9 @@ fn public_schema_keys(loaded: &LoadedManifest) -> BTreeSet<String> {
         if let Some(progress) = &operation.progress {
             keys.insert(progress.schema.clone());
         }
+        if let Some(update) = &operation.update {
+            keys.insert(update.schema.clone());
+        }
         if let Some(output) = &operation.output {
             keys.insert(output.schema.clone());
         }
@@ -3027,6 +3144,19 @@ fn public_schema_keys(loaded: &LoadedManifest) -> BTreeSet<String> {
     for feed in loaded.manifest.feeds.values() {
         keys.insert(feed.input.schema.clone());
         keys.insert(feed.event.schema.clone());
+    }
+
+    if let Some(jobs) = top_level_contract_jobs(loaded) {
+        for queue in jobs.values() {
+            if let Some(schema_name) = queue
+                .get("update")
+                .and_then(Value::as_object)
+                .and_then(|update| update.get("schema"))
+                .and_then(Value::as_str)
+            {
+                keys.insert(schema_name.to_string());
+            }
+        }
     }
 
     if let Some(state) = loaded.value.get("state").and_then(Value::as_object) {
@@ -4468,6 +4598,13 @@ mod tests {
                             "delivered": { "type": "boolean" }
                         },
                         "required": ["delivered"]
+                    },
+                    "EmailUpdate": {
+                        "type": "object",
+                        "properties": {
+                            "content": { "type": "string" }
+                        },
+                        "required": ["content"]
                     }
                 },
                 "rpc": {
@@ -4481,6 +4618,7 @@ mod tests {
                 "jobs": {
                     "sendEmail": {
                         "payload": { "schema": "EmailPayload" },
+                        "update": { "schema": "EmailUpdate" },
                         "result": { "schema": "EmailResult" }
                     }
                 },
@@ -4504,6 +4642,7 @@ mod tests {
         let loaded = load_manifest(&manifest_path).unwrap();
 
         let contract = render_contract_ts(&opts, &loaded);
+        let types = render_types_ts(&opts, &loaded);
 
         assert!(contract.contains(
             "import { CONTRACT_JOBS_METADATA, type ContractJobsMetadata } from \"@qlever-llc/trellis/contracts\";"
@@ -4514,12 +4653,18 @@ mod tests {
         assert!(contract.contains("type ContractJobs = {"));
         assert!(contract.contains("\"sendEmail\": {"));
         assert!(contract.contains("payload: { address: string; };"));
+        assert!(contract.contains("update: { content: string; };"));
         assert!(contract.contains("result: { delivered: boolean; };"));
         assert!(
             contract.contains("const CONTRACT_JOBS = defineContractJobsMetadata<ContractJobs>({")
         );
-        assert!(contract.contains("  \"sendEmail\": { payload: undefined, result: undefined },"));
+        assert!(contract.contains(
+            "  \"sendEmail\": { payload: undefined, update: undefined, updateSchema: schema(EmailUpdateSchema), result: undefined },"
+        ));
         assert!(contract.contains("  [CONTRACT_JOBS_METADATA]: CONTRACT_JOBS,"));
+        assert!(types.contains("export type SendEmailJobUpdate = { content: string; };"));
+        assert!(types
+            .contains("ActiveJob<SendEmailJobPayload, SendEmailJobResult, SendEmailJobUpdate>"));
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -4785,6 +4930,7 @@ mod tests {
                 "schemas": {
                     "Input": { "type": "object", "properties": {} },
                     "Progress": { "type": "object", "properties": { "step": { "type": "string" } } },
+                    "ExampleProcessUpdate": { "type": "object", "properties": { "content": { "type": "string" } }, "required": ["content"] },
                     "Output": { "type": "object", "properties": {} },
                     "ErrorPayload": { "type": "object", "properties": { "detail": { "type": "string" } } }
                 },
@@ -4800,6 +4946,7 @@ mod tests {
                         "subject": "operations.v1.Example.Process",
                         "input": { "schema": "Input" },
                         "progress": { "schema": "Progress" },
+                        "update": { "schema": "ExampleProcessUpdate" },
                         "output": { "schema": "Output" },
                         "errors": [{ "type": "NotFoundError" }]
                     }
@@ -4823,6 +4970,7 @@ mod tests {
         let loaded = load_manifest(&manifest_path).unwrap();
 
         let types = render_types_ts(&opts, &loaded);
+        let owned_api = render_owned_api_ts(&opts, &loaded);
 
         assert!(
             types.contains("export type ExampleProcessOperationHandlerError = TrellisErrorInstance | BaseError<NotFoundErrorData>;"),
@@ -4830,9 +4978,18 @@ mod tests {
         );
 
         assert!(
-            types.contains("op: OperationRuntimeHandle<ExampleProcessProgress, ExampleProcessOutput, ExampleProcessOperationHandlerError>"),
+            types.contains("op: OperationRuntimeHandle<ExampleProcessProgress, ExampleProcessOutput, ExampleProcessOperationHandlerError, ExampleProcessUpdate>"),
             "expected narrowed OperationRuntimeHandle in operation handler, got:\n{types}"
         );
+        assert!(types.contains("export type ExampleProcessUpdate = { content: string; };"));
+        assert_eq!(
+            types.matches("export type ExampleProcessUpdate =").count(),
+            1,
+            "expected one usable operation update alias, got:\n{types}"
+        );
+        assert!(!types.contains("export type ExampleProcessUpdate = ExampleProcessUpdate;"));
+        assert!(owned_api
+            .contains("update: schema<Types.ExampleProcessUpdate>(ExampleProcessUpdateSchema)"));
 
         fs::remove_dir_all(root).unwrap();
     }

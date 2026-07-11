@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use async_nats::jetstream::{self, stream};
-use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
+use futures_util::{FutureExt, StreamExt};
 
 use crate::jobs::bindings::JobsQueueBinding;
 use crate::jobs::projection::{is_terminal, reduce_job_event};
 use crate::jobs::types::{Job, JobEvent, JobEventType};
+use crate::jobs::updates::{validate_update, JobUpdate, JobUpdateDescriptor};
 use crate::jobs::JobsError;
 
 const JOBS_STREAM: &str = "JOBS";
@@ -72,6 +74,162 @@ impl NatsJobWaiter {
         tokio::time::timeout(self.timeout, wait)
             .await
             .map_err(|_| jobs_message(format!("job '{timeout_job_id}' timed out")))?
+    }
+
+    /// Subscribe to validated live-only updates until terminal lifecycle state.
+    pub async fn updates<D>(
+        &self,
+        job_id: impl Into<String>,
+    ) -> Result<BoxStream<'static, Result<JobUpdate<D::Update>, JobsError>>, JobsError>
+    where
+        D: JobUpdateDescriptor,
+    {
+        let job_id = job_id.into();
+        let bound_schema = self.queue.update.as_deref().ok_or_else(|| {
+            jobs_message(format!(
+                "jobs queue '{}' does not declare updates",
+                self.queue.queue_type
+            ))
+        })?;
+        let updates_prefix = self.queue.updates_prefix.as_deref().ok_or_else(|| {
+            jobs_message(format!(
+                "jobs queue '{}' has no updates prefix",
+                self.queue.queue_type
+            ))
+        })?;
+        if D::QUEUE_TYPE != self.queue.queue_type || D::UPDATE_SCHEMA != bound_schema {
+            return Err(jobs_message(format!(
+                "job update descriptor does not match queue '{}'",
+                self.queue.queue_type
+            )));
+        }
+        let lifecycle_subject = format!("{}.{}.*", self.queue.publish_prefix, job_id);
+        let lifecycle = self
+            .nats
+            .subscribe(lifecycle_subject.clone())
+            .await
+            .map_err(|error| jobs_message(format!("job lifecycle subscribe failed: {error}")))?;
+        let updates_subject = format!("{updates_prefix}.{job_id}");
+        let updates = self
+            .nats
+            .subscribe(updates_subject)
+            .await
+            .map_err(|error| jobs_message(format!("job updates subscribe failed: {error}")))?;
+        self.nats
+            .flush()
+            .await
+            .map_err(|error| jobs_message(format!("flush job update subscriptions: {error}")))?;
+
+        let lifecycle_stream = jetstream::new(self.nats.clone())
+            .get_stream_no_info(JOBS_STREAM)
+            .await
+            .map_err(|error| jobs_message(format!("open jobs lifecycle stream failed: {error}")))?;
+        let latest = latest_lifecycle_message(&lifecycle_stream, &lifecycle_subject).await?;
+        let mut attempt = 0;
+        let mut terminal = false;
+        if let Some(message) = latest {
+            let event: JobEvent = serde_json::from_slice(&message.payload)
+                .map_err(|error| jobs_message(format!("decode job lifecycle event: {error}")))?;
+            if event.job_id == job_id && event.job_type == self.queue.queue_type {
+                attempt = event.tries;
+                terminal = matches!(
+                    event.event_type,
+                    JobEventType::Completed
+                        | JobEventType::Failed
+                        | JobEventType::Cancelled
+                        | JobEventType::Expired
+                        | JobEventType::Skipped
+                        | JobEventType::Dead
+                        | JobEventType::Dismissed
+                );
+            }
+        }
+
+        let queue_type = self.queue.queue_type.clone();
+        Ok(Box::pin(futures_util::stream::unfold(
+            (lifecycle, updates, attempt, 0_u64, terminal),
+            move |(mut lifecycle, mut updates, mut attempt, mut sequence, mut terminal)| {
+                let job_id = job_id.clone();
+                let queue_type = queue_type.clone();
+                async move {
+                    loop {
+                        let message = if terminal {
+                            updates.next().now_or_never().flatten()?
+                        } else {
+                            tokio::select! {
+                                biased;
+                                message = updates.next() => message?,
+                                message = lifecycle.next() => {
+                                    let message = message?;
+                                    let event: JobEvent = match serde_json::from_slice(&message.payload) {
+                                        Ok(event) => event,
+                                        Err(error) => return Some((Err(jobs_message(format!("decode job lifecycle event: {error}"))), (lifecycle, updates, attempt, sequence, true))),
+                                    };
+                                    if event.job_id != job_id || event.job_type != queue_type {
+                                        continue;
+                                    }
+                                    if event.tries > attempt {
+                                        attempt = event.tries;
+                                        sequence = 0;
+                                    }
+                                    if matches!(event.event_type, JobEventType::Completed | JobEventType::Failed | JobEventType::Cancelled | JobEventType::Expired | JobEventType::Skipped | JobEventType::Dead | JobEventType::Dismissed) {
+                                        terminal = true;
+                                    }
+                                    continue;
+                                }
+                            }
+                        };
+                        let value: serde_json::Value =
+                            match serde_json::from_slice(&message.payload) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    return Some((
+                                        Err(jobs_message(format!("decode job update: {error}"))),
+                                        (lifecycle, updates, attempt, sequence, true),
+                                    ))
+                                }
+                            };
+                        let Some(update_value) = value.get("update") else {
+                            return Some((
+                                Err(jobs_message(
+                                    "job update envelope is missing update".to_string(),
+                                )),
+                                (lifecycle, updates, attempt, sequence, true),
+                            ));
+                        };
+                        if let Err(error) = validate_update(D::UPDATE_SCHEMA_JSON, update_value) {
+                            return Some((
+                                Err(jobs_message(error.to_string())),
+                                (lifecycle, updates, attempt, sequence, true),
+                            ));
+                        }
+                        let update: JobUpdate<D::Update> = match serde_json::from_value(value) {
+                            Ok(update) => update,
+                            Err(error) => {
+                                return Some((
+                                    Err(jobs_message(format!("decode typed job update: {error}"))),
+                                    (lifecycle, updates, attempt, sequence, true),
+                                ))
+                            }
+                        };
+                        if update.job_id != job_id
+                            || update.attempt < attempt
+                            || (update.attempt == attempt && update.sequence <= sequence)
+                        {
+                            continue;
+                        }
+                        if update.attempt > attempt {
+                            attempt = update.attempt;
+                        }
+                        sequence = update.sequence;
+                        return Some((
+                            Ok(update),
+                            (lifecycle, updates, attempt, sequence, terminal),
+                        ));
+                    }
+                }
+            },
+        )))
     }
 }
 

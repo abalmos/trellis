@@ -485,12 +485,14 @@ export function jobsAdminRuntimePublishSubjects(): string[] {
     "$JS.API.INFO",
     ...[JOBS_STREAM, JOBS_ADVISORIES_STREAM].flatMap((stream) => [
       `$JS.API.STREAM.INFO.${stream}`,
+      `$JS.API.CONSUMER.CREATE.${stream}`,
       `$JS.API.CONSUMER.CREATE.${stream}.>`,
       `$JS.API.CONSUMER.DURABLE.CREATE.${stream}.>`,
       `$JS.API.CONSUMER.INFO.${stream}.>`,
       `$JS.API.CONSUMER.MSG.NEXT.${stream}.>`,
       `$JS.ACK.${stream}.>`,
     ]),
+    `$JS.API.CONSUMER.LIST.${JOBS_STREAM}`,
     `$JS.API.STREAM.INFO.${JOBS_WORK_STREAM}`,
     `$JS.API.DIRECT.GET.${JOBS_WORK_STREAM}`,
     `$JS.API.DIRECT.GET.${JOBS_WORK_STREAM}.>`,
@@ -504,6 +506,7 @@ export function jobsAdminRuntimePublishSubjects(): string[] {
 export function eventLogRuntimePublishSubjects(): string[] {
   return [
     `$JS.API.STREAM.INFO.${EVENTLOG_STREAM}`,
+    `$JS.API.CONSUMER.CREATE.${EVENTLOG_STREAM}`,
     `$JS.API.CONSUMER.CREATE.${EVENTLOG_STREAM}.>`,
     `$JS.API.CONSUMER.DURABLE.CREATE.${EVENTLOG_STREAM}.>`,
     `$JS.API.CONSUMER.INFO.${EVENTLOG_STREAM}.>`,

@@ -72,6 +72,7 @@ import type {
   OperationRegistration as RootOperationRegistration,
   OperationRuntimeHandle,
   OperationTransferContextOf,
+  OperationUpdateOf,
   PreparedTrellisEvent,
   RpcHandlerContext,
   RpcHandlerErrorOf,
@@ -103,6 +104,7 @@ import {
 import type { ReceiveTransferGrant } from "../transfer.ts";
 import {
   ActiveJob as PublicActiveJob,
+  decodeJobUpdateEnvelope,
   type JobHandlerOptions,
   type JobIdentity,
   type JobLogEntry,
@@ -111,10 +113,14 @@ import {
   JobRef,
   type JobSnapshot,
   type JobSubmitOutcome,
+  type JobUpdatesOptions,
+  type JobUpdateSubscription,
   JobWorkerHostAdapter,
   RetryJobError,
   type TerminalJob,
 } from "../jobs.ts";
+import { parseSchema } from "../codec.ts";
+import { isJsonValue } from "../contract_support/canonical.ts";
 import { ulid } from "ulid";
 import {
   JobManager as InternalJobManager,
@@ -175,6 +181,8 @@ type ResourceBindingJobsQueue = {
   workSubject: string;
   consumerName: string;
   payload: { schema: string };
+  update?: { schema: string };
+  updatesPrefix?: string;
   result?: { schema: string };
   maxDeliver: number;
   backoffMs: number[];
@@ -240,6 +248,8 @@ function baseJobsQueueBinding(
     workSubject: queue.workSubject,
     consumerName: queue.consumerName,
     payload: queue.payload,
+    ...(queue.update ? { update: queue.update } : {}),
+    ...(queue.updatesPrefix ? { updatesPrefix: queue.updatesPrefix } : {}),
     ...(queue.result ? { result: queue.result } : {}),
     maxDeliver: queue.maxDeliver,
     backoffMs: queue.backoffMs,
@@ -267,8 +277,7 @@ type ResourceBindingEventConsumer = {
   consumerName: string;
   filterSubjects: string[];
   replay: "new" | "all";
-  ordering: "strict";
-  concurrency: number;
+  ordering: "strict" | "parallel";
   ackWaitMs: number;
   maxDeliver: number;
   backoffMs: number[];
@@ -1174,7 +1183,8 @@ export type OperationHandler<
       OperationProgressOf<ContractOwnedApi<TContract>, O>,
       OperationOutputOf<ContractOwnedApi<TContract>, O>,
       OperationTransferContextOf<ContractOwnedApi<TContract>, O>,
-      OperationHandlerErrorOf<ContractOwnedApi<TContract>, O>
+      OperationHandlerErrorOf<ContractOwnedApi<TContract>, O>,
+      OperationUpdateOf<ContractOwnedApi<TContract>, O>
     >
     & {
       client: Trellis<
@@ -1197,14 +1207,21 @@ export type JobQueue<
   TTrellisApi extends TrellisAPI,
   TKv extends ContractKvMetadata = ContractKvMetadata,
   TJobs extends ContractJobsMetadata = {},
+  TUpdate = never,
 > = {
-  create(payload: TPayload): AsyncResult<JobRef<TPayload, TResult>, BaseError>;
+  create(
+    payload: TPayload,
+  ): AsyncResult<JobRef<TPayload, TResult, TUpdate>, BaseError>;
   submit(
     payload: TPayload,
-  ): AsyncResult<JobSubmitOutcome<TPayload, TResult>, BaseError>;
+  ): AsyncResult<JobSubmitOutcome<TPayload, TResult, TUpdate>, BaseError>;
+  updates(
+    jobId: string,
+    options?: JobUpdatesOptions,
+  ): AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
   handle(
     handler: (args: {
-      job: PublicActiveJob<TPayload, TResult>;
+      job: PublicActiveJob<TPayload, TResult, TUpdate>;
       client: Trellis<TTrellisApi, TKv, TJobs>;
     }) => Promise<Result<TResult, BaseError>>,
     options?: JobHandlerOptions,
@@ -1221,7 +1238,8 @@ export type JobsFacadeOf<
     TJobs[K]["result"],
     TTrellisApi,
     TKv,
-    TJobs
+    TJobs,
+    TJobs[K]["update"]
   >;
 };
 
@@ -1542,7 +1560,8 @@ type OperationHandleFn<
           OperationProgressOf<TOwnedApi, O>,
           OperationOutputOf<TOwnedApi, O>,
           OperationTransferContextOf<TOwnedApi, O>,
-          OperationHandlerErrorOf<TOwnedApi, O>
+          OperationHandlerErrorOf<TOwnedApi, O>,
+          OperationUpdateOf<TOwnedApi, O>
         >
         & { client: Trellis<TTrellisApi, TKv, TJobs> },
     ) => unknown | Promise<unknown>,
@@ -1552,7 +1571,8 @@ type OperationHandleFn<
       AcceptedOperation<
         OperationProgressOf<TOwnedApi, O>,
         OperationOutputOf<TOwnedApi, O>,
-        OperationHandlerErrorOf<TOwnedApi, O>
+        OperationHandlerErrorOf<TOwnedApi, O>,
+        OperationUpdateOf<TOwnedApi, O>
       >,
       UnexpectedError
     >;
@@ -1560,7 +1580,8 @@ type OperationHandleFn<
       OperationRuntimeHandle<
         OperationProgressOf<TOwnedApi, O>,
         OperationOutputOf<TOwnedApi, O>,
-        OperationHandlerErrorOf<TOwnedApi, O>
+        OperationHandlerErrorOf<TOwnedApi, O>,
+        OperationUpdateOf<TOwnedApi, O>
       >,
       BaseError
     >;
@@ -1579,7 +1600,8 @@ export type OperationRegistration<
     AcceptedOperation<
       OperationProgressOf<TOwnedApi, O>,
       OperationOutputOf<TOwnedApi, O>,
-      OperationHandlerErrorOf<TOwnedApi, O>
+      OperationHandlerErrorOf<TOwnedApi, O>,
+      OperationUpdateOf<TOwnedApi, O>
     >,
     UnexpectedError
   >;
@@ -1593,7 +1615,8 @@ export type OperationRegistration<
     OperationRuntimeHandle<
       OperationProgressOf<TOwnedApi, O>,
       OperationOutputOf<TOwnedApi, O>,
-      OperationHandlerErrorOf<TOwnedApi, O>
+      OperationHandlerErrorOf<TOwnedApi, O>,
+      OperationUpdateOf<TOwnedApi, O>
     >,
     BaseError
   >;
@@ -1605,7 +1628,8 @@ export type OperationRegistration<
           OperationProgressOf<TOwnedApi, O>,
           OperationOutputOf<TOwnedApi, O>,
           OperationTransferContextOf<TOwnedApi, O>,
-          OperationHandlerErrorOf<TOwnedApi, O>
+          OperationHandlerErrorOf<TOwnedApi, O>,
+          OperationUpdateOf<TOwnedApi, O>
         >
         & { client: Trellis<TTrellisApi, TKv, TJobs> },
     ) => unknown | Promise<unknown>,
@@ -1885,7 +1909,7 @@ export async function createConnectedService<
 }
 
 type RegisteredJobHandler<TPayload, TResult> = (
-  job: PublicActiveJob<TPayload, TResult>,
+  job: PublicActiveJob<TPayload, TResult, unknown>,
 ) => Promise<Result<TResult, BaseError>>;
 
 function toUnexpectedError(cause: unknown): UnexpectedError {
@@ -2292,6 +2316,11 @@ type JobLifecycleTracker = {
     jobType: string;
     id: string;
   }): JobSnapshot<TPayload, TResult> | undefined;
+  attempt(args: {
+    service: string;
+    jobType: string;
+    id: string;
+  }): number | undefined;
   apply<TPayload, TResult>(
     event: InternalJobEvent<TPayload, TResult>,
   ): JobSnapshot<TPayload, TResult> | undefined;
@@ -2303,6 +2332,7 @@ type JobLifecycleTracker = {
 
 function createJobLifecycleTracker(nc: NatsConnection): JobLifecycleTracker {
   const snapshots = new Map<string, JobSnapshot<unknown, unknown>>();
+  const attempts = new Map<string, number>();
   const waiters = new Map<string, JobLifecycleWaiter<unknown, unknown>[]>();
   const subscriptions = new Map<string, Subscription>();
   let stopped = false;
@@ -2318,6 +2348,7 @@ function createJobLifecycleTracker(nc: NatsConnection): JobLifecycleTracker {
     event: InternalJobEvent<TPayload, TResult>,
   ): JobSnapshot<TPayload, TResult> | undefined => {
     const key = jobLifecycleKey(event.service, event.jobType, event.jobId);
+    attempts.set(key, Math.max(attempts.get(key) ?? 0, event.tries));
     const current = snapshots.get(key) as
       | JobSnapshot<TPayload, TResult>
       | undefined;
@@ -2353,6 +2384,7 @@ function createJobLifecycleTracker(nc: NatsConnection): JobLifecycleTracker {
     },
     seed<TPayload, TResult>(snapshot: JobSnapshot<TPayload, TResult>) {
       const key = jobLifecycleKey(snapshot.service, snapshot.type, snapshot.id);
+      attempts.set(key, Math.max(attempts.get(key) ?? 0, snapshot.tries));
       const current = snapshots.get(key) as
         | JobSnapshot<TPayload, TResult>
         | undefined;
@@ -2369,6 +2401,9 @@ function createJobLifecycleTracker(nc: NatsConnection): JobLifecycleTracker {
         jobLifecycleKey(args.service, args.jobType, args.id),
       );
       return current as JobSnapshot<TPayload, TResult> | undefined;
+    },
+    attempt(args) {
+      return attempts.get(jobLifecycleKey(args.service, args.jobType, args.id));
     },
     apply,
     wait<TPayload, TResult>(snapshot: JobSnapshot<TPayload, TResult>) {
@@ -2408,21 +2443,25 @@ function createJobLifecycleTracker(nc: NatsConnection): JobLifecycleTracker {
         for (const waiter of pending) waiter.reject(error);
       }
       waiters.clear();
+      attempts.clear();
     },
   };
 }
 
-function createJobRef<TPayload, TResult>(args: {
+function createJobRef<TPayload, TResult, TUpdate = unknown>(args: {
   nc: NatsConnection;
   queueType: string;
   jobsBinding: JobsBinding;
   queueBinding: JobsQueueBinding;
   seed: JobSnapshot<TPayload, TResult>;
   lifecycle: JobLifecycleTracker;
-}): JobRef<TPayload, TResult> {
+  updates?: (
+    options?: JobUpdatesOptions,
+  ) => AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
+}): JobRef<TPayload, TResult, TUpdate> {
   args.lifecycle.seed(args.seed);
 
-  return new JobRef<TPayload, TResult>(
+  return new JobRef<TPayload, TResult, TUpdate>(
     {
       id: args.seed.id,
       service: args.seed.service,
@@ -2481,8 +2520,96 @@ function createJobRef<TPayload, TResult>(args: {
 
           return Result.ok(args.lifecycle.apply(event) ?? current);
         })()),
+      updates: args.updates,
     },
   );
+}
+
+function subscribeToJobUpdates(args: {
+  nc: NatsConnection;
+  active: Set<Subscription>;
+  lifecycle: JobLifecycleTracker;
+  service: string;
+  queue: ResourceBindingJobsQueue;
+  updateSchema: NonNullable<ContractJobsMetadata[string]["updateSchema"]>;
+  jobId: string;
+  options?: JobUpdatesOptions;
+}): AsyncResult<JobUpdateSubscription<unknown>, BaseError> {
+  return AsyncResult.from((async () => {
+    if (!args.queue.update || !args.queue.updatesPrefix) {
+      return Result.err(toUnexpectedError(
+        new Error("Job updates are not configured for this queue"),
+      ));
+    }
+    if (!/^[^.>*\s]+$/u.test(args.jobId)) {
+      return Result.err(
+        new ValidationError({
+          errors: [{
+            path: "/jobId",
+            message: "Job id must be one NATS token",
+          }],
+        }),
+      );
+    }
+
+    const subscription = args.nc.subscribe(
+      `${args.queue.updatesPrefix}.${args.jobId}`,
+    );
+    args.active.add(subscription);
+    const close = () => {
+      subscription.unsubscribe();
+      args.active.delete(subscription);
+    };
+    const abort = () => close();
+    args.options?.signal?.addEventListener("abort", abort, { once: true });
+    try {
+      await args.nc.flush();
+    } catch (cause) {
+      close();
+      args.options?.signal?.removeEventListener("abort", abort);
+      return Result.err(toUnexpectedError(cause));
+    }
+    if (args.options?.signal?.aborted) close();
+
+    const updates: JobUpdateSubscription<unknown> = {
+      unsubscribe: close,
+      async *[Symbol.asyncIterator]() {
+        let attempt = 0;
+        let sequence = 0;
+        try {
+          for await (const message of subscription) {
+            const envelope = decodeJobUpdateEnvelope(message.data);
+            if (!envelope || envelope.jobId !== args.jobId) continue;
+            if (!isJsonValue(envelope.update)) continue;
+            const parsed = parseSchema(args.updateSchema, envelope.update)
+              .take();
+            if (isErr(parsed)) continue;
+            const lifecycleAttempt = args.lifecycle.attempt({
+              service: args.service,
+              jobType: args.queue.queueType,
+              id: args.jobId,
+            }) ?? 0;
+            if (lifecycleAttempt > attempt) {
+              attempt = lifecycleAttempt;
+              sequence = 0;
+            }
+            if (envelope.attempt < attempt) continue;
+            if (envelope.attempt > attempt) {
+              attempt = envelope.attempt;
+              sequence = 0;
+            }
+            if (envelope.sequence <= sequence) continue;
+            sequence = envelope.sequence;
+            yield parsed;
+          }
+        } finally {
+          close();
+          args.options?.signal?.removeEventListener("abort", abort);
+        }
+      },
+    };
+    return Result.ok(updates);
+  })());
 }
 
 function createNoopJobWorkerHost(): JobWorkerHostAdapter {
@@ -2526,6 +2653,7 @@ function createJobsFacade<
   }>();
   const jobsFacade: Record<string, unknown> = {};
   const lifecycle = createJobLifecycleTracker(args.nc);
+  const updateSubscriptions = new Set<Subscription>();
   const keyCoordinator = createNatsJobKeyCoordinator(args.nc);
   const jobsBinding = args.jobsBinding
     ? normalizeResourceJobsBinding(args.jobsBinding)
@@ -2538,9 +2666,29 @@ function createJobsFacade<
 
   for (const queueType of Object.keys(args.contractJobs ?? {})) {
     const queueBinding = jobsBinding?.queues[queueType];
+    const updateSchema = args.contractJobs[queueType]?.updateSchema;
     if (queueBinding) lifecycle.watch(queueBinding);
 
+    const updates = (jobId: string, options?: JobUpdatesOptions) => {
+      if (!queueBinding || !updateSchema) {
+        return AsyncResult.err(toUnexpectedError(
+          new Error(`Job updates are unavailable for queue '${queueType}'`),
+        ));
+      }
+      return subscribeToJobUpdates({
+        nc: args.nc,
+        active: updateSubscriptions,
+        lifecycle,
+        service: args.serviceName,
+        queue: queueBinding,
+        updateSchema,
+        jobId,
+        options,
+      });
+    };
+
     jobsFacade[queueType] = {
+      updates,
       create: (payload) =>
         AsyncResult.from((async () => {
           try {
@@ -2572,6 +2720,7 @@ function createJobsFacade<
               queueBinding,
               seed: created as JobSnapshot<unknown, unknown>,
               lifecycle,
+              updates: (options) => updates(created.id, options),
             }));
           } catch (cause) {
             if (cause instanceof JobNotEnqueuedError) {
@@ -2615,6 +2764,7 @@ function createJobsFacade<
                   queueBinding,
                   seed: outcome.job as JobSnapshot<unknown, unknown>,
                   lifecycle,
+                  updates: (options) => updates(outcome.job.id, options),
                 }),
               });
             }
@@ -2630,6 +2780,7 @@ function createJobsFacade<
                   queueBinding,
                   seed: outcome.job as JobSnapshot<unknown, unknown>,
                   lifecycle,
+                  updates: (options) => updates(outcome.job.id, options),
                 }),
               });
             }
@@ -2664,7 +2815,7 @@ function createJobsFacade<
             }),
         });
       },
-    } satisfies JobQueue<unknown, unknown, TTrellisApi, TKv, TJobs>;
+    } satisfies JobQueue<unknown, unknown, TTrellisApi, TKv, TJobs, unknown>;
   }
 
   const managedWorkers: ManagedJobWorkers = {
@@ -2701,6 +2852,29 @@ function createJobsFacade<
             if (!queueBinding) {
               throw new Error(`Unknown jobs queue '${queueType}'`);
             }
+            const updateSchema = args.contractJobs[queueType]?.updateSchema;
+            const workerUpdates = (
+              jobId: string,
+              options?: JobUpdatesOptions,
+            ) => {
+              if (!updateSchema) {
+                return AsyncResult.err(toUnexpectedError(
+                  new Error(
+                    `Job updates are unavailable for queue '${queueType}'`,
+                  ),
+                ));
+              }
+              return subscribeToJobUpdates({
+                nc: args.nc,
+                active: updateSubscriptions,
+                lifecycle,
+                service: args.serviceName,
+                queue: queueBinding,
+                updateSchema,
+                jobId,
+                options,
+              });
+            };
             const registration = handlers.get(queueType);
             if (!registration) {
               throw new Error(
@@ -2733,6 +2907,8 @@ function createJobsFacade<
                 });
               },
               handler: async (job: InternalActiveJob<unknown, unknown>) => {
+                let updateSequence = 0;
+                let attemptActive = true;
                 const publicJob = new PublicActiveJob(
                   createJobRef({
                     nc: args.nc,
@@ -2741,6 +2917,7 @@ function createJobsFacade<
                     queueBinding,
                     seed: job.job() as JobSnapshot<unknown, unknown>,
                     lifecycle,
+                    updates: (options) => workerUpdates(job.job().id, options),
                   }),
                   job.job().payload,
                   job.context(),
@@ -2751,6 +2928,52 @@ function createJobsFacade<
                       wrapVoidTask(() => job.updateProgress(value)),
                     log: (entry: JobLogEntry) =>
                       wrapVoidTask(() => job.log(entry.level, entry.message)),
+                    emitUpdate: (value: unknown) =>
+                      AsyncResult.from((async () => {
+                        if (!attemptActive) {
+                          return Result.err(toUnexpectedError(
+                            new Error("Job attempt is no longer active"),
+                          ));
+                        }
+                        if (
+                          !queueBinding.update || !queueBinding.updatesPrefix ||
+                          !updateSchema
+                        ) {
+                          return Result.err(toUnexpectedError(
+                            new Error(
+                              `Job updates are unavailable for queue '${queueType}'`,
+                            ),
+                          ));
+                        }
+                        if (!isJsonValue(value)) {
+                          return Result.err(
+                            new ValidationError({
+                              errors: [{
+                                path: "/",
+                                message: "Job update must be JSON-serializable",
+                              }],
+                            }),
+                          );
+                        }
+                        const parsed = parseSchema(updateSchema, value).take();
+                        if (isErr(parsed)) return parsed;
+                        updateSequence += 1;
+                        try {
+                          args.nc.publish(
+                            `${queueBinding.updatesPrefix}.${job.job().id}`,
+                            new TextEncoder().encode(JSON.stringify({
+                              jobId: job.job().id,
+                              attempt: job.job().tries + 1,
+                              sequence: updateSequence,
+                              timestamp: new Date().toISOString(),
+                              update: parsed,
+                            })),
+                          );
+                          return Result.ok(undefined);
+                        } catch (cause) {
+                          return Result.err(toUnexpectedError(cause));
+                        }
+                      })()),
                     waitFor: (target, fn) => job.waitFor(target, fn),
                     redeliveryCount: job.redeliveryCount(),
                     signal: job.signal,
@@ -2780,6 +3003,8 @@ function createJobsFacade<
                   throw signal(
                     serializeJobHandlerError(annotatedError),
                   );
+                } finally {
+                  attemptActive = false;
                 }
                 if (isErr(handled)) {
                   const annotatedError = annotateHandlerBoundaryError(
@@ -2844,6 +3069,10 @@ function createJobsFacade<
           }
         }
         if (!activeHost) {
+          for (const subscription of updateSubscriptions) {
+            subscription.unsubscribe();
+          }
+          updateSubscriptions.clear();
           lifecycle.stop();
           return Result.ok(undefined);
         }
@@ -2852,6 +3081,10 @@ function createJobsFacade<
         try {
           return await host.stop();
         } finally {
+          for (const subscription of updateSubscriptions) {
+            subscription.unsubscribe();
+          }
+          updateSubscriptions.clear();
           lifecycle.stop();
           if (activeHost === host) {
             activeHost = undefined;

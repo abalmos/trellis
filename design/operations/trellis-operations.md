@@ -69,6 +69,7 @@ Example:
       "subject": "operations.v1.Billing.Refund",
       "input": { "schema": "BillingRefundRequest" },
       "progress": { "schema": "BillingRefundProgress" },
+      "update": { "schema": "BillingRefundUpdate" },
       "output": { "schema": "BillingRefundResult" },
       "capabilities": {
         "call": ["billing.refund"],
@@ -96,6 +97,7 @@ Descriptor rules:
   `ContractErrorRef` shape as RPC error refs
 - `progress` is optional; if omitted, the operation does not emit typed progress
   payloads
+- `update` is an optional singular schema reference for typed live-only updates
 - `capabilities.call` gates initial invocation
 - `capabilities.observe` gates `get`, `wait`, and `watch`; if omitted, it
   defaults to `capabilities.call`
@@ -136,6 +138,21 @@ persistence strategy, but the public semantics are uniform:
 - an operation may emit live events
 - `watch()` complements durable state; it does not replace it
 
+#### Typed live updates
+
+`progress` is low-frequency durable telemetry or a current snapshot. A declared
+`update` is typed, live-only content delivered at most once to currently
+subscribed watchers. Updates do not mutate the durable operation snapshot and
+are not persisted, replayed, exposed through admin or Event Log surfaces, or
+available to late subscribers. Payloads SHOULD therefore be cumulative when a
+missed frame would otherwise make later frames unusable. The terminal operation
+output or failure remains authoritative.
+
+Operation watchers opt in to updates. TypeScript callers use `.onUpdate(...)`
+when starting an operation or `ref.watch({ updates: true })`; Rust callers use
+`watch_with_updates()` or the update-only `updates()` stream. Normal `watch()`
+continues to expose durable lifecycle and progress without live update content.
+
 ### 4) Public runtime API
 
 Rules:
@@ -152,6 +169,8 @@ Rules:
 - `OperationRef.wait()` resolves from durable state and live events to a
   terminal snapshot
 - `OperationRef.watch()` returns a live async stream of typed operation events
+- operation update events are opt-in and only available when the descriptor
+  declares `update`
 - transfer-capable operations initiate caller-to-service send transfer through
   `operation.<group>.<leaf>.input(input).transfer(body).start()`
 - transfer initiation is builder-only: callers MUST NOT start an operation once
@@ -202,6 +221,8 @@ Owning-service surface:
 - handler-visible active operation handles are the normal in-handler path for
   publishing lifecycle changes, progress, terminal success, terminal failure,
   cancellation, or job attachment
+- handlers emit declared live content with TypeScript `op.emitUpdate(...)` or
+  Rust `OperationControl::emit_update(...)`
 - owning services also expose an operation-scoped control path such as
   `service.handle.operation.<group>.<leaf>.control(operationId)` for
   service-private jobs and other durable service-owned execution paths that only
@@ -248,6 +269,8 @@ runtime MUST preserve these logical fields and semantics:
   cancelled
 - lifecycle events carry accepted, started, transfer progress, progress,
   completed, failed, and cancelled changes as appropriate for the descriptor
+- opted-in live watches may additionally carry typed `update` events paired with
+  the unchanged current snapshot
 - generated progress events carry the progress payload both as the event payload
   and on the embedded snapshot; generated transfer events do the same for
   transfer progress
@@ -271,6 +294,9 @@ Lifecycle rules:
 - `progress` updates the stored progress payload, does not change terminal
   state, and MUST carry that payload as both `event.progress` and
   `event.snapshot.progress`
+- `update` validates the payload against the declared update schema, does not
+  mutate the snapshot or its revision, and is delivered only to active opted-in
+  watchers
 - `completed`, `failed`, and `cancelled` are terminal
 - a service handler may explicitly defer terminal completion only by returning
   the runtime's operation-deferred sentinel. Deferral means the accepted
@@ -371,6 +397,7 @@ type OperationControlRequest =
   | {
     action: "watch";
     operationId: string;
+    includeUpdates?: boolean;
   }
   | {
     action: "cancel";
@@ -387,6 +414,8 @@ type OperationControlRequest =
 Rules:
 
 - `operationId` is always required for control requests
+- `includeUpdates` opts a watch into declared live-only update events and
+  defaults to `false`
 - `signal` is the contract-declared signal name for `action: "signal"`
 - `input` is validated against the matching signal descriptor's input schema;
   rejected signals are not persisted
@@ -400,7 +429,7 @@ Rules:
 internal frames on the validated caller reply subject.
 
 ```ts
-type OperationControlFrame<TProgress, TOutput> =
+type OperationControlFrame<TProgress, TOutput, TUpdate> =
   | {
     kind: "snapshot";
     snapshot:
@@ -415,7 +444,7 @@ type OperationControlFrame<TProgress, TOutput> =
   | {
     kind: "event";
     sequence: number;
-    event: OperationEvent<TProgress, TOutput>;
+    event: OperationEvent<TProgress, TOutput, TUpdate>;
   }
   | {
     kind: "signal-accepted";
@@ -473,6 +502,8 @@ Rules:
 - receives exactly one initial `snapshot` frame representing current durable
   state
 - then receives zero or more `event` frames and optional `keepalive` frames
+- when `includeUpdates` is true, may also receive live `update` event frames
+  emitted after the subscription is active
 - after a terminal event, the service MUST close the reply stream
 
 `cancel`:

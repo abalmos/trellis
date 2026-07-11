@@ -14,6 +14,7 @@ Jobs participation is declared in the contract's top-level `jobs` map. Job schem
 import {
   ReserveInventoryPayloadSchema,
   ReserveInventoryResultSchema,
+  ReserveInventoryUpdateSchema,
   ChargePaymentPayloadSchema,
   ChargePaymentResultSchema,
   NotifyWarehousePayloadSchema,
@@ -26,6 +27,7 @@ import {
     // ... existing order schemas ...
     ReserveInventoryPayload: ReserveInventoryPayloadSchema,
     ReserveInventoryResult: ReserveInventoryResultSchema,
+    ReserveInventoryUpdate: ReserveInventoryUpdateSchema,
     ChargePaymentPayload: ChargePaymentPayloadSchema,
     ChargePaymentResult: ChargePaymentResultSchema,
     NotifyWarehousePayload: NotifyWarehousePayloadSchema,
@@ -47,6 +49,7 @@ resources: {
 jobs: {
   reserveInventory: {
     payload: { schema: "ReserveInventoryPayload" },
+    update: { schema: "ReserveInventoryUpdate" },
     result: { schema: "ReserveInventoryResult" },
     maxDeliver: 5,
     backoffMs: [5000, 30000, 120000],
@@ -75,6 +78,12 @@ export const ReserveInventoryPayloadSchema = Type.Object({
   items: Type.Array(Type.Object({ productId: Type.String(), quantity: Type.Number() })),
 });
 export type ReserveInventoryPayload = Static<typeof ReserveInventoryPayloadSchema>;
+
+export const ReserveInventoryUpdateSchema = Type.Object({
+  processedItems: Type.Number(),
+  totalItems: Type.Number(),
+});
+export type ReserveInventoryUpdate = Static<typeof ReserveInventoryUpdateSchema>;
 
 export const ReserveInventoryResultSchema = Type.Object({ reserved: Type.Boolean() });
 export type ReserveInventoryResult = Static<typeof ReserveInventoryResultSchema>;
@@ -150,6 +159,10 @@ service.jobs.reserveInventory.handle(async ({ job, client }) => {
     `reserveInventory job ${job.ref.id} request=${job.context.requestId} trace=${job.context.traceId}`,
   );
   await job.progress({ step: "reserving", message: "Checking inventory" });
+  await job.emitUpdate({
+    processedItems: 0,
+    totalItems: job.payload.items.length,
+  }).orThrow();
 
   if (job.cancelled) {
     return Result.err({ type: "JobCancelledError", message: "Cancelled" });
@@ -238,6 +251,32 @@ const charge = await job.waitFor({
 Use safe correlation keys only; never put secrets, full credentials, or private
 payloads in wait metadata. Short local awaits do not need annotation.
 
+### Live typed updates
+
+`job.progress(...)` is low-frequency durable telemetry for operators.
+`job.emitUpdate(...)` sends typed live-only content from the active attempt. A
+service-local consumer can subscribe through the returned reference or through a
+known job id:
+
+```ts
+const updates = await jobRef.updates().orThrow();
+for await (const update of updates) {
+  console.log(update.processedItems, update.totalItems);
+}
+
+const earlyUpdates = await service.jobs.reserveInventory
+  .updates(preallocatedJobId)
+  .orThrow();
+// Call earlyUpdates.unsubscribe() when it will not be fully consumed.
+```
+
+Updates are at most once and are not persisted, replayed, shown in jobs admin,
+or sent to Event Log. Late subscribers may miss frames, so prefer cumulative
+payloads and treat the terminal job result as authoritative. Subscriptions
+filter stale attempts and duplicate or out-of-order attempt-local sequences.
+For SQL-outbox submission, subscribe with the `jobId` returned by
+`job.<queue>.create(...)` before the dispatcher can emit early updates.
+
 ## 5. Run the service
 
 Call `service.wait()` after all `handle()` registrations. The service starts registered workers, keeps them running, and stops them when `service.stop()` or process shutdown runs:
@@ -270,16 +309,15 @@ service.jobs.chargePayment.handle(async ({ job }) => {
 
 Use keyed concurrency when one logical unit of work must have at most one active
 job across all service instances. Existing queues without `keyConcurrency` keep
-the normal work-queue behavior. The existing numeric `concurrency` option still
-controls how many worker tasks run for the queue; `keyConcurrency` controls the
-active limit for a derived logical key.
+the normal work-queue behavior. `keyConcurrency` is a contract invariant for a
+derived logical key. Worker count is implementation configuration supplied when
+the service registers its handler.
 
 ```ts
 jobs: {
   syncTickets: {
     payload: { schema: "SyncTicketsPayload" },
     result: { schema: "SyncTicketsResult" },
-    concurrency: 4,
     keyConcurrency: {
       key: ["zendesk", "/origin", "tickets"],
       maxActive: 1,
@@ -291,6 +329,10 @@ jobs: {
     },
   },
 }
+```
+
+```ts
+service.jobs.syncTickets.handle(handleSyncTicket, { concurrency: 4 });
 ```
 
 The default keyed policy is conservative: `maxActive: 1`,

@@ -33,6 +33,8 @@ pub struct JobsQueueBinding {
     pub queue_type: String,
     /// Publish prefix for lifecycle events in the jobs stream.
     pub publish_prefix: String,
+    /// Publish prefix for live-only updates, when declared.
+    pub updates_prefix: Option<String>,
     /// Work subject consumed by the worker.
     pub work_subject: String,
     /// Durable consumer name for the queue.
@@ -45,12 +47,12 @@ pub struct JobsQueueBinding {
     pub ack_wait_ms: u64,
     /// Optional business deadline applied to newly created jobs.
     pub default_deadline_ms: Option<u64>,
+    /// Declared update schema name, when live updates are enabled.
+    pub update: Option<String>,
     /// Whether progress events are enabled for the queue.
     pub progress: bool,
     /// Whether log events are enabled for the queue.
     pub logs: bool,
-    /// Suggested worker concurrency for the queue.
-    pub concurrency: u32,
     /// Optional normalized keyed concurrency policy.
     pub key_concurrency: Option<JobKeyConcurrencyBinding>,
     /// Optional normalized queue-depth policy for keyed queues.
@@ -116,17 +118,23 @@ pub enum JobsBindingError {
 #[serde(rename_all = "camelCase")]
 struct JobsQueueBindingValue {
     publish_prefix: String,
+    updates_prefix: Option<String>,
     work_subject: String,
     consumer_name: String,
     max_deliver: u64,
     backoff_ms: Vec<u64>,
     ack_wait_ms: u64,
     default_deadline_ms: Option<u64>,
+    update: Option<JobUpdateBindingValue>,
     progress: bool,
     logs: bool,
-    concurrency: u32,
     key_concurrency: Option<JobKeyConcurrencyBindingValue>,
     queue: Option<JobQueueDepthBindingValue>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JobUpdateBindingValue {
+    schema: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,15 +173,16 @@ enum JobQueueWhenFullValue {
 struct NormalizedJobsQueueBinding {
     queue_type: String,
     publish_prefix: String,
+    updates_prefix: Option<String>,
     work_subject: String,
     consumer_name: String,
     max_deliver: u64,
     backoff_ms: Vec<u64>,
     ack_wait_ms: u64,
     default_deadline_ms: Option<u64>,
+    update: Option<String>,
     progress: bool,
     logs: bool,
-    concurrency: u32,
     key_concurrency: Option<JobKeyConcurrencyBinding>,
     queue: Option<JobQueueDepthBinding>,
 }
@@ -249,15 +258,16 @@ fn jobs_queue_binding_from_normalized(queue: NormalizedJobsQueueBinding) -> Jobs
     JobsQueueBinding {
         queue_type: queue.queue_type,
         publish_prefix: queue.publish_prefix,
+        updates_prefix: queue.updates_prefix,
         work_subject: queue.work_subject,
         consumer_name: queue.consumer_name,
         max_deliver: queue.max_deliver,
         backoff_ms: queue.backoff_ms,
         ack_wait_ms: queue.ack_wait_ms,
         default_deadline_ms: queue.default_deadline_ms,
+        update: queue.update,
         progress: queue.progress,
         logs: queue.logs,
-        concurrency: queue.concurrency,
         key_concurrency: queue.key_concurrency,
         queue: queue.queue,
     }
@@ -273,18 +283,25 @@ fn normalize_json_queue_binding(
             details: error.to_string(),
         }
     })?;
+    if parsed.update.is_some() != parsed.updates_prefix.is_some() {
+        return Err(JobsBindingError::InvalidQueueBinding {
+            queue_type: queue_type.to_string(),
+            details: "update and updatesPrefix must be present together".to_string(),
+        });
+    }
     Ok(NormalizedJobsQueueBinding {
         queue_type: queue_type.to_string(),
         publish_prefix: parsed.publish_prefix,
+        updates_prefix: parsed.updates_prefix,
         work_subject: parsed.work_subject,
         consumer_name: parsed.consumer_name,
         max_deliver: parsed.max_deliver,
         backoff_ms: parsed.backoff_ms,
         ack_wait_ms: parsed.ack_wait_ms,
         default_deadline_ms: parsed.default_deadline_ms,
+        update: parsed.update.map(|update| update.schema),
         progress: parsed.progress,
         logs: parsed.logs,
-        concurrency: parsed.concurrency,
         key_concurrency: parsed.key_concurrency.map(job_key_concurrency_from_value),
         queue: parsed.queue.map(job_queue_depth_from_value),
     })
@@ -309,6 +326,7 @@ fn normalize_core_queue_binding(
     Ok(NormalizedJobsQueueBinding {
         queue_type: queue.queue_type.clone(),
         publish_prefix: queue.publish_prefix.clone(),
+        updates_prefix: parsed_policy.updates_prefix,
         work_subject: queue.work_subject.clone(),
         consumer_name: queue.consumer_name.clone(),
         max_deliver: i64_to_u64(queue.max_deliver, queue_type, "maxDeliver")?,
@@ -323,9 +341,9 @@ fn normalize_core_queue_binding(
             .default_deadline_ms
             .map(|value| i64_to_u64(value, queue_type, "defaultDeadlineMs"))
             .transpose()?,
+        update: parsed_policy.update.map(|update| update.schema),
         progress: queue.progress,
         logs: queue.logs,
-        concurrency: i64_to_u32(queue.concurrency, queue_type, "concurrency")?,
         key_concurrency: parsed_policy
             .key_concurrency
             .map(job_key_concurrency_from_value),
@@ -367,12 +385,4 @@ fn i64_to_u64(value: i64, queue_type: &str, field: &str) -> Result<u64, JobsBind
         });
     }
     Ok(value as u64)
-}
-
-fn i64_to_u32(value: i64, queue_type: &str, field: &str) -> Result<u32, JobsBindingError> {
-    let value = i64_to_u64(value, queue_type, field)?;
-    u32::try_from(value).map_err(|_| JobsBindingError::InvalidQueueBinding {
-        queue_type: queue_type.to_string(),
-        details: format!("{field} exceeds u32 range"),
-    })
 }

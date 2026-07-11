@@ -19,6 +19,7 @@ Update `contracts/orders_service.manifest.json` to add a top-level `jobs` map wi
 "jobs": {
   "reserve-inventory": {
     "payload": { "schema": "ReserveInventoryPayload" },
+    "update": { "schema": "ReserveInventoryUpdate" },
     "result": { "schema": "ReserveInventoryResult" },
     "maxDeliver": 5,
     "backoffMs": [5000, 30000, 120000]
@@ -87,7 +88,6 @@ service
             ..Default::default()
         })
         .await?;
-
         if job.is_cancelled() {
             return Err(Err(JobsError::Message { message: "cancelled".to_string() }));
         }
@@ -204,6 +204,39 @@ let charge = job
 Use safe correlation keys only; never put secrets, full credentials, or private
 payloads in wait metadata. Short local awaits do not need annotation.
 
+### Live typed updates
+
+`job.progress(...)` is low-frequency durable telemetry for operators. The jobs
+worker runtime's `ActiveJob::emit_update::<D>(...)` sends typed live-only content
+from the active attempt. Given the queue's `NatsJobWaiter`, subscribe before work
+starts when early frames matter:
+
+```rust
+active_job
+    .emit_update::<orders_participant::jobs::ReserveInventoryJob>(
+        ReserveInventoryJobUpdate {
+            processed_items: 0,
+            total_items: 10,
+        },
+    )
+    .await?;
+
+let mut updates = waiter
+    .updates::<orders_participant::jobs::ReserveInventoryJob>(&job_id)
+    .await?;
+
+while let Some(frame) = updates.next().await {
+    let frame = frame?;
+    println!("{} / {}", frame.update.processed_items, frame.update.total_items);
+}
+```
+
+Updates are at most once and are not persisted, replayed, shown in jobs admin,
+or sent to Event Log. Late subscribers may miss frames, so prefer cumulative
+payloads and treat the terminal job result as authoritative. The stream filters
+stale attempts and duplicate or out-of-order attempt-local sequences, then ends
+at terminal lifecycle state or when dropped.
+
 ## 4. Start workers
 
 Call `start_workers()` **after** all `handle()` registrations:
@@ -234,16 +267,15 @@ Returning `Err(...)` from a handler triggers JetStream NAK and redelivery per th
 
 Use keyed concurrency when one logical unit of work must have at most one active
 job across all service instances. Queues without `keyConcurrency` keep normal
-work-queue behavior. The existing numeric `concurrency` option still controls how
-many worker tasks run for the queue; `keyConcurrency` controls the active limit
-for a derived logical key.
+work-queue behavior. `keyConcurrency` is a contract invariant for a derived
+logical key. Worker count belongs to the service implementation's
+`WorkerHostOptions`.
 
 ```json
 "jobs": {
   "sync-tickets": {
     "payload": { "schema": "SyncTicketsPayload" },
     "result": { "schema": "SyncTicketsResult" },
-    "concurrency": 4,
     "keyConcurrency": {
       "key": ["zendesk", "/origin", "tickets"],
       "maxActive": 1,
@@ -255,6 +287,13 @@ for a derived logical key.
     }
   }
 }
+```
+
+```rust
+let options = WorkerHostOptions {
+    queue_concurrency: BTreeMap::from([("sync-tickets".to_string(), 4)]),
+    ..WorkerHostOptions::default()
+};
 ```
 
 The default keyed policy is conservative: `maxActive: 1`,

@@ -225,7 +225,6 @@ Deno.test("event consumer requests resolve approved subscribe filters", () => {
       ],
       replay: "all",
       ordering: "strict",
-      concurrency: 1,
       ackWaitMs: 1000,
       maxDeliver: 2,
       backoffMs: [100],
@@ -265,7 +264,6 @@ Deno.test("event consumer requests resolve owned event filters without dependenc
     filterSubjects: ["events.v1.Audit.Created.*"],
     replay: "new",
     ordering: "strict",
-    concurrency: 1,
     ackWaitMs: 300000,
     maxDeliver: 6,
     backoffMs: [5000, 30000, 120000, 600000, 1800000],
@@ -323,7 +321,6 @@ Deno.test("event consumer requests resolve mixed owned and dependency filters", 
       ],
       replay: "new",
       ordering: "strict",
-      concurrency: 1,
       ackWaitMs: 300000,
       maxDeliver: 6,
       backoffMs: [5000, 30000, 120000, 600000, 1800000],
@@ -394,7 +391,6 @@ Deno.test("event consumer requests ignore incompatible unused dependency schemas
       filterSubjects: ["events.v1.Example.Changed.*"],
       replay: "new",
       ordering: "strict",
-      concurrency: 1,
       ackWaitMs: 300000,
       maxDeliver: 6,
       backoffMs: [5000, 30000, 120000, 600000, 1800000],
@@ -445,7 +441,6 @@ Deno.test("event consumer requests ignore unrelated uses during dependency resol
       filterSubjects: ["events.v1.Example.Changed.*"],
       replay: "new",
       ordering: "strict",
-      concurrency: 1,
       ackWaitMs: 300000,
       maxDeliver: 6,
       backoffMs: [5000, 30000, 120000, 600000, 1800000],
@@ -840,7 +835,6 @@ Deno.test("resource permission grants include exact event consumer subjects", ()
         filterSubjects: ["events.v1.Example.Changed.*"],
         replay: "new",
         ordering: "strict",
-        concurrency: 1,
         ackWaitMs: 300000,
         maxDeliver: 5,
         backoffMs: [5000],
@@ -881,6 +875,10 @@ Deno.test("event consumer reconciliation updates changed consumer config", async
     max_deliver: 8,
     max_ack_pending: 2,
     backoff: [1_000_000_000, 5_000_000_000],
+    metadata: {
+      "trellis.managed_by": "authority",
+      "trellis.group": "ingest",
+    },
   };
   const updates: Array<{
     stream: string;
@@ -922,6 +920,10 @@ Deno.test("event consumer reconciliation adopts matching existing config", async
     max_deliver: 5,
     max_ack_pending: 1,
     backoff: [5_000_000_000],
+    metadata: {
+      "trellis.managed_by": "authority",
+      "trellis.group": "ingest",
+    },
   };
 
   await reconcileEventConsumerConfig(
@@ -930,7 +932,14 @@ Deno.test("event consumer reconciliation adopts matching existing config", async
         assertEquals(stream, "trellis");
         assertEquals(consumerName, "svc_events_ingest");
         return Promise.resolve({
-          config: { ...requestedConfig, ack_wait: 5_000_000_000 },
+          config: {
+            ...requestedConfig,
+            ack_wait: 5_000_000_000,
+            metadata: {
+              "trellis.group": "ingest",
+              "trellis.managed_by": "authority",
+            },
+          },
         });
       },
     },
@@ -1313,11 +1322,13 @@ Deno.test("jobs resource requests apply queue defaults", () => {
     ...CONTRACT,
     schemas: {
       Payload: { type: "object" },
+      Update: { type: "object" },
     },
     resources: {},
     jobs: {
       "document-process": {
         payload: { schema: "Payload" },
+        update: { schema: "Update" },
       },
     },
   } as TrellisContractV1;
@@ -1326,13 +1337,13 @@ Deno.test("jobs resource requests apply queue defaults", () => {
     {
       queueType: "document-process",
       payload: { schema: "Payload" },
+      update: { schema: "Update" },
       maxDeliver: 5,
       backoffMs: [5000, 30000, 120000, 600000, 1800000],
       ackWaitMs: 300000,
       progress: true,
       logs: true,
       dlq: true,
-      concurrency: 1,
     },
   ]);
 });
@@ -1348,7 +1359,6 @@ Deno.test("jobs resource requests normalize keyed queue defaults", () => {
       "sync-tickets": {
         payload: { schema: "Payload" },
         ackWaitMs: 90_000,
-        concurrency: 8,
         keyConcurrency: {
           key: ["zendesk", "/origin", "tickets"],
         },
@@ -1366,7 +1376,6 @@ Deno.test("jobs resource requests normalize keyed queue defaults", () => {
       progress: true,
       logs: true,
       dlq: true,
-      concurrency: 8,
       keyConcurrency: {
         key: ["zendesk", "/origin", "tickets"],
         maxActive: 1,
@@ -1432,21 +1441,35 @@ Deno.test("jobs resource grants use service-visible queue bindings", () => {
           queueType: "document-process",
           publishPrefix:
             "trellis.jobs.document_activity_25c0dcc8dbcd.document-process",
+          updatesPrefix:
+            "trellis.job_updates.document_activity_25c0dcc8dbcd.document-process",
           workSubject:
             "trellis.work.document_activity_25c0dcc8dbcd.document-process",
           consumerName: "document_activity_25c0dcc8dbcd-document-process",
           payload: { schema: "Payload" },
+          update: { schema: "Update" },
           maxDeliver: 5,
           backoffMs: [5000, 30000, 120000, 600000, 1800000],
           ackWaitMs: 300000,
           progress: true,
           logs: true,
           dlq: true,
-          concurrency: 1,
         },
       },
     },
   });
+  assertEquals(
+    grants.publish.includes(
+      "trellis.job_updates.document_activity_25c0dcc8dbcd.document-process.>",
+    ),
+    true,
+  );
+  assertEquals(
+    grants.subscribe.includes(
+      "trellis.job_updates.document_activity_25c0dcc8dbcd.document-process.>",
+    ),
+    true,
+  );
   assertEquals(
     grants.publish.includes(
       "trellis.jobs.workers.document_activity_25c0dcc8dbcd.>",

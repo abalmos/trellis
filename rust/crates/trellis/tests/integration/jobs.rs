@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
@@ -11,8 +13,9 @@ use trellis_rs::jobs::keys::NatsKeyCoordinator;
 use trellis_rs::jobs::manager::{JobNotEnqueuedReason, JobSubmitOutcome};
 use trellis_rs::jobs::{
     publish_worker_heartbeat, runtime_ref::NatsJobWaiter, start_worker_host_from_client,
-    JobLogLevel, JobManager, JobProcessError, JobState, JobsRuntimeBinding, NatsJobEventPublisher,
-    TrellisJobMetaSource, WorkerActiveJob, WorkerHeartbeat, WorkerHostOptions,
+    JobDescriptor, JobLogLevel, JobManager, JobProcessError, JobState, JobUpdateDescriptor,
+    JobsRuntimeBinding, NatsJobEventPublisher, TrellisJobMetaSource, WorkerActiveJob,
+    WorkerHeartbeat, WorkerHostOptions,
 };
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
@@ -54,6 +57,11 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
       "type": "object",
       "required": ["documentId"],
       "properties": { "documentId": { "type": "string" } }
+    },
+    "JobUpdate": {
+      "type": "object",
+      "required": ["processed"],
+      "properties": { "processed": { "type": "number" } }
     },
     "LongJobPayload": {
       "type": "object",
@@ -122,6 +130,7 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
   "jobs": {
     "processDocument": {
       "payload": { "schema": "JobPayload" },
+      "update": { "schema": "JobUpdate" },
       "result": { "schema": "JobResult" }
     },
     "longProcessDocument": {
@@ -137,7 +146,6 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
     "keyedProcessDocument": {
       "payload": { "schema": "KeyedJobPayload" },
       "result": { "schema": "KeyedJobResult" },
-      "concurrency": 2,
       "keyConcurrency": {
         "key": ["document", "/groupKey"],
         "maxActive": 1,
@@ -192,6 +200,29 @@ struct JobResult {
     processed_by: String,
     request_id: String,
     trace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct JobUpdatePayload {
+    processed: u64,
+}
+
+struct ProcessDocumentJob;
+
+impl JobDescriptor for ProcessDocumentJob {
+    type Payload = JobPayload;
+    type Result = JobResult;
+
+    const QUEUE_TYPE: &'static str = "processDocument";
+    const PAYLOAD_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["documentId"],"properties":{"documentId":{"type":"string"}}}"#;
+    const RESULT_SCHEMA_JSON: Option<&'static str> = None;
+}
+
+impl JobUpdateDescriptor for ProcessDocumentJob {
+    type Update = JobUpdatePayload;
+
+    const UPDATE_SCHEMA: &'static str = "JobUpdate";
+    const UPDATE_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["processed"],"properties":{"processed":{"type":"number"}}}"#;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -329,6 +360,10 @@ struct JobsFixture {
     client: Arc<trellis_rs::client::TrellisClient>,
     manager: JobManager<NatsJobEventPublisher, TrellisJobMetaSource>,
     keyed_waiter: NatsJobWaiter,
+    update_waiter: NatsJobWaiter,
+    update_release: Arc<tokio::sync::Notify>,
+    service_client: Arc<TrellisClient>,
+    jobs_runtime: JobsRuntimeBinding,
     keyed_run_state: Arc<KeyedJobRunState>,
     failing_attempts: Arc<tokio::sync::Mutex<Vec<u64>>>,
 }
@@ -436,11 +471,13 @@ async fn setup_jobs_fixture() -> JobsFixture {
     );
     let keyed_run_state = Arc::new(KeyedJobRunState::default());
     let long_started = Arc::new(tokio::sync::Notify::new());
+    let update_release = Arc::new(tokio::sync::Notify::new());
     let failing_attempts = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
     let svc_client: Arc<TrellisClient> = service.client().clone();
 
     let process_manager = manager.clone();
+    let update_waiter = waiter.clone();
     let fixture_keyed_waiter = keyed_waiter.clone();
     service.register_rpc::<DocumentsProcessRpc, _, _>(move |_context, input| {
         let manager = process_manager.clone();
@@ -551,15 +588,17 @@ async fn setup_jobs_fixture() -> JobsFixture {
     let worker_keyed_run_state = Arc::clone(&keyed_run_state);
     let worker_long_started = Arc::clone(&long_started);
     let worker_failing_attempts = Arc::clone(&failing_attempts);
+    let worker_update_release = Arc::clone(&update_release);
     let worker_host = start_worker_host_from_client(
         &*svc_client,
-        jobs_runtime,
+        jobs_runtime.clone(),
         "jobs-fixture-service".to_string(),
         |_, _| TrellisJobMetaSource,
         move |active_job: WorkerActiveJob<_, _>| {
             let keyed_run_state = Arc::clone(&worker_keyed_run_state);
             let long_started = Arc::clone(&worker_long_started);
             let failing_attempts = Arc::clone(&worker_failing_attempts);
+            let update_release = Arc::clone(&worker_update_release);
             async move {
                 if active_job.job().job_type == "keyedProcessDocument" {
                     let payload: KeyedJobPayload =
@@ -572,6 +611,12 @@ async fn setup_jobs_fixture() -> JobsFixture {
                     if payload.sequence == 1 {
                         keyed_run_state.first_started.notify_one();
                         keyed_run_state.release_first.notified().await;
+                    } else if payload.sequence == 99 {
+                        keyed_run_state.first_started.notify_one();
+                        while !active_job.is_cancelled() {
+                            tokio::time::sleep(Duration::from_millis(25)).await;
+                        }
+                        return Err(JobProcessError::failed("worker stopped".to_string()));
                     } else if !keyed_run_state
                         .released
                         .load(std::sync::atomic::Ordering::SeqCst)
@@ -625,6 +670,13 @@ async fn setup_jobs_fixture() -> JobsFixture {
 
                 let payload: JobPayload = serde_json::from_value(active_job.job().payload.clone())
                     .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                if payload.document_id == "doc-update" {
+                    update_release.notified().await;
+                }
+                active_job
+                    .emit_update::<ProcessDocumentJob>(JobUpdatePayload { processed: 1 })
+                    .await
+                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
                 active_job
                     .update_progress(1, 1, Some(format!("processed {}", payload.document_id)))
                     .await
@@ -646,7 +698,10 @@ async fn setup_jobs_fixture() -> JobsFixture {
                 Ok(result)
             }
         },
-        WorkerHostOptions::default(),
+        WorkerHostOptions {
+            queue_concurrency: BTreeMap::from([("keyedProcessDocument".to_string(), 2)]),
+            ..WorkerHostOptions::default()
+        },
     )
     .await
     .expect("start jobs worker host");
@@ -667,9 +722,53 @@ async fn setup_jobs_fixture() -> JobsFixture {
         client,
         manager,
         keyed_waiter: fixture_keyed_waiter,
+        update_waiter,
+        update_release,
+        service_client: svc_client,
+        jobs_runtime,
         keyed_run_state,
         failing_attempts,
     }
+}
+
+#[tokio::test]
+async fn jobs_live_updates_are_typed_and_stop_at_terminal_state() {
+    assert_case_registered(
+        "jobs.live-updates-are-typed-and-stop-at-terminal-state",
+        "jobs",
+        "jobs",
+    );
+    let fixture = setup_jobs_fixture().await;
+    let job = fixture
+        .manager
+        .create(
+            "processDocument",
+            JobPayload {
+                document_id: "doc-update".to_string(),
+            },
+        )
+        .await
+        .expect("create live-update job");
+    let mut updates = fixture
+        .update_waiter
+        .updates::<ProcessDocumentJob>(&job.id)
+        .await
+        .expect("subscribe to live job updates");
+    fixture.update_release.notify_one();
+    let update = tokio::time::timeout(Duration::from_secs(5), updates.next())
+        .await
+        .expect("receive update before timeout")
+        .expect("update stream item")
+        .expect("valid typed update");
+    assert_eq!(update.job_id, job.id);
+    assert_eq!(update.attempt, 1);
+    assert_eq!(update.sequence, 1);
+    assert_eq!(update.update.processed, 1);
+    assert!(tokio::time::timeout(Duration::from_secs(5), updates.next())
+        .await
+        .expect("observe terminal stream closure")
+        .is_none());
+    fixture.stop().await;
 }
 
 impl JobsFixture {
@@ -743,6 +842,77 @@ async fn jobs_keyed_jobs_serialize_same_key() {
     assert_eq!(*fixture.keyed_run_state.completed.lock().await, vec![1, 2]);
 
     fixture.stop().await;
+}
+
+#[tokio::test]
+async fn jobs_keyed_active_redelivery_after_restart() {
+    assert_case_registered("jobs.keyed-active-redelivery-after-restart", "jobs", "jobs");
+
+    let fixture = setup_jobs_fixture().await;
+    let job = fixture
+        .manager
+        .create(
+            "keyedProcessDocument",
+            KeyedJobPayload {
+                document_id: "doc-keyed-restart".to_string(),
+                group_key: "restart".to_string(),
+                sequence: 99,
+            },
+        )
+        .await
+        .expect("create keyed restart job");
+    fixture.keyed_run_state.first_started.notified().await;
+    fixture
+        .worker_host
+        .stop()
+        .await
+        .expect("stop first jobs worker host");
+
+    let replacement_started = Arc::new(tokio::sync::Notify::new());
+    let replacement_signal = Arc::clone(&replacement_started);
+    let replacement = start_worker_host_from_client(
+        &*fixture.service_client,
+        fixture.jobs_runtime.clone(),
+        "jobs-fixture-service-replacement".to_string(),
+        |_, _| TrellisJobMetaSource,
+        move |active_job: WorkerActiveJob<_, _>| {
+            let replacement_signal = Arc::clone(&replacement_signal);
+            async move {
+                let payload: KeyedJobPayload =
+                    serde_json::from_value(active_job.job().payload.clone())
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                replacement_signal.notify_one();
+                serde_json::to_value(KeyedJobResult {
+                    document_id: payload.document_id,
+                    group_key: payload.group_key,
+                    sequence: payload.sequence,
+                    processed_by: "rust-replacement-worker".to_string(),
+                    request_id: active_job.context().request_id.clone(),
+                    trace_id: active_job.context().trace_id.clone(),
+                })
+                .map_err(|error| JobProcessError::failed(error.to_string()))
+            }
+        },
+        WorkerHostOptions::default(),
+    )
+    .await
+    .expect("start replacement jobs worker host");
+
+    tokio::time::timeout(Duration::from_secs(45), replacement_started.notified())
+        .await
+        .expect("keyed job redelivered to replacement worker");
+    let terminal = fixture
+        .keyed_waiter
+        .wait_for_terminal(job)
+        .await
+        .expect("wait for redelivered keyed job");
+    assert_eq!(terminal.state, JobState::Completed);
+
+    replacement
+        .stop()
+        .await
+        .expect("stop replacement jobs worker host");
+    fixture.service_task.abort_and_wait().await;
 }
 
 #[tokio::test]

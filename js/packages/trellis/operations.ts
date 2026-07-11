@@ -106,11 +106,13 @@ export type StartedTransfer<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > = {
   operation: OperationRef<
     TDesc,
     TProgress,
-    TOutput
+    TOutput,
+    TUpdate
   >;
   wait(): AsyncResult<
     CompletedTransfer<TDesc, TProgress, TOutput>,
@@ -122,6 +124,7 @@ export type OperationRef<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > = {
   id: string;
   service: string;
@@ -134,8 +137,8 @@ export type OperationRef<
     TerminalOperation<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   >;
-  watch(): AsyncResult<
-    AsyncIterable<OperationEvent<TProgress, TOutput>>,
+  watch(options?: OperationWatchOptions): AsyncResult<
+    AsyncIterable<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   >;
   cancel(): AsyncResult<
@@ -149,6 +152,12 @@ export type OperationRef<
     OperationSignalAck<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   >;
+};
+
+/** Options controlling optional operation watch event classes. */
+export type OperationWatchOptions = {
+  /** Include transient typed update events. */
+  updates?: boolean;
 };
 
 export type AcceptedOperationEvent<TProgress = unknown, TOutput = unknown> = {
@@ -181,6 +190,17 @@ export type ProgressOperationEvent<TProgress = unknown, TOutput = unknown> = {
   progress: TProgress;
 };
 
+/** A transient operation update paired with the unchanged current snapshot. */
+export type UpdateOperationEvent<
+  TProgress = unknown,
+  TOutput = unknown,
+  TUpdate = unknown,
+> = {
+  type: "update";
+  update: TUpdate;
+  snapshot: OperationSnapshot<TProgress, TOutput>;
+};
+
 export type CompletedOperationEvent<TProgress = unknown, TOutput = unknown> = {
   type: "completed";
   snapshot: TerminalOperation<TProgress, TOutput>;
@@ -196,47 +216,59 @@ export type CancelledOperationEvent<TProgress = unknown, TOutput = unknown> = {
   snapshot: TerminalOperation<TProgress, TOutput>;
 };
 
-export type OperationEvent<TProgress = unknown, TOutput = unknown> =
+export type OperationEvent<
+  TProgress = unknown,
+  TOutput = unknown,
+  TUpdate = unknown,
+> =
   | AcceptedOperationEvent<TProgress, TOutput>
   | StartedOperationEvent<TProgress, TOutput>
   | TransferOperationEvent<TProgress, TOutput>
   | ProgressOperationEvent<TProgress, TOutput>
+  | UpdateOperationEvent<TProgress, TOutput, TUpdate>
   | CompletedOperationEvent<TProgress, TOutput>
   | FailedOperationEvent<TProgress, TOutput>
   | CancelledOperationEvent<TProgress, TOutput>;
 
-export type OperationObserverCallbacks<TProgress = unknown, TOutput = unknown> =
-  {
-    onAccepted?: (
-      event: AcceptedOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onStarted?: (
-      event: StartedOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onTransfer?: (
-      event: TransferOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onProgress?: (
-      event: ProgressOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onCompleted?: (
-      event: CompletedOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onFailed?: (
-      event: FailedOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onCancelled?: (
-      event: CancelledOperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-    onEvent?: (
-      event: OperationEvent<TProgress, TOutput>,
-    ) => void | Promise<void>;
-  };
+export type OperationObserverCallbacks<
+  TProgress = unknown,
+  TOutput = unknown,
+  TUpdate = unknown,
+> = {
+  onAccepted?: (
+    event: AcceptedOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onStarted?: (
+    event: StartedOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onTransfer?: (
+    event: TransferOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onProgress?: (
+    event: ProgressOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onUpdate?: (
+    event: UpdateOperationEvent<TProgress, TOutput, TUpdate>,
+  ) => void | Promise<void>;
+  onCompleted?: (
+    event: CompletedOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onFailed?: (
+    event: FailedOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onCancelled?: (
+    event: CancelledOperationEvent<TProgress, TOutput>,
+  ) => void | Promise<void>;
+  onEvent?: (
+    event: OperationEvent<TProgress, TOutput, TUpdate>,
+  ) => void | Promise<void>;
+};
 
 interface OperationObserverBuilderBase<
   TBuilder,
   TProgress = unknown,
   TOutput = unknown,
+  TUpdate = unknown,
 > {
   onAccepted(
     handler: NonNullable<
@@ -251,6 +283,11 @@ interface OperationObserverBuilderBase<
   onProgress(
     handler: NonNullable<
       OperationObserverCallbacks<TProgress, TOutput>["onProgress"]
+    >,
+  ): TBuilder;
+  onUpdate(
+    handler: NonNullable<
+      OperationObserverCallbacks<TProgress, TOutput, TUpdate>["onUpdate"]
     >,
   ): TBuilder;
   onCompleted(
@@ -270,7 +307,7 @@ interface OperationObserverBuilderBase<
   ): TBuilder;
   onEvent(
     handler: NonNullable<
-      OperationObserverCallbacks<TProgress, TOutput>["onEvent"]
+      OperationObserverCallbacks<TProgress, TOutput, TUpdate>["onEvent"]
     >,
   ): TBuilder;
 }
@@ -279,12 +316,13 @@ interface OperationInputBuilderBase<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
   TBuilder,
-> extends OperationObserverBuilderBase<TBuilder, TProgress, TOutput> {
+> extends OperationObserverBuilderBase<TBuilder, TProgress, TOutput, TUpdate> {
   start(
-    callbacks?: OperationObserverCallbacks<TProgress, TOutput>,
+    callbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
   ): AsyncResult<
-    OperationRef<TDesc, TProgress, TOutput>,
+    OperationRef<TDesc, TProgress, TOutput, TUpdate>,
     OperationControlError | UnexpectedError
   >;
 }
@@ -293,21 +331,23 @@ export interface TransferOperationBuilder<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > extends
   OperationObserverBuilderBase<
-    TransferOperationBuilder<TDesc, TProgress, TOutput>,
+    TransferOperationBuilder<TDesc, TProgress, TOutput, TUpdate>,
     TProgress,
-    TOutput
+    TOutput,
+    TUpdate
   > {
   onTransfer(
     handler: NonNullable<
       OperationObserverCallbacks<TProgress, TOutput>["onTransfer"]
     >,
-  ): TransferOperationBuilder<TDesc, TProgress, TOutput>;
+  ): TransferOperationBuilder<TDesc, TProgress, TOutput, TUpdate>;
   start(
-    callbacks?: OperationObserverCallbacks<TProgress, TOutput>,
+    callbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
   ): AsyncResult<
-    StartedTransfer<TDesc, TProgress, TOutput>,
+    StartedTransfer<TDesc, TProgress, TOutput, TUpdate>,
     OperationControlError | UnexpectedError | TransferError
   >;
 }
@@ -316,12 +356,14 @@ export interface OperationInputBuilder<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > extends
   OperationInputBuilderBase<
     TDesc,
     TProgress,
     TOutput,
-    OperationInputBuilder<TDesc, TProgress, TOutput>
+    TUpdate,
+    OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
   > {
 }
 
@@ -329,12 +371,14 @@ export interface TransferCapableOperationInputBuilder<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > extends
   OperationInputBuilderBase<
     TDesc,
     TProgress,
     TOutput,
-    TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput>
+    TUpdate,
+    TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
   > {
   transfer(
     body: TransferBody,
@@ -368,6 +412,7 @@ type OperationShape = {
   subject: string;
   input: unknown;
   progress?: unknown;
+  update?: unknown;
   output?: unknown;
   transfer?: {
     store: string;
@@ -386,6 +431,9 @@ type OperationInputOf<TDesc extends OperationShape> = InferSchemaType<
 type OperationProgressOf<TDesc extends OperationShape> =
   TDesc["progress"] extends undefined ? unknown
     : InferSchemaType<NonNullable<TDesc["progress"]>>;
+type OperationUpdateOf<TDesc extends OperationShape> = TDesc["update"] extends
+  undefined ? unknown
+  : InferSchemaType<NonNullable<TDesc["update"]>>;
 type OperationOutputOf<TDesc extends OperationShape> = TDesc["output"] extends
   undefined ? unknown
   : InferSchemaType<NonNullable<TDesc["output"]>>;
@@ -443,9 +491,9 @@ function createTransportError(args: {
   });
 }
 
-function snapshotToEvent<TProgress, TOutput>(
+function snapshotToEvent<TProgress, TOutput, TUpdate = unknown>(
   snapshot: OperationSnapshot<TProgress, TOutput>,
-): OperationEvent<TProgress, TOutput> {
+): OperationEvent<TProgress, TOutput, TUpdate> {
   switch (snapshot.state) {
     case "pending":
       return { type: "accepted", snapshot };
@@ -469,19 +517,19 @@ function snapshotToEvent<TProgress, TOutput>(
   }
 }
 
-function isTerminalEvent<TProgress, TOutput>(
-  event: OperationEvent<TProgress, TOutput>,
+function isTerminalEvent<TProgress, TOutput, TUpdate>(
+  event: OperationEvent<TProgress, TOutput, TUpdate>,
 ): event is Extract<
-  OperationEvent<TProgress, TOutput>,
+  OperationEvent<TProgress, TOutput, TUpdate>,
   { type: "completed" | "failed" | "cancelled" }
 > {
   return event.type === "completed" || event.type === "failed" ||
     event.type === "cancelled";
 }
 
-function normalizeOperationEvent<TProgress, TOutput>(
-  event: OperationEvent<TProgress, TOutput>,
-): Result<OperationEvent<TProgress, TOutput>, TransportError> {
+function normalizeOperationEvent<TProgress, TOutput, TUpdate>(
+  event: OperationEvent<TProgress, TOutput, TUpdate>,
+): Result<OperationEvent<TProgress, TOutput, TUpdate>, TransportError> {
   try {
     switch (event.type) {
       case "transfer": {
@@ -528,9 +576,9 @@ function normalizeOperationEvent<TProgress, TOutput>(
   }
 }
 
-async function dispatchObservedOperationEvent<TProgress, TOutput>(
-  options: OperationObserverCallbacks<TProgress, TOutput>,
-  event: OperationEvent<TProgress, TOutput>,
+async function dispatchObservedOperationEvent<TProgress, TOutput, TUpdate>(
+  options: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  event: OperationEvent<TProgress, TOutput, TUpdate>,
 ): Promise<void> {
   switch (event.type) {
     case "accepted":
@@ -544,6 +592,9 @@ async function dispatchObservedOperationEvent<TProgress, TOutput>(
       break;
     case "progress":
       await options.onProgress?.(event);
+      break;
+    case "update":
+      await options.onUpdate?.(event);
       break;
     case "completed":
       await options.onCompleted?.(event);
@@ -559,14 +610,15 @@ async function dispatchObservedOperationEvent<TProgress, TOutput>(
   await options.onEvent?.(event);
 }
 
-function hasObserverCallbacks<TProgress, TOutput>(
-  options: OperationObserverCallbacks<TProgress, TOutput>,
+function hasObserverCallbacks<TProgress, TOutput, TUpdate>(
+  options: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
 ): boolean {
   return Boolean(
     options.onAccepted ||
       options.onStarted ||
       options.onTransfer ||
       options.onProgress ||
+      options.onUpdate ||
       options.onCompleted ||
       options.onFailed ||
       options.onCancelled ||
@@ -655,6 +707,7 @@ class RuntimeOperationRef<
   TDesc extends OperationShape,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > {
   readonly id: string;
   readonly service: string;
@@ -816,8 +869,8 @@ class RuntimeOperationRef<
     return this.#transport.putTransfer(grant, body);
   }
 
-  watch(): AsyncResult<
-    AsyncIterable<OperationEvent<TProgress, TOutput>>,
+  watch(options: OperationWatchOptions = {}): AsyncResult<
+    AsyncIterable<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   > {
     return AsyncResult.from((async () => {
@@ -826,6 +879,7 @@ class RuntimeOperationRef<
         {
           action: "watch",
           operationId: this.id,
+          ...(options.updates ? { includeUpdates: true } : {}),
         },
       ).take();
       if (isErr(rawIterable)) {
@@ -841,7 +895,9 @@ class RuntimeOperationRef<
           if (isErr(frameValue)) {
             throw frameValue.error;
           }
-          const decoded = decodeWatchFrame<TProgress, TOutput>(frameValue);
+          const decoded = decodeWatchFrame<TProgress, TOutput, TUpdate>(
+            frameValue,
+          );
           const decodedValue = decoded.take();
           if (isErr(decodedValue)) {
             throw decodedValue.error;
@@ -893,9 +949,12 @@ class RuntimeOperationRef<
   }
 }
 
-function decodeWatchFrame<TProgress, TOutput>(
+function decodeWatchFrame<TProgress, TOutput, TUpdate>(
   value: JsonValue,
-): Result<OperationEvent<TProgress, TOutput> | null, OperationControlError> {
+): Result<
+  OperationEvent<TProgress, TOutput, TUpdate> | null,
+  OperationControlError
+> {
   try {
     if (
       value && typeof value === "object" &&
@@ -910,12 +969,15 @@ function decodeWatchFrame<TProgress, TOutput>(
 
     const frame = value as
       | { kind: "snapshot"; snapshot: OperationSnapshot<TProgress, TOutput> }
-      | { kind: "event"; event: OperationEvent<TProgress, TOutput> };
+      | {
+        kind: "event";
+        event: OperationEvent<TProgress, TOutput, TUpdate>;
+      };
 
     if (
       (frame as { kind?: string }).kind === "snapshot" && "snapshot" in frame
     ) {
-      return ok(snapshotToEvent(frame.snapshot));
+      return ok(snapshotToEvent<TProgress, TOutput, TUpdate>(frame.snapshot));
     }
     if ((frame as { kind?: string }).kind === "event" && "event" in frame) {
       return ok(frame.event);
@@ -943,22 +1005,32 @@ type OperationWatchObservation<TProgress, TOutput> = {
   close?: () => Promise<void>;
 };
 
-type ObservedWatchOptions<TProgress, TOutput> = {
+type ObservedWatchOptions<TProgress, TOutput, TUpdate> = {
   ready?: Promise<void>;
-  skipEvent?: (event: OperationEvent<TProgress, TOutput>) => boolean;
+  skipEvent?: (event: OperationEvent<TProgress, TOutput, TUpdate>) => boolean;
 };
 
-type InvokedOperation<TDesc extends OperationShape, TProgress, TOutput> = {
+type InvokedOperation<
+  TDesc extends OperationShape,
+  TProgress,
+  TOutput,
+  TUpdate,
+> = {
   accepted: AcceptedOperationEvent<TProgress, TOutput>;
-  operation: RuntimeOperationRef<TDesc, TProgress, TOutput>;
+  operation: RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>;
 };
 
-function invokeOperation<TDesc extends OperationShape, TProgress, TOutput>(
+function invokeOperation<
+  TDesc extends OperationShape,
+  TProgress,
+  TOutput,
+  TUpdate,
+>(
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
 ): AsyncResult<
-  InvokedOperation<TDesc, TProgress, TOutput>,
+  InvokedOperation<TDesc, TProgress, TOutput, TUpdate>,
   TransportError | UnexpectedError
 > {
   return AsyncResult.from((async () => {
@@ -981,7 +1053,7 @@ function invokeOperation<TDesc extends OperationShape, TProgress, TOutput>(
         type: "accepted",
         snapshot: envelope.snapshot,
       },
-      operation: new RuntimeOperationRef<TDesc, TProgress, TOutput>(
+      operation: new RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>(
         transport,
         descriptor,
         envelope.ref,
@@ -995,10 +1067,11 @@ function beginObservedWatch<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
-  operation: RuntimeOperationRef<TDesc, TProgress, TOutput>,
-  callbacks: OperationObserverCallbacks<TProgress, TOutput>,
-  options: ObservedWatchOptions<TProgress, TOutput> = {},
+  operation: RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>,
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  options: ObservedWatchOptions<TProgress, TOutput, TUpdate> = {},
 ): AsyncResult<
   OperationWatchObservation<TProgress, TOutput>,
   OperationControlError | UnexpectedError
@@ -1008,7 +1081,9 @@ function beginObservedWatch<
   }
 
   return AsyncResult.from((async () => {
-    const watchValue = await operation.watch().take();
+    const watchValue = await operation.watch({
+      updates: callbacks.onUpdate !== undefined,
+    }).take();
     if (isErr(watchValue)) {
       return watchValue;
     }
@@ -1075,17 +1150,23 @@ function startObservedOperation<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
-  callbacks: OperationObserverCallbacks<TProgress, TOutput>,
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
 ): AsyncResult<
-  OperationRef<TDesc, TProgress, TOutput>,
+  OperationRef<TDesc, TProgress, TOutput, TUpdate>,
   OperationControlError | UnexpectedError
 > {
   return AsyncResult.from((async () => {
-    const startedValue = await invokeOperation<TDesc, TProgress, TOutput>(
+    const startedValue = await invokeOperation<
+      TDesc,
+      TProgress,
+      TOutput,
+      TUpdate
+    >(
       transport,
       descriptor,
       input,
@@ -1132,18 +1213,24 @@ function startObservedTransfer<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
   body: TransferBody,
-  callbacks: OperationObserverCallbacks<TProgress, TOutput>,
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
 ): AsyncResult<
-  StartedTransfer<TDesc, TProgress, TOutput>,
+  StartedTransfer<TDesc, TProgress, TOutput, TUpdate>,
   OperationControlError | UnexpectedError | TransferError
 > {
   return AsyncResult.from((async () => {
-    const startedValue = await invokeOperation<TDesc, TProgress, TOutput>(
+    const startedValue = await invokeOperation<
+      TDesc,
+      TProgress,
+      TOutput,
+      TUpdate
+    >(
       transport,
       descriptor,
       input,
@@ -1218,10 +1305,11 @@ function createObservedOperationRef<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
-  operation: RuntimeOperationRef<TDesc, TProgress, TOutput>,
+  operation: RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>,
   observation: OperationWatchObservation<TProgress, TOutput>,
-): OperationRef<TDesc, TProgress, TOutput> {
+): OperationRef<TDesc, TProgress, TOutput, TUpdate> {
   return createPublicOperationRef(operation, observation);
 }
 
@@ -1229,10 +1317,11 @@ function createPublicOperationRef<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
-  operation: RuntimeOperationRef<TDesc, TProgress, TOutput>,
+  operation: RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>,
   observation: OperationWatchObservation<TProgress, TOutput>,
-): OperationRef<TDesc, TProgress, TOutput> {
+): OperationRef<TDesc, TProgress, TOutput, TUpdate> {
   const base = {
     id: operation.id,
     service: operation.service,
@@ -1275,31 +1364,32 @@ function createPublicOperationRef<
 
         return await operation.wait();
       })()),
-    watch: () => operation.watch(),
+    watch: (options?: OperationWatchOptions) => operation.watch(options),
     cancel: () => operation.cancel(),
     signal: (signal: string, input?: unknown) =>
       operation.signal(signal, input),
   };
 
-  return base as OperationRef<TDesc, TProgress, TOutput>;
+  return base as OperationRef<TDesc, TProgress, TOutput, TUpdate>;
 }
 
 function createOperationInputBuilder<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
-  callbacks: OperationObserverCallbacks<TProgress, TOutput> = {},
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate> = {},
 ): TDesc["transfer"] extends undefined
-  ? OperationInputBuilder<TDesc, TProgress, TOutput>
-  : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput> {
+  ? OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
+  : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate> {
   const rebuild = (
-    nextCallbacks: OperationObserverCallbacks<TProgress, TOutput>,
+    nextCallbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
   ) =>
-    createOperationInputBuilder<TDesc, TProgress, TOutput>(
+    createOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>(
       transport,
       descriptor,
       input,
@@ -1328,6 +1418,13 @@ function createOperationInputBuilder<
     ) {
       return rebuild({ ...callbacks, onProgress: handler });
     },
+    onUpdate(
+      handler: NonNullable<
+        OperationObserverCallbacks<TProgress, TOutput, TUpdate>["onUpdate"]
+      >,
+    ) {
+      return rebuild({ ...callbacks, onUpdate: handler });
+    },
     onCompleted(
       handler: NonNullable<
         OperationObserverCallbacks<TProgress, TOutput>["onCompleted"]
@@ -1351,13 +1448,15 @@ function createOperationInputBuilder<
     },
     onEvent(
       handler: NonNullable<
-        OperationObserverCallbacks<TProgress, TOutput>["onEvent"]
+        OperationObserverCallbacks<TProgress, TOutput, TUpdate>["onEvent"]
       >,
     ) {
       return rebuild({ ...callbacks, onEvent: handler });
     },
-    start(startCallbacks?: OperationObserverCallbacks<TProgress, TOutput>) {
-      return startObservedOperation<TDesc, TProgress, TOutput>(
+    start(
+      startCallbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+    ) {
+      return startObservedOperation<TDesc, TProgress, TOutput, TUpdate>(
         transport,
         descriptor,
         input,
@@ -1368,14 +1467,20 @@ function createOperationInputBuilder<
     TDesc,
     TProgress,
     TOutput,
-    OperationInputBuilder<TDesc, TProgress, TOutput>
+    TUpdate,
+    OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
   >;
 
   if (descriptor.transfer) {
     return {
       ...baseBuilder,
       transfer(body: TransferBody) {
-        return createTransferOperationBuilder<TDesc, TProgress, TOutput>(
+        return createTransferOperationBuilder<
+          TDesc,
+          TProgress,
+          TOutput,
+          TUpdate
+        >(
           transport,
           descriptor,
           input,
@@ -1384,30 +1489,36 @@ function createOperationInputBuilder<
         );
       },
     } as TDesc["transfer"] extends undefined
-      ? OperationInputBuilder<TDesc, TProgress, TOutput>
-      : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput>;
+      ? OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
+      : TransferCapableOperationInputBuilder<
+        TDesc,
+        TProgress,
+        TOutput,
+        TUpdate
+      >;
   }
 
   return baseBuilder as TDesc["transfer"] extends undefined
-    ? OperationInputBuilder<TDesc, TProgress, TOutput>
-    : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput>;
+    ? OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
+    : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>;
 }
 
 function createTransferOperationBuilder<
   TDesc extends OperationShape,
   TProgress,
   TOutput,
+  TUpdate,
 >(
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
   body: TransferBody,
-  callbacks: OperationObserverCallbacks<TProgress, TOutput> = {},
-): TransferOperationBuilder<TDesc, TProgress, TOutput> {
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate> = {},
+): TransferOperationBuilder<TDesc, TProgress, TOutput, TUpdate> {
   const rebuild = (
-    nextCallbacks: OperationObserverCallbacks<TProgress, TOutput>,
+    nextCallbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
   ) =>
-    createTransferOperationBuilder<TDesc, TProgress, TOutput>(
+    createTransferOperationBuilder<TDesc, TProgress, TOutput, TUpdate>(
       transport,
       descriptor,
       input,
@@ -1428,6 +1539,9 @@ function createTransferOperationBuilder<
     onProgress(handler) {
       return rebuild({ ...callbacks, onProgress: handler });
     },
+    onUpdate(handler) {
+      return rebuild({ ...callbacks, onUpdate: handler });
+    },
     onCompleted(handler) {
       return rebuild({ ...callbacks, onCompleted: handler });
     },
@@ -1440,8 +1554,10 @@ function createTransferOperationBuilder<
     onEvent(handler) {
       return rebuild({ ...callbacks, onEvent: handler });
     },
-    start(startCallbacks?: OperationObserverCallbacks<TProgress, TOutput>) {
-      return startObservedTransfer<TDesc, TProgress, TOutput>(
+    start(
+      startCallbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+    ) {
+      return startObservedTransfer<TDesc, TProgress, TOutput, TUpdate>(
         transport,
         descriptor,
         input,
@@ -1457,6 +1573,7 @@ export class OperationInvoker<
   TInput = OperationInputOf<TDesc>,
   TProgress = OperationProgressOf<TDesc>,
   TOutput = OperationOutputOf<TDesc>,
+  TUpdate = OperationUpdateOf<TDesc>,
 > {
   readonly #transport: OperationTransport;
   readonly #descriptor: TDesc;
@@ -1466,9 +1583,11 @@ export class OperationInvoker<
     this.#descriptor = descriptor;
   }
 
-  resume(ref: OperationRefData): OperationRef<TDesc, TProgress, TOutput> {
+  resume(
+    ref: OperationRefData,
+  ): OperationRef<TDesc, TProgress, TOutput, TUpdate> {
     return createPublicOperationRef(
-      new RuntimeOperationRef<TDesc, TProgress, TOutput>(
+      new RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>(
         this.#transport,
         this.#descriptor,
         ref,
@@ -1479,12 +1598,12 @@ export class OperationInvoker<
 
   start(
     input: TInput,
-    callbacks?: OperationObserverCallbacks<TProgress, TOutput>,
+    callbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
   ): AsyncResult<
-    OperationRef<TDesc, TProgress, TOutput>,
+    OperationRef<TDesc, TProgress, TOutput, TUpdate>,
     OperationControlError | UnexpectedError
   > {
-    return createOperationInputBuilder<TDesc, TProgress, TOutput>(
+    return createOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>(
       this.#transport,
       this.#descriptor,
       input as OperationInputOf<TDesc>,
@@ -1494,15 +1613,20 @@ export class OperationInvoker<
   input(
     input: TInput,
   ): TDesc["transfer"] extends undefined
-    ? OperationInputBuilder<TDesc, TProgress, TOutput>
-    : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput> {
-    return createOperationInputBuilder<TDesc, TProgress, TOutput>(
+    ? OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
+    : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate> {
+    return createOperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>(
       this.#transport,
       this.#descriptor,
       input as OperationInputOf<TDesc>,
     ) as TDesc["transfer"] extends undefined
-      ? OperationInputBuilder<TDesc, TProgress, TOutput>
-      : TransferCapableOperationInputBuilder<TDesc, TProgress, TOutput>;
+      ? OperationInputBuilder<TDesc, TProgress, TOutput, TUpdate>
+      : TransferCapableOperationInputBuilder<
+        TDesc,
+        TProgress,
+        TOutput,
+        TUpdate
+      >;
   }
 }
 
@@ -1618,9 +1742,9 @@ function failedObservation<TProgress, TOutput>(
   };
 }
 
-async function dispatchOperationEventResult<TProgress, TOutput>(
-  callbacks: OperationObserverCallbacks<TProgress, TOutput>,
-  event: OperationEvent<TProgress, TOutput>,
+async function dispatchOperationEventResult<TProgress, TOutput, TUpdate>(
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  event: OperationEvent<TProgress, TOutput, TUpdate>,
 ): Promise<Result<void, UnexpectedError>> {
   try {
     await dispatchObservedOperationEvent(callbacks, event);

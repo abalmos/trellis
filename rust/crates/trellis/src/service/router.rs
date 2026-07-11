@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
-use std::pin::Pin;
+use tokio::sync::oneshot;
 
 use serde_json::Value;
 
@@ -14,8 +17,8 @@ use super::request_loop::{HandlerResponse, ResponseStream};
 use super::schema_validation::validate_input_schema;
 use super::{
     control_subject, AcceptedOperation, FeedDescriptor, HandlerResult, OperationControlRequest,
-    OperationDescriptor, OperationProvider, OperationSignalAccepted, OperationSnapshot,
-    OperationSnapshotFrame, RpcDescriptor, ServerError,
+    OperationDescriptor, OperationLiveEvent, OperationProvider, OperationSignalAccepted,
+    OperationSnapshot, OperationSnapshotFrame, RpcDescriptor, ServerError,
 };
 
 /// Request metadata forwarded to mounted RPC handlers.
@@ -94,11 +97,50 @@ impl RouteCapabilities {
 
 type OperationWatch<TProgress, TOutput> =
     Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>;
+type OperationLiveWatch<TProgress, TUpdate, TOutput> = Pin<
+    Box<
+        dyn Stream<Item = Result<OperationLiveEvent<TProgress, TUpdate, TOutput>, ServerError>>
+            + Send,
+    >,
+>;
+const FEED_CANCEL_TOMBSTONE_TTL: Duration = Duration::from_secs(30);
+const MAX_FEED_CANCEL_TOMBSTONES: usize = 1_024;
+
+enum FeedCancellationState {
+    Active(oneshot::Sender<()>),
+    Cancelled(Instant),
+}
+
+type FeedCancellations = Arc<Mutex<HashMap<(String, String), FeedCancellationState>>>;
+
+struct FeedCancellation {
+    receiver: oneshot::Receiver<()>,
+    key: (String, String),
+    cancellations: FeedCancellations,
+}
+
+impl Future for FeedCancellation {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.receiver).poll(context).map(|_| ())
+    }
+}
+
+impl Drop for FeedCancellation {
+    fn drop(&mut self) {
+        self.cancellations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.key);
+    }
+}
 
 /// An in-memory subject router for descriptor-backed RPC handlers.
 #[derive(Default)]
 pub struct Router {
     handlers: HashMap<String, Route>,
+    feed_cancellations: FeedCancellations,
 }
 
 impl Router {
@@ -143,6 +185,7 @@ impl Router {
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handler = Arc::new(handler);
+        let cancellations = Arc::clone(&self.feed_cancellations);
         self.handlers.insert(
             D::SUBJECT.to_string(),
             Route {
@@ -150,11 +193,42 @@ impl Router {
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
+                    let cancellations = Arc::clone(&cancellations);
                     Box::pin(async move {
                         let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
-                        Ok(HandlerResponse::FeedStream(feed_response_stream(handler(
-                            ctx, input,
-                        ))))
+                        let reply_to = ctx.reply_to.clone().ok_or_else(|| {
+                            ServerError::Nats("feed request is missing a reply inbox".to_string())
+                        })?;
+                        let key = (D::SUBJECT.to_string(), reply_to);
+                        let (cancel, receiver) = oneshot::channel();
+                        let mut states = cancellations
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let now = Instant::now();
+                        states.retain(|_, state| {
+                            !matches!(state, FeedCancellationState::Cancelled(at) if now.duration_since(*at) >= FEED_CANCEL_TOMBSTONE_TTL)
+                        });
+                        match states.remove(&key) {
+                            Some(FeedCancellationState::Cancelled(_)) => {
+                                let _ = cancel.send(());
+                            }
+                            Some(FeedCancellationState::Active(previous)) => {
+                                let _ = previous.send(());
+                                states.insert(key.clone(), FeedCancellationState::Active(cancel));
+                            }
+                            None => {
+                                states.insert(key.clone(), FeedCancellationState::Active(cancel));
+                            }
+                        }
+                        drop(states);
+                        let cancellation = FeedCancellation {
+                            receiver,
+                            key,
+                            cancellations,
+                        };
+                        Ok(HandlerResponse::FeedStream(feed_response_stream(
+                            handler(ctx, input).take_until(cancellation),
+                        )))
                     })
                 },
             ),
@@ -317,6 +391,120 @@ impl Router {
             + Send
             + 'static,
     {
+        self.register_operation_with_live_watch_and_signal::<D, Value, _, _, _, _, _, _, _, _, _>(
+            start,
+            get,
+            move |context, operation_id| {
+                Box::pin(
+                    watch(context, operation_id)
+                        .map(|snapshot| snapshot.map(OperationLiveEvent::Snapshot)),
+                ) as OperationLiveWatch<D::Progress, Value, D::Output>
+            },
+            cancel,
+            signal,
+            None,
+        );
+    }
+
+    /// Register an operation handler whose watch stream includes declared live updates.
+    pub fn register_operation_with_updates_and_signal<
+        D,
+        FStart,
+        FutStart,
+        FGet,
+        FutGet,
+        FWatch,
+        FCancel,
+        FutCancel,
+        FSignal,
+        FutSignal,
+    >(
+        &mut self,
+        start: FStart,
+        get: FGet,
+        watch: FWatch,
+        cancel: FCancel,
+        signal: FSignal,
+    ) where
+        D: super::OperationUpdateDescriptor + 'static,
+        D::Update: serde::Serialize + Send + 'static,
+        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
+        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
+        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FWatch: Fn(RequestContext, String) -> OperationLiveWatch<D::Progress, D::Update, D::Output>
+            + Send
+            + Sync
+            + 'static,
+        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
+        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FSignal:
+            Fn(RequestContext, String, String, Option<Value>) -> FutSignal + Send + Sync + 'static,
+        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+    {
+        self.register_operation_with_live_watch_and_signal::<D, D::Update, _, _, _, _, _, _, _, _, _>(
+            start,
+            get,
+            watch,
+            cancel,
+            signal,
+            Some(D::UPDATE_SCHEMA_JSON),
+        );
+    }
+
+    fn register_operation_with_live_watch_and_signal<
+        D,
+        TUpdate,
+        FStart,
+        FutStart,
+        FGet,
+        FutGet,
+        FWatch,
+        FCancel,
+        FutCancel,
+        FSignal,
+        FutSignal,
+    >(
+        &mut self,
+        start: FStart,
+        get: FGet,
+        watch: FWatch,
+        cancel: FCancel,
+        signal: FSignal,
+        update_schema_json: Option<&'static str>,
+    ) where
+        D: OperationDescriptor + 'static,
+        TUpdate: serde::Serialize + Send + 'static,
+        FStart: Fn(RequestContext, D::Input) -> FutStart + Send + Sync + 'static,
+        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FGet: Fn(RequestContext, String) -> FutGet + Send + Sync + 'static,
+        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FWatch: Fn(RequestContext, String) -> OperationLiveWatch<D::Progress, TUpdate, D::Output>
+            + Send
+            + Sync
+            + 'static,
+        FCancel: Fn(RequestContext, String) -> FutCancel + Send + Sync + 'static,
+        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FSignal:
+            Fn(RequestContext, String, String, Option<Value>) -> FutSignal + Send + Sync + 'static,
+        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+    {
         let start = Arc::new(start);
         let get = Arc::new(get);
         let watch = Arc::new(watch);
@@ -373,11 +561,13 @@ impl Router {
                             "wait" => {
                                 let mut snapshots = watch(ctx, request.operation_id);
                                 let mut terminal = None;
-                                while let Some(snapshot) = snapshots.next().await {
-                                    let snapshot = snapshot?;
-                                    if snapshot.state.is_terminal() {
-                                        terminal = Some(snapshot);
-                                        break;
+                                while let Some(event) = snapshots.next().await {
+                                    let event = event?;
+                                    if let OperationLiveEvent::Snapshot(snapshot) = event {
+                                        if snapshot.state.is_terminal() {
+                                            terminal = Some(snapshot);
+                                            break;
+                                        }
                                     }
                                 }
                                 let snapshot = terminal.ok_or_else(|| {
@@ -388,10 +578,20 @@ impl Router {
                                 })?;
                                 HandlerResponse::Frames(vec![snapshot_frame(snapshot)?])
                             }
-                            "watch" => HandlerResponse::Stream(watch_response_stream(watch(
-                                ctx,
-                                request.operation_id,
-                            ))),
+                            "watch" => {
+                                let include_updates = request.include_updates.unwrap_or(false);
+                                if include_updates && update_schema_json.is_none() {
+                                    return Err(ServerError::InvalidOperationControlAction {
+                                        subject: D::SUBJECT.to_string(),
+                                        action: "watch:updates".to_string(),
+                                    });
+                                }
+                                HandlerResponse::Stream(watch_response_stream(
+                                    watch(ctx, request.operation_id),
+                                    include_updates,
+                                    update_schema_json,
+                                ))
+                            }
                             "cancel" if D::CANCELABLE => {
                                 HandlerResponse::Frames(vec![snapshot_frame(
                                     cancel(ctx, request.operation_id).await?,
@@ -535,8 +735,48 @@ impl Router {
             .handlers
             .get(subject)
             .ok_or_else(|| ServerError::MissingHandler(subject.to_string()))?;
+        if let Some(reply_to) = feed_cancel_reply_to(&payload)
+            .filter(|reply_to| context.reply_to.as_deref() == Some(reply_to.as_str()))
+        {
+            let key = (subject.to_string(), reply_to);
+            let mut states = self
+                .feed_cancellations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let now = Instant::now();
+            states.retain(|_, state| {
+                !matches!(state, FeedCancellationState::Cancelled(at) if now.duration_since(*at) >= FEED_CANCEL_TOMBSTONE_TTL)
+            });
+            match states.remove(&key) {
+                Some(FeedCancellationState::Active(cancel)) => {
+                    let _ = cancel.send(());
+                }
+                Some(FeedCancellationState::Cancelled(_)) | None => {
+                    let tombstones = states
+                        .values()
+                        .filter(|state| matches!(state, FeedCancellationState::Cancelled(_)))
+                        .count();
+                    if tombstones < MAX_FEED_CANCEL_TOMBSTONES {
+                        states.insert(key, FeedCancellationState::Cancelled(now));
+                    }
+                }
+            }
+            return Ok(HandlerResponse::Frames(Vec::new()));
+        }
         (route.handler)(context, payload).await
     }
+}
+
+fn feed_cancel_reply_to(payload: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(payload).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    object
+        .get("_trellisFeedCancel")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 /// Parse bytes into a valid JSON value, validate against JSON Schema, then
@@ -577,16 +817,58 @@ where
     )
 }
 
-fn watch_response_stream<TProgress, TOutput>(
-    snapshots: OperationWatch<TProgress, TOutput>,
+fn watch_response_stream<TProgress, TUpdate, TOutput>(
+    events: OperationLiveWatch<TProgress, TUpdate, TOutput>,
+    include_updates: bool,
+    update_schema_json: Option<&'static str>,
 ) -> ResponseStream
 where
     TProgress: serde::Serialize + 'static,
+    TUpdate: serde::Serialize + 'static,
     TOutput: serde::Serialize + 'static,
 {
-    Box::pin(snapshots.enumerate().map(|(index, snapshot)| {
-        snapshot.and_then(|snapshot| operation_watch_frame(index, snapshot))
-    }))
+    let mut sent_initial_snapshot = false;
+    Box::pin(
+        events
+            .map(move |event| match event {
+                Ok(OperationLiveEvent::Snapshot(snapshot)) => {
+                    let index = usize::from(sent_initial_snapshot);
+                    sent_initial_snapshot = true;
+                    Some(operation_watch_frame(index, snapshot))
+                }
+                Ok(OperationLiveEvent::Update(update)) if include_updates => {
+                    Some(operation_update_frame(update, update_schema_json))
+                }
+                Ok(OperationLiveEvent::Update(_)) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .filter_map(futures_util::future::ready),
+    )
+}
+
+fn operation_update_frame<TUpdate>(
+    update: crate::client::OperationUpdateEvent<TUpdate>,
+    update_schema_json: Option<&str>,
+) -> Result<Bytes, ServerError>
+where
+    TUpdate: serde::Serialize,
+{
+    let update_value = serde_json::to_value(update.update)?;
+    let schema_json = update_schema_json.ok_or_else(|| {
+        ServerError::Nats("operation update stream is missing its declared schema".to_string())
+    })?;
+    validate_input_schema(schema_json, &update_value)?;
+    Ok(Bytes::from(serde_json::to_vec(&serde_json::json!({
+        "kind": "event",
+        "sequence": update.sequence,
+        "event": {
+            "type": "update",
+            "operationId": update.operation_id,
+            "sequence": update.sequence,
+            "timestamp": update.timestamp,
+            "update": update_value,
+        }
+    }))?))
 }
 
 fn snapshot_frame<TProgress, TOutput>(
@@ -658,4 +940,124 @@ where
         "sequence": index,
         "event": event,
     }))?))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use futures_util::{stream, StreamExt};
+
+    use super::*;
+
+    struct TestFeed;
+
+    impl FeedDescriptor for TestFeed {
+        type Input = Value;
+        type Event = Value;
+
+        const KEY: &'static str = "Test.Live";
+        const SUBJECT: &'static str = "feeds.v1.Test.Live";
+        const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+        const EVENT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+    }
+
+    #[tokio::test]
+    async fn feed_cancel_frame_stops_the_active_response_stream() {
+        let mut router = Router::new();
+        router.register_feed::<TestFeed, _, _>(|_, _| {
+            stream::pending::<Result<Value, ServerError>>()
+        });
+        let reply_to = "_INBOX.test.feed";
+        let context = || RequestContext {
+            subject: TestFeed::SUBJECT.to_string(),
+            reply_to: Some(reply_to.to_string()),
+            ..Default::default()
+        };
+        let response = router
+            .handle_request_response(TestFeed::SUBJECT, Bytes::from_static(b"{}"), context())
+            .await
+            .expect("open feed");
+        let HandlerResponse::FeedStream(mut stream) = response else {
+            panic!("feed registration should return a response stream");
+        };
+
+        router
+            .handle_request_response(
+                TestFeed::SUBJECT,
+                Bytes::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "_trellisFeedCancel": reply_to,
+                    }))
+                    .expect("serialize cancellation"),
+                ),
+                context(),
+            )
+            .await
+            .expect("cancel feed");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), stream.next())
+                .await
+                .expect("feed should stop promptly")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn feed_cancel_frame_stops_a_request_that_registers_after_it() {
+        let mut router = Router::new();
+        router.register_feed::<TestFeed, _, _>(|_, _| {
+            stream::pending::<Result<Value, ServerError>>()
+        });
+        let reply_to = "_INBOX.test.pending-feed";
+        let context = || RequestContext {
+            subject: TestFeed::SUBJECT.to_string(),
+            reply_to: Some(reply_to.to_string()),
+            ..Default::default()
+        };
+        {
+            let mut states = router
+                .feed_cancellations
+                .lock()
+                .expect("lock cancellation states");
+            for index in 0..MAX_FEED_CANCEL_TOMBSTONES {
+                states.insert(
+                    (
+                        TestFeed::SUBJECT.to_string(),
+                        format!("_INBOX.expired.{index}"),
+                    ),
+                    FeedCancellationState::Cancelled(Instant::now() - FEED_CANCEL_TOMBSTONE_TTL),
+                );
+            }
+        }
+
+        router
+            .handle_request_response(
+                TestFeed::SUBJECT,
+                Bytes::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "_trellisFeedCancel": reply_to,
+                    }))
+                    .expect("serialize cancellation"),
+                ),
+                context(),
+            )
+            .await
+            .expect("record early cancellation");
+        let response = router
+            .handle_request_response(TestFeed::SUBJECT, Bytes::from_static(b"{}"), context())
+            .await
+            .expect("open cancelled feed");
+        let HandlerResponse::FeedStream(mut stream) = response else {
+            panic!("feed registration should return a response stream");
+        };
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), stream.next())
+                .await
+                .expect("early cancellation should stop feed promptly")
+                .is_none()
+        );
+    }
 }

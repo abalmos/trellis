@@ -498,6 +498,7 @@ fn manifest_parses_owned_and_used_operations() {
         "kind": "service",
         "schemas": {
             "CaptureRequest": {"type": "object", "properties": {}},
+            "CaptureUpdate": {"type": "object", "properties": {}},
             "CaptureProgress": {"type": "object", "properties": {}},
             "CaptureResult": {"type": "object", "properties": {}}
         },
@@ -516,6 +517,7 @@ fn manifest_parses_owned_and_used_operations() {
                 "version": "v1",
                 "subject": "operations.v1.Payments.Capture",
                 "input": {"schema": "CaptureRequest"},
+                "update": {"schema": "CaptureUpdate"},
                 "progress": {"schema": "CaptureProgress"},
                 "output": {"schema": "CaptureResult"},
                 "transfer": {
@@ -543,6 +545,10 @@ fn manifest_parses_owned_and_used_operations() {
     assert_eq!(op.version, "v1");
     assert_eq!(op.subject, "operations.v1.Payments.Capture");
     assert_eq!(op.input.schema, "CaptureRequest");
+    assert_eq!(
+        op.update.as_ref().map(|value| value.schema.as_str()),
+        Some("CaptureUpdate")
+    );
     assert_eq!(
         op.progress.as_ref().map(|value| value.schema.as_str()),
         Some("CaptureProgress")
@@ -940,8 +946,7 @@ fn contract_docs_normalize_but_do_not_affect_digest() {
             "auditProjection": {
                 "uses": {"audit": ["Audit.Changed"]},
                 "replay": "new",
-                "ordering": "strict",
-                "concurrency": 1
+                "ordering": "strict"
             }
         },
         "resources": {
@@ -1060,7 +1065,6 @@ fn contract_docs_normalize_but_do_not_affect_digest() {
                 "uses": {"audit": ["Audit.Changed"]},
                 "replay": "new",
                 "ordering": "strict",
-                "concurrency": 1,
                 "docs": {
                     "summary": "Consumer docs.",
                     "markdown": "Event consumer docs."
@@ -1236,7 +1240,6 @@ fn manifest_parses_event_consumers_with_defaults_and_projects_digest() {
         .expect("projection group");
     assert_eq!(group.replay, ContractEventConsumerReplay::New);
     assert_eq!(group.ordering, ContractEventConsumerOrdering::Strict);
-    assert_eq!(group.concurrency, 1);
     assert_eq!(
         group.uses.get("billing").expect("billing event use"),
         &vec!["Billing.Paid".to_string()]
@@ -1253,12 +1256,39 @@ fn manifest_parses_event_consumers_with_defaults_and_projects_digest() {
         json!("strict")
     );
     assert_eq!(
-        normalized["eventConsumers"]["projection"]["concurrency"],
-        json!(1)
-    );
-    assert_eq!(
         project_contract_digest_manifest(&normalized)["eventConsumers"]["projection"],
         normalized["eventConsumers"]["projection"]
+    );
+}
+
+#[test]
+fn manifest_parses_parallel_event_consumer_ordering() {
+    let manifest = parse_manifest(json!({
+        "format": "trellis.contract.v1",
+        "id": "example.parallel-consumer@v1",
+        "displayName": "Example Parallel Consumer",
+        "description": "Consumes events with parallel local listeners.",
+        "kind": "service",
+        "uses": {
+            "required": {
+                "billing": {
+                    "contract": "billing@v1",
+                    "events": {"subscribe": ["Billing.Paid"]}
+                }
+            }
+        },
+        "eventConsumers": {
+            "projection": {
+                "uses": {"billing": ["Billing.Paid"]},
+                "ordering": "parallel"
+            }
+        }
+    }))
+    .expect("parallel event consumer should parse");
+
+    assert_eq!(
+        manifest.event_consumers["projection"].ordering,
+        ContractEventConsumerOrdering::Parallel
     );
 }
 
@@ -1478,11 +1508,13 @@ fn manifest_parses_top_level_jobs() {
         "kind": "service",
         "schemas": {
             "JobPayload": {"type": "object", "properties": {}},
+            "JobUpdate": {"type": "object", "properties": {}},
             "JobResult": {"type": "object", "properties": {}}
         },
         "jobs": {
             "document-process": {
                 "payload": {"schema": "JobPayload"},
+                "update": {"schema": "JobUpdate"},
                 "result": {"schema": "JobResult"},
                 "maxDeliver": 5,
                 "backoffMs": [1000, 5000],
@@ -1490,8 +1522,7 @@ fn manifest_parses_top_level_jobs() {
                 "defaultDeadlineMs": 60000,
                 "progress": true,
                 "logs": true,
-                "dlq": true,
-                "concurrency": 4
+                "dlq": true
             }
         }
     }))
@@ -1503,6 +1534,10 @@ fn manifest_parses_top_level_jobs() {
         .expect("document-process queue");
     assert_eq!(queue.payload.schema, "JobPayload");
     assert_eq!(
+        queue.update.as_ref().map(|schema| schema.schema.as_str()),
+        Some("JobUpdate")
+    );
+    assert_eq!(
         queue.result.as_ref().map(|schema| schema.schema.as_str()),
         Some("JobResult")
     );
@@ -1513,7 +1548,51 @@ fn manifest_parses_top_level_jobs() {
     assert_eq!(queue.progress, Some(true));
     assert_eq!(queue.logs, Some(true));
     assert_eq!(queue.dlq, Some(true));
-    assert_eq!(queue.concurrency, Some(4));
+}
+
+#[test]
+fn live_update_schemas_are_reachable_and_affect_digest() {
+    let manifest = json!({
+        "format": "trellis.contract.v1",
+        "id": "example.live-updates@v1",
+        "displayName": "Live Updates",
+        "description": "Expose typed live updates.",
+        "kind": "service",
+        "schemas": {
+            "Input": {"type": "object"},
+            "Output": {"type": "object"},
+            "OperationUpdate": {"type": "string"},
+            "JobPayload": {"type": "object"},
+            "JobUpdate": {"type": "string"},
+            "Unused": {"type": "boolean"}
+        },
+        "operations": {
+            "Example.Run": {
+                "version": "v1",
+                "subject": "operations.v1.Example.Run",
+                "input": {"schema": "Input"},
+                "update": {"schema": "OperationUpdate"},
+                "output": {"schema": "Output"}
+            }
+        },
+        "jobs": {
+            "run": {
+                "payload": {"schema": "JobPayload"},
+                "update": {"schema": "JobUpdate"}
+            }
+        }
+    });
+    let projection = project_contract_digest_manifest(&manifest);
+    assert!(projection["schemas"].get("OperationUpdate").is_some());
+    assert!(projection["schemas"].get("JobUpdate").is_some());
+    assert!(projection["schemas"].get("Unused").is_none());
+
+    let mut changed = manifest.clone();
+    changed["schemas"]["JobUpdate"] = json!({"type": "number"});
+    assert_ne!(
+        digest_contract_value(&manifest).expect("original digest"),
+        digest_contract_value(&changed).expect("changed digest")
+    );
 }
 
 #[test]
@@ -1530,7 +1609,6 @@ fn manifest_parses_keyed_job_concurrency_policy() {
         "jobs": {
             "sync-tickets": {
                 "payload": {"schema": "JobPayload"},
-                "concurrency": 8,
                 "keyConcurrency": {
                     "key": ["zendesk", "/origin", "tickets"],
                     "maxActive": 1,

@@ -1,6 +1,7 @@
 //! Runtime-facing active job handle.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -9,6 +10,7 @@ use crate::manager::{JobManager, JobManagerError, JobMetaSource};
 use crate::publisher::JobEventPublisher;
 use crate::runtime_worker::JobCancellationToken;
 use crate::types::{Job, JobContext, JobLogEntry, JobLogLevel, JobProgress, JobWaitEdge};
+use crate::updates::{JobUpdate, JobUpdateDescriptor};
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
@@ -29,6 +31,8 @@ pub struct ActiveJob<P, M> {
     job: Job,
     cancellation: JobCancellationToken,
     heartbeat: HeartbeatHook,
+    update_sequence: Arc<AtomicU64>,
+    update_gate: Arc<tokio::sync::Mutex<bool>>,
 }
 
 impl<P, M> ActiveJob<P, M> {
@@ -43,6 +47,8 @@ impl<P, M> ActiveJob<P, M> {
             job,
             cancellation,
             heartbeat,
+            update_sequence: Arc::new(AtomicU64::new(0)),
+            update_gate: Arc::new(tokio::sync::Mutex::new(true)),
         }
     }
 
@@ -100,6 +106,34 @@ where
                 },
             )
             .await
+    }
+
+    /// Emit one contract-typed live-only update for this active attempt.
+    pub async fn emit_update<D>(
+        &self,
+        update: D::Update,
+    ) -> Result<JobUpdate<D::Update>, JobManagerError<P::Error>>
+    where
+        D: JobUpdateDescriptor,
+        D::Update: Clone,
+    {
+        let gate = self.update_gate.lock().await;
+        if !*gate {
+            return Err(JobManagerError::UpdatesClosed {
+                job_id: self.job.id.clone(),
+            });
+        }
+        let sequence = self.update_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        let result = self
+            .manager
+            .emit_update::<D>(&self.job, sequence, update)
+            .await;
+        drop(gate);
+        result
+    }
+
+    pub(crate) fn update_gate(&self) -> Arc<tokio::sync::Mutex<bool>> {
+        Arc::clone(&self.update_gate)
     }
 
     /// Publish a log entry for this active job.

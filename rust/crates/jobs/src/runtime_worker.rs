@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{
     atomic::{AtomicU8, Ordering},
@@ -207,6 +208,8 @@ struct ActiveKeyLease {
 pub struct WorkerHostOptions {
     /// Optional subset of queue types to run. When omitted, all bound queues run.
     pub queue_types: Option<Vec<String>>,
+    /// Local worker count by queue type. Selected queues not present here use one worker.
+    pub queue_concurrency: BTreeMap<String, u32>,
     /// How often worker presence heartbeats should be published.
     pub heartbeat_interval: Duration,
     /// Optional service version to include in worker heartbeats.
@@ -217,6 +220,7 @@ impl Default for WorkerHostOptions {
     fn default() -> Self {
         Self {
             queue_types: None,
+            queue_concurrency: BTreeMap::new(),
             heartbeat_interval: Duration::from_secs(30),
             version: None,
         }
@@ -1150,18 +1154,30 @@ where
     E: ToString + Send + 'static,
 {
     let queue_types = selected_queue_types(&binding, options.queue_types.as_deref())?;
+    let queue_concurrency = queue_types
+        .iter()
+        .map(|queue_type| {
+            let concurrency = options
+                .queue_concurrency
+                .get(queue_type)
+                .copied()
+                .unwrap_or(1);
+            if concurrency == 0 {
+                Err(WorkerHostError::InvalidConcurrency {
+                    queue_type: queue_type.clone(),
+                    concurrency,
+                })
+            } else {
+                Ok((queue_type.clone(), concurrency))
+            }
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
     for queue_type in &queue_types {
-        let queue = binding.jobs.queues.get(queue_type).ok_or_else(|| {
+        binding.jobs.queues.get(queue_type).ok_or_else(|| {
             WorkerHostError::MissingQueueBinding {
                 queue_type: queue_type.clone(),
             }
         })?;
-        if queue.concurrency == 0 {
-            return Err(WorkerHostError::InvalidConcurrency {
-                queue_type: queue_type.clone(),
-                concurrency: queue.concurrency,
-            });
-        }
     }
 
     let jetstream = jetstream::new(nats.clone());
@@ -1172,7 +1188,7 @@ where
                 queue_type: queue_type.clone(),
             }
         })?;
-        for worker_index in 0..queue.concurrency {
+        for worker_index in 0..queue_concurrency[queue_type] {
             let lifecycle_stream = lifecycle_stream(&jetstream).await.map_err(|error| {
                 WorkerHostError::WorkerStartup {
                     queue_type: queue_type.clone(),
@@ -1198,11 +1214,6 @@ where
     let cancellation = JobCancellationToken::new();
     let mut heartbeats = Vec::new();
     for queue_type in &queue_types {
-        let queue = binding.jobs.queues.get(queue_type).ok_or_else(|| {
-            WorkerHostError::MissingQueueBinding {
-                queue_type: queue_type.clone(),
-            }
-        })?;
         heartbeats.push(
             start_worker_heartbeat_loop(
                 nats.clone(),
@@ -1210,7 +1221,7 @@ where
                 binding.jobs.namespace.clone(),
                 queue_type.clone(),
                 instance_id.clone(),
-                Some(queue.concurrency),
+                Some(queue_concurrency[queue_type]),
                 options.version.clone(),
                 options.heartbeat_interval,
             )
@@ -1506,6 +1517,7 @@ async fn latest_lifecycle_message(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::time::Duration;
 
     use serde_json::Value;
@@ -1514,11 +1526,23 @@ mod tests {
 
     use super::{
         ack_action_for_outcome, ack_action_for_process_result, lifecycle_work_decision,
-        ProjectedWorkDecision, RuntimeWorkerError, WorkerAckAction,
+        ProjectedWorkDecision, RuntimeWorkerError, WorkerAckAction, WorkerHostOptions,
     };
     use crate::events::{cancelled_event, completed_event, retried_event, started_event};
     use crate::manager::JobProcessOutcome;
     use crate::types::{Job, JobContext, JobState};
+
+    #[test]
+    fn worker_host_options_keep_concurrency_local() {
+        let options = WorkerHostOptions::default();
+        assert!(options.queue_concurrency.is_empty());
+
+        let options = WorkerHostOptions {
+            queue_concurrency: BTreeMap::from([("documents".to_string(), 4)]),
+            ..WorkerHostOptions::default()
+        };
+        assert_eq!(options.queue_concurrency["documents"], 4);
+    }
 
     fn sample_context() -> JobContext {
         JobContext {

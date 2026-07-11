@@ -31,9 +31,9 @@ use super::transfer::{
 use super::{
     bootstrap_service_host, control_subject, AcceptedOperation, BootstrapBindingInfo,
     DownloadTransferGrantPlan, EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding,
-    KvResourceBinding, KvResourceClient, OperationDescriptor, OperationProvider,
-    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext,
-    RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
+    KvResourceBinding, KvResourceClient, OperationDescriptor, OperationLiveEvent,
+    OperationProvider, OperationSignalAccepted, OperationSnapshot, OperationTransferProgress,
+    RequestContext, RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
     ServiceResourceBindings, StoreResourceBinding, StoreResourceClient, UploadTransferCompletion,
     UploadTransferSession,
 };
@@ -73,7 +73,8 @@ struct DurableEventListenerKey {
 struct SharedDurableEventListener {
     expected_subjects: BTreeSet<String>,
     handlers: BTreeMap<String, BTreeMap<u64, SharedEventHandler>>,
-    pull_abort_handle: AbortHandle,
+    concurrency: u32,
+    pull_abort_handles: Vec<AbortHandle>,
 }
 
 #[derive(Clone)]
@@ -370,6 +371,14 @@ fn map_validate_request_error(subject: &str, error: TrellisClientError) -> Serve
 pub type ServiceOperationWatch<TProgress, TOutput> =
     Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>;
 
+/// Stream returned by operation handlers that opt in to live update events.
+pub type ServiceOperationLiveWatch<TProgress, TUpdate, TOutput> = Pin<
+    Box<
+        dyn Stream<Item = Result<OperationLiveEvent<TProgress, TUpdate, TOutput>, ServerError>>
+            + Send,
+    >,
+>;
+
 /// Default request/connect timeout for service bootstrap and NATS RPC calls.
 pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
@@ -497,6 +506,26 @@ pub enum ServiceRuntimeError {
         /// Event subject requested by the listener.
         subject: String,
     },
+
+    /// A durable listener count must be at least one.
+    #[error("event consumer group '{group}' has invalid listener concurrency {concurrency}; expected >= 1")]
+    InvalidEventListenerConcurrency { group: String, concurrency: u32 },
+
+    /// Strict ordering permits only one pull loop per service instance.
+    #[error(
+        "event consumer group '{group}' uses strict ordering and requires listener concurrency 1"
+    )]
+    StrictEventListenerConcurrency { group: String },
+
+    /// Registrations sharing one durable consumer must use the same local count.
+    #[error(
+        "event consumer group '{group}' already uses listener concurrency {existing}; requested {requested}"
+    )]
+    EventListenerConcurrencyMismatch {
+        group: String,
+        existing: u32,
+        requested: u32,
+    },
 }
 
 /// Options for registering a service event listener.
@@ -508,6 +537,8 @@ pub struct ServiceEventListenOptions {
     pub group: Option<String>,
     /// Caller-provided durable names are rejected because Trellis owns durable consumers.
     pub durable_name: Option<String>,
+    /// Number of local pull loops for a parallel durable consumer group.
+    pub concurrency: u32,
 }
 
 impl Default for ServiceEventListenOptions {
@@ -516,6 +547,7 @@ impl Default for ServiceEventListenOptions {
             mode: ServiceEventListenerMode::Durable,
             group: None,
             durable_name: None,
+            concurrency: 1,
         }
     }
 }
@@ -1285,6 +1317,99 @@ impl<C> ConnectedServiceRuntime<C> {
         self.registered_subjects.insert(control_subject(D::SUBJECT));
     }
 
+    /// Register one operation handler with typed live updates and signal control support.
+    pub fn register_operation_with_updates_and_signal<
+        D,
+        FStart,
+        FutStart,
+        FGet,
+        FutGet,
+        FWatch,
+        FCancel,
+        FutCancel,
+        FSignal,
+        FutSignal,
+    >(
+        &mut self,
+        start: FStart,
+        get: FGet,
+        watch: FWatch,
+        cancel: FCancel,
+        signal: FSignal,
+    ) where
+        D: super::OperationUpdateDescriptor + 'static,
+        D::Update: serde::Serialize + Send + 'static,
+        FStart: Fn(ServiceHandlerContext, D::Input) -> FutStart + Send + Sync + 'static,
+        FutStart: Future<Output = Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FGet: Fn(ServiceHandlerContext, String) -> FutGet + Send + Sync + 'static,
+        FutGet: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FWatch: Fn(
+                ServiceHandlerContext,
+                String,
+            ) -> ServiceOperationLiveWatch<D::Progress, D::Update, D::Output>
+            + Send
+            + Sync
+            + 'static,
+        FCancel: Fn(ServiceHandlerContext, String) -> FutCancel + Send + Sync + 'static,
+        FutCancel: Future<Output = Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+        FSignal: Fn(ServiceHandlerContext, String, String, Option<Value>) -> FutSignal
+            + Send
+            + Sync
+            + 'static,
+        FutSignal: Future<Output = Result<OperationSignalAccepted<D::Progress, D::Output>, ServerError>>
+            + Send
+            + 'static,
+    {
+        let start_handle = self.handle();
+        let get_handle = self.handle();
+        let watch_handle = self.handle();
+        let cancel_handle = self.handle();
+        let signal_handle = self.handle();
+        self.router
+            .register_operation_with_updates_and_signal::<D, _, _, _, _, _, _, _, _, _>(
+                move |request, input| {
+                    start(
+                        ServiceHandlerContext::new(request, start_handle.clone()),
+                        input,
+                    )
+                },
+                move |request, operation_id| {
+                    get(
+                        ServiceHandlerContext::new(request, get_handle.clone()),
+                        operation_id,
+                    )
+                },
+                move |request, operation_id| {
+                    watch(
+                        ServiceHandlerContext::new(request, watch_handle.clone()),
+                        operation_id,
+                    )
+                },
+                move |request, operation_id| {
+                    cancel(
+                        ServiceHandlerContext::new(request, cancel_handle.clone()),
+                        operation_id,
+                    )
+                },
+                move |request, operation_id, signal_name, input| {
+                    signal(
+                        ServiceHandlerContext::new(request, signal_handle.clone()),
+                        operation_id,
+                        signal_name,
+                        input,
+                    )
+                },
+            );
+        self.registered_subjects.insert(D::SUBJECT.to_string());
+        self.registered_subjects.insert(control_subject(D::SUBJECT));
+    }
+
     /// Run registered subjects using the default NATS request loop.
     pub async fn run(self) -> Result<(), ServiceRuntimeError> {
         self.run_with_runner(DefaultServiceRunner).await
@@ -1636,6 +1761,7 @@ where
 
     let (group, binding) =
         resolve_event_consumer_binding(bindings, D::SUBJECT, options.group.as_deref(), None)?;
+    validate_event_listener_concurrency(&group, binding.ordering, options.concurrency, None)?;
     let key = DurableEventListenerKey {
         stream: binding.stream.clone(),
         durable_name: binding.consumer_name.clone(),
@@ -1666,6 +1792,12 @@ where
     {
         let mut listeners = event_listeners.lock().await;
         if let Some(listener) = listeners.get_mut(&key) {
+            validate_event_listener_concurrency(
+                context.group.as_deref().expect("durable listener group"),
+                binding.ordering,
+                options.concurrency,
+                Some(listener.concurrency),
+            )?;
             listener
                 .handlers
                 .entry(D::SUBJECT.to_string())
@@ -1689,105 +1821,18 @@ where
         replay: EventReplayPolicy::New,
         durable_name: Some(binding.consumer_name.clone()),
     };
-    let pull_client = Arc::clone(client);
-    let pull_event_listeners = Arc::clone(&event_listeners);
-    let pull_key = key.clone();
-    let pull_task = tokio::spawn(async move {
-        loop {
-            if !durable_listener_ready(&pull_event_listeners, &pull_key).await {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            }
-
-            let mut messages = match pull_client
-                .subscribe_messages::<D>(subscribe_options.clone())
-                .await
-            {
-                Ok(messages) => messages,
-                Err(error) if is_missing_durable_event_consumer_error(&error) => {
-                    tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
-                        .await;
-                    continue;
-                }
-                Err(error) => {
-                    return Err::<(), ServiceRuntimeError>(ServiceRuntimeError::from(error))
-                }
-            };
-
-            while durable_listener_ready(&pull_event_listeners, &pull_key).await {
-                let Some(result) = messages.next().await else {
-                    break;
-                };
-                let message = match result {
-                    Ok(message) => message,
-                    Err(error) if is_missing_durable_event_consumer_error(&error) => {
-                        tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
-                            .await;
-                        break;
-                    }
-                    Err(error) => {
-                        return Err::<(), ServiceRuntimeError>(ServiceRuntimeError::from(error))
-                    }
-                };
-                if !durable_listener_ready(&pull_event_listeners, &pull_key).await {
-                    break;
-                }
-                let handlers = pull_event_listeners
-                    .lock()
-                    .await
-                    .get(&pull_key)
-                    .and_then(|listener| listener.handlers.get(message.subject()).cloned())
-                    .unwrap_or_default();
-                let validation = match validate_event_message(
-                    &pull_client,
-                    message.subject(),
-                    message.payload(),
-                    message.headers(),
-                )
-                .await
-                {
-                    Ok(validation) => validation,
-                    Err(error) => {
-                        tracing::warn!(
-                            subject = %message.subject(),
-                            error = %error.message(),
-                            "Event auth validation failed"
-                        );
-                        if error.is_transient() {
-                            let _ = message.nak().await;
-                        } else {
-                            let _ = message.term().await;
-                        }
-                        continue;
-                    }
-                };
-                let mut handled = true;
-                for handler in handlers.values() {
-                    let context = service_event_context_from_message(
-                        context.mode,
-                        context.group.clone(),
-                        &message,
-                        validation.publisher.clone(),
-                    );
-                    if let Err(_error) =
-                        handler(Bytes::copy_from_slice(message.payload()), context).await
-                    {
-                        let _ = message.nak().await;
-                        handled = false;
-                        break;
-                    }
-                }
-                if !handled {
-                    continue;
-                }
-                if !durable_listener_ready(&pull_event_listeners, &pull_key).await {
-                    break;
-                }
-                message.ack().await?;
-            }
-        }
-    });
-    let pull_abort_handle = pull_task.abort_handle();
+    let pull_abort_handles = (0..options.concurrency)
+        .map(|_| {
+            tokio::spawn(run_durable_event_pull_loop::<D>(
+                Arc::clone(client),
+                Arc::clone(&event_listeners),
+                key.clone(),
+                subscribe_options.clone(),
+                context.clone(),
+            ))
+            .abort_handle()
+        })
+        .collect();
     event_listeners.lock().await.insert(
         key.clone(),
         SharedDurableEventListener {
@@ -1796,7 +1841,8 @@ where
                 D::SUBJECT.to_string(),
                 BTreeMap::from([(handler_id, handler)]),
             )]),
-            pull_abort_handle,
+            concurrency: options.concurrency,
+            pull_abort_handles,
         },
     );
 
@@ -1809,6 +1855,33 @@ where
             handler_id,
         }),
     ))
+}
+
+fn validate_event_listener_concurrency(
+    group: &str,
+    ordering: super::EventConsumerOrdering,
+    requested: u32,
+    existing: Option<u32>,
+) -> Result<(), ServiceRuntimeError> {
+    if requested == 0 {
+        return Err(ServiceRuntimeError::InvalidEventListenerConcurrency {
+            group: group.to_string(),
+            concurrency: requested,
+        });
+    }
+    if ordering == super::EventConsumerOrdering::Strict && requested > 1 {
+        return Err(ServiceRuntimeError::StrictEventListenerConcurrency {
+            group: group.to_string(),
+        });
+    }
+    if let Some(existing) = existing.filter(|existing| *existing != requested) {
+        return Err(ServiceRuntimeError::EventListenerConcurrencyMismatch {
+            group: group.to_string(),
+            existing,
+            requested,
+        });
+    }
+    Ok(())
 }
 
 async fn remove_service_event_listener_registration(
@@ -1827,7 +1900,9 @@ async fn remove_service_event_listener_registration(
     if listener.handlers.values().all(BTreeMap::is_empty) {
         let listener = listeners.remove(&registration.key);
         if let Some(listener) = listener {
-            listener.pull_abort_handle.abort();
+            for handle in listener.pull_abort_handles {
+                handle.abort();
+            }
         }
     }
 }
@@ -1841,7 +1916,134 @@ fn spawn_service_event_listener_cleanup(registration: ServiceEventListenerRegist
 async fn remove_service_event_listeners(event_listeners: SharedDurableEventListeners) {
     let listeners = std::mem::take(&mut *event_listeners.lock().await);
     for (_, listener) in listeners {
-        listener.pull_abort_handle.abort();
+        for handle in listener.pull_abort_handles {
+            handle.abort();
+        }
+    }
+}
+
+async fn run_durable_event_pull_loop<D>(
+    client: Arc<TrellisClient>,
+    event_listeners: SharedDurableEventListeners,
+    key: DurableEventListenerKey,
+    subscribe_options: EventSubscribeOptions,
+    context: ServiceEventListenerContext,
+) where
+    D: crate::client::EventDescriptor + 'static,
+    D::Event: Send + 'static,
+{
+    loop {
+        if !durable_listener_ready(&event_listeners, &key).await {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            continue;
+        }
+
+        let mut messages = match client
+            .subscribe_messages::<D>(subscribe_options.clone())
+            .await
+        {
+            Ok(messages) => messages,
+            Err(error) if is_missing_durable_event_consumer_error(&error) => {
+                tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS)).await;
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    group = ?context.group,
+                    error = %error,
+                    "Durable event subscription failed; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS)).await;
+                continue;
+            }
+        };
+
+        while durable_listener_ready(&event_listeners, &key).await {
+            let Some(result) = messages.next().await else {
+                break;
+            };
+            let message = match result {
+                Ok(message) => message,
+                Err(error) if is_missing_durable_event_consumer_error(&error) => {
+                    tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
+                        .await;
+                    break;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        group = ?context.group,
+                        error = %error,
+                        "Durable event pull failed; retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
+                        .await;
+                    break;
+                }
+            };
+            if !durable_listener_ready(&event_listeners, &key).await {
+                break;
+            }
+            let handlers = event_listeners
+                .lock()
+                .await
+                .get(&key)
+                .and_then(|listener| listener.handlers.get(message.subject()).cloned())
+                .unwrap_or_default();
+            let validation = match validate_event_message(
+                &client,
+                message.subject(),
+                message.payload(),
+                message.headers(),
+            )
+            .await
+            {
+                Ok(validation) => validation,
+                Err(error) => {
+                    tracing::warn!(
+                        subject = %message.subject(),
+                        error = %error.message(),
+                        "Event auth validation failed"
+                    );
+                    if error.is_transient() {
+                        let _ = message.nak().await;
+                    } else {
+                        let _ = message.term().await;
+                    }
+                    continue;
+                }
+            };
+            let mut handled = true;
+            for handler in handlers.values() {
+                let context = service_event_context_from_message(
+                    context.mode,
+                    context.group.clone(),
+                    &message,
+                    validation.publisher.clone(),
+                );
+                if handler(Bytes::copy_from_slice(message.payload()), context)
+                    .await
+                    .is_err()
+                {
+                    let _ = message.nak().await;
+                    handled = false;
+                    break;
+                }
+            }
+            if !handled {
+                continue;
+            }
+            if !durable_listener_ready(&event_listeners, &key).await {
+                break;
+            }
+            if let Err(error) = message.ack().await {
+                tracing::warn!(
+                    group = ?context.group,
+                    error = %error,
+                    "Durable event acknowledgement failed; retrying"
+                );
+                break;
+            }
+        }
     }
 }
 
@@ -2065,7 +2267,6 @@ mod tests {
                         filter_subjects: vec!["events.v1.Billing.Paid".to_string()],
                         replay: "new".to_string(),
                         ordering: "strict".to_string(),
-                        concurrency: 1,
                         ack_wait_ms: 30_000,
                         max_deliver: 5,
                         backoff_ms: vec![1_000, 5_000],
@@ -2104,7 +2305,6 @@ mod tests {
                 .collect(),
             replay: EventConsumerReplay::New,
             ordering: EventConsumerOrdering::Strict,
-            concurrency: 1,
             ack_wait_ms: 30_000,
             max_deliver: 5,
             backoff_ms: vec![1_000, 5_000],
@@ -2124,6 +2324,75 @@ mod tests {
 
         assert_eq!(group, "projection");
         assert_eq!(binding.consumer_name, "consumer");
+    }
+
+    #[test]
+    fn durable_event_listener_concurrency_defaults_to_one() {
+        assert_eq!(ServiceEventListenOptions::default().concurrency, 1);
+    }
+
+    #[test]
+    fn core_bootstrap_maps_parallel_event_consumer_ordering() {
+        let mut core = binding().into_inner();
+        core.resources
+            .event_consumers
+            .as_mut()
+            .expect("event consumer bindings")
+            .get_mut("projection")
+            .expect("projection event consumer binding")
+            .ordering = "parallel".to_string();
+
+        let resources = CoreBootstrapBinding::new(core).resource_bindings();
+        assert_eq!(
+            resources.event_consumers["projection"].ordering,
+            EventConsumerOrdering::Parallel
+        );
+    }
+
+    #[test]
+    fn durable_event_listener_concurrency_enforces_ordering_and_group_agreement() {
+        assert!(validate_event_listener_concurrency(
+            "projection",
+            EventConsumerOrdering::Parallel,
+            4,
+            Some(4)
+        )
+        .is_ok());
+        assert!(matches!(
+            validate_event_listener_concurrency(
+                "projection",
+                EventConsumerOrdering::Strict,
+                2,
+                None
+            ),
+            Err(ServiceRuntimeError::StrictEventListenerConcurrency { group })
+                if group == "projection"
+        ));
+        assert!(matches!(
+            validate_event_listener_concurrency(
+                "projection",
+                EventConsumerOrdering::Parallel,
+                2,
+                Some(4)
+            ),
+            Err(ServiceRuntimeError::EventListenerConcurrencyMismatch {
+                group,
+                existing: 4,
+                requested: 2
+            }) if group == "projection"
+        ));
+        assert!(matches!(
+            validate_event_listener_concurrency(
+                "projection",
+                EventConsumerOrdering::Parallel,
+                0,
+                None
+            ),
+            Err(ServiceRuntimeError::InvalidEventListenerConcurrency {
+                group,
+                concurrency: 0
+            }) if group == "projection"
+        ));
     }
 
     #[test]

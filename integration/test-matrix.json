@@ -475,6 +475,47 @@
     },
     {
       "kind": "client",
+      "id": "operations.live-updates-are-typed-ordered-and-transient",
+      "fixture": "operations",
+      "title": "Opted-in clients receive typed transient operation updates",
+      "coverage": [
+        "cross-runtime-operations"
+      ],
+      "description": "A Rust service emits ordered typed live operation updates to an opted-in Rust client without persisting update bodies in durable snapshots or weakening terminal output authority.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.operations-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.operations-service@v1"
+          }
+        ],
+        "given": [
+          "Entity.Process declares a typed update schema",
+          "the Rust client opts into operation updates"
+        ],
+        "when": [
+          "the Rust service emits cumulative updates before completion"
+        ],
+        "then": [
+          "typed updates arrive in sequence before terminal completion",
+          "durable snapshots contain no transient update body",
+          "terminal output remains authoritative",
+          "a late update watcher receives no transient updates"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
       "id": "operations.client-waits-for-completion",
       "fixture": "operations",
       "title": "Client waits for operation completion and receives typed output",
@@ -2083,6 +2124,43 @@
     },
     {
       "kind": "client",
+      "id": "jobs.keyed-active-redelivery-after-restart",
+      "fixture": "jobs",
+      "title": "Active keyed jobs redeliver after a worker restart",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "jobs-keyed-queue-policy"
+      ],
+      "description": "A keyed job whose worker stops while active is redelivered to the replacement worker and reacquires its released key slot without requiring a queued reservation.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "a keyed job is active on a service worker",
+          "the worker releases its key slot while the job lifecycle remains active"
+        ],
+        "when": [
+          "the service disconnects before the job completes",
+          "the same deployment reconnects with a replacement worker"
+        ],
+        "then": [
+          "the active work event is redelivered",
+          "the job reacquires the empty key slot and runs on the replacement worker"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
       "id": "jobs.keyed-jobs-reject-queue-full",
       "fixture": "jobs",
       "title": "Keyed jobs reject when the per-key queue is full",
@@ -2157,6 +2235,51 @@
       "completion": {
         "typescript": "implemented",
         "rust": "required"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "jobs.live-updates-are-typed-and-stop-at-terminal-state",
+      "fixture": "jobs",
+      "title": "Typed private-job updates stream live and stop at terminal state",
+      "coverage": [
+        "jobs-public-api",
+        "jobs-service-local-parity",
+        "cross-runtime-operations"
+      ],
+      "description": "A service-private job emits ordered typed cumulative updates. TypeScript relays them through typed operation updates to an opted-in caller, while transient update bodies remain outside durable job lifecycle state.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.jobs-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.jobs-service@v1"
+          }
+        ],
+        "given": [
+          "a service-private job and public operation declare typed update schemas",
+          "the caller opts into operation updates"
+        ],
+        "when": [
+          "the operation creates a job and subscribes to updates by job id",
+          "the job emits cumulative updates before completing"
+        ],
+        "then": [
+          "typed cumulative updates arrive in order",
+          "TypeScript relays job updates through the operation update surface",
+          "the terminal output remains authoritative",
+          "late operation watchers without update opt-in receive no update frames",
+          "transient update bodies are absent from durable Jobs admin lifecycle state"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
       }
     },
     {
@@ -5084,6 +5207,48 @@
       "completion": {
         "typescript": "implemented",
         "rust": "implemented"
+      }
+    },
+    {
+      "kind": "client",
+      "id": "outbox.dispatches-jobs-through-sql-outbox",
+      "fixture": "outbox",
+      "title": "SQL outbox dispatches durable job creation and submission after commit",
+      "coverage": [
+        "service-sql-outbox",
+        "outbox-job-delivery",
+        "jobs-create-submit"
+      ],
+      "description": "A service transaction atomically records job creation and submission intents. After commit, the SQL outbox dispatches both through the normal Trellis job manager and real workers process them.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.outbox-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.outbox-service@v1"
+          }
+        ],
+        "given": [
+          "a service is connected with real SQLite, SQL outbox, and a job worker",
+          "the service RPC handler enqueues create and submit job intents in one transaction"
+        ],
+        "when": [
+          "the transaction commits"
+        ],
+        "then": [
+          "both intents are dispatched through the normal job runtime",
+          "the worker processes both jobs",
+          "the outbox rows record dispatched state and accepted outcomes"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "required"
       }
     },
     {
@@ -8396,6 +8561,111 @@
         "rust": {
           "module": "event_consumers",
           "function": "event_consumers_readiness_lost_does_not_nak_delivered_group_message"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "event-consumers.parallel-group-runs-messages-concurrently",
+      "fixture": "event-consumers",
+      "title": "Parallel group runs messages concurrently",
+      "coverage": [
+        "events",
+        "event-consumers",
+        "parallel",
+        "concurrency"
+      ],
+      "description": "Runs two local pull workers for a parallel durable group and proves a second message starts while the first handler is blocked.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "source service",
+            "kind": "service",
+            "contract": "event-consumers source contract"
+          },
+          {
+            "name": "consumer service",
+            "kind": "service",
+            "contract": "event-consumers parallel consumer contract"
+          },
+          {
+            "name": "publisher app",
+            "kind": "app",
+            "contract": "event-consumers publisher app contract"
+          }
+        ],
+        "given": [
+          "A parallel durable group is registered with two implementation workers."
+        ],
+        "when": [
+          "A second event arrives while the first handler is blocked."
+        ],
+        "then": [
+          "The second handler starts concurrently and conflicting group worker counts are rejected."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "event-consumers/parallel_group_runs_messages_concurrently.integration_test.ts",
+          "testName": "event-consumers.parallel-group-runs-messages-concurrently"
+        },
+        "rust": {
+          "module": "event_consumers",
+          "function": "event_consumers_parallel_group_runs_messages_concurrently"
+        }
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      }
+    },
+    {
+      "kind": "service",
+      "id": "event-consumers.strict-group-rejects-parallel-workers",
+      "fixture": "event-consumers",
+      "title": "Strict group rejects parallel workers",
+      "coverage": [
+        "events",
+        "event-consumers",
+        "strict-ordering",
+        "validation"
+      ],
+      "description": "Verifies strict durable groups reject implementation concurrency above one.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "source service",
+            "kind": "service",
+            "contract": "event-consumers source contract"
+          },
+          {
+            "name": "consumer service",
+            "kind": "service",
+            "contract": "event-consumers dependency consumer contract"
+          }
+        ],
+        "given": [
+          "A durable consumer contract declares strict ordering."
+        ],
+        "when": [
+          "The implementation registers two local workers."
+        ],
+        "then": [
+          "Registration fails before event delivery begins."
+        ]
+      },
+      "implementations": {
+        "typescript": {
+          "file": "event-consumers/strict_group_rejects_parallel_workers.integration_test.ts",
+          "testName": "event-consumers.strict-group-rejects-parallel-workers"
+        },
+        "rust": {
+          "module": "event_consumers",
+          "function": "event_consumers_strict_group_rejects_parallel_workers"
         }
       },
       "completion": {

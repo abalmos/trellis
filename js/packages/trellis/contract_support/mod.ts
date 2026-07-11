@@ -262,6 +262,7 @@ const ContractOperationSchema = Type.Object({
   version: VersionSchema,
   subject: NonEmptyStringSchema,
   input: ContractSchemaRefSchema,
+  update: Type.Optional(ContractSchemaRefSchema),
   progress: Type.Optional(ContractSchemaRefSchema),
   output: ContractSchemaRefSchema,
   errors: Type.Optional(Type.Array(ContractErrorRefSchema)),
@@ -518,6 +519,7 @@ export type ContractOperation = {
   subject: string;
   input: ContractSchemaRef;
   progress?: ContractSchemaRef;
+  update?: ContractSchemaRef;
   output: ContractSchemaRef;
   errors?: ContractErrorRef[];
   transfer?: {
@@ -560,6 +562,7 @@ export type ContractFeed = {
 
 export type ContractJobQueueResource = {
   payload: ContractSchemaRef;
+  update?: ContractSchemaRef;
   result?: ContractSchemaRef;
   maxDeliver?: number;
   backoffMs?: number[];
@@ -568,7 +571,6 @@ export type ContractJobQueueResource = {
   progress?: boolean;
   logs?: boolean;
   dlq?: boolean;
-  concurrency?: number;
   keyConcurrency?: JobKeyConcurrency;
   queue?: JobQueueDepth;
   docs?: ContractDocs;
@@ -916,6 +918,7 @@ export type ContractSourceOperation<
   version: `v${number}`;
   input: ContractSchemaRef<TSchemaName>;
   progress?: ContractSchemaRef<TSchemaName>;
+  update?: ContractSchemaRef<TSchemaName>;
   output: ContractSchemaRef<TSchemaName>;
   errors?: readonly TErrorName[];
   transfer?: {
@@ -970,6 +973,7 @@ export type ContractSourceJobQueue<
   TSchemaName extends string = string,
 > = {
   payload: ContractSchemaRef<TSchemaName>;
+  update?: ContractSchemaRef<TSchemaName>;
   result?: ContractSchemaRef<TSchemaName>;
   maxDeliver?: number;
   backoffMs?: readonly number[];
@@ -978,7 +982,6 @@ export type ContractSourceJobQueue<
   progress?: boolean;
   logs?: boolean;
   dlq?: boolean;
-  concurrency?: number;
   keyConcurrency?: {
     key: readonly string[];
     maxActive?: number;
@@ -1002,8 +1005,7 @@ export type ContractSourceEventConsumerGroup = {
   uses?: Record<string, readonly string[]>;
   self?: readonly string[];
   replay?: "new" | "all";
-  ordering?: "strict";
-  concurrency?: number;
+  ordering?: "strict" | "parallel";
   ackWaitMs?: number;
   maxDeliver?: number;
   backoffMs?: readonly number[];
@@ -1278,6 +1280,8 @@ type ResolveSchemaTypeFromMap<
 
 export type ContractJobsMetadata = Record<string, {
   payload: unknown;
+  update?: unknown;
+  updateSchema?: SchemaLike;
   result: unknown;
 }>;
 export type ContractKvMetadata = Record<string, {
@@ -1309,6 +1313,9 @@ type ProjectedJobs<
 > = T extends ContractSourceJobs<string> ? {
     [K in keyof T]: {
       payload: ResolveSchemaTypeFromMap<TSchemas, T[K]["payload"]>;
+      update: T[K] extends { update: infer TUpdate }
+        ? ResolveSchemaTypeFromMap<TSchemas, TUpdate>
+        : never;
       result: ResolveSchemaTypeFromMap<TSchemas, T[K]["result"]>;
     };
   }
@@ -1511,7 +1518,10 @@ type ProjectedOperations<
       & OperationDesc<
         ResolveSchemaFromMap<TSchemas, T[K]["input"]>,
         ResolveSchemaFromMap<TSchemas, T[K]["progress"]>,
-        ResolveSchemaFromMap<TSchemas, T[K]["output"]>
+        ResolveSchemaFromMap<TSchemas, T[K]["output"]>,
+        T[K]["errors"] extends readonly string[] ? T[K]["errors"] : undefined,
+        readonly RuntimeRpcErrorDesc[] | undefined,
+        ResolveSchemaFromMap<TSchemas, T[K]["update"]>
       >
       & {
         subject: ProjectedOperationSubject<K, T[K]>;
@@ -2616,6 +2626,7 @@ function collectReachableSchemaNames(contract: TrellisContractV1): Set<string> {
   for (const operation of Object.values(contract.operations ?? {})) {
     collectSchemaRef(reachableSchemas, operation.input);
     collectSchemaRef(reachableSchemas, operation.progress);
+    collectSchemaRef(reachableSchemas, operation.update);
     collectSchemaRef(reachableSchemas, operation.output);
     for (const signal of Object.values(operation.signals ?? {})) {
       collectSchemaRef(reachableSchemas, signal.input);
@@ -2639,6 +2650,7 @@ function collectReachableSchemaNames(contract: TrellisContractV1): Set<string> {
 
   for (const job of Object.values(contract.jobs ?? {})) {
     collectSchemaRef(reachableSchemas, job.payload);
+    collectSchemaRef(reachableSchemas, job.update);
     collectSchemaRef(reachableSchemas, job.result);
   }
 
@@ -3086,6 +3098,7 @@ function operation(operation: ContractOperation): ContractOperation {
     subject: operation.subject,
     input: schemaRef(operation.input),
     ...(operation.progress ? { progress: schemaRef(operation.progress) } : {}),
+    ...(operation.update ? { update: schemaRef(operation.update) } : {}),
     output: schemaRef(operation.output),
     ...(operation.transfer
       ? {
@@ -3207,7 +3220,6 @@ function eventConsumerGroup(
     ...(group.self ? { self: sortEventConsumerSelf(group.self) } : {}),
     replay: group.replay ?? "new",
     ordering: group.ordering ?? "strict",
-    concurrency: group.concurrency ?? 1,
     ...(group.ackWaitMs !== undefined ? { ackWaitMs: group.ackWaitMs } : {}),
     ...(group.maxDeliver !== undefined ? { maxDeliver: group.maxDeliver } : {}),
     ...(group.backoffMs ? { backoffMs: [...group.backoffMs] } : {}),
@@ -3334,6 +3346,7 @@ function jobQueue(
 ): ContractJobQueue {
   return {
     payload: schemaRef(queue.payload),
+    ...(queue.update ? { update: schemaRef(queue.update) } : {}),
     ...(queue.result ? { result: schemaRef(queue.result) } : {}),
     ...(queue.maxDeliver !== undefined ? { maxDeliver: queue.maxDeliver } : {}),
     ...(queue.backoffMs ? { backoffMs: [...queue.backoffMs] } : {}),
@@ -3344,9 +3357,6 @@ function jobQueue(
     ...(queue.progress !== undefined ? { progress: queue.progress } : {}),
     ...(queue.logs !== undefined ? { logs: queue.logs } : {}),
     ...(queue.dlq !== undefined ? { dlq: queue.dlq } : {}),
-    ...(queue.concurrency !== undefined
-      ? { concurrency: queue.concurrency }
-      : {}),
     ...(queue.keyConcurrency
       ? { keyConcurrency: jobKeyConcurrency(queueType, queue.keyConcurrency) }
       : {}),
@@ -3624,6 +3634,7 @@ function emitJobs(
       queueType,
       {
         payload: { ...queue.payload },
+        ...(queue.update ? { update: { ...queue.update } } : {}),
         ...(queue.result ? { result: { ...queue.result } } : {}),
         ...(queue.maxDeliver !== undefined
           ? { maxDeliver: queue.maxDeliver }
@@ -3638,9 +3649,6 @@ function emitJobs(
         ...(queue.progress !== undefined ? { progress: queue.progress } : {}),
         ...(queue.logs !== undefined ? { logs: queue.logs } : {}),
         ...(queue.dlq !== undefined ? { dlq: queue.dlq } : {}),
-        ...(queue.concurrency !== undefined
-          ? { concurrency: queue.concurrency }
-          : {}),
         ...(queue.keyConcurrency
           ? {
             keyConcurrency: jobKeyConcurrency(queueType, queue.keyConcurrency),
@@ -3669,6 +3677,7 @@ function emitEventConsumers(
 }
 
 function buildContractJobsMetadata(
+  schemas: ContractSourceSchemas | undefined,
   jobs: ContractSourceJobs | undefined,
 ): ContractJobsMetadata {
   if (!jobs) {
@@ -3678,6 +3687,18 @@ function buildContractJobsMetadata(
   return Object.fromEntries(
     Object.keys(jobs).map((queueType) => [queueType, {
       payload: undefined,
+      update: undefined,
+      ...(jobs[queueType].update
+        ? {
+          updateSchema: schema(
+            resolveSchemaRef(
+              schemas,
+              jobs[queueType].update,
+              `job '${queueType}' update`,
+            ),
+          ),
+        }
+        : {}),
       result: undefined,
     }]),
   ) as ContractJobsMetadata;
@@ -3911,6 +3932,9 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
         };
         if (operation.progress) {
           emitted.progress = { ...operation.progress };
+        }
+        if (operation.update) {
+          emitted.update = { ...operation.update };
         }
         if (operation.transfer) {
           emitted.transfer = { ...operation.transfer, direction: "send" };
@@ -4207,6 +4231,15 @@ function buildOwnedApi(source: TrellisContractSource): ApiShape {
             ),
           )
           : undefined,
+        update: operation.update
+          ? schema(
+            resolveSchemaRef(
+              source.schemas,
+              operation.update,
+              `operation '${name}' update`,
+            ),
+          )
+          : undefined,
         output: operation.output
           ? schema(
             resolveSchemaRef(
@@ -4424,12 +4457,6 @@ function assertValidEventConsumers(
         `event consumer group '${groupName}' must declare at least one dependency or self event`,
       );
     }
-    if ((group.ordering ?? "strict") === "strict" && group.concurrency !== 1) {
-      throw new Error(
-        `event consumer group '${groupName}' with strict ordering requires concurrency 1`,
-      );
-    }
-
     for (const [alias, eventNames] of Object.entries(group.uses ?? {})) {
       if (eventNames.length === 0) {
         throw new Error(
@@ -5214,7 +5241,10 @@ function defineContract(
     use: createUseHelper(
       () => contract,
     ),
-    [CONTRACT_JOBS_METADATA]: buildContractJobsMetadata(source.jobs),
+    [CONTRACT_JOBS_METADATA]: buildContractJobsMetadata(
+      source.schemas,
+      source.jobs,
+    ),
     [CONTRACT_KV_METADATA]: buildContractKvMetadata(
       source.resources,
       source.schemas,

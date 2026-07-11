@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
-use std::pin::Pin;
+use tokio::sync::oneshot;
 
 use serde_json::Value;
 
@@ -91,11 +94,44 @@ impl RouteCapabilities {
 
 type OperationWatch<TProgress, TOutput> =
     Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>;
+const FEED_CANCEL_TOMBSTONE_TTL: Duration = Duration::from_secs(30);
+const MAX_FEED_CANCEL_TOMBSTONES: usize = 1_024;
+
+enum FeedCancellationState {
+    Active(oneshot::Sender<()>),
+    Cancelled(Instant),
+}
+
+type FeedCancellations = Arc<Mutex<HashMap<(String, String), FeedCancellationState>>>;
+
+struct FeedCancellation {
+    receiver: oneshot::Receiver<()>,
+    key: (String, String),
+    cancellations: FeedCancellations,
+}
+
+impl Future for FeedCancellation {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.receiver).poll(context).map(|_| ())
+    }
+}
+
+impl Drop for FeedCancellation {
+    fn drop(&mut self) {
+        self.cancellations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.key);
+    }
+}
 
 /// An in-memory subject router for descriptor-backed RPC handlers.
 #[derive(Default)]
 pub struct Router {
     handlers: HashMap<String, Route>,
+    feed_cancellations: FeedCancellations,
 }
 
 impl Router {
@@ -142,6 +178,7 @@ impl Router {
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handler = Arc::new(handler);
+        let cancellations = Arc::clone(&self.feed_cancellations);
         self.handlers.insert(
             D::SUBJECT.to_string(),
             Route {
@@ -149,13 +186,44 @@ impl Router {
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
+                    let cancellations = Arc::clone(&cancellations);
                     let input =
                         serde_json::from_slice::<D::Input>(&payload).map_err(ServerError::Json);
                     Box::pin(async move {
                         let input = input?;
-                        Ok(HandlerResponse::FeedStream(feed_response_stream(handler(
-                            ctx, input,
-                        ))))
+                        let reply_to = ctx.reply_to.clone().ok_or_else(|| {
+                            ServerError::Nats("feed request is missing a reply inbox".to_string())
+                        })?;
+                        let key = (D::SUBJECT.to_string(), reply_to);
+                        let (cancel, receiver) = oneshot::channel();
+                        let mut states = cancellations
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let now = Instant::now();
+                        states.retain(|_, state| {
+                            !matches!(state, FeedCancellationState::Cancelled(at) if now.duration_since(*at) >= FEED_CANCEL_TOMBSTONE_TTL)
+                        });
+                        match states.remove(&key) {
+                            Some(FeedCancellationState::Cancelled(_)) => {
+                                let _ = cancel.send(());
+                            }
+                            Some(FeedCancellationState::Active(previous)) => {
+                                let _ = previous.send(());
+                                states.insert(key.clone(), FeedCancellationState::Active(cancel));
+                            }
+                            None => {
+                                states.insert(key.clone(), FeedCancellationState::Active(cancel));
+                            }
+                        }
+                        drop(states);
+                        let cancellation = FeedCancellation {
+                            receiver,
+                            key,
+                            cancellations,
+                        };
+                        Ok(HandlerResponse::FeedStream(feed_response_stream(
+                            handler(ctx, input).take_until(cancellation),
+                        )))
                     })
                 },
             ),
@@ -521,8 +589,48 @@ impl Router {
             .handlers
             .get(subject)
             .ok_or_else(|| ServerError::MissingHandler(subject.to_string()))?;
+        if let Some(reply_to) = feed_cancel_reply_to(&payload)
+            .filter(|reply_to| context.reply_to.as_deref() == Some(reply_to.as_str()))
+        {
+            let key = (subject.to_string(), reply_to);
+            let mut states = self
+                .feed_cancellations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let now = Instant::now();
+            states.retain(|_, state| {
+                !matches!(state, FeedCancellationState::Cancelled(at) if now.duration_since(*at) >= FEED_CANCEL_TOMBSTONE_TTL)
+            });
+            match states.remove(&key) {
+                Some(FeedCancellationState::Active(cancel)) => {
+                    let _ = cancel.send(());
+                }
+                Some(FeedCancellationState::Cancelled(_)) | None => {
+                    let tombstones = states
+                        .values()
+                        .filter(|state| matches!(state, FeedCancellationState::Cancelled(_)))
+                        .count();
+                    if tombstones < MAX_FEED_CANCEL_TOMBSTONES {
+                        states.insert(key, FeedCancellationState::Cancelled(now));
+                    }
+                }
+            }
+            return Ok(HandlerResponse::Frames(Vec::new()));
+        }
         (route.handler)(context, payload).await
     }
+}
+
+fn feed_cancel_reply_to(payload: &[u8]) -> Option<String> {
+    let value = serde_json::from_slice::<Value>(payload).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    object
+        .get("_trellisFeedCancel")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 fn feed_response_stream<TEvent>(

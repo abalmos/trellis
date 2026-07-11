@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::task::JoinHandle;
@@ -32,6 +33,31 @@ const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
 const DEFAULT_AUTHORITY_RETRY_DELAY_MS: u64 = 1_000;
 static FEED_INBOX_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+struct FeedCancelGuard {
+    runtime: tokio::runtime::Handle,
+    nats: async_nats::Client,
+    auth: Arc<SessionAuth>,
+    subject: String,
+    reply: String,
+    payload: Bytes,
+}
+
+impl Drop for FeedCancelGuard {
+    fn drop(&mut self) {
+        let nats = self.nats.clone();
+        let subject = self.subject.clone();
+        let reply = self.reply.clone();
+        let payload = self.payload.clone();
+        let headers = signed_headers(&self.auth, &subject, &payload);
+        self.runtime.spawn(async move {
+            let _ = nats
+                .publish_with_reply_and_headers(subject, reply, headers, payload)
+                .await;
+            let _ = nats.flush().await;
+        });
+    }
+}
 
 pub(crate) fn signed_headers(auth: &SessionAuth, subject: &str, payload: &[u8]) -> HeaderMap {
     let iat = now_iat_seconds() as i64;
@@ -945,7 +971,7 @@ async fn connect_bootstrapped_service(
 
     Ok(TrellisClient {
         nats,
-        auth,
+        auth: Arc::new(auth),
         timeout_ms,
         service_bootstrap_binding,
         health_heartbeat_task,
@@ -965,7 +991,7 @@ pub struct UserConnectOptions<'a> {
 /// A low-level Trellis client over NATS request/reply and publish primitives.
 pub struct TrellisClient {
     nats: async_nats::Client,
-    auth: SessionAuth,
+    auth: Arc<SessionAuth>,
     timeout_ms: u64,
     service_bootstrap_binding: Option<Value>,
     health_heartbeat_task: Option<JoinHandle<()>>,
@@ -1137,7 +1163,7 @@ impl TrellisClient {
 
         Ok(Self {
             nats,
-            auth,
+            auth: Arc::new(auth),
             timeout_ms: opts.timeout_ms,
             service_bootstrap_binding: None,
             health_heartbeat_task,
@@ -1180,7 +1206,7 @@ impl TrellisClient {
 
         Ok(Self {
             nats,
-            auth,
+            auth: Arc::new(auth),
             timeout_ms: opts.timeout_ms,
             service_bootstrap_binding: None,
             health_heartbeat_task: None,
@@ -1436,6 +1462,17 @@ impl TrellisClient {
             self.auth.inbox_prefix(),
             FEED_INBOX_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
+        let cancel_payload = Bytes::from(serde_json::to_vec(&serde_json::json!({
+            "_trellisFeedCancel": inbox.clone(),
+        }))?);
+        let cancel = FeedCancelGuard {
+            runtime: tokio::runtime::Handle::current(),
+            nats: self.nats.clone(),
+            auth: Arc::clone(&self.auth),
+            subject: D::SUBJECT.to_string(),
+            reply: inbox.clone(),
+            payload: cancel_payload,
+        };
         let mut subscriber = timeout(
             std::time::Duration::from_millis(self.timeout_ms),
             self.nats.subscribe(inbox.clone()),
@@ -1475,10 +1512,10 @@ impl TrellisClient {
 
         let first_event = decode_feed_message::<D>(first)?;
         let stream = stream::try_unfold(
-            (subscriber, first_event),
-            |(mut subscriber, first_event)| async move {
+            (subscriber, first_event, cancel),
+            |(mut subscriber, first_event, cancel)| async move {
                 if let Some(event) = first_event {
-                    return Ok(Some((event, (subscriber, None))));
+                    return Ok(Some((event, (subscriber, None, cancel))));
                 }
 
                 match subscriber.next().await {
@@ -1488,7 +1525,7 @@ impl TrellisClient {
                                 "feed emitted duplicate ready acknowledgement".to_string(),
                             )
                         })?;
-                        Ok(Some((event, (subscriber, None))))
+                        Ok(Some((event, (subscriber, None, cancel))))
                     }
                     None => Ok(None),
                 }

@@ -183,6 +183,10 @@ fn collect_reachable_schema_names(contract: &Value) -> std::collections::BTreeSe
         );
         collect_schema_ref(
             &mut reachable,
+            operation.and_then(|value| value.get("update")),
+        );
+        collect_schema_ref(
+            &mut reachable,
             operation.and_then(|value| value.get("progress")),
         );
         collect_schema_ref(
@@ -255,6 +259,7 @@ fn collect_reachable_schema_names(contract: &Value) -> std::collections::BTreeSe
     {
         let job = object(Some(job));
         collect_schema_ref(&mut reachable, job.and_then(|value| value.get("payload")));
+        collect_schema_ref(&mut reachable, job.and_then(|value| value.get("update")));
         collect_schema_ref(&mut reachable, job.and_then(|value| value.get("result")));
     }
 
@@ -778,6 +783,13 @@ fn validate_schema_refs(manifest: &ContractManifest) -> Result<(), ContractsErro
             &operation.input.schema,
             &format!("operation '{name}' input"),
         )?;
+        if let Some(update) = &operation.update {
+            assert_schema_ref_exists(
+                manifest,
+                &update.schema,
+                &format!("operation '{name}' update"),
+            )?;
+        }
         if let Some(progress) = &operation.progress {
             assert_schema_ref_exists(
                 manifest,
@@ -841,6 +853,13 @@ fn validate_schema_refs(manifest: &ContractManifest) -> Result<(), ContractsErro
             &queue.payload.schema,
             &format!("jobs queue '{queue_type}' payload"),
         )?;
+        if let Some(update) = &queue.update {
+            assert_schema_ref_exists(
+                manifest,
+                &update.schema,
+                &format!("jobs queue '{queue_type}' update"),
+            )?;
+        }
         if let Some(result) = &queue.result {
             assert_schema_ref_exists(
                 manifest,
@@ -936,15 +955,6 @@ fn validate_event_consumers(manifest: &ContractManifest) -> Result<(), Contracts
                 kind: "contract",
                 details: format!(
                     "eventConsumers.{group_name}: must declare at least one dependency or self event"
-                ),
-            });
-        }
-        if group.ordering == crate::ContractEventConsumerOrdering::Strict && group.concurrency != 1
-        {
-            return Err(ContractsError::SchemaValidation {
-                kind: "contract",
-                details: format!(
-                    "eventConsumers.{group_name}: strict ordering requires concurrency 1"
                 ),
             });
         }

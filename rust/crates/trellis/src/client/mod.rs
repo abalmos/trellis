@@ -36,7 +36,8 @@ pub use operations::{
     control_subject, OperationDescriptor, OperationEvent, OperationInputBuilder, OperationInvoker,
     OperationRef, OperationRefData, OperationSignalAccepted, OperationSnapshot, OperationState,
     OperationTransferInputBuilder, OperationTransferProgress, OperationTransferStartError,
-    OperationTransport, StartedOperationTransfer, TransferOperationDescriptor,
+    OperationTransport, OperationUpdateDescriptor, OperationUpdateEvent, StartedOperationTransfer,
+    TransferOperationDescriptor,
 };
 pub use proof::{build_event_proof_input, verify_event_proof, verify_proof};
 pub use state::{

@@ -42,8 +42,6 @@ pub struct EventConsumerResourceBinding {
     pub replay: EventConsumerReplay,
     /// Ordering policy used by the consumer group.
     pub ordering: EventConsumerOrdering,
-    /// Handler concurrency configured for this group.
-    pub concurrency: i64,
     /// Ack wait in milliseconds for the durable consumer.
     pub ack_wait_ms: i64,
     /// Maximum delivery attempts before termination.
@@ -64,6 +62,7 @@ pub enum EventConsumerReplay {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventConsumerOrdering {
     Strict,
+    Parallel,
     Unknown,
 }
 
@@ -113,12 +112,16 @@ pub struct JobsQueueResourceBinding {
     pub queue_type: String,
     /// Publish prefix for job lifecycle events.
     pub publish_prefix: String,
+    /// Publish prefix for live-only job updates, when declared.
+    pub updates_prefix: Option<String>,
     /// NATS subject consumed by workers for this queue.
     pub work_subject: String,
     /// Durable consumer name for this queue.
     pub consumer_name: String,
     /// JSON schema reference for queued job payloads.
     pub payload: JobsSchemaRef,
+    /// Optional JSON schema reference for live-only updates.
+    pub update: Option<JobsSchemaRef>,
     /// Optional JSON schema reference for successful job results.
     pub result: Option<JobsSchemaRef>,
     /// Maximum delivery attempts before dead-letter handling.
@@ -135,8 +138,6 @@ pub struct JobsQueueResourceBinding {
     pub logs: bool,
     /// Whether dead-letter handling is enabled for this queue.
     pub dlq: bool,
-    /// Suggested worker concurrency for this queue.
-    pub concurrency: i64,
     /// Optional normalized keyed concurrency policy for this queue.
     pub key_concurrency: Option<crate::jobs::bindings::JobKeyConcurrencyBinding>,
     /// Optional normalized queue-depth policy for keyed queues.

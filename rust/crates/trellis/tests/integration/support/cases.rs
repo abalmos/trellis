@@ -110,6 +110,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "operations_client_watches_progress",
     ),
     IntegrationCase::live(
+        "operations.live-updates-are-typed-ordered-and-transient",
+        "operations",
+        "operations_live_updates_are_typed_ordered_and_transient",
+    ),
+    IntegrationCase::live(
         "operations.client-waits-for-completion",
         "operations",
         "operations_client_waits_for_completion",
@@ -325,6 +330,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "jobs_keyed_jobs_serialize_same_key",
     ),
     IntegrationCase::live(
+        "jobs.keyed-active-redelivery-after-restart",
+        "jobs",
+        "jobs_keyed_active_redelivery_after_restart",
+    ),
+    IntegrationCase::live(
         "jobs.keyed-jobs-reject-queue-full",
         "jobs",
         "jobs_keyed_jobs_reject_queue_full",
@@ -358,6 +368,11 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "jobs.job-context-propagates-request-and-trace",
         "jobs",
         "jobs_job_context_propagates_request_and_trace",
+    ),
+    IntegrationCase::live(
+        "jobs.live-updates-are-typed-and-stop-at-terminal-state",
+        "jobs",
+        "jobs_live_updates_are_typed_and_stop_at_terminal_state",
     ),
     IntegrationCase::live(
         "jobs.admin-list-services-filters-stale-worker-heartbeats",
@@ -951,6 +966,16 @@ pub(crate) const RUST_SERVICE_INTEGRATION_CASES: &[IntegrationCase] = &[
         "event-consumers.readiness-lost-does-not-nak-delivered-group-message",
         "event_consumers",
         "event_consumers_readiness_lost_does_not_nak_delivered_group_message",
+    ),
+    IntegrationCase::live(
+        "event-consumers.parallel-group-runs-messages-concurrently",
+        "event_consumers",
+        "event_consumers_parallel_group_runs_messages_concurrently",
+    ),
+    IntegrationCase::live(
+        "event-consumers.strict-group-rejects-parallel-workers",
+        "event_consumers",
+        "event_consumers_strict_group_rejects_parallel_workers",
     ),
     IntegrationCase::live(
         "prepared-events.prepared-publish-preserves-custom-headers-and-annotates-handler-error",

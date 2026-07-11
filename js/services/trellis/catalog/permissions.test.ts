@@ -1202,7 +1202,15 @@ Deno.test("jobs admin service receives built-in Jobs runtime subjects", () => {
     });
     assertEquals(publishSubjects.includes("$JS.API.STREAM.INFO.JOBS"), true);
     assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.CREATE.JOBS"),
+      true,
+    );
+    assertEquals(
       publishSubjects.includes("$JS.API.CONSUMER.DURABLE.CREATE.JOBS.>"),
+      true,
+    );
+    assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.LIST.JOBS"),
       true,
     );
     assertEquals(
@@ -1288,6 +1296,10 @@ Deno.test("event log service receives built-in event stream runtime subjects", (
     });
     assertEquals(
       publishSubjects.includes("$JS.API.STREAM.INFO.trellis"),
+      true,
+    );
+    assertEquals(
+      publishSubjects.includes("$JS.API.CONSUMER.CREATE.trellis"),
       true,
     );
     assertEquals(

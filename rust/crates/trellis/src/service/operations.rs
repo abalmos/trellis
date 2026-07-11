@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 
 use super::{RequestContext, ServerError, UploadTransferGrant};
 
@@ -185,6 +185,18 @@ pub struct OperationControlRequest {
     pub signal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<Value>,
+    /// Whether this watch request opts in to live-only updates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_updates: Option<bool>,
+}
+
+/// One item in an opt-in operation stream that includes live updates.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OperationLiveEvent<TProgress = Value, TUpdate = Value, TOutput = Value> {
+    /// Durable lifecycle snapshot.
+    Snapshot(OperationSnapshot<TProgress, TOutput>),
+    /// Live-only update that never mutates the durable snapshot.
+    Update(crate::client::OperationUpdateEvent<TUpdate>),
 }
 
 pub trait OperationDescriptor {
@@ -205,6 +217,15 @@ pub trait OperationDescriptor {
     const PROGRESS_SCHEMA_JSON: Option<&'static str>;
     const OUTPUT_SCHEMA_JSON: &'static str;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str;
+}
+
+/// Service descriptor extension implemented only by operations that declare live updates.
+pub trait OperationUpdateDescriptor: OperationDescriptor {
+    /// Contract-defined cumulative update payload.
+    type Update: Serialize + DeserializeOwned + Send + 'static;
+
+    /// JSON Schema used to validate updates before publication.
+    const UPDATE_SCHEMA_JSON: &'static str;
 }
 
 impl<D> OperationDescriptor for D
@@ -278,8 +299,16 @@ struct StoredOperation {
     operation: String,
     snapshot: OperationSnapshot<Value, Value>,
     updates: watch::Sender<OperationSnapshot<Value, Value>>,
+    live_events: broadcast::Sender<StoredOperationEvent>,
+    live_sequence: u64,
     signals: Vec<OperationSignal>,
     signal_updates: watch::Sender<u64>,
+}
+
+#[derive(Debug, Clone)]
+enum StoredOperationEvent {
+    Snapshot(OperationSnapshot<Value, Value>),
+    Update(crate::client::OperationUpdateEvent<Value>),
 }
 
 #[derive(Debug)]
@@ -384,6 +413,7 @@ where
             error: None,
         };
         let (updates, _receiver) = watch::channel(snapshot.clone());
+        let (live_events, _receiver) = broadcast::channel(64);
         let (signal_updates, _receiver) = watch::channel(0);
         let mut operations = self.inner.operations.lock().await;
         if operations.contains_key(&operation_id) {
@@ -396,6 +426,8 @@ where
                 operation: D::KEY.to_string(),
                 snapshot: snapshot.clone(),
                 updates,
+                live_events,
+                live_sequence: 1,
                 signals: Vec::new(),
                 signal_updates,
             },
@@ -524,7 +556,9 @@ where
         }
 
         let (updates, _receiver) = watch::channel(snapshot.clone());
+        let (live_events, _receiver) = broadcast::channel(64);
         let (signal_updates, _receiver) = watch::channel(0);
+        let live_sequence = snapshot.revision;
         let mut operations = self.inner.operations.lock().await;
         operations.insert(
             operation_id,
@@ -533,6 +567,8 @@ where
                 operation: operation.clone(),
                 snapshot,
                 updates,
+                live_events,
+                live_sequence,
                 signals: Vec::new(),
                 signal_updates,
             },
@@ -616,6 +652,69 @@ where
             Result<OperationSnapshot<D::Progress, D::Output>, ServerError>,
         > = Box::pin(stream::once(async move { Ok(initial) }).chain(updates));
         Ok(snapshots)
+    }
+
+    /// Watch the current snapshot and ordered future lifecycle and live update events.
+    pub async fn live_events(
+        &self,
+        operation_id: impl Into<String>,
+    ) -> Result<
+        BoxStream<
+            'static,
+            Result<OperationLiveEvent<D::Progress, D::Update, D::Output>, ServerError>,
+        >,
+        ServerError,
+    >
+    where
+        D: OperationUpdateDescriptor,
+        D::Update: Serialize + DeserializeOwned + Send + 'static,
+    {
+        let operation_id = operation_id.into();
+        let (initial, receiver) = {
+            let operations = self.inner.operations.lock().await;
+            let stored =
+                operations
+                    .get(&operation_id)
+                    .ok_or_else(|| ServerError::OperationNotFound {
+                        operation_id: operation_id.clone(),
+                    })?;
+            self.validate_stored(&operation_id, stored)?;
+            (stored.snapshot.clone(), stored.live_events.subscribe())
+        };
+        let initial = typed_snapshot(initial)?;
+        if initial.state.is_terminal() {
+            return Ok(Box::pin(stream::once(async move {
+                Ok(OperationLiveEvent::Snapshot(initial))
+            })));
+        }
+        let events = stream::unfold((receiver, false), |(mut receiver, done)| async move {
+            if done {
+                return None;
+            }
+            match receiver.recv().await {
+                Ok(StoredOperationEvent::Snapshot(snapshot)) => {
+                    let done = snapshot.state.is_terminal();
+                    Some((
+                        typed_snapshot(snapshot).map(OperationLiveEvent::Snapshot),
+                        (receiver, done),
+                    ))
+                }
+                Ok(StoredOperationEvent::Update(update)) => Some((
+                    typed_update(update).map(OperationLiveEvent::Update),
+                    (receiver, false),
+                )),
+                Err(broadcast::error::RecvError::Closed) => None,
+                Err(broadcast::error::RecvError::Lagged(count)) => Some((
+                    Err(ServerError::Nats(format!(
+                        "operation live update stream lagged by {count} events"
+                    ))),
+                    (receiver, true),
+                )),
+            }
+        });
+        Ok(Box::pin(
+            stream::once(async move { Ok(OperationLiveEvent::Snapshot(initial)) }).chain(events),
+        ))
     }
 
     /// Cancel an operation id and return its resulting snapshot.
@@ -730,6 +829,49 @@ where
             None,
         )
         .await
+    }
+
+    /// Emit a validated live-only update without changing the durable snapshot.
+    pub async fn emit_update(
+        &self,
+        update: D::Update,
+    ) -> Result<crate::client::OperationUpdateEvent<D::Update>, ServerError>
+    where
+        D: OperationUpdateDescriptor,
+        D::Update: Serialize + DeserializeOwned + Clone + Send + 'static,
+    {
+        let update_value = serde_json::to_value(&update)?;
+        super::validate_input_schema(D::UPDATE_SCHEMA_JSON, &update_value)?;
+        let mut operations = self.operation.inner.operations.lock().await;
+        let stored = operations.get_mut(&self.operation_ref.id).ok_or_else(|| {
+            ServerError::OperationNotFound {
+                operation_id: self.operation_ref.id.clone(),
+            }
+        })?;
+        self.operation
+            .validate_stored(&self.operation_ref.id, stored)?;
+        if stored.snapshot.state.is_terminal() {
+            return Err(ServerError::OperationTerminal {
+                operation_id: self.operation_ref.id.clone(),
+                state: operation_state_name(&stored.snapshot.state).to_string(),
+            });
+        }
+        stored.live_sequence += 1;
+        let event = crate::client::OperationUpdateEvent {
+            operation_id: self.operation_ref.id.clone(),
+            sequence: stored.live_sequence,
+            timestamp: now_timestamp(),
+            update,
+        };
+        let _ = stored.live_events.send(StoredOperationEvent::Update(
+            crate::client::OperationUpdateEvent {
+                operation_id: event.operation_id.clone(),
+                sequence: event.sequence,
+                timestamp: event.timestamp.clone(),
+                update: update_value,
+            },
+        ));
+        Ok(event)
     }
 
     /// Complete the operation with typed output.
@@ -904,6 +1046,7 @@ where
         }
 
         stored.snapshot.revision += 1;
+        stored.live_sequence += 1;
         let now = now_timestamp();
         stored.snapshot.state = state;
         stored.snapshot.updated_at = Some(now.clone());
@@ -921,8 +1064,25 @@ where
         }
         let snapshot = stored.snapshot.clone();
         let _ = stored.updates.send(snapshot.clone());
+        let _ = stored
+            .live_events
+            .send(StoredOperationEvent::Snapshot(snapshot.clone()));
         typed_snapshot(snapshot)
     }
+}
+
+fn typed_update<TUpdate>(
+    event: crate::client::OperationUpdateEvent<Value>,
+) -> Result<crate::client::OperationUpdateEvent<TUpdate>, ServerError>
+where
+    TUpdate: DeserializeOwned,
+{
+    Ok(crate::client::OperationUpdateEvent {
+        operation_id: event.operation_id,
+        sequence: event.sequence,
+        timestamp: event.timestamp,
+        update: serde_json::from_value(event.update)?,
+    })
 }
 
 fn typed_snapshot<TProgress, TOutput>(

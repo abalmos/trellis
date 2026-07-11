@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use async_nats::jetstream::{self, consumer};
@@ -70,6 +71,14 @@ impl JobsRuntime {
                     durable_name: Some(consumer_name.to_string()),
                     filter_subject: filter_subject.to_string(),
                     ack_policy: consumer::AckPolicy::Explicit,
+                    metadata: HashMap::from([
+                        ("trellis.managed_by".to_string(), "platform".to_string()),
+                        (
+                            "trellis.contract_id".to_string(),
+                            "trellis.jobs@v1".to_string(),
+                        ),
+                        ("trellis.group".to_string(), consumer_name.to_string()),
+                    ]),
                     ..Default::default()
                 },
             )

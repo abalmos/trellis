@@ -22,15 +22,16 @@ fn parse_jobs_binding_maps_queue_values() {
             "document-process".to_string(),
             json!({
                 "publishPrefix": "trellis.jobs.documents.document-process",
+                "updatesPrefix": "trellis.job_updates.documents.document-process",
                 "workSubject": "trellis.work.documents.document-process",
                 "consumerName": "documents-document-process",
                 "maxDeliver": 5,
                 "backoffMs": [5000, 30000],
                 "ackWaitMs": 60000,
                 "defaultDeadlineMs": 120000,
+                "update": { "schema": "DocumentUpdate" },
                 "progress": true,
-                "logs": true,
-                "concurrency": 2
+                "logs": true
             }),
         )]),
     )
@@ -55,9 +56,41 @@ fn parse_jobs_binding_maps_queue_values() {
     assert_eq!(queue.backoff_ms, vec![5000, 30000]);
     assert_eq!(queue.ack_wait_ms, 60000);
     assert_eq!(queue.default_deadline_ms, Some(120000));
+    assert_eq!(queue.update.as_deref(), Some("DocumentUpdate"));
+    assert_eq!(
+        queue.updates_prefix.as_deref(),
+        Some("trellis.job_updates.documents.document-process")
+    );
     assert!(queue.progress);
     assert!(queue.logs);
-    assert_eq!(queue.concurrency, 2);
+}
+
+#[test]
+fn parse_jobs_binding_rejects_half_configured_updates() {
+    let error = parse_jobs_binding(
+        "trellis/documents",
+        "documents",
+        &BTreeMap::from([(
+            "document-process".to_string(),
+            json!({
+                "publishPrefix": "trellis.jobs.documents.document-process",
+                "updatesPrefix": "trellis.job_updates.documents.document-process",
+                "workSubject": "trellis.work.documents.document-process",
+                "consumerName": "documents-document-process",
+                "maxDeliver": 5,
+                "backoffMs": [],
+                "ackWaitMs": 60000,
+                "progress": false,
+                "logs": false
+            }),
+        )]),
+    )
+    .expect_err("updates prefix without schema should fail");
+
+    assert!(matches!(
+        error,
+        JobsBindingError::InvalidQueueBinding { .. }
+    ));
 }
 
 #[test]
@@ -76,7 +109,6 @@ fn parse_jobs_binding_maps_keyed_queue_policy() {
                 "ackWaitMs": 90000,
                 "progress": true,
                 "logs": true,
-                "concurrency": 8,
                 "keyConcurrency": {
                     "key": ["zendesk", "/origin", "tickets"],
                     "maxActive": 1,
@@ -141,7 +173,6 @@ fn sample_core_binding() -> TrellisBindingsGetResponseBinding {
                     TrellisBindingsGetResponseBindingResourcesJobsQueuesValue {
                         ack_wait_ms: 60_000,
                         backoff_ms: vec![5_000, 30_000],
-                        concurrency: 2,
                         consumer_name: "documents-document-process".to_string(),
                         default_deadline_ms: Some(120_000),
                         dlq: true,
@@ -159,6 +190,8 @@ fn sample_core_binding() -> TrellisBindingsGetResponseBinding {
                                 schema: "DocumentResult".to_string(),
                             },
                         ),
+                        update: None,
+                        updates_prefix: None,
                         queue: None,
                         work_subject: "trellis.work.documents.document-process".to_string(),
                     },
@@ -188,7 +221,6 @@ fn jobs_runtime_binding_try_from_core_binding_maps_jobs_and_work_stream() {
     let queue = runtime.jobs.queues.get("document-process").expect("queue");
     assert_eq!(queue.max_deliver, 5);
     assert_eq!(queue.default_deadline_ms, Some(120_000));
-    assert_eq!(queue.concurrency, 2);
 }
 
 #[test]
@@ -207,8 +239,7 @@ fn parse_jobs_binding_and_runtime_binding_share_same_queue_shape() {
                 "ackWaitMs": 60000,
                 "defaultDeadlineMs": 120000,
                 "progress": true,
-                "logs": true,
-                "concurrency": 2
+                "logs": true
             }),
         )]),
     )
@@ -255,27 +286,6 @@ fn jobs_runtime_binding_try_from_core_binding_rejects_negative_numeric_queue_fie
 
     let error =
         JobsRuntimeBinding::try_from(&binding).expect_err("negative max_deliver should fail");
-    assert!(matches!(
-        error,
-        JobsBindingError::InvalidQueueBinding { queue_type, .. } if queue_type == "document-process"
-    ));
-}
-
-#[test]
-fn jobs_runtime_binding_try_from_core_binding_rejects_concurrency_over_u32_range() {
-    let mut binding = sample_core_binding();
-    binding
-        .resources
-        .jobs
-        .as_mut()
-        .expect("jobs")
-        .queues
-        .get_mut("document-process")
-        .expect("queue")
-        .concurrency = i64::from(u32::MAX) + 1;
-
-    let error =
-        JobsRuntimeBinding::try_from(&binding).expect_err("overflow concurrency should fail");
     assert!(matches!(
         error,
         JobsBindingError::InvalidQueueBinding { queue_type, .. } if queue_type == "document-process"

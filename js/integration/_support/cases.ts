@@ -92,6 +92,14 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "operations.live-updates-are-typed-ordered-and-transient",
+    file:
+      "operations/live_updates_are_typed_ordered_and_transient.integration_test.ts",
+    testName:
+      "operations.live-updates-are-typed-ordered-and-transient observes ordered typed updates without persisting them",
+    runtime: "live-trellis",
+  },
+  {
     id: "operations.client-waits-for-completion",
     file: "operations/client_waits_for_completion.integration_test.ts",
     testName:
@@ -412,6 +420,13 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
+    id: "jobs.keyed-active-redelivery-after-restart",
+    file: "jobs/keyed_active_redelivery_after_restart.integration_test.ts",
+    testName:
+      "jobs.keyed-active-redelivery-after-restart reacquires a released key slot",
+    runtime: "live-trellis",
+  },
+  {
     id: "jobs.keyed-jobs-reject-queue-full",
     file: "jobs/keyed_jobs_reject_queue_full.integration_test.ts",
     testName:
@@ -423,6 +438,14 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     file: "jobs/keyed_jobs_queue_policies_live.integration_test.ts",
     testName:
       "jobs.keyed-jobs-queue-policies-live coalesces, replaces, and removes queued keyed jobs",
+    runtime: "live-trellis",
+  },
+  {
+    id: "jobs.live-updates-are-typed-and-stop-at-terminal-state",
+    file:
+      "jobs/live_updates_are_typed_and_stop_at_terminal_state.integration_test.ts",
+    testName:
+      "jobs.live-updates-are-typed-and-stop-at-terminal-state relays typed job updates through an operation",
     runtime: "live-trellis",
   },
   {

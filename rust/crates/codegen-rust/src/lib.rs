@@ -233,6 +233,10 @@ pub fn generate_rust_sdk(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustEr
         &render_operations_rs(&loaded),
     )?;
     write_rust_if_changed(
+        &opts.out_dir.join("src").join("jobs.rs"),
+        &render_jobs_rs(&loaded),
+    )?;
+    write_rust_if_changed(
         &opts.out_dir.join("src").join("events.rs"),
         &render_events_rs(&loaded),
     )?;
@@ -1725,11 +1729,45 @@ fn render_types_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
                 );
             }
         }
+        if let Some(update) = &operation.update {
+            if !is_empty_object_schema(resolve_schema_ref(loaded, &update.schema)) {
+                renderer.render_named_type(
+                    &format!("{base}Update"),
+                    resolve_schema_ref(loaded, &update.schema),
+                );
+            }
+        }
         if let Some(output) = &operation.output {
             if !is_empty_object_schema(resolve_schema_ref(loaded, &output.schema)) {
                 renderer.render_named_type(
                     &format!("{base}Output"),
                     resolve_schema_ref(loaded, &output.schema),
+                );
+            }
+        }
+    }
+
+    for (key, job) in &loaded.manifest.jobs {
+        let base = key_to_pascal(key);
+        if !is_empty_object_schema(resolve_schema_ref(loaded, &job.payload.schema)) {
+            renderer.render_named_type(
+                &format!("{base}JobPayload"),
+                resolve_schema_ref(loaded, &job.payload.schema),
+            );
+        }
+        if let Some(update) = &job.update {
+            if !is_empty_object_schema(resolve_schema_ref(loaded, &update.schema)) {
+                renderer.render_named_type(
+                    &format!("{base}JobUpdate"),
+                    resolve_schema_ref(loaded, &update.schema),
+                );
+            }
+        }
+        if let Some(result) = &job.result {
+            if !is_empty_object_schema(resolve_schema_ref(loaded, &result.schema)) {
+                renderer.render_named_type(
+                    &format!("{base}JobResult"),
+                    resolve_schema_ref(loaded, &result.schema),
                 );
             }
         }
@@ -2001,6 +2039,14 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
         .manifest
         .operations
         .values()
+        .any(|operation| operation.update.is_some())
+    {
+        lines.push("use trellis_rs::client::OperationUpdateDescriptor;".to_string());
+    }
+    if loaded
+        .manifest
+        .operations
+        .values()
         .any(|op| op.errors.as_ref().is_some_and(|e| !e.is_empty()))
     {
         lines.push("use trellis_rs::service::OperationFailureLike;".to_string());
@@ -2187,8 +2233,110 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
             ));
             lines.push(String::new());
         }
+        if let Some(update) = &operation.update {
+            let update_type = if is_empty_object_schema(resolve_schema_ref(loaded, &update.schema))
+            {
+                "crate::rpc::Empty".to_string()
+            } else {
+                format!("crate::types::{base}Update")
+            };
+            lines.push(format!(
+                "impl OperationUpdateDescriptor for {base}Operation {{"
+            ));
+            lines.push(format!("    type Update = {update_type};"));
+            lines.push(format!(
+                "    const UPDATE_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_UPDATE_SCHEMA_JSON;"
+            ));
+            lines.push("}".to_string());
+            lines.push(String::new());
+        }
     }
 
+    format!("{}\n", lines.join("\n"))
+}
+
+fn render_jobs_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
+    let mut lines = vec![
+        format!("//! Typed jobs descriptors for `{}`.", loaded.manifest.id),
+        String::new(),
+    ];
+    if !loaded.manifest.jobs.is_empty() {
+        lines.push("use trellis_rs::jobs::JobDescriptor;".to_string());
+    }
+    if loaded
+        .manifest
+        .jobs
+        .values()
+        .any(|job| job.update.is_some())
+    {
+        lines.push("use trellis_rs::jobs::JobUpdateDescriptor;".to_string());
+    }
+    if !loaded.manifest.jobs.is_empty() {
+        lines.push(String::new());
+    }
+
+    for (key, job) in &loaded.manifest.jobs {
+        let base = key_to_pascal(key);
+        let schema_base = key_to_schema_constant_base(key);
+        let payload_type =
+            if is_empty_object_schema(resolve_schema_ref(loaded, &job.payload.schema)) {
+                "crate::rpc::Empty".to_string()
+            } else {
+                format!("crate::types::{base}JobPayload")
+            };
+        let result_type = job
+            .result
+            .as_ref()
+            .map(|result| {
+                if is_empty_object_schema(resolve_schema_ref(loaded, &result.schema)) {
+                    "crate::rpc::Empty".to_string()
+                } else {
+                    format!("crate::types::{base}JobResult")
+                }
+            })
+            .unwrap_or_else(|| "serde_json::Value".to_string());
+        lines.push(format!("/// Descriptor for jobs queue `{key}`."));
+        lines.push(format!("pub struct {base}Job;"));
+        lines.push(String::new());
+        lines.push(format!("impl JobDescriptor for {base}Job {{"));
+        lines.push(format!("    type Payload = {payload_type};"));
+        lines.push(format!("    type Result = {result_type};"));
+        lines.push(format!(
+            "    const QUEUE_TYPE: &'static str = {};",
+            string_literal(key)
+        ));
+        lines.push(format!(
+            "    const PAYLOAD_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_JOB_PAYLOAD_SCHEMA_JSON;"
+        ));
+        match &job.result {
+            Some(_) => lines.push(format!(
+                "    const RESULT_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_JOB_RESULT_SCHEMA_JSON);"
+            )),
+            None => lines.push("    const RESULT_SCHEMA_JSON: Option<&'static str> = None;".to_string()),
+        }
+        lines.push("}".to_string());
+        lines.push(String::new());
+
+        if let Some(update) = &job.update {
+            let update_type = if is_empty_object_schema(resolve_schema_ref(loaded, &update.schema))
+            {
+                "crate::rpc::Empty".to_string()
+            } else {
+                format!("crate::types::{base}JobUpdate")
+            };
+            lines.push(format!("impl JobUpdateDescriptor for {base}Job {{"));
+            lines.push(format!("    type Update = {update_type};"));
+            lines.push(format!(
+                "    const UPDATE_SCHEMA: &'static str = {};",
+                string_literal(&update.schema)
+            ));
+            lines.push(format!(
+                "    const UPDATE_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_JOB_UPDATE_SCHEMA_JSON;"
+            ));
+            lines.push("}".to_string());
+            lines.push(String::new());
+        }
+    }
     format!("{}\n", lines.join("\n"))
 }
 
@@ -3232,6 +3380,11 @@ fn render_lib_rs(loaded: &trellis_contracts::LoadedManifest, is_service: bool) -
     } else {
         "pub use operations::*;\n".to_string()
     };
+    let jobs_reexport = if loaded.manifest.jobs.is_empty() {
+        String::new()
+    } else {
+        "pub use jobs::*;\n".to_string()
+    };
     let events_reexport = if loaded.manifest.events.is_empty() {
         String::new()
     } else {
@@ -3258,7 +3411,7 @@ fn render_lib_rs(loaded: &trellis_contracts::LoadedManifest, is_service: bool) -
         String::new()
     };
     format!(
-        "//! Generated Rust SDK crate for one Trellis contract.\n\npub mod client;\n{connect_module}pub mod contract;\npub mod events;\n{feeds_module}pub mod operations;\npub mod rpc;\npub mod schemas;\npub mod types;\n\npub use client::{client_name};\n{connect_reexport}pub use contract::{{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME}};\n{events_reexport}{feeds_reexport}{operations_reexport}pub use rpc::*;\npub use types::*;\n"
+        "//! Generated Rust SDK crate for one Trellis contract.\n\npub mod client;\n{connect_module}pub mod contract;\npub mod events;\n{feeds_module}pub mod jobs;\npub mod operations;\npub mod rpc;\npub mod schemas;\npub mod types;\n\npub use client::{client_name};\n{connect_reexport}pub use contract::{{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME}};\n{events_reexport}{feeds_reexport}{jobs_reexport}{operations_reexport}pub use rpc::*;\npub use types::*;\n"
     )
 }
 
@@ -3299,6 +3452,14 @@ fn render_schemas_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
             "pub const {}_INPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
             base, input_json
         ));
+        if let Some(update) = &operation.update {
+            let update_schema = resolve_schema_ref(loaded, &update.schema);
+            let update_json = serde_json::to_string(update_schema).expect("valid json");
+            lines.push(format!(
+                "pub const {}_UPDATE_SCHEMA_JSON: &str = r#\"{}\"#;",
+                base, update_json
+            ));
+        }
         match &operation.progress {
             Some(progress) => {
                 let progress_schema = resolve_schema_ref(loaded, &progress.schema);
@@ -3347,6 +3508,33 @@ fn render_schemas_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
             lines.push(format!(
                 "pub const {}_SIGNAL_INPUT_SCHEMAS_JSON: &str = r#\"{{}}\"#;",
                 base
+            ));
+        }
+        lines.push(String::new());
+    }
+
+    for (key, job) in &loaded.manifest.jobs {
+        let base = key_to_schema_constant_base(key);
+        let payload_json = serde_json::to_string(resolve_schema_ref(loaded, &job.payload.schema))
+            .expect("valid json");
+        lines.push(format!(
+            "pub const {}_JOB_PAYLOAD_SCHEMA_JSON: &str = r#\"{}\"#;",
+            base, payload_json
+        ));
+        if let Some(update) = &job.update {
+            let update_json = serde_json::to_string(resolve_schema_ref(loaded, &update.schema))
+                .expect("valid json");
+            lines.push(format!(
+                "pub const {}_JOB_UPDATE_SCHEMA_JSON: &str = r#\"{}\"#;",
+                base, update_json
+            ));
+        }
+        if let Some(result) = &job.result {
+            let result_json = serde_json::to_string(resolve_schema_ref(loaded, &result.schema))
+                .expect("valid json");
+            lines.push(format!(
+                "pub const {}_JOB_RESULT_SCHEMA_JSON: &str = r#\"{}\"#;",
+                base, result_json
             ));
         }
         lines.push(String::new());

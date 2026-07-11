@@ -85,7 +85,13 @@ import { RemoteError } from "./errors/RemoteError.ts";
 import { logger, type LoggerLike } from "./globals.ts";
 import { TypedKV } from "./kv.ts";
 import { TrellisErrorDataSchema } from "./models/trellis/TrellisError.ts";
-import type { ActiveJob, JobRef, JobTypeMetadata } from "./jobs.ts";
+import type {
+  ActiveJob,
+  JobRef,
+  JobTypeMetadata,
+  JobUpdatesOptions,
+  JobUpdateSubscription,
+} from "./jobs.ts";
 import type { StoreWaitOptions, TypedStore, TypedStoreEntry } from "./store.ts";
 import {
   OperationInvoker,
@@ -590,6 +596,13 @@ export type OperationProgressOf<
   ? TProgress extends undefined ? unknown
   : InferSchemaType<NonNullable<TProgress>>
   : unknown;
+/** Infers the transient update payload for an operation descriptor. */
+export type OperationUpdateOf<
+  TA extends AnyTrellisAPI,
+  O extends OperationsOf<TA>,
+> = TA["operations"][O] extends { update?: infer TUpdate }
+  ? TUpdate extends undefined ? unknown : InferSchemaType<NonNullable<TUpdate>>
+  : unknown;
 export type OperationOutputOf<
   TA extends AnyTrellisAPI,
   O extends OperationsOf<TA>,
@@ -600,12 +613,15 @@ export type OperationRuntimeHandle<
   TProgress,
   TOutput,
   TError extends BaseError,
+  TUpdate = unknown,
 > = {
   id: string;
   started(): AsyncResult<RuntimeOperationSnapshot, BaseError>;
   progress(
     value: TProgress,
   ): AsyncResult<RuntimeOperationSnapshot, BaseError>;
+  /** Emits a transient update without changing the persisted snapshot. */
+  emitUpdate(value: TUpdate): AsyncResult<void, BaseError>;
   complete(
     value: TOutput,
   ): AsyncResult<RuntimeOperationSnapshot, BaseError>;
@@ -640,8 +656,9 @@ export type AcceptedOperation<
   TProgress,
   TOutput,
   TError extends BaseError,
+  TUpdate = unknown,
 > =
-  & OperationRuntimeHandle<TProgress, TOutput, TError>
+  & OperationRuntimeHandle<TProgress, TOutput, TError, TUpdate>
   & {
     ref: OperationRefData;
     snapshot: RuntimeOperationSnapshot & {
@@ -756,9 +773,10 @@ export type OperationHandlerContext<
   TOutput,
   TTransfer,
   TError extends BaseError,
+  TUpdate = unknown,
 > = {
   input: TInput;
-  op: OperationRuntimeHandle<TProgress, TOutput, TError>;
+  op: OperationRuntimeHandle<TProgress, TOutput, TError, TUpdate>;
   caller: SessionCaller;
 } & (TTransfer extends undefined ? {} : { transfer: TTransfer });
 export type OperationRegistration<
@@ -767,11 +785,12 @@ export type OperationRegistration<
   TOutput,
   TTransfer,
   TError extends BaseError,
+  TUpdate = unknown,
 > = {
   accept(args: {
     sessionKey: string;
   }): AsyncResult<
-    AcceptedOperation<TProgress, TOutput, TError>,
+    AcceptedOperation<TProgress, TOutput, TError, TUpdate>,
     UnexpectedError
   >;
   /**
@@ -780,7 +799,10 @@ export type OperationRegistration<
    */
   control(
     operationId: string,
-  ): AsyncResult<OperationRuntimeHandle<TProgress, TOutput, TError>, BaseError>;
+  ): AsyncResult<
+    OperationRuntimeHandle<TProgress, TOutput, TError, TUpdate>,
+    BaseError
+  >;
   handle(
     handler: (
       context: OperationHandlerContext<
@@ -788,7 +810,8 @@ export type OperationRegistration<
         TProgress,
         TOutput,
         TTransfer,
-        TError
+        TError,
+        TUpdate
       >,
     ) => unknown | Promise<unknown>,
   ): Promise<void>;
@@ -809,7 +832,8 @@ export type OperationSurface<
     OperationProgressOf<TA, O>,
     OperationOutputOf<TA, O>,
     OperationTransferContextOf<TA, O>,
-    OperationHandlerErrorOf<TA, O>
+    OperationHandlerErrorOf<TA, O>,
+    OperationUpdateOf<TA, O>
   >
   : OperationInvoker<TA["operations"][O] & RuntimeOperationDesc>;
 
@@ -881,6 +905,7 @@ export type RuntimeOperationDesc = {
   subject: string;
   input: unknown;
   progress?: unknown;
+  update?: unknown;
   output?: unknown;
   signals?: Record<string, { input: unknown }>;
   cancelCapabilities?: readonly string[];
@@ -946,7 +971,8 @@ export type RuntimeOperationRecord = {
   signalSequence: number;
   signals: RuntimeOperationSignal[];
   terminal: boolean;
-  watchers: Set<string>;
+  watchers: Map<string, { includeUpdates: boolean }>;
+  frameQueue: Promise<void>;
   waiters: Set<string>;
   signalWaiters: Set<RuntimeOperationSignalWaiter>;
 };
@@ -1015,8 +1041,13 @@ export type RuntimeOperationAcceptedEnvelope = {
 
 export type RuntimeOperationControlRequest =
   | {
-    action: "get" | "wait" | "watch" | "cancel";
+    action: "get" | "wait" | "cancel";
     operationId: string;
+  }
+  | {
+    action: "watch";
+    operationId: string;
+    includeUpdates?: boolean;
   }
   | {
     action: "signal";
@@ -1143,9 +1174,14 @@ export type RequestOpts = {
   timeout?: number;
 };
 
+const FEED_CANCEL_TOMBSTONE_MS = 30_000;
+const MAX_FEED_CANCEL_TOMBSTONES = 1_024;
+
 export type EventOpts = {
   mode?: "durable" | "ephemeral";
   replay?: "all" | "new";
+  /** Worker loops started for this durable group by this service instance. */
+  concurrency?: number;
   /**
    * Contract event consumer group to use for durable service listeners when an
    * event is declared in more than one group.
@@ -1292,8 +1328,9 @@ type DurableEventRegistration<TA extends AnyTrellisAPI> = {
 
 type DurableEventConsumerLoop<TA extends AnyTrellisAPI> = {
   registrations: Array<DurableEventRegistration<TA>>;
-  started: boolean;
-  messages?: ConsumerMessages;
+  concurrency: number;
+  startedWorkers: Set<number>;
+  messages: Set<ConsumerMessages>;
 };
 
 export type FeedSubscribeOpts = {
@@ -1569,11 +1606,18 @@ export type HandlerJobQueue<
   TPayload,
   TResult,
   TTrellis,
+  TUpdate = never,
 > = {
-  create(payload: TPayload): AsyncResult<JobRef<TPayload, TResult>, BaseError>;
+  create(
+    payload: TPayload,
+  ): AsyncResult<JobRef<TPayload, TResult, TUpdate>, BaseError>;
+  updates(
+    jobId: string,
+    options?: JobUpdatesOptions,
+  ): AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
   handle(
     handler: (args: {
-      job: ActiveJob<TPayload, TResult>;
+      job: ActiveJob<TPayload, TResult, TUpdate>;
       client: TTrellis;
     }) => Promise<Result<TResult, BaseError>>,
   ): void;
@@ -1586,7 +1630,8 @@ export type HandlerJobsFacade<
   [K in keyof TJobs]: HandlerJobQueue<
     TJobs[K]["payload"],
     TJobs[K]["result"],
-    TTrellis
+    TTrellis,
+    TJobs[K]["update"]
   >;
 };
 
@@ -2171,6 +2216,8 @@ export class Trellis<
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
   #durableEventLoops = new Map<string, DurableEventConsumerLoop<TA>>();
   #durableEventListenersStopped = false;
+  #activeFeeds = new Map<string, AbortController>();
+  #pendingFeedCancels = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     name: string, // Must be unique for a service
@@ -2636,7 +2683,6 @@ export class Trellis<
         });
         return subject;
       }
-
       const span = startClientSpan(method, subject);
       const attempt = async (): Promise<Result<TOutput, BaseError>> => {
         const authHeaders = await this.#createProof(subject, msg);
@@ -2979,6 +3025,22 @@ export class Trellis<
       }
 
       const authHeaders = await this.#createProof(subject, payload);
+      if (opts?.signal?.aborted) {
+        const error = createTransportError({
+          code: "trellis.feed.subscribe_aborted",
+          message:
+            "The feed subscription was aborted before Trellis acknowledged it.",
+          hint: "Retry the subscription if the feed is still needed.",
+          context: { feed, subject },
+        });
+        recordRuntimeError(error, {
+          surface: "feed",
+          direction: "client",
+          operation: feed,
+          phase: "handshake",
+        });
+        return err(error);
+      }
       const headers = natsHeaders();
       headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
@@ -2989,7 +3051,34 @@ export class Trellis<
       const inbox = createInbox(`_INBOX.${this.#auth.sessionKey.slice(0, 16)}`);
       const sub = this.#nats.subscribe(inbox);
       const iterator = sub[Symbol.asyncIterator]();
-      const abort = () => sub.unsubscribe();
+      const cancelPayload = JSON.stringify({
+        _trellisFeedCancel: inbox,
+      });
+      let cancelled = false;
+      const cancel = async () => {
+        if (cancelled) return;
+        cancelled = true;
+        try {
+          const auth = await this.#createProof(subject, cancelPayload);
+          const cancelHeaders = natsHeaders();
+          cancelHeaders.set("session-key", this.#auth.sessionKey);
+          cancelHeaders.set("proof", auth.proof);
+          cancelHeaders.set("iat", String(auth.iat));
+          cancelHeaders.set("request-id", auth.requestId);
+          injectTraceContext(createNatsHeaderCarrier(cancelHeaders));
+          this.#nats.publish(subject, cancelPayload, {
+            headers: cancelHeaders,
+            reply: inbox,
+          });
+          await this.#nats.flush();
+        } catch {
+          // Best effort: the transport may already be closing with the feed.
+        }
+      };
+      const abort = () => {
+        sub.unsubscribe();
+        void cancel();
+      };
       opts?.signal?.addEventListener("abort", abort, { once: true });
 
       try {
@@ -2998,6 +3087,7 @@ export class Trellis<
       } catch (cause) {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
+        await cancel();
         const error = createTransportError({
           code: "trellis.feed.subscribe_failed",
           message: "Trellis could not subscribe to the feed.",
@@ -3043,6 +3133,7 @@ export class Trellis<
       if (firstFrame === "timeout" || firstFrame === "aborted") {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
+        await cancel();
         const error = createTransportError({
           code: firstFrame === "timeout"
             ? "trellis.feed.subscribe_timeout"
@@ -3066,6 +3157,7 @@ export class Trellis<
       if (firstFrame.done) {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
+        await cancel();
         const error = createTransportError({
           code: "trellis.feed.subscribe_closed",
           message: "Trellis closed the feed before acknowledging it.",
@@ -3085,6 +3177,7 @@ export class Trellis<
       if (firstMessage.headers?.get("status") === "error") {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
+        await cancel();
         const error = createTransportError({
           code: "trellis.feed.failed",
           message: "Trellis rejected the feed subscription.",
@@ -3155,6 +3248,7 @@ export class Trellis<
         } finally {
           opts?.signal?.removeEventListener("abort", abort);
           sub.unsubscribe();
+          await cancel();
         }
       })());
     })());
@@ -3245,17 +3339,6 @@ export class Trellis<
       });
       return json;
     }
-    const parsed = parseRuntimeSchema(descriptor.input, json).take();
-    if (isErr(parsed)) {
-      recordRuntimeError(parsed.error, {
-        surface: "feed",
-        direction: "server",
-        operation: feed,
-        phase: "input_validation",
-      });
-      return parsed;
-    }
-
     const caller = await this.#authenticateFeedRequest({
       feed,
       subject: msg.subject,
@@ -3273,6 +3356,45 @@ export class Trellis<
       });
       return callerValue;
     }
+    const cancelReply = json && typeof json === "object" &&
+        !Array.isArray(json) && Object.keys(json).length === 1 &&
+        typeof (json as Record<string, unknown>)._trellisFeedCancel === "string"
+      ? (json as Record<string, string>)._trellisFeedCancel
+      : undefined;
+    if (cancelReply !== undefined) {
+      if (cancelReply !== msg.reply) {
+        return err(
+          new AuthError({
+            reason: "reply_subject_mismatch",
+            context: { expected: msg.reply, actual: cancelReply },
+          }),
+        );
+      }
+      this.#activeFeeds.get(cancelReply)?.abort();
+      if (this.#activeFeeds.delete(cancelReply)) return ok(undefined);
+      const previous = this.#pendingFeedCancels.get(cancelReply);
+      if (previous !== undefined) clearTimeout(previous);
+      if (
+        previous !== undefined ||
+        this.#pendingFeedCancels.size < MAX_FEED_CANCEL_TOMBSTONES
+      ) {
+        const timeout = setTimeout(() => {
+          this.#pendingFeedCancels.delete(cancelReply);
+        }, FEED_CANCEL_TOMBSTONE_MS);
+        this.#pendingFeedCancels.set(cancelReply, timeout);
+      }
+      return ok(undefined);
+    }
+    const parsed = parseRuntimeSchema(descriptor.input, json).take();
+    if (isErr(parsed)) {
+      recordRuntimeError(parsed.error, {
+        surface: "feed",
+        direction: "server",
+        operation: feed,
+        phase: "input_validation",
+      });
+      return parsed;
+    }
     if (!msg.reply) {
       const error = new UnexpectedError({
         context: { feed, reason: "missing_reply" },
@@ -3285,13 +3407,24 @@ export class Trellis<
       });
       return err(error);
     }
-    const readyHeaders = natsHeaders();
-    readyHeaders.set("feed-status", "ready");
-    this.#nats.publish(msg.reply, new Uint8Array(), { headers: readyHeaders });
-    await this.#nats.flush();
-
+    const pendingCancel = this.#pendingFeedCancels.get(msg.reply);
+    if (pendingCancel !== undefined) {
+      clearTimeout(pendingCancel);
+      this.#pendingFeedCancels.delete(msg.reply);
+      return ok(undefined);
+    }
     const controller = new AbortController();
+    this.#activeFeeds.get(msg.reply)?.abort();
+    this.#activeFeeds.set(msg.reply, controller);
     try {
+      const readyHeaders = natsHeaders();
+      readyHeaders.set("feed-status", "ready");
+      this.#nats.publish(msg.reply, new Uint8Array(), {
+        headers: readyHeaders,
+      });
+      await this.#nats.flush();
+      if (controller.signal.aborted) return ok(undefined);
+
       const handlerResult = await handler({
         input: parsed as TInput,
         caller: callerValue,
@@ -3361,6 +3494,9 @@ export class Trellis<
       }
       return ok(undefined);
     } finally {
+      if (this.#activeFeeds.get(msg.reply) === controller) {
+        this.#activeFeeds.delete(msg.reply);
+      }
       controller.abort();
     }
   }
@@ -4216,6 +4352,11 @@ export class Trellis<
         if (isErr(subject)) return subject;
 
         if (opts?.mode === "ephemeral") {
+          if (opts.concurrency !== undefined) {
+            throw new Error(
+              "Event listener concurrency is only supported for durable consumer groups.",
+            );
+          }
           return await this.#startEphemeralEvent(
             eventName,
             ctx,
@@ -4249,6 +4390,7 @@ export class Trellis<
           ctx,
           subject,
           fn,
+          concurrency: opts?.concurrency ?? 1,
           signal: opts?.signal,
         });
         return ok(undefined);
@@ -4466,14 +4608,39 @@ export class Trellis<
     ctx: EventDescriptorOf<TA, EventsOf<TA>>;
     subject: string;
     fn: EventCallback<EventOf<TA, EventsOf<TA>>>;
+    concurrency: number;
     signal?: AbortSignal;
   }): void {
     if (args.signal?.aborted || this.#durableEventListenersStopped) return;
 
+    if (!Number.isInteger(args.concurrency) || args.concurrency < 1) {
+      throw new Error(
+        `Event consumer group '${args.group}' has invalid concurrency ${args.concurrency}; expected a positive integer`,
+      );
+    }
+    const binding = this.#eventConsumers.bindings?.[args.group];
+    if (!binding) {
+      throw new Error(
+        `Event consumer group '${args.group}' has no Trellis-provisioned binding.`,
+      );
+    }
+    if (binding.ordering === "strict" && args.concurrency !== 1) {
+      throw new Error(
+        `Event consumer group '${args.group}' uses strict ordering and requires concurrency 1`,
+      );
+    }
+
     const loop = this.#durableEventLoops.get(args.group) ?? {
       registrations: [],
-      started: false,
+      concurrency: args.concurrency,
+      startedWorkers: new Set<number>(),
+      messages: new Set<ConsumerMessages>(),
     };
+    if (loop.concurrency !== args.concurrency) {
+      throw new Error(
+        `Event consumer group '${args.group}' is already registered with concurrency ${loop.concurrency}; received ${args.concurrency}`,
+      );
+    }
     const registration: DurableEventRegistration<TA> = {
       event: args.event,
       ctx: args.ctx,
@@ -4487,7 +4654,7 @@ export class Trellis<
       const index = loop.registrations.indexOf(registration);
       if (index >= 0) loop.registrations.splice(index, 1);
       if (!this.#durableEventConsumerGroupReady(args.group, loop)) {
-        loop.messages?.stop();
+        for (const messages of loop.messages) messages.stop();
       }
     }, { once: true });
 
@@ -4499,17 +4666,23 @@ export class Trellis<
     loop: DurableEventConsumerLoop<TA>,
   ): void {
     if (
-      this.#durableEventListenersStopped || loop.started ||
+      this.#durableEventListenersStopped ||
       !this.#durableEventConsumerGroupReady(group, loop)
     ) {
       return;
     }
-    loop.started = true;
-
-    this.#tasks.add(
-      `event-consumer:${group}:${ulid()}`,
-      this.#runDurableEventConsumer(group, loop),
-    );
+    for (
+      let workerIndex = 0;
+      workerIndex < loop.concurrency;
+      workerIndex += 1
+    ) {
+      if (loop.startedWorkers.has(workerIndex)) continue;
+      loop.startedWorkers.add(workerIndex);
+      this.#tasks.add(
+        `event-consumer:${group}:${workerIndex}:${ulid()}`,
+        this.#runDurableEventConsumer(group, loop, workerIndex),
+      );
+    }
   }
 
   #durableEventConsumerGroupReady(
@@ -4528,6 +4701,7 @@ export class Trellis<
   #runDurableEventConsumer(
     group: string,
     loop: DurableEventConsumerLoop<TA>,
+    workerIndex: number,
   ): AsyncResult<void, ValidationError | UnexpectedError> {
     return AsyncResult.from((async () => {
       const binding = this.#eventConsumers.bindings?.[group];
@@ -4575,13 +4749,18 @@ export class Trellis<
             max_messages: 1,
             expires: 30_000,
           });
-          loop.messages = messages;
+          loop.messages.add(messages);
           if (!this.#durableEventConsumerGroupReady(group, loop)) {
             messages.stop();
+            loop.messages.delete(messages);
             break;
           }
-          await this.#handleDurableEventConsumer(group, loop, messages)
-            .orThrow();
+          try {
+            await this.#handleDurableEventConsumer(group, loop, messages)
+              .orThrow();
+          } finally {
+            loop.messages.delete(messages);
+          }
         }
       } catch (cause) {
         if (
@@ -4600,8 +4779,7 @@ export class Trellis<
         }
         return err(new UnexpectedError({ cause, context: { group } }));
       } finally {
-        loop.started = false;
-        loop.messages = undefined;
+        loop.startedWorkers.delete(workerIndex);
         if (!this.#durableEventListenersStopped) {
           this.#startDurableEventConsumer(group, loop);
         }
@@ -4871,7 +5049,7 @@ export class Trellis<
     this.#durableEventListenersStopped = true;
     for (const loop of this.#durableEventLoops.values()) {
       loop.registrations.splice(0, loop.registrations.length);
-      loop.messages?.stop();
+      for (const messages of loop.messages) messages.stop();
     }
   }
 
@@ -5158,9 +5336,45 @@ export class Trellis<
         return err(error);
       }
 
+      const iterator = sub[Symbol.asyncIterator]();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let first: IteratorResult<Msg>;
+      try {
+        first = await Promise.race([
+          iterator.next(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("operation watch setup timed out")),
+              this.timeout,
+            );
+          }),
+        ]);
+      } catch (cause) {
+        sub.unsubscribe();
+        const error = createTransportError({
+          code: "trellis.watch.failed",
+          message: "Trellis could not start the operation watch.",
+          hint:
+            "Retry watching the operation. If it keeps failing, reconnect to Trellis and try again.",
+          cause,
+          context: { subject },
+        });
+        recordRuntimeError(error, {
+          surface: "operation",
+          direction: "client",
+          operation: "watchJson",
+          phase: "response_wait",
+        });
+        return err(error);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+
       return ok((async function* () {
         try {
-          for await (const msg of sub) {
+          let next = first;
+          while (!next.done) {
+            const msg = next.value;
             if (msg.headers?.get("status") === "error") {
               const error = createTransportError({
                 code: "trellis.watch.failed",
@@ -5176,6 +5390,7 @@ export class Trellis<
                 phase: "remote_error",
               });
               yield err(error);
+              next = await iterator.next();
               continue;
             }
 
@@ -5196,12 +5411,15 @@ export class Trellis<
                 phase: "response_decoding",
               });
               yield err(error);
+              next = await iterator.next();
               continue;
             }
 
             yield ok(json);
+            next = await iterator.next();
           }
         } finally {
+          await iterator.return?.();
           sub.unsubscribe();
         }
       })());

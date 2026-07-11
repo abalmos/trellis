@@ -155,6 +155,7 @@ export type {
   OperationSnapshot,
   OperationState,
   OperationTransferProgress,
+  OperationWatchOptions,
   ProgressOperationEvent,
   ProgressOperationSnapshot,
   StartedOperationEvent,
@@ -164,6 +165,7 @@ export type {
   TransferOperationBuilder,
   TransferOperationEvent,
   TransferOperationSnapshot,
+  UpdateOperationEvent,
 } from "./operations.ts";
 export { controlSubject, OperationInvoker } from "./operations.ts";
 export type {
@@ -191,6 +193,7 @@ export type {
   OperationRuntimeHandle,
   OperationTransferContextOf,
   OperationTransferHandle,
+  OperationUpdateOf,
   PreparedTrellisEvent,
   RequestOpts,
   RpcHandlerContext,

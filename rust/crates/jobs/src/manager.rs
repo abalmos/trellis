@@ -28,6 +28,7 @@ use crate::types::{
     Job, JobConcurrency, JobContext, JobEventType, JobLineage, JobLogEntry, JobProgress,
     JobQueuePolicy, JobQueuePolicyOutcome, JobState, JobTrigger, JobTriggerKind, JobWaitEdge,
 };
+use crate::updates::{validate_update, JobUpdate, JobUpdateDescriptor, JobUpdateError};
 
 type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync>;
 
@@ -142,6 +143,17 @@ pub enum JobManagerError<E> {
     SerializeEvent(serde_json::Error),
     #[error("failed to serialize job result: {0}")]
     SerializeResult(serde_json::Error),
+    #[error(transparent)]
+    Update(#[from] JobUpdateError),
+    #[error(
+        "job update descriptor for '{queue_type}' does not match bound schema '{bound_schema}'"
+    )]
+    UpdateBindingMismatch {
+        queue_type: String,
+        bound_schema: String,
+    },
+    #[error("job '{job_id}' no longer accepts live updates")]
+    UpdatesClosed { job_id: String },
     #[error("feature '{feature}' is disabled for queue type '{queue_type}'")]
     FeatureDisabled {
         queue_type: String,
@@ -767,7 +779,10 @@ where
         );
 
         let parent = active_job.job().clone();
-        match ACTIVE_PARENT_JOB.scope(parent, process(active_job)).await {
+        let update_gate = active_job.update_gate();
+        let process_result = ACTIVE_PARENT_JOB.scope(parent, process(active_job)).await;
+        *update_gate.lock().await = false;
+        match process_result {
             Ok(result) => {
                 if cancellation.is_host_shutdown() {
                     self.run_terminal_cleanup(&terminal_cleanup, &job.updated_at)
@@ -956,6 +971,63 @@ where
         );
         self.publish_queue_event(queue, &job.id, event.event_type, &event)
             .await
+    }
+
+    /// Publish one validated live-only update for an active job attempt.
+    pub async fn emit_update<D>(
+        &self,
+        job: &Job,
+        sequence: u64,
+        update: D::Update,
+    ) -> Result<JobUpdate<D::Update>, JobManagerError<P::Error>>
+    where
+        D: JobUpdateDescriptor,
+        D::Update: Clone,
+    {
+        let queue = self.queue_binding_for_job(job)?;
+        let Some(bound_schema) = queue.update.as_deref() else {
+            return Err(JobManagerError::FeatureDisabled {
+                queue_type: queue.queue_type.clone(),
+                feature: "update",
+            });
+        };
+        let Some(updates_prefix) = queue.updates_prefix.as_deref() else {
+            return Err(JobManagerError::FeatureDisabled {
+                queue_type: queue.queue_type.clone(),
+                feature: "update",
+            });
+        };
+        if D::QUEUE_TYPE != job.job_type || D::UPDATE_SCHEMA != bound_schema {
+            return Err(JobManagerError::UpdateBindingMismatch {
+                queue_type: queue.queue_type.clone(),
+                bound_schema: bound_schema.to_string(),
+            });
+        }
+        if job.state != JobState::Active {
+            return Err(JobManagerError::InvalidTransition {
+                job_id: job.id.clone(),
+                state: job.state,
+                action: "emit_update",
+            });
+        }
+        let update_value = serde_json::to_value(&update).map_err(JobUpdateError::Json)?;
+        validate_update(D::UPDATE_SCHEMA_JSON, &update_value)?;
+        let envelope = JobUpdate {
+            job_id: job.id.clone(),
+            attempt: job.tries,
+            sequence,
+            timestamp: self.now_iso(),
+            update,
+        };
+        self.publisher()
+            .publish(
+                format!("{updates_prefix}.{}", job.id),
+                JobEventHeaders::from(&job.context),
+                serde_json::to_vec(&envelope).map_err(JobUpdateError::Json)?,
+            )
+            .await
+            .map_err(JobManagerError::Publish)?;
+        Ok(envelope)
     }
 
     pub async fn emit_log(

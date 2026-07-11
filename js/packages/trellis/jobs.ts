@@ -224,8 +224,8 @@ export class RetryJobError extends BaseError<RetryJobErrorData> {
   }
 }
 
-export type JobSubmitOutcome<TPayload, TResult> =
-  | { kind: "accepted"; ref: JobRef<TPayload, TResult>; key?: string }
+export type JobSubmitOutcome<TPayload, TResult, TUpdate = never> =
+  | { kind: "accepted"; ref: JobRef<TPayload, TResult, TUpdate>; key?: string }
   | {
     kind: "rejected";
     key: string;
@@ -244,7 +244,7 @@ export type JobSubmitOutcome<TPayload, TResult> =
     kind: "replaced";
     key: string;
     replaced: JobIdentity;
-    ref: JobRef<TPayload, TResult>;
+    ref: JobRef<TPayload, TResult, TUpdate>;
   };
 
 export type JobSnapshot<TPayload, TResult> = {
@@ -312,8 +312,61 @@ export type ServiceInfo = {
 
 export type JobTypeMetadata = {
   payload: unknown;
+  update: unknown;
   result: unknown;
 };
+
+/** A transient update emitted by one job handler attempt. */
+export type JobUpdateEnvelope<TUpdate = unknown> = {
+  jobId: string;
+  attempt: number;
+  sequence: number;
+  timestamp: string;
+  update: TUpdate;
+};
+
+/** Options for a queue-scoped job update subscription. */
+export type JobUpdatesOptions = {
+  signal?: AbortSignal;
+};
+
+/** A live stream of typed transient job updates. */
+export type JobUpdateSubscription<TUpdate> = AsyncIterable<TUpdate> & {
+  /** Stops the subscription immediately. */
+  unsubscribe(): void;
+};
+
+/** Decodes the structural Core NATS envelope used for transient job updates. */
+export function decodeJobUpdateEnvelope(
+  data: Uint8Array,
+): JobUpdateEnvelope | undefined {
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(data));
+    if (!value || typeof value !== "object") return undefined;
+    const jobId = Reflect.get(value, "jobId");
+    const attempt = Reflect.get(value, "attempt");
+    const sequence = Reflect.get(value, "sequence");
+    const timestamp = Reflect.get(value, "timestamp");
+    if (
+      typeof jobId !== "string" || jobId.length === 0 ||
+      !Number.isInteger(attempt) || attempt < 1 ||
+      !Number.isInteger(sequence) || sequence < 1 ||
+      typeof timestamp !== "string" || Number.isNaN(Date.parse(timestamp)) ||
+      !Reflect.has(value, "update")
+    ) {
+      return undefined;
+    }
+    return {
+      jobId,
+      attempt,
+      sequence,
+      timestamp,
+      update: Reflect.get(value, "update"),
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 function toUnexpectedError(cause: unknown): UnexpectedError {
   return cause instanceof UnexpectedError
@@ -353,7 +406,7 @@ export function runActiveJobWait<T>(
 
 setActiveJobWaitHook(runActiveJobWait);
 
-export class JobRef<TPayload, TResult> {
+export class JobRef<TPayload, TResult, TUpdate = never> {
   readonly id: string;
   readonly service: string;
   readonly type: string;
@@ -364,6 +417,9 @@ export class JobRef<TPayload, TResult> {
     JobSnapshot<TPayload, TResult>,
     BaseError
   >;
+  readonly #updates?: (
+    options?: JobUpdatesOptions,
+  ) => AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
 
   constructor(
     ref: JobIdentity,
@@ -371,6 +427,9 @@ export class JobRef<TPayload, TResult> {
       get: () => AsyncResult<JobSnapshot<TPayload, TResult>, BaseError>;
       wait: () => AsyncResult<TerminalJob<TPayload, TResult>, BaseError>;
       cancel: () => AsyncResult<JobSnapshot<TPayload, TResult>, BaseError>;
+      updates?: (
+        options?: JobUpdatesOptions,
+      ) => AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
     },
   ) {
     this.id = ref.id;
@@ -379,6 +438,7 @@ export class JobRef<TPayload, TResult> {
     this.#get = impl.get;
     this.#wait = impl.wait;
     this.#cancel = impl.cancel;
+    this.#updates = impl.updates;
   }
 
   get(): AsyncResult<JobSnapshot<TPayload, TResult>, BaseError> {
@@ -413,10 +473,26 @@ export class JobRef<TPayload, TResult> {
       return AsyncResult.err(toUnexpectedError(cause));
     }
   }
+
+  /** Subscribes to transient updates for this job. */
+  updates(
+    options?: JobUpdatesOptions,
+  ): AsyncResult<JobUpdateSubscription<TUpdate>, BaseError> {
+    if (!this.#updates) {
+      return AsyncResult.err(toUnexpectedError(
+        new Error("Job updates are unavailable for this reference"),
+      ));
+    }
+    try {
+      return this.#updates(options);
+    } catch (cause) {
+      return AsyncResult.err(toUnexpectedError(cause));
+    }
+  }
 }
 
-export class ActiveJob<TPayload, TResult> {
-  readonly ref: JobRef<TPayload, TResult>;
+export class ActiveJob<TPayload, TResult, TUpdate = never> {
+  readonly ref: JobRef<TPayload, TResult, TUpdate>;
   readonly payload: TPayload;
   readonly context: Readonly<JobContext>;
   readonly signal: AbortSignal;
@@ -425,6 +501,7 @@ export class ActiveJob<TPayload, TResult> {
   readonly #heartbeat: () => AsyncResult<void, BaseError>;
   readonly #progress: (value: JobProgress) => AsyncResult<void, BaseError>;
   readonly #log: (entry: JobLogEntry) => AsyncResult<void, BaseError>;
+  readonly #emitUpdate: (value: TUpdate) => AsyncResult<void, BaseError>;
   readonly #waitFor: <T>(
     target: JobWaitTarget,
     fn: () => Promise<T>,
@@ -432,7 +509,7 @@ export class ActiveJob<TPayload, TResult> {
   readonly #redeliveryCount: number;
 
   constructor(
-    ref: JobRef<TPayload, TResult>,
+    ref: JobRef<TPayload, TResult, TUpdate>,
     payload: TPayload,
     context: JobContext,
     cancelled: boolean | (() => boolean),
@@ -440,6 +517,7 @@ export class ActiveJob<TPayload, TResult> {
       heartbeat: () => AsyncResult<void, BaseError>;
       progress: (value: JobProgress) => AsyncResult<void, BaseError>;
       log: (entry: JobLogEntry) => AsyncResult<void, BaseError>;
+      emitUpdate?: (value: TUpdate) => AsyncResult<void, BaseError>;
       waitFor: <T>(target: JobWaitTarget, fn: () => Promise<T>) => Promise<T>;
       redeliveryCount?: number;
       signal?: AbortSignal;
@@ -454,6 +532,11 @@ export class ActiveJob<TPayload, TResult> {
     this.#heartbeat = impl.heartbeat;
     this.#progress = impl.progress;
     this.#log = impl.log;
+    this.#emitUpdate = impl.emitUpdate ??
+      (() =>
+        AsyncResult.err(toUnexpectedError(
+          new Error("Job updates are not configured for this queue"),
+        )));
     this.#waitFor = impl.waitFor;
     this.#redeliveryCount = impl.redeliveryCount ?? 0;
     this.signal = impl.signal ?? new AbortController().signal;
@@ -491,6 +574,15 @@ export class ActiveJob<TPayload, TResult> {
     }
   }
 
+  /** Emits a validated transient update for the current handler attempt. */
+  emitUpdate(value: TUpdate): AsyncResult<void, BaseError> {
+    try {
+      return this.#emitUpdate(value);
+    } catch (cause) {
+      return AsyncResult.err(toUnexpectedError(cause));
+    }
+  }
+
   /**
    * Records that this job is waiting on another job, operation, or external async work.
    * The wrapped function's return value or thrown error is preserved.
@@ -508,44 +600,70 @@ export class ActiveJob<TPayload, TResult> {
   }
 }
 
-export class JobQueue<TPayload, TResult> {
+export class JobQueue<TPayload, TResult, TUpdate = never> {
   readonly #create: (
     payload: TPayload,
-  ) => AsyncResult<JobRef<TPayload, TResult>, BaseError>;
+  ) => AsyncResult<JobRef<TPayload, TResult, TUpdate>, BaseError>;
   readonly #handle: (
     handler: (
-      job: ActiveJob<TPayload, TResult>,
+      job: ActiveJob<TPayload, TResult, TUpdate>,
     ) => Promise<Result<TResult, BaseError>>,
     options?: JobHandlerOptions,
   ) => void;
   readonly #submit: (
     payload: TPayload,
-  ) => AsyncResult<JobSubmitOutcome<TPayload, TResult>, BaseError>;
+  ) => AsyncResult<JobSubmitOutcome<TPayload, TResult, TUpdate>, BaseError>;
+  readonly #updates: (
+    jobId: string,
+    options?: JobUpdatesOptions,
+  ) => AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
 
   constructor(impl: {
     create: (
       payload: TPayload,
-    ) => AsyncResult<JobRef<TPayload, TResult>, BaseError>;
+    ) => AsyncResult<JobRef<TPayload, TResult, TUpdate>, BaseError>;
     handle: (
       handler: (
-        job: ActiveJob<TPayload, TResult>,
+        job: ActiveJob<TPayload, TResult, TUpdate>,
       ) => Promise<Result<TResult, BaseError>>,
       options?: JobHandlerOptions,
     ) => void;
     submit?: (
       payload: TPayload,
-    ) => AsyncResult<JobSubmitOutcome<TPayload, TResult>, BaseError>;
+    ) => AsyncResult<JobSubmitOutcome<TPayload, TResult, TUpdate>, BaseError>;
+    updates?: (
+      jobId: string,
+      options?: JobUpdatesOptions,
+    ) => AsyncResult<JobUpdateSubscription<TUpdate>, BaseError>;
   }) {
     this.#create = impl.create;
     this.#handle = impl.handle;
     this.#submit = impl.submit ??
       ((payload) =>
         impl.create(payload).map((ref) => ({ kind: "accepted", ref })));
+    this.#updates = impl.updates ?? (() =>
+      AsyncResult.err(toUnexpectedError(
+        new Error("Job updates are not configured for this queue"),
+      )));
   }
 
-  create(payload: TPayload): AsyncResult<JobRef<TPayload, TResult>, BaseError> {
+  create(
+    payload: TPayload,
+  ): AsyncResult<JobRef<TPayload, TResult, TUpdate>, BaseError> {
     try {
       return this.#create(payload);
+    } catch (cause) {
+      return AsyncResult.err(toUnexpectedError(cause));
+    }
+  }
+
+  /** Subscribes to transient updates for a known or preallocated job id. */
+  updates(
+    jobId: string,
+    options?: JobUpdatesOptions,
+  ): AsyncResult<JobUpdateSubscription<TUpdate>, BaseError> {
+    try {
+      return this.#updates(jobId, options);
     } catch (cause) {
       return AsyncResult.err(toUnexpectedError(cause));
     }
@@ -557,7 +675,7 @@ export class JobQueue<TPayload, TResult> {
    */
   submit(
     payload: TPayload,
-  ): AsyncResult<JobSubmitOutcome<TPayload, TResult>, BaseError> {
+  ): AsyncResult<JobSubmitOutcome<TPayload, TResult, TUpdate>, BaseError> {
     try {
       return this.#submit(payload);
     } catch (cause) {
@@ -567,7 +685,7 @@ export class JobQueue<TPayload, TResult> {
 
   handle(
     handler: (
-      job: ActiveJob<TPayload, TResult>,
+      job: ActiveJob<TPayload, TResult, TUpdate>,
     ) => Promise<Result<TResult, BaseError>>,
     options?: JobHandlerOptions,
   ): void {
@@ -619,6 +737,10 @@ export type JobsFacade = {};
 
 export type JobsFacadeOf<TJobs extends Record<string, JobTypeMetadata>> =
   & {
-    [K in keyof TJobs]: JobQueue<TJobs[K]["payload"], TJobs[K]["result"]>;
+    [K in keyof TJobs]: JobQueue<
+      TJobs[K]["payload"],
+      TJobs[K]["result"],
+      TJobs[K]["update"]
+    >;
   }
   & JobsFacade;

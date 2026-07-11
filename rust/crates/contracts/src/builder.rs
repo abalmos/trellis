@@ -160,20 +160,14 @@ impl ContractManifestBuilder {
     }
 
     pub fn build(mut self) -> Result<ContractManifest, ContractsError> {
-        self.apply_baseline_uses()?;
         self.project_declared_capabilities()?;
         let value = serde_json::to_value(self.manifest)?;
         parse_manifest(value)
     }
 
     pub fn build_unvalidated(mut self) -> ContractManifest {
-        let _ = self.apply_baseline_uses();
         let _ = self.project_declared_capabilities();
         self.manifest
-    }
-
-    fn apply_baseline_uses(&mut self) -> Result<(), ContractsError> {
-        Ok(())
     }
 
     fn project_declared_capabilities(&mut self) -> Result<(), ContractsError> {
@@ -443,6 +437,7 @@ pub fn operation(
         version: version.into(),
         subject: subject.into(),
         input: schema_ref(input_schema),
+        update: None,
         progress: progress_schema.map(schema_ref),
         output: output_schema.map(schema_ref),
         errors: None,
@@ -534,6 +529,7 @@ pub fn job_queue(
 ) -> ContractJobQueueResource {
     ContractJobQueueResource {
         payload,
+        update: None,
         result,
         max_deliver: None,
         backoff_ms: None,
@@ -542,7 +538,6 @@ pub fn job_queue(
         progress: None,
         logs: None,
         dlq: None,
-        concurrency: None,
         key_concurrency: None,
         queue: None,
         docs: None,
@@ -608,6 +603,12 @@ impl ContractRpcMethod {
 }
 
 impl ContractOperation {
+    /// Declare the live-only update payload schema for this operation.
+    pub fn with_update_schema(mut self, schema: impl Into<String>) -> Self {
+        self.update = Some(schema_ref(schema));
+        self
+    }
+
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -711,6 +712,14 @@ impl ContractOperation {
                 docs: None,
             },
         );
+        self
+    }
+}
+
+impl ContractJobQueueResource {
+    /// Declare the live-only update payload schema for this jobs queue.
+    pub fn with_update_schema(mut self, schema: impl Into<String>) -> Self {
+        self.update = Some(schema_ref(schema));
         self
     }
 }

@@ -9,6 +9,13 @@ import {
   defineServiceContract,
   type SerializableErrorData,
 } from "./mod.ts";
+import type {
+  OperationHandlerErrorOf,
+  OperationOutputOf,
+  OperationProgressOf,
+  OperationRuntimeHandle,
+  OperationUpdateOf,
+} from "../trellis.ts";
 
 const EmptySchema = Type.Object({});
 const StringSchema = Type.Object({ value: Type.String() });
@@ -464,6 +471,7 @@ const builderContract = defineServiceContract(
     schemas: {
       Empty: EmptySchema,
       Result: StringSchema,
+      Update: StringSchema,
     },
     errors: {
       BuilderFailed,
@@ -481,10 +489,45 @@ const builderContract = defineServiceContract(
         errors: [ref.error("BuilderFailed"), ref.error("UnexpectedError")],
       },
     },
+    operations: {
+      "Builder.Process": {
+        version: "v1",
+        input: ref.schema("Empty"),
+        update: ref.schema("Update"),
+        output: ref.schema("Result"),
+        errors: [ref.error("BuilderFailed")],
+        capabilities: { call: [] },
+      },
+    },
   }),
 );
 
 builderContract.API.owned.rpc["Builder.Run"].subject;
+builderContract.API.owned.operations["Builder.Process"].subject;
+
+type BuilderOwnedApi = typeof builderContract.API.owned;
+type BuilderProcessHandle = OperationRuntimeHandle<
+  OperationProgressOf<BuilderOwnedApi, "Builder.Process">,
+  OperationOutputOf<BuilderOwnedApi, "Builder.Process">,
+  OperationHandlerErrorOf<BuilderOwnedApi, "Builder.Process">,
+  OperationUpdateOf<BuilderOwnedApi, "Builder.Process">
+>;
+type BuilderFailedError = ReturnType<typeof BuilderFailed.fromSerializable>;
+type _BuilderOperationAcceptsDeclaredError = Assert<
+  Extends<
+    BuilderFailedError,
+    OperationHandlerErrorOf<BuilderOwnedApi, "Builder.Process">
+  >
+>;
+
+function acceptBuilderOperationError(
+  handle: BuilderProcessHandle,
+  error: BuilderFailedError,
+) {
+  return handle.fail(error);
+}
+
+acceptBuilderOperationError;
 
 const appContract = defineAppContract(() => ({
   id: "trellis.builder-app@v1",

@@ -432,6 +432,9 @@
         "payload": {
           "$ref": "#/$defs/schemaRef"
         },
+        "update": {
+          "$ref": "#/$defs/schemaRef"
+        },
         "result": {
           "$ref": "#/$defs/schemaRef"
         },
@@ -462,10 +465,6 @@
         },
         "dlq": {
           "type": "boolean"
-        },
-        "concurrency": {
-          "type": "integer",
-          "minimum": 1
         },
         "keyConcurrency": {
           "$ref": "#/$defs/jobKeyConcurrency"
@@ -509,11 +508,8 @@
           "enum": ["new", "all"]
         },
         "ordering": {
-          "const": "strict"
-        },
-        "concurrency": {
-          "type": "integer",
-          "minimum": 1
+          "type": "string",
+          "enum": ["strict", "parallel"]
         },
         "ackWaitMs": {
           "type": "integer",
@@ -642,6 +638,9 @@
           "minLength": 1
         },
         "input": {
+          "$ref": "#/$defs/schemaRef"
+        },
+        "update": {
           "$ref": "#/$defs/schemaRef"
         },
         "progress": {

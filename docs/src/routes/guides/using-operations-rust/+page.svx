@@ -12,6 +12,7 @@ Update `contracts/orders_service.manifest.json` to add an `operations` section:
     "version": "v1",
     "input": { "schema": { "$ref": "ProcessOrderRequest" } },
     "progress": { "schema": { "$ref": "ProcessOrderProgress" } },
+    "update": { "schema": { "$ref": "ProcessOrderUpdate" } },
     "output": { "schema": { "$ref": "ProcessOrderResult" } },
     "capabilities": {
       "call": ["orders.write"],
@@ -60,7 +61,6 @@ router.register_operation::<orders_participant::operations::OrdersProcess, _, _,
                         message: "Fulfillment started".into(),
                     })
                     .await?;
-
                 tokio::spawn(async move {
                     let result = run_fulfillment(input).await;
                     match result {
@@ -102,6 +102,24 @@ router.register_operation::<orders_participant::operations::OrdersProcess, _, _,
 );
 ```
 
+For operations with an `update` schema, register the provider through
+`register_operation_with_updates_and_signal(...)`. Its `OperationControl` emits
+schema-validated live content:
+
+```rust
+control
+    .emit_update(ProcessOrderUpdate {
+        completed_items: 0,
+        total_items: 3,
+    })
+    .await?;
+```
+
+Use `progress(...)` for low-frequency durable telemetry or the current snapshot.
+Updates are at most once, are not persisted or replayed, and may be missed by
+late subscribers, so prefer cumulative payloads. The terminal output is
+authoritative.
+
 For service-owned async work that can drive the operation to a terminal state,
 use `OperationControl::attach(...)`. The attached task must complete, fail, or
 cancel the operation before it returns; otherwise `attach(...)` returns an error
@@ -137,16 +155,19 @@ let op_ref = client.orders()
 let terminal = op_ref.wait().await?;
 println!("{:?}", terminal.output);
 
-// Or watch live progress
-let mut stream = op_ref.watch();
+// Or opt into live progress and typed updates
+let mut stream = op_ref.watch_with_updates().await?;
 while let Some(event) = stream.next().await {
-    match event {
+    match event? {
         OperationEvent::Progress { snapshot } => println!("{:?}", snapshot.progress),
+        OperationEvent::Update { update } => println!("{:?}", update),
         OperationEvent::Completed { snapshot } => { println!("{:?}", snapshot.output); break; }
         _ => {}
     }
 }
 ```
+
+Use `op_ref.updates().await?` when only update frames are needed.
 
 ## 5. Cancellation
 

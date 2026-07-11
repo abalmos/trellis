@@ -15,6 +15,7 @@ import {
   ProcessOrderRequestSchema,
   ProcessOrderProgressSchema,
   ProcessOrderResultSchema,
+  ProcessOrderUpdateSchema,
 } from "./schemas.ts";
 
 // In the first defineServiceContract argument, add to the schemas map:
@@ -24,6 +25,7 @@ import {
     ProcessOrderRequest: ProcessOrderRequestSchema,
     ProcessOrderProgress: ProcessOrderProgressSchema,
     ProcessOrderResult: ProcessOrderResultSchema,
+    ProcessOrderUpdate: ProcessOrderUpdateSchema,
   },
 }
 
@@ -38,6 +40,7 @@ operations: {
     version: "v1",
     input: { schema: "ProcessOrderRequest" },
     progress: { schema: "ProcessOrderProgress" },
+    update: { schema: "ProcessOrderUpdate" },
     output: { schema: "ProcessOrderResult" },
     capabilities: {
       call: ["orders.write"],
@@ -70,6 +73,12 @@ export const ProcessOrderProgressSchema = Type.Object({
 });
 export type ProcessOrderProgress = Static<typeof ProcessOrderProgressSchema>;
 
+export const ProcessOrderUpdateSchema = Type.Object({
+  completedItems: Type.Number(),
+  totalItems: Type.Number(),
+});
+export type ProcessOrderUpdate = Static<typeof ProcessOrderUpdateSchema>;
+
 export const ProcessOrderResultSchema = Type.Object({
   orderId: Type.String(),
   status: Type.String(),
@@ -92,6 +101,9 @@ await service.handle.operation.orders.process(async ({ input, op }) => {
   });
   if (progress.isErr()) return Result.err(progress.error);
 
+  const update = await op.emitUpdate({ completedItems: 0, totalItems: 3 });
+  if (update.isErr()) return Result.err(update.error);
+
   const job = await service.jobs.reserveInventory.create({
     orderId: input.orderId,
     items: [],
@@ -103,6 +115,12 @@ await service.handle.operation.orders.process(async ({ input, op }) => {
 ```
 
 `op.attach(job.value)` blocks until the job chain completes. Pass `job.value` — the unwrapped `JobRef` from the `Result<JobRef>`. The framework extracts the typed output from the terminal job snapshot to resolve the caller's `OperationRef`.
+
+Use `op.progress(...)` for low-frequency durable telemetry or the current
+snapshot. `op.emitUpdate(...)` sends typed live-only content to opted-in current
+watchers. Updates are at most once, are not persisted or replayed, and may be
+missed by late subscribers, so prefer cumulative payloads. The terminal output
+is authoritative.
 
 If the attached queue uses keyed concurrency, `create(...)` may return a typed
 expected failure when another active or queued job already owns the same key. In
@@ -191,7 +209,7 @@ if (result.isErr()) throw result.error;
 console.log(result.value.output); // { orderId, status }
 
 // Or watch live progress events
-for await (const event of op.watch()) {
+for await (const event of await op.watch().orThrow()) {
   if (event.type === "progress") {
     console.log(event.snapshot.progress); // { step, message }
   }
@@ -199,6 +217,20 @@ for await (const event of op.watch()) {
     console.log(event.snapshot.output);
     break;
   }
+}
+```
+
+Opt into live updates either while starting or on a watch:
+
+```ts
+const op = await client.operation.orders.process
+  .input({ orderId: "ord_123" })
+  .onUpdate((event) => console.log(event.update.completedItems))
+  .start()
+  .orThrow();
+
+for await (const event of await op.watch({ updates: true }).orThrow()) {
+  if (event.type === "update") console.log(event.update);
 }
 ```
 

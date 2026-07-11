@@ -102,10 +102,12 @@ export type OperationDesc<
   TRuntimeErrors extends readonly RuntimeRpcErrorDesc[] | undefined =
     | readonly RuntimeRpcErrorDesc[]
     | undefined,
+  U extends SchemaLike | undefined = SchemaLike | undefined,
 > = {
   subject: string;
   input: I;
   progress?: P;
+  update?: U;
   output?: O;
   errors?: E;
   runtimeErrors?: TRuntimeErrors;

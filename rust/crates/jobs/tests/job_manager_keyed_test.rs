@@ -269,15 +269,16 @@ fn keyed_bindings(when_full: JobQueueWhenFull, max_queued_per_key: u64) -> JobsB
             JobsQueueBinding {
                 queue_type: "sync".to_string(),
                 publish_prefix: "trellis.jobs.documents.sync".to_string(),
+                updates_prefix: None,
                 work_subject: "trellis.work.documents.sync".to_string(),
                 consumer_name: "documents-sync".to_string(),
                 max_deliver: 5,
                 backoff_ms: vec![5_000],
                 ack_wait_ms: 60_000,
                 default_deadline_ms: None,
+                update: None,
                 progress: true,
                 logs: true,
-                concurrency: 1,
                 key_concurrency: Some(JobKeyConcurrencyBinding {
                     key: vec![
                         "zendesk".to_string(),

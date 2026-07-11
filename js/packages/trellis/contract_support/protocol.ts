@@ -107,6 +107,7 @@ export type JobQueueDepth = Static<typeof JobQueueDepthSchema>;
 
 export const ContractJobQueueSchema = Type.Object({
   payload: ContractSchemaRefSchema,
+  update: Type.Optional(ContractSchemaRefSchema),
   result: Type.Optional(ContractSchemaRefSchema),
   maxDeliver: Type.Optional(Type.Integer({ minimum: 1 })),
   backoffMs: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }))),
@@ -115,7 +116,6 @@ export const ContractJobQueueSchema = Type.Object({
   progress: Type.Optional(Type.Boolean()),
   logs: Type.Optional(Type.Boolean()),
   dlq: Type.Optional(Type.Boolean()),
-  concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
   keyConcurrency: Type.Optional(JobKeyConcurrencySchema),
   queue: Type.Optional(JobQueueDepthSchema),
   docs: Type.Optional(ContractDocsSchema),
@@ -154,8 +154,10 @@ export const ContractEventConsumerGroupSchema = Type.Object({
     Type.Literal("new"),
     Type.Literal("all"),
   ])),
-  ordering: Type.Optional(Type.Literal("strict")),
-  concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
+  ordering: Type.Optional(Type.Union([
+    Type.Literal("strict"),
+    Type.Literal("parallel"),
+  ])),
   ackWaitMs: Type.Optional(Type.Integer({ minimum: 1 })),
   maxDeliver: Type.Optional(Type.Integer({ minimum: 1 })),
   backoffMs: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }))),
@@ -238,6 +240,8 @@ export const JobsQueueBindingSchema = Type.Object({
   workSubject: Type.String({ minLength: 1 }),
   consumerName: Type.String({ minLength: 1 }),
   payload: ContractSchemaRefSchema,
+  update: Type.Optional(ContractSchemaRefSchema),
+  updatesPrefix: Type.Optional(Type.String({ minLength: 1 })),
   result: Type.Optional(ContractSchemaRefSchema),
   maxDeliver: Type.Integer({ minimum: 1 }),
   backoffMs: Type.Array(Type.Integer({ minimum: 0 })),
@@ -246,7 +250,6 @@ export const JobsQueueBindingSchema = Type.Object({
   progress: Type.Boolean(),
   logs: Type.Boolean(),
   dlq: Type.Boolean(),
-  concurrency: Type.Integer({ minimum: 1 }),
   keyConcurrency: Type.Optional(JobsQueueKeyConcurrencyBindingSchema),
   queue: Type.Optional(JobsQueueDepthBindingSchema),
 });
@@ -267,8 +270,10 @@ export const EventConsumerResourceBindingSchema = Type.Object({
   consumerName: Type.String({ minLength: 1 }),
   filterSubjects: Type.Array(Type.String({ minLength: 1 })),
   replay: Type.Union([Type.Literal("new"), Type.Literal("all")]),
-  ordering: Type.Literal("strict"),
-  concurrency: Type.Integer({ minimum: 1 }),
+  ordering: Type.Union([
+    Type.Literal("strict"),
+    Type.Literal("parallel"),
+  ]),
   ackWaitMs: Type.Integer({ minimum: 1 }),
   maxDeliver: Type.Integer({ minimum: 1 }),
   backoffMs: Type.Array(Type.Integer({ minimum: 0 })),

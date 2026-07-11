@@ -47,8 +47,7 @@ type ContractEventConsumerGroup = {
   uses?: Record<string, string[]>;
   self?: string[];
   replay?: "new" | "all";
-  ordering?: "strict";
-  concurrency?: number;
+  ordering?: "strict" | "parallel";
   ackWaitMs?: number;
   maxDeliver?: number;
   backoffMs?: number[];
@@ -90,6 +89,7 @@ export type StoreResourceRequest = {
 export type JobsQueueRequest = {
   queueType: string;
   payload: { schema: string };
+  update?: { schema: string };
   result?: { schema: string };
   maxDeliver: number;
   backoffMs: number[];
@@ -98,7 +98,6 @@ export type JobsQueueRequest = {
   progress: boolean;
   logs: boolean;
   dlq: boolean;
-  concurrency: number;
   keyConcurrency?: JobKeyConcurrencyPolicy;
   queue?: JobQueueDepthPolicy;
 };
@@ -108,8 +107,7 @@ export type EventConsumerGroupRequest = {
   stream: string;
   filterSubjects: string[];
   replay: "new" | "all";
-  ordering: "strict";
-  concurrency: number;
+  ordering: "strict" | "parallel";
   ackWaitMs: number;
   maxDeliver: number;
   backoffMs: number[];
@@ -197,6 +195,7 @@ export type ExistingResourceNames = {
     namespace?: string;
     queues?: Record<string, {
       publishPrefix?: string;
+      updatesPrefix?: string;
       workSubject?: string;
       consumerName?: string;
     }>;
@@ -229,9 +228,11 @@ export type ContractResourceBindings = {
     queues: Record<string, {
       queueType: string;
       publishPrefix: string;
+      updatesPrefix?: string;
       workSubject: string;
       consumerName: string;
       payload: { schema: string };
+      update?: { schema: string };
       result?: { schema: string };
       maxDeliver: number;
       backoffMs: number[];
@@ -240,7 +241,6 @@ export type ContractResourceBindings = {
       progress: boolean;
       logs: boolean;
       dlq: boolean;
-      concurrency: number;
       keyConcurrency?: JobKeyConcurrencyPolicy;
       queue?: JobQueueDepthPolicy;
     }>;
@@ -250,8 +250,7 @@ export type ContractResourceBindings = {
     consumerName: string;
     filterSubjects: string[];
     replay: "new" | "all";
-    ordering: "strict";
-    concurrency: number;
+    ordering: "strict" | "parallel";
     ackWaitMs: number;
     maxDeliver: number;
     backoffMs: number[];
@@ -308,6 +307,7 @@ export type AuthorityPhysicalResourceManager = ResourcePurgeManager & {
   ensureEventConsumer(
     request: EventConsumerGroupRequest,
     consumerName: string,
+    deploymentId?: string,
   ): Promise<"created" | "adopted">;
 };
 
@@ -372,8 +372,8 @@ export function createNatsAuthorityPhysicalResourceManager(
       ensureBuiltinJobsInfrastructure(nats, mergeOptions(options)),
     ensureJobsQueueConsumer: (stream, queue) =>
       ensureJobsQueueConsumer(nats, stream, queue),
-    ensureEventConsumer: (request, consumerName) =>
-      ensureEventConsumer(nats, request, consumerName),
+    ensureEventConsumer: (request, consumerName, deploymentId) =>
+      ensureEventConsumer(nats, request, consumerName, deploymentId),
   };
 }
 
@@ -864,10 +864,11 @@ async function ensureEventConsumer(
   nats: NatsConnection,
   request: EventConsumerGroupRequest,
   consumerName: string,
+  deploymentId?: string,
 ): Promise<"created" | "adopted"> {
   const jsm = await jetstreamManager(nats);
   const consumers: EventConsumerManager = jsm.consumers;
-  const config = toEventConsumerConfig(request, consumerName);
+  const config = toEventConsumerConfig(request, consumerName, deploymentId);
 
   try {
     await consumers.add(request.stream, config);
@@ -923,6 +924,7 @@ async function ensureJobsQueueConsumer(
 function toEventConsumerConfig(
   request: EventConsumerGroupRequest,
   consumerName: string,
+  deploymentId?: string,
 ): Record<string, unknown> {
   return {
     durable_name: consumerName,
@@ -931,8 +933,15 @@ function toEventConsumerConfig(
     filter_subjects: request.filterSubjects,
     ack_wait: request.ackWaitMs * 1_000_000,
     max_deliver: request.maxDeliver,
-    max_ack_pending: request.concurrency,
+    ...(request.ordering === "strict" ? { max_ack_pending: 1 } : {}),
     backoff: request.backoffMs.map((delay) => delay * 1_000_000),
+    metadata: {
+      "trellis.managed_by": "authority",
+      "trellis.group": request.alias,
+      ...(deploymentId === undefined
+        ? {}
+        : { "trellis.deployment_id": deploymentId }),
+    },
   };
 }
 
@@ -945,7 +954,6 @@ function toJobsQueueConsumerConfig(
     filter_subject: queue.workSubject,
     ack_wait: queue.ackWaitMs * 1_000_000,
     max_deliver: queue.maxDeliver,
-    max_ack_pending: queue.concurrency,
     backoff: queue.backoffMs.map((delay) => delay * 1_000_000),
   };
 }
@@ -1076,7 +1084,17 @@ function consumerConfigValueEquals(
   if (Array.isArray(expected)) {
     return Array.isArray(actual) &&
       actual.length === expected.length &&
-      expected.every((value, index) => actual[index] === value);
+      expected.every((value, index) =>
+        consumerConfigValueEquals(actual[index], value)
+      );
+  }
+  if (isRecord(expected)) {
+    if (!isRecord(actual)) return false;
+    const expectedEntries = Object.entries(expected);
+    return expectedEntries.length === Object.keys(actual).length &&
+      expectedEntries.every(([key, value]) =>
+        consumerConfigValueEquals(actual[key], value)
+      );
   }
   return actual === expected;
 }
@@ -1134,9 +1152,11 @@ export function existingResourceNamesFromBindings(
         NonNullable<ExistingResourceNames["jobs"]>["queues"]
       >[string] = {};
       const publishPrefix = stringBindingValue(record.binding, "publishPrefix");
+      const updatesPrefix = stringBindingValue(record.binding, "updatesPrefix");
       const workSubject = stringBindingValue(record.binding, "workSubject");
       const consumerName = stringBindingValue(record.binding, "consumerName");
       if (publishPrefix) queue.publishPrefix = publishPrefix;
+      if (updatesPrefix) queue.updatesPrefix = updatesPrefix;
       if (workSubject) queue.workSubject = workSubject;
       if (consumerName) queue.consumerName = consumerName;
       if (Object.keys(queue).length > 0) {
@@ -1449,6 +1469,9 @@ function toJobsQueueRequest(
   return {
     queueType,
     payload: requiredSchema(definition, "payload"),
+    ...(optionalSchema(definition, "update") !== undefined
+      ? { update: optionalSchema(definition, "update") }
+      : {}),
     ...(optionalSchema(definition, "result") !== undefined
       ? { result: optionalSchema(definition, "result") }
       : {}),
@@ -1467,7 +1490,6 @@ function toJobsQueueRequest(
     progress: optionalBoolean(definition, "progress") ?? true,
     logs: optionalBoolean(definition, "logs") ?? true,
     dlq: optionalBoolean(definition, "dlq") ?? true,
-    concurrency: optionalPositiveInteger(definition, "concurrency") ?? 1,
     ...(keyConcurrency ? { keyConcurrency } : {}),
     ...(queue ? { queue } : {}),
   };
@@ -1490,8 +1512,7 @@ function toEventConsumerRequest(
     stream,
     filterSubjects: optionalStringArray(definition, "filterSubjects") ?? [],
     replay: definition.replay === "all" ? "all" : "new",
-    ordering: "strict",
-    concurrency: optionalPositiveInteger(definition, "concurrency") ?? 1,
+    ordering: definition.ordering === "parallel" ? "parallel" : "strict",
     ackWaitMs: optionalPositiveInteger(definition, "ackWaitMs") ?? 300000,
     maxDeliver,
     backoffMs: optionalNumberArray(definition, "backoffMs") ??
@@ -1619,6 +1640,12 @@ export async function materializeAuthorityResourceBindings(
           ...request,
           publishPrefix: existingQueue?.publishPrefix ??
             `trellis.jobs.${namespace}.${queueToken}`,
+          ...(request.update
+            ? {
+              updatesPrefix: existingQueue?.updatesPrefix ??
+                `trellis.job_updates.${namespace}.${queueToken}`,
+            }
+            : {}),
           workSubject: existingQueue?.workSubject ??
             `trellis.work.${namespace}.${queueToken}`,
           consumerName: existingQueue?.consumerName ??
@@ -1652,6 +1679,7 @@ export async function materializeAuthorityResourceBindings(
         const action = await options.manager.ensureEventConsumer(
           request,
           consumerName,
+          options.deploymentId,
         );
         const binding = {
           deploymentId: options.deploymentId,
@@ -1712,6 +1740,7 @@ export function getJobsQueueRequests(
 
   return (Object.entries(queues ?? {}) as Array<[string, {
     payload: { schema: string };
+    update?: { schema: string };
     result?: { schema: string };
     maxDeliver?: number;
     backoffMs?: number[];
@@ -1720,7 +1749,6 @@ export function getJobsQueueRequests(
     progress?: boolean;
     logs?: boolean;
     dlq?: boolean;
-    concurrency?: number;
     keyConcurrency?: {
       key: string[];
       maxActive?: number;
@@ -1745,6 +1773,7 @@ export function getJobsQueueRequests(
       return {
         queueType,
         payload: queue.payload,
+        ...(queue.update ? { update: queue.update } : {}),
         ...(queue.result ? { result: queue.result } : {}),
         maxDeliver: queue.maxDeliver ?? 5,
         backoffMs: queue.backoffMs ?? [5000, 30000, 120000, 600000, 1800000],
@@ -1755,7 +1784,6 @@ export function getJobsQueueRequests(
         progress: queue.progress ?? true,
         logs: queue.logs ?? true,
         dlq: queue.dlq ?? true,
-        concurrency: queue.concurrency ?? 1,
         ...(keyConcurrency ? { keyConcurrency } : {}),
         ...(queueDepth ? { queue: queueDepth } : {}),
       };
@@ -1858,7 +1886,6 @@ export function getEventConsumerGroupRequests(
         ),
         replay: group.replay ?? "new",
         ordering: group.ordering ?? "strict",
-        concurrency: group.concurrency ?? 1,
         ackWaitMs: group.ackWaitMs ?? 300000,
         maxDeliver,
         backoffMs: eventConsumerBackoffMs(group, maxDeliver),
@@ -1915,7 +1942,6 @@ function getEventConsumerGroupDeclarations(
         filterSubjects: [],
         replay: group.replay ?? "new",
         ordering: group.ordering ?? "strict",
-        concurrency: group.concurrency ?? 1,
         ackWaitMs: group.ackWaitMs ?? 300000,
         maxDeliver,
         backoffMs: eventConsumerBackoffMs(group, maxDeliver),
@@ -2122,11 +2148,18 @@ export async function provisionContractResources(
           queueType: queue.queueType,
           publishPrefix: existingQueue?.publishPrefix ??
             `trellis.jobs.${namespace}.${queueToken}`,
+          ...(queue.update
+            ? {
+              updatesPrefix: existingQueue?.updatesPrefix ??
+                `trellis.job_updates.${namespace}.${queueToken}`,
+            }
+            : {}),
           workSubject: existingQueue?.workSubject ??
             `trellis.work.${namespace}.${queueToken}`,
           consumerName: existingQueue?.consumerName ??
             `${namespace}_${queueToken}`.slice(0, 64),
           payload: queue.payload,
+          ...(queue.update ? { update: queue.update } : {}),
           ...(queue.result ? { result: queue.result } : {}),
           maxDeliver: queue.maxDeliver,
           backoffMs: [...queue.backoffMs],
@@ -2137,7 +2170,6 @@ export async function provisionContractResources(
           progress: queue.progress,
           logs: queue.logs,
           dlq: queue.dlq,
-          concurrency: queue.concurrency,
           ...(queue.keyConcurrency
             ? { keyConcurrency: queue.keyConcurrency }
             : {}),
@@ -2188,7 +2220,6 @@ export async function provisionContractResources(
           filterSubjects: [...consumer.filterSubjects],
           replay: consumer.replay,
           ordering: consumer.ordering,
-          concurrency: consumer.concurrency,
           ackWaitMs: consumer.ackWaitMs,
           maxDeliver: consumer.maxDeliver,
           backoffMs: [...consumer.backoffMs],
@@ -2256,6 +2287,10 @@ export function getResourcePermissionGrants(
       publish.add(queue.publishPrefix + ".>");
       subscribe.add(`${queue.publishPrefix}.*.*`);
       subscribe.add(`${queue.publishPrefix}.*.cancelled`);
+      if (queue.updatesPrefix) {
+        publish.add(`${queue.updatesPrefix}.>`);
+        subscribe.add(`${queue.updatesPrefix}.>`);
+      }
     }
   }
 

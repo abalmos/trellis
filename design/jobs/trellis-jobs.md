@@ -87,6 +87,9 @@ step just to create or process jobs.
    Trellis-owned coordination state to enforce per-key active limits,
    queue-depth policy, and heartbeat-based stale-job handling across service
    instances.
+7. **Live updates are transient** — A queue may declare one typed `update`
+   schema for at-most-once content sent only to active subscribers. These frames
+   are separate from durable job lifecycle events and projections.
 
 ### Job States
 
@@ -204,6 +207,10 @@ Job state changes and worker heartbeats are published to this stream. The stream
 is append-only and replayable. The `.created` event contains the full job
 payload and Trellis-owned job context, enabling stream replay to reconstruct job
 state and preserve request/trace correlation.
+
+Typed job updates are not published to `JOBS`. They use a private Core NATS
+subject outside the jobs lifecycle subject family and are not persisted,
+replayed, projected into SQL, exposed through jobs admin, or sent to Event Log.
 
 **Work Queue: JetStream Stream (`JOBS_WORK`)**
 
@@ -592,6 +599,40 @@ type WorkerHeartbeat = {
 - `listServices()` and related admin views aggregate that derived
   worker-presence projection rather than reading direct service-written registry
   state.
+
+### Typed Live Updates
+
+A top-level job queue MAY declare one optional update schema:
+
+```typescript
+jobs: {
+  syncTickets: {
+    payload: { schema: "SyncTicketsPayload" },
+    update: { schema: "SyncTicketsUpdate" },
+    result: { schema: "SyncTicketsResult" },
+  },
+}
+```
+
+`progress` remains low-frequency durable telemetry projected for operators.
+`update` is typed live-only content emitted by an active handler with TypeScript
+`job.emitUpdate(...)` or Rust `ActiveJob::emit_update::<D>(...)`. Service-local
+consumers subscribe with TypeScript `JobRef.updates()` or
+`service.jobs.<queue>.updates(jobId)`, or Rust
+`NatsJobWaiter::updates::<D>(jobId)`. Payloads SHOULD be cumulative because late
+subscribers and disconnected subscribers may miss frames. The terminal job
+result or failure is authoritative.
+
+Each frame carries its job attempt and an attempt-local sequence. Runtime
+subscriptions discard older attempts and duplicate or out-of-order sequences.
+TypeScript subscriptions clean up on `unsubscribe()`, abort, or iterator close;
+Rust `NatsJobWaiter` streams also end when terminal lifecycle is observed. This
+filtering and cleanup do not make updates replayable.
+
+SQL-outbox callers that need updates MUST preallocate the job id and subscribe
+with the queue-level `updates(jobId)` API before the committed intent is
+dispatched. A `JobRef` created only after dispatch may subscribe too late for
+early frames.
 
 ### Job Schema
 
@@ -1010,6 +1051,9 @@ Public runtime rules:
 - active job handles expose typed payloads plus service-private execution
   controls such as heartbeat/in-progress acknowledgement, progress publication,
   log publication, cooperative cancellation checks, and redelivery metadata
+- queues with a declared update schema expose typed active-job emission plus
+  `JobRef` and known-job-id subscription helpers; subscriptions are live-only
+  and must be cleaned up when no longer consumed
 - active job handles expose immutable job context so handlers can include
   `requestId` and trace identifiers in logs, child work, and domain outputs when
   appropriate

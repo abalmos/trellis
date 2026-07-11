@@ -26,6 +26,7 @@ pub mod runtime_ref;
 mod runtime_worker;
 pub mod subjects;
 pub mod types;
+pub mod updates;
 
 pub use active_job::ActiveJob as WorkerActiveJob;
 pub use api::{
@@ -58,6 +59,7 @@ pub use types::{
     JobLogLevel, JobProgress, JobQueuePolicy, JobQueuePolicyOutcome, JobState, JobWaitEdge,
     JobWaitTarget, JobWaitTargetKind, WorkerHeartbeat,
 };
+pub use updates::{JobDescriptor, JobUpdate, JobUpdateDescriptor, JobUpdateError};
 
 #[doc(hidden)]
 pub type NatsJobEventPublisher = TrellisJobEventPublisher;

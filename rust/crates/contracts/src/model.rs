@@ -246,6 +246,9 @@ pub struct ContractOperation {
     pub version: String,
     pub subject: String,
     pub input: ContractSchemaRef,
+    /// Optional schema for live-only cumulative updates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<ContractSchemaRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub progress: Option<ContractSchemaRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,10 +349,7 @@ pub enum ContractEventConsumerReplay {
 pub enum ContractEventConsumerOrdering {
     #[default]
     Strict,
-}
-
-fn default_event_consumer_concurrency() -> i64 {
-    1
+    Parallel,
 }
 
 /// One durable event consumer group declared by a contract manifest.
@@ -363,8 +363,6 @@ pub struct ContractEventConsumerGroup {
     pub replay: ContractEventConsumerReplay,
     #[serde(default)]
     pub ordering: ContractEventConsumerOrdering,
-    #[serde(default = "default_event_consumer_concurrency")]
-    pub concurrency: i64,
     #[serde(rename = "ackWaitMs", skip_serializing_if = "Option::is_none")]
     pub ack_wait_ms: Option<i64>,
     #[serde(rename = "maxDeliver", skip_serializing_if = "Option::is_none")]
@@ -455,6 +453,9 @@ pub enum JobQueueWhenFullPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContractJobQueueResource {
     pub payload: ContractSchemaRef,
+    /// Optional schema for live-only cumulative updates.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<ContractSchemaRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<ContractSchemaRef>,
     #[serde(rename = "maxDeliver", skip_serializing_if = "Option::is_none")]
@@ -471,8 +472,6 @@ pub struct ContractJobQueueResource {
     pub logs: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dlq: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub concurrency: Option<i64>,
     #[serde(rename = "keyConcurrency", skip_serializing_if = "Option::is_none")]
     pub key_concurrency: Option<JobKeyConcurrencyDescriptor>,
     #[serde(skip_serializing_if = "Option::is_none")]

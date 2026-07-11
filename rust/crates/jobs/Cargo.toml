@@ -12,6 +12,7 @@ trellis-rs = { path = "../trellis", version = "0.11.0" }
 async-nats.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
+jsonschema.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true

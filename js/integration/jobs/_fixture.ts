@@ -112,6 +112,12 @@ export function createJobsFixture(caseId: string) {
       requestId: Type.String(),
       traceId: Type.String(),
     }),
+    UpdateOperationInput: Type.Object({ documentId: Type.String() }),
+    UpdateOperationUpdate: Type.Object({ processed: Type.Number() }),
+    UpdateOperationOutput: Type.Object({
+      jobId: Type.String(),
+      total: Type.Number(),
+    }),
     KeyedWorkflowInput: Type.Object({
       documentId: Type.String(),
       groupKey: Type.String(),
@@ -134,6 +140,10 @@ export function createJobsFixture(caseId: string) {
       cancelState: Type.String(),
     }),
     JobPayload: Type.Object({ documentId: Type.String() }),
+    JobUpdate: Type.Object({
+      processed: Type.Number(),
+      marker: Type.String(),
+    }),
     LongJobPayload: Type.Object({ documentId: Type.String() }),
     FailingJobPayload: Type.Object({ documentId: Type.String() }),
     JobResult: Type.Object({
@@ -166,6 +176,7 @@ export function createJobsFixture(caseId: string) {
       jobs: {
         processDocument: {
           payload: ref.schema("JobPayload"),
+          update: ref.schema("JobUpdate"),
           result: ref.schema("JobResult"),
         },
         longProcessDocument: {
@@ -181,7 +192,6 @@ export function createJobsFixture(caseId: string) {
         keyedProcessDocument: {
           payload: ref.schema("KeyedJobPayload"),
           result: ref.schema("KeyedJobResult"),
-          concurrency: 2,
           keyConcurrency: {
             key: ["document", "/groupKey"],
             maxActive: 1,
@@ -197,7 +207,6 @@ export function createJobsFixture(caseId: string) {
         keyedCoalesceProcessDocument: {
           payload: ref.schema("KeyedJobPayload"),
           result: ref.schema("KeyedJobResult"),
-          concurrency: 2,
           keyConcurrency: {
             key: ["document", "/groupKey"],
             maxActive: 1,
@@ -213,7 +222,6 @@ export function createJobsFixture(caseId: string) {
         keyedReplaceProcessDocument: {
           payload: ref.schema("KeyedJobPayload"),
           result: ref.schema("KeyedJobResult"),
-          concurrency: 2,
           keyConcurrency: {
             key: ["document", "/groupKey"],
             maxActive: 1,
@@ -225,6 +233,21 @@ export function createJobsFixture(caseId: string) {
             maxQueuedPerKey: 1,
             whenFull: "replace-oldest",
           },
+        },
+      },
+      operations: {
+        "Documents.ProcessWithUpdates": {
+          version: "v1",
+          subject: caseScopedSubject(
+            "operations.v1.Integration.Jobs",
+            caseId,
+            "Documents.ProcessWithUpdates",
+          ),
+          input: ref.schema("UpdateOperationInput"),
+          update: ref.schema("UpdateOperationUpdate"),
+          output: ref.schema("UpdateOperationOutput"),
+          capabilities: { call: [], observe: [] },
+          errors: [ref.error("UnexpectedError")],
         },
       },
       rpc: {
@@ -287,6 +310,7 @@ export function createJobsFixture(caseId: string) {
     uses: {
       required: {
         jobsService: serviceContract.use({
+          operations: { call: ["Documents.ProcessWithUpdates"] },
           rpc: {
             call: [
               "Documents.Process",
@@ -394,7 +418,7 @@ export function createJobsFixture(caseId: string) {
         requestId: job.context.requestId,
         traceId: job.context.traceId,
       });
-    });
+    }, { concurrency: 2 });
 
     await service.handle.rpc.documents.keyedProcess(
       async ({ input, client }) => {

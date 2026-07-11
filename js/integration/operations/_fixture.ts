@@ -35,6 +35,10 @@ export function createOperationsFixture(
       message: Type.String(),
       step: Type.Number(),
     }),
+    OperationUpdate: Type.Object({
+      message: Type.String(),
+      step: Type.Integer(),
+    }),
     OperationOutput: Type.Object({
       message: Type.String(),
       done: Type.Boolean(),
@@ -81,6 +85,7 @@ export function createOperationsFixture(
           ),
           input: ref.schema("OperationInput"),
           progress: ref.schema("OperationProgress"),
+          update: ref.schema("OperationUpdate"),
           output: ref.schema("OperationOutput"),
           errors: [ref.error("UnexpectedError")],
           capabilities: {

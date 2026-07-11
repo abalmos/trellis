@@ -34,9 +34,9 @@ pub use error::{
 pub use operations::{
     control_subject, AcceptedOperation, InMemoryOperationRuntime, OperationControl,
     OperationControlRequest, OperationDescriptor, OperationError, OperationFailure,
-    OperationFailureLike, OperationProvider, OperationRefData, OperationSignal,
+    OperationFailureLike, OperationLiveEvent, OperationProvider, OperationRefData, OperationSignal,
     OperationSignalAccepted, OperationSnapshot, OperationSnapshotFrame, OperationState,
-    OperationTransferProgress, ServiceOperation,
+    OperationTransferProgress, OperationUpdateDescriptor, ServiceOperation,
 };
 pub use publisher::EventPublisher;
 pub use request_validator_adapter::{
@@ -51,8 +51,8 @@ pub use router::{RequestContext, Router};
 pub use runtime_facade::{
     ConnectedServiceRuntime, CoreBootstrapBinding, DefaultServiceRunner, GeneratedServiceContract,
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
-    ServiceEventListenerMode, ServiceHandle, ServiceHandlerContext, ServiceOperationProvider,
-    ServiceOperationWatch, ServiceRuntimeError, ServiceRuntimeRunner,
+    ServiceEventListenerMode, ServiceHandle, ServiceHandlerContext, ServiceOperationLiveWatch,
+    ServiceOperationProvider, ServiceOperationWatch, ServiceRuntimeError, ServiceRuntimeRunner,
     DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_MS,
 };
 pub use schema_validation::validate_input_schema;

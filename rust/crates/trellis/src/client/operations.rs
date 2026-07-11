@@ -93,7 +93,7 @@ struct OperationControlError {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum OperationEvent<TProgress = Value, TOutput = Value> {
+pub enum OperationEvent<TProgress = Value, TOutput = Value, TUpdate = Value> {
     Accepted {
         snapshot: OperationSnapshot<TProgress, TOutput>,
     },
@@ -102,6 +102,10 @@ pub enum OperationEvent<TProgress = Value, TOutput = Value> {
     },
     Progress {
         snapshot: OperationSnapshot<TProgress, TOutput>,
+    },
+    Update {
+        #[serde(flatten)]
+        update: OperationUpdateEvent<TUpdate>,
     },
     Transfer {
         snapshot: OperationSnapshot<TProgress, TOutput>,
@@ -120,9 +124,23 @@ pub enum OperationEvent<TProgress = Value, TOutput = Value> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct EventFrame<TProgress = Value, TOutput = Value> {
+struct EventFrame<TProgress = Value, TOutput = Value, TUpdate = Value> {
     kind: String,
-    event: OperationEvent<TProgress, TOutput>,
+    event: OperationEvent<TProgress, TOutput, TUpdate>,
+}
+
+/// One live-only typed operation update.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationUpdateEvent<TUpdate = Value> {
+    /// Durable operation id associated with the update.
+    pub operation_id: String,
+    /// Monotonic live event sequence for this operation process.
+    pub sequence: u64,
+    /// RFC 3339 publication timestamp.
+    pub timestamp: String,
+    /// Cumulative contract-defined update payload.
+    pub update: TUpdate,
 }
 
 pub trait OperationDescriptor {
@@ -144,6 +162,15 @@ pub trait OperationDescriptor {
     const PROGRESS_SCHEMA_JSON: Option<&'static str>;
     const OUTPUT_SCHEMA_JSON: &'static str;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str;
+}
+
+/// Descriptor extension implemented only by operations that declare live updates.
+pub trait OperationUpdateDescriptor {
+    /// Contract-defined cumulative live update payload.
+    type Update: DeserializeOwned + Send + 'static;
+
+    /// JSON Schema used to validate update payloads on both wire boundaries.
+    const UPDATE_SCHEMA_JSON: &'static str;
 }
 
 /// Marker trait for operations that declare an upload transfer.
@@ -529,7 +556,7 @@ where
     pub async fn watch(
         &self,
     ) -> Result<
-        BoxStream<'a, Result<OperationEvent<D::Progress, D::Output>, TrellisClientError>>,
+        BoxStream<'a, Result<OperationEvent<D::Progress, D::Output, Value>, TrellisClientError>>,
         TrellisClientError,
     > {
         let control = control_subject(D::SUBJECT);
@@ -550,7 +577,9 @@ where
                         Some(frame) => {
                             let event = match frame {
                                 Ok(value) => {
-                                    match decode_watch_frame::<D::Progress, D::Output>(value) {
+                                    match decode_watch_frame::<D::Progress, Value, D::Output>(
+                                        value, None,
+                                    ) {
                                         Ok(Some(event)) => event,
                                         Ok(None) => continue,
                                         Err(error) => return Err(error),
@@ -569,6 +598,74 @@ where
         )))
     }
 
+    /// Watch durable lifecycle events plus declared live-only updates.
+    pub async fn watch_with_updates(
+        &self,
+    ) -> Result<
+        BoxStream<
+            'a,
+            Result<OperationEvent<D::Progress, D::Output, D::Update>, TrellisClientError>,
+        >,
+        TrellisClientError,
+    >
+    where
+        D: OperationUpdateDescriptor,
+    {
+        let response = self
+            .transport
+            .watch_json_value(
+                control_subject(D::SUBJECT),
+                json!({
+                    "action": "watch",
+                    "operationId": self.id(),
+                    "includeUpdates": true,
+                }),
+            )
+            .await?;
+        Ok(Box::pin(stream::try_unfold(
+            (response, false),
+            |(mut response, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                loop {
+                    let Some(frame) = response.next().await else {
+                        return Ok(None);
+                    };
+                    let Some(event) = decode_watch_frame::<D::Progress, D::Update, D::Output>(
+                        frame?,
+                        Some(D::UPDATE_SCHEMA_JSON),
+                    )?
+                    else {
+                        continue;
+                    };
+                    let terminal = is_terminal_event(&event);
+                    return Ok(Some((event, (response, terminal))));
+                }
+            },
+        )))
+    }
+
+    /// Subscribe to declared live-only updates until the operation becomes terminal.
+    pub async fn updates(
+        &self,
+    ) -> Result<
+        BoxStream<'a, Result<OperationUpdateEvent<D::Update>, TrellisClientError>>,
+        TrellisClientError,
+    >
+    where
+        D: OperationUpdateDescriptor,
+    {
+        let events = self.watch_with_updates().await?;
+        Ok(Box::pin(events.filter_map(|event| async move {
+            match event {
+                Ok(OperationEvent::Update { update }) => Some(Ok(update)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })))
+    }
+
     pub async fn transfer(&self, body: impl AsRef<[u8]>) -> Result<FileInfo, TrellisClientError> {
         self.transfer_vec(body.as_ref().to_vec()).await
     }
@@ -583,9 +680,14 @@ where
     }
 }
 
-fn decode_watch_frame<TProgress: DeserializeOwned, TOutput: DeserializeOwned>(
+fn decode_watch_frame<
+    TProgress: DeserializeOwned,
+    TUpdate: DeserializeOwned,
+    TOutput: DeserializeOwned,
+>(
     value: Value,
-) -> Result<Option<OperationEvent<TProgress, TOutput>>, TrellisClientError> {
+    update_schema_json: Option<&str>,
+) -> Result<Option<OperationEvent<TProgress, TOutput, TUpdate>>, TrellisClientError> {
     if value.get("kind").and_then(Value::as_str) == Some("keepalive") {
         return Ok(None);
     }
@@ -600,7 +702,20 @@ fn decode_watch_frame<TProgress: DeserializeOwned, TOutput: DeserializeOwned>(
             Ok(Some(snapshot_to_event(frame.snapshot)))
         }
         "event" => {
-            let frame: EventFrame<TProgress, TOutput> = serde_json::from_value(value)?;
+            if value.pointer("/event/type").and_then(Value::as_str) == Some("update") {
+                let update = value.pointer("/event/update").ok_or_else(|| {
+                    TrellisClientError::OperationProtocol(
+                        "operation update event is missing its payload".to_string(),
+                    )
+                })?;
+                let schema_json = update_schema_json.ok_or_else(|| {
+                    TrellisClientError::OperationProtocol(
+                        "received an undeclared operation update".to_string(),
+                    )
+                })?;
+                validate_update_schema(schema_json, update)?;
+            }
+            let frame: EventFrame<TProgress, TOutput, TUpdate> = serde_json::from_value(value)?;
             Ok(Some(frame.event))
         }
         "error" => Err(operation_error_frame(value)),
@@ -655,9 +770,9 @@ fn operation_error_frame(value: Value) -> TrellisClientError {
     }
 }
 
-fn snapshot_to_event<TProgress, TOutput>(
+fn snapshot_to_event<TProgress, TUpdate, TOutput>(
     snapshot: OperationSnapshot<TProgress, TOutput>,
-) -> OperationEvent<TProgress, TOutput> {
+) -> OperationEvent<TProgress, TOutput, TUpdate> {
     match snapshot.state {
         OperationState::Pending => OperationEvent::Accepted { snapshot },
         OperationState::Running => OperationEvent::Started { snapshot },
@@ -667,13 +782,65 @@ fn snapshot_to_event<TProgress, TOutput>(
     }
 }
 
-fn is_terminal_event<TProgress, TOutput>(event: &OperationEvent<TProgress, TOutput>) -> bool {
+fn is_terminal_event<TProgress, TUpdate, TOutput>(
+    event: &OperationEvent<TProgress, TOutput, TUpdate>,
+) -> bool {
     matches!(
         event,
         OperationEvent::Completed { .. }
             | OperationEvent::Failed { .. }
             | OperationEvent::Cancelled { .. }
     )
+}
+
+fn validate_update_schema(schema_json: &str, update: &Value) -> Result<(), TrellisClientError> {
+    let schema: Value = serde_json::from_str(schema_json)?;
+    let validator = jsonschema::validator_for(&schema).map_err(|error| {
+        TrellisClientError::OperationProtocol(format!(
+            "failed to compile operation update schema: {error}"
+        ))
+    })?;
+    if let Some(error) = validator.iter_errors(update).next() {
+        return Err(TrellisClientError::OperationProtocol(format!(
+            "operation update failed schema validation: {error}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Update {
+        processed: u64,
+    }
+
+    #[test]
+    fn decodes_and_validates_typed_update_frame() {
+        let event = decode_watch_frame::<Value, Update, Value>(
+            json!({
+                "kind": "event",
+                "sequence": 2,
+                "event": {
+                    "type": "update",
+                    "operationId": "op-1",
+                    "sequence": 2,
+                    "timestamp": "2026-07-10T12:00:00Z",
+                    "update": { "processed": 3 }
+                }
+            }),
+            Some(r#"{"type":"object","required":["processed"],"properties":{"processed":{"type":"integer"}}}"#),
+        )
+        .expect("decode update frame")
+        .expect("event frame");
+
+        assert!(matches!(
+            event,
+            OperationEvent::Update { update } if update.update.processed == 3
+        ));
+    }
 }
 
 pub fn control_subject(subject: &str) -> String {

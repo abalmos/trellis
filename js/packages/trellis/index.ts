@@ -26,6 +26,22 @@ export {
   schema,
   unwrapSchema,
 } from "./contracts.ts";
+export {
+  TrellisBindingsGetRequestSchema,
+  TrellisBindingsGetResponseSchema,
+} from "./models/trellis/rpc/TrellisBindingsGet.ts";
+export {
+  TrellisCatalogRequestSchema,
+  TrellisCatalogResponseSchema,
+} from "./models/trellis/rpc/TrellisCatalog.ts";
+export {
+  TrellisContractGetRequestSchema,
+  TrellisContractGetResponseSchema,
+} from "./models/trellis/rpc/TrellisContractGet.ts";
+export {
+  TrellisSurfaceStatusRequestSchema,
+  TrellisSurfaceStatusResponseSchema,
+} from "./models/trellis/rpc/TrellisSurfaceStatus.ts";
 export type { InferSchemaType, JsonValue, TrellisAPI } from "./contracts.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
@@ -129,6 +145,7 @@ export {
 } from "./errors/index.ts";
 export {
   ActiveJob,
+  decodeJobUpdateEnvelope,
   JobLogEntrySchema,
   JobProgressSchema,
   JobQueue,
@@ -139,6 +156,7 @@ export {
 export type {
   Job,
   JobFilter,
+  JobHandlerOptions,
   JobIdentity,
   JobLogEntry,
   JobProgress,
@@ -147,6 +165,9 @@ export type {
   JobSnapshot,
   JobState,
   JobTypeMetadata,
+  JobUpdateEnvelope,
+  JobUpdatesOptions,
+  JobUpdateSubscription,
   JobWorkerHost,
   RetryJobErrorData,
   ServiceInfo,
@@ -191,6 +212,7 @@ export type {
   OperationSnapshot,
   OperationState,
   OperationTransferProgress,
+  OperationWatchOptions,
   ProgressOperationEvent,
   ProgressOperationSnapshot,
   StartedOperationEvent,
@@ -200,6 +222,7 @@ export type {
   TransferOperationBuilder,
   TransferOperationEvent,
   TransferOperationSnapshot,
+  UpdateOperationEvent,
 } from "./operations.ts";
 export { controlSubject, OperationInvoker } from "./operations.ts";
 export type {
@@ -227,6 +250,7 @@ export type {
   OperationRuntimeHandle,
   OperationTransferContextOf,
   OperationTransferHandle,
+  OperationUpdateOf,
   PreparedTrellisEvent,
   RequestOpts,
   RpcHandlerContext,

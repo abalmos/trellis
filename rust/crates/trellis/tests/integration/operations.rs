@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures_util::stream::{self, BoxStream};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{watch, Notify};
@@ -55,6 +55,14 @@ const OP_SERVICE_CONTRACT_JSON: &str = r#"{
         "step": { "type": "integer" }
       }
     },
+    "OperationUpdate": {
+      "type": "object",
+      "required": ["message", "step"],
+      "properties": {
+        "message": { "type": "string" },
+        "step": { "type": "integer" }
+      }
+    },
     "OperationSignalInput": {
       "type": "object",
       "required": ["suffix"],
@@ -69,19 +77,12 @@ const OP_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "events": { "publish": ["Health.Heartbeat"] }
-      }
-    }
-  },
   "operations": {
     "Entity.Process": {
       "version": "v1",
       "subject": "operations.v1.Entity.Process",
       "input": { "schema": "OperationInput" },
+      "update": { "schema": "OperationUpdate" },
       "progress": { "schema": "OperationProgress" },
       "output": { "schema": "OperationOutput" },
       "capabilities": { "call": ["process"], "observe": ["process"], "cancel": ["cancelProcess"], "control": ["process"] },
@@ -107,7 +108,7 @@ struct OperationsServiceContract;
 
 impl trellis_rs::service::GeneratedServiceContract for OperationsServiceContract {
     const CONTRACT_ID: &'static str = OP_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "OE0YYjBgM1nLLX2WPs_eJdxKuVn4Z6f8sXMKgCMJEXM";
+    const CONTRACT_DIGEST: &'static str = "95L3etWwveNZKrUPhg7LNPME6l3X8BsZXzjuUYLAlOI";
     const CONTRACT_JSON: &'static str = OP_SERVICE_CONTRACT_JSON;
 }
 
@@ -126,6 +127,12 @@ struct EntityProcessProgress {
 struct EntityProcessOutput {
     message: String,
     done: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct EntityProcessUpdate {
+    message: String,
+    step: u64,
 }
 
 struct EntityProcessOp;
@@ -151,6 +158,19 @@ impl trellis_rs::client::OperationDescriptor for EntityProcessOp {
     );
     const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","done"],"properties":{"message":{"type":"string"},"done":{"type":"boolean"}}}"#;
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = r##"{"appendMessage":{"type":"object","required":["suffix"],"properties":{"suffix":{"type":"string"}}},"updateMessage":{"type":"object","required":["suffix"],"properties":{"suffix":{"type":"string"}}}}"##;
+}
+
+impl trellis_rs::client::OperationUpdateDescriptor for EntityProcessOp {
+    type Update = EntityProcessUpdate;
+
+    const UPDATE_SCHEMA_JSON: &'static str = r#"{"type":"object","required":["message","step"],"properties":{"message":{"type":"string"},"step":{"type":"integer"}}}"#;
+}
+
+impl trellis_rs::service::OperationUpdateDescriptor for EntityProcessOp {
+    type Update = EntityProcessUpdate;
+
+    const UPDATE_SCHEMA_JSON: &'static str =
+        <Self as trellis_rs::client::OperationUpdateDescriptor>::UPDATE_SCHEMA_JSON;
 }
 
 struct EntityStatusOp;
@@ -771,6 +791,108 @@ fn setup_control_operation_service(
     );
 }
 
+#[derive(Default)]
+struct OperationUpdateGates {
+    watch_opened: Notify,
+    release_updates: Notify,
+    release_terminal: Notify,
+}
+
+fn setup_update_operation_service(
+    service: &mut trellis_rs::service::ConnectedServiceRuntime<OperationsServiceContract>,
+    operations: trellis_rs::service::ServiceOperation<EntityProcessOp>,
+    gates: Arc<OperationUpdateGates>,
+) {
+    let operations_for_start = operations.clone();
+    let operations_for_get = operations.clone();
+    let operations_for_watch = operations.clone();
+    let operations_for_cancel = operations.clone();
+
+    service
+        .register_operation_with_updates_and_signal::<EntityProcessOp, _, _, _, _, _, _, _, _, _>(
+            {
+                let gates = Arc::clone(&gates);
+                move |_context: trellis_rs::service::ServiceHandlerContext,
+                      input: EntityProcessInput| {
+                    let operations = operations_for_start.clone();
+                    let gates = Arc::clone(&gates);
+                    async move {
+                        let operation_id = format!("op-{}", input.message);
+                        let accepted = operations.accept(operation_id.clone()).await?;
+                        let control = operations.control(operation_id).await?;
+                        let running = control.started().await?;
+
+                        tokio::spawn(async move {
+                            gates.release_updates.notified().await;
+                            control
+                                .emit_update(EntityProcessUpdate {
+                                    message: input.message.clone(),
+                                    step: 1,
+                                })
+                                .await
+                                .expect("emit first live operation update");
+                            control
+                                .emit_update(EntityProcessUpdate {
+                                    message: input.message,
+                                    step: 2,
+                                })
+                                .await
+                                .expect("emit second live operation update");
+                            gates.release_terminal.notified().await;
+                            control
+                                .complete(EntityProcessOutput {
+                                    message: "updates-complete".to_string(),
+                                    done: true,
+                                })
+                                .await
+                                .expect("complete live-update operation");
+                        });
+
+                        Ok(AcceptedOperation {
+                            snapshot: running,
+                            ..accepted
+                        })
+                    }
+                }
+            },
+            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+                let operations = operations_for_get.clone();
+                async move { operations.get(operation_id).await }
+            },
+            {
+                let gates = Arc::clone(&gates);
+                move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+                    let operations = operations_for_watch.clone();
+                    let gates = Arc::clone(&gates);
+                    let stream: trellis_rs::service::ServiceOperationLiveWatch<
+                        EntityProcessProgress,
+                        EntityProcessUpdate,
+                        EntityProcessOutput,
+                    > = Box::pin(
+                        stream::once(async move {
+                            let events = operations.live_events(operation_id).await?;
+                            gates.watch_opened.notify_one();
+                            Ok::<_, ServerError>(events)
+                        })
+                        .try_flatten(),
+                    );
+                    stream
+                }
+            },
+            move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
+                let operations = operations_for_cancel.clone();
+                async move { operations.cancel(operation_id).await }
+            },
+            move |_context: trellis_rs::service::ServiceHandlerContext,
+                  operation_id: String,
+                  signal_name: String,
+                  input: Option<Value>| {
+                let operations = operations.clone();
+                async move { operations.signal(operation_id, signal_name, input).await }
+            },
+        );
+}
+
 struct ControlOperationFixture {
     runtime: trellis_test::TrellisTestRuntime,
     service_key: trellis_test::TrellisTestServiceKey,
@@ -969,6 +1091,136 @@ async fn operations_client_watches_progress() {
     }
 
     assert!(saw_progress, "operation watch should observe progress");
+
+    service_task.abort_and_wait().await;
+}
+
+#[tokio::test]
+async fn operations_live_updates_are_typed_ordered_and_transient() {
+    assert_case_registered(
+        "operations.live-updates-are-typed-ordered-and-transient",
+        "operations",
+        "operations",
+    );
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+
+    let service_contract =
+        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
+            .expect("build operations service test contract");
+    assert_eq!(
+        service_contract.digest(),
+        OperationsServiceContract::CONTRACT_DIGEST
+    );
+    let client_contract = operations_client_contract().expect("build operations client contract");
+    let service_key = admin
+        .provision_service_instance(&bootstrap_url, &service_contract, None, None)
+        .await
+        .expect("provision live operations service instance");
+    let mut service =
+        trellis_rs::service::ConnectedServiceRuntime::<OperationsServiceContract>::connect(
+            runtime.service_connect_options("operations-fixture-service", &service_key),
+        )
+        .await
+        .expect("connect live Rust operations service");
+    let operations =
+        trellis_rs::service::InMemoryOperationRuntime::new("operations-fixture-service")
+            .operation::<EntityProcessOp>();
+    let gates = Arc::new(OperationUpdateGates::default());
+    setup_update_operation_service(&mut service, operations, Arc::clone(&gates));
+    let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
+    let client = admin
+        .connect_client(&bootstrap_url, &client_contract)
+        .await
+        .expect("connect live Rust operations client");
+
+    let operation_ref = start_operation_with_retry(&client, "typed-updates").await;
+    let mut events = operation_ref
+        .watch_with_updates()
+        .await
+        .expect("watch typed operation updates");
+    tokio::time::timeout(Duration::from_secs(5), gates.watch_opened.notified())
+        .await
+        .expect("service opens update-aware watch");
+    gates.release_updates.notify_one();
+
+    let mut updates = Vec::new();
+    while updates.len() < 2 {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.next())
+            .await
+            .expect("receive operation event before timeout")
+            .expect("operation event stream item")
+            .expect("valid operation event");
+        match event {
+            OperationEvent::Update { update } => updates.push(update),
+            OperationEvent::Completed { .. }
+            | OperationEvent::Failed { .. }
+            | OperationEvent::Cancelled { .. } => {
+                panic!("operation became terminal before both updates")
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        updates
+            .iter()
+            .map(|event| event.update.step)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert_eq!(updates[0].update.message, "typed-updates");
+    assert!(updates[0].sequence < updates[1].sequence);
+
+    let running = operation_ref.get().await.expect("get running snapshot");
+    assert_eq!(running.state, ClientOperationState::Running);
+    assert!(running.progress.is_none());
+    assert!(running.output.is_none());
+    assert!(serde_json::to_value(&running)
+        .expect("serialize running snapshot")
+        .get("update")
+        .is_none());
+
+    gates.release_terminal.notify_one();
+    let completed = loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.next())
+            .await
+            .expect("receive terminal event before timeout")
+            .expect("terminal event stream item")
+            .expect("valid terminal event");
+        if let OperationEvent::Completed { snapshot } = event {
+            break snapshot;
+        }
+    };
+    let expected_output = EntityProcessOutput {
+        message: "updates-complete".to_string(),
+        done: true,
+    };
+    assert_eq!(completed.output, Some(expected_output.clone()));
+    assert!(events.next().await.is_none());
+
+    let terminal = operation_ref.get().await.expect("get terminal snapshot");
+    assert_eq!(terminal.state, ClientOperationState::Completed);
+    assert_eq!(terminal.output, Some(expected_output));
+    assert!(serde_json::to_value(&terminal)
+        .expect("serialize terminal snapshot")
+        .get("update")
+        .is_none());
+
+    let late_updates: Vec<_> = operation_ref
+        .updates()
+        .await
+        .expect("open late update watch")
+        .collect()
+        .await;
+    assert!(late_updates.is_empty());
 
     service_task.abort_and_wait().await;
 }

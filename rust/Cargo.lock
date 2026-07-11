@@ -4090,6 +4090,7 @@ dependencies = [
  "async-nats",
  "bytes",
  "futures-util",
+ "jsonschema",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4200,12 +4201,14 @@ dependencies = [
  "tracing-subscriber",
  "trellis-contracts",
  "trellis-rs",
+ "trellis-test",
 ]
 
 [[package]]
 name = "trellis-service-jobs"
 version = "0.11.0"
 dependencies = [
+ "async-nats",
  "futures-util",
  "rusqlite",
  "rustls",
