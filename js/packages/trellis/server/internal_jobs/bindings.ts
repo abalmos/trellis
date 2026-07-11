@@ -4,6 +4,8 @@ export type JobsQueueBinding = {
   workSubject: string;
   consumerName: string;
   payload: { schema: string };
+  update?: { schema: string };
+  updatesPrefix?: string;
   result?: { schema: string };
   maxDeliver: number;
   backoffMs: number[];

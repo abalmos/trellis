@@ -8,6 +8,7 @@ description = "Rust jobs admin service bootstrap scaffold for Trellis."
 publish = false
 
 [dependencies]
+async-nats.workspace = true
 futures-util.workspace = true
 rusqlite.workspace = true
 rustls.workspace = true

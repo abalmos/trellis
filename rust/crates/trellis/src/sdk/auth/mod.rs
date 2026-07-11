@@ -2,6 +2,7 @@
 pub mod client;
 pub mod contract;
 pub mod events;
+pub mod jobs;
 pub mod operations;
 pub mod rpc;
 pub mod schemas;

@@ -151,7 +151,6 @@ fn bindings_get_response_deserializes_top_level_event_consumers() {
                 "filterSubjects": ["events.v1.Auth.Connections.Opened"],
                 "replay": "new",
                 "ordering": "strict",
-                "concurrency": 1,
                 "ackWaitMs": 30000,
                 "maxDeliver": 5,
                 "backoffMs": [1000, 5000]
@@ -170,7 +169,6 @@ fn bindings_get_response_deserializes_top_level_event_consumers() {
                 filter_subjects: vec!["events.v1.Auth.Connections.Opened".to_string()],
                 replay: "new".to_string(),
                 ordering: "strict".to_string(),
-                concurrency: 1,
                 ack_wait_ms: 30000,
                 max_deliver: 5,
                 backoff_ms: vec![1000, 5000],
@@ -261,8 +259,7 @@ fn jobs_binding_types_deserialize_with_work_stream() {
                             "ackWaitMs": 60000,
                             "progress": true,
                             "logs": true,
-                            "dlq": true,
-                            "concurrency": 2
+                            "dlq": true
                         }
                     }
                 },
@@ -299,8 +296,7 @@ fn jobs_binding_types_deserialize_with_work_stream() {
                     "ackWaitMs": 60000,
                     "progress": true,
                     "logs": true,
-                    "dlq": true,
-                    "concurrency": 2
+                    "dlq": true
                 }
             },
             "resources": { "kv": {} }
@@ -361,8 +357,7 @@ fn core_bootstrap_binding_maps_generated_resources_to_service_resource_bindings(
                             "defaultDeadlineMs": 120000,
                             "progress": true,
                             "logs": true,
-                            "dlq": true,
-                            "concurrency": 2
+                            "dlq": true
                         }
                     }
                 }

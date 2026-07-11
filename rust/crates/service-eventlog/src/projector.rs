@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_nats::jetstream::consumer::FromConsumer;
 use async_nats::jetstream::{self, consumer};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -22,8 +24,14 @@ const EVENT_STREAM: &str = "trellis";
 const EVENT_SUBJECT_WILDCARD: &str = "events.v1.>";
 const PROJECTOR_BATCH_SIZE: usize = 100;
 const PROJECTOR_CONCURRENCY: usize = 32;
+const LIVE_WATCH_INACTIVE_THRESHOLD: Duration = Duration::from_secs(5);
+const OBSOLETE_WATCH_INACTIVE_THRESHOLD: Duration = Duration::from_secs(5 * 60);
 const EVENT_ID_HEADER: &str = "Nats-Msg-Id";
 const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
+pub(crate) const CONSUMER_METADATA_MANAGED_BY: &str = "trellis.managed_by";
+pub(crate) const CONSUMER_METADATA_DEPLOYMENT_ID: &str = "trellis.deployment_id";
+pub(crate) const CONSUMER_METADATA_CONTRACT_ID: &str = "trellis.contract_id";
+pub(crate) const CONSUMER_METADATA_GROUP: &str = "trellis.group";
 
 /// Event Log transport facade over the Trellis event JetStream stream.
 #[derive(Debug, Clone)]
@@ -39,31 +47,14 @@ impl EventLogRuntime {
         }
     }
 
-    pub(crate) async fn event_messages(
-        &self,
-        consumer_name: &str,
-        replay_all: bool,
-    ) -> Result<EventMessageStream, String> {
+    pub(crate) async fn live_events(&self) -> Result<EventMessageStream, String> {
         let jetstream = jetstream::new(self.nats.clone());
         let stream = jetstream
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
         let consumer = stream
-            .get_or_create_consumer(
-                consumer_name,
-                consumer::pull::Config {
-                    durable_name: Some(consumer_name.to_string()),
-                    filter_subject: EVENT_SUBJECT_WILDCARD.to_string(),
-                    deliver_policy: if replay_all {
-                        consumer::DeliverPolicy::All
-                    } else {
-                        consumer::DeliverPolicy::New
-                    },
-                    ack_policy: consumer::AckPolicy::Explicit,
-                    ..Default::default()
-                },
-            )
+            .create_consumer(live_event_consumer_config())
             .await
             .map_err(|error| error.to_string())?;
         consumer
@@ -79,6 +70,33 @@ impl EventLogRuntime {
                     .boxed()
             })
             .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn expire_obsolete_watch_consumers(&self) -> Result<usize, String> {
+        let jetstream = jetstream::new(self.nats.clone());
+        let stream = jetstream
+            .get_stream(EVENT_STREAM)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut consumers = stream.consumers();
+        let mut configs = Vec::new();
+        while let Some(info) = consumers.next().await {
+            let info = info.map_err(|error| error.to_string())?;
+            if is_obsolete_eventlog_watch_consumer(&info.name, &info.config) {
+                let mut config = consumer::pull::Config::try_from_consumer_config(info.config)
+                    .map_err(|error| error.to_string())?;
+                config.inactive_threshold = OBSOLETE_WATCH_INACTIVE_THRESHOLD;
+                config.metadata.extend(platform_consumer_metadata("watch"));
+                configs.push(config);
+            }
+        }
+        for config in configs.iter().cloned() {
+            stream
+                .update_consumer(config)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(configs.len())
     }
 
     pub(crate) async fn event_consumer(
@@ -103,6 +121,7 @@ impl EventLogRuntime {
                         consumer::DeliverPolicy::New
                     },
                     ack_policy: consumer::AckPolicy::Explicit,
+                    metadata: platform_consumer_metadata("projector"),
                     ..Default::default()
                 },
             )
@@ -135,6 +154,31 @@ impl EventLogRuntime {
             .await
             .map_err(|error| error.to_string())
     }
+}
+
+fn live_event_consumer_config() -> consumer::pull::Config {
+    consumer::pull::Config {
+        filter_subject: EVENT_SUBJECT_WILDCARD.to_string(),
+        deliver_policy: consumer::DeliverPolicy::New,
+        ack_policy: consumer::AckPolicy::Explicit,
+        inactive_threshold: LIVE_WATCH_INACTIVE_THRESHOLD,
+        metadata: platform_consumer_metadata("watch"),
+        ..Default::default()
+    }
+}
+
+fn platform_consumer_metadata(group: &str) -> HashMap<String, String> {
+    HashMap::from([
+        (
+            CONSUMER_METADATA_MANAGED_BY.to_string(),
+            "platform".to_string(),
+        ),
+        (
+            CONSUMER_METADATA_CONTRACT_ID.to_string(),
+            "trellis.eventlog@v1".to_string(),
+        ),
+        (CONSUMER_METADATA_GROUP.to_string(), group.to_string()),
+    ])
 }
 
 /// Handle for the background Event Log projector task.
@@ -449,6 +493,31 @@ fn projector_consumer_name(projection_id: &str) -> String {
     )
 }
 
+pub(crate) fn is_eventlog_projector_consumer(name: &str) -> bool {
+    name.starts_with("eventlog-projector-") || name.starts_with("event-log-projector-")
+}
+
+pub(crate) fn is_obsolete_eventlog_watch_consumer(name: &str, config: &consumer::Config) -> bool {
+    let suffix = name
+        .strip_prefix("eventlog-watch-")
+        .or_else(|| name.strip_prefix("event-log-watch-"));
+    let Some((seed, counter)) = suffix.and_then(|suffix| suffix.rsplit_once('-')) else {
+        return false;
+    };
+    !seed.is_empty()
+        && seed.len() <= 48
+        && seed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        && counter.parse::<u64>().is_ok()
+        && config.durable_name.as_deref() == Some(name)
+        && config.filter_subject == EVENT_SUBJECT_WILDCARD
+        && config.filter_subjects.is_empty()
+        && config.deliver_policy == consumer::DeliverPolicy::New
+        && config.ack_policy == consumer::AckPolicy::Explicit
+        && config.metadata.keys().all(|key| key.starts_with("_nats."))
+}
+
 fn sanitize_consumer_token(value: &str) -> String {
     let token = value
         .chars()
@@ -463,7 +532,31 @@ fn sanitize_consumer_token(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::projector_consumer_name;
+    use std::time::Duration;
+
+    use async_nats::jetstream::consumer;
+
+    use super::{
+        is_eventlog_projector_consumer, is_obsolete_eventlog_watch_consumer,
+        live_event_consumer_config, projector_consumer_name, CONSUMER_METADATA_MANAGED_BY,
+        EVENT_SUBJECT_WILDCARD,
+    };
+
+    #[test]
+    fn live_watch_consumer_is_ephemeral_and_new_only() {
+        let config = live_event_consumer_config();
+
+        assert!(config.durable_name.is_none());
+        assert_eq!(config.deliver_policy, consumer::DeliverPolicy::New);
+        assert_eq!(config.inactive_threshold, Duration::from_secs(5));
+        assert_eq!(
+            config
+                .metadata
+                .get(CONSUMER_METADATA_MANAGED_BY)
+                .map(String::as_str),
+            Some("platform")
+        );
+    }
 
     #[test]
     fn projector_consumer_name_removes_timestamp_punctuation() {
@@ -471,6 +564,42 @@ mod tests {
             projector_consumer_name("1877448-2026-07-09T04:28:06.672734698Z"),
             "eventlog-projector-1877448-2026-07-09T042806672734698Z",
         );
+    }
+
+    #[test]
+    fn eventlog_consumer_ownership_recognizes_current_and_legacy_names() {
+        assert!(is_eventlog_projector_consumer("eventlog-projector-current"));
+        assert!(is_eventlog_projector_consumer("event-log-projector-legacy"));
+    }
+
+    #[test]
+    fn obsolete_watch_requires_the_legacy_name_and_config_shape() {
+        let mut config = consumer::Config {
+            durable_name: Some("eventlog-watch-session_1-7".to_string()),
+            filter_subject: EVENT_SUBJECT_WILDCARD.to_string(),
+            deliver_policy: consumer::DeliverPolicy::New,
+            ack_policy: consumer::AckPolicy::Explicit,
+            ..Default::default()
+        };
+        assert!(is_obsolete_eventlog_watch_consumer(
+            "eventlog-watch-session_1-7",
+            &config
+        ));
+
+        config.filter_subject = "events.v1.External.>".to_string();
+        assert!(!is_obsolete_eventlog_watch_consumer(
+            "eventlog-watch-session_1-7",
+            &config
+        ));
+
+        config.filter_subject = EVENT_SUBJECT_WILDCARD.to_string();
+        config
+            .metadata
+            .insert("owner".to_string(), "external".to_string());
+        assert!(!is_obsolete_eventlog_watch_consumer(
+            "eventlog-watch-session_1-7",
+            &config
+        ));
     }
 }
 

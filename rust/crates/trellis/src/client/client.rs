@@ -2183,6 +2183,8 @@ mod tests {
             json!({
                 "status": "ready",
                 "connectInfo": {
+                    "instanceId": "instance-test",
+                    "deploymentId": "deployment-test",
                     "contractDigest": "digest-alpha",
                     "transports": {
                         "native": {
@@ -2290,6 +2292,8 @@ mod tests {
                 json!({
                     "status": "ready",
                     "connectInfo": {
+                        "instanceId": "instance-test",
+                        "deploymentId": "deployment-test",
                         "contractDigest": "digest-alpha",
                         "transports": {
                             "native": {

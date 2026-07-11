@@ -141,6 +141,33 @@ export function createEventConsumersFixture(caseId: string) {
     }),
   );
 
+  const parallelConsumerContract = defineServiceContract(
+    { schemas },
+    () => ({
+      id: caseScopedContractId(
+        "trellis.integration.event-consumers-parallel",
+        caseId,
+      ),
+      displayName: `Trellis Event Consumers Parallel (${slug})`,
+      description: "Consumes source events without an ordering guarantee.",
+      uses: {
+        required: {
+          source: sourceContract.use({
+            events: { subscribe: ["Source.Pinged"] },
+          }),
+        },
+      },
+      eventConsumers: {
+        ingest: {
+          uses: { source: ["Source.Pinged"] },
+          ordering: "parallel",
+          ackWaitMs: 5_000,
+          maxDeliver: 2,
+        },
+      },
+    }),
+  );
+
   const groupedDependencyConsumerContract = defineServiceContract(
     { schemas },
     () => ({
@@ -232,6 +259,7 @@ export function createEventConsumersFixture(caseId: string) {
     missingGroupConsumerContract,
     ambiguousGroupConsumerContract,
     dependencyConsumerContract,
+    parallelConsumerContract,
     groupedDependencyConsumerContract,
     selfConsumerContract,
     sourceName: caseScopedName("event-consumers-source", caseId),

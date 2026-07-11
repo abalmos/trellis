@@ -107,6 +107,40 @@ const op = await client.operation.orders.process
   .orThrow();
 ```
 
+An operation or job queue may declare one optional `update` schema. Keep
+`progress` for low-frequency durable telemetry/snapshots. Updates are typed
+live-only, at-most-once content: they are not persisted, replayed, exposed in
+admin/Event Log, or delivered to late subscribers. Prefer cumulative payloads
+and treat terminal output/result as authoritative.
+
+```ts
+// Inside an operation handler:
+await op.emitUpdate({ completed: 3, total: 10 }).orThrow();
+
+const ref = await client.operation.orders.process
+  .input({ orderId: "ord_123" })
+  .onUpdate((event) => console.log(event.update))
+  .start()
+  .orThrow();
+const events = await ref.watch({ updates: true }).orThrow();
+
+// Inside an active job handler:
+await job.emitUpdate({ completed: 3, total: 10 }).orThrow();
+const updates = await jobRef.updates().orThrow();
+const early = await service.jobs.syncOrder.updates(preallocatedJobId).orThrow();
+early.unsubscribe();
+```
+
+Job subscriptions filter stale attempts and duplicate or out-of-order
+attempt-local sequences and clean up when iteration ends or `unsubscribe()` is
+called. SQL-outbox callers should subscribe by the returned preallocated
+`jobId` before dispatch when early frames matter. Job update subjects are
+private Core NATS outside `JOBS`; application code must not build them.
+
+Close or abort feed subscriptions when the caller no longer needs them. Trellis
+propagates cancellation to the provider's `signal`; feed handlers must stop
+connection-scoped work and release resources when that signal aborts.
+
 If a generated facade is missing, check the contract generation path or the
 current API reference.
 
@@ -149,8 +183,9 @@ live integration test needs a missing failure or inspection surface, add the
 smallest named test helper instead of enriching a fake.
 
 For service-private jobs that must be singleton per logical key, declare
-`keyConcurrency` on the job queue. Keep the existing numeric `concurrency`
-field for worker-count concurrency. Keyed queues default to clear failure
+`keyConcurrency` on the job queue. Configure per-instance worker count on
+`service.jobs.<queue>.handle(handler, { concurrency })`; it is not part of the
+contract or resource binding. Keyed queues default to clear failure
 (`stalePolicy: "fail-stale"`, `whenFull: "reject"`); only use
 `whenFull: "coalesce"` or `"replace-oldest"` when the service explicitly wants
 scheduler-style compression or supersession. `create(...)` means “create a new
@@ -440,7 +475,6 @@ const contract = defineServiceContract({ schemas }, () => ({
       },
       replay: "new",
       ordering: "strict",
-      concurrency: 1,
     },
   },
 }));
@@ -449,6 +483,10 @@ await service.event.orders.shipped.listen(handleShipment, {}, {
   group: "shipmentProjection",
 }).orThrow();
 ```
+
+Strict groups are globally single-in-flight. For independent messages, declare
+`ordering: "parallel"` and pass a positive per-instance `concurrency` to every
+listener registration in that group. Registrations in one group must agree.
 
 Dependency durable consumption remains authority-backed by the top-level `uses`
 subscription. For durable self-consumption of events owned by the same service,

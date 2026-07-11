@@ -26,7 +26,6 @@ eventConsumers: {
     events: [{ use: "auth", event: "Auth.Connections.Opened" }],
     replay: "new",
     ordering: "strict",
-    concurrency: 1,
   },
 },
 ```
@@ -65,6 +64,11 @@ await service.event.auth.connectionsOpened.listen(
 ```
 
 Returning `ok(undefined)` acknowledges the message. If your handler returns `err(...)`, Trellis will NAK the delivery and redeliver it, which is useful for transient failures like a downstream service being temporarily unavailable.
+
+`ordering: "strict"` is globally single-in-flight. For independent messages,
+declare `ordering: "parallel"` and configure this service instance's worker count
+when listening: `{ group: "authConnections", concurrency: 4 }`. All listeners in
+the same group must use the same count.
 
 Do not pass a `durableName`. Durable event consumer names, filters, and permissions are provisioned by Trellis from the contract. If you want a live-only listener that does not replay stored events, pass `{ mode: "ephemeral", replay: "new" }` and omit `eventConsumers`.
 

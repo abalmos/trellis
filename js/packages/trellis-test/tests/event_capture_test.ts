@@ -1,4 +1,4 @@
-import { assertRejects } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { defineServiceContract } from "@qlever-llc/trellis";
 import { Type } from "typebox";
 import { startTrellisTestEventCapture } from "../src/event_capture.ts";
@@ -49,4 +49,33 @@ Deno.test("event capture rejects duplicate event names", async () => {
     Error,
     "Duplicate event name 'Entity.Changed' in Trellis event capture options",
   );
+});
+
+Deno.test("event capture approves its source in the selected deployment", async () => {
+  let approvedDeployment: string | undefined;
+  await assertRejects(
+    () =>
+      startTrellisTestEventCapture({
+        runtime: {
+          contracts: {
+            approve: (input) => {
+              approvedDeployment = input.deployment;
+              return Promise.resolve(undefined);
+            },
+          },
+          connectClient: () => Promise.reject(new Error("stop after approve")),
+          waitFor: () => Promise.reject(new Error("should not wait")),
+        },
+        options: {
+          name: "selected-deployment",
+          contract: duplicateEventContract,
+          deployment: "source-deployment",
+          events: ["Entity.Changed"],
+        },
+        onStop: () => undefined,
+      }),
+    Error,
+    "stop after approve",
+  );
+  assertEquals(approvedDeployment, "source-deployment");
 });

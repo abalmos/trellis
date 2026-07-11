@@ -107,12 +107,16 @@ export const CONTRACT = {
       "properties": {
         "ackPending": { "type": "integer" },
         "ackWaitMs": { "type": "integer" },
-        "concurrency": { "type": "integer" },
         "consumerName": { "type": "string" },
         "contractId": { "type": "string" },
         "deploymentId": { "type": "string" },
         "filterSubjects": { "items": { "type": "string" }, "type": "array" },
         "group": { "type": "string" },
+        "managedBy": {
+          "anyOf": [{ "const": "authority" }, { "const": "platform" }, {
+            "const": "external",
+          }],
+        },
         "maxDeliver": { "type": "integer" },
         "oldestPendingAt": { "type": "string" },
         "oldestPendingEventId": { "type": "string" },

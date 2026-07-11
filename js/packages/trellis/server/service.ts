@@ -1669,6 +1669,10 @@ export type TrellisServiceInternalConnectArgs<
   contractId?: string;
   contractDigest: string;
   contractKv?: TKv;
+  healthIdentity?: {
+    instanceId: string;
+    deploymentId: string;
+  };
 };
 
 /**

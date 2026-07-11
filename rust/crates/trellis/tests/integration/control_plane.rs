@@ -558,8 +558,7 @@ const CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON: &str = r#"{
   "jobs": {
     "syncRecords": {
       "payload": { "schema": "Record" },
-      "result": { "schema": "Record" },
-      "concurrency": 1
+      "result": { "schema": "Record" }
     }
   },
   "rpc": {

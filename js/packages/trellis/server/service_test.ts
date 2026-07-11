@@ -167,6 +167,8 @@ async function connectJobsHandlerTestService(opts?: {
           serverNow: 1_700_000_120,
           connectInfo: {
             sessionKey: "session-key",
+            instanceId: "instance-test",
+            deploymentId: "deployment-test",
             contractId: jobsHandlerTestContract.CONTRACT_ID,
             contractDigest: jobsHandlerTestContract.CONTRACT_DIGEST,
             transports: {
@@ -208,7 +210,6 @@ async function connectJobsHandlerTestService(opts?: {
                     progress: true,
                     logs: true,
                     dlq: true,
-                    concurrency: 1,
                   },
                 },
               },
@@ -266,6 +267,8 @@ async function connectHandlerSurfaceTestService(opts?: {
           serverNow: 1_700_000_120,
           connectInfo: {
             sessionKey: "session-key",
+            instanceId: "instance-test",
+            deploymentId: "deployment-test",
             contractId: handlerSurfaceTestContract.CONTRACT_ID,
             contractDigest: handlerSurfaceTestContract.CONTRACT_DIGEST,
             transports: {
@@ -779,6 +782,8 @@ function installCoreBootstrapFetch(): () => void {
           serverNow: 1_700_000_120,
           connectInfo: {
             sessionKey: "session-key",
+            instanceId: "instance-test",
+            deploymentId: "deployment-test",
             contractId: core.CONTRACT_ID,
             contractDigest: core.CONTRACT_DIGEST,
             transports: {
@@ -869,6 +874,8 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
             serverNow: 1_700_000_120,
             connectInfo: {
               sessionKey: "session-key",
+              instanceId: "instance-test",
+              deploymentId: "deployment-test",
               contractId: core.CONTRACT_ID,
               contractDigest: core.CONTRACT_DIGEST,
               transports: {
@@ -1036,6 +1043,8 @@ Deno.test("TrellisService.connect retries once on iat_out_of_range using server 
           serverNow: 1_700_000_120,
           connectInfo: {
             sessionKey: "session-key",
+            instanceId: "instance-test",
+            deploymentId: "deployment-test",
             contractId: core.CONTRACT_ID,
             contractDigest: core.CONTRACT_DIGEST,
             transports: {
@@ -1115,6 +1124,8 @@ Deno.test("TrellisService.connect retries bootstrap with manifest when required"
           serverNow: 1_700_000_120,
           connectInfo: {
             sessionKey: "session-key",
+            instanceId: "instance-test",
+            deploymentId: "deployment-test",
             contractId: core.CONTRACT_ID,
             contractDigest: core.CONTRACT_DIGEST,
             transports: {
@@ -1188,6 +1199,8 @@ Deno.test("TrellisService.connect retries when bootstrap endpoint is unavailable
             serverNow: 1_700_000_120,
             connectInfo: {
               sessionKey: "session-key",
+              instanceId: "instance-test",
+              deploymentId: "deployment-test",
               contractId: core.CONTRACT_ID,
               contractDigest: core.CONTRACT_DIGEST,
               transports: {
@@ -1432,6 +1445,8 @@ Deno.test("TrellisService.connect waits for pending authority update", async () 
             serverNow: 1_700_000_120,
             connectInfo: {
               sessionKey: "session-key",
+              instanceId: "instance-test",
+              deploymentId: "deployment-test",
               contractId: core.CONTRACT_ID,
               contractDigest: core.CONTRACT_DIGEST,
               transports: {
@@ -1577,6 +1592,8 @@ Deno.test("TrellisService.connect waits for pending contract activation", async 
             serverNow: 1_700_000_120,
             connectInfo: {
               sessionKey: "session-key",
+              instanceId: "instance-test",
+              deploymentId: "deployment-test",
               contractId: core.CONTRACT_ID,
               contractDigest: core.CONTRACT_DIGEST,
               transports: {
@@ -1682,6 +1699,8 @@ Deno.test("TrellisService.connect waits for pending contract catalog issue", asy
             serverNow: 1_700_000_120,
             connectInfo: {
               sessionKey: "session-key",
+              instanceId: "instance-test",
+              deploymentId: "deployment-test",
               contractId: core.CONTRACT_ID,
               contractDigest: core.CONTRACT_DIGEST,
               transports: {
@@ -1994,6 +2013,10 @@ Deno.test("service heartbeat publishing stops after terminal NATS close", async 
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
     },
+    healthIdentity: {
+      instanceId: "instance-test",
+      deploymentId: "deployment-test",
+    },
     server: {
       api: heartbeatTestContract.API.owned,
       trellisApi: heartbeatTestContract.API.trellis,
@@ -2005,6 +2028,7 @@ Deno.test("service heartbeat publishing stops after terminal NATS close", async 
   });
 
   try {
+    await delay(30);
     const requestsBeforeClose = publishRequests;
     assertEquals(requestsBeforeClose > 0, true);
 
@@ -2229,6 +2253,25 @@ Deno.test("service jobs reject duplicate handler registration immediately", asyn
       Error,
       "Job handler for queue 'refreshSummaries' is already registered",
     );
+  } finally {
+    await service.stop();
+    restore();
+  }
+});
+
+Deno.test("service jobs validate implementation concurrency at registration", async () => {
+  const { service, restore } = await connectJobsHandlerTestService();
+  const handler: Parameters<
+    typeof service.jobs.refreshSummaries.handle
+  >[0] = async ({ job }) => Result.ok({ refreshId: job.payload.siteId });
+
+  try {
+    assertThrows(
+      () => service.jobs.refreshSummaries.handle(handler, { concurrency: 0 }),
+      Error,
+      "expected a positive integer",
+    );
+    service.jobs.refreshSummaries.handle(handler, { concurrency: 2 });
   } finally {
     await service.stop();
     restore();

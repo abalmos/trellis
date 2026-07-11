@@ -602,7 +602,6 @@ export const AuthEventConsumerBindingSchema = Type.Object({
   filterSubjects: Type.Array(Type.String({ minLength: 1 })),
   replay: Type.String({ minLength: 1 }),
   ordering: Type.String({ minLength: 1 }),
-  concurrency: Type.Integer({ minimum: 1 }),
   ackWaitMs: Type.Integer({ minimum: 1 }),
   maxDeliver: Type.Integer({ minimum: 1 }),
   backoffMs: Type.Array(Type.Integer({ minimum: 1 })),
@@ -884,7 +883,6 @@ export const ContractAnalysisJobsQueueSchema = Type.Object({
   progress: Type.Boolean(),
   logs: Type.Boolean(),
   dlq: Type.Boolean(),
-  concurrency: Type.Number(),
 });
 
 export const ContractAnalysisRpcMethodSchema = Type.Object({

@@ -142,11 +142,15 @@ fn resource_bindings_from_core_binding(
                             JobsQueueResourceBinding {
                                 queue_type: queue.queue_type,
                                 publish_prefix: queue.publish_prefix,
+                                updates_prefix: queue.updates_prefix,
                                 work_subject: queue.work_subject,
                                 consumer_name: queue.consumer_name,
                                 payload: JobsSchemaRef {
                                     schema: queue.payload.schema,
                                 },
+                                update: queue.update.map(|update| JobsSchemaRef {
+                                    schema: update.schema,
+                                }),
                                 result: queue.result.map(|result| JobsSchemaRef {
                                     schema: result.schema,
                                 }),
@@ -157,7 +161,6 @@ fn resource_bindings_from_core_binding(
                                 progress: queue.progress,
                                 logs: queue.logs,
                                 dlq: queue.dlq,
-                                concurrency: queue.concurrency,
                                 key_concurrency: queue
                                     .key_concurrency
                                     .map(job_key_concurrency_binding_from_core),
@@ -187,9 +190,9 @@ fn resource_bindings_from_core_binding(
                         },
                         ordering: match consumer.ordering.as_str() {
                             "strict" => EventConsumerOrdering::Strict,
+                            "parallel" => EventConsumerOrdering::Parallel,
                             _ => EventConsumerOrdering::Unknown,
                         },
-                        concurrency: consumer.concurrency,
                         ack_wait_ms: consumer.ack_wait_ms,
                         max_deliver: consumer.max_deliver,
                         backoff_ms: consumer.backoff_ms,

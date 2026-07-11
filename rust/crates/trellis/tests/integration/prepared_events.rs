@@ -137,6 +137,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
                 mode: ServiceEventListenerMode::Ephemeral,
                 group: None,
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await

@@ -1428,7 +1428,6 @@ pub struct AuthEventConsumersListResponseEntriesItem {
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "deploymentId")]
@@ -1990,7 +1989,6 @@ pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsEventConsu
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -2035,13 +2033,17 @@ pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueues
 pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValueResult {
     pub schema: String,
 }
+/// Generated schema type `AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValue {
     #[serde(rename = "ackWaitMs")]
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "defaultDeadlineMs")]
@@ -2068,6 +2070,12 @@ pub struct AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueues
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result:
         Option<AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update:
+        Option<AuthServiceInstancesDisableResponseInstanceResourceBindingsJobsQueuesValueUpdate>,
+    #[serde(rename = "updatesPrefix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates_prefix: Option<String>,
     #[serde(rename = "workSubject")]
     pub work_subject: String,
 }
@@ -2165,7 +2173,6 @@ pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsEventConsum
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -2209,13 +2216,17 @@ pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesV
 pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValueResult {
     pub schema: String,
 }
+/// Generated schema type `AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValue {
     #[serde(rename = "ackWaitMs")]
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "defaultDeadlineMs")]
@@ -2242,6 +2253,12 @@ pub struct AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesV
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result:
         Option<AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update:
+        Option<AuthServiceInstancesEnableResponseInstanceResourceBindingsJobsQueuesValueUpdate>,
+    #[serde(rename = "updatesPrefix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates_prefix: Option<String>,
     #[serde(rename = "workSubject")]
     pub work_subject: String,
 }
@@ -2342,7 +2359,6 @@ pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsEventConsu
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -2387,13 +2403,17 @@ pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueues
 pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValueResult {
     pub schema: String,
 }
+/// Generated schema type `AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValue {
     #[serde(rename = "ackWaitMs")]
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "defaultDeadlineMs")]
@@ -2420,6 +2440,12 @@ pub struct AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueues
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result:
         Option<AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update:
+        Option<AuthServiceInstancesListResponseEntriesItemResourceBindingsJobsQueuesValueUpdate>,
+    #[serde(rename = "updatesPrefix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates_prefix: Option<String>,
     #[serde(rename = "workSubject")]
     pub work_subject: String,
 }
@@ -2525,7 +2551,6 @@ pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsEventCon
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -2570,13 +2595,17 @@ pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueu
 pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValueResult {
     pub schema: String,
 }
+/// Generated schema type `AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValue {
     #[serde(rename = "ackWaitMs")]
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "defaultDeadlineMs")]
@@ -2604,6 +2633,12 @@ pub struct AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueu
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result:
         Option<AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update:
+        Option<AuthServiceInstancesProvisionResponseInstanceResourceBindingsJobsQueuesValueUpdate>,
+    #[serde(rename = "updatesPrefix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates_prefix: Option<String>,
     #[serde(rename = "workSubject")]
     pub work_subject: String,
 }

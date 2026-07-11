@@ -1075,7 +1075,6 @@ fn refresh_jobs_binding(resources: &ServiceResourceBindings) -> jobs::JobsBindin
                             .map(|value| value.max(0) as u64),
                         progress: queue.progress,
                         logs: queue.logs,
-                        concurrency: queue.concurrency.max(0) as u32,
                     },
                 )
             })
@@ -1215,7 +1214,6 @@ fn demo_refresh_jobs_binding() -> jobs::JobsBinding {
                 default_deadline_ms: None,
                 progress: true,
                 logs: false,
-                concurrency: 1,
             },
         )]),
     }

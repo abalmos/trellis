@@ -76,8 +76,9 @@ Rules:
   needs a missing failure or inspection surface, add the smallest named test
   helper instead of enriching a fake.
 - service-private jobs that must be singleton per logical key should declare
-  `keyConcurrency`. Keep the existing numeric `concurrency` field for
-  worker-count concurrency. Keyed queues default to clear failure
+  `keyConcurrency`. Configure per-queue worker counts in
+  `WorkerHostOptions.queue_concurrency`; they are not contract or binding fields.
+  Keyed queues default to clear failure
   (`stalePolicy: "fail-stale"`, `whenFull: "reject"`); coalescing or replacing
   queued jobs should be explicit policy.
 - Rust job handlers classify failures with `JobProcessError::retryable(...)` for
@@ -149,6 +150,35 @@ let op = trellis_client
 let terminal = op.wait().await?;
 ```
 
+An operation or job queue may declare one optional `update` schema. Keep
+progress for low-frequency durable telemetry/snapshots. Updates are typed
+live-only, at-most-once content: they are not persisted, replayed, exposed in
+admin/Event Log, or delivered to late subscribers. Prefer cumulative payloads
+and treat terminal output/result as authoritative.
+
+```rust
+// From a provider registered with register_operation_with_updates_and_signal:
+control.emit_update(ProcessOrderUpdate { completed: 3, total: 10 }).await?;
+let mut events = op.watch_with_updates().await?;
+let mut updates_only = op.updates().await?;
+
+active_job
+    .emit_update::<orders_sdk::jobs::SyncOrderJob>(SyncOrderJobUpdate {
+        completed: 3,
+        total: 10,
+    })
+    .await?;
+let mut job_updates = waiter
+    .updates::<orders_sdk::jobs::SyncOrderJob>(&job_id)
+    .await?;
+```
+
+Job update streams filter stale attempts and duplicate or out-of-order
+attempt-local sequences and clean up when dropped or terminal lifecycle is
+observed. Subscribe by a known/preallocated job id before work starts when early
+frames matter. Job update subjects are private Core NATS outside `JOBS`;
+application code must not build them.
+
 Register service handlers through generated provider facades where they exist:
 
 ```rust
@@ -156,6 +186,10 @@ service.handle().rpc().orders().get(get_order_handler);
 service.handle().feed().orders().live(orders_live_stream);
 service.handle().operation().orders().process(orders_process_provider);
 ```
+
+Dropping a client feed stream propagates cancellation to the provider and drops
+the provider response stream. Keep connection-scoped resources owned by that
+stream so they are released on cancellation.
 
 Apps or services that already received Trellis user ids on authorized records can
 call generated `Auth.Users.Resolve` to render minimal labels. Do not use admin

@@ -57,10 +57,23 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   Trellis authority tables or projection records by hand.
 - NATS is the transport boundary. Application code should use generated Trellis
   APIs rather than hand-built subjects or raw NATS connection handles.
+- Feed subscriptions are connection-scoped. Closing or aborting a client feed
+  propagates cancellation to the provider; watch feeds must not create a durable
+  consumer per viewer.
 - The runtime owns authentication, authorization, authority validation,
   deployment approval, resource bindings, request context, and wire validation.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background work.
+- Operations and job queues may declare one optional `update` schema. Keep
+  `progress` for low-frequency durable telemetry/snapshots; updates are typed
+  live-only, at-most-once content with no persistence, replay, admin, or Event
+  Log surface. Operation watchers opt in, late subscribers may miss frames,
+  cumulative payloads are preferred, and terminal output/result is authoritative.
+- Active jobs emit updates and `JobRef` or queue-by-job-id subscriptions consume
+  them. Job update subscriptions filter stale attempts and duplicate or
+  out-of-order attempt-local sequences and must be cleaned up. SQL-outbox callers
+  subscribe using the preallocated `jobId` before dispatch when early frames
+  matter. Job update subjects are private Core NATS outside `JOBS`.
 - Jobs admin workbenches use `Jobs.Query` for server-side safe-field search,
   sorting, grouping, and stats, `Jobs.Metrics` for grouped operational summaries
   and time buckets, and `Jobs.Inspect` for one-job detail, timeline, attempts,
@@ -82,8 +95,8 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `summary.integrityExceptions`, resolved event-type counts, and typed time
   buckets with volume, payload size, resolution, and verification counts.
 - Use job `keyConcurrency` for service-private work that must have at most one
-  active job per logical key across service instances. The existing numeric job
-  `concurrency` setting remains worker-count concurrency. Keyed concurrency
+  active job per logical key across service instances. Configure worker count in
+  the service implementation, not the contract or resource binding. Keyed concurrency
   defaults should fail clearly (`stalePolicy: "fail-stale"`,
   `whenFull: "reject"`); coalescing and replacing queued jobs must be explicit
   queue policy choices.

@@ -72,7 +72,6 @@ const resourceContract = defineServiceContract({ schemas }, (ref) => ({
   jobs: {
     syncRecords: {
       payload: ref.schema("Record"),
-      concurrency: 1,
     },
   },
   rpc: {

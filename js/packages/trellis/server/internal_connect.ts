@@ -280,6 +280,7 @@ export async function connectTrellisServiceInternal<
       contractKv,
       server: opts.server,
       bindings,
+      healthIdentity: opts.healthIdentity,
     });
   } catch (cause) {
     await closeFailedServiceBootstrapConnection(nc);

@@ -18,7 +18,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "rOmVuKA-H2Qz1g2k_4z2OZDamjBJ4SiaC5J03Rs7v7Y" as const;
+  "li4JAKPNat2wbdqv-oKo1eTF_8RQq2WFT3PYy_QI9nc" as const;
 
 export type AuthCapabilitiesListInput = { limit: number; offset?: number };
 export type AuthCapabilitiesListOutput = {
@@ -1667,7 +1667,6 @@ export type AuthEventConsumersListOutput = {
     {
       ackWaitMs: number;
       backoffMs: Array<number>;
-      concurrency: number;
       consumerName: string;
       deploymentId: string;
       filterSubjects: Array<string>;
@@ -2017,11 +2016,10 @@ export type AuthServiceInstancesDisableOutput = {
         [k: string]: {
           ackWaitMs: number;
           backoffMs: Array<number>;
-          concurrency: number;
           consumerName: string;
           filterSubjects: Array<string>;
           maxDeliver: number;
-          ordering: "strict";
+          ordering: "strict" | "parallel";
           replay: "new" | "all";
           stream: string;
         };
@@ -2032,7 +2030,6 @@ export type AuthServiceInstancesDisableOutput = {
           [k: string]: {
             ackWaitMs: number;
             backoffMs: Array<number>;
-            concurrency: number;
             consumerName: string;
             defaultDeadlineMs?: number;
             dlq: boolean;
@@ -2054,6 +2051,8 @@ export type AuthServiceInstancesDisableOutput = {
             };
             queueType: string;
             result?: { schema: string };
+            update?: { schema: string };
+            updatesPrefix?: string;
             workSubject: string;
           };
         };
@@ -2094,11 +2093,10 @@ export type AuthServiceInstancesEnableOutput = {
         [k: string]: {
           ackWaitMs: number;
           backoffMs: Array<number>;
-          concurrency: number;
           consumerName: string;
           filterSubjects: Array<string>;
           maxDeliver: number;
-          ordering: "strict";
+          ordering: "strict" | "parallel";
           replay: "new" | "all";
           stream: string;
         };
@@ -2109,7 +2107,6 @@ export type AuthServiceInstancesEnableOutput = {
           [k: string]: {
             ackWaitMs: number;
             backoffMs: Array<number>;
-            concurrency: number;
             consumerName: string;
             defaultDeadlineMs?: number;
             dlq: boolean;
@@ -2131,6 +2128,8 @@ export type AuthServiceInstancesEnableOutput = {
             };
             queueType: string;
             result?: { schema: string };
+            update?: { schema: string };
+            updatesPrefix?: string;
             workSubject: string;
           };
         };
@@ -2178,11 +2177,10 @@ export type AuthServiceInstancesListOutput = {
           [k: string]: {
             ackWaitMs: number;
             backoffMs: Array<number>;
-            concurrency: number;
             consumerName: string;
             filterSubjects: Array<string>;
             maxDeliver: number;
-            ordering: "strict";
+            ordering: "strict" | "parallel";
             replay: "new" | "all";
             stream: string;
           };
@@ -2193,7 +2191,6 @@ export type AuthServiceInstancesListOutput = {
             [k: string]: {
               ackWaitMs: number;
               backoffMs: Array<number>;
-              concurrency: number;
               consumerName: string;
               defaultDeadlineMs?: number;
               dlq: boolean;
@@ -2215,6 +2212,8 @@ export type AuthServiceInstancesListOutput = {
               };
               queueType: string;
               result?: { schema: string };
+              update?: { schema: string };
+              updatesPrefix?: string;
               workSubject: string;
             };
           };
@@ -2262,11 +2261,10 @@ export type AuthServiceInstancesProvisionOutput = {
         [k: string]: {
           ackWaitMs: number;
           backoffMs: Array<number>;
-          concurrency: number;
           consumerName: string;
           filterSubjects: Array<string>;
           maxDeliver: number;
-          ordering: "strict";
+          ordering: "strict" | "parallel";
           replay: "new" | "all";
           stream: string;
         };
@@ -2277,7 +2275,6 @@ export type AuthServiceInstancesProvisionOutput = {
           [k: string]: {
             ackWaitMs: number;
             backoffMs: Array<number>;
-            concurrency: number;
             consumerName: string;
             defaultDeadlineMs?: number;
             dlq: boolean;
@@ -2299,6 +2296,8 @@ export type AuthServiceInstancesProvisionOutput = {
             };
             queueType: string;
             result?: { schema: string };
+            update?: { schema: string };
+            updatesPrefix?: string;
             workSubject: string;
           };
         };

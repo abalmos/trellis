@@ -21,7 +21,6 @@ pub struct TrellisBindingsGetResponseBindingResourcesEventConsumersValue {
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -65,13 +64,17 @@ pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValueQueue {
 pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValueResult {
     pub schema: String,
 }
+/// Generated schema type `TrellisBindingsGetResponseBindingResourcesJobsQueuesValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValue {
     #[serde(rename = "ackWaitMs")]
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "defaultDeadlineMs")]
@@ -95,6 +98,11 @@ pub struct TrellisBindingsGetResponseBindingResourcesJobsQueuesValue {
     pub queue_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<TrellisBindingsGetResponseBindingResourcesJobsQueuesValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<TrellisBindingsGetResponseBindingResourcesJobsQueuesValueUpdate>,
+    #[serde(rename = "updatesPrefix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updates_prefix: Option<String>,
     #[serde(rename = "workSubject")]
     pub work_subject: String,
 }
@@ -159,7 +167,6 @@ pub struct TrellisBindingsGetResponseEventConsumersValue {
     pub ack_wait_ms: i64,
     #[serde(rename = "backoffMs")]
     pub backoff_ms: Vec<i64>,
-    pub concurrency: i64,
     #[serde(rename = "consumerName")]
     pub consumer_name: String,
     #[serde(rename = "filterSubjects")]
@@ -307,6 +314,11 @@ pub struct TrellisContractGetResponseContractJobsValueQueue {
 pub struct TrellisContractGetResponseContractJobsValueResult {
     pub schema: String,
 }
+/// Generated schema type `TrellisContractGetResponseContractJobsValueUpdate`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrellisContractGetResponseContractJobsValueUpdate {
+    pub schema: String,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TrellisContractGetResponseContractJobsValue {
     #[serde(rename = "ackWaitMs")]
@@ -315,8 +327,6 @@ pub struct TrellisContractGetResponseContractJobsValue {
     #[serde(rename = "backoffMs")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backoff_ms: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub concurrency: Option<i64>,
     #[serde(rename = "defaultDeadlineMs")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_deadline_ms: Option<i64>,
@@ -339,6 +349,8 @@ pub struct TrellisContractGetResponseContractJobsValue {
     pub queue: Option<TrellisContractGetResponseContractJobsValueQueue>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<TrellisContractGetResponseContractJobsValueResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<TrellisContractGetResponseContractJobsValueUpdate>,
 }
 /// Generated schema type `TrellisContractGetResponseContractResources`.
 /// Generated schema type `TrellisContractGetResponseContractResourcesKvValue`.

@@ -1,5 +1,7 @@
 import { Type } from "typebox";
 
+export const HealthRpcSchema = Type.Object({});
+
 export const HealthInfoSchema = Type.Record(Type.String(), Type.Unknown());
 
 export const HealthCheckResultSchema = Type.Object({
@@ -9,4 +11,15 @@ export const HealthCheckResultSchema = Type.Object({
   summary: Type.Optional(Type.String()),
   info: Type.Optional(HealthInfoSchema),
   latencyMs: Type.Number(),
+});
+
+export const HealthResponseSchema = Type.Object({
+  status: Type.Union([
+    Type.Literal("healthy"),
+    Type.Literal("unhealthy"),
+    Type.Literal("degraded"),
+  ]),
+  service: Type.String(),
+  timestamp: Type.String({ format: "date-time" }),
+  checks: Type.Array(HealthCheckResultSchema),
 });

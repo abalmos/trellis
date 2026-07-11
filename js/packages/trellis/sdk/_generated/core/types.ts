@@ -12,7 +12,7 @@ export type HandlerClient = HandlerTrellis<Api>;
 
 export const CONTRACT_ID = "trellis.core@v1" as const;
 export const CONTRACT_DIGEST =
-  "kgKiOaKFG18mEtNxWqh-NigshVL7xsNDTMzDI1bmDKA" as const;
+  "iw0X6TQQ4kze9ccq1mo9H-hvRA8bcp7FxJTzCPdpyM8" as const;
 
 export type TrellisBindingsGetInput = { contractId?: string; digest?: string };
 export type TrellisBindingsGetOutput = {
@@ -24,11 +24,10 @@ export type TrellisBindingsGetOutput = {
         [k: string]: {
           ackWaitMs: number;
           backoffMs: Array<number>;
-          concurrency: number;
           consumerName: string;
           filterSubjects: Array<string>;
           maxDeliver: number;
-          ordering: "strict";
+          ordering: "strict" | "parallel";
           replay: "new" | "all";
           stream: string;
         };
@@ -39,7 +38,6 @@ export type TrellisBindingsGetOutput = {
           [k: string]: {
             ackWaitMs: number;
             backoffMs: Array<number>;
-            concurrency: number;
             consumerName: string;
             defaultDeadlineMs?: number;
             dlq: boolean;
@@ -61,6 +59,8 @@ export type TrellisBindingsGetOutput = {
             };
             queueType: string;
             result?: { schema: string };
+            update?: { schema: string };
+            updatesPrefix?: string;
             workSubject: string;
           };
         };
@@ -89,11 +89,10 @@ export type TrellisBindingsGetOutput = {
     [k: string]: {
       ackWaitMs: number;
       backoffMs: Array<number>;
-      concurrency: number;
       consumerName: string;
       filterSubjects: Array<string>;
       maxDeliver: number;
-      ordering: "strict";
+      ordering: "strict" | "parallel";
       replay: "new" | "all";
       stream: string;
     };
@@ -154,7 +153,6 @@ export type TrellisContractGetOutput = {
       [k: string]: {
         ackWaitMs?: number;
         backoffMs?: Array<number>;
-        concurrency?: number;
         defaultDeadlineMs?: number;
         dlq?: boolean;
         docs?: { markdown: string; summary?: string };
@@ -174,6 +172,7 @@ export type TrellisContractGetOutput = {
           whenFull?: "reject" | "coalesce" | "replace-oldest";
         };
         result?: { schema: string };
+        update?: { schema: string };
       };
     };
     kind: "service" | "app" | "device" | "agent";

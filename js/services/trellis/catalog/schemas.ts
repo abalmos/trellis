@@ -119,7 +119,6 @@ export const ContractRecordSchema = Type.Object({
           progress: Type.Boolean(),
           logs: Type.Boolean(),
           dlq: Type.Boolean(),
-          concurrency: Type.Number(),
         }),
         { default: [] },
       ),

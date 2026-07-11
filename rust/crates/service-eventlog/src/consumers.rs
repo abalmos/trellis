@@ -8,7 +8,11 @@ use trellis_rs::sdk::auth::types::{
     AuthEventConsumersListRequest, AuthEventConsumersListResponseEntriesItem,
 };
 
-use crate::projector::EventLogRuntime;
+use crate::projector::{
+    is_eventlog_projector_consumer, is_obsolete_eventlog_watch_consumer, EventLogRuntime,
+    CONSUMER_METADATA_CONTRACT_ID, CONSUMER_METADATA_DEPLOYMENT_ID, CONSUMER_METADATA_GROUP,
+    CONSUMER_METADATA_MANAGED_BY,
+};
 
 pub(crate) async fn query_consumers(
     runtime: &EventLogRuntime,
@@ -33,32 +37,36 @@ pub(crate) async fn query_consumers(
         .consumers()
         .await?
         .into_iter()
+        .filter(|info| info.config.durable_name.is_some())
         .map(|info| (info.name.clone(), info))
         .collect::<BTreeMap<_, _>>();
     let mut rows = Vec::new();
-    for consumer in expected.into_iter().filter(|consumer| {
-        deployment_id.is_none_or(|deployment_id| consumer.deployment_id == deployment_id)
-            && subject.is_none_or(|subject| {
-                consumer.filter_subjects.iter().any(|filter| {
-                    filter == subject || subject.starts_with(filter.trim_end_matches('>'))
-                })
-            })
-    }) {
+    for consumer in expected {
         let live_info = live.remove(&consumer.consumer_name);
         rows.push(expected_consumer_row(&consumer, live_info));
     }
-    rows.extend(
-        live.into_values()
-            .map(|info| consumer_row(info, Some("orphaned"))),
-    );
+    rows.extend(live.into_values().map(unmatched_consumer_row));
     let mut rows = rows
         .into_iter()
         .filter(|row| {
-            statuses.is_empty()
+            (statuses.is_empty()
                 || row
                     .get("status")
                     .and_then(Value::as_str)
-                    .is_some_and(|status| statuses.contains(&status))
+                    .is_some_and(|status| statuses.contains(&status)))
+                && deployment_id.is_none_or(|deployment_id| {
+                    row.get("deploymentId").and_then(Value::as_str) == Some(deployment_id)
+                })
+                && subject.is_none_or(|subject| {
+                    row.get("filterSubjects")
+                        .and_then(Value::as_array)
+                        .is_some_and(|filters| {
+                            filters.iter().filter_map(Value::as_str).any(|filter| {
+                                filter == subject
+                                    || subject.starts_with(filter.trim_end_matches('>'))
+                            })
+                        })
+                })
         })
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| {
@@ -110,7 +118,7 @@ pub(crate) async fn inspect_consumer(
     let consumer = if let Some(expected) = expected.as_ref() {
         expected_consumer_row(expected, info)
     } else {
-        consumer_row(info.expect("checked above"), Some("orphaned"))
+        unmatched_consumer_row(info.expect("checked above"))
     };
     Ok(json!({
         "consumer": consumer,
@@ -161,10 +169,16 @@ fn consumer_status(info: &async_nats::jetstream::consumer::Info) -> &'static str
     }
 }
 
-fn consumer_row(info: async_nats::jetstream::consumer::Info, status: Option<&str>) -> Value {
+fn consumer_row(
+    info: async_nats::jetstream::consumer::Info,
+    status: Option<&str>,
+    managed_by: &str,
+) -> Value {
     let status = status.unwrap_or_else(|| consumer_status(&info));
-    let filter_subjects = if info.config.filter_subject.is_empty() {
-        Vec::<String>::new()
+    let filter_subjects = if !info.config.filter_subjects.is_empty() {
+        info.config.filter_subjects.clone()
+    } else if info.config.filter_subject.is_empty() {
+        Vec::new()
     } else {
         vec![info.config.filter_subject.clone()]
     };
@@ -173,6 +187,7 @@ fn consumer_row(info: async_nats::jetstream::consumer::Info, status: Option<&str
         "consumerName": info.name,
         "filterSubjects": filter_subjects,
         "status": status,
+        "managedBy": managed_by,
         "pending": info.num_pending,
         "ackPending": info.num_ack_pending as u64,
         "waitingPulls": info.num_waiting as u64,
@@ -180,6 +195,53 @@ fn consumer_row(info: async_nats::jetstream::consumer::Info, status: Option<&str
         "ackWaitMs": info.config.ack_wait.as_millis() as u64,
         "maxDeliver": info.config.max_deliver,
     })
+}
+
+fn unmatched_consumer_row(info: async_nats::jetstream::consumer::Info) -> Value {
+    let managed_by = info.config.metadata.get(CONSUMER_METADATA_MANAGED_BY);
+    if managed_by.is_some_and(|value| value == "authority") {
+        attributed_consumer_row(info, Some("orphaned"), "authority")
+    } else if managed_by.is_some_and(|value| value == "platform") {
+        attributed_consumer_row(info, None, "platform")
+    } else if is_eventlog_projector_consumer(&info.name) {
+        let mut row = consumer_row(info, None, "platform");
+        row["contractId"] = json!("trellis.eventlog@v1");
+        row["group"] = json!("projector");
+        row
+    } else if is_obsolete_eventlog_watch_consumer(&info.name, &info.config) {
+        consumer_row(info, Some("orphaned"), "platform")
+    } else {
+        consumer_row(info, None, "external")
+    }
+}
+
+fn attributed_consumer_row(
+    info: async_nats::jetstream::consumer::Info,
+    status: Option<&str>,
+    managed_by: &str,
+) -> Value {
+    let deployment_id = info
+        .config
+        .metadata
+        .get(CONSUMER_METADATA_DEPLOYMENT_ID)
+        .cloned();
+    let contract_id = info
+        .config
+        .metadata
+        .get(CONSUMER_METADATA_CONTRACT_ID)
+        .cloned();
+    let group = info.config.metadata.get(CONSUMER_METADATA_GROUP).cloned();
+    let mut row = consumer_row(info, status, managed_by);
+    if let Some(deployment_id) = deployment_id {
+        row["deploymentId"] = json!(deployment_id);
+    }
+    if let Some(contract_id) = contract_id {
+        row["contractId"] = json!(contract_id);
+    }
+    if let Some(group) = group {
+        row["group"] = json!(group);
+    }
+    row
 }
 
 fn expected_consumer_value(consumer: &AuthEventConsumersListResponseEntriesItem) -> Value {
@@ -191,7 +253,6 @@ fn expected_consumer_value(consumer: &AuthEventConsumersListResponseEntriesItem)
         "filterSubjects": consumer.filter_subjects,
         "replay": consumer.replay,
         "ordering": consumer.ordering,
-        "concurrency": consumer.concurrency,
         "ackWaitMs": consumer.ack_wait_ms,
         "maxDeliver": consumer.max_deliver,
         "backoffMs": consumer.backoff_ms,
@@ -210,11 +271,11 @@ fn expected_consumer_row(
         "consumerName": consumer.consumer_name,
         "filterSubjects": consumer.filter_subjects,
         "status": status,
+        "managedBy": "authority",
         "pending": live.as_ref().map(|info| info.num_pending).unwrap_or(0),
         "ackPending": live.as_ref().map(|info| info.num_ack_pending as u64).unwrap_or(0),
         "waitingPulls": live.as_ref().map(|info| info.num_waiting as u64).unwrap_or(0),
         "redelivered": live.as_ref().map(|info| info.num_redelivered as u64).unwrap_or(0),
-        "concurrency": consumer.concurrency,
         "ackWaitMs": consumer.ack_wait_ms,
         "maxDeliver": consumer.max_deliver,
     })

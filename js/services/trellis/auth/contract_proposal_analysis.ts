@@ -579,6 +579,7 @@ function jobsDefinition(queue: JobsQueueRequest): Record<string, unknown> {
     type: "jobs-queue",
     queueType: queue.queueType,
     payload: queue.payload,
+    ...(queue.update === undefined ? {} : { update: queue.update }),
     ...(queue.result === undefined ? {} : { result: queue.result }),
     maxDeliver: queue.maxDeliver,
     backoffMs: queue.backoffMs,
@@ -589,7 +590,6 @@ function jobsDefinition(queue: JobsQueueRequest): Record<string, unknown> {
     progress: queue.progress,
     logs: queue.logs,
     dlq: queue.dlq,
-    concurrency: queue.concurrency,
     ...(queue.keyConcurrency === undefined
       ? {}
       : { keyConcurrency: queue.keyConcurrency }),
@@ -639,7 +639,6 @@ function eventConsumerDefinition(
     eventRefs: eventConsumerEventRefs(contract, consumer.alias),
     replay: consumer.replay,
     ordering: consumer.ordering,
-    concurrency: consumer.concurrency,
     ackWaitMs: consumer.ackWaitMs,
     maxDeliver: consumer.maxDeliver,
     backoffMs: consumer.backoffMs,

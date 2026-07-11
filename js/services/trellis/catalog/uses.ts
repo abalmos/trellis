@@ -430,6 +430,15 @@ function mergeOperation(
     rightContract,
     projectedSchemas,
   );
+  const update = projectCompatibleSchemaField(
+    key,
+    "update",
+    left.update,
+    leftContract,
+    right.update,
+    rightContract,
+    projectedSchemas,
+  );
   const output = projectCompatibleSchemaField(
     key,
     "output",
@@ -451,6 +460,7 @@ function mergeOperation(
     ...left,
     ...(input ? { input } : {}),
     ...(progress ? { progress } : {}),
+    ...(update ? { update } : {}),
     ...(output ? { output } : {}),
     ...(left.transfer ?? right.transfer
       ? { transfer: left.transfer ?? right.transfer }
@@ -558,6 +568,15 @@ function mergeJobQueue(
     rightContract,
     projectedSchemas,
   );
+  const update = projectCompatibleSchemaField(
+    key,
+    "update",
+    left.update,
+    leftContract,
+    right.update,
+    rightContract,
+    projectedSchemas,
+  );
   requireSameJsonField(key, "maxDeliver", left.maxDeliver, right.maxDeliver);
   requireSameJsonField(key, "backoffMs", left.backoffMs, right.backoffMs);
   requireSameJsonField(key, "ackWaitMs", left.ackWaitMs, right.ackWaitMs);
@@ -570,10 +589,10 @@ function mergeJobQueue(
   requireSameJsonField(key, "progress", left.progress, right.progress);
   requireSameJsonField(key, "logs", left.logs, right.logs);
   requireSameJsonField(key, "dlq", left.dlq, right.dlq);
-  requireSameJsonField(key, "concurrency", left.concurrency, right.concurrency);
   return {
     ...left,
     ...(payload ? { payload } : {}),
+    ...(update ? { update } : {}),
     ...(result ? { result } : {}),
   };
 }

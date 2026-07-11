@@ -215,8 +215,7 @@ function eventConsumerBindingRow(binding: DeploymentResourceBinding) {
       : "new",
     ordering: typeof binding.binding.ordering === "string"
       ? binding.binding.ordering
-      : "parallel",
-    concurrency: integerField(binding.binding, "concurrency"),
+      : "strict",
     ackWaitMs: integerField(binding.binding, "ackWaitMs"),
     maxDeliver: integerField(binding.binding, "maxDeliver"),
     backoffMs: numberArray(binding.binding.backoffMs),

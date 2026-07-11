@@ -32,6 +32,7 @@ import type { SendTransferGrant, TransferBody } from "../transfer.ts";
 const schemas = {
   RefundInput: Type.Object({ chargeId: Type.String() }),
   RefundProgress: Type.Object({ message: Type.String() }),
+  RefundUpdate: Type.Object({ detail: Type.String() }),
   RefundOutput: Type.Object({ refundId: Type.String() }),
 } as const;
 
@@ -68,6 +69,7 @@ const billing = defineServiceContract(
         version: "v1",
         input: schemaRef("RefundInput"),
         progress: schemaRef("RefundProgress"),
+        update: schemaRef("RefundUpdate"),
         output: schemaRef("RefundOutput"),
         capabilities: {
           call: ["billing.refund"],
@@ -80,7 +82,10 @@ const billing = defineServiceContract(
   }),
 );
 
-const refundOperation = billing.API.owned.operations["Billing.Refund"];
+const refundOperation = {
+  ...billing.API.owned.operations["Billing.Refund"],
+  update: schemas.RefundUpdate,
+} as const;
 const uploadOperation = {
   ...refundOperation,
   transfer: {
@@ -225,6 +230,103 @@ Deno.test("OperationInvoker.input().start() type surface stays specific", () => 
     OperationLifecycleError | TransportError | UnexpectedError
   > = started;
   assertEquals(true, true);
+});
+
+Deno.test("OperationRef.watch opts into typed transient updates on the wire", async () => {
+  const transport = new FakeOperationTransport([
+    acceptedRefundFrame(),
+    {
+      kind: "event",
+      event: {
+        type: "update",
+        update: { detail: "authorizing" },
+        snapshot: {
+          id: "op_123",
+          service: "billing",
+          operation: "Billing.Refund",
+          revision: 1,
+          state: "pending",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    },
+  ]);
+  const ref = await startRefundReference(transport);
+  const events = await ref.watch({ updates: true }).orThrow();
+  const iterator = events[Symbol.asyncIterator]();
+  const next = await iterator.next();
+
+  if (!next.done && next.value.type === "update") {
+    assertEquals(next.value.update.detail, "authorizing");
+  } else {
+    throw new Error("expected typed update event");
+  }
+  assertEquals(transport.seen[1], {
+    subject: controlSubject("operations.v1.Billing.Refund"),
+    body: {
+      action: "watch",
+      operationId: "op_123",
+      includeUpdates: true,
+    },
+  });
+});
+
+Deno.test("Operation builder onUpdate automatically opts into updates", async () => {
+  const transport = new FakeOperationTransport([
+    acceptedRefundFrame(),
+    {
+      kind: "event",
+      event: {
+        type: "update",
+        update: { detail: "authorizing" },
+        snapshot: {
+          id: "op_123",
+          service: "billing",
+          operation: "Billing.Refund",
+          revision: 1,
+          state: "pending",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    },
+    {
+      kind: "event",
+      event: {
+        type: "completed",
+        snapshot: {
+          id: "op_123",
+          service: "billing",
+          operation: "Billing.Refund",
+          revision: 2,
+          state: "completed",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:01.000Z",
+          output: { refundId: "rf_123" },
+        },
+      },
+    },
+  ]);
+  const updates: string[] = [];
+  const ref = await new OperationInvoker(transport, refundOperation)
+    .input({ chargeId: "ch_123" })
+    .onUpdate((event) => {
+      updates.push(event.update.detail);
+    })
+    .start()
+    .orThrow();
+  await ref.wait().orThrow();
+
+  assertEquals(updates, ["authorizing"]);
+  assertEquals(transport.seen[1], {
+    subject: controlSubject("operations.v1.Billing.Refund"),
+    body: {
+      action: "watch",
+      operationId: "op_123",
+      includeUpdates: true,
+    },
+  });
 });
 
 Deno.test("OperationInvoker.input().transfer().start() watches events, transfers bytes, and returns the terminal operation", async () => {

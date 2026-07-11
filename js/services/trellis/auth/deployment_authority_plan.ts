@@ -191,9 +191,9 @@ function resourceDefinitionChangeRequiresMigration(
         "result",
         "filterSubjects",
         "replayPolicy",
+        "ordering",
         "maxDeliver",
         "ackWaitMs",
-        "concurrency",
         "backoffMs",
         "purpose",
         "docs",
@@ -219,10 +219,6 @@ function resourceDefinitionChangeRequiresMigration(
       isLimitRelaxedOrSame(
         numberValue(currentDefinition, "ackWaitMs"),
         numberValue(requestedDefinition, "ackWaitMs"),
-      ) &&
-      isLimitRelaxedOrSame(
-        numberValue(currentDefinition, "concurrency"),
-        numberValue(requestedDefinition, "concurrency"),
       ) &&
       isBackoffRelaxedOrSame(
         currentDefinition.backoffMs,

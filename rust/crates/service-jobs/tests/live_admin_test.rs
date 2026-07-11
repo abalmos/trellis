@@ -1,5 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
+use async_nats::jetstream::{self, consumer};
+use futures_util::StreamExt;
 use serde_json::json;
 use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
 use trellis_rs::jobs::keys::NatsKeyCoordinator;
@@ -11,6 +13,7 @@ use trellis_rs::jobs::{
 use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsInspectRequest, JobsQueryRequest, JobsQueryResponseEntriesItem,
+    JobsWatchInput,
 };
 use trellis_rs::service::ConnectedServiceRuntime;
 
@@ -109,6 +112,21 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         })
         .await
         .expect("connect Rust Jobs admin service client");
+    let jobs_nats = jobs_client.internal_nats().clone();
+    let jobs_jetstream = jetstream::new(jobs_nats.clone());
+    let jobs_stream = jobs_jetstream
+        .get_stream("JOBS")
+        .await
+        .expect("open Jobs lifecycle stream");
+    jobs_stream
+        .create_consumer(consumer::pull::Config {
+            durable_name: Some("jobs-watch-stale_test-1".to_string()),
+            filter_subject: "trellis.jobs.>".to_string(),
+            ack_policy: consumer::AckPolicy::Explicit,
+            ..Default::default()
+        })
+        .await
+        .expect("seed obsolete Jobs.Watch consumer");
     let jobs_runtime =
         ConnectedServiceRuntime::<trellis_service_jobs::JobsContract>::from_connected_client(
             trellis_service_jobs::SERVICE_NAME,
@@ -206,6 +224,25 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
     let listed_job = wait_for_listed_job(&jobs_admin, &job.service, &job.job_type, &job.id).await;
     assert_eq!(listed_job.service, job.service);
     assert_eq!(listed_job.r#type, job.job_type);
+    let stale_watch = jobs_jetstream
+        .get_stream("JOBS")
+        .await
+        .expect("reopen Jobs lifecycle stream")
+        .consumer_info("jobs-watch-stale_test-1")
+        .await
+        .expect("obsolete Jobs.Watch consumer should remain during its expiry grace period");
+    assert_eq!(
+        stale_watch.config.inactive_threshold,
+        Duration::from_secs(5 * 60)
+    );
+    assert_eq!(
+        stale_watch
+            .config
+            .metadata
+            .get("trellis.managed_by")
+            .map(String::as_str),
+        Some("platform")
+    );
 
     let detail = jobs_admin
         .rpc()
@@ -222,6 +259,53 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .iter()
         .any(|event| event.r#type == "started"));
 
+    let mut watch = jobs_admin
+        .feed()
+        .jobs()
+        .watch(&JobsWatchInput {
+            include_initial: Some(false),
+            job_id: Some(job.id.clone()),
+            query: None,
+        })
+        .await
+        .expect("subscribe to generated Jobs.Watch");
+    let ready = tokio::time::timeout(Duration::from_secs(5), watch.next())
+        .await
+        .expect("Jobs.Watch should become ready")
+        .expect("Jobs.Watch should emit ready")
+        .expect("Jobs.Watch ready frame should decode");
+    assert_eq!(ready.0["kind"], "ready");
+    let jobs_stream = jobs_jetstream
+        .get_stream("JOBS")
+        .await
+        .expect("inspect Jobs lifecycle stream");
+    let mut consumers = jobs_stream.consumers();
+    let watch_filter = format!("trellis.jobs.*.*.{}.>", job.id);
+    let mut found_ephemeral_watch = false;
+    while let Some(info) = consumers.next().await {
+        let info = info.expect("inspect Jobs consumer");
+        if info.config.filter_subject == watch_filter {
+            assert!(info.config.durable_name.is_none());
+            assert_eq!(
+                info.config
+                    .metadata
+                    .get("trellis.managed_by")
+                    .map(String::as_str),
+                Some("platform")
+            );
+            found_ephemeral_watch = true;
+        }
+        if info
+            .config
+            .durable_name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("jobs-watch-"))
+        {
+            assert_eq!(info.config.inactive_threshold, Duration::from_secs(5 * 60));
+        }
+    }
+    assert!(found_ephemeral_watch);
+
     let cancelled = jobs_admin
         .rpc()
         .jobs()
@@ -232,6 +316,37 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .await
         .expect("call generated Jobs.Cancel");
     assert_eq!(cancelled.job.id, job.id);
+
+    let changed = tokio::time::timeout(Duration::from_secs(5), watch.next())
+        .await
+        .expect("Jobs.Watch should observe cancellation")
+        .expect("Jobs.Watch should emit cancellation invalidation")
+        .expect("Jobs.Watch cancellation frame should decode");
+    assert_eq!(changed.0["kind"], "jobInspectChanged");
+    assert_eq!(changed.0["id"], job.id);
+    drop(watch);
+    let expiry_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let jobs_stream = jobs_jetstream
+            .get_stream("JOBS")
+            .await
+            .expect("inspect Jobs lifecycle stream after watch closes");
+        let mut consumers = jobs_stream.consumers();
+        let mut watch_exists = false;
+        while let Some(info) = consumers.next().await {
+            let info = info.expect("inspect Jobs consumer after watch closes");
+            watch_exists |=
+                info.config.durable_name.is_none() && info.config.filter_subject == watch_filter;
+        }
+        if !watch_exists {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < expiry_deadline,
+            "ephemeral Jobs.Watch consumer should expire after disconnect"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     let terminal = wait_for_job_state(&jobs_admin, &job.id, "cancelled").await;
     assert_eq!(terminal.state, "cancelled");
@@ -244,19 +359,19 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest =
-        trellis_rs::contracts::ContractManifestBuilder::new(
-            ADMIN_CLIENT_CONTRACT_ID,
-            "Trellis Service Jobs Live Admin Client",
-            "Uses the generated Jobs admin SDK surface.",
-            trellis_rs::contracts::ContractKind::App,
-        )
-        .use_ref(
-            "jobs",
-            trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"]),
-        )
-        .build()?;
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        ADMIN_CLIENT_CONTRACT_ID,
+        "Trellis Service Jobs Live Admin Client",
+        "Uses the generated Jobs admin SDK surface.",
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .use_ref(
+        "jobs",
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
+            .with_rpc_call(["Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"])
+            .with_feed_subscribe(["Jobs.Watch"]),
+    )
+    .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }

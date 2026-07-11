@@ -654,7 +654,7 @@ Deno.test("active compatible projection rejects divergent duplicate job queues",
               refresh: {
                 payload: { schema: "JobPayload" },
                 result: { schema: "JobResult" },
-                concurrency: 2,
+                maxDeliver: 2,
               },
             },
           },

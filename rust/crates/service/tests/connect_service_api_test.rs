@@ -161,11 +161,13 @@ fn resources() -> ServiceResourceBindings {
                 JobsQueueResourceBinding {
                     queue_type: "report-finalize".to_string(),
                     publish_prefix: "trellis.jobs.field-ops.report-finalize".to_string(),
+                    updates_prefix: None,
                     work_subject: "trellis.work.field-ops.report-finalize".to_string(),
                     consumer_name: "field-ops-report-finalize".to_string(),
                     payload: JobsSchemaRef {
                         schema: "ReportFinalizePayload".to_string(),
                     },
+                    update: None,
                     result: None,
                     max_deliver: 5,
                     backoff_ms: vec![5_000, 30_000],
@@ -174,7 +176,6 @@ fn resources() -> ServiceResourceBindings {
                     progress: true,
                     logs: true,
                     dlq: true,
-                    concurrency: 2,
                     key_concurrency: None,
                     queue: None,
                 },

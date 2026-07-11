@@ -136,11 +136,15 @@ pub fn resource_bindings_from_core_binding(
                             JobsQueueResourceBinding {
                                 queue_type: queue.queue_type,
                                 publish_prefix: queue.publish_prefix,
+                                updates_prefix: queue.updates_prefix,
                                 work_subject: queue.work_subject,
                                 consumer_name: queue.consumer_name,
                                 payload: JobsSchemaRef {
                                     schema: queue.payload.schema,
                                 },
+                                update: queue.update.map(|update| JobsSchemaRef {
+                                    schema: update.schema,
+                                }),
                                 result: queue.result.map(|result| JobsSchemaRef {
                                     schema: result.schema,
                                 }),
@@ -151,7 +155,6 @@ pub fn resource_bindings_from_core_binding(
                                 progress: queue.progress,
                                 logs: queue.logs,
                                 dlq: queue.dlq,
-                                concurrency: queue.concurrency,
                             },
                         )
                     })

@@ -36,7 +36,10 @@ type EventCaptureListener<TEvent> = {
 
 type EventCaptureRuntime = {
   contracts: {
-    approve(args: { contract: EventSourceContract }): Promise<unknown>;
+    approve(args: {
+      contract: EventSourceContract;
+      deployment?: string;
+    }): Promise<unknown>;
   };
   connectClient<TContract extends TrellisTestClientContract<TrellisAPI>>(
     args: ClientOpts & { name: string; contract: TContract },
@@ -64,6 +67,8 @@ export type TrellisTestEventCaptureOptions<
   name: string;
   /** Source contract whose owned events should be captured. */
   contract: TContract;
+  /** Existing source deployment to approve without mutating the runtime default. */
+  deployment?: string;
   /** Owned event names to subscribe to through the generated event facade. */
   events: TEvents;
 };
@@ -359,7 +364,10 @@ export async function startTrellisTestEventCapture<
   ) => void;
 }): Promise<TrellisTestEventCapture<TContract, TEvents[number]>> {
   const events = selectedEvents(args.options.contract, args.options.events);
-  await args.runtime.contracts.approve({ contract: args.options.contract });
+  await args.runtime.contracts.approve({
+    contract: args.options.contract,
+    deployment: args.options.deployment,
+  });
 
   const appContract = defineAppContract(() => ({
     id: `trellis.test.event-capture.${
@@ -378,8 +386,12 @@ export async function startTrellisTestEventCapture<
     },
   }));
 
-  const { contract: _sourceContract, events: _events, ...clientOptions } =
-    args.options;
+  const {
+    contract: _sourceContract,
+    deployment: _deployment,
+    events: _events,
+    ...clientOptions
+  } = args.options;
   const clientContract = appContract as TrellisTestClientContract<TrellisAPI>;
   const client = await args.runtime.connectClient({
     ...clientOptions,

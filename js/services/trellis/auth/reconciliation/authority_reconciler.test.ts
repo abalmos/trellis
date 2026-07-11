@@ -374,7 +374,6 @@ Deno.test("physical authority materializer creates desired resource bindings", a
             maxDeliver: 2,
             backoffMs: [100],
             ackWaitMs: 3000,
-            concurrency: 4,
           },
         },
         {
@@ -385,7 +384,6 @@ Deno.test("physical authority materializer creates desired resource bindings", a
             stream: "trellis",
             filterSubjects: ["events.v1.Partner.Changed.>"],
             replay: "all",
-            concurrency: 2,
           },
         },
         { kind: "transfer", alias: "uploads", required: true },

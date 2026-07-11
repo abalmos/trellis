@@ -229,7 +229,6 @@ const FIELD_LABEL_BY_PATH: Record<string, string> = {
   schema: "schema",
   keySchema: "keySchema",
   valueSchema: "valueSchema",
-  concurrency: "concurrency",
   maxDeliver: "maxDeliver",
   ttlMs: "ttlMs",
   maxValueSizeBytes: "maxValueSizeBytes",

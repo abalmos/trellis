@@ -12,14 +12,16 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.feed.entity.live(async ({ input, emit }) => {
-        for (let i = 1; i <= 10; i++) {
-          await emit({
-            topic: input.topic,
-            message: `feed:${input.topic}:${i}`,
-            sequence: i,
-          }).orThrow();
-        }
+      let providerStopped = false;
+      let providerStarts = 0;
+      await service.handle.feed.entity.live(async ({ signal }) => {
+        providerStarts++;
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => {
+            providerStopped = true;
+            resolve();
+          }, { once: true });
+        });
       });
 
       const client = await runtime.connectClient({
@@ -51,6 +53,37 @@ liveTrellisTest({
 
       await Promise.race([iterate, timeout]);
       assert(terminated, "feed stream should terminate after abort");
+
+      await Promise.race([
+        (async () => {
+          while (!providerStopped) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        })(),
+        new Promise<void>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error("provider did not receive feed cancellation")),
+            5000,
+          )
+        ),
+      ]);
+      assert(providerStopped, "feed provider should stop after client abort");
+
+      const alreadyAborted = new AbortController();
+      alreadyAborted.abort();
+      const abortedResult = await client.feed.entity.live(
+        { topic: fixture.topic },
+        { signal: alreadyAborted.signal },
+      );
+      assert(
+        abortedResult.isErr(),
+        "an already-aborted feed should be rejected",
+      );
+      assert(
+        providerStarts === 1,
+        "an already-aborted feed should not reach the provider",
+      );
     } finally {
       await service.stop();
     }

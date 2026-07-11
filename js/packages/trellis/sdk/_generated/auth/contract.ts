@@ -13,7 +13,7 @@ const CONTRACT_MODULE_METADATA = Symbol.for(
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "rOmVuKA-H2Qz1g2k_4z2OZDamjBJ4SiaC5J03Rs7v7Y" as const;
+  "li4JAKPNat2wbdqv-oKo1eTF_8RQq2WFT3PYy_QI9nc" as const;
 export const CONTRACT = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -6332,7 +6332,6 @@ export const CONTRACT = {
           "items": { "minimum": 1, "type": "integer" },
           "type": "array",
         },
-        "concurrency": { "minimum": 1, "type": "integer" },
         "consumerName": { "minLength": 1, "type": "string" },
         "deploymentId": { "minLength": 1, "type": "string" },
         "filterSubjects": {
@@ -6353,7 +6352,6 @@ export const CONTRACT = {
         "filterSubjects",
         "replay",
         "ordering",
-        "concurrency",
         "ackWaitMs",
         "maxDeliver",
         "backoffMs",
@@ -6381,7 +6379,6 @@ export const CONTRACT = {
                 "items": { "minimum": 1, "type": "integer" },
                 "type": "array",
               },
-              "concurrency": { "minimum": 1, "type": "integer" },
               "consumerName": { "minLength": 1, "type": "string" },
               "deploymentId": { "minLength": 1, "type": "string" },
               "filterSubjects": {
@@ -6402,7 +6399,6 @@ export const CONTRACT = {
               "filterSubjects",
               "replay",
               "ordering",
-              "concurrency",
               "ackWaitMs",
               "maxDeliver",
               "backoffMs",
@@ -7373,14 +7369,18 @@ export const CONTRACT = {
                           "items": { "minimum": 0, "type": "integer" },
                           "type": "array",
                         },
-                        "concurrency": { "minimum": 1, "type": "integer" },
                         "consumerName": { "minLength": 1, "type": "string" },
                         "filterSubjects": {
                           "items": { "minLength": 1, "type": "string" },
                           "type": "array",
                         },
                         "maxDeliver": { "minimum": 1, "type": "integer" },
-                        "ordering": { "const": "strict", "type": "string" },
+                        "ordering": {
+                          "anyOf": [{ "const": "strict", "type": "string" }, {
+                            "const": "parallel",
+                            "type": "string",
+                          }],
+                        },
                         "replay": {
                           "anyOf": [{ "const": "new", "type": "string" }, {
                             "const": "all",
@@ -7395,7 +7395,6 @@ export const CONTRACT = {
                         "filterSubjects",
                         "replay",
                         "ordering",
-                        "concurrency",
                         "ackWaitMs",
                         "maxDeliver",
                         "backoffMs",
@@ -7417,7 +7416,6 @@ export const CONTRACT = {
                               "items": { "minimum": 0, "type": "integer" },
                               "type": "array",
                             },
-                            "concurrency": { "minimum": 1, "type": "integer" },
                             "consumerName": {
                               "minLength": 1,
                               "type": "string",
@@ -7504,6 +7502,17 @@ export const CONTRACT = {
                               "required": ["schema"],
                               "type": "object",
                             },
+                            "update": {
+                              "properties": {
+                                "schema": { "minLength": 1, "type": "string" },
+                              },
+                              "required": ["schema"],
+                              "type": "object",
+                            },
+                            "updatesPrefix": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
                             "workSubject": { "minLength": 1, "type": "string" },
                           },
                           "required": [
@@ -7518,7 +7527,6 @@ export const CONTRACT = {
                             "progress",
                             "logs",
                             "dlq",
-                            "concurrency",
                           ],
                           "type": "object",
                         },
@@ -7605,14 +7613,18 @@ export const CONTRACT = {
                           "items": { "minimum": 0, "type": "integer" },
                           "type": "array",
                         },
-                        "concurrency": { "minimum": 1, "type": "integer" },
                         "consumerName": { "minLength": 1, "type": "string" },
                         "filterSubjects": {
                           "items": { "minLength": 1, "type": "string" },
                           "type": "array",
                         },
                         "maxDeliver": { "minimum": 1, "type": "integer" },
-                        "ordering": { "const": "strict", "type": "string" },
+                        "ordering": {
+                          "anyOf": [{ "const": "strict", "type": "string" }, {
+                            "const": "parallel",
+                            "type": "string",
+                          }],
+                        },
                         "replay": {
                           "anyOf": [{ "const": "new", "type": "string" }, {
                             "const": "all",
@@ -7627,7 +7639,6 @@ export const CONTRACT = {
                         "filterSubjects",
                         "replay",
                         "ordering",
-                        "concurrency",
                         "ackWaitMs",
                         "maxDeliver",
                         "backoffMs",
@@ -7649,7 +7660,6 @@ export const CONTRACT = {
                               "items": { "minimum": 0, "type": "integer" },
                               "type": "array",
                             },
-                            "concurrency": { "minimum": 1, "type": "integer" },
                             "consumerName": {
                               "minLength": 1,
                               "type": "string",
@@ -7736,6 +7746,17 @@ export const CONTRACT = {
                               "required": ["schema"],
                               "type": "object",
                             },
+                            "update": {
+                              "properties": {
+                                "schema": { "minLength": 1, "type": "string" },
+                              },
+                              "required": ["schema"],
+                              "type": "object",
+                            },
+                            "updatesPrefix": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
                             "workSubject": { "minLength": 1, "type": "string" },
                           },
                           "required": [
@@ -7750,7 +7771,6 @@ export const CONTRACT = {
                             "progress",
                             "logs",
                             "dlq",
-                            "concurrency",
                           ],
                           "type": "object",
                         },
@@ -7848,14 +7868,18 @@ export const CONTRACT = {
                             "items": { "minimum": 0, "type": "integer" },
                             "type": "array",
                           },
-                          "concurrency": { "minimum": 1, "type": "integer" },
                           "consumerName": { "minLength": 1, "type": "string" },
                           "filterSubjects": {
                             "items": { "minLength": 1, "type": "string" },
                             "type": "array",
                           },
                           "maxDeliver": { "minimum": 1, "type": "integer" },
-                          "ordering": { "const": "strict", "type": "string" },
+                          "ordering": {
+                            "anyOf": [{ "const": "strict", "type": "string" }, {
+                              "const": "parallel",
+                              "type": "string",
+                            }],
+                          },
                           "replay": {
                             "anyOf": [{ "const": "new", "type": "string" }, {
                               "const": "all",
@@ -7870,7 +7894,6 @@ export const CONTRACT = {
                           "filterSubjects",
                           "replay",
                           "ordering",
-                          "concurrency",
                           "ackWaitMs",
                           "maxDeliver",
                           "backoffMs",
@@ -7891,10 +7914,6 @@ export const CONTRACT = {
                               "backoffMs": {
                                 "items": { "minimum": 0, "type": "integer" },
                                 "type": "array",
-                              },
-                              "concurrency": {
-                                "minimum": 1,
-                                "type": "integer",
                               },
                               "consumerName": {
                                 "minLength": 1,
@@ -7993,6 +8012,20 @@ export const CONTRACT = {
                                 "required": ["schema"],
                                 "type": "object",
                               },
+                              "update": {
+                                "properties": {
+                                  "schema": {
+                                    "minLength": 1,
+                                    "type": "string",
+                                  },
+                                },
+                                "required": ["schema"],
+                                "type": "object",
+                              },
+                              "updatesPrefix": {
+                                "minLength": 1,
+                                "type": "string",
+                              },
                               "workSubject": {
                                 "minLength": 1,
                                 "type": "string",
@@ -8010,7 +8043,6 @@ export const CONTRACT = {
                               "progress",
                               "logs",
                               "dlq",
-                              "concurrency",
                             ],
                             "type": "object",
                           },
@@ -8105,14 +8137,18 @@ export const CONTRACT = {
                           "items": { "minimum": 0, "type": "integer" },
                           "type": "array",
                         },
-                        "concurrency": { "minimum": 1, "type": "integer" },
                         "consumerName": { "minLength": 1, "type": "string" },
                         "filterSubjects": {
                           "items": { "minLength": 1, "type": "string" },
                           "type": "array",
                         },
                         "maxDeliver": { "minimum": 1, "type": "integer" },
-                        "ordering": { "const": "strict", "type": "string" },
+                        "ordering": {
+                          "anyOf": [{ "const": "strict", "type": "string" }, {
+                            "const": "parallel",
+                            "type": "string",
+                          }],
+                        },
                         "replay": {
                           "anyOf": [{ "const": "new", "type": "string" }, {
                             "const": "all",
@@ -8127,7 +8163,6 @@ export const CONTRACT = {
                         "filterSubjects",
                         "replay",
                         "ordering",
-                        "concurrency",
                         "ackWaitMs",
                         "maxDeliver",
                         "backoffMs",
@@ -8149,7 +8184,6 @@ export const CONTRACT = {
                               "items": { "minimum": 0, "type": "integer" },
                               "type": "array",
                             },
-                            "concurrency": { "minimum": 1, "type": "integer" },
                             "consumerName": {
                               "minLength": 1,
                               "type": "string",
@@ -8236,6 +8270,17 @@ export const CONTRACT = {
                               "required": ["schema"],
                               "type": "object",
                             },
+                            "update": {
+                              "properties": {
+                                "schema": { "minLength": 1, "type": "string" },
+                              },
+                              "required": ["schema"],
+                              "type": "object",
+                            },
+                            "updatesPrefix": {
+                              "minLength": 1,
+                              "type": "string",
+                            },
                             "workSubject": { "minLength": 1, "type": "string" },
                           },
                           "required": [
@@ -8250,7 +8295,6 @@ export const CONTRACT = {
                             "progress",
                             "logs",
                             "dlq",
-                            "concurrency",
                           ],
                           "type": "object",
                         },
@@ -10973,14 +11017,18 @@ export const CONTRACT = {
                       "items": { "minimum": 0, "type": "integer" },
                       "type": "array",
                     },
-                    "concurrency": { "minimum": 1, "type": "integer" },
                     "consumerName": { "minLength": 1, "type": "string" },
                     "filterSubjects": {
                       "items": { "minLength": 1, "type": "string" },
                       "type": "array",
                     },
                     "maxDeliver": { "minimum": 1, "type": "integer" },
-                    "ordering": { "const": "strict", "type": "string" },
+                    "ordering": {
+                      "anyOf": [{ "const": "strict", "type": "string" }, {
+                        "const": "parallel",
+                        "type": "string",
+                      }],
+                    },
                     "replay": {
                       "anyOf": [{ "const": "new", "type": "string" }, {
                         "const": "all",
@@ -10995,7 +11043,6 @@ export const CONTRACT = {
                     "filterSubjects",
                     "replay",
                     "ordering",
-                    "concurrency",
                     "ackWaitMs",
                     "maxDeliver",
                     "backoffMs",
@@ -11017,7 +11064,6 @@ export const CONTRACT = {
                           "items": { "minimum": 0, "type": "integer" },
                           "type": "array",
                         },
-                        "concurrency": { "minimum": 1, "type": "integer" },
                         "consumerName": { "minLength": 1, "type": "string" },
                         "defaultDeadlineMs": {
                           "minimum": 1,
@@ -11092,6 +11138,14 @@ export const CONTRACT = {
                           "required": ["schema"],
                           "type": "object",
                         },
+                        "update": {
+                          "properties": {
+                            "schema": { "minLength": 1, "type": "string" },
+                          },
+                          "required": ["schema"],
+                          "type": "object",
+                        },
+                        "updatesPrefix": { "minLength": 1, "type": "string" },
                         "workSubject": { "minLength": 1, "type": "string" },
                       },
                       "required": [
@@ -11106,7 +11160,6 @@ export const CONTRACT = {
                         "progress",
                         "logs",
                         "dlq",
-                        "concurrency",
                       ],
                       "type": "object",
                     },

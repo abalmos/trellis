@@ -52,6 +52,7 @@ import {
   type OperationsOf,
   type OperationTransferContextOf,
   type OperationTransferHandle,
+  type OperationUpdateOf,
   type RuntimeOperationAcceptedEnvelope,
   type RuntimeOperationController,
   type RuntimeOperationControlRequest,
@@ -92,7 +93,8 @@ export type TrellisServiceRuntimeFor<TA extends AnyTrellisAPI = TrellisAPI> =
       OperationProgressOf<TA, O>,
       OperationOutputOf<TA, O>,
       OperationTransferContextOf<TA, O>,
-      BaseError
+      BaseError,
+      OperationUpdateOf<TA, O>
     >;
   };
 
@@ -379,7 +381,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
         durable.snapshot.state === "cancelled",
       signalSequence: durable.signalSequence ?? 0,
       signals: durable.signals ?? [],
-      watchers: new Set(),
+      watchers: new Map(),
+      frameQueue: Promise.resolve(),
       waiters: new Set(),
       signalWaiters: new Set(),
     };
@@ -401,52 +404,117 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
         return err(this.#operationNotFoundError(operationId));
       }
 
+      return await this.#queueOperationFrame(runtime, async () => {
+        if (runtime.terminal) {
+          return err(this.#operationAlreadyTerminalError(runtime));
+        }
+
+        runtime.sequence += 1;
+        runtime.snapshot = buildRuntimeOperationSnapshot(
+          runtime,
+          state,
+          opts.patch,
+        );
+        runtime.terminal = state === "completed" || state === "failed" ||
+          state === "cancelled";
+
+        await this.saveOperationRecord(runtime);
+
+        const frame = {
+          kind: "event",
+          sequence: runtime.sequence,
+          event: {
+            snapshot: runtime.snapshot,
+            ...opts.event,
+          },
+        };
+        for (const reply of runtime.watchers.keys()) {
+          await this.#nats.publish(reply, JSON.stringify(frame));
+        }
+
+        if (runtime.terminal) {
+          const terminalFrame = {
+            kind: "snapshot",
+            snapshot: runtime.snapshot,
+          };
+          for (const reply of runtime.waiters) {
+            await this.#nats.publish(reply, JSON.stringify(terminalFrame));
+          }
+          runtime.waiters.clear();
+          this.#rejectSignalWaiters(runtime);
+        }
+
+        return ok(runtime.snapshot);
+      });
+    })());
+  }
+
+  async #queueOperationFrame<T>(
+    runtime: RuntimeOperationRecord,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    const previous = runtime.frameQueue;
+    let release: (() => void) | undefined;
+    runtime.frameQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release?.();
+    }
+  }
+
+  #emitOperationUpdate(
+    runtime: RuntimeOperationRecord,
+    ctx: RegisteredRuntimeOperationDesc,
+    update: unknown,
+  ): Promise<Result<void, BaseError>> {
+    return this.#queueOperationFrame(runtime, async () => {
       if (runtime.terminal) {
         return err(this.#operationAlreadyTerminalError(runtime));
       }
+      if (ctx.update === undefined) {
+        return err(
+          new ValidationError({
+            errors: [{
+              path: "/",
+              message:
+                `Operation '${runtime.operation}' does not declare updates`,
+            }],
+            context: { operation: runtime.operation },
+          }),
+        );
+      }
+      const parsed = this.#validateOperationValue(ctx, "update", update).take();
+      if (isErr(parsed)) return parsed;
 
       runtime.sequence += 1;
-      runtime.snapshot = buildRuntimeOperationSnapshot(
-        runtime,
-        state,
-        opts.patch,
-      );
-      runtime.terminal = state === "completed" || state === "failed" ||
-        state === "cancelled";
-
-      await this.saveOperationRecord(runtime);
-
       const frame = {
         kind: "event",
         sequence: runtime.sequence,
-        event: {
-          snapshot: runtime.snapshot,
-          ...opts.event,
-        },
+        event: { type: "update", update: parsed, snapshot: runtime.snapshot },
       };
-      for (const reply of runtime.watchers) {
-        await this.#nats.publish(reply, JSON.stringify(frame));
-      }
-
-      if (runtime.terminal) {
-        const terminalFrame = { kind: "snapshot", snapshot: runtime.snapshot };
-        for (const reply of runtime.waiters) {
-          await this.#nats.publish(reply, JSON.stringify(terminalFrame));
+      for (const [reply, watcher] of runtime.watchers) {
+        if (watcher.includeUpdates) {
+          await this.#nats.publish(reply, JSON.stringify(frame));
         }
-        runtime.waiters.clear();
-        this.#rejectSignalWaiters(runtime);
       }
-
-      return ok(runtime.snapshot);
-    })());
+      return ok(undefined);
+    });
   }
 
   #validateOperationValue(
     ctx: RegisteredRuntimeOperationDesc,
-    kind: "progress" | "output",
+    kind: "progress" | "update" | "output",
     value: unknown,
   ): Result<unknown, BaseError> {
-    const schema = kind === "progress" ? ctx.progress : ctx.output;
+    const schema = kind === "progress"
+      ? ctx.progress
+      : kind === "update"
+      ? ctx.update
+      : ctx.output;
     if (schema === undefined) return ok(value);
     if (!isJsonValue(value)) {
       return err(
@@ -542,6 +610,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
           patch: { progress: value },
           event: { type: "progress", progress: value },
         }),
+      emitUpdate: (value: unknown) =>
+        AsyncResult.from(this.#emitOperationUpdate(runtime, ctx, value)),
       complete: (value: unknown) =>
         this.#applyControlledOperationUpdate(runtime, ctx, "completed", {
           patch: { output: value },
@@ -603,6 +673,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
       snapshot: runtime.snapshot,
       started: () => this.operations.started(runtime.id),
       progress: (value: unknown) => this.operations.progress(runtime.id, value),
+      emitUpdate: (value: unknown) =>
+        AsyncResult.from(this.#emitOperationUpdate(runtime, ctx, value)),
       complete: (value: unknown) => this.operations.complete(runtime.id, value),
       fail: (error: BaseError) => this.operations.fail(runtime.id, error),
       cancel: () => {
@@ -792,7 +864,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
       signalSequence: 0,
       signals: [],
       terminal: false,
-      watchers: new Set(),
+      watchers: new Map(),
+      frameQueue: Promise.resolve(),
       waiters: new Set(),
       signalWaiters: new Set(),
     };
@@ -1042,9 +1115,14 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
 
         if (control.action === "watch") {
           if (msg.reply) {
-            await publishSnapshot(msg.reply, snapshot);
-            if (!runtime || runtime.terminal) continue;
-            runtime.watchers.add(msg.reply);
+            await this.#queueOperationFrame(runtime, async () => {
+              if (!runtime.terminal) {
+                runtime.watchers.set(msg.reply!, {
+                  includeUpdates: control.includeUpdates === true,
+                });
+              }
+              await publishSnapshot(msg.reply!, runtime.snapshot);
+            });
           }
           continue;
         }
@@ -1092,38 +1170,19 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
             );
             continue;
           }
-          runtime.snapshot = {
-            ...runtime.snapshot,
-            revision: runtime.snapshot.revision + 1,
-            state: "cancelled",
-            updatedAt: new Date().toISOString(),
-            completedAt: new Date().toISOString(),
-          };
-          runtime.terminal = true;
-          runtime.sequence += 1;
-          await this.saveOperationRecord(runtime);
-          const frame = {
-            kind: "event",
-            sequence: runtime.sequence,
-            event: {
-              type: "cancelled",
-              snapshot: runtime.snapshot,
-            },
-          };
-          for (const reply of runtime.watchers) {
-            await this.#nats.publish(reply, JSON.stringify(frame));
-          }
-          for (const reply of runtime.waiters) {
-            await this.#nats.publish(
-              reply,
-              JSON.stringify({ kind: "snapshot", snapshot: runtime.snapshot }),
+          const cancelled = await this.#applyControlledOperationUpdate(
+            runtime,
+            ctx,
+            "cancelled",
+            { event: { type: "cancelled" } },
+          ).take();
+          if (isErr(cancelled)) {
+            respondControlError(msg, cancelled.error);
+          } else {
+            msg.respond(
+              JSON.stringify({ kind: "snapshot", snapshot: cancelled }),
             );
           }
-          runtime.waiters.clear();
-          this.#rejectSignalWaiters(runtime);
-          msg.respond(
-            JSON.stringify({ kind: "snapshot", snapshot: runtime.snapshot }),
-          );
           continue;
         }
 
@@ -1235,115 +1294,30 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
           await this.#nats.publish(reply, JSON.stringify(frame));
         };
 
-        const publishSnapshot = async (
-          reply: string,
-          snapshot: RuntimeOperationSnapshot,
-        ) => {
-          await publishFrame(reply, { kind: "snapshot", snapshot });
-        };
-
-        const publishEventToWatchers = async (
-          runtime: RuntimeOperationRecord,
-          event: unknown,
-        ) => {
-          const frame = { kind: "event", sequence: runtime.sequence, event };
-          for (const reply of runtime.watchers) {
-            await publishFrame(reply, frame);
-          }
-        };
-
-        const flushWaiters = async (runtime: RuntimeOperationRecord) => {
-          const frame = { kind: "snapshot", snapshot: runtime.snapshot };
-          for (const reply of runtime.waiters) {
-            await publishFrame(reply, frame);
-          }
-          runtime.waiters.clear();
-        };
-
         const makeOperation = (
           runtime: RuntimeOperationRecord,
           context: { requestId?: string; traceId?: string },
         ) => {
-          const ensureActive = () => {
-            if (runtime.terminal) {
-              return err(
-                this.#operationAlreadyTerminalError(runtime),
-              );
-            }
-            return null;
-          };
-
-          const transition = async (
-            state: RuntimeOperationState,
-            patch?: Partial<RuntimeOperationSnapshot>,
-            event?: unknown,
-          ) => {
-            runtime.sequence += 1;
-            runtime.snapshot = buildRuntimeOperationSnapshot(
-              runtime,
-              state,
-              patch,
-            );
-            await this.saveOperationRecord(runtime);
-            if (event) {
-              await publishEventToWatchers(runtime, event);
-            }
-            return ok(runtime.snapshot);
-          };
-
           return {
             id: runtime.id,
             started: () =>
-              AsyncResult.from((async () => {
-                const active = ensureActive();
-                if (active) return active;
-                return transition("running", undefined, {
-                  type: "started",
-                  snapshot: buildRuntimeOperationSnapshot(runtime, "running", {
-                    revision: runtime.snapshot.revision + 1,
-                  }),
-                });
-              })()),
+              this.#applyControlledOperationUpdate(runtime, ctx, "running", {
+                event: { type: "started" },
+              }),
             progress: (value: unknown) =>
-              AsyncResult.from((async () => {
-                const active = ensureActive();
-                if (active) return active;
-                return transition("running", { progress: value }, {
-                  type: "progress",
-                  snapshot: buildRuntimeOperationSnapshot(runtime, "running", {
-                    revision: runtime.snapshot.revision + 1,
-                    progress: value,
-                  }),
-                });
-              })()),
+              this.#applyControlledOperationUpdate(runtime, ctx, "running", {
+                patch: { progress: value },
+                event: { type: "progress", progress: value },
+              }),
+            emitUpdate: (value: unknown) =>
+              AsyncResult.from(this.#emitOperationUpdate(runtime, ctx, value)),
             complete: (value: unknown) =>
-              AsyncResult.from((async () => {
-                const active = ensureActive();
-                if (active) return active;
-                const snapshot = buildRuntimeOperationSnapshot(
-                  runtime,
-                  "completed",
-                  {
-                    output: value,
-                    completedAt: now(),
-                  },
-                );
-                runtime.sequence += 1;
-                runtime.snapshot = snapshot;
-                runtime.terminal = true;
-                await this.saveOperationRecord(runtime);
-                await publishEventToWatchers(runtime, {
-                  type: "completed",
-                  snapshot,
-                });
-                await flushWaiters(runtime);
-                this.#rejectSignalWaiters(runtime);
-                return ok(snapshot);
-              })()),
+              this.#applyControlledOperationUpdate(runtime, ctx, "completed", {
+                patch: { output: value, completedAt: now() },
+                event: { type: "completed" },
+              }),
             fail: (error: BaseError) =>
               AsyncResult.from((async () => {
-                const active = ensureActive();
-                if (active) return active;
                 const annotatedError = annotateHandlerBoundaryError(error, {
                   operation: String(operation),
                   requestId: context.requestId,
@@ -1352,49 +1326,24 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
                   contractDigest: this.contractDigest,
                   traceId: context.traceId,
                 });
-                const snapshot = buildRuntimeOperationSnapshot(
+                return await this.#applyControlledOperationUpdate(
                   runtime,
+                  ctx,
                   "failed",
                   {
-                    error: annotatedError.toSerializable(),
-                    completedAt: now(),
+                    patch: {
+                      error: annotatedError.toSerializable(),
+                      completedAt: now(),
+                    },
+                    event: { type: "failed" },
                   },
                 );
-                runtime.sequence += 1;
-                runtime.snapshot = snapshot;
-                runtime.terminal = true;
-                await this.saveOperationRecord(runtime);
-                await publishEventToWatchers(runtime, {
-                  type: "failed",
-                  snapshot,
-                });
-                await flushWaiters(runtime);
-                this.#rejectSignalWaiters(runtime);
-                return ok(snapshot);
               })()),
             cancel: () =>
-              AsyncResult.from((async () => {
-                const active = ensureActive();
-                if (active) return active;
-                const snapshot = buildRuntimeOperationSnapshot(
-                  runtime,
-                  "cancelled",
-                  {
-                    completedAt: now(),
-                  },
-                );
-                runtime.sequence += 1;
-                runtime.snapshot = snapshot;
-                runtime.terminal = true;
-                await this.saveOperationRecord(runtime);
-                await publishEventToWatchers(runtime, {
-                  type: "cancelled",
-                  snapshot,
-                });
-                await flushWaiters(runtime);
-                this.#rejectSignalWaiters(runtime);
-                return ok(snapshot);
-              })()),
+              this.#applyControlledOperationUpdate(runtime, ctx, "cancelled", {
+                patch: { completedAt: now() },
+                event: { type: "cancelled" },
+              }),
             attach: (job: { wait: () => AsyncResult<unknown, BaseError> }) =>
               AsyncResult.from((async () => {
                 const waited = await job.wait();
@@ -1681,7 +1630,8 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
               signalSequence: 0,
               signals: [],
               terminal: false,
-              watchers: new Set(),
+              watchers: new Map(),
+              frameQueue: Promise.resolve(),
               waiters: new Set(),
               signalWaiters: new Set(),
             };
@@ -1693,17 +1643,9 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
                 for await (
                   const progress of transferSession.transfer.updates()
                 ) {
-                  runtime.sequence += 1;
-                  runtime.snapshot = buildRuntimeOperationSnapshot(
-                    runtime,
-                    "running",
-                    { transfer: progress },
-                  );
-                  await this.saveOperationRecord(runtime);
-                  await publishEventToWatchers(runtime, {
-                    type: "transfer",
-                    transfer: progress,
-                    snapshot: runtime.snapshot,
+                  await this.#applyOperationUpdate(runtime.id, "running", {
+                    patch: { transfer: progress },
+                    event: { type: "transfer", transfer: progress },
                   });
                 }
               })();

@@ -90,6 +90,18 @@ impl ConnectedEventLogService {
             eventlog_runtime.clone(),
             auth_client.clone(),
         );
+        match eventlog_runtime.expire_obsolete_watch_consumers().await {
+            Ok(count) if count > 0 => {
+                tracing::info!(
+                    count,
+                    "scheduled obsolete EventLog.Watch consumers for expiry"
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "failed to expire obsolete EventLog.Watch consumers");
+            }
+        }
         register_eventlog_rpc_handlers(&mut self.runtime, query);
         register_eventlog_watch_feed(&mut self.runtime, eventlog_runtime.clone());
         run_eventlog_service_runtime(

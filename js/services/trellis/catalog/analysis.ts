@@ -110,7 +110,6 @@ export type ContractAnalysis = {
       progress: boolean;
       logs: boolean;
       dlq: boolean;
-      concurrency: number;
     }>;
   };
 };

@@ -66,18 +66,10 @@ fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
 }
 
 #[test]
-fn generated_jobs_contract_keeps_baseline_health_without_runtime_bootstrap_uses() {
+fn generated_jobs_contract_omits_runtime_bootstrap_uses() {
     let contract = generated_contract::contract_manifest();
 
-    assert!(contract.uses.contains_key("health"));
-    assert_eq!(
-        contract
-            .uses
-            .get("health")
-            .expect("baseline health use")
-            .contract,
-        "trellis.health@v1"
-    );
+    assert!(!contract.uses.contains_key("health"));
     assert!(!contract.uses.contains_key("core"));
     assert!(!contract.uses.contains_key("auth"));
 }

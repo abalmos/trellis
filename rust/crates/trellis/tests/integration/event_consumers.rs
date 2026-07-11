@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, Notify};
 use trellis_rs::client::{EventDescriptor, ServiceConnectWithContractOptions, TrellisClient};
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerContext,
@@ -150,7 +150,42 @@ const DEPENDENCY_CONSUMER_JSON: &str = r#"{
   "eventConsumers": {
     "ingest": {
       "uses": { "source": ["Source.Pinged"] },
+      "ordering": "strict",
       "ackWaitMs": 1000,
+      "maxDeliver": 2
+    }
+  }
+}"#;
+
+const PARALLEL_DEPENDENCY_CONSUMER_JSON: &str = r#"{
+  "format": "trellis.contract.v1",
+  "id": "trellis.integration.event-consumers-parallel-dependency-rust@v1",
+  "displayName": "Trellis Rust Event Consumers Parallel Dependency",
+  "description": "Consumes source events through a parallel Trellis-provisioned durable group.",
+  "kind": "service",
+  "schemas": {
+    "EventRecord": {
+      "type": "object",
+      "required": ["id", "value"],
+      "properties": {
+        "id": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    }
+  },
+  "uses": {
+    "required": {
+      "source": {
+        "contract": "trellis.integration.event-consumers-source-rust@v1",
+        "events": { "subscribe": ["Source.Pinged"] }
+      }
+    }
+  },
+  "eventConsumers": {
+    "ingest": {
+      "uses": { "source": ["Source.Pinged"] },
+      "ordering": "parallel",
+      "ackWaitMs": 10000,
       "maxDeliver": 2
     }
   }
@@ -322,6 +357,167 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
 }
 
 #[tokio::test]
+async fn event_consumers_parallel_group_runs_messages_concurrently() {
+    assert_service_case_registered(
+        "event-consumers.parallel-group-runs-messages-concurrently",
+        "event-consumers",
+        "event_consumers",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    admin
+        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .await
+        .expect("approve source contract");
+    let consumer = connect_consumer(
+        &mut admin,
+        runtime.trellis_url(),
+        &bootstrap_url,
+        PARALLEL_DEPENDENCY_CONSUMER_JSON,
+        "event-consumers-parallel-dependency-rust",
+    )
+    .await;
+
+    let first_started = Arc::new(Notify::new());
+    let second_started = Arc::new(Notify::new());
+    let release_first = Arc::new(Notify::new());
+    let first_finished = Arc::new(Notify::new());
+    let listener = consumer
+        .listen_event::<SourcePingedEvent, _, _>(
+            {
+                let first_started = Arc::clone(&first_started);
+                let second_started = Arc::clone(&second_started);
+                let release_first = Arc::clone(&release_first);
+                let first_finished = Arc::clone(&first_finished);
+                move |event, context| {
+                    let first_started = Arc::clone(&first_started);
+                    let second_started = Arc::clone(&second_started);
+                    let release_first = Arc::clone(&release_first);
+                    let first_finished = Arc::clone(&first_finished);
+                    async move {
+                        assert_eq!(context.group.as_deref(), Some("ingest"));
+                        match event.value.as_str() {
+                            "first" => {
+                                first_started.notify_one();
+                                release_first.notified().await;
+                                first_finished.notify_one();
+                            }
+                            "second" => second_started.notify_one(),
+                            value => panic!("unexpected parallel fixture value {value}"),
+                        }
+                        Ok(())
+                    }
+                }
+            },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Durable,
+                group: Some("ingest".to_string()),
+                durable_name: None,
+                concurrency: 2,
+            },
+        )
+        .await
+        .expect("start parallel durable listener");
+    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 2).await;
+
+    let conflicting = consumer
+        .listen_event::<SourcePingedEvent, _, _>(
+            |_event, _context| async { Ok(()) },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Durable,
+                group: Some("ingest".to_string()),
+                durable_name: None,
+                concurrency: 1,
+            },
+        )
+        .await;
+    assert!(matches!(
+        conflicting,
+        Err(ServiceRuntimeError::EventListenerConcurrencyMismatch {
+            ref group,
+            existing: 2,
+            requested: 1,
+        }) if group == "ingest"
+    ));
+
+    let publisher_contract = publisher_contract();
+    let publisher = admin
+        .connect_client(&bootstrap_url, &publisher_contract)
+        .await
+        .expect("connect event publisher client");
+    publisher
+        .publish::<SourcePingedEvent>(&EventRecord {
+            id: "rust-event-consumers-parallel-first".to_string(),
+            value: "first".to_string(),
+        })
+        .await
+        .expect("publish first parallel event");
+    tokio::time::timeout(Duration::from_secs(5), first_started.notified())
+        .await
+        .expect("first parallel handler did not start");
+
+    publisher
+        .publish::<SourcePingedEvent>(&EventRecord {
+            id: "rust-event-consumers-parallel-second".to_string(),
+            value: "second".to_string(),
+        })
+        .await
+        .expect("publish second parallel event");
+    tokio::time::timeout(Duration::from_secs(5), second_started.notified())
+        .await
+        .expect("second handler did not start while first was blocked");
+
+    release_first.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), first_finished.notified())
+        .await
+        .expect("first parallel handler did not finish");
+    listener.abort();
+    let _ = listener.await;
+}
+
+#[tokio::test]
+async fn event_consumers_strict_group_rejects_parallel_workers() {
+    assert_service_case_registered(
+        "event-consumers.strict-group-rejects-parallel-workers",
+        "event-consumers",
+        "event_consumers",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    admin
+        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .await
+        .expect("approve source contract");
+    let consumer = connect_consumer(
+        &mut admin,
+        runtime.trellis_url(),
+        &bootstrap_url,
+        DEPENDENCY_CONSUMER_JSON,
+        "event-consumers-dependency-rust",
+    )
+    .await;
+
+    let result = consumer
+        .listen_event::<SourcePingedEvent, _, _>(
+            |_event, _context| async { Ok(()) },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Durable,
+                group: Some("ingest".to_string()),
+                durable_name: None,
+                concurrency: 2,
+            },
+        )
+        .await;
+    assert!(matches!(
+        result,
+        Err(ServiceRuntimeError::StrictEventListenerConcurrency { ref group })
+            if group == "ingest"
+    ));
+}
+
+#[tokio::test]
 async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_specifying_group_works()
 {
     assert_service_case_registered(
@@ -378,6 +574,7 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("primary".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -431,6 +628,7 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
                 mode: ServiceEventListenerMode::Durable,
                 group: None,
                 durable_name: Some("caller-name".to_string()),
+                concurrency: 1,
             },
         )
         .await;
@@ -493,6 +691,7 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -569,6 +768,7 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -650,6 +850,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -683,6 +884,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -795,6 +997,7 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
                 mode: ServiceEventListenerMode::Ephemeral,
                 group: None,
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -875,6 +1078,7 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -897,6 +1101,7 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -968,6 +1173,7 @@ async fn event_consumers_self_owned_durable_consumer_receives_self_published_eve
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1039,6 +1245,7 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1109,6 +1316,7 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1189,6 +1397,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("ingest".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1264,6 +1473,7 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1296,6 +1506,7 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1343,6 +1554,7 @@ async fn event_consumers_self_owned_grouped_consumer_waits_for_all_handlers_befo
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await
@@ -1377,6 +1589,7 @@ async fn event_consumers_self_owned_grouped_consumer_waits_for_all_handlers_befo
                 mode: ServiceEventListenerMode::Durable,
                 group: Some("paired".to_string()),
                 durable_name: None,
+                concurrency: 1,
             },
         )
         .await

@@ -17,7 +17,7 @@ use crate::projector::{start_jobs_projector, JobsProjectorHandle};
 use crate::query::{jobs_admin_resources_from_binding, JobsAdminResources, JobsQuery};
 use crate::router::register_jobs_rpc_handlers;
 use crate::storage::SqliteJobsStore;
-use crate::watch::register_jobs_watch_feed;
+use crate::watch::{expire_obsolete_watch_consumers, register_jobs_watch_feed};
 use crate::worker_presence::{start_worker_presence_projector, WorkerPresenceProjectorHandle};
 
 /// Controls whether this process owns background jobs-service loops or only RPC serving.
@@ -193,17 +193,23 @@ impl ConnectedJobsService {
     pub async fn run_with_mode(mut self, mode: JobsServiceMode) -> Result<(), ServerError> {
         tracing::info!(?mode, "registering jobs admin runtime surfaces");
         let jobs_runtime = self.jobs_runtime.clone();
+        let nats = self.runtime.client().internal_nats().clone();
         let (resources, query, store) = build_jobs_runtime(
             jobs_runtime.clone(),
             self.binding(),
             self.jobs_store.clone(),
         )?;
+        match expire_obsolete_watch_consumers(&nats, &resources.jobs_stream).await {
+            Ok(count) if count > 0 => {
+                tracing::info!(count, "scheduled obsolete Jobs.Watch consumers for expiry");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "failed to expire obsolete Jobs.Watch consumers");
+            }
+        }
         register_jobs_rpc_handlers(&mut self.runtime, query);
-        register_jobs_watch_feed(
-            &mut self.runtime,
-            jobs_runtime.clone(),
-            resources.jobs_stream.clone(),
-        );
+        register_jobs_watch_feed(&mut self.runtime, nats, resources.jobs_stream.clone());
         tracing::debug!(?mode, "jobs admin RPC handlers and watch feed registered");
         run_jobs_service_runtime(jobs_runtime, resources, store, mode, async move {
             self.runtime
