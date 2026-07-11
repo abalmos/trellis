@@ -102,13 +102,27 @@ export function formatList(values: string[] | null | undefined): string {
 
 export function compactDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "-";
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  const rounded = Math.round(ms);
+  if (rounded < 1_000) return `${rounded}ms`;
+
+  const milliseconds = rounded % 1_000;
+  const totalSeconds = Math.floor(rounded / 1_000);
+  const seconds = `${totalSeconds % 60}.${
+    String(milliseconds).padStart(3, "0")
+  }s`;
+  if (totalSeconds < 60) {
+    return `${totalSeconds}.${String(milliseconds).padStart(3, "0")}s`;
+  }
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ${seconds}`;
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (totalHours < 48) return `${totalHours}h ${minutes}m ${seconds}`;
+
+  const days = Math.floor(totalHours / 24);
+  return `${days}d ${totalHours % 24}h ${minutes}m ${seconds}`;
 }
 
 export function jsonBlock(value: unknown): string {

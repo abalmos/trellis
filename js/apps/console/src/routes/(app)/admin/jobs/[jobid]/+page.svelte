@@ -8,6 +8,7 @@
   import Icon from "../../../../../lib/components/Icon.svelte";
   import JobAttemptTimeline from "../../../../../lib/components/JobAttemptTimeline.svelte";
   import JobEventTimeline from "../../../../../lib/components/JobEventTimeline.svelte";
+  import { jobTimelineEventsForAttempt } from "../../../../../lib/job_event_timeline";
   import JsonTree from "../../../../../lib/components/JsonTree.svelte";
   import LoadingState from "../../../../../lib/components/LoadingState.svelte";
   import Notice from "../../../../../lib/components/Notice.svelte";
@@ -64,7 +65,7 @@
   const selectedTimeline = $derived.by(() => {
     const tryNumber = selectedAttempt?.try;
     if (typeof tryNumber !== "number") return timeline;
-    return timeline.filter((event) => event.tries === tryNumber);
+    return jobTimelineEventsForAttempt(timeline, tryNumber);
   });
   const canCancel = $derived(job?.state === "pending" || job?.state === "retry" || job?.state === "active");
   const canRetry = $derived(job?.state === "failed");

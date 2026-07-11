@@ -1,10 +1,18 @@
 import { equal } from "node:assert/strict";
 
-import { errorMessage } from "./format.ts";
+import { compactDuration, errorMessage } from "./format.ts";
 
 declare const Deno: {
   test(name: string, fn: () => void): void;
 };
+
+Deno.test("compactDuration preserves millisecond resolution", () => {
+  equal(compactDuration(0), "0ms");
+  equal(compactDuration(243.4), "243ms");
+  equal(compactDuration(2_184), "2.184s");
+  equal(compactDuration(580_132), "9m 40.132s");
+  equal(compactDuration(3_723_006), "1h 2m 3.006s");
+});
 
 Deno.test("errorMessage prefers explicit server messages", () => {
   equal(
