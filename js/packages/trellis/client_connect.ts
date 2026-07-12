@@ -10,6 +10,11 @@ import {
   digestContractManifest,
 } from "./contract_support/mod.ts";
 import {
+  type ContractWithRuntime,
+  getContractRuntime,
+} from "./contract_support/contract_runtime.ts";
+import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
+import {
   base64urlDecode,
   base64urlEncode,
   getOrCreateSessionKey,
@@ -36,17 +41,17 @@ import {
   signEd25519SeedSha256,
 } from "./auth/keys.ts";
 import type { ClientOpts } from "./client.ts";
-import type { TrellisAPI, TrellisContractV1 } from "./contracts.ts";
+import type { TrellisContractV1 } from "./contracts.ts";
+import type { RuntimeApi } from "./contract_support/runtime.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   type RuntimeTransport,
 } from "./runtime_transport.ts";
 import {
-  type ConnectedTrellisClient,
   type RuntimeStateStores,
   Trellis,
   type TrellisOpts,
-} from "./trellis.ts";
+} from "./session.ts";
 import { TransportError } from "./errors/index.ts";
 import {
   AsyncResult,
@@ -68,24 +73,13 @@ import {
 } from "./connection.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
-type ClientContract<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends TrellisContractV1 = TrellisContractV1,
-> = {
-  CONTRACT: TContract;
-  CONTRACT_DIGEST?: string;
-  API: {
-    owned?: TApi;
-    trellis?: TApi;
+type ClientContract<TContract extends TrellisContractV1 = TrellisContractV1> =
+  & ContractWithRuntime
+  & {
+    CONTRACT: TContract;
+    CONTRACT_DIGEST?: string;
+    readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
   };
-  readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
-};
-
-type ApiForClientContract<TContract extends ClientContract> = TContract extends
-  { API: { trellis: infer TApi } } ? TApi extends TrellisAPI ? TApi : TrellisAPI
-  : TContract extends { API: { owned: infer TApi } }
-    ? TApi extends TrellisAPI ? TApi : TrellisAPI
-  : TrellisAPI;
 
 function createConnectedClient(args: {
   name: string;
@@ -98,12 +92,12 @@ function createConnectedClient(args: {
     timeout: ClientOpts["timeout"];
     stream: ClientOpts["stream"];
     noResponderRetry: ClientOpts["noResponderRetry"];
-    api: TrellisAPI;
-    state: TrellisOpts<TrellisAPI>["state"];
-    onSessionNotFound?: TrellisOpts<TrellisAPI>["onSessionNotFound"];
+    api: RuntimeApi;
+    state: TrellisOpts<RuntimeApi>["state"];
+    onSessionNotFound?: TrellisOpts<RuntimeApi>["onSessionNotFound"];
   };
-}): Trellis<TrellisAPI, "client", RuntimeStateStores> {
-  const trellis = new Trellis<TrellisAPI, "client", RuntimeStateStores>(
+}): Trellis<RuntimeApi, "client", RuntimeStateStores> {
+  const trellis = new Trellis<RuntimeApi, "client", RuntimeStateStores>(
     args.name,
     args.nc,
     {
@@ -213,9 +207,7 @@ type ClientConnectArgsFor<TContract extends ClientContract> =
   };
 
 export type TrellisClientConnectArgs<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends ClientContract<TApi, TrellisContractV1> = ClientContract<
-    TApi,
+  TContract extends ClientContract<TrellisContractV1> = ClientContract<
     TrellisContractV1
   >,
 > = ClientConnectArgsFor<TContract>;
@@ -989,7 +981,7 @@ function needsReauth(
 }
 
 function bootstrapTargetsRequestedContract<
-  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+  TContract extends ClientContract<TrellisContractV1>,
 >(
   bootstrap: ClientBootstrapResponse,
   args: ClientConnectArgsFor<TContract>,
@@ -1135,11 +1127,11 @@ async function authStartNeedsManifest(response: Response): Promise<boolean> {
 }
 
 export async function connectClientWithDeps<
-  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+  TContract extends ClientContract<TrellisContractV1>,
 >(
   args: ClientConnectArgsFor<TContract>,
   deps: ClientConnectDeps,
-): Promise<Trellis<TrellisAPI, "client", RuntimeStateStores>> {
+): Promise<CallerRuntime<TContract>> {
   const totalStartedAt = performance.now();
   const trellisUrl = normalizeTrellisUrl(args.trellisUrl);
   const identity = await resolveClientIdentity(args.auth);
@@ -1365,12 +1357,9 @@ export async function connectClientWithDeps<
       : {}),
   });
 
-  const api = args.contract.API.trellis ?? args.contract.API.owned;
-  if (!api) {
-    throw new Error("Contract is missing an owned or trellis API view");
-  }
+  const api = getContractRuntime(args.contract).usedApi as RuntimeApi;
   const state = args.contract[CONTRACT_STATE_METADATA] as TrellisOpts<
-    TrellisAPI
+    RuntimeApi
   >["state"];
 
   const client = createConnectedClient({
@@ -1398,11 +1387,11 @@ export async function connectClientWithDeps<
       outcome: "ok",
     },
   );
-  return client;
+  return createCallerRuntime(client, args.contract);
 }
 
 async function resolveAuthRequired<
-  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+  TContract extends ClientContract<TrellisContractV1>,
 >(
   args: ClientConnectArgsFor<TContract>,
   identity: ClientRuntimeIdentity,
@@ -1545,15 +1534,14 @@ async function resolveAuthRequired<
   );
 }
 
+/** Connects user-facing participants to the Trellis caller runtime. */
 export class TrellisClient {
   static connect<
-    TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+    TContract extends ClientContract<TrellisContractV1>,
   >(
     args: ClientConnectArgsFor<TContract>,
   ): AsyncResult<
-    ConnectedTrellisClient<
-      TContract & { API: { trellis: ApiForClientContract<TContract> } }
-    >,
+    CallerRuntime<TContract>,
     TransportError | UnexpectedError | ClientAuthHandledError
   >;
   static connect(

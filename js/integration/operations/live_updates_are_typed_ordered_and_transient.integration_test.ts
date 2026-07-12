@@ -23,7 +23,7 @@ liveTrellisTest({
     });
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         await updatesReady;
         await op.emitUpdate({ message: input.message, step: 1 }).orThrow();
@@ -37,7 +37,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
       const callbackUpdates: number[] = [];
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).onUpdate((event) => {
         callbackUpdates.push(event.update.step);

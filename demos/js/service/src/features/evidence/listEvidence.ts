@@ -1,8 +1,7 @@
-import { ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
+import { ok } from "@qlever-llc/trellis";
+import type { FieldOpsService } from "../../deps.ts";
 
-type Args = RpcArgs<typeof contract, "Evidence.List">;
-type Result = RpcResult<typeof contract, "Evidence.List">;
+type Handler = Parameters<FieldOpsService["handleEvidenceList"]>[0];
 
 function evidenceIdForKey(
   key: string,
@@ -12,7 +11,7 @@ function evidenceIdForKey(
 }
 
 /** Lists image evidence staged in the demo object store. */
-export async function listEvidence({ input, client }: Args): Promise<Result> {
+export const listEvidence: Handler = async ({ input, client }) => {
   const uploads = await client.store.uploads.open().orThrow();
   const page = await uploads.list({
     prefix: input.prefix ?? "evidence/",
@@ -38,4 +37,4 @@ export async function listEvidence({ input, client }: Args): Promise<Result> {
   );
 
   return ok({ ...page, entries: evidence });
-}
+};

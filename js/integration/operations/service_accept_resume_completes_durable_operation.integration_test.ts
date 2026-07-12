@@ -23,10 +23,10 @@ liveTrellisTest({
         contract: fixture.clientContract,
         sessionKeySeed: clientKey.seed,
       });
-      const accepted = await service.handle.operation.entity.process.accept({
+      const accepted = await service.handleEntityProcess.accept({
         sessionKey: clientKey.sessionKey,
       }).orThrow();
-      const resumed = client.operation.entity.process.resume(accepted.ref);
+      const resumed = client.entityProcess.resume(accepted.ref);
 
       await accepted.started().orThrow();
       await accepted.progress({ message: "working", step: 1 }).orThrow();

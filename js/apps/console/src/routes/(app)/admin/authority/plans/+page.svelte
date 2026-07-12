@@ -32,7 +32,6 @@
   };
 
   const trellis = getTrellis();
-  const request = trellis.request.bind(trellis) as AuthorityPlansRequest;
   const states: (PlanState | "")[] = ["", "pending", "accepted", "rejected", "expired", "superseded"];
   const classifications: (PlanClassification | "")[] = ["", "update", "migration"];
   const kinds: (AuthorityKind | "")[] = ["", "service", "device", "app", "cli", "native", "device-user"];
@@ -105,7 +104,7 @@
     if (classificationFilter) input.classification = classificationFilter;
     if (kindFilter) input.kind = kindFilter;
     try {
-      const plansResponse = await request("Auth.DeploymentAuthority.Plans.List", input).take();
+      const plansResponse = await trellis.authDeploymentAuthorityPlansList(input).take();
       if (isErr(plansResponse)) { error = errorMessage(plansResponse); return; }
       plans = plansResponse.entries ?? [];
       total = plansResponse.count ?? plans.length;

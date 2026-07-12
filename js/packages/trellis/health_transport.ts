@@ -3,8 +3,7 @@ import type { NatsConnection } from "@nats-io/nats-core";
 import { base64urlEncode } from "./auth/utils.ts";
 import type { HealthHeartbeatSample } from "./sdk/_generated/health/types.ts";
 
-export const HEALTH_HEARTBEAT_STREAM = "TRELLIS_HEALTH";
-export const HEALTH_HEARTBEAT_SUBJECT_PREFIX = "health.v1.heartbeat";
+const HEALTH_HEARTBEAT_SUBJECT_PREFIX = "health.v1.heartbeat";
 
 export type HealthHeartbeatSubjectIdentity = {
   sessionKey: string;

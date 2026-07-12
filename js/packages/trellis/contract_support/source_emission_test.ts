@@ -14,11 +14,17 @@ import {
   defineServiceContract,
   digestContractManifest,
   globalCapabilityName,
+  jobs,
+  kv,
   normalizeContractManifest,
+  optional,
   parseContractManifest,
+  state,
+  store,
 } from "./mod.ts";
 import { unwrapSchema } from "./runtime.ts";
-import { sdk as health } from "../sdk/health.ts";
+import { getContractRuntime } from "./contract_runtime.ts";
+import { HealthQuery } from "../sdk/health.ts";
 
 const EmptySchema = Type.Object({});
 const StringSchema = Type.Object({ value: Type.String() });
@@ -132,14 +138,7 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
           description: "Publish and subscribe to audit events.",
         },
       },
-      uses: {
-        required: {
-          auth: auth.use({
-            rpc: { call: ["Auth.Sessions.Me"] },
-            events: { subscribe: ["Auth.Connections.Opened"] },
-          }),
-        },
-      },
+      uses: [auth.AuthSessionsMe, auth.AuthConnectionsOpened.subscribe],
       rpc: {
         "Audit.List": {
           version: "v1",
@@ -191,7 +190,7 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
     },
     uses: {
       required: {
-        auth: {
+        "trellis.auth@v1": {
           contract: "trellis.auth@v1",
           rpc: { call: ["Auth.Sessions.Me"] },
           events: { subscribe: ["Auth.Connections.Opened"] },
@@ -228,23 +227,23 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
   });
 
   assertEquals(
-    audit.API.owned.rpc["Audit.List"].subject,
+    getContractRuntime(audit).ownedApi.rpc["Audit.List"].subject,
     "rpc.v1.Audit.List",
   );
   assertEquals(
-    audit.API.used.rpc["Auth.Sessions.Me"].subject,
+    getContractRuntime(audit).usedApi.rpc["Auth.Sessions.Me"].subject,
     "rpc.v1.Auth.Sessions.Me",
   );
   assertEquals(
-    audit.API.used.events["Auth.Connections.Opened"].subject,
+    getContractRuntime(audit).usedApi.events["Auth.Connections.Opened"].subject,
     "events.v1.Auth.Connections.Opened",
   );
   assertEquals(
-    audit.API.trellis.rpc["Audit.List"].subject,
+    getContractRuntime(audit).api.rpc["Audit.List"].subject,
     "rpc.v1.Audit.List",
   );
   assertEquals(
-    audit.API.trellis.rpc["Auth.Sessions.Me"].subject,
+    getContractRuntime(audit).api.rpc["Auth.Sessions.Me"].subject,
     "rpc.v1.Auth.Sessions.Me",
   );
   assertEquals(
@@ -285,34 +284,34 @@ function typecheckHealthContractDoesNotInferSelfUse(): void {
   }));
 
   // @ts-expect-error health contract should not infer an implicit self-use.
-  const invalid = contract.API.used.events["Health.StatusChanged"];
+  const invalid = getContractRuntime(contract).usedApi.events.Health;
   void invalid;
 }
 
 void typecheckHealthContractDoesNotInferSelfUse;
 
-Deno.test("device contracts keep implicit auth and state uses", () => {
+Deno.test("state feature emits state declarations and required runtime actions", () => {
   const contract = defineDeviceContract(
     { schemas: baseSchemas },
     (ref) => ({
       id: "baseline-health.device@v1",
       displayName: "Baseline Health Device",
-      description: "Verify device contracts retain all implicit Trellis uses.",
-      state: {
+      description: "Verify state features select the State runtime.",
+      uses: [state({
         preferences: {
           kind: "value",
           schema: ref.schema("StringValue"),
         },
-      },
+      })],
     }),
   );
 
   assertEquals(
-    requiredUses(contract.CONTRACT.uses)?.auth?.contract,
-    "trellis.auth@v1",
+    requiredUses(contract.CONTRACT.uses)?.["trellis.auth@v1"],
+    undefined,
   );
   assertEquals(
-    requiredUses(contract.CONTRACT.uses)?.state?.contract,
+    requiredUses(contract.CONTRACT.uses)?.["trellis.state@v1"]?.contract,
     "trellis.state@v1",
   );
 });
@@ -322,14 +321,10 @@ Deno.test("explicit health use preserves only selected public surfaces", () => {
     id: "explicit-health.service@v1",
     displayName: "Explicit Health Service",
     description: "Verify explicit health use remains explicit.",
-    uses: {
-      required: {
-        health: health.use({ rpc: { call: ["Health.Query"] } }),
-      },
-    },
+    uses: [HealthQuery],
   }));
 
-  assertEquals(requiredUses(contract.CONTRACT.uses)?.health, {
+  assertEquals(requiredUses(contract.CONTRACT.uses)?.["trellis.health@v1"], {
     contract: "trellis.health@v1",
     rpc: { call: ["Health.Query"] },
   });
@@ -377,13 +372,34 @@ Deno.test("defineServiceContract emits docs on owned contract surfaces", () => {
         summary: "Documented service.",
         markdown: "# Docs Example\n\nService documentation.",
       },
-      state: {
-        settings: {
-          kind: "value",
-          schema: ref.schema("StringValue"),
-          docs: { markdown: "State settings docs." },
-        },
-      },
+      uses: [
+        state({
+          settings: {
+            kind: "value",
+            schema: ref.schema("StringValue"),
+            docs: { markdown: "State settings docs." },
+          },
+        }),
+        jobs({
+          "docs.process": {
+            payload: ref.schema("StringValue"),
+            docs: { markdown: "Job docs." },
+          },
+        }),
+        kv({
+          docs: {
+            purpose: "Store docs values.",
+            schema: ref.schema("StringValue"),
+            docs: { markdown: "KV docs." },
+          },
+        }),
+        store({
+          blobs: {
+            purpose: "Store docs blobs.",
+            docs: { markdown: "Store docs." },
+          },
+        }),
+      ],
       rpc: {
         "Docs.Read": {
           version: "v1",
@@ -419,27 +435,6 @@ Deno.test("defineServiceContract emits docs on owned contract surfaces", () => {
           input: ref.schema("Empty"),
           event: ref.schema("StringValue"),
           docs: { markdown: "Feed docs." },
-        },
-      },
-      jobs: {
-        "docs.process": {
-          payload: ref.schema("StringValue"),
-          docs: { markdown: "Job docs." },
-        },
-      },
-      resources: {
-        kv: {
-          docs: {
-            purpose: "Store docs values.",
-            schema: ref.schema("StringValue"),
-            docs: { markdown: "KV docs." },
-          },
-        },
-        store: {
-          blobs: {
-            purpose: "Store docs blobs.",
-            docs: { markdown: "Store docs." },
-          },
         },
       },
     }),
@@ -485,7 +480,7 @@ Deno.test("defineServiceContract emits keyed job concurrency policy", () => {
       id: "jobs.keyed@v1",
       displayName: "Keyed Jobs",
       description: "Verify keyed jobs manifest emission.",
-      jobs: {
+      uses: [jobs({
         syncTickets: {
           payload: ref.schema("StringValue"),
           keyConcurrency: {
@@ -500,7 +495,7 @@ Deno.test("defineServiceContract emits keyed job concurrency policy", () => {
             whenFull: "reject",
           },
         },
-      },
+      })],
     }),
   );
 
@@ -551,13 +546,34 @@ Deno.test("contract digest ignores docs-only differences", () => {
       displayName: "Digest Docs",
       description: "Verify docs are not part of contract identity.",
       docs: { summary: markdown, markdown },
-      state: {
-        settings: {
-          kind: "value",
-          schema: ref.schema("StringValue"),
-          docs: { markdown },
-        },
-      },
+      uses: [
+        state({
+          settings: {
+            kind: "value",
+            schema: ref.schema("StringValue"),
+            docs: { markdown },
+          },
+        }),
+        jobs({
+          "docs.process": {
+            payload: ref.schema("StringValue"),
+            docs: { markdown },
+          },
+        }),
+        kv({
+          docs: {
+            purpose: "Store docs values.",
+            schema: ref.schema("StringValue"),
+            docs: { markdown },
+          },
+        }),
+        store({
+          blobs: {
+            purpose: "Store docs blobs.",
+            docs: { markdown },
+          },
+        }),
+      ],
       rpc: {
         "Docs.Read": {
           version: "v1",
@@ -590,27 +606,6 @@ Deno.test("contract digest ignores docs-only differences", () => {
           input: ref.schema("Empty"),
           event: ref.schema("StringValue"),
           docs: { markdown },
-        },
-      },
-      jobs: {
-        "docs.process": {
-          payload: ref.schema("StringValue"),
-          docs: { markdown },
-        },
-      },
-      resources: {
-        kv: {
-          docs: {
-            purpose: "Store docs values.",
-            schema: ref.schema("StringValue"),
-            docs: { markdown },
-          },
-        },
-        store: {
-          blobs: {
-            purpose: "Store docs blobs.",
-            docs: { markdown },
-          },
         },
       },
     }));
@@ -766,7 +761,8 @@ Deno.test("defineServiceContract emits operation error refs using declared wire 
   ]);
 
   // Assert runtime API metadata
-  const api = contract.API.owned.operations["Example.Process"];
+  const api =
+    getContractRuntime(contract).ownedApi.operations["Example.Process"];
   assertEquals(api.declaredErrorTypes, ["NotFoundError", "UnexpectedError"]);
   assert(api.runtimeErrors !== undefined);
   assertEquals(api.runtimeErrors.length, 1);
@@ -774,7 +770,7 @@ Deno.test("defineServiceContract emits operation error refs using declared wire 
   assertEquals(api.errors, ["NotFoundError", "UnexpectedError"]);
 });
 
-Deno.test("defineAppContract emits top-level named state declarations", async () => {
+Deno.test("state feature emits named state declarations", async () => {
   const dashboardSchemas = {
     Preferences: Type.Object({ theme: Type.String() }),
     Draft: Type.Object({ title: Type.String() }),
@@ -786,7 +782,7 @@ Deno.test("defineAppContract emits top-level named state declarations", async ()
       id: "trellis.dashboard@v1",
       displayName: "Dashboard",
       description: "Persist dashboard preferences and drafts.",
-      state: {
+      uses: [state({
         preferences: {
           kind: "value",
           schema: ref.schema("Preferences"),
@@ -795,7 +791,7 @@ Deno.test("defineAppContract emits top-level named state declarations", async ()
           kind: "map",
           schema: ref.schema("Draft"),
         },
-      },
+      })],
     }),
   );
 
@@ -829,11 +825,7 @@ Deno.test("defineAppContract emits top-level named state declarations", async ()
     },
     uses: {
       required: {
-        auth: {
-          contract: "trellis.auth@v1",
-          rpc: { call: ["Auth.Sessions.Logout", "Auth.Sessions.Me"] },
-        },
-        state: {
+        "trellis.state@v1": {
           contract: "trellis.state@v1",
           rpc: {
             call: ["State.Delete", "State.Get", "State.List", "State.Put"],
@@ -844,19 +836,11 @@ Deno.test("defineAppContract emits top-level named state declarations", async ()
   });
 
   assertEquals(
-    dashboard.API.used.rpc["Auth.Sessions.Me"].subject,
-    "rpc.v1.Auth.Sessions.Me",
-  );
-  assertEquals(
-    dashboard.API.used.rpc["Auth.Sessions.Logout"].subject,
-    "rpc.v1.Auth.Sessions.Logout",
-  );
-  assertEquals(
-    dashboard.API.used.rpc["State.Get"].subject,
+    getContractRuntime(dashboard).usedApi.rpc["State.Get"].subject,
     "rpc.v1.State.Get",
   );
   assertEquals(
-    dashboard.API.trellis.rpc["State.Put"].subject,
+    getContractRuntime(dashboard).api.rpc["State.Put"].subject,
     "rpc.v1.State.Put",
   );
 
@@ -1194,11 +1178,13 @@ Deno.test("defineServiceContract emits top-level capabilities with global names"
     subscribe: ["external::subscribe", globalUsersRead],
   });
   assertEquals(
-    contract.API.owned.rpc["Auth.Users.List"].callerCapabilities,
+    getContractRuntime(contract).ownedApi.rpc["Auth.Users.List"]
+      .callerCapabilities,
     ["platform::audit", globalUsersRead],
   );
   assertEquals(
-    contract.API.owned.events["Auth.UserChanged"].subscribeCapabilities,
+    getContractRuntime(contract).ownedApi.events["Auth.UserChanged"]
+      .subscribeCapabilities,
     ["external::subscribe", globalUsersRead],
   );
 });
@@ -1373,36 +1359,31 @@ Deno.test("contract digest normalizes uses logical-name order and duplicates", (
     id: "digest.uses@v1",
     displayName: "Digest Uses",
     description: "Verify uses normalization.",
-    uses: {
-      required: {
-        dependency: dependency.use({
-          rpc: { call: ["Dependency.B", "Dependency.A", "Dependency.A"] },
-        }),
-      },
-    },
+    uses: [
+      dependency.DependencyB,
+      dependency.DependencyA,
+      dependency.DependencyA,
+    ],
   }));
 
   const second = defineServiceContract({}, () => ({
     id: "digest.uses@v1",
     displayName: "Digest Uses",
     description: "Verify uses normalization.",
-    uses: {
-      required: {
-        dependency: dependency.use({
-          rpc: { call: ["Dependency.A", "Dependency.B"] },
-        }),
-      },
-    },
+    uses: [dependency.DependencyA, dependency.DependencyB],
   }));
 
-  assertEquals(requiredUses(first.CONTRACT.uses)?.dependency.rpc?.call, [
-    "Dependency.A",
-    "Dependency.B",
-  ]);
+  assertEquals(
+    requiredUses(first.CONTRACT.uses)?.["digest.dependency@v1"].rpc?.call,
+    [
+      "Dependency.A",
+      "Dependency.B",
+    ],
+  );
   assertEquals(first.CONTRACT_DIGEST, second.CONTRACT_DIGEST);
 });
 
-Deno.test("grouped required uses emit grouped manifest", () => {
+Deno.test("descriptor selections emit contract-ID-keyed manifest uses", () => {
   const dependency = defineServiceContract(
     { schemas: baseSchemas },
     (ref) => ({
@@ -1429,19 +1410,12 @@ Deno.test("grouped required uses emit grouped manifest", () => {
     id: "grouped.required@v1",
     displayName: "Grouped Required",
     description: "Declare grouped required uses.",
-    uses: {
-      required: {
-        dependency: dependency.use({
-          events: { subscribe: ["Dependency.Changed"] },
-          rpc: { call: ["Dependency.Read"] },
-        }),
-      },
-    },
+    uses: [dependency.DependencyChanged.subscribe, dependency.DependencyRead],
   }));
 
   assertEquals(grouped.CONTRACT.uses, {
     required: {
-      dependency: {
+      "grouped.dependency@v1": {
         contract: "grouped.dependency@v1",
         rpc: { call: ["Dependency.Read"] },
         events: { subscribe: ["Dependency.Changed"] },
@@ -1449,11 +1423,11 @@ Deno.test("grouped required uses emit grouped manifest", () => {
     },
   });
   assertEquals(
-    grouped.API.used.rpc["Dependency.Read"].subject,
+    getContractRuntime(grouped).usedApi.rpc["Dependency.Read"].subject,
     "rpc.v1.Dependency.Read",
   );
   assertEquals(
-    grouped.API.used.events["Dependency.Changed"].subject,
+    getContractRuntime(grouped).usedApi.events["Dependency.Changed"].subject,
     "events.v1.Dependency.Changed",
   );
   assertEquals(
@@ -1496,43 +1470,24 @@ Deno.test("grouped optional uses normalize selectors and affect digest", () => {
     id: "grouped.optional@v1",
     displayName: "Grouped Optional",
     description: "Declare grouped uses without optional dependencies.",
-    uses: {
-      required: {
-        dependency: dependency.use({ rpc: { call: ["Dependency.Read"] } }),
-      },
-    },
+    uses: [],
   }));
 
   const withOptional = defineServiceContract({}, () => ({
     id: "grouped.optional@v1",
     displayName: "Grouped Optional",
     description: "Declare grouped optional dependencies.",
-    uses: {
-      required: {
-        dependency: dependency.use({ rpc: { call: ["Dependency.Read"] } }),
-      },
-      optional: {
-        optionalDependency: dependency.use({
-          events: {
-            subscribe: ["Dependency.Changed", "Dependency.Changed"],
-          },
-          feeds: {
-            subscribe: ["Dependency.Changes", "Dependency.Changes"],
-          },
-        }),
-      },
-    },
+    uses: [
+      optional(
+        dependency.DependencyChanged.subscribe,
+        dependency.DependencyChanges,
+      ),
+    ],
   }));
 
   assertEquals(withOptional.CONTRACT.uses, {
-    required: {
-      dependency: {
-        contract: "grouped.optional-dependency@v1",
-        rpc: { call: ["Dependency.Read"] },
-      },
-    },
     optional: {
-      optionalDependency: {
+      "grouped.optional-dependency@v1": {
         contract: "grouped.optional-dependency@v1",
         events: { subscribe: ["Dependency.Changed"] },
         feeds: { subscribe: ["Dependency.Changes"] },
@@ -1540,13 +1495,14 @@ Deno.test("grouped optional uses normalize selectors and affect digest", () => {
     },
   });
   assertEquals(
-    withOptional.API.used.feeds["Dependency.Changes"].subject,
+    getContractRuntime(withOptional).usedApi.feeds["Dependency.Changes"]
+      .subject,
     "feeds.v1.Dependency.Changes",
   );
   assertNotEquals(requiredOnly.CONTRACT_DIGEST, withOptional.CONTRACT_DIGEST);
 });
 
-Deno.test("grouped required uses take precedence over duplicate optional aliases", () => {
+Deno.test("one dependency cannot mix required and optional selections", () => {
   const dependency = defineServiceContract(
     { schemas: baseSchemas },
     (ref) => ({
@@ -1573,34 +1529,27 @@ Deno.test("grouped required uses take precedence over duplicate optional aliases
     id: "grouped.duplicate@v1",
     displayName: "Grouped Duplicate",
     description: "Declare required uses.",
-    uses: {
-      required: {
-        dependency: dependency.use({ rpc: { call: ["Dependency.Read"] } }),
-      },
-    },
+    uses: [dependency.DependencyRead],
   }));
 
-  const duplicateOptional = defineServiceContract({}, () => ({
-    id: "grouped.duplicate@v1",
-    displayName: "Grouped Duplicate",
-    description: "Declare duplicate optional uses.",
-    uses: {
-      required: {
-        dependency: dependency.use({ rpc: { call: ["Dependency.Read"] } }),
-      },
-      optional: {
-        dependency: dependency.use({
-          events: { subscribe: ["Dependency.Changed"] },
-        }),
-      },
-    },
-  }));
-
-  assertEquals(duplicateOptional.CONTRACT.uses, requiredOnly.CONTRACT.uses);
-  assertEquals(duplicateOptional.CONTRACT_DIGEST, requiredOnly.CONTRACT_DIGEST);
   assertEquals(
-    Object.hasOwn(duplicateOptional.API.used.events, "Dependency.Changed"),
-    false,
+    requiredUses(requiredOnly.CONTRACT.uses)
+      ?.["grouped.duplicate-dependency@v1"].rpc?.call,
+    ["Dependency.Read"],
+  );
+  assertThrows(
+    () =>
+      defineServiceContract({}, () => ({
+        id: "grouped.duplicate@v1",
+        displayName: "Grouped Duplicate",
+        description: "Reject mixed dependency optionality.",
+        uses: [
+          dependency.DependencyRead,
+          optional(dependency.DependencyChanged.subscribe),
+        ],
+      })),
+    Error,
+    "cannot mix required and optional actions",
   );
 });
 
@@ -1735,7 +1684,8 @@ Deno.test("defineServiceContract derives local error schemas from defineError ru
   );
   assertEquals(
     unwrapSchema(
-      contract.API.owned.rpc["Workspace.Get"].runtimeErrors?.[0]?.schema ?? {},
+      getContractRuntime(contract).ownedApi.rpc["Workspace.Get"].runtimeErrors
+        ?.[0]?.schema ?? {},
     ),
     JSON.parse(JSON.stringify(NotFoundError.schema)),
   );
@@ -1832,7 +1782,8 @@ Deno.test("defineServiceContract emits generated defineError classes", () => {
   });
   assertEquals(
     unwrapSchema(
-      contract.API.owned.rpc["Workspace.Get"].runtimeErrors?.[0]?.schema ?? {},
+      getContractRuntime(contract).ownedApi.rpc["Workspace.Get"].runtimeErrors
+        ?.[0]?.schema ?? {},
     ),
     JSON.parse(JSON.stringify(WorkspaceMissingError.schema)),
   );
@@ -1863,11 +1814,7 @@ Deno.test("defineServiceContract rejects duplicate logical keys across used and 
           id: "duplicate@v1",
           displayName: "Duplicate",
           description: "Trigger duplicate logical RPC key validation.",
-          uses: {
-            required: {
-              auth: auth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-            },
-          },
+          uses: [auth.AuthSessionsMe],
           rpc: {
             "Auth.Sessions.Me": {
               version: "v1",
@@ -1884,46 +1831,6 @@ Deno.test("defineServiceContract rejects duplicate logical keys across used and 
   );
 });
 
-Deno.test("defineServiceContract validates use(...) provenance and selected keys at runtime", () => {
-  const auth = defineServiceContract(
-    { schemas: baseSchemas },
-    () => ({
-      id: "trellis.auth@v1",
-      displayName: "Trellis Auth",
-      description: "Expose auth RPCs in provenance tests.",
-      rpc: {
-        "Auth.Sessions.Me": {
-          version: "v1",
-          input: schemaRef<typeof baseSchemas, "Empty">("Empty"),
-          output: schemaRef<typeof baseSchemas, "StringValue">("StringValue"),
-        },
-      },
-    }),
-  );
-
-  assertThrows(
-    () => auth.use({ rpc: { call: JSON.parse('["Auth.Nope"]') } }),
-    Error,
-    "does not expose rpc key 'Auth.Nope'",
-  );
-
-  const forgedUse = structuredClone(
-    auth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-  );
-
-  assertThrows(
-    () =>
-      defineServiceContract({}, () => ({
-        id: "forged@v1",
-        displayName: "Forged",
-        description: "Trigger forged use provenance validation.",
-        uses: { required: { auth: forgedUse } },
-      })),
-    Error,
-    "must be created with contractModule.use(...)",
-  );
-});
-
 Deno.test("defineServiceContract emits KV resources with schema-backed defaults", () => {
   const kvSchemas = {
     Item: Type.Object({ value: Type.String() }),
@@ -1935,14 +1842,12 @@ Deno.test("defineServiceContract emits KV resources with schema-backed defaults"
       id: "kv.example@v1",
       displayName: "KV Example",
       description: "Expose schema-backed KV resource declarations.",
-      resources: {
-        kv: {
-          items: {
-            purpose: "Persist typed items",
-            schema: ref.schema("Item"),
-          },
+      uses: [kv({
+        items: {
+          purpose: "Persist typed items",
+          schema: ref.schema("Item"),
         },
-      },
+      })],
     }),
   );
 
@@ -1960,13 +1865,13 @@ Deno.test("defineServiceContract emits top-level jobs with defaults", () => {
     id: "jobs.example@v1",
     displayName: "Jobs Example",
     description: "Expose top-level jobs declarations in emitted manifests.",
-    jobs: {
+    uses: [jobs({
       refresh: {
         payload: { schema: "Empty" },
         update: { schema: "StringValue" },
         result: { schema: "StringValue" },
       },
-    },
+    })],
   }));
 
   assertEquals(contract.CONTRACT.jobs?.refresh, {
@@ -2003,17 +1908,11 @@ Deno.test("defineServiceContract emits dependency event consumer groups", () => 
       id: "events.consumer@v1",
       displayName: "Event Consumer",
       description: "Declare durable event consumer groups.",
-      uses: {
-        required: {
-          source: source.use({
-            events: { subscribe: ["Source.Created", "Source.Updated"] },
-          }),
-        },
-      },
+      uses: [source.SourceCreated.subscribe, source.SourceUpdated.subscribe],
       eventConsumers: {
         ingest: {
           uses: {
-            source: ["Source.Updated", "Source.Created"],
+            "events.source@v1": ["Source.Updated", "Source.Created"],
           },
           ordering: "parallel",
           ackWaitMs: 1_000,
@@ -2027,7 +1926,7 @@ Deno.test("defineServiceContract emits dependency event consumer groups", () => 
 
   assertEquals(contract.CONTRACT.eventConsumers?.ingest, {
     uses: {
-      source: ["Source.Created", "Source.Updated"],
+      "events.source@v1": ["Source.Created", "Source.Updated"],
     },
     replay: "new",
     ordering: "parallel",
@@ -2148,13 +2047,7 @@ Deno.test("defineServiceContract emits mixed dependency and self event consumer 
       id: "events.mixed-consumer@v1",
       displayName: "Mixed Consumer",
       description: "Consume dependency and owned events in one group.",
-      uses: {
-        required: {
-          source: source.use({
-            events: { subscribe: ["Source.Created"] },
-          }),
-        },
-      },
+      uses: [source.SourceCreated.subscribe],
       events: {
         "Self.Created": {
           version: "v1",
@@ -2163,7 +2056,7 @@ Deno.test("defineServiceContract emits mixed dependency and self event consumer 
       },
       eventConsumers: {
         ingest: {
-          uses: { source: ["Source.Created"] },
+          uses: { "events.mixed-source@v1": ["Source.Created"] },
           self: ["Self.Created"],
         },
       },
@@ -2171,7 +2064,7 @@ Deno.test("defineServiceContract emits mixed dependency and self event consumer 
   );
 
   assertEquals(contract.CONTRACT.eventConsumers?.ingest, {
-    uses: { source: ["Source.Created"] },
+    uses: { "events.mixed-source@v1": ["Source.Created"] },
     self: ["Self.Created"],
     replay: "new",
     ordering: "strict",
@@ -2210,16 +2103,12 @@ Deno.test("defineServiceContract sorts event consumer aliases and arrays stably"
       id: "events.sorted-consumer@v1",
       displayName: "Sorted Consumer",
       description: "Normalize grouped event consumer order.",
-      uses: {
-        required: {
-          b: sourceB.use({
-            events: { subscribe: ["B.Updated", "B.Created"] },
-          }),
-          a: sourceA.use({
-            events: { subscribe: ["A.Updated", "A.Created"] },
-          }),
-        },
-      },
+      uses: [
+        sourceB.BUpdated.subscribe,
+        sourceB.BCreated.subscribe,
+        sourceA.AUpdated.subscribe,
+        sourceA.ACreated.subscribe,
+      ],
       events: {
         "Self.Z": { version: "v1", event: ref.schema("StringValue") },
         "Self.A": { version: "v1", event: ref.schema("StringValue") },
@@ -2227,8 +2116,8 @@ Deno.test("defineServiceContract sorts event consumer aliases and arrays stably"
       eventConsumers: {
         ingest: {
           uses: {
-            b: ["B.Updated", "B.Created", "B.Updated"],
-            a: ["A.Updated", "A.Created"],
+            "events.sorted-b@v1": ["B.Updated", "B.Created", "B.Updated"],
+            "events.sorted-a@v1": ["A.Updated", "A.Created"],
           },
           self: ["Self.Z", "Self.A", "Self.Z"],
         },
@@ -2242,16 +2131,12 @@ Deno.test("defineServiceContract sorts event consumer aliases and arrays stably"
       id: "events.sorted-consumer@v1",
       displayName: "Sorted Consumer",
       description: "Normalize grouped event consumer order.",
-      uses: {
-        required: {
-          a: sourceA.use({
-            events: { subscribe: ["A.Created", "A.Updated"] },
-          }),
-          b: sourceB.use({
-            events: { subscribe: ["B.Created", "B.Updated"] },
-          }),
-        },
-      },
+      uses: [
+        sourceA.ACreated.subscribe,
+        sourceA.AUpdated.subscribe,
+        sourceB.BCreated.subscribe,
+        sourceB.BUpdated.subscribe,
+      ],
       events: {
         "Self.A": { version: "v1", event: ref.schema("StringValue") },
         "Self.Z": { version: "v1", event: ref.schema("StringValue") },
@@ -2259,8 +2144,8 @@ Deno.test("defineServiceContract sorts event consumer aliases and arrays stably"
       eventConsumers: {
         ingest: {
           uses: {
-            a: ["A.Created", "A.Updated"],
-            b: ["B.Created", "B.Updated"],
+            "events.sorted-a@v1": ["A.Created", "A.Updated"],
+            "events.sorted-b@v1": ["B.Created", "B.Updated"],
           },
           self: ["Self.A", "Self.Z"],
         },
@@ -2269,8 +2154,8 @@ Deno.test("defineServiceContract sorts event consumer aliases and arrays stably"
   );
 
   assertEquals(first.CONTRACT.eventConsumers?.ingest.uses, {
-    a: ["A.Created", "A.Updated"],
-    b: ["B.Created", "B.Updated"],
+    "events.sorted-a@v1": ["A.Created", "A.Updated"],
+    "events.sorted-b@v1": ["B.Created", "B.Updated"],
   });
   assertEquals(first.CONTRACT.eventConsumers?.ingest.self, [
     "Self.A",
@@ -2337,13 +2222,11 @@ Deno.test("defineServiceContract validates event consumer group uses", () => {
           id: "events.not-subscribed@v1",
           displayName: "Not Subscribed",
           description: "Reject event consumers outside subscribed events.",
-          uses: {
-            required: {
-              source: source.use({ events: { subscribe: ["Source.Created"] } }),
-            },
-          },
+          uses: [source.SourceCreated.subscribe],
           eventConsumers: {
-            ingest: { uses: { source: ["Source.Updated"] } },
+            ingest: {
+              uses: { "events.validation-source@v1": ["Source.Updated"] },
+            },
           },
         }),
       ),
@@ -2383,14 +2266,12 @@ Deno.test("defineServiceContract emits store resources with defaults", () => {
     id: "store.example@v1",
     displayName: "Store Example",
     description: "Expose store resource declarations in emitted manifests.",
-    resources: {
-      store: {
-        uploads: {
-          purpose: "Temporary uploaded files awaiting processing",
-          maxObjectBytes: 100 * 1024 * 1024,
-        },
+    uses: [store({
+      uploads: {
+        purpose: "Temporary uploaded files awaiting processing",
+        maxObjectBytes: 100 * 1024 * 1024,
       },
-    },
+    })],
   }));
 
   assertEquals(contract.CONTRACT.resources?.store?.uploads, {
@@ -2421,25 +2302,19 @@ Deno.test("locally defined contracts can be reused as dependencies", () => {
     id: "trellis.dashboard@v1",
     displayName: "Dashboard",
     description: "Reuse locally defined contracts as dependencies in tests.",
-    uses: {
-      required: {
-        audit: audit.use({
-          events: { subscribe: ["Audit.Recorded"] },
-        }),
-      },
-    },
+    uses: [audit.AuditRecorded.subscribe],
   }));
 
   assertEquals(
-    requiredUses(dashboard.CONTRACT.uses)?.audit.contract,
+    requiredUses(dashboard.CONTRACT.uses)?.["trellis.audit@v1"].contract,
     "trellis.audit@v1",
   );
   assertEquals(
-    dashboard.API.used.events["Audit.Recorded"].subject,
+    getContractRuntime(dashboard).usedApi.events["Audit.Recorded"].subject,
     "events.v1.Audit.Recorded",
   );
   assertEquals(
-    dashboard.API.trellis.events["Audit.Recorded"].subject,
+    getContractRuntime(dashboard).api.events["Audit.Recorded"].subject,
     "events.v1.Audit.Recorded",
   );
 });
@@ -2506,13 +2381,7 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
       id: "trellis.payments@v1",
       displayName: "Payments",
       description: "Use billing operations in source emission tests.",
-      uses: {
-        required: {
-          billing: billing.use({
-            operations: { call: ["Billing.Refund"] },
-          }),
-        },
-      },
+      uses: [billing.BillingRefund],
       operations: {
         "Payments.Capture": {
           version: "v1",
@@ -2531,16 +2400,17 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
       output: { schema: "StringValue" },
     },
   });
-  assertEquals(requiredUses(payments.CONTRACT.uses)?.billing, {
+  assertEquals(requiredUses(payments.CONTRACT.uses)?.["trellis.billing@v1"], {
     contract: "trellis.billing@v1",
     operations: { call: ["Billing.Refund"] },
   });
   assertEquals(
-    payments.API.owned.operations["Payments.Capture"].subject,
+    getContractRuntime(payments).ownedApi.operations["Payments.Capture"]
+      .subject,
     "operations.v1.Payments.Capture",
   );
   assertEquals(
-    payments.API.used.operations["Billing.Refund"].subject,
+    getContractRuntime(payments).usedApi.operations["Billing.Refund"].subject,
     "operations.v1.Billing.Refund",
   );
   const refundOperation = billing.CONTRACT.operations?.["Billing.Refund"];
@@ -2553,7 +2423,7 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
   ]);
   assertEquals(
     unwrapSchema(
-      billing.API.owned.operations["Billing.Refund"].signals
+      getContractRuntime(billing).ownedApi.operations["Billing.Refund"].signals
         ?.selectReason.input ?? {},
     ),
     {
@@ -2563,7 +2433,8 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
     },
   );
   assertEquals(
-    billing.API.owned.operations["Billing.Refund"].controlCapabilities,
+    getContractRuntime(billing).ownedApi.operations["Billing.Refund"]
+      .controlCapabilities,
     ["trellis.billing::control"] as const,
   );
 });
@@ -2581,15 +2452,13 @@ Deno.test("defineServiceContract emits transfer-capable operations", () => {
       displayName: "Files",
       description:
         "Expose transfer-capable operations for source emission tests.",
-      resources: {
-        store: {
-          uploads: {
-            purpose: "Temporary uploads",
-            ttlMs: 60_000,
-            maxObjectBytes: 1024,
-          },
+      uses: [store({
+        uploads: {
+          purpose: "Temporary uploads",
+          ttlMs: 60_000,
+          maxObjectBytes: 1024,
         },
-      },
+      })],
       operations: {
         "Demo.Files.Upload": {
           version: "v1",
@@ -2618,12 +2487,15 @@ Deno.test("defineServiceContract emits transfer-capable operations", () => {
       expiresInMs: 60_000,
     },
   });
-  assertEquals(files.API.owned.operations["Demo.Files.Upload"].transfer, {
-    direction: "send",
-    store: "uploads",
-    key: "/key",
-    expiresInMs: 60_000,
-  });
+  assertEquals(
+    getContractRuntime(files).ownedApi.operations["Demo.Files.Upload"].transfer,
+    {
+      direction: "send",
+      store: "uploads",
+      key: "/key",
+      expiresInMs: 60_000,
+    },
+  );
 });
 
 Deno.test("defineServiceContract rejects duplicate logical keys across used and owned operations", () => {
@@ -2651,13 +2523,7 @@ Deno.test("defineServiceContract rejects duplicate logical keys across used and 
           id: "duplicate.operations@v1",
           displayName: "Duplicate Operations",
           description: "Trigger duplicate logical operation key validation.",
-          uses: {
-            required: {
-              billing: billing.use({
-                operations: { call: ["Billing.Refund"] },
-              }),
-            },
-          },
+          uses: [billing.BillingRefund],
           operations: {
             "Billing.Refund": {
               version: "v1",
@@ -2669,30 +2535,5 @@ Deno.test("defineServiceContract rejects duplicate logical keys across used and 
       ),
     Error,
     "Duplicate operations key 'Billing.Refund'",
-  );
-});
-
-Deno.test("defineServiceContract validates operation use selections at runtime", () => {
-  const billing = defineServiceContract(
-    { schemas: baseSchemas },
-    () => ({
-      id: "trellis.billing@v1",
-      displayName: "Billing",
-      description: "Expose billing operations in runtime validation tests.",
-      operations: {
-        "Billing.Refund": {
-          version: "v1",
-          input: schemaRef<typeof baseSchemas, "Empty">("Empty"),
-          output: schemaRef<typeof baseSchemas, "Empty">("Empty"),
-        },
-      },
-    }),
-  );
-
-  assertThrows(
-    () =>
-      billing.use({ operations: { call: JSON.parse('["Billing.Writeoff"]') } }),
-    Error,
-    "does not expose operations key 'Billing.Writeoff'",
   );
 });

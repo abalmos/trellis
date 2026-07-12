@@ -6,14 +6,12 @@ import {
   type ClientAuthRequiredContext,
   type ClientOpts,
   createAuth,
-  type EventName,
-  type TrellisAPI,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import {
   CONTRACT as trellisJobsContract,
   CONTRACT_DIGEST as trellisJobsContractDigest,
-} from "@qlever-llc/trellis/sdk/jobs";
+} from "@qlever-llc/trellis/sdk/jobs/manifest";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
@@ -33,6 +31,7 @@ import {
   startTrellisTestEventCapture,
   TrellisTestEventCapture,
   type TrellisTestEventCaptureOptions,
+  type TrellisTestEventAction,
   type TrellisTestEventSourceContract,
 } from "./event_capture.ts";
 import { NatsTestContainer } from "./nats_container.ts";
@@ -428,7 +427,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
 
   /** Connects an app/client participant through the public generated client surface. */
   async connectClient<
-    TContract extends TrellisTestClientContract<TrellisAPI>,
+    TContract extends TrellisTestClientContract,
   >(
     args: ClientOpts & {
       name: string;
@@ -463,10 +462,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
    */
   async captureEvents<
     TContract extends TrellisTestEventSourceContract,
-    const TEvents extends readonly EventName<TContract>[],
+    const TEvents extends readonly TrellisTestEventAction[],
   >(
     args: TrellisTestEventCaptureOptions<TContract, TEvents>,
-  ): Promise<TrellisTestEventCapture<TContract, TEvents[number]>> {
+  ): Promise<TrellisTestEventCapture<TEvents[number]>> {
     const capture = await startTrellisTestEventCapture({
       runtime: this,
       options: args,

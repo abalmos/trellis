@@ -18,7 +18,7 @@ liveTrellisTest({
 
     try {
       const sqlOutbox = fixture.createOutbox(service, db);
-      await service.event.document.processed.listen(
+      await service.onDocumentProcessed(
         async (event) => {
           await sqlOutbox.transaction(async ({ event: out }) => {
             await out.document.audited.enqueue({
@@ -32,7 +32,7 @@ liveTrellisTest({
         { mode: "ephemeral" },
       ).orThrow();
 
-      await service.handle.rpc.documents.process(async ({ input }) => {
+      await service.handleDocumentsProcess(async ({ input }) => {
         await sqlOutbox.transaction(async ({ event }) => {
           await event.document.processed.enqueue({
             documentId: input.documentId,
@@ -49,7 +49,10 @@ liveTrellisTest({
       const capture = await runtime.captureEvents({
         name: fixture.listenerCaptureName,
         contract: fixture.serviceContract,
-        events: ["Document.Processed", "Document.Audited"],
+        events: [
+          fixture.serviceContract.DocumentProcessed.subscribe,
+          fixture.serviceContract.DocumentAudited.subscribe,
+        ],
       });
 
       try {
@@ -58,7 +61,7 @@ liveTrellisTest({
           contract: fixture.clientContract,
         });
 
-        await client.rpc.documents.process({
+        await client.documentsProcess({
           documentId: fixture.listenerDocumentId,
         }).orThrow();
 

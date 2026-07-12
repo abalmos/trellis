@@ -206,9 +206,9 @@
       if (!hasTargetParams) return;
 
       const [usersResponse, capabilitiesResponse, groupsResponse] = await Promise.all([
-        trellis.request("Auth.Users.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.CapabilityGroups.List", { limit: 500, offset: 0 }).take(),
+        trellis.authUsersList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
@@ -231,7 +231,7 @@
     savePending = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Users.Update", {
+      const response = await trellis.authUsersUpdate({
         userId: targetUser.userId,
         active,
         capabilities: uniqueCapabilities(selectedCapabilities),

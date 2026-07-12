@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
+import { defineAppContract, state, TrellisClient } from "@qlever-llc/trellis";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
@@ -33,7 +33,7 @@ const clientContract = defineAppContract({ schemas }, (ref) => ({
   displayName: "Trellis Control-Plane State Restart Client",
   description:
     "Verifies contract-owned state remains readable after control-plane restart.",
-  state: {
+  uses: [state({
     preferences: {
       kind: "value",
       schema: ref.schema("Preferences"),
@@ -44,7 +44,7 @@ const clientContract = defineAppContract({ schemas }, (ref) => ({
       schema: ref.schema("Draft"),
       stateVersion: "drafts.v1",
     },
-  },
+  })],
 }));
 
 const clientName = caseScopedName("state-restart-client", CASE_ID);

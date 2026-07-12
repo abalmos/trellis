@@ -17,7 +17,7 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.feed.entity.live(async ({ input, emit }) => {
+      await service.handleEntityLive(async ({ input, emit }) => {
         await emit({
           topic: input.topic,
           message: `feed:${input.topic}:1`,
@@ -37,10 +37,8 @@ liveTrellisTest({
       const controller = new AbortController();
 
       try {
-        const stream = await client.feed.entity.live(
-          { topic: fixture.topic },
-          { signal: controller.signal },
-        ).orThrow();
+        const stream = await client.entityLive({ topic: fixture.topic },
+        { signal: controller.signal },).orThrow();
         const frames = await withTimeout(
           collectFeedFrames(stream, 2),
           "feeds.client-receives-ordered-frames frames",

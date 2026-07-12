@@ -1,11 +1,10 @@
-import { isErr, ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
+import { isErr, ok } from "@qlever-llc/trellis";
 import type { SiteSummary } from "../../../../shared/field_data.ts";
-import contract from "../../../contract.ts";
+import type { FieldOpsService } from "../../deps.ts";
 
-type Args = RpcArgs<typeof contract, "Sites.List">;
-type Result = RpcResult<typeof contract, "Sites.List">;
+type Handler = Parameters<FieldOpsService["handleSitesList"]>[0];
 
-export async function listSites({ input, client }: Args): Promise<Result> {
+export const listSites: Handler = async ({ input, client }) => {
   const sites: SiteSummary[] = [];
   const keys = await client.kv.siteSummaries.keys(">").orThrow();
 
@@ -29,4 +28,4 @@ export async function listSites({ input, client }: Args): Promise<Result> {
       ? { nextOffset: offset + input.limit }
       : {}),
   });
-}
+};

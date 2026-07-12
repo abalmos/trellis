@@ -26,7 +26,7 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const result = await consumer.event.source.pinged.listen(
+      const result = await consumer.onSourcePinged(
         () => Result.ok(undefined),
         {},
         { group: "ingest", concurrency: 2 },

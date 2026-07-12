@@ -29,7 +29,7 @@ liveTrellisTest({
     let handlerCalled = false;
 
     try {
-      await service.handle.rpc.validation.annotated(() => {
+      await service.handleValidationAnnotated(() => {
         handlerCalled = true;
         return Result.ok({ success: true });
       });
@@ -39,7 +39,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.validation.annotated({ items: [] });
+      const result = await client.validationAnnotated({ items: [] });
       assert(result.isErr());
       assertInstanceOf(result.error, SchemaValidationError);
       assertEquals(result.error.issues.length, 1);

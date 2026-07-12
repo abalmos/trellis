@@ -57,11 +57,7 @@ const clientContract = defineAppContract(() => ({
   displayName: `External Fixture RPC Client (${slug})`,
   description:
     "Out-of-tree style app contract used by trellis-test smoke coverage.",
-  uses: {
-    required: {
-      service: serviceContract.use({ rpc: { call: ["Echo.Ping"] } }),
-    },
-  },
+  uses: [serviceContract.EchoPing],
 }));
 
 const serviceName = caseScopedName("external-rpc-service", CASE_ID);
@@ -88,7 +84,7 @@ trellisIntegrationTest({
     }).orThrow();
 
     try {
-      await service.handle.rpc.echo.ping(({ input }) =>
+      await service.handleEchoPing(({ input }) =>
         Result.ok({ message: input.message, reply: `pong:${input.message}` })
       );
 
@@ -96,7 +92,7 @@ trellisIntegrationTest({
         name: clientName,
         contract: clientContract,
       });
-      const result = await client.rpc.echo.ping({ message }).orThrow();
+      const result = await client.echoPing({ message }).orThrow();
 
       assertEquals(result, { message, reply: `pong:${message}` });
     } finally {

@@ -68,13 +68,7 @@ export function createFeedsFixture(caseId: string) {
     id: caseScopedContractId("trellis.integration.feeds-client", caseId),
     displayName: `Trellis Integration Feeds Client (${slug})`,
     description: "App/client participant for the feeds integration fixture.",
-    uses: {
-      required: {
-        feedsService: serviceContract.use({
-          feeds: { subscribe: ["Entity.Live"] },
-        }),
-      },
-    },
+    uses: [serviceContract.EntityLive],
   }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
@@ -84,11 +78,6 @@ export function createFeedsFixture(caseId: string) {
     ),
     displayName: `Trellis Integration Feeds Unauthorized Client (${slug})`,
     description: "App/client participant without feed subscribe authority.",
-    uses: {
-      required: {
-        feedsService: serviceContract.use({ feeds: {} }),
-      },
-    },
   }));
 
   async function connectService(runtime: LiveTrellisRuntime) {

@@ -28,13 +28,12 @@ liveTrellisTest({
       seed: baseKey.seed,
     });
     let replacementService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.incompatibleSchemaContract>>>
       | undefined;
 
     try {
-      await baseService.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
-      );
+      await baseService.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
       const before = await fixture.connectClientAndPing(
         runtime,
         "before-reject",

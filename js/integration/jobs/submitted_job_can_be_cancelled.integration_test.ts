@@ -22,7 +22,7 @@ liveTrellisTest({
       });
 
       const result = requireJobsWorkflowOutput(
-        await client.rpc.documents.submitLongProcess({
+        await client.documentsSubmitLongProcess({
           documentId: fixture.documentId,
         }).orThrow(),
       );

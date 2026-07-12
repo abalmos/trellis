@@ -180,7 +180,7 @@ import {
 import {
   AuthSessionsLogoutResponseSchema,
   AuthSessionsLogoutSchema,
-} from "../../../packages/trellis/models/auth/rpc/Logout.ts";
+} from "@qlever-llc/trellis";
 
 const schemas = {
   AuthDeviceUserAuthoritiesReviewsDecideRequest:
@@ -1341,6 +1341,5 @@ const baseTrellisAuth = defineServiceContract(
 
 export const trellisAuth = baseTrellisAuth;
 
-export const { CONTRACT_ID, CONTRACT, CONTRACT_DIGEST, API, use } = trellisAuth;
-export type Api = typeof API;
+export const { CONTRACT_ID, CONTRACT, CONTRACT_DIGEST } = trellisAuth;
 export default trellisAuth;

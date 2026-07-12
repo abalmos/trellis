@@ -17,6 +17,6 @@ liveTrellisTest({
       contract: fixture.unauthorizedClientContract,
     });
 
-    assert((client.operation as Record<string, unknown>).entity === undefined);
+    assert(!("entityProcess" in client));
   },
 });

@@ -34,16 +34,15 @@ liveTrellisTest({
 
     const connectedService = await connectPromise;
     try {
-      await connectedService.handle.rpc.startup.ping(({ input }) =>
-        Result.ok({ message: input.message, approved: true })
-      );
+      await connectedService.handleStartupPing(({ input }) =>
+        Result.ok({ message: input.message, approved: true }));
 
       const client = await runtime.connectClient({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.startup.ping({
+      const result = await client.startupPing({
         message: fixture.pingMessage,
       }).orThrow();
       assertEquals(result, { message: fixture.pingMessage, approved: true });

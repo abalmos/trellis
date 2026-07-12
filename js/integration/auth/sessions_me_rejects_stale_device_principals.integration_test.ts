@@ -50,18 +50,18 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      await device.request("Auth.Sessions.Me", {}).orThrow();
+      await device.authSessionsMe({}).orThrow();
 
       const session = await sqlite.takeSession(identity.publicIdentityKey);
       assert(session !== null, "expected live device session row");
-      assert((await device.request("Auth.Sessions.Me", {})).isErr());
+      assert((await device.authSessionsMe({})).isErr());
       await session.restore();
 
       await sqlite.execute(
         "UPDATE device_instances SET deployment_id = ? WHERE instance_id = ?",
         [`${deploymentId}.stale`, provisioned.instance.instanceId],
       );
-      const staleDeployment = await device.request("Auth.Sessions.Me", {});
+      const staleDeployment = await device.authSessionsMe({});
       assert(staleDeployment.isErr());
 
       await sqlite.execute(
@@ -75,7 +75,7 @@ liveTrellisTest({
           provisioned.instance.instanceId,
         ],
       );
-      const staleIdentity = await device.request("Auth.Sessions.Me", {});
+      const staleIdentity = await device.authSessionsMe({});
       assert(staleIdentity.isErr());
     } finally {
       await device.connection.close().catch(() => undefined);

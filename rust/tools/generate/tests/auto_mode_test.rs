@@ -294,21 +294,19 @@ export default contract;
         .exists());
     assert!(temp
         .path()
-        .join("generated/packages/jsr/dashboard/client.ts")
+        .join("generated/packages/jsr/dashboard/descriptors.ts")
         .exists());
-    let client = fs::read_to_string(
+    let descriptors = fs::read_to_string(
         temp.path()
-            .join("generated/packages/jsr/dashboard/client.ts"),
+            .join("generated/packages/jsr/dashboard/descriptors.ts"),
     )
     .unwrap();
-    assert!(client.contains(
-        "get(input: OrdersSdk.OrdersGetInput, opts?: RequestOpts): AsyncResult<OrdersSdk.OrdersGetOutput, BaseError>;"
-    ));
-    let api =
-        fs::read_to_string(temp.path().join("generated/packages/jsr/dashboard/api.ts")).unwrap();
-    assert!(api.contains("export const USED_API: UsedApi = {"));
-    assert!(api.contains("import { OWNED_API as OrdersApi } from \"../orders/owned_api.ts\";"));
-    assert!(api.contains("\"Orders.Get\"() { return OrdersApi.rpc[\"Orders.Get\"]"));
+    assert!(!descriptors.contains("Orders.Get"));
+    assert!(!descriptors.contains("../orders"));
+    assert!(!temp
+        .path()
+        .join("generated/packages/jsr/dashboard/client.ts")
+        .exists());
     assert!(!temp
         .path()
         .join("generated/packages/cargo/dashboard/Cargo.toml")
@@ -731,7 +729,7 @@ fn prepare_writes_demo_typescript_sdks_inside_demos_js_workspace() {
         .join("js/generated/packages/jsr/demo-rpc-service/mod.ts")
         .exists());
     assert!(demos_root
-        .join("js/generated/packages/jsr/demo-rpc-service/client.ts")
+        .join("js/generated/packages/jsr/demo-rpc-service/descriptors.ts")
         .exists());
     assert!(demos_root
         .join("generated/packages/cargo/demo-rpc-service/Cargo.toml")
@@ -796,16 +794,14 @@ export default contract;
     );
 
     let sdk = repo.join("generated/packages/jsr/dashboard");
-    let api = fs::read_to_string(sdk.join("api.ts")).unwrap();
-    let owned_api = fs::read_to_string(sdk.join("owned_api.ts")).unwrap();
-    let contract = fs::read_to_string(sdk.join("contract.ts")).unwrap();
+    let descriptors = fs::read_to_string(sdk.join("descriptors.ts")).unwrap();
+    let manifest = fs::read_to_string(sdk.join("manifest.ts")).unwrap();
     let types = fs::read_to_string(sdk.join("types.ts")).unwrap();
     let deno = fs::read_to_string(sdk.join("deno.json")).unwrap();
-    let combined = format!("{api}\n{owned_api}\n{contract}\n{types}\n{deno}");
+    let combined = format!("{descriptors}\n{manifest}\n{types}\n{deno}");
 
-    assert!(owned_api.contains("@qlever-llc/trellis/contracts"));
-    assert!(contract.contains("@qlever-llc/trellis"));
-    assert!(types.contains("@qlever-llc/trellis"));
+    assert!(descriptors.contains("@qlever-llc/trellis/contracts"));
+    assert!(manifest.contains("@qlever-llc/trellis/contracts"));
     assert!(!sdk.join("scripts/build_npm.ts").exists());
     assert!(!deno.contains("build:npm"));
     assert!(!combined.contains("js/packages/trellis"));
@@ -843,7 +839,7 @@ fn local_mode_generates_app_typescript_client_without_rust_sdk() {
         .join("generated/contracts/manifests/trellis.dashboard@v1.json")
         .exists());
     assert!(project
-        .join("generated/packages/jsr/dashboard/client.ts")
+        .join("generated/packages/jsr/dashboard/descriptors.ts")
         .exists());
     assert!(project
         .join("generated/packages/jsr/dashboard/mod.ts")
@@ -1336,7 +1332,7 @@ fn local_mode_regenerates_when_a_key_output_is_missing() {
         String::from_utf8_lossy(&first.stderr)
     );
 
-    fs::remove_file(project.join("generated/packages/jsr/orders/contract.ts")).unwrap();
+    fs::remove_file(project.join("generated/packages/jsr/orders/descriptors.ts")).unwrap();
 
     let second = trellis_generate().current_dir(&project).output().unwrap();
     assert!(

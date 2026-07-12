@@ -24,7 +24,7 @@
     loading = true;
     error = null;
 
-    const res = await trellis.request("Auth.IdentityGrants.List", { limit: 500, offset: 0 }).take();
+    const res = await trellis.authIdentityGrantsList({ limit: 500, offset: 0 }).take();
     loading = false;
     if (isErr(res)) {
       error = errorMessage(res);

@@ -28,7 +28,7 @@ liveTrellisTest({
     let observed: { id: string; context: EventListenerContext } | undefined;
 
     try {
-      await service.event.self.pinged.listen(
+      await service.onSelfPinged(
         (event, context) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
@@ -36,7 +36,7 @@ liveTrellisTest({
         {},
         { group: "ingest", signal: controller.signal },
       ).orThrow();
-      await service.event.self.pinged.publish({
+      await service.publishSelfPinged({
         id: fixture.eventId,
         value: "self",
       }).orThrow();

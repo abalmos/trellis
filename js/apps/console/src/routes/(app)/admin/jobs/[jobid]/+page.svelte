@@ -197,7 +197,7 @@
 
     try {
       const data = await loadJobDetailData({
-        inspect: (input) => trellis.request("Jobs.Inspect", input),
+        inspect: (input) => trellis.jobsInspect(input),
       }, id);
       if (sequence !== loadSequence) return;
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
@@ -228,13 +228,13 @@
     error = null;
     try {
       if (name === "cancel") {
-        await cancelJob({ action: (input) => trellis.request("Jobs.Cancel", input) }, actionJobId);
+        await cancelJob({ action: (input) => trellis.jobsCancel(input) }, actionJobId);
       } else if (name === "retry") {
-        await retryJob({ action: (input) => trellis.request("Jobs.Retry", input) }, actionJobId);
+        await retryJob({ action: (input) => trellis.jobsRetry(input) }, actionJobId);
       } else if (name === "replay") {
-        await replayDlqJob({ action: (input) => trellis.request("Jobs.ReplayDLQ", input) }, actionJobId);
+        await replayDlqJob({ action: (input) => trellis.jobsReplayDLQ(input) }, actionJobId);
       } else {
-        await dismissDlqJob({ action: (input) => trellis.request("Jobs.DismissDLQ", input) }, actionJobId);
+        await dismissDlqJob({ action: (input) => trellis.jobsDismissDLQ(input) }, actionJobId);
       }
       await load(actionJobId);
     } catch (e) {
@@ -270,7 +270,7 @@
     const sequence = ++metricsSequence;
     try {
       const payload = await loadJobsMetrics(
-        { metrics: (request) => trellis.request("Jobs.Metrics", request) },
+        { metrics: (request) => trellis.jobsMetrics(request) },
         {
           groupBy: "type",
           service: j.service,
@@ -366,7 +366,7 @@
 
     void (async () => {
       try {
-        const stream = await trellis.feed.jobs.watch({ includeInitial: false, jobId: id }, { signal: controller.signal }).orThrow();
+        const stream = await trellis.jobsWatch({ includeInitial: false, jobId: id }, { signal: controller.signal }).orThrow();
         for await (const event of stream) {
           if (controller.signal.aborted) return;
           if (event.kind !== "ready") scheduleWatchReload(id);

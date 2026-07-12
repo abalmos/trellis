@@ -1,5 +1,5 @@
 import type { NatsConnection } from "@nats-io/nats-core";
-import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../trellis.ts";
+import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../session.ts";
 
 // Keep the public server package runtime-neutral.
 //

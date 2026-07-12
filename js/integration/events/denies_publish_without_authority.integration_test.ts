@@ -1,4 +1,4 @@
-import { assertRejects } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createEventsFixture } from "./_fixture.ts";
 
@@ -16,11 +16,6 @@ liveTrellisTest({
       contract: fixture.subscribeOnlyClientContract,
     });
 
-    await assertRejects(() =>
-      client.event.entity.changed.publish({
-        id: fixture.deniedPublishEntityId,
-        value: "should-not-publish",
-      }).orThrow()
-    );
+    assertEquals("publishEntityChanged" in client, false);
   },
 });

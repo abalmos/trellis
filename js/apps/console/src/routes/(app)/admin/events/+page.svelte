@@ -353,9 +353,9 @@
     try {
       const metricsInput: EventLogMetricsInput = { window: windowValue };
       const [eventData, consumerData, metricData] = await Promise.all([
-        trellis.request("EventLog.Query", buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
-        trellis.request("EventLog.Consumers.Query", buildConsumerQuery(), { timeout: rpcTimeout }).orThrow(),
-        trellis.request("EventLog.Metrics", metricsInput, { timeout: rpcTimeout }).orThrow(),
+        trellis.eventLogQuery(buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
+        trellis.eventLogConsumersQuery(buildConsumerQuery(), { timeout: rpcTimeout }).orThrow(),
+        trellis.eventLogMetrics(metricsInput, { timeout: rpcTimeout }).orThrow(),
       ]);
       if (sequence !== loadSequence) return;
       rows = eventData.events.filter(isEventLogRow);
@@ -441,7 +441,7 @@
     selectedConsumer = null;
     try {
       const input: EventLogInspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
-      const detail = toInspect(await trellis.request("EventLog.Inspect", input, { timeout: rpcTimeout }).orThrow());
+      const detail = toInspect(await trellis.eventLogInspect(input, { timeout: rpcTimeout }).orThrow());
       if (sequence !== detailSequence) return;
       selectedEvent = detail ?? { event: row, headers: {}, related: [] };
     } catch (inspectError) {
@@ -459,9 +459,7 @@
     detailError = null;
     selectedEvent = null;
     try {
-      const detail = await trellis.request(
-        "EventLog.Consumers.Inspect",
-        { consumerName: row.consumerName, stream: row.stream },
+      const detail = await trellis.eventLogConsumersInspect({ consumerName: row.consumerName, stream: row.stream },
         { timeout: rpcTimeout },
       ).orThrow();
       if (sequence !== detailSequence) return;
@@ -503,7 +501,7 @@
     watchController = controller;
     void (async () => {
       try {
-        const stream = await trellis.feed.eventLog.watch({}, { signal: controller.signal }).orThrow();
+        const stream = await trellis.eventLogWatch({}, { signal: controller.signal }).orThrow();
         for await (const frame of stream) {
           if (controller.signal.aborted) return;
           const record = objectRecord(frame);

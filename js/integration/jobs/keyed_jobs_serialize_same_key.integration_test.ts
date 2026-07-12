@@ -25,14 +25,14 @@ liveTrellisTest({
       });
 
       const groupKey = `${fixture.documentId}-same-key`;
-      const first = client.rpc.documents.keyedProcess({
+      const first = client.documentsKeyedProcess({
         documentId: `${fixture.documentId}-1`,
         groupKey,
         sequence: 1,
       }).orThrow();
       await controls.firstStarted;
 
-      const second = client.rpc.documents.keyedProcess({
+      const second = client.documentsKeyedProcess({
         documentId: `${fixture.documentId}-2`,
         groupKey,
         sequence: 2,

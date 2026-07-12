@@ -1,11 +1,10 @@
-import { isErr, ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
+import { isErr, ok } from "@qlever-llc/trellis";
+import type { FieldOpsService } from "../../deps.ts";
 
-type Args = RpcArgs<typeof contract, "Sites.Get">;
-type Result = RpcResult<typeof contract, "Sites.Get">;
+type Handler = Parameters<FieldOpsService["handleSitesGet"]>[0];
 
-export async function getSite({ input, client }: Args): Promise<Result> {
+export const getSite: Handler = async ({ input, client }) => {
   const entry = await client.kv.siteSummaries.get(input.siteId).take();
 
   return ok({ site: isErr(entry) ? undefined : entry.value });
-}
+};

@@ -44,7 +44,6 @@
   type StatusVariant = "healthy" | "degraded" | "unhealthy" | "offline";
 
   const trellis = getTrellis();
-  const authorityRequest = trellis.request.bind(trellis) as AuthorityRequest;
   const understoodMetadataKeys = ["name", "serialNumber", "modelNumber"] as const;
   const understoodMetadataKeySet = new Set<string>(understoodMetadataKeys);
   const tabs: Tab[] = ["instances", "activations", "reviews", "authority"];
@@ -202,7 +201,7 @@
     }
     selectedAuthorityDetail = null;
     try {
-      const response = await authorityRequest("Auth.DeploymentAuthority.Get", { deploymentId }).take();
+      const response = await trellis.authDeploymentAuthorityGet({ deploymentId }).take();
       if (requestToken !== authorityDetailRequestToken) return;
       if (isErr(response)) { error = errorMessage(response); return; }
       selectedAuthorityDetail = response;
@@ -217,12 +216,12 @@
     error = null;
     try {
       const [deploymentsResponse, instancesResponse, activationsResponse, reviewsResponse, authoritiesResponse, capabilitiesResponse] = await Promise.all([
-        trellis.request("Auth.Deployments.List", { kind: "device", limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.Devices.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.DeviceUserAuthorities.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.DeviceUserAuthorities.Reviews.List", { limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.List", { kind: "device", limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentsList({ kind: "device", limit: 500, offset: 0 }).take(),
+        trellis.authDevicesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeviceUserAuthoritiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityList({ kind: "device", limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
       ]);
 
       if (isErr(deploymentsResponse)) { error = errorMessage(deploymentsResponse); return; }

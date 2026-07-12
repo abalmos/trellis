@@ -60,25 +60,23 @@ Rules:
   reconciliation is the only path that creates, updates, removes, or adopts
   materialized stores and bindings
 
-`resources.store` is intended for service-local and service-owned binary data.
-It is not a shared public data plane and it does not change the ownership rules
-used by `kv`.
+`store({...})` in the contract's `uses` array is intended for service-local and
+service-owned binary data. It is not a shared public data plane and it does not
+change the ownership rules used by `kv`.
 
 ### Contract Shape
 
 Example:
 
 ```ts
-resources: {
-  store: {
-    uploads: {
-      purpose: "Temporary uploaded files awaiting processing",
-      required: true,
-      ttlMs: 86_400_000,
-      maxTotalBytes: 10 * 1024 * 1024 * 1024,
-    },
+uses: [store({
+  uploads: {
+    purpose: "Temporary uploaded files awaiting processing",
+    required: true,
+    ttlMs: 86_400_000,
+    maxTotalBytes: 10 * 1024 * 1024 * 1024,
   },
-}
+})];
 ```
 
 Rules:

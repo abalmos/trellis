@@ -55,20 +55,20 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       const sessionKey = await sessionKeyFor(
         admin,
         "device",
         provisioned.instance.instanceId,
       );
 
-      const revoked = await admin.rpc.auth.sessionsRevoke({ sessionKey })
+      const revoked = await admin.authSessionsRevoke({ sessionKey })
         .orThrow();
       assertEquals(revoked.success, true);
 
       await waitFor(async () => {
         const activations = requireDeviceAuthorityList(
-          await admin.rpc.auth.deviceUserAuthoritiesList({
+          await admin.authDeviceUserAuthoritiesList({
             deploymentId,
             instanceId: provisioned.instance.instanceId,
             state: "revoked",
@@ -84,7 +84,7 @@ liveTrellisTest({
       });
       await waitForSessionAbsent(admin, sessionKey);
       await waitFor(async () =>
-        (await device.request("Auth.Sessions.Me", {})).isErr()
+        (await device.authSessionsMe({})).isErr()
       );
       assertEquals(me.participantKind, "device");
     } finally {
@@ -121,14 +121,14 @@ liveTrellisTest({
         "service",
         serviceKey.sessionKey,
       );
-      const revoked = await admin.rpc.auth.sessionsRevoke({
+      const revoked = await admin.authSessionsRevoke({
         sessionKey: serviceSessionKey,
       }).orThrow();
       assertEquals(revoked.success, true);
 
       await waitForSessionAbsent(admin, serviceSessionKey);
       await waitFor(async () =>
-        (await admin.rpc.auth.serviceInstancesList({
+        (await admin.authServiceInstancesList({
           deploymentId: "test",
           disabled: true,
           limit: 100,
@@ -166,7 +166,7 @@ async function sessionKeyFor(
   kind: "device" | "service",
   id: string,
 ): Promise<string> {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry) => {
     if (entry.sessionKey === id) return true;
     if (entry.participantKind !== kind) return false;
@@ -189,7 +189,7 @@ async function waitForSessionAbsent(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     return sessions.entries.every((entry) => entry.sessionKey !== sessionKey);
   });

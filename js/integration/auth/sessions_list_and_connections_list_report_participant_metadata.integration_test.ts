@@ -69,14 +69,14 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await client.rpc.authLogin.ping({ message: fixture.pingMessage })
+      await client.authLoginPing({ message: fixture.pingMessage })
         .orThrow();
-      await agent.rpc.authLogin.ping({ message: fixture.pingMessage })
+      await agent.authLoginPing({ message: fixture.pingMessage })
         .orThrow();
-      await device.request("Auth.Sessions.Me", {}).orThrow();
+      await device.authSessionsMe({}).orThrow();
 
       const sessions = await waitFor(async () => {
-        const page = await admin.rpc.auth.sessionsList({ limit: 500 })
+        const page = await admin.authSessionsList({ limit: 500 })
           .orThrow();
         return page.entries.some((entry) => entry.participantKind === "app") &&
             page.entries.some((entry) => entry.participantKind === "agent") &&
@@ -149,7 +149,7 @@ liveTrellisTest({
       assert(serviceSession.principal.deploymentId.length > 0);
 
       const connection = await waitFor(async () => {
-        const page = await admin.rpc.auth.connectionsList({
+        const page = await admin.authConnectionsList({
           sessionKey: clientKey.sessionKey,
           limit: 500,
         }).orThrow();
@@ -166,7 +166,7 @@ liveTrellisTest({
       assert(connection.userNkey.length > 0);
 
       const agentConnection = await waitFor(async () => {
-        const page = await admin.rpc.auth.connectionsList({
+        const page = await admin.authConnectionsList({
           sessionKey: agentKey.sessionKey,
           limit: 500,
         }).orThrow();

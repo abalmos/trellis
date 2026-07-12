@@ -14,7 +14,7 @@ liveTrellisTest({
     try {
       let providerStopped = false;
       let providerStarts = 0;
-      await service.handle.feed.entity.live(async ({ signal }) => {
+      await service.handleEntityLive(async ({ signal }) => {
         providerStarts++;
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => {
@@ -30,10 +30,8 @@ liveTrellisTest({
       });
       const controller = new AbortController();
 
-      const stream = await client.feed.entity.live(
-        { topic: fixture.topic },
-        { signal: controller.signal },
-      ).orThrow();
+      const stream = await client.entityLive({ topic: fixture.topic },
+      { signal: controller.signal },).orThrow();
 
       controller.abort();
 
@@ -72,10 +70,8 @@ liveTrellisTest({
 
       const alreadyAborted = new AbortController();
       alreadyAborted.abort();
-      const abortedResult = await client.feed.entity.live(
-        { topic: fixture.topic },
-        { signal: alreadyAborted.signal },
-      );
+      const abortedResult = await client.entityLive({ topic: fixture.topic },
+      { signal: alreadyAborted.signal },);
       assert(
         abortedResult.isErr(),
         "an already-aborted feed should be rejected",

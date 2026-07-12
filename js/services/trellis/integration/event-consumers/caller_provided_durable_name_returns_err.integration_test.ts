@@ -27,7 +27,7 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const result = await service.event.source.pinged.listen(
+      const result = await service.onSourcePinged(
         () => Result.ok(undefined),
         {},
         { durableName: "caller-name" },

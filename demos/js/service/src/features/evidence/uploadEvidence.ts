@@ -54,7 +54,7 @@ export const uploadEvidence: OperationHandler<
     disposition: "ready-for-review",
   };
 
-  await client.event.evidence.uploaded.publish({
+  await client.publishEvidenceUploaded({
     evidenceId: output.evidenceId,
     key: output.key,
     size: output.size,

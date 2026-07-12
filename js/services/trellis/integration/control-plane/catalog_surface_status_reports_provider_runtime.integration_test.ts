@@ -1,8 +1,8 @@
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import {
+  type CallerRuntime,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
   defineAppContract,
   defineServiceContract,
   isErr,
@@ -11,8 +11,8 @@ import {
   ValidationError,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
-import { sdk as trellisCore } from "@qlever-llc/trellis/sdk/core.ts";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import * as trellisCore from "@qlever-llc/trellis/sdk/core.ts";
 import type {
   TrellisSurfaceStatusInput,
   TrellisSurfaceStatusOutput,
@@ -191,30 +191,19 @@ const authorizedClientContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Catalog Surface Status Client",
   description:
     "Calls Trellis.Surface.Status and the provider RPC for runtime status coverage.",
-  uses: {
-    required: {
-      core: trellisCore.use({
-        rpc: { call: ["Trellis.Surface.Status", "Trellis.Contract.Get"] },
-      }),
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Connections.Kick",
-            "Auth.Connections.List",
-            "Auth.ServiceInstances.Disable",
-            "Auth.ServiceInstances.List",
-            "Auth.Users.Create",
-            "Auth.Users.PasswordReset.Create",
-          ],
-        },
-      }),
-      provider: providerContract.use({
-        rpc: { call: ["CatalogSurfaceStatus.Ping"] },
-        events: { publish: ["CatalogSurfaceStatus.Changed"] },
-        feeds: { subscribe: ["CatalogSurfaceStatus.Feed"] },
-      }),
-    },
-  },
+  uses: [
+    trellisCore.TrellisSurfaceStatus,
+    trellisCore.TrellisContractGet,
+    trellisAuth.AuthConnectionsKick,
+    trellisAuth.AuthConnectionsList,
+    trellisAuth.AuthServiceInstancesDisable,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthUsersCreate,
+    trellisAuth.AuthUsersPasswordResetCreate,
+    providerContract.CatalogSurfaceStatusPing,
+    providerContract.CatalogSurfaceStatusFeed,
+    providerContract.CatalogSurfaceStatusChanged.publish,
+  ],
 }));
 
 const observerClientContract = defineAppContract(() => ({
@@ -224,11 +213,7 @@ const observerClientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Catalog Surface Status Observer",
   description: "Calls Trellis.Surface.Status without provider RPC authority.",
-  uses: {
-    required: {
-      core: trellisCore.use({ rpc: { call: ["Trellis.Surface.Status"] } }),
-    },
-  },
+  uses: [trellisCore.TrellisSurfaceStatus],
 }));
 
 const providerName = caseScopedName("catalog-surface-status-provider", CASE_ID);
@@ -281,7 +266,7 @@ liveTrellisTest({
     let service: { stop(): Promise<void> } | undefined;
     let unrelatedService: { stop(): Promise<void> } | undefined;
     let observer:
-      | ConnectedTrellisClient<typeof observerClientContract>
+      | CallerRuntime<typeof observerClientContract>
       | undefined;
     let oldProviderService: { stop(): Promise<void> } | undefined;
     try {
@@ -342,7 +327,7 @@ liveTrellisTest({
 
       const providerDigest = providerContract.CONTRACT_DIGEST;
       assert(providerDigest, "provider contract digest should be generated");
-      const contractGet = await client.rpc.trellis.contractGet({
+      const contractGet = await client.trellisContractGet({
         digest: providerDigest,
       }).orThrow();
       assertEquals(contractGet.contract.exports, { schemas: ["PublicValue"] });
@@ -378,7 +363,7 @@ liveTrellisTest({
         server: { log: false },
       }).orThrow();
       service = connectedService;
-      connectedService.handle.rpc.catalogSurfaceStatus.ping(({ input }) =>
+      connectedService.handleCatalogSurfaceStatusPing(({ input }) =>
         Result.ok({ message: input.message, servedBy: providerName })
       );
 
@@ -429,7 +414,7 @@ liveTrellisTest({
         missingCapabilities: [providerCapability],
       });
       assertEquals(
-        await client.rpc.catalogSurfaceStatus.ping({ message: "live" })
+        await client.catalogSurfaceStatusPing({ message: "live" })
           .orThrow(),
         { message: "live", servedBy: providerName },
       );
@@ -439,7 +424,7 @@ liveTrellisTest({
           false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(
-        await client.rpc.auth.connectionsKick({ userNkey: providerUserNkey })
+        await client.authConnectionsKick({ userNkey: providerUserNkey })
           .orThrow(),
         { success: true },
       );
@@ -451,7 +436,7 @@ liveTrellisTest({
           providerKey.sessionKey,
         );
         if (liveUserNkey) {
-          await client.rpc.auth.connectionsKick({ userNkey: liveUserNkey })
+          await client.authConnectionsKick({ userNkey: liveUserNkey })
             .orThrow();
           return false;
         }
@@ -518,7 +503,7 @@ liveTrellisTest({
         client,
         providerKey.sessionKey,
       );
-      await client.rpc.auth.serviceInstancesDisable({ instanceId }).orThrow();
+      await client.authServiceInstancesDisable({ instanceId }).orThrow();
       await runtime.waitFor(async () => {
         const status = await providerStatus(client);
         return status.state === "available" && status.runtime === "disabled"
@@ -543,7 +528,7 @@ liveTrellisTest({
 async function connectObserver(
   trellisUrl: string,
   admin: SurfaceStatusAdminClient,
-): Promise<ConnectedTrellisClient<typeof observerClientContract>> {
+): Promise<CallerRuntime<typeof observerClientContract>> {
   const created = await createLocalObserverUser(admin);
   await completeLocalPasswordAccountFlow({
     trellisUrl,
@@ -574,7 +559,7 @@ async function connectObserver(
 async function createLocalObserverUser(
   admin: SurfaceStatusAdminClient,
 ): Promise<{ flowId: string }> {
-  const created = await admin.rpc.auth.usersCreate({
+  const created = await admin.authUsersCreate({
     username: observerUsername,
     name: "Catalog Surface Status Observer",
     email: `${observerUsername}@example.test`,
@@ -582,7 +567,7 @@ async function createLocalObserverUser(
     capabilities: ["trellis.core::catalog.read"],
     capabilityGroups: [],
   }).orThrow();
-  return await admin.rpc.auth.usersPasswordResetCreate({
+  return await admin.authUsersPasswordResetCreate({
     userId: created.user.userId,
   }).orThrow();
 }
@@ -690,14 +675,14 @@ async function surfaceStatus(
   client: SurfaceStatusOnlyClient,
   input: TrellisSurfaceStatusInput,
 ): Promise<TrellisSurfaceStatusOutput["status"]> {
-  return (await client.rpc.trellis.surfaceStatus(input).orThrow()).status;
+  return (await client.trellisSurfaceStatus(input).orThrow()).status;
 }
 
 async function assertSurfaceStatusValidationError(
   client: SurfaceStatusOnlyClient,
   input: TrellisSurfaceStatusInput,
 ): Promise<void> {
-  const result = await client.rpc.trellis.surfaceStatus(input);
+  const result = await client.trellisSurfaceStatus(input);
   const value = await result.take();
   assert(isErr(value));
   assertInstanceOf(value.error, ValidationError);
@@ -707,7 +692,7 @@ async function providerInstanceId(
   client: SurfaceStatusAdminClient,
   sessionKey: string,
 ): Promise<string> {
-  const page = await client.rpc.auth.serviceInstancesList({ limit: 500 })
+  const page = await client.authServiceInstancesList({ limit: 500 })
     .orThrow();
   const instance = page.entries.find((entry) =>
     entry.instanceKey === sessionKey
@@ -720,7 +705,7 @@ async function connectionUserNkey(
   client: SurfaceStatusAdminClient,
   sessionKey: string,
 ): Promise<string | undefined> {
-  const page = await client.rpc.auth.connectionsList({
+  const page = await client.authConnectionsList({
     limit: 500,
     sessionKey,
   }).orThrow();
@@ -729,56 +714,11 @@ async function connectionUserNkey(
   )?.userNkey;
 }
 
-type SurfaceStatusOnlyClient = {
-  readonly rpc: {
-    readonly trellis: {
-      surfaceStatus(input: TrellisSurfaceStatusInput): SurfaceStatusResult;
-    };
-  };
-};
-
-type SurfaceStatusResult = {
-  orThrow(): Promise<TrellisSurfaceStatusOutput>;
-  take(): Promise<unknown>;
-};
-
-type SurfaceStatusAdminClient = SurfaceStatusOnlyClient & {
-  readonly rpc: SurfaceStatusOnlyClient["rpc"] & {
-    readonly auth: {
-      serviceInstancesList(input: { limit: number }): {
-        orThrow(): Promise<{
-          entries: Array<{ instanceId: string; instanceKey: string }>;
-        }>;
-      };
-      serviceInstancesDisable(input: { instanceId: string }): {
-        orThrow(): Promise<unknown>;
-      };
-      connectionsKick(input: { userNkey: string }): {
-        orThrow(): Promise<{ success: boolean }>;
-      };
-      connectionsList(input: { limit: number; sessionKey: string }): {
-        orThrow(): Promise<{
-          entries: Array<{
-            participantKind: string;
-            sessionKey: string;
-            userNkey: string;
-          }>;
-        }>;
-      };
-      usersCreate(input: {
-        username: string;
-        name: string;
-        email: string;
-        active: boolean;
-        capabilities: string[];
-        capabilityGroups: string[];
-      }): { orThrow(): Promise<{ user: { userId: string } }> };
-      usersPasswordResetCreate(input: { userId: string }): {
-        orThrow(): Promise<{ flowId: string }>;
-      };
-    };
-  };
-};
+type SurfaceStatusOnlyClient = Pick<
+  CallerRuntime<typeof observerClientContract>,
+  "trellisSurfaceStatus"
+>;
+type SurfaceStatusAdminClient = CallerRuntime<typeof authorizedClientContract>;
 
 function randomSessionSeed(): string {
   const bytes = new Uint8Array(32);

@@ -30,6 +30,7 @@ Deno.test("control panel keeps admin navigation focused on active sections", () 
     "Overview",
     "Health Events",
     "Sessions",
+    "Events",
     "Jobs",
     "Grants",
     "Authority Plans",

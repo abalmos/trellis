@@ -18,7 +18,7 @@ liveTrellisTest({
 
     try {
       const sqlOutbox = fixture.createOutbox(service, db);
-      await service.handle.rpc.documents.process(async ({ input }) => {
+      await service.handleDocumentsProcess(async ({ input }) => {
         await sqlOutbox.transaction(async ({ event }) => {
           await event.document.processed.enqueue({
             documentId: input.documentId,
@@ -35,7 +35,7 @@ liveTrellisTest({
       const capture = await runtime.captureEvents({
         name: fixture.captureName,
         contract: fixture.serviceContract,
-        events: ["Document.Processed"],
+        events: [fixture.serviceContract.DocumentProcessed.subscribe],
       });
 
       try {
@@ -45,7 +45,7 @@ liveTrellisTest({
         });
 
         const rpcResult = requireOutboxDocOutput(
-          await client.rpc.documents.process({
+          await client.documentsProcess({
             documentId: fixture.documentId,
           }).orThrow(),
         );

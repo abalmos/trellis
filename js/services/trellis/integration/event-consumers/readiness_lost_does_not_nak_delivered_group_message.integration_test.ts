@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import type { ConsumerInfo } from "@nats-io/jetstream";
 import { Result } from "@qlever-llc/trellis";
-import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../../../../packages/trellis/trellis.ts";
+import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../../../../packages/trellis/session.ts";
 import { connectTrellisServiceWithRuntimeDeps } from "../../../../packages/trellis/server/service.ts";
 import {
   liveTrellisTest,
@@ -84,7 +84,7 @@ liveTrellisTest({
           : false;
       });
 
-      await publisher.event.source.ponged.publish({
+      await publisher.publishSourcePonged({
         id: fixture.eventId,
         value: "readiness-lost",
       }).orThrow();

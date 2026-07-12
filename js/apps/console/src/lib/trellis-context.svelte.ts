@@ -24,7 +24,7 @@ export function getTrellis(): TrellisConsoleClient {
 }
 
 export function getAuthenticatedUser(trellis: TrellisConsoleClient) {
-  return trellis.request("Auth.Sessions.Me", {}).orThrow();
+  return trellis.authSessionsMe({}).orThrow();
 }
 
 export function getConnection() {

@@ -27,10 +27,10 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await client.rpc.authLogin.ping({ message: fixture.pingMessage })
+      await client.authLoginPing({ message: fixture.pingMessage })
         .orThrow();
       const valid = await waitFor(async () => {
-        const page = await admin.rpc.auth.connectionsList({
+        const page = await admin.authConnectionsList({
           sessionKey: clientKey.sessionKey,
           limit: 500,
         }).orThrow();
@@ -55,7 +55,7 @@ liveTrellisTest({
         },
       });
 
-      const listed = await admin.rpc.auth.connectionsList({
+      const listed = await admin.authConnectionsList({
         sessionKey: clientKey.sessionKey,
         limit: 500,
       }).orThrow();

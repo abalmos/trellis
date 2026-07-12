@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract, Result, RetryJobError } from "@qlever-llc/trellis";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import * as trellisJobs from "@qlever-llc/trellis/sdk/jobs";
 
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
@@ -15,11 +15,7 @@ const adminContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.jobs-admin-client", CASE_ID),
   displayName: `Trellis Integration Jobs Admin Client (${fixture.slug})`,
   description: "Inspects job lifecycle state without transient update bodies.",
-  uses: {
-    required: {
-      jobs: trellisJobs.use({ rpc: { call: ["Jobs.Inspect"] } }),
-    },
-  },
+  uses: [trellisJobs.JobsInspect],
 }));
 
 liveTrellisTest({
@@ -64,12 +60,10 @@ liveTrellisTest({
         });
       });
 
-      await service.handle.operation.documents.processWithUpdates(
-        async ({ op }) => {
-          await op.started().orThrow();
-          return op.defer();
-        },
-      );
+      await service.handleDocumentsProcessWithUpdates(async ({ op }) => {
+        await op.started().orThrow();
+        return op.defer();
+      },);
       serviceWait = service.wait();
 
       const client = await runtime.connectClient({
@@ -78,8 +72,7 @@ liveTrellisTest({
       });
       const received: number[] = [];
       const observedByBuilder: number[] = [];
-      const operation = await client.operation.documents.processWithUpdates
-        .input({ documentId: fixture.documentId })
+      const operation = await client.documentsProcessWithUpdates({ documentId: fixture.documentId })
         .onUpdate((event) => {
           observedByBuilder.push(event.update.processed);
         })
@@ -94,8 +87,7 @@ liveTrellisTest({
         }
       })();
 
-      const controlled = await service.handle.operation.documents
-        .processWithUpdates.control(operation.id).orThrow();
+      const controlled = await service.handleDocumentsProcessWithUpdates.control(operation.id).orThrow();
       const job = await service.jobs.processDocument.create({
         documentId: fixture.documentId,
       }).orThrow();
@@ -164,7 +156,7 @@ liveTrellisTest({
         contract: adminContract,
       });
       const inspected = await runtime.waitFor(async () => {
-        const current = await admin.rpc.jobs.inspect({
+        const current = await admin.jobsInspect({
           id: output.jobId,
         }).orThrow();
         return current.job.state === "completed" ? current : false;

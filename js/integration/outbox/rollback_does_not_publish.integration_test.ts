@@ -17,27 +17,25 @@ liveTrellisTest({
 
     try {
       const sqlOutbox = fixture.createRollbackOutbox(service, db);
-      await service.handle.rpc.documents.processWithRollback(
-        async ({ input }) => {
-          await sqlOutbox.transaction(async ({ event }) => {
-            await event.document.processed.enqueue({
-              documentId: input.documentId,
-            })
-              .orThrow();
-            throw new Error("rollback");
-          }).orThrow();
-          return Result.ok({
+      await service.handleDocumentsProcessWithRollback(async ({ input }) => {
+        await sqlOutbox.transaction(async ({ event }) => {
+          await event.document.processed.enqueue({
             documentId: input.documentId,
-            processedBy: "should-not-reach",
-          });
-        },
-      );
+          })
+            .orThrow();
+          throw new Error("rollback");
+        }).orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          processedBy: "should-not-reach",
+        });
+      },);
       serviceWait = service.wait();
 
       const capture = await runtime.captureEvents({
         name: fixture.rollbackCaptureName,
         contract: fixture.serviceContract,
-        events: ["Document.Processed"],
+        events: [fixture.serviceContract.DocumentProcessed.subscribe],
       });
 
       try {
@@ -46,7 +44,7 @@ liveTrellisTest({
           contract: fixture.clientContract,
         });
 
-        const result = await client.rpc.documents.processWithRollback({
+        const result = await client.documentsProcessWithRollback({
           documentId: fixture.rollbackDocumentId,
         });
         assert(result.error !== undefined);

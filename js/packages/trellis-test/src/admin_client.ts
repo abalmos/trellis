@@ -1,11 +1,9 @@
 import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
-  type ContractModule,
+  type CallerRuntime,
   createAuth,
   defineAppContract,
-  type TrellisApiLike,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import {
@@ -14,7 +12,19 @@ import {
   submitPortalApproval,
 } from "@qlever-llc/trellis/auth";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import {
+  AuthDeploymentAuthorityAcceptMigration,
+  AuthDeploymentAuthorityAcceptUpdate,
+  AuthDeploymentAuthorityGet,
+  AuthDeploymentAuthorityPlan,
+  AuthDeploymentAuthorityPlansList,
+  AuthDeploymentAuthorityReconcile,
+  AuthDeploymentAuthorityReject,
+  AuthDeploymentsCreate,
+  AuthServiceInstancesProvision,
+  AuthSessionsMe,
+  AuthUsersUpdate,
+} from "@qlever-llc/trellis/sdk/auth";
 import { generateSessionSeed } from "./control_plane_config.ts";
 import { waitFor } from "./wait.ts";
 import type {
@@ -24,42 +34,29 @@ import type {
   TrellisTestServiceKey,
 } from "./types.ts";
 
-type RuntimeContract = ContractModule<
-  string,
-  TrellisApiLike,
-  TrellisApiLike,
-  TrellisApiLike
->;
-
 const ADMIN_USERNAME = "admin";
-
-const ADMIN_RPC_CALLS = [
-  "Auth.DeploymentAuthority.AcceptMigration",
-  "Auth.DeploymentAuthority.AcceptUpdate",
-  "Auth.DeploymentAuthority.Get",
-  "Auth.DeploymentAuthority.Plan",
-  "Auth.DeploymentAuthority.Reject",
-  "Auth.DeploymentAuthority.Plans.List",
-  "Auth.DeploymentAuthority.Reconcile",
-  "Auth.Deployments.Create",
-  "Auth.Sessions.Me",
-  "Auth.ServiceInstances.Provision",
-  "Auth.Users.Update",
-] as const;
 
 const adminContract = defineAppContract(() => ({
   id: "trellis.test.admin@v1",
   displayName: "Trellis Test Admin",
   description:
     "Automates Trellis test runtime administration through Auth RPCs.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ADMIN_RPC_CALLS } }),
-    },
-  },
+  uses: [
+    AuthDeploymentAuthorityAcceptMigration,
+    AuthDeploymentAuthorityAcceptUpdate,
+    AuthDeploymentAuthorityGet,
+    AuthDeploymentAuthorityPlan,
+    AuthDeploymentAuthorityReject,
+    AuthDeploymentAuthorityPlansList,
+    AuthDeploymentAuthorityReconcile,
+    AuthDeploymentsCreate,
+    AuthSessionsMe,
+    AuthServiceInstancesProvision,
+    AuthUsersUpdate,
+  ],
 }));
 
-type AdminClient = ConnectedTrellisClient<typeof adminContract>;
+type AdminClient = CallerRuntime<typeof adminContract>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -330,7 +327,7 @@ export class TrellisTestAdminAutomation {
     const startedAt = performance.now();
     const promise = (async () => {
       const client = await this.#client();
-      await client.rpc.auth.deploymentsCreate({
+       await client.authDeploymentsCreate({
         deploymentId: deployment,
         kind: "service",
         namespaces: [],
@@ -405,7 +402,7 @@ export class TrellisTestAdminAutomation {
         const missingCapabilities = [...new Set(args.state.missingCapabilities)]
           .sort();
         const meStartedAt = performance.now();
-        const me = await client.rpc.auth.sessionsMe({}).orThrow();
+        const me = await client.authSessionsMe({}).orThrow();
         recordTrellisDuration(
           "trellis.admin.workflow.duration",
           performance.now() - meStartedAt,
@@ -421,7 +418,7 @@ export class TrellisTestAdminAutomation {
         ].sort();
         if (adminCapabilities.length !== me.user.capabilities.length) {
           const updateStartedAt = performance.now();
-          await client.rpc.auth.usersUpdate({
+          await client.authUsersUpdate({
             userId: me.user.userId,
             capabilities: adminCapabilities,
           }).orThrow();
@@ -454,7 +451,7 @@ export class TrellisTestAdminAutomation {
     await this.createDeployment({ deployment });
     const client = await this.#client();
     const planStartedAt = performance.now();
-    const planned = await client.rpc.auth.deploymentAuthorityPlan({
+    const planned = await client.authDeploymentAuthorityPlan({
       deploymentId: deployment,
       contract: args.contract.CONTRACT,
       expectedDigest: args.contract.CONTRACT_DIGEST!,
@@ -486,11 +483,11 @@ export class TrellisTestAdminAutomation {
     }
     const acceptStartedAt = performance.now();
     if (classification === "update") {
-      await client.rpc.auth.deploymentAuthorityAcceptUpdate({
+      await client.authDeploymentAuthorityAcceptUpdate({
         planId: planned.plan.planId,
       }).orThrow();
     } else {
-      await client.rpc.auth.deploymentAuthorityAcceptMigration({
+      await client.authDeploymentAuthorityAcceptMigration({
         planId: planned.plan.planId,
         acknowledgement:
           "Approved by TrellisTestRuntime for an isolated mutable-dev integration test.",
@@ -523,7 +520,7 @@ export class TrellisTestAdminAutomation {
   async reconcile(deployment: string, label = "reconcile"): Promise<void> {
     const startedAt = performance.now();
     const client = await this.#client();
-    await client.rpc.auth.deploymentAuthorityReconcile({
+    await client.authDeploymentAuthorityReconcile({
       deploymentId: deployment,
     }).orThrow();
     recordTrellisDuration(
@@ -544,7 +541,7 @@ export class TrellisTestAdminAutomation {
     await waitFor(async () => {
       polls += 1;
       const pollStartedAt = performance.now();
-      const result = await client.rpc.auth.deploymentAuthorityGet({
+      const result = await client.authDeploymentAuthorityGet({
         deploymentId: deployment,
       }).orThrow();
       const materialized = result.materializedAuthority;
@@ -591,7 +588,7 @@ export class TrellisTestAdminAutomation {
     const seed = args.sessionKeySeed ?? generateSessionSeed();
     const auth = await createAuth({ sessionKeySeed: seed });
     const client = await this.#client();
-    await client.rpc.auth.serviceInstancesProvision({
+    await client.authServiceInstancesProvision({
       deploymentId: deployment,
       instanceKey: auth.sessionKey,
     }).orThrow();
@@ -637,7 +634,7 @@ export class TrellisTestAdminAutomation {
     { entries: unknown[]; count: number; offset: number; limit: number }
   > {
     const client = await this.#client();
-    return await client.rpc.auth.deploymentAuthorityPlansList({
+    return await client.authDeploymentAuthorityPlansList({
       deploymentId: args.deploymentId,
       state: args.state,
       classification: args.classification,
@@ -652,7 +649,7 @@ export class TrellisTestAdminAutomation {
     reason?: string;
   }): Promise<{ success: boolean }> {
     const client = await this.#client();
-    return await client.rpc.auth.deploymentAuthorityReject({
+    return await client.authDeploymentAuthorityReject({
       planId: args.planId,
       reason: args.reason,
     }).orThrow();
@@ -664,7 +661,7 @@ export class TrellisTestAdminAutomation {
     expectedDesiredVersion?: string;
   }): Promise<unknown> {
     const client = await this.#client();
-    return await client.rpc.auth.deploymentAuthorityAcceptUpdate({
+    return await client.authDeploymentAuthorityAcceptUpdate({
       planId: args.planId,
       expectedDesiredVersion: args.expectedDesiredVersion,
     }).orThrow();
@@ -677,7 +674,7 @@ export class TrellisTestAdminAutomation {
     expectedDesiredVersion?: string;
   }): Promise<unknown> {
     const client = await this.#client();
-    return await client.rpc.auth.deploymentAuthorityAcceptMigration({
+    return await client.authDeploymentAuthorityAcceptMigration({
       planId: args.planId,
       acknowledgement: args.acknowledgement,
       expectedDesiredVersion: args.expectedDesiredVersion,
@@ -693,7 +690,7 @@ export class TrellisTestAdminAutomation {
     const seed = args.sessionKeySeed ?? generateSessionSeed();
     const auth = await createAuth({ sessionKeySeed: seed });
     const client = await this.#client();
-    await client.rpc.auth.serviceInstancesProvision({
+    await client.authServiceInstancesProvision({
       deploymentId: deployment,
       instanceKey: auth.sessionKey,
     }).orThrow();

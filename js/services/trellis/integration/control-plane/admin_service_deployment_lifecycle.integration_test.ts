@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -18,21 +18,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Deployment Admin Client",
   description:
     "Exercises generated Auth.Deployments admin RPCs through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.List",
-            "Auth.Deployments.Disable",
-            "Auth.Deployments.Enable",
-            "Auth.Deployments.Remove",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsList,
+    trellisAuth.AuthDeploymentsDisable,
+    trellisAuth.AuthDeploymentsEnable,
+    trellisAuth.AuthDeploymentsRemove,
+  ],
 }));
 
 liveTrellisTest({
@@ -46,7 +38,7 @@ liveTrellisTest({
     });
 
     try {
-      const created = await admin.rpc.auth.deploymentsCreate({
+      const created = await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "admin", "ops"],
@@ -62,20 +54,20 @@ liveTrellisTest({
 
       assertEquals(
         findDeployment(
-          await admin.rpc.auth.deploymentsList({ kind: "service", limit: 500 })
+          await admin.authDeploymentsList({ kind: "service", limit: 500 })
             .orThrow(),
         )?.disabled,
         false,
       );
 
-      const disabled = await admin.rpc.auth.deploymentsDisable({
+      const disabled = await admin.authDeploymentsDisable({
         kind: "service",
         deploymentId,
       }).orThrow();
       assertEquals(disabled.deployment.disabled, true);
       assertEquals(
         findDeployment(
-          await admin.rpc.auth.deploymentsList({
+          await admin.authDeploymentsList({
             kind: "service",
             disabled: true,
             limit: 500,
@@ -84,14 +76,14 @@ liveTrellisTest({
         deploymentId,
       );
 
-      const enabled = await admin.rpc.auth.deploymentsEnable({
+      const enabled = await admin.authDeploymentsEnable({
         kind: "service",
         deploymentId,
       }).orThrow();
       assertEquals(enabled.deployment.disabled, false);
 
       assertEquals(
-        await admin.rpc.auth.deploymentsRemove({
+        await admin.authDeploymentsRemove({
           kind: "service",
           deploymentId,
         }).orThrow(),
@@ -99,13 +91,13 @@ liveTrellisTest({
       );
       assertEquals(
         findDeployment(
-          await admin.rpc.auth.deploymentsList({ kind: "service", limit: 500 })
+          await admin.authDeploymentsList({ kind: "service", limit: 500 })
             .orThrow(),
         ),
         undefined,
       );
 
-      const missingRemove = await admin.rpc.auth.deploymentsRemove({
+      const missingRemove = await admin.authDeploymentsRemove({
         kind: "service",
         deploymentId,
       });

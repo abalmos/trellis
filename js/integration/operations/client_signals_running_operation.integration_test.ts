@@ -16,12 +16,12 @@ liveTrellisTest({
     let serviceObservedSignal = false;
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
-
+      
         const signal = await op.nextSignal("updateMessage").orThrow();
         assertEquals(signal.signal, "updateMessage");
-
+      
         const signalInput = signal.input;
         assert(
           typeof signalInput === "object" && signalInput !== null &&
@@ -31,12 +31,12 @@ liveTrellisTest({
         );
         assertEquals(signalInput.suffix, signalSuffix);
         serviceObservedSignal = true;
-
+      
         await op.progress({
           message: `${input.message}:${signalInput.suffix}`,
           step: 2,
         }).orThrow();
-
+      
         return Result.ok({
           message: `${input.message}:${signalInput.suffix}`,
           done: true,
@@ -47,7 +47,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
       const events = await ref.watch().orThrow();

@@ -20,7 +20,7 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "app");
       assert(me.user !== null, "expected Auth.Sessions.Me to return a user");
       assertEquals(me.user.active, true);

@@ -1,12 +1,16 @@
 import { assert, assertEquals } from "@std/assert";
-import { defineAppContract, defineDeviceContract } from "@qlever-llc/trellis";
+import {
+  type CallerRuntime,
+  defineAppContract,
+  defineDeviceContract,
+} from "@qlever-llc/trellis";
 import {
   buildDeviceActivationPayload,
   deriveDeviceIdentity,
   startDeviceActivationRequest,
 } from "@qlever-llc/trellis/auth";
 import { assertOperationCompleted } from "@qlever-llc/trellis-test";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
   caseScopedContractId,
@@ -165,36 +169,28 @@ export function createDeviceActivationFixture(caseId: string) {
     displayName: `Trellis Integration Device Activation Admin (${slug})`,
     description:
       "Admin participant for the device activation integration fixture.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({
-          rpc: {
-            call: [
-              "Auth.Deployments.Create",
-              "Auth.Deployments.Disable",
-              "Auth.DeploymentAuthority.AcceptMigration",
-              "Auth.DeploymentAuthority.AcceptUpdate",
-              "Auth.DeploymentAuthority.Get",
-              "Auth.DeploymentAuthority.Plan",
-              "Auth.DeploymentAuthority.Reconcile",
-              "Auth.Devices.Provision",
-              "Auth.DeviceUserAuthorities.List",
-              "Auth.DeviceUserAuthorities.Revoke",
-              "Auth.DeviceUserAuthorities.Reviews.Decide",
-              "Auth.DeviceUserAuthorities.Reviews.List",
-              "Auth.Connections.List",
-              "Auth.ServiceInstances.List",
-              "Auth.Sessions.List",
-              "Auth.Sessions.Me",
-              "Auth.Sessions.Revoke",
-              "Auth.Users.Create",
-              "Auth.Users.PasswordReset.Create",
-            ],
-          },
-          operations: { call: ["Auth.DeviceUserAuthorities.Resolve"] },
-        }),
-      },
-    },
+    uses: [
+      trellisAuth.AuthDeploymentsCreate,
+      trellisAuth.AuthDeploymentsDisable,
+      trellisAuth.AuthDeploymentAuthorityAcceptMigration,
+      trellisAuth.AuthDeploymentAuthorityAcceptUpdate,
+      trellisAuth.AuthDeploymentAuthorityGet,
+      trellisAuth.AuthDeploymentAuthorityPlan,
+      trellisAuth.AuthDeploymentAuthorityReconcile,
+      trellisAuth.AuthDevicesProvision,
+      trellisAuth.AuthDeviceUserAuthoritiesList,
+      trellisAuth.AuthDeviceUserAuthoritiesRevoke,
+      trellisAuth.AuthDeviceUserAuthoritiesReviewsDecide,
+      trellisAuth.AuthDeviceUserAuthoritiesReviewsList,
+      trellisAuth.AuthConnectionsList,
+      trellisAuth.AuthServiceInstancesList,
+      trellisAuth.AuthSessionsList,
+      trellisAuth.AuthSessionsMe,
+      trellisAuth.AuthSessionsRevoke,
+      trellisAuth.AuthUsersCreate,
+      trellisAuth.AuthUsersPasswordResetCreate,
+      trellisAuth.AuthDeviceUserAuthoritiesResolve,
+    ],
   }));
 
   const deviceContract = defineDeviceContract(() => ({
@@ -205,11 +201,10 @@ export function createDeviceActivationFixture(caseId: string) {
     displayName: `Trellis Integration Activated Device (${slug})`,
     description:
       "Activated device participant for the device activation integration fixture.",
+    uses: [trellisAuth.AuthSessionsMe],
   }));
 
-  type DeviceActivationAdmin = Awaited<
-    ReturnType<LiveTrellisRuntime["connectClient"]>
-  >;
+  type DeviceActivationAdmin = CallerRuntime<typeof adminContract>;
 
   async function setupDeviceDeployment(
     runtime: LiveTrellisRuntime,
@@ -224,7 +219,7 @@ export function createDeviceActivationFixture(caseId: string) {
       caseId,
     );
 
-    await admin.rpc.auth.deploymentsCreate({
+    await admin.authDeploymentsCreate({
       deploymentId,
       kind: "device",
       reviewMode: options.reviewMode ?? "none",
@@ -241,7 +236,7 @@ export function createDeviceActivationFixture(caseId: string) {
     const rootSecret = crypto.getRandomValues(new Uint8Array(32));
     const identity = await deriveDeviceIdentity(rootSecret);
     const provisioned = requireProvisionedDevice(
-      await admin.rpc.auth.devicesProvision({
+      await admin.authDevicesProvision({
         deploymentId,
         publicIdentityKey: identity.publicIdentityKey,
         activationKey: identity.activationKeyBase64url,
@@ -286,9 +281,7 @@ export function createDeviceActivationFixture(caseId: string) {
     deploymentId: string,
     instanceId: string,
   ) {
-    const activationRef = await admin.operation.auth
-      .deviceUserAuthoritiesResolve
-      .input({ flowId })
+    const activationRef = await admin.authDeviceUserAuthoritiesResolve({ flowId })
       .start()
       .orThrow();
     const terminal = await assertOperationCompleted(activationRef, {
@@ -309,7 +302,7 @@ export function createDeviceActivationFixture(caseId: string) {
     deploymentId: string,
   ): Promise<void> {
     const planned = requirePlannedAuthority(
-      await admin.rpc.auth.deploymentAuthorityPlan({
+      await admin.authDeploymentAuthorityPlan({
         deploymentId,
         contract: deviceContract.CONTRACT,
         expectedDigest: deviceContract.CONTRACT_DIGEST,
@@ -317,18 +310,18 @@ export function createDeviceActivationFixture(caseId: string) {
     );
 
     if (planned.plan.classification === "update") {
-      await admin.rpc.auth.deploymentAuthorityAcceptUpdate({
+      await admin.authDeploymentAuthorityAcceptUpdate({
         planId: planned.plan.planId,
       }).orThrow();
     } else {
-      await admin.rpc.auth.deploymentAuthorityAcceptMigration({
+      await admin.authDeploymentAuthorityAcceptMigration({
         planId: planned.plan.planId,
         acknowledgement:
           "Approved by isolated device activation integration test.",
       }).orThrow();
     }
 
-    await admin.rpc.auth.deploymentAuthorityReconcile({ deploymentId })
+    await admin.authDeploymentAuthorityReconcile({ deploymentId })
       .orThrow();
     await waitForDeviceDeploymentAuthority(admin, deploymentId);
   }
@@ -340,7 +333,7 @@ export function createDeviceActivationFixture(caseId: string) {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       const current = requireDeploymentAuthority(
-        await admin.rpc.auth.deploymentAuthorityGet({ deploymentId }).orThrow(),
+        await admin.authDeploymentAuthorityGet({ deploymentId }).orThrow(),
       );
       const materialized = current.materializedAuthority;
       if (materialized?.status === "failed") {

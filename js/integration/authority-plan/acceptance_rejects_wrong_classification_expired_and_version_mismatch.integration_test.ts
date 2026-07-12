@@ -1,6 +1,10 @@
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
-import { defineAppContract, ValidationError } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import {
+  type CallerRuntime,
+  defineAppContract,
+  ValidationError,
+} from "@qlever-llc/trellis";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { isErr } from "@qlever-llc/result";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
@@ -17,19 +21,11 @@ const adminContract = defineAppContract(() => ({
   ),
   displayName: `Authority Plan Acceptance Admin (${fixture.slug})`,
   description: "Exercises invalid deployment authority plan acceptance paths.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.DeploymentAuthority.AcceptMigration",
-            "Auth.DeploymentAuthority.AcceptUpdate",
-            "Auth.DeploymentAuthority.Get",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentAuthorityAcceptMigration,
+    trellisAuth.AuthDeploymentAuthorityAcceptUpdate,
+    trellisAuth.AuthDeploymentAuthorityGet,
+  ],
 }));
 
 liveTrellisTest({
@@ -55,10 +51,10 @@ liveTrellisTest({
       seed: baseKey.seed,
     });
     let replacementService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.incompatibleSchemaContract>>>
       | undefined;
     let additiveService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
       | undefined;
     const admin = await runtime.connectClient({
       name: caseScopedName("authority-plan-acceptance-admin", CASE_ID),
@@ -87,19 +83,18 @@ liveTrellisTest({
       });
 
       await assertValidationError(
-        admin.rpc.auth.deploymentAuthorityAcceptUpdate({
-          planId: migration.planId,
-        }),
-      );
-      const missingAckMethod: string =
-        "Auth.DeploymentAuthority.AcceptMigration";
-      await assertValidationError(
-        (admin as RawRequester).request(missingAckMethod, {
+        admin.authDeploymentAuthorityAcceptUpdate({
           planId: migration.planId,
         }),
       );
       await assertValidationError(
-        admin.rpc.auth.deploymentAuthorityAcceptMigration({
+        // @ts-expect-error Intentionally exercise runtime validation of a malformed request.
+        admin.authDeploymentAuthorityAcceptMigration({
+          planId: migration.planId,
+        }),
+      );
+      await assertValidationError(
+        admin.authDeploymentAuthorityAcceptMigration({
           planId: migration.planId,
           acknowledgement: "Accepted by invalid acceptance test.",
           expectedDesiredVersion: "stale-version",
@@ -117,7 +112,7 @@ liveTrellisTest({
 
       const rejected = await fixture.rejectPlan(runtime, migration);
       await assertValidationError(
-        admin.rpc.auth.deploymentAuthorityAcceptMigration({
+        admin.authDeploymentAuthorityAcceptMigration({
           planId: migration.planId,
           acknowledgement: "Accepted after rejection.",
         }),
@@ -152,7 +147,7 @@ liveTrellisTest({
         ["2020-01-01T00:00:00.000Z", update.planId],
       );
       await assertValidationError(
-        admin.rpc.auth.deploymentAuthorityAcceptUpdate({
+        admin.authDeploymentAuthorityAcceptUpdate({
           planId: update.planId,
         }),
       );
@@ -178,24 +173,8 @@ liveTrellisTest({
   },
 });
 
-type AuthorityAdmin = {
-  readonly rpc: {
-    readonly auth: {
-      deploymentAuthorityGet(input: { readonly deploymentId: string }): {
-        orThrow(): Promise<{
-          readonly authority: {
-            readonly version: string;
-            readonly desiredState: unknown;
-          };
-        }>;
-      };
-    };
-  };
-};
+type AuthorityAdmin = CallerRuntime<typeof adminContract>;
 
-type RawRequester = {
-  request(method: string, input: unknown): { take(): Promise<unknown> };
-};
 type AuthoritySnapshot = {
   readonly version: string;
   readonly desiredState: unknown;
@@ -204,7 +183,7 @@ type AuthoritySnapshot = {
 async function authoritySnapshot(
   admin: AuthorityAdmin,
 ): Promise<AuthoritySnapshot> {
-  const current = await admin.rpc.auth.deploymentAuthorityGet({
+  const current = await admin.authDeploymentAuthorityGet({
     deploymentId: fixture.strictDeployment,
   }).orThrow();
   return {

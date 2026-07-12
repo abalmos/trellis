@@ -8,7 +8,7 @@ import { type StaticDecode, Type } from "typebox";
 
 import type { TypedKV } from "../kv.ts";
 import { recordTrellisError } from "../telemetry/mod.ts";
-import type { PreparedTrellisEvent } from "../trellis.ts";
+import type { PreparedTrellisEvent } from "../session.ts";
 
 export type OutboxMessageState = "pending" | "dispatched" | "failed";
 

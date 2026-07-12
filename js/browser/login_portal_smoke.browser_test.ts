@@ -1,5 +1,5 @@
 import {
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
   TrellisDevice,
 } from "@qlever-llc/trellis";
@@ -385,11 +385,11 @@ withLivePortalPage(
     );
     let authRequired = false;
     let client:
-      | ConnectedTrellisClient<typeof liveLocalLoginFixture.clientContract>
+      | CallerRuntime<typeof liveLocalLoginFixture.clientContract>
       | undefined;
 
     try {
-      const user = await admin.rpc.auth.usersCreate({
+      const user = await admin.authUsersCreate({
         username: liveLocalLoginUsername,
         name: "Browser Login Portal User",
         email: `${liveLocalLoginUsername}@example.test`,
@@ -397,7 +397,7 @@ withLivePortalPage(
         capabilities: [liveLocalLoginFixture.pingCapability],
         capabilityGroups: ["admin"],
       }).orThrow();
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: user.user.userId,
       }).orThrow();
       await completeLocalPasswordAccountFlow({
@@ -406,17 +406,17 @@ withLivePortalPage(
         username: liveLocalLoginUsername,
         password: liveLocalLoginPassword,
       });
-      await admin.rpc.auth.portalsPut({
+      await admin.authPortalsPut({
         portalId: liveLocalLoginPortalId,
         displayName: "Browser Login Portal",
         entryUrl: `${portalOrigin}/_trellis/portal/users/login`,
       }).orThrow();
-      await admin.rpc.auth.portalsRoutesPut({
+      await admin.authPortalsRoutesPut({
         portalId: liveLocalLoginPortalId,
         contractId: liveLocalLoginFixture.clientContract.CONTRACT.id,
         origin: portalOrigin,
       }).orThrow();
-      await admin.rpc.auth.deploymentAuthorityGrantOverridesPut({
+      await admin.authDeploymentAuthorityGrantOverridesPut({
         deploymentId: liveLocalLoginFixture.deploymentId,
         overrides: [{
           deploymentId: liveLocalLoginFixture.deploymentId,
@@ -467,13 +467,13 @@ withLivePortalPage(
       }).orThrow();
 
       assert(authRequired, "expected local-login flow to require auth");
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "app");
       assert(me.user !== null, "expected Auth.Sessions.Me to return a user");
       assertEquals(me.user.active, true);
       assertArrayIncludes(me.user.capabilities, ["admin"]);
 
-      const ping = await client.rpc.authLogin.ping({
+      const ping = await client.authLoginPing({
         message: liveLocalLoginFixture.pingMessage,
       }).orThrow();
       assertEquals(ping, {
@@ -498,10 +498,10 @@ withLivePortalPage(
       runtime,
     );
     let originalClient:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
     let reboundClient:
-      | ConnectedTrellisClient<typeof fixture.updatedClientContract>
+      | CallerRuntime<typeof fixture.updatedClientContract>
       | undefined;
 
     try {
@@ -532,7 +532,7 @@ withLivePortalPage(
           return { status: "bound", flowId };
         },
       }).orThrow();
-      await originalClient.rpc.authLogin.ping({
+      await originalClient.authLoginPing({
         message: fixture.pingMessage,
       }).orThrow();
 
@@ -576,8 +576,9 @@ withLivePortalPage(
         fixture.updatedClientDisplayName,
       );
 
-      const allowedByUpdatedAuthority = await reboundClient.rpc.auth
-        .connectionsList({ sessionKey: clientKey.sessionKey, limit: 500 })
+      const allowedByUpdatedAuthority = await reboundClient.authConnectionsList(
+        { sessionKey: clientKey.sessionKey, limit: 500 },
+      )
         .orThrow();
       assert(
         allowedByUpdatedAuthority.entries.length >= 1,
@@ -585,7 +586,7 @@ withLivePortalPage(
       );
 
       const afterConnection = await runtime.waitFor(async () => {
-        const connections = await admin.rpc.auth.connectionsList({
+        const connections = await admin.authConnectionsList({
           sessionKey: clientKey.sessionKey,
           limit: 500,
         }).orThrow();
@@ -614,7 +615,7 @@ withLivePortalPage(
       runtime,
     );
     let client:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
 
     try {
@@ -648,7 +649,7 @@ withLivePortalPage(
           return { status: "bound", flowId };
         },
       }).orThrow();
-      await client.rpc.auth.sessionsMe({}).orThrow();
+      await client.authSessionsMe({}).orThrow();
       await singleConnectionFor(admin, clientKey.sessionKey);
 
       const returnTo = `${portalOrigin}/_trellis/test/signed-out`;
@@ -677,7 +678,7 @@ withLivePortalPage(
         (await appSessionsFor(admin, clientKey.sessionKey)).length === 0
       );
       await runtime.waitFor(async () => {
-        const connections = await admin.rpc.auth.connectionsList({
+        const connections = await admin.authConnectionsList({
           sessionKey: clientKey.sessionKey,
           limit: 500,
         }).orThrow();
@@ -686,7 +687,7 @@ withLivePortalPage(
       const connectedClient = client;
       assert(connectedClient, "expected connected client before logout");
       await runtime.waitFor(async () =>
-        (await connectedClient.rpc.auth.sessionsMe({})).isErr()
+        (await connectedClient.authSessionsMe({})).isErr()
       );
     } finally {
       await client?.connection.close().catch(() => undefined);
@@ -751,7 +752,7 @@ withLivePortalPage(
         (await appSessionsFor(admin, clientKey.sessionKey)).length,
         0,
       );
-      const connections = await admin.rpc.auth.connectionsList({
+      const connections = await admin.authConnectionsList({
         sessionKey: clientKey.sessionKey,
         limit: 500,
       }).orThrow();
@@ -782,7 +783,7 @@ withLivePortalPage(
         name: "Browser Inactive Login Portal User",
         capabilities: [fixture.pingCapability],
       });
-      await admin.rpc.auth.usersUpdate({
+      await admin.authUsersUpdate({
         userId: user.user.userId,
         active: false,
       }).orThrow();
@@ -980,7 +981,7 @@ withLivePortalPage(
     const admin = await fixture.setupSessionAdmin(runtime);
 
     try {
-      const user = await admin.rpc.auth.usersCreate({
+      const user = await admin.authUsersCreate({
         name: "Browser Account Link User",
         email: `${liveAccountLinkUsername}@example.test`,
         active: true,
@@ -1011,7 +1012,7 @@ withLivePortalPage(
       await page.getByRole("button", { name: "Link credentials" }).click();
       await page.getByRole("heading", { name: "Account linked" }).waitFor();
 
-      const identities = await admin.rpc.auth.userIdentitiesList({
+      const identities = await admin.authUserIdentitiesList({
         userId: user.user.userId,
         limit: 500,
       }).orThrow();
@@ -1044,7 +1045,7 @@ withLivePortalPage(
     const admin = await fixture.setupSessionAdmin(runtime);
     const { clientAuth } = await fixture.setupClientRegistration(runtime);
     let client:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
 
     try {
@@ -1062,7 +1063,7 @@ withLivePortalPage(
         portalOrigin,
         portalId: liveAccountPasswordPortalId,
       });
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: user.user.userId,
       }).orThrow();
 
@@ -1105,7 +1106,7 @@ withLivePortalPage(
           return { status: "bound", flowId };
         },
       }).orThrow();
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
       assertEquals(me.user?.userId, user.user.userId);
     } finally {
       await client?.connection.close().catch(() => undefined);
@@ -1123,7 +1124,7 @@ withLivePortalPage(
     const admin = await fixture.setupSessionAdmin(runtime);
     const { clientAuth } = await fixture.setupClientRegistration(runtime);
     let client:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
 
     try {
@@ -1141,7 +1142,7 @@ withLivePortalPage(
         portalOrigin,
         portalId: liveAccountPasswordTooShortPortalId,
       });
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: user.user.userId,
       }).orThrow();
       const stateUrl = `${runtime.trellisUrl}/auth/account-flow/${
@@ -1189,7 +1190,7 @@ withLivePortalPage(
           return { status: "bound", flowId };
         },
       }).orThrow();
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
       assertEquals(me.user?.userId, user.user.userId);
     } finally {
       await client?.connection.close().catch(() => undefined);
@@ -1213,7 +1214,7 @@ withLivePortalPage(
         password: liveAccountLinkDuplicatePassword,
         name: "Browser Account Link Existing Local User",
       });
-      const target = await admin.rpc.auth.usersCreate({
+      const target = await admin.authUsersCreate({
         name: "Browser Account Link Duplicate Target User",
         email:
           `${liveAccountLinkDuplicateExistingUsername}-target@example.test`,
@@ -1224,7 +1225,7 @@ withLivePortalPage(
         caseId: liveAccountLinkDuplicateCaseId,
         targetUserId: target.user.userId,
       });
-      const before = await admin.rpc.auth.userIdentitiesList({
+      const before = await admin.authUserIdentitiesList({
         userId: target.user.userId,
         limit: 500,
       }).orThrow();
@@ -1253,7 +1254,7 @@ withLivePortalPage(
         "That username is already in use. Choose a different username.",
       ).waitFor();
 
-      const after = await admin.rpc.auth.userIdentitiesList({
+      const after = await admin.authUserIdentitiesList({
         userId: target.user.userId,
         limit: 500,
       }).orThrow();
@@ -1279,13 +1280,13 @@ withLivePortalPage(
     const admin = await fixture.setupSessionAdmin(runtime);
 
     try {
-      const user = await admin.rpc.auth.usersCreate({
+      const user = await admin.authUsersCreate({
         username: liveMissingAccountFlowUsername,
         name: "Browser Missing Account Flow User",
         email: `${liveMissingAccountFlowUsername}@example.test`,
         active: true,
       }).orThrow();
-      const before = await admin.rpc.auth.userIdentitiesList({
+      const before = await admin.authUserIdentitiesList({
         userId: user.user.userId,
         limit: 500,
       }).orThrow();
@@ -1306,7 +1307,7 @@ withLivePortalPage(
       )
         .waitFor();
 
-      const after = await admin.rpc.auth.userIdentitiesList({
+      const after = await admin.authUserIdentitiesList({
         userId: user.user.userId,
         limit: 500,
       }).orThrow();
@@ -1331,7 +1332,7 @@ withLivePortalPage(
         password: liveReusedAccountFlowInitialPassword,
         name: "Browser Reused Account Flow User",
       });
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: user.user.userId,
       }).orThrow();
       const url = accountFlowPortalUrl(
@@ -1354,7 +1355,7 @@ withLivePortalPage(
         }`,
       );
       assertEquals(terminalState.status, "consumed");
-      const before = await admin.rpc.auth.userIdentitiesList({
+      const before = await admin.authUserIdentitiesList({
         userId: user.user.userId,
         limit: 500,
       }).orThrow();
@@ -1368,7 +1369,7 @@ withLivePortalPage(
       )
         .waitFor();
 
-      const after = await admin.rpc.auth.userIdentitiesList({
+      const after = await admin.authUserIdentitiesList({
         userId: user.user.userId,
         limit: 500,
       }).orThrow();
@@ -1443,7 +1444,7 @@ withLivePortalPage(
       });
       await runtime.waitFor(async () => {
         const activations = requireDeviceAuthorityList(
-          await admin.rpc.auth.deviceUserAuthoritiesList({
+          await admin.authDeviceUserAuthoritiesList({
             deploymentId,
             instanceId: provisioned.instance.instanceId,
             state: "activated",
@@ -1465,7 +1466,7 @@ withLivePortalPage(
         log: false,
       }).orThrow();
       try {
-        const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+        const me = await device.authSessionsMe({}).orThrow();
         assertEquals(me.participantKind, "device");
         assertEquals(me.device?.deploymentId, deploymentId);
         assertEquals(me.device?.runtimePublicKey, identity.publicIdentityKey);
@@ -1603,7 +1604,7 @@ withLivePortalPage(
         instanceId: provisioned.instance.instanceId,
         publicIdentityKey: identity.publicIdentityKey,
       });
-      const decided = await admin.rpc.auth.deviceUserAuthoritiesReviewsDecide({
+      const decided = await admin.authDeviceUserAuthoritiesReviewsDecide({
         reviewId: review.reviewId,
         decision: "reject",
         reason: rejectionReason,
@@ -1695,7 +1696,7 @@ withLivePortalPage(
         .waitFor();
 
       const activations = requireDeviceAuthorityList(
-        await admin.rpc.auth.deviceUserAuthoritiesList({
+        await admin.authDeviceUserAuthoritiesList({
           deploymentId,
           instanceId: provisioned.instance.instanceId,
           state: "activated",
@@ -1825,11 +1826,11 @@ async function createLocalPasswordUser(args: {
 }): Promise<
   Awaited<
     ReturnType<
-      ReturnType<SessionAdminClient["rpc"]["auth"]["usersCreate"]>["orThrow"]
+      ReturnType<SessionAdminClient["authUsersCreate"]>["orThrow"]
     >
   >
 > {
-  const user = await args.admin.rpc.auth.usersCreate({
+  const user = await args.admin.authUsersCreate({
     username: args.username,
     name: args.name,
     email: `${args.username}@example.test`,
@@ -1837,7 +1838,7 @@ async function createLocalPasswordUser(args: {
     capabilities: args.capabilities ?? [],
     capabilityGroups: [],
   }).orThrow();
-  const reset = await args.admin.rpc.auth.usersPasswordResetCreate({
+  const reset = await args.admin.authUsersPasswordResetCreate({
     userId: user.user.userId,
   }).orThrow();
   await completeLocalPasswordAccountFlow({
@@ -1945,7 +1946,7 @@ async function setupLocalLoginPortalUser(args: {
   name: string;
   useGrantOverride?: boolean;
 }): Promise<void> {
-  const user = await args.admin.rpc.auth.usersCreate({
+  const user = await args.admin.authUsersCreate({
     username: args.username,
     name: args.name,
     email: `${args.username}@example.test`,
@@ -1953,7 +1954,7 @@ async function setupLocalLoginPortalUser(args: {
     capabilities: [args.fixture.pingCapability],
     capabilityGroups: ["admin"],
   }).orThrow();
-  const reset = await args.admin.rpc.auth.usersPasswordResetCreate({
+  const reset = await args.admin.authUsersPasswordResetCreate({
     userId: user.user.userId,
   }).orThrow();
   await completeLocalPasswordAccountFlow({
@@ -1974,7 +1975,7 @@ async function setupDeviceActivationPortalUser(args: {
   password: string;
   name: string;
 }): Promise<void> {
-  const user = await args.admin.rpc.auth.usersCreate({
+  const user = await args.admin.authUsersCreate({
     username: args.username,
     name: args.name,
     email: `${args.username}@example.test`,
@@ -1982,7 +1983,7 @@ async function setupDeviceActivationPortalUser(args: {
     capabilities: [],
     capabilityGroups: ["admin"],
   }).orThrow();
-  const reset = await args.admin.rpc.auth.usersPasswordResetCreate({
+  const reset = await args.admin.authUsersPasswordResetCreate({
     userId: user.user.userId,
   }).orThrow();
   await completeLocalPasswordAccountFlow({
@@ -1991,12 +1992,12 @@ async function setupDeviceActivationPortalUser(args: {
     username: args.username,
     password: args.password,
   });
-  await args.admin.rpc.auth.portalsPut({
+  await args.admin.authPortalsPut({
     portalId: args.portalId,
     displayName: "Browser Device Activation Portal",
     entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
   }).orThrow();
-  await args.admin.rpc.auth.portalsRoutesPut({
+  await args.admin.authPortalsRoutesPut({
     portalId: args.portalId,
     contractId: deviceActivationPortalContractId,
     origin: args.portalOrigin,
@@ -2010,18 +2011,18 @@ async function configureLocalLoginPortal(args: {
   portalId: string;
   useGrantOverride?: boolean;
 }): Promise<void> {
-  await args.admin.rpc.auth.portalsPut({
+  await args.admin.authPortalsPut({
     portalId: args.portalId,
     displayName: "Browser Login Portal",
     entryUrl: `${args.portalOrigin}/_trellis/portal/users/login`,
   }).orThrow();
-  await args.admin.rpc.auth.portalsRoutesPut({
+  await args.admin.authPortalsRoutesPut({
     portalId: args.portalId,
     contractId: args.fixture.clientContract.CONTRACT.id,
     origin: args.portalOrigin,
   }).orThrow();
   if (args.useGrantOverride === false) return;
-  await args.admin.rpc.auth.deploymentAuthorityGrantOverridesPut({
+  await args.admin.authDeploymentAuthorityGrantOverridesPut({
     deploymentId: args.fixture.deploymentId,
     overrides: [{
       deploymentId: args.fixture.deploymentId,
@@ -2121,7 +2122,7 @@ async function waitForDeviceActivationReview(args: {
   publicIdentityKey: string;
 }): Promise<{ readonly reviewId: string }> {
   return await args.runtime.waitFor(async () => {
-    const reviews = await args.admin.rpc.auth.deviceUserAuthoritiesReviewsList({
+    const reviews = await args.admin.authDeviceUserAuthoritiesReviewsList({
       deploymentId: args.deploymentId,
       instanceId: args.instanceId,
       state: "pending",
@@ -2142,7 +2143,7 @@ async function assertNoActivatedDeviceAuthority(args: {
   publicIdentityKey: string;
 }): Promise<void> {
   const activations = requireDeviceAuthorityList(
-    await args.admin.rpc.auth.deviceUserAuthoritiesList({
+    await args.admin.authDeviceUserAuthoritiesList({
       deploymentId: args.deploymentId,
       instanceId: args.instanceId,
       state: "activated",
@@ -2264,7 +2265,7 @@ async function appSessionsFor(
   admin: SessionAdminClient,
   sessionKey: string,
 ): Promise<AppSession[]> {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   return sessions.entries.filter((entry): entry is AppSession =>
     entry.participantKind === "app" && entry.sessionKey === sessionKey
   );
@@ -2275,7 +2276,7 @@ async function assertNoAppSessionOrConnection(
   sessionKey: string,
 ): Promise<void> {
   assertEquals((await appSessionsFor(admin, sessionKey)).length, 0);
-  const connections = await admin.rpc.auth.connectionsList({
+  const connections = await admin.authConnectionsList({
     sessionKey,
     limit: 500,
   }).orThrow();
@@ -2307,7 +2308,7 @@ async function singleConnectionFor(
   admin: SessionAdminClient,
   sessionKey: string,
 ): Promise<AppConnection> {
-  const connections = await admin.rpc.auth.connectionsList({
+  const connections = await admin.authConnectionsList({
     sessionKey,
     limit: 500,
   }).orThrow();

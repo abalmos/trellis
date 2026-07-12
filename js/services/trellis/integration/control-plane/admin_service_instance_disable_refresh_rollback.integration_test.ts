@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { createAuth, defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,20 +24,12 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Instance Disable Rollback Admin",
   description:
     "Exercises Auth service instance disable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.ServiceInstances.Disable",
-            "Auth.ServiceInstances.List",
-            "Auth.ServiceInstances.Provision",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthServiceInstancesDisable,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthServiceInstancesProvision,
+  ],
 }));
 
 liveTrellisTest({
@@ -53,7 +45,7 @@ liveTrellisTest({
 
     try {
       const instanceDisabled = async (instanceId: string) => {
-        const page = await admin.rpc.auth.serviceInstancesList({
+        const page = await admin.authServiceInstancesList({
           deploymentId,
           limit: 500,
         }).orThrow();
@@ -63,19 +55,19 @@ liveTrellisTest({
           ?.disabled;
       };
 
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
       const auth = await createAuth({ sessionKeySeed: randomSessionSeed() });
-      const provisioned = await admin.rpc.auth.serviceInstancesProvision({
+      const provisioned = await admin.authServiceInstancesProvision({
         deploymentId,
         instanceKey: auth.sessionKey,
       }).orThrow();
 
-      const failedDisable = await admin.rpc.auth.serviceInstancesDisable({
+      const failedDisable = await admin.authServiceInstancesDisable({
         instanceId: provisioned.instance.instanceId,
       });
       assertRefreshHookFailure(failedDisable, refreshHook);

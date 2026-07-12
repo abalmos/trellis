@@ -26,10 +26,10 @@ liveTrellisTest({
     });
 
     let additiveService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
       | undefined;
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.baseContract>>>
       | undefined;
     const connectPromise = fixture.connectServicePending({
       runtime,
@@ -69,9 +69,8 @@ liveTrellisTest({
         name: fixture.baseServiceName,
         seed: baseKey.seed,
       });
-      await baseService.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
-      );
+      await baseService.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
       const result = await fixture.connectClientAndPing(
         runtime,
         "old-authority",

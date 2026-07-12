@@ -1,7 +1,9 @@
 import {
   defineAppContract,
+  state,
   type TrellisConnectionStatus,
 } from "@qlever-llc/trellis";
+import { AuthSessionsMe } from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import type { TrellisProviderProps } from "./components/TrellisProvider.types.ts";
 import {
@@ -20,9 +22,9 @@ const testContract = defineAppContract(
     id: "trellis.svelte.context-test@v1",
     displayName: "Trellis Svelte Context Test",
     description: "Typecheck the Svelte context public API.",
-    state: {
+    uses: [AuthSessionsMe, state({
       preferences: { kind: "value", schema: ref.schema("Preferences") },
-    },
+    })],
   }),
 );
 
@@ -100,10 +102,9 @@ async function typecheckContextApi(): Promise<void> {
   const generatedTrellis: GeneratedClient = generatedApp.getTrellis();
   const generatedConnectionStatus: TrellisConnectionStatus =
     generatedTrellis.connection.status;
-  const generatedMe = await generatedTrellis.request("Auth.Sessions.Me", {})
-    .orThrow();
+  const generatedMe = await generatedTrellis.authSessionsMe({}).orThrow();
 
-  const me = await trellis.request("Auth.Sessions.Me", {}).orThrow();
+  const me = await trellis.authSessionsMe({}).orThrow();
   const participantKind: "app" | "agent" | "device" | "service" =
     me.participantKind;
   const deviceId: string | undefined = me.device?.deviceId;
@@ -120,19 +121,10 @@ async function typecheckContextApi(): Promise<void> {
   // @ts-expect-error value state stores do not expose map-only list
   const invalidStateList = trellis.state.preferences.list;
 
-  type ClientMethod = Parameters<typeof trellis.request>[0];
-  const authMeMethod: ClientMethod = "Auth.Sessions.Me";
-  // @ts-expect-error contract-anchored typing should reject undeclared RPC methods
-  const invalidMethod: ClientMethod = "Auth.NotDeclared";
-  // @ts-expect-error contract-anchored typing should reject invalid RPC inputs
-  const invalidInput = trellis.request("Auth.DeploymentAuthority.Get", {});
-  // @ts-expect-error contract-anchored typing should reject undeclared RPC methods
-  const invalidRpc = trellis.api.rpc.notDeclared;
+  // @ts-expect-error contract-anchored typing rejects undeclared actions
+  const invalidRpc = trellis.authNotDeclared;
 
-  void authMeMethod;
   void deviceId;
-  void invalidInput;
-  void invalidMethod;
   void invalidRpc;
   void invalidStateList;
   void participantKind;

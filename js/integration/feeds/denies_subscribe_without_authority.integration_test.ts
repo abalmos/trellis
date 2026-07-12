@@ -1,6 +1,6 @@
-import { assertRejects } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
-import { createFeedsFixture, optionalFeedClient } from "./_fixture.ts";
+import { createFeedsFixture } from "./_fixture.ts";
 
 const CASE_ID = "feeds.denies-subscribe-without-authority" as const;
 const fixture = createFeedsFixture(CASE_ID);
@@ -16,12 +16,6 @@ liveTrellisTest({
       contract: fixture.unauthorizedClientContract,
     });
 
-    await assertRejects(async () => {
-      const feedApi = optionalFeedClient(client).feed;
-      if (feedApi?.entity?.live === undefined) {
-        throw new Error("denied: feed subscribe is not available");
-      }
-      await feedApi.entity.live({ topic: fixture.topic }).orThrow();
-    });
+    assertEquals("entityLive" in client, false);
   },
 });

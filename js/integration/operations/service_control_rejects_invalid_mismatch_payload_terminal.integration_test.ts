@@ -40,28 +40,21 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const accepted = await service.handle.operation.entity.process.accept({
+      const accepted = await service.handleEntityProcess.accept({
         sessionKey: clientKey.sessionKey,
       }).orThrow();
 
-      const missing = await service.handle.operation.entity.process.control(
-        "missing-operation-id",
-      ).take();
+      const missing = await service.handleEntityProcess.control("missing-operation-id",).take();
       assert(isErr(missing), "missing operation id should fail");
       assertInstanceOf(missing.error, OperationNotFoundError);
 
-      const wrongOperation = await service.handle.operation.entity.status
-        .control(
-          accepted.id,
-        ).take();
+      const wrongOperation = await service.handleEntityStatus.control(accepted.id,).take();
       assert(isErr(wrongOperation), "wrong operation control should fail");
       assertInstanceOf(wrongOperation.error, OperationMismatchError);
       assertEquals(wrongOperation.error.expectedOperation, "Entity.Status");
       assertEquals(wrongOperation.error.actualOperation, "Entity.Process");
 
-      const controlled = await service.handle.operation.entity.process.control(
-        accepted.id,
-      ).orThrow();
+      const controlled = await service.handleEntityProcess.control(accepted.id,).orThrow();
       // @ts-expect-error Process progress requires message/step; runtime rejection is asserted below.
       const invalidProgress = await controlled.progress({ stage: "wrong" })
         .take();
@@ -88,9 +81,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
         sessionKeySeed: clientKey.seed,
       });
-      const wrongRemoteOperation = await client.operation.entity.status.resume(
-        accepted.ref,
-      ).get().take();
+      const wrongRemoteOperation = await client.entityStatus.resume(accepted.ref,).get().take();
       assert(
         isErr(wrongRemoteOperation),
         "wrong resumed operation should fail",
@@ -105,8 +96,7 @@ liveTrellisTest({
         telemetry: false,
         server: {},
       }).orThrow();
-      const wrongService = await otherService.handle.operation.entity.process
-        .control(accepted.id).take();
+      const wrongService = await otherService.handleEntityProcess.control(accepted.id).take();
       assert(isErr(wrongService), "wrong service control should fail");
       assertInstanceOf(wrongService.error, OperationMismatchError);
       assertEquals(

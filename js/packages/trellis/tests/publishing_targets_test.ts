@@ -295,8 +295,12 @@ Deno.test("published trellis sources do not self-import package subpaths", async
   assertEquals(offenders, []);
 });
 
-Deno.test("publishable trellis service sources do not import package internals by repo path", async () => {
+Deno.test("only platform runtime modules import private Trellis source", async () => {
   const offenders: string[] = [];
+  const platformInternalImports = new Set([
+    "auth/callout/callout.ts",
+    "auth/registration/types.ts",
+  ]);
   const packageRoot = new URL("../../../services/trellis/", import.meta.url);
   const relativePackageImportPattern =
     /(?:\.\.\/\.\.\/\.\.\/packages\/trellis|\.\.\/\.\.\/\.\.\/\.\.\/packages\/trellis|\.\.\/\.\.\/packages\/trellis)(?:\/|["'])/;
@@ -308,7 +312,10 @@ Deno.test("publishable trellis service sources do not import package internals b
       relativePackageImportPattern.test(source) ||
       generatedSdkAliasPattern.test(source)
     ) {
-      offenders.push(sourceUrl.pathname.replace(packageRoot.pathname, ""));
+      const relativePath = sourceUrl.pathname.replace(packageRoot.pathname, "");
+      if (!platformInternalImports.has(relativePath)) {
+        offenders.push(relativePath);
+      }
     }
   }
 
@@ -404,13 +411,13 @@ Deno.test("trellis-svelte npm build uses current Trellis package bases", async (
   assertStringIncludes(source, '"@qlever-llc/trellis": "^0.11.0"');
 });
 
-Deno.test("trellis package exports the errors and health subpaths", async () => {
+Deno.test("trellis package exports public runtime subpaths", async () => {
   const source = await Deno.readTextFile(
     new URL("../deno.json", import.meta.url),
   );
 
   assertStringIncludes(source, '"./errors": "./errors/index.ts"');
-  assertStringIncludes(source, '"./health": "./health.ts"');
+  assertEquals(source.includes('"./health":'), false);
   assertStringIncludes(source, '"./host": "./host/mod.ts"');
   assertStringIncludes(source, '"./jobs": "./jobs.ts"');
   assertStringIncludes(source, '"./service": "./service/mod.ts"');

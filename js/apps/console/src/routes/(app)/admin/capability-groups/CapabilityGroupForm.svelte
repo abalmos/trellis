@@ -164,7 +164,7 @@
     saved = null;
     try {
       const groupsResponse = await withLoadTimeout(
-        trellis.request("Auth.CapabilityGroups.List", { limit: 500, offset: 0 }).take(),
+        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
         "Capability groups",
       );
       if (isErr(groupsResponse)) {
@@ -198,7 +198,7 @@
     capabilitiesLoading = true;
     try {
       const capabilitiesResponse = await withLoadTimeout(
-        trellis.request("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
         "Capabilities",
       );
       if (isErr(capabilitiesResponse)) {
@@ -236,7 +236,7 @@
         capabilities: uniqueSorted(catalogedSelectedCapabilities),
         includedGroups: uniqueSorted(selectedIncludedGroups.filter((key) => key !== groupKey)),
       } satisfies AuthCapabilityGroupsPutInput;
-      const response = await trellis.request("Auth.CapabilityGroups.Put", input).take();
+      const response = await trellis.authCapabilityGroupsPut(input).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;

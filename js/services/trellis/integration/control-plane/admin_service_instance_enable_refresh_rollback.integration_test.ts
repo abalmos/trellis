@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { createAuth, defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,21 +24,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Instance Enable Rollback Admin",
   description:
     "Exercises Auth service instance enable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.ServiceInstances.Disable",
-            "Auth.ServiceInstances.Enable",
-            "Auth.ServiceInstances.List",
-            "Auth.ServiceInstances.Provision",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthServiceInstancesDisable,
+    trellisAuth.AuthServiceInstancesEnable,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthServiceInstancesProvision,
+  ],
 }));
 
 liveTrellisTest({
@@ -52,19 +44,19 @@ liveTrellisTest({
       contract: adminContract,
     });
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
       const auth = await createAuth({ sessionKeySeed: randomSessionSeed() });
-      const provisioned = await admin.rpc.auth.serviceInstancesProvision({
+      const provisioned = await admin.authServiceInstancesProvision({
         deploymentId,
         instanceKey: auth.sessionKey,
       }).orThrow();
       instanceId = provisioned.instance.instanceId;
-      await admin.rpc.auth.serviceInstancesDisable({ instanceId }).orThrow();
+      await admin.authServiceInstancesDisable({ instanceId }).orThrow();
     } finally {
       await admin.connection.close().catch(() => undefined);
     }
@@ -80,7 +72,7 @@ liveTrellisTest({
     });
     try {
       const instanceDisabled = async () => {
-        const page = await restartedAdmin.rpc.auth.serviceInstancesList({
+        const page = await restartedAdmin.authServiceInstancesList({
           deploymentId,
           limit: 500,
         }).orThrow();
@@ -90,7 +82,7 @@ liveTrellisTest({
           ?.disabled;
       };
 
-      const failedEnable = await restartedAdmin.rpc.auth.serviceInstancesEnable(
+      const failedEnable = await restartedAdmin.authServiceInstancesEnable(
         {
           instanceId,
         },

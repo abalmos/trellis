@@ -16,9 +16,9 @@ liveTrellisTest({
     const consumed: string[] = [];
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
-
+      
         for await (const signal of op.signals()) {
           assert(
             typeof signal.input === "object" && signal.input !== null,
@@ -27,7 +27,7 @@ liveTrellisTest({
           const suffix = Reflect.get(signal.input, "suffix");
           assertEquals(typeof suffix, "string");
           consumed.push(`${signal.signal}:${suffix}`);
-
+      
           if (consumed.length === 2) {
             assertEquals(consumed, ["updateMessage:one", "appendMessage:two"]);
             return Result.ok({
@@ -36,7 +36,7 @@ liveTrellisTest({
             });
           }
         }
-
+      
         throw new Error("signal stream ended before two accepted signals");
       });
 
@@ -44,7 +44,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

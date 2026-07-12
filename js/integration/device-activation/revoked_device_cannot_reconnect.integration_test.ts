@@ -51,19 +51,19 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "device");
       assertEquals(me.device?.deploymentId, deploymentId);
       assertEquals(me.device?.runtimePublicKey, identity.publicIdentityKey);
 
-      const revoked = await admin.rpc.auth.deviceUserAuthoritiesRevoke({
+      const revoked = await admin.authDeviceUserAuthoritiesRevoke({
         instanceId: provisioned.instance.instanceId,
       }).orThrow();
       assertEquals(revoked.success, true);
 
       await waitFor(async () => {
         const activations = requireDeviceAuthorityList(
-          await admin.rpc.auth.deviceUserAuthoritiesList({
+          await admin.authDeviceUserAuthoritiesList({
             deploymentId,
             instanceId: provisioned.instance.instanceId,
             state: "revoked",
@@ -79,7 +79,7 @@ liveTrellisTest({
       });
 
       await waitFor(async () => {
-        const result = await device.request("Auth.Sessions.Me", {});
+        const result = await device.authSessionsMe({});
         return result.isErr();
       });
     } finally {

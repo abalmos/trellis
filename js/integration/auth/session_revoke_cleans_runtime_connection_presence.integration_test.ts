@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { waitFor } from "@qlever-llc/trellis-test";
@@ -23,7 +23,7 @@ liveTrellisTest({
       runtime,
     );
     let client:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
 
     try {
@@ -34,12 +34,12 @@ liveTrellisTest({
         auth: clientAuth.auth,
         onAuthRequired: async (ctx) => await clientAuth.onAuthRequired(ctx),
       }).orThrow();
-      await client.rpc.authLogin.ping({ message: fixture.pingMessage })
+      await client.authLoginPing({ message: fixture.pingMessage })
         .orThrow();
 
       const targetSession = await appSessionFor(admin, clientKey.sessionKey);
       const beforeConnections = await waitFor(async () => {
-        const page = await admin.rpc.auth.connectionsList({
+        const page = await admin.authConnectionsList({
           sessionKey: targetSession.sessionKey,
           limit: 500,
         }).orThrow();
@@ -50,27 +50,27 @@ liveTrellisTest({
         targetSession.sessionKey,
       );
 
-      const revoked = await admin.rpc.auth.sessionsRevoke({
+      const revoked = await admin.authSessionsRevoke({
         sessionKey: targetSession.sessionKey,
       }).orThrow();
       assertEquals(revoked.success, true);
 
       await waitFor(async () => {
-        const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+        const sessions = await admin.authSessionsList({ limit: 500 })
           .orThrow();
         return sessions.entries.every((entry) =>
           entry.sessionKey !== targetSession.sessionKey
         );
       });
       await waitFor(async () => {
-        const connections = await admin.rpc.auth.connectionsList({
+        const connections = await admin.authConnectionsList({
           sessionKey: targetSession.sessionKey,
           limit: 500,
         }).orThrow();
         return connections.entries.length === 0;
       });
       await waitFor(async () => {
-        const result = await client!.rpc.auth.sessionsMe({});
+        const result = await client!.authSessionsMe({});
         return result.isErr();
       });
     } finally {
@@ -85,7 +85,7 @@ async function appSessionFor(
   admin: SessionAdminClient,
   sessionKey: string,
 ) {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry) =>
     entry.participantKind === "app" && entry.sessionKey === sessionKey
   );

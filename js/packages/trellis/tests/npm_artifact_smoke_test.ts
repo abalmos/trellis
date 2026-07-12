@@ -7,9 +7,6 @@ const staleCliArtifactPattern =
   /defineCliContract|"service" \| "app" \| "device" \| "cli"|defineClientContract\("cli"/;
 const privateGeneratedSdkBuildPattern = /\.build\/generated-sdk/;
 const dntShimDenoRuntimeDetectionPattern = /"Deno" in dntShim\.dntGlobalThis/;
-const generatedSdkRootRelativeImportPattern =
-  /\.\.\/\.\.\/\.\.\/(?:contract|contracts|index)\.js/;
-const generatedSdkCoreAliasImportPattern = /\.\.\/core\/mod\.js/;
 const rawTransportDeclarationPattern =
   /NatsConnection|natsConnection|nc: NatsConnection|createConnectedService|connectTrellisServiceWithRuntimeDeps|connectDeviceWithDeps/;
 const forbiddenBrowserArtifactPattern =
@@ -88,16 +85,6 @@ Deno.test("trellis npm artifact only depends on allowed published Trellis packag
     assertEquals(forbiddenImportPattern.test(source), false, filePath);
     assertEquals(staleCliArtifactPattern.test(source), false, filePath);
     assertEquals(privateGeneratedSdkBuildPattern.test(source), false, filePath);
-    assertEquals(
-      generatedSdkRootRelativeImportPattern.test(source),
-      false,
-      filePath,
-    );
-    assertEquals(
-      generatedSdkCoreAliasImportPattern.test(source),
-      false,
-      filePath,
-    );
   }
 
   for await (const filePath of walkFiles(join(npmDir.pathname, "script"))) {
@@ -106,20 +93,10 @@ Deno.test("trellis npm artifact only depends on allowed published Trellis packag
     assertEquals(forbiddenImportPattern.test(source), false, filePath);
     assertEquals(staleCliArtifactPattern.test(source), false, filePath);
     assertEquals(privateGeneratedSdkBuildPattern.test(source), false, filePath);
-    assertEquals(
-      generatedSdkRootRelativeImportPattern.test(source),
-      false,
-      filePath,
-    );
-    assertEquals(
-      generatedSdkCoreAliasImportPattern.test(source),
-      false,
-      filePath,
-    );
   }
 });
 
-Deno.test("trellis npm SDK exports resolve through public wrapper modules", async () => {
+Deno.test("trellis npm SDK exports contain owner-only vocabulary", async () => {
   const packageJsonUrl = new URL("../npm/package.json", import.meta.url);
   try {
     await Deno.stat(packageJsonUrl);
@@ -144,6 +121,10 @@ Deno.test("trellis npm SDK exports resolve through public wrapper modules", asyn
     import: "./esm/sdk/core.js",
     require: "./script/sdk/core.js",
   });
+  assertEquals(packageJson.exports["./sdk/eventlog"], {
+    import: "./esm/sdk/eventlog.js",
+    require: "./script/sdk/eventlog.js",
+  });
   assertEquals(packageJson.exports["./sdk/health"], {
     import: "./esm/sdk/health.js",
     require: "./script/sdk/health.js",
@@ -161,48 +142,35 @@ Deno.test("trellis npm SDK exports resolve through public wrapper modules", asyn
     require: "./script/service/drizzle.js",
   });
 
-  const authWrapper = await Deno.readTextFile(
-    new URL("../npm/esm/sdk/auth.js", import.meta.url),
-  );
-  assertEquals(authWrapper.includes("useDefaults"), false);
-  const authGeneratedMod = await Deno.readTextFile(
-    new URL("../npm/esm/generated-sdk/auth/mod.js", import.meta.url),
-  );
-  assertEquals(authGeneratedMod.includes("useDefaults"), false);
-  const coreGeneratedMod = await Deno.readTextFile(
-    new URL("../npm/esm/generated-sdk/trellis-core/mod.js", import.meta.url),
-  );
-  assertEquals(coreGeneratedMod.includes(" use,"), true);
-  const healthWrapper = await Deno.readTextFile(
-    new URL("../npm/esm/sdk/health.js", import.meta.url),
-  );
-  assertEquals(healthWrapper.includes("useDefaults"), false);
-  const stateWrapper = await Deno.readTextFile(
-    new URL("../npm/esm/sdk/state.js", import.meta.url),
-  );
-  assertEquals(stateWrapper.includes("useDefaults"), false);
-
-  const authClientTypes = await Deno.readTextFile(
-    new URL("../npm/esm/generated-sdk/auth/client.d.ts", import.meta.url),
-  );
-  assertEquals(authClientTypes.includes('from "@qlever-llc/trellis"'), true);
-  assertEquals(authClientTypes.includes("npm/src/errors"), false);
-  assertEquals(authClientTypes.includes("../errors"), false);
-
-  const authApiTypes = await Deno.readTextFile(
-    new URL("../npm/esm/generated-sdk/auth/api.d.ts", import.meta.url),
-  );
-  assertEquals(
-    authApiTypes.includes('from "@qlever-llc/trellis/sdk/health"'),
-    true,
-  );
-  const stateApiTypes = await Deno.readTextFile(
-    new URL("../npm/esm/generated-sdk/state/api.d.ts", import.meta.url),
-  );
-  assertEquals(
-    stateApiTypes.includes('from "@qlever-llc/trellis/sdk/health"'),
-    true,
-  );
+  for (
+    const sdkDir of [
+      "auth",
+      "trellis-core",
+      "eventlog",
+      "health",
+      "jobs",
+      "state",
+    ]
+  ) {
+    const generatedDir = `../npm/esm/generated-sdk/${sdkDir}/`;
+    const mod = await Deno.readTextFile(
+      new URL(`${generatedDir}mod.js`, import.meta.url),
+    );
+    assertEquals(mod.includes('export * from "./descriptors.js"'), true);
+    assertEquals(mod.includes('export * from "./types.js"'), true);
+    assertEquals(mod.includes('export * from "./schemas.js"'), true);
+    await assertNotExists(new URL(`${generatedDir}api.js`, import.meta.url));
+    await assertNotExists(new URL(`${generatedDir}client.js`, import.meta.url));
+    await assertNotExists(
+      new URL(`${generatedDir}contract.js`, import.meta.url),
+    );
+    await assertNotExists(
+      new URL(`${generatedDir}owned_api.js`, import.meta.url),
+    );
+    await assertNotExists(
+      new URL(`${generatedDir}manifest.js`, import.meta.url),
+    );
+  }
 
   await assertNotExists(
     new URL("../npm/esm/sdk/_generated", import.meta.url),

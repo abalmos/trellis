@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   base64urlEncode,
   buildLogoutSignaturePayload,
@@ -26,11 +26,7 @@ const clientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Session Logout Delete Client",
   description: "Creates a bound app session for signed HTTP logout coverage.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthSessionsMe],
 }));
 
 liveTrellisTest({

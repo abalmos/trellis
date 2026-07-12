@@ -116,7 +116,7 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
 
 Deno.test("RPC client template failures record trellis error metric", async () => {
   exporter.reset();
-  const { Trellis } = await import(`../trellis.ts?rpc=${crypto.randomUUID()}`);
+  const { Trellis } = await import(`../session.ts?rpc=${crypto.randomUUID()}`);
   const api = {
     rpc: {
       "Test.Echo": {
@@ -153,7 +153,7 @@ Deno.test("RPC client template failures record trellis error metric", async () =
 
 Deno.test("Feed client template failures record trellis error metric", async () => {
   exporter.reset();
-  const { Trellis } = await import(`../trellis.ts?feed=${crypto.randomUUID()}`);
+  const { Trellis } = await import(`../session.ts?feed=${crypto.randomUUID()}`);
   const api = {
     rpc: {},
     events: {},

@@ -1,5 +1,5 @@
-import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import { type CallerRuntime, defineAppContract } from "@qlever-llc/trellis";
+import * as trellisJobs from "@qlever-llc/trellis/sdk/jobs";
 import { assert, assertEquals } from "@std/assert";
 
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
@@ -17,13 +17,7 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Integration Jobs Admin Client",
   description:
     "Observes and cancels jobs through the generated Jobs admin SDK.",
-  uses: {
-    required: {
-      jobs: trellisJobs.use({
-        rpc: { call: ["Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"] },
-      }),
-    },
-  },
+  uses: [trellisJobs.JobsQuery, trellisJobs.JobsInspect, trellisJobs.JobsCancel],
 }));
 
 liveTrellisTest({
@@ -37,7 +31,7 @@ liveTrellisTest({
       contract: adminContract,
     });
     let serviceWait: Promise<void> | undefined;
-    let client: Awaited<ReturnType<typeof runtime.connectClient>> | undefined;
+    let client: CallerRuntime<typeof fixture.clientContract> | undefined;
 
     try {
       await fixture.mountTerminalLocalEdgesWorkflow(service);
@@ -48,7 +42,7 @@ liveTrellisTest({
       });
 
       const result = requireTerminalJobEdgesOutput(
-        await client.rpc.documents.terminalLocalEdges({
+        await client.documentsTerminalLocalEdges({
           documentId: fixture.documentId,
         }).orThrow(),
       );
@@ -58,14 +52,14 @@ liveTrellisTest({
       assertEquals(result.cancelState, "completed");
 
       const adminJob = await runtime.waitFor(async () => {
-        const current = await admin.rpc.jobs.inspect({ id: result.jobId })
+        const current = await admin.jobsInspect({ id: result.jobId })
           .orThrow();
         return current.job.state === "completed" ? current : false;
       }, { timeoutMs: 60_000, intervalMs: 100 });
       assertEquals(adminJob.job.id, result.jobId);
       assertEquals(adminJob.job.state, "completed");
 
-      const listed = await admin.rpc.jobs.query({
+      const listed = await admin.jobsQuery({
         limit: 10,
         service: adminJob.job.service,
         type: adminJob.job.type,
@@ -73,7 +67,7 @@ liveTrellisTest({
       }).orThrow();
       assert(listed.entries.some((job) => job.id === result.jobId));
 
-      const cancelled = await admin.rpc.jobs.cancel({ id: result.jobId })
+      const cancelled = await admin.jobsCancel({ id: result.jobId })
         .orThrow();
       assertEquals(cancelled.job.id, result.jobId);
       assertEquals(cancelled.job.state, "completed");

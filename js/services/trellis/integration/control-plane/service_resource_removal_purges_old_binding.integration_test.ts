@@ -1,7 +1,11 @@
 import { assertEquals } from "@std/assert";
-import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
+import {
+  defineAppContract,
+  defineServiceContract,
+  kv,
+} from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
@@ -36,17 +40,15 @@ const resourceContract = defineServiceContract({ schemas }, (ref) => ({
   id: serviceContractId,
   displayName: "Trellis Control-Plane Resource Removal Service",
   description: "Starts with a service KV resource binding.",
-  resources: {
-    kv: {
-      records: {
-        purpose: "Resource removed by the replacement contract.",
-        schema: ref.schema("Record"),
-        required: true,
-        history: 1,
-        ttlMs: 0,
-      },
+  uses: [kv({
+    records: {
+      purpose: "Resource removed by the replacement contract.",
+      schema: ref.schema("Record"),
+      required: true,
+      history: 1,
+      ttlMs: 0,
     },
-  },
+  })],
   rpc: {
     "ResourceRemoval.Ping": {
       version: "v1",
@@ -80,13 +82,7 @@ const adminContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Resource Removal Admin",
   description: "Reads deployment authority after resource removal.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.DeploymentAuthority.Get"] },
-      }),
-    },
-  },
+  uses: [trellisAuth.AuthDeploymentAuthorityGet],
 }));
 
 const deployment = caseScopedName("resource-removal", CASE_ID);
@@ -157,7 +153,7 @@ liveTrellisTest({
       const connectedRemovedService = await connectPromise;
       removedService = connectedRemovedService;
       assertEquals(Object.hasOwn(connectedRemovedService.kv, "records"), false);
-      const authority = await admin.rpc.auth.deploymentAuthorityGet({
+      const authority = await admin.authDeploymentAuthorityGet({
         deploymentId: deployment,
       }).orThrow();
       assertEquals(

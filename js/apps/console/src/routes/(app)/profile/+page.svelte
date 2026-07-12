@@ -29,7 +29,6 @@
   };
 
   const trellis = getTrellis();
-  const identityGrantsRequest = trellis.request.bind(trellis) as IdentityGrantsRequest;
   const connection = getConnection();
   const notifications = getNotifications();
 
@@ -104,7 +103,7 @@
     linkPending = true;
     linkError = null;
     try {
-      const response = await trellis.request("Auth.Users.IdentityLink.Create", { returnTo: currentReturnTarget() }).take();
+      const response = await trellis.authUsersIdentityLinkCreate({ returnTo: currentReturnTarget() }).take();
       if (isErr(response)) {
         linkError = errorMessage(response);
         notifications.error(linkError, "Connect login failed");
@@ -133,7 +132,7 @@
         return;
       }
 
-      const response = await trellis.request("Auth.Users.Password.Change", {
+      const response = await trellis.authUsersPasswordChange({
         currentPassword,
         newPassword,
       }).take();
@@ -169,8 +168,8 @@
       }
 
       const [grantsResponse, identitiesResponse] = await Promise.all([
-        identityGrantsRequest("Auth.IdentityGrants.List", { limit: 100, offset: 0 }).take(),
-        trellis.request("Auth.UserIdentities.List", { userId: me.user.userId, limit: 100, offset: 0 }).take(),
+        trellis.authIdentityGrantsList({ limit: 100, offset: 0 }).take(),
+        trellis.authUserIdentitiesList({ userId: me.user.userId, limit: 100, offset: 0 }).take(),
       ]);
       if (isErr(grantsResponse)) {
         error = errorMessage(grantsResponse);

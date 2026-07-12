@@ -6,15 +6,17 @@
 import { assertEquals, assertExists } from "jsr:@std/assert";
 import { Type } from "typebox";
 import { AsyncResult, Result } from "@qlever-llc/result";
-import { defineServiceContract } from "../contract.ts";
+import { defineServiceContract, jobs, kv, store } from "../contract.ts";
 import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
 } from "../contract_support/mod.ts";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 import { UnexpectedError } from "../errors/index.ts";
 import type { StoreError } from "@qlever-llc/trellis";
 import type { TypedKV } from "../kv.ts";
 import type { TypedStore } from "../store.ts";
+import type { TrellisServiceSession } from "./service.ts";
 
 // Import the module under test
 import {
@@ -29,7 +31,6 @@ import {
   type ServiceEventHandler,
   StoreHandle,
   type SubscribeOpts,
-  type TrellisService,
   TrellisService as TrellisServiceClass,
   TrellisServiceRuntime,
 } from "./mod.ts";
@@ -61,19 +62,19 @@ const typeTestContract = defineServiceContract(
         event: ref.schema("PingedEvent"),
       },
     },
-    resources: {
-      kv: {
+    uses: [
+      kv({
         items: {
           purpose: "Store typed items",
           schema: ref.schema("KVValue"),
         },
-      },
-      store: {
+      }),
+      store({
         uploads: {
           purpose: "Store staged uploads",
         },
-      },
-    },
+      }),
+    ],
   }),
 );
 
@@ -93,25 +94,25 @@ const jobsTypeTestContract = defineServiceContract(
     id: "trellis.server.jobs-type-test@v1",
     displayName: "Jobs Type Test",
     description: "Verify typed service.jobs surface.",
-    jobs: {
-      refreshSummaries: {
-        payload: ref.schema("RefreshPayload"),
-        result: ref.schema("RefreshResult"),
-      },
-    },
-    resources: {
-      kv: {
+    uses: [
+      jobs({
+        refreshSummaries: {
+          payload: ref.schema("RefreshPayload"),
+          result: ref.schema("RefreshResult"),
+        },
+      }),
+      kv({
         items: {
           purpose: "Store typed items",
           schema: ref.schema("KVValue"),
         },
-      },
-      store: {
+      }),
+      store({
         uploads: {
           purpose: "Store staged uploads",
         },
-      },
-    },
+      }),
+    ],
   }),
 );
 
@@ -122,15 +123,13 @@ const optionalKvTypeTestContract = defineServiceContract(
     displayName: "Optional KV Type Test",
     description:
       "Verify optional KV aliases stay optional in the service type.",
-    resources: {
-      kv: {
-        items: {
-          purpose: "Optionally store typed items",
-          schema: ref.schema("KVValue"),
-          required: false,
-        },
+    uses: [kv({
+      items: {
+        purpose: "Optionally store typed items",
+        schema: ref.schema("KVValue"),
+        required: false,
       },
-    },
+    })],
   }),
 );
 
@@ -160,19 +159,19 @@ const operationsTypeTestContract = defineServiceContract(
         errors: [ref.error("UnexpectedError")],
       },
     },
-    resources: {
-      kv: {
+    uses: [
+      kv({
         items: {
           purpose: "Store typed items",
           schema: ref.schema("KVValue"),
         },
-      },
-      store: {
+      }),
+      store({
         uploads: {
           purpose: "Store staged uploads",
         },
-      },
-    },
+      }),
+    ],
   }),
 );
 
@@ -221,22 +220,29 @@ const depsTypeTestContract = defineServiceContract(
         output: ref.schema("Output"),
       },
     },
-    jobs: {
-      refresh: {
-        payload: ref.schema("JobPayload"),
-        result: ref.schema("JobResult"),
-      },
-    },
-    resources: {
-      kv: {
+    uses: [
+      jobs({
+        refresh: {
+          payload: ref.schema("JobPayload"),
+          result: ref.schema("JobResult"),
+        },
+      }),
+      kv({
         items: {
           purpose: "Store typed items",
           schema: ref.schema("KVValue"),
         },
-      },
-    },
+      }),
+    ],
   }),
 );
+
+const typeTestRuntime = getContractRuntime(typeTestContract);
+const optionalKvTypeTestRuntime = getContractRuntime(
+  optionalKvTypeTestContract,
+);
+const jobsTypeTestRuntime = getContractRuntime(jobsTypeTestContract);
+const depsTypeTestRuntime = getContractRuntime(depsTypeTestContract);
 
 Deno.test("TrellisServiceRuntime export exists", () => {
   assertExists(TrellisServiceRuntime);
@@ -301,9 +307,9 @@ Deno.test("Subscription types are re-exported", () => {
 
 Deno.test("service wrapper type surface stays specific", () => {
   function expectTypedSurface(
-    service: TrellisService<
-      typeof typeTestContract.API.owned,
-      typeof typeTestContract.API.owned,
+    service: TrellisServiceSession<
+      typeof typeTestRuntime.ownedApi,
+      typeof typeTestRuntime.ownedApi,
       {},
       TypeTestKv
     >,
@@ -325,9 +331,9 @@ Deno.test("service wrapper type surface stays specific", () => {
 
 Deno.test("optional KV aliases stay optional in the service type", () => {
   function expectOptionalKv(
-    service: TrellisService<
-      typeof optionalKvTypeTestContract.API.owned,
-      typeof optionalKvTypeTestContract.API.owned,
+    service: TrellisServiceSession<
+      typeof optionalKvTypeTestRuntime.ownedApi,
+      typeof optionalKvTypeTestRuntime.ownedApi,
       {},
       OptionalKvTypeTest
     >,
@@ -340,9 +346,9 @@ Deno.test("optional KV aliases stay optional in the service type", () => {
 
 Deno.test("service wrapper exposes typed jobs facade", () => {
   type JobsContract = typeof jobsTypeTestContract;
-  type JobsService = TrellisService<
-    JobsContract["API"]["owned"],
-    JobsContract["API"]["owned"],
+  type JobsService = TrellisServiceSession<
+    typeof jobsTypeTestRuntime.ownedApi,
+    typeof jobsTypeTestRuntime.api,
     NonNullable<JobsContract[typeof CONTRACT_JOBS_METADATA]>
   >;
 
@@ -370,9 +376,9 @@ Deno.test("bound service wrapper injects deps across handler surfaces", () => {
   type DepsContract = typeof depsTypeTestContract;
   type DepsJobs = NonNullable<DepsContract[typeof CONTRACT_JOBS_METADATA]>;
   type DepsKv = NonNullable<DepsContract[typeof CONTRACT_KV_METADATA]>;
-  type DepsService = TrellisService<
-    DepsContract["API"]["owned"],
-    DepsContract["API"]["trellis"],
+  type DepsService = TrellisServiceSession<
+    typeof depsTypeTestRuntime.ownedApi,
+    typeof depsTypeTestRuntime.api,
     DepsJobs,
     DepsKv
   >;
@@ -430,10 +436,8 @@ Deno.test("server RPC helper types support extracted handlers", () => {
   const pingHandler: PingHandler = ({ input, context, client }) => {
     const value: string = input.value;
     const sessionKey: string = context.sessionKey;
-    const ping = client.rpc.test.ping({ value });
     const kv: TypedKV<typeof typeTestSchemas.KVValue> = client.kv.items;
     const store = client.store.uploads.open();
-    assertExists(ping);
     assertExists(kv);
     assertExists(store);
     assertExists(sessionKey);
@@ -453,7 +457,6 @@ Deno.test("service handler aliases expose narrow client object args", () => {
   const expectRuntime = (
     client: Parameters<PingRpcHandler>[0]["client"],
   ) => {
-    assertExists(client.rpc.test.ping({ value: "ok" }));
     assertExists(client.kv.items);
     assertExists(client.store.uploads.open());
   };

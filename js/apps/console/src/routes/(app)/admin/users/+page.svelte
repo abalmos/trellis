@@ -88,11 +88,11 @@
     error = null;
     sessionsWarning = null;
     try {
-      const usersResponse = await trellis.request("Auth.Users.List", { limit: 500, offset: 0 }).take();
+      const usersResponse = await trellis.authUsersList({ limit: 500, offset: 0 }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       users = usersResponse.entries ?? [];
 
-      const sessionsResponse = await trellis.request("Auth.Sessions.List", { limit: 500, offset: 0 }).take();
+      const sessionsResponse = await trellis.authSessionsList({ limit: 500, offset: 0 }).take();
       if (isErr(sessionsResponse)) {
         sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
         userLastAuth = {};
@@ -116,7 +116,7 @@
     if (resetPendingUserId) return;
     resetPendingUserId = user.userId;
     try {
-      const response = await trellis.request("Auth.Users.PasswordReset.Create", {
+      const response = await trellis.authUsersPasswordResetCreate({
         userId: user.userId,
       }).take();
       if (isErr(response)) {

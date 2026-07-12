@@ -60,11 +60,7 @@ export function createAppIdentityApprovalFixture(caseId: string) {
     displayName: `Trellis Integration App Identity Approval Client (${slug})`,
     description:
       "App/client participant for the app identity approval fixture.",
-    uses: {
-      required: {
-        grantService: serviceContract.use({ rpc: { call: ["Grant.Ping"] } }),
-      },
-    },
+    uses: [serviceContract.GrantPing],
   }));
 
   const serviceName = caseScopedName(
@@ -90,7 +86,7 @@ export function createAppIdentityApprovalFixture(caseId: string) {
       server: { log: false },
     }).orThrow();
 
-    service.handle.rpc.grant.ping(({ input }) =>
+    service.handleGrantPing(({ input }) =>
       Result.ok({ message: input.message, approved: true })
     );
 

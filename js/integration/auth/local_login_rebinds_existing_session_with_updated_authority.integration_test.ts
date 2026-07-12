@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import type {
@@ -35,10 +35,10 @@ liveTrellisTest({
       runtime,
     );
     let originalClient:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
     let reboundClient:
-      | ConnectedTrellisClient<typeof fixture.updatedClientContract>
+      | CallerRuntime<typeof fixture.updatedClientContract>
       | undefined;
 
     try {
@@ -49,7 +49,7 @@ liveTrellisTest({
         auth: clientAuth.auth,
         onAuthRequired: async (ctx) => await clientAuth.onAuthRequired(ctx),
       }).orThrow();
-      await originalClient.rpc.authLogin.ping({
+      await originalClient.authLoginPing({
         message: fixture.pingMessage,
       }).orThrow();
 
@@ -83,8 +83,7 @@ liveTrellisTest({
         fixture.updatedClientDisplayName,
       );
 
-      const allowedByUpdatedAuthority = await reboundClient.rpc.auth
-        .connectionsList({ sessionKey: clientKey.sessionKey, limit: 500 })
+      const allowedByUpdatedAuthority = await reboundClient.authConnectionsList({ sessionKey: clientKey.sessionKey, limit: 500 })
         .orThrow();
       assertEquals(allowedByUpdatedAuthority.entries.length, 1);
 
@@ -96,7 +95,7 @@ liveTrellisTest({
         return connection.userNkey !== beforeConnection.userNkey && connection;
       });
       await waitFor(async () => {
-        const result = await originalClient!.rpc.auth.sessionsMe({});
+        const result = await originalClient!.authSessionsMe({});
         return result.isErr();
       });
     } finally {
@@ -112,7 +111,7 @@ async function appSessionFor(
   admin: SessionAdminClient,
   sessionKey: string,
 ): Promise<AppSession> {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry): entry is AppSession =>
     entry.participantKind === "app" && entry.sessionKey === sessionKey
   );
@@ -125,7 +124,7 @@ async function singleConnectionFor(
   sessionKey: string,
 ): Promise<AppConnection> {
   const page = await waitFor(async () => {
-    const connections = await admin.rpc.auth.connectionsList({
+    const connections = await admin.authConnectionsList({
       sessionKey,
       limit: 500,
     }).orThrow();

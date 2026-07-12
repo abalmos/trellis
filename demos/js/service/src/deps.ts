@@ -4,6 +4,8 @@ import type {
   StoreError,
   TransferError,
 } from "@qlever-llc/trellis";
+import type { ConnectedTrellisService } from "@qlever-llc/trellis/service";
+import type contract from "../contract.ts";
 import type { getSiteSummary } from "../../shared/field_data.ts";
 
 export type ReceiveTransferIssuer = {
@@ -37,3 +39,8 @@ export type FieldOpsDeps = {
   getSiteSummary: typeof getSiteSummary;
   activityFeedEventNames: ActivityFeedEventNames;
 };
+
+export type FieldOpsService = ConnectedTrellisService<typeof contract>;
+export type FieldOpsHandlerClient = Parameters<
+  Parameters<FieldOpsService["handleAssignmentsList"]>[0]
+>[0]["client"];

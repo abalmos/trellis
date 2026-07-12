@@ -17,6 +17,6 @@ liveTrellisTest({
       contract: fixture.unauthorizedClientContract,
     });
 
-    assert((client.rpc as Record<string, unknown>).entity === undefined);
+    assert(!("entityGet" in client));
   },
 });

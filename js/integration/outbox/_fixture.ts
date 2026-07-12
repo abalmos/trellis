@@ -1,4 +1,8 @@
-import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
+import {
+  defineAppContract,
+  defineServiceContract,
+  jobs,
+} from "@qlever-llc/trellis";
 import {
   getSqlOutboxMigrations,
   type SqlExecutor,
@@ -180,7 +184,7 @@ export function createOutboxFixture(caseId: string) {
         errors: [],
       },
     },
-    jobs: {
+    uses: [jobs({
       syncCustomer: {
         payload: ref.schema("SyncInput"),
         result: ref.schema("SyncOutput"),
@@ -190,7 +194,7 @@ export function createOutboxFixture(caseId: string) {
         result: ref.schema("SyncOutput"),
         keyConcurrency: { key: ["customer", "/customerId"] },
       },
-    },
+    })],
     events: {
       "Document.Processed": {
         version: "v1",
@@ -219,21 +223,14 @@ export function createOutboxFixture(caseId: string) {
     id: caseScopedContractId("trellis.integration.outbox-client", caseId),
     displayName: `Trellis Integration Outbox Client (${slug})`,
     description: "App/client participant for the outbox integration fixture.",
-    uses: {
-      required: {
-        outboxService: serviceContract.use({
-          rpc: {
-            call: [
-              "Documents.Process",
-              "Documents.ProcessWithRollback",
-              "Documents.ProcessMultiEvent",
-              "Documents.SyncCustomer",
-            ],
-          },
-          events: { subscribe: ["Document.Processed", "Document.Audited"] },
-        }),
-      },
-    },
+    uses: [
+      serviceContract.DocumentsProcess,
+      serviceContract.DocumentsProcessWithRollback,
+      serviceContract.DocumentsProcessMultiEvent,
+      serviceContract.DocumentsSyncCustomer,
+      serviceContract.DocumentProcessed.subscribe,
+      serviceContract.DocumentAudited.subscribe,
+    ],
   }));
 
   async function createEmptyDb() {

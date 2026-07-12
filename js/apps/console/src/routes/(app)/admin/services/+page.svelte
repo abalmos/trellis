@@ -36,8 +36,6 @@
   };
 
   const trellis = getTrellis();
-  const coreRequest = trellis.request.bind(trellis) as CoreRequest;
-  const authorityRequest = trellis.request.bind(trellis) as AuthorityRequest;
   const RPC_TIMEOUT_MS = 10_000;
 
   let loading = $state(true);
@@ -146,11 +144,11 @@
     catalogError = null;
     try {
       const [deploymentsRes, instancesRes, authoritiesRes, plansRes, catalogRes] = await Promise.all([
-        trellis.request("Auth.Deployments.List", { kind: "service", limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.ServiceInstances.List", { limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.List", { kind: "service", limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.Plans.List", { kind: "service", state: "pending", limit: 500, offset: 0 }).take(),
-        coreRequest("Trellis.Catalog", {}).take(),
+        trellis.authDeploymentsList({ kind: "service", limit: 500, offset: 0 }).take(),
+        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityList({ kind: "service", limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ kind: "service", state: "pending", limit: 500, offset: 0 }).take(),
+        trellis.trellisCatalog({}).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
@@ -174,9 +172,7 @@
   }
 
   async function loadHealth(): Promise<void> {
-    const result = await trellis.request(
-      "Health.Query",
-      { participantKinds: ["service"], limit: 200, offset: 0 },
+    const result = await trellis.healthQuery({ participantKinds: ["service"], limit: 200, offset: 0 },
       { timeout: RPC_TIMEOUT_MS },
     ).take();
     if (isErr(result)) {
@@ -195,7 +191,7 @@
     void loadHealth();
     void (async () => {
       try {
-        const result = await trellis.feed.health.watch(
+        const result = await trellis.healthWatch(
           { participantKinds: ["service"] },
           { signal: controller.signal },
         ).take();

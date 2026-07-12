@@ -1,5 +1,13 @@
-import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import {
+  defineAppContract,
+  defineServiceContract,
+  kv,
+  optional,
+} from "@qlever-llc/trellis";
+import {
+  type ConnectedTrellisService,
+  TrellisService,
+} from "@qlever-llc/trellis/service/deno";
 import { assert } from "@std/assert";
 import { Type } from "typebox";
 
@@ -9,10 +17,7 @@ import {
   caseScopedSubject,
   integrationSlug,
 } from "../_support/names.ts";
-import type {
-  LiveTrellisRuntime,
-  RuntimeContract,
-} from "../_support/runtime.ts";
+import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 
 export type AuthorityPlanEntry = {
   readonly planId: string;
@@ -224,8 +229,8 @@ export function createAuthorityPlanFixture(caseId: string) {
           description: "Call the additive authority-plan ping RPC.",
         },
       },
-      resources: {
-        kv: {
+      uses: [
+        kv({
           additiveRecords: {
             purpose: "Store additive authority-plan update records.",
             schema: ref.schema("ResourceRecord"),
@@ -233,15 +238,9 @@ export function createAuthorityPlanFixture(caseId: string) {
             history: 1,
             ttlMs: 0,
           },
-        },
-      },
-      uses: {
-        optional: {
-          dependencyService: dependencyContract.use({
-            rpc: { call: ["Plan.DependencyPing"] },
-          }),
-        },
-      },
+        }),
+        optional(dependencyContract.PlanDependencyPing),
+      ],
       rpc: {
         "Plan.Ping": {
           version: "v1",
@@ -292,8 +291,8 @@ export function createAuthorityPlanFixture(caseId: string) {
     id: resourceServiceContractId,
     displayName: `Authority Plan Resource Service (${slug})`,
     description: "Base resource authority-plan service contract.",
-    resources: {
-      kv: {
+    uses: [
+      kv({
         records: {
           purpose: "Store authority-plan resource records.",
           schema: ref.schema("ResourceRecord"),
@@ -301,8 +300,8 @@ export function createAuthorityPlanFixture(caseId: string) {
           history: 1,
           ttlMs: 0,
         },
-      },
-    },
+      }),
+    ],
     rpc: {
       "Plan.ResourcePing": {
         version: "v1",
@@ -319,8 +318,8 @@ export function createAuthorityPlanFixture(caseId: string) {
     id: resourceServiceContractId,
     displayName: `Authority Plan Resource Service Changed (${slug})`,
     description: "Changed resource authority-plan service contract.",
-    resources: {
-      kv: {
+    uses: [
+      kv({
         records: {
           purpose: "Store changed authority-plan resource records.",
           schema: ref.schema("ResourceRecord"),
@@ -328,8 +327,8 @@ export function createAuthorityPlanFixture(caseId: string) {
           history: 2,
           ttlMs: 0,
         },
-      },
-    },
+      }),
+    ],
     rpc: {
       "Plan.ResourcePing": {
         version: "v1",
@@ -349,11 +348,7 @@ export function createAuthorityPlanFixture(caseId: string) {
     ),
     displayName: `Authority Plan Base Client (${slug})`,
     description: "Client for the base authority-plan ping RPC.",
-    uses: {
-      required: {
-        planService: baseContract.use({ rpc: { call: ["Plan.Ping"] } }),
-      },
-    },
+    uses: [baseContract.PlanPing],
   }));
 
   const additiveClientContract = defineAppContract(() => ({
@@ -363,13 +358,10 @@ export function createAuthorityPlanFixture(caseId: string) {
     ),
     displayName: `Authority Plan Additive Client (${slug})`,
     description: "Client for the additive authority-plan ping RPC.",
-    uses: {
-      required: {
-        planService: compatibleAdditiveContract.use({
-          rpc: { call: ["Plan.Ping", "Plan.AddedPing"] },
-        }),
-      },
-    },
+    uses: [
+      compatibleAdditiveContract.PlanPing,
+      compatibleAdditiveContract.PlanAddedPing,
+    ],
   }));
 
   const incompatibleClientContract = defineAppContract(() => ({
@@ -379,13 +371,7 @@ export function createAuthorityPlanFixture(caseId: string) {
     ),
     displayName: `Authority Plan Incompatible Client (${slug})`,
     description: "Client for the incompatible authority-plan ping RPC.",
-    uses: {
-      required: {
-        planService: incompatibleSchemaContract.use({
-          rpc: { call: ["Plan.Ping"] },
-        }),
-      },
-    },
+    uses: [incompatibleSchemaContract.PlanPing],
   }));
 
   const resourceClientContract = defineAppContract(() => ({
@@ -395,22 +381,24 @@ export function createAuthorityPlanFixture(caseId: string) {
     ),
     displayName: `Authority Plan Resource Client (${slug})`,
     description: "Client for the resource authority-plan ping RPC.",
-    uses: {
-      required: {
-        resourceService: resourceChangedContract.use({
-          rpc: { call: ["Plan.ResourcePing"] },
-        }),
-      },
-    },
+    uses: [resourceChangedContract.PlanResourcePing],
   }));
 
-  async function connectService<TContract extends RuntimeContract>(args: {
+  type FixtureServiceContract =
+    | typeof dependencyContract
+    | typeof baseContract
+    | typeof compatibleMetadataContract
+    | typeof compatibleAdditiveContract
+    | typeof incompatibleSchemaContract
+    | typeof resourceBaseContract
+    | typeof resourceChangedContract;
+  async function connectService<const TContract extends FixtureServiceContract>(args: {
     readonly runtime: LiveTrellisRuntime;
     readonly contract: TContract;
     readonly name: string;
     readonly seed: string;
-  }) {
-    return await TrellisService.connect({
+  }): Promise<ConnectedTrellisService<TContract>> {
+    return await TrellisService.connect<TContract>({
       trellisUrl: args.runtime.trellisUrl,
       contract: args.contract,
       name: args.name,
@@ -420,7 +408,7 @@ export function createAuthorityPlanFixture(caseId: string) {
     }).orThrow();
   }
 
-  function connectServicePending<TContract extends RuntimeContract>(args: {
+  function connectServicePending<const TContract extends FixtureServiceContract>(args: {
     readonly runtime: LiveTrellisRuntime;
     readonly contract: TContract;
     readonly name: string;
@@ -568,7 +556,7 @@ export function createAuthorityPlanFixture(caseId: string) {
       name: caseScopedName("authority-plan-client", caseId),
       contract: baseClientContract,
     });
-    return await client.rpc.plan.ping({ message }).orThrow();
+    return await client.planPing({ message }).orThrow();
   }
 
   return {

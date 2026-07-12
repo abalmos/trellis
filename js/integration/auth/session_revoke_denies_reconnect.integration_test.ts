@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   isErr,
   TrellisClient,
 } from "@qlever-llc/trellis";
@@ -23,7 +23,7 @@ liveTrellisTest({
     );
 
     let client:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
 
     try {
@@ -35,11 +35,11 @@ liveTrellisTest({
         onAuthRequired: async (ctx) => await clientAuth.onAuthRequired(ctx),
       }).orThrow();
 
-      await client.rpc.authLogin.ping({
+      await client.authLoginPing({
         message: fixture.pingMessage,
       }).orThrow();
 
-      const before = await admin.rpc.auth.sessionsList({ limit: 500 })
+      const before = await admin.authSessionsList({ limit: 500 })
         .orThrow();
       const targetSession = before.entries.find((entry) =>
         entry.participantKind === "app" &&
@@ -50,13 +50,13 @@ liveTrellisTest({
         "expected Auth.Sessions.List to include app session",
       );
 
-      const revoked = await admin.rpc.auth.sessionsRevoke({
+      const revoked = await admin.authSessionsRevoke({
         sessionKey: targetSession.sessionKey,
       }).orThrow();
       assertEquals(revoked.success, true);
 
       await waitFor(async () => {
-        const after = await admin.rpc.auth.sessionsList({ limit: 500 })
+        const after = await admin.authSessionsList({ limit: 500 })
           .orThrow();
         return after.entries.every((entry) =>
           entry.sessionKey !== targetSession.sessionKey
@@ -64,7 +64,7 @@ liveTrellisTest({
       });
 
       await waitFor(async () => {
-        const result = await client!.rpc.auth.sessionsMe({});
+        const result = await client!.authSessionsMe({});
         return result.isErr();
       });
 

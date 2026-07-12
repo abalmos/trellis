@@ -41,7 +41,7 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
 
     try {
-      const target = await admin.rpc.auth.usersCreate({
+      const target = await admin.authUsersCreate({
         username: caseScopedName("oauth-target", CASE_ID),
         name: "OAuth Target",
         email: "oauth-target@example.test",
@@ -108,7 +108,7 @@ liveTrellisTest({
       assertStringIncludes(location, "status=completed");
       assertStringIncludes(location, `userId=${target.user.userId}`);
 
-      const identities = await admin.rpc.auth.userIdentitiesList({
+      const identities = await admin.authUserIdentitiesList({
         userId: target.user.userId,
         limit: 500,
       }).orThrow();

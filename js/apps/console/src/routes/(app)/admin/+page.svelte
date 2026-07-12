@@ -70,8 +70,6 @@
   };
 
   const trellis = getTrellis();
-  const coreRequest = trellis.request.bind(trellis) as CoreRequest;
-  const authorityRequest = trellis.request.bind(trellis) as AuthorityRequest;
   const authorityPlanPreviewLimit = 10;
 
   let loading = $state(true);
@@ -196,13 +194,13 @@
     jobsUnavailableMessage = null;
     try {
       const [sessionsRes, connectionsRes, instancesRes, authoritiesRes, authorityPlansRes, deviceReviewsRes, catalogRes] = await Promise.all([
-        trellis.request("Auth.Sessions.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.Connections.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.ServiceInstances.List", { limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.List", { limit: 500, offset: 0 }).take(),
-        authorityRequest("Auth.DeploymentAuthority.Plans.List", { state: "pending", limit: authorityPlanPreviewLimit, offset: 0 }).take(),
-        trellis.request("Auth.DeviceUserAuthorities.Reviews.List", { state: "pending", limit: 500, offset: 0 }).take(),
-        coreRequest("Trellis.Catalog", {}).take(),
+        trellis.authSessionsList({ limit: 500, offset: 0 }).take(),
+        trellis.authConnectionsList({ limit: 500, offset: 0 }).take(),
+        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: authorityPlanPreviewLimit, offset: 0 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500, offset: 0 }).take(),
+        trellis.trellisCatalog({}).take(),
       ]);
       if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
       if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
@@ -220,8 +218,8 @@
       catalogIssues = isErr(catalogRes) ? [] : catalogRes.catalog.issues ?? [];
 
       const jobsData = await loadJobsPageData({
-        listServices: (input) => trellis.request("Jobs.ListServices", input),
-        queryJobs: (filter) => trellis.request("Jobs.Query", filter),
+        listServices: (input) => trellis.jobsListServices(input),
+        queryJobs: (filter) => trellis.jobsQuery(filter),
       }, { groupBy: "type", limit: 50, offset: 0 }).catch((jobsError: unknown) => ({
         available: false,
         message: `Jobs admin runtime is unavailable: ${errorMessage(jobsError)}`,

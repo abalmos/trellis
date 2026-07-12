@@ -1,11 +1,10 @@
 import { ASSIGNED_INSPECTIONS } from "../../../../shared/field_data.ts";
-import { ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
+import { ok } from "@qlever-llc/trellis";
+import type { FieldOpsService } from "../../deps.ts";
 
-type Args = RpcArgs<typeof contract, "Assignments.List">;
-type Result = RpcResult<typeof contract, "Assignments.List">;
+type Handler = Parameters<FieldOpsService["handleAssignmentsList"]>[0];
 
-export function listAssignments({ input }: Args): Result {
+export const listAssignments: Handler = ({ input }) => {
   const offset = input.offset ?? 0;
   const count = ASSIGNED_INSPECTIONS.length;
   return ok({
@@ -17,4 +16,4 @@ export function listAssignments({ input }: Args): Result {
       ? { nextOffset: offset + input.limit }
       : {}),
   });
-}
+};

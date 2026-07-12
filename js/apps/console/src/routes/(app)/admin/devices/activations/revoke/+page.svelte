@@ -39,7 +39,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.DeviceUserAuthorities.List", { state: "activated", limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeviceUserAuthoritiesList({ state: "activated", limit: 500, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedActivations = response.entries ?? [];
       const loadedActiveActivations = loadedActivations.filter((activation) => activation.state === "activated");
@@ -62,9 +62,7 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.request(
-        "Auth.DeviceUserAuthorities.Revoke",
-        { instanceId: selectedActivation.instanceId } satisfies AuthDeviceUserAuthoritiesRevokeInput,
+      const response = await trellis.authDeviceUserAuthoritiesRevoke({ instanceId: selectedActivation.instanceId } satisfies AuthDeviceUserAuthoritiesRevokeInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device activation revoked for ${selectedActivation.instanceId}.`, "Revoked");

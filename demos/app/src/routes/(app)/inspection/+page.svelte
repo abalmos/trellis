@@ -111,7 +111,7 @@
     error = null;
 
     try {
-      const response = await trellis.request("Sites.Get", { siteId }).orThrow();
+      const response = await trellis.sitesGet({ siteId }).orThrow();
       if (!mounted || requestId !== selectionRequestId || selectedSiteId !== siteId) return;
       selectedSite = response.site ?? null;
     } catch (cause) {
@@ -129,8 +129,8 @@
 
     try {
       const [assignmentResponse, siteResponse] = await Promise.all([
-        trellis.request("Assignments.List", listPage).orThrow(),
-        trellis.request("Sites.List", listPage).orThrow(),
+        trellis.assignmentsList(listPage).orThrow(),
+        trellis.sitesList(listPage).orThrow(),
       ]);
       if (!mounted || requestId !== loadRequestId) return;
 
@@ -141,7 +141,7 @@
       if (siteIdToLoad) {
         if (selectedSiteId !== siteIdToLoad) resetRefreshTrace();
         selectedSiteId = siteIdToLoad;
-        const detail = await trellis.request("Sites.Get", { siteId: siteIdToLoad }).orThrow();
+        const detail = await trellis.sitesGet({ siteId: siteIdToLoad }).orThrow();
         if (!mounted || requestId !== loadRequestId || selectedSiteId !== siteIdToLoad) return;
         selectedSite = detail.site ?? null;
       } else {
@@ -217,7 +217,7 @@
     };
 
     try {
-      const ref = await trellis.operation("Sites.Refresh").input({ siteId: selectedSiteId }).start().orThrow();
+      const ref = await trellis.sitesRefresh({ siteId: selectedSiteId }).start().orThrow();
       if (!mounted || runId !== refreshRunId) return;
       operationId = ref.id;
       dispatchLiveUpdate({

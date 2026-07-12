@@ -61,7 +61,7 @@ liveTrellisTest({
       currentStateVersion: "drafts.v2",
     });
 
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     const session = sessions.entries.find((entry) =>
       entry.participantKind === "app" &&
@@ -86,7 +86,7 @@ liveTrellisTest({
       },
     };
 
-    const adminPreferences = await admin.rpc.state.adminGet({
+    const adminPreferences = await admin.stateAdminGet({
       ...stateTarget,
       store: "preferences",
     }).orThrow();
@@ -97,7 +97,7 @@ liveTrellisTest({
       currentStateVersion: "preferences.v2",
     });
 
-    const adminDrafts = await admin.rpc.state.adminList({
+    const adminDrafts = await admin.stateAdminList({
       ...stateTarget,
       store: "drafts",
       prefix: fixture.draftPrefix,

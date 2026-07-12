@@ -26,7 +26,7 @@
         reviewMode,
       };
 
-      const response = await trellis.request("Auth.Deployments.Create", input).take();
+      const response = await trellis.authDeploymentsCreate(input).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${input.deploymentId} created.`, "Created");
       deploymentId = "";

@@ -16,7 +16,6 @@ import {
   startDeviceActivationWithDeps,
 } from "../device.ts";
 import { base64urlDecode, base64urlEncode } from "../auth/utils.ts";
-import type { TrellisAPI } from "../contracts.ts";
 import { signDeviceWaitRequest } from "../auth/device_activation.ts";
 
 const PendingActivationStateSchema = Type.Object({
@@ -153,19 +152,9 @@ type DeviceActivationStateStore = {
  * Options for the Deno-only device activation status helper.
  */
 export type CheckDeviceActivationArgs<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends {
-    CONTRACT_ID: string;
-    CONTRACT_DIGEST: string;
-    CONTRACT: { displayName?: string };
-    API: { trellis: TApi };
-  } = {
-    CONTRACT_ID: string;
-    CONTRACT_DIGEST: string;
-    CONTRACT: { displayName?: string };
-    API: { trellis: TApi };
-  },
-> = TrellisDeviceActivationArgs<TApi, TContract> & {
+  TContract extends TrellisDeviceActivationArgs["contract"] =
+    TrellisDeviceActivationArgs["contract"],
+> = TrellisDeviceActivationArgs<TContract> & {
   stateDir?: string;
   statePath?: string;
 };
@@ -744,15 +733,9 @@ async function waitForActivationCompletion(args: {
 }
 
 async function createActivationRequiredStatus<
-  TApi extends TrellisAPI,
-  TContract extends {
-    CONTRACT_ID: string;
-    CONTRACT_DIGEST: string;
-    CONTRACT: { displayName?: string };
-    API: { trellis: TApi };
-  },
+  TContract extends TrellisDeviceActivationArgs["contract"],
 >(args: {
-  checkArgs: CheckDeviceActivationArgs<TApi, TContract>;
+  checkArgs: CheckDeviceActivationArgs<TContract>;
   store: DeviceActivationStateStore;
   localState: TrellisDeviceLocalActivationState | null;
 }): Promise<TrellisDeviceActivationRequiredStatus> {
@@ -864,15 +847,9 @@ async function resolvePendingActivation(args: {
  * Reports Deno device activation status and hides local activation persistence details.
  */
 export async function checkDeviceActivation<
-  TApi extends TrellisAPI,
-  TContract extends {
-    CONTRACT_ID: string;
-    CONTRACT_DIGEST: string;
-    CONTRACT: { displayName?: string };
-    API: { trellis: TApi };
-  },
+  TContract extends TrellisDeviceActivationArgs["contract"],
 >(
-  args: CheckDeviceActivationArgs<TApi, TContract>,
+  args: CheckDeviceActivationArgs<TContract>,
 ): Promise<TrellisDeviceActivationStatus> {
   const store = await openDeviceActivationStateStore({
     trellisUrl: args.trellisUrl,

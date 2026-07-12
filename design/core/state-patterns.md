@@ -55,7 +55,7 @@ const contract = defineAppContract(
     id: "acme.notes@v1",
     displayName: "Notes",
     description: "Notes app",
-    state: {
+    uses: [state({
       preferences: {
         kind: "value",
         schema: ref.schema("Preferences"),
@@ -65,7 +65,7 @@ const contract = defineAppContract(
         },
       },
       drafts: { kind: "map", schema: ref.schema("Draft") },
-    },
+    })],
   }),
 );
 ```
@@ -113,9 +113,8 @@ storage backing remains an implementation detail.
 ## Normal Runtime Surface
 
 The normal client/device runtime exposes declared stores at
-`client.state.<store>`. Contracts that declare state automatically include the
-Trellis-owned `State.*` RPCs in `API.used`, but the named-store facade is the
-normal runtime entrypoint.
+`client.state.<store>`. The `state(...)` descriptor privately selects the
+Trellis-owned `State.*` transport actions needed by this named-store facade.
 
 Example:
 
@@ -136,9 +135,9 @@ for (const draft of page.entries) {
 
 Rules:
 
-- the store name comes from the contract's top-level `state` map
-- generated facades may include supporting `State.*` RPCs through `API.used`,
-  but the named-store facade is the normal runtime entrypoint
+- the store name comes from the contract's `state({...})` feature selection
+- supporting `State.*` RPCs are private runtime details; the named-store facade
+  is the public runtime entrypoint
 - normal callers do not provide `contractId`, `scope`, user identity, or device
   identity
 - the runtime derives the target namespace from the authenticated session and

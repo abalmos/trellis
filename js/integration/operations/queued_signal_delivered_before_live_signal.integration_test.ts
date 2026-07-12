@@ -20,10 +20,10 @@ liveTrellisTest({
     const consumed: string[] = [];
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         await consumptionGate;
-
+      
         const queued = await op.nextSignal().orThrow();
         assertEquals(queued.signal, "updateMessage");
         assert(
@@ -31,7 +31,7 @@ liveTrellisTest({
           "queued signal input should be an object",
         );
         consumed.push(String(Reflect.get(queued.input, "suffix")));
-
+      
         const live = await op.nextSignal("appendMessage").orThrow();
         assertEquals(live.signal, "appendMessage");
         assert(
@@ -40,7 +40,7 @@ liveTrellisTest({
         );
         consumed.push(String(Reflect.get(live.input, "suffix")));
         assertEquals(consumed, ["queued", "live"]);
-
+      
         return Result.ok({
           message: `${input.message}:${consumed.join(":")}`,
           done: true,
@@ -51,7 +51,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

@@ -33,7 +33,7 @@ liveTrellisTest({
     ).orThrow();
     assert(draft.applied, "expected draft write to apply");
 
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     const session = sessions.entries.find((entry) =>
       entry.participantKind === "app" &&
@@ -59,7 +59,7 @@ liveTrellisTest({
       },
     };
 
-    const adminPreferences = await admin.rpc.state.adminGet({
+    const adminPreferences = await admin.stateAdminGet({
       ...stateTarget,
       store: "preferences",
     }).orThrow();
@@ -73,7 +73,7 @@ liveTrellisTest({
     assertEquals(adminPreferences.entry.revision, preferences.entry.revision);
     assertExists(adminPreferences.entry.updatedAt);
 
-    const listedDrafts = await admin.rpc.state.adminList({
+    const listedDrafts = await admin.stateAdminList({
       ...stateTarget,
       store: "drafts",
       prefix: fixture.draftPrefix,
@@ -92,14 +92,14 @@ liveTrellisTest({
     });
     assertEquals(listedDraft.revision, draft.entry.revision);
 
-    const deletedPreferences = await admin.rpc.state.adminDelete({
+    const deletedPreferences = await admin.stateAdminDelete({
       ...stateTarget,
       store: "preferences",
       expectedRevision: preferences.entry.revision,
     }).orThrow();
     assertEquals(deletedPreferences.deleted, true);
 
-    const deletedDraft = await admin.rpc.state.adminDelete({
+    const deletedDraft = await admin.stateAdminDelete({
       ...stateTarget,
       store: "drafts",
       key: `${fixture.draftPrefix}/${fixture.draftKey}`,

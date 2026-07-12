@@ -1,5 +1,6 @@
 import type { JsMsg } from "@nats-io/jetstream";
-import type { InferSchemaType, TrellisAPI } from "../contracts.ts";
+import type { InferSchemaType } from "../contracts.ts";
+import type { RuntimeApi } from "../contract_support/runtime.ts";
 
 /**
  * Context provided to event handlers with message metadata and acknowledgment controls.
@@ -36,11 +37,11 @@ export type SubscribeOpts = {
   consumerName?: string;
 };
 
-export type Events<TA extends TrellisAPI = TrellisAPI> =
+export type Events<TA extends RuntimeApi = RuntimeApi> =
   & keyof TA["events"]
   & string;
 
-export type Event<TA extends TrellisAPI, E extends Events<TA>> =
+export type Event<TA extends RuntimeApi, E extends Events<TA>> =
   InferSchemaType<
     TA["events"][E]["event"]
   >;
@@ -50,7 +51,7 @@ export type Event<TA extends TrellisAPI, E extends Events<TA>> =
  * @template TA - The API module defining event schemas
  * @template E - The event key being handled
  */
-export type EventHandler<TA extends TrellisAPI, E extends Events<TA>> = (
+export type EventHandler<TA extends RuntimeApi, E extends Events<TA>> = (
   event: Event<TA, E>,
   ctx: EventContext,
 ) => Promise<void>;
@@ -80,7 +81,7 @@ export function createEventContext(
 /**
  * Defines a group of events that should be processed together with ordering guarantees.
  */
-export type OrderingGroup<TA extends TrellisAPI = TrellisAPI> = {
+export type OrderingGroup<TA extends RuntimeApi = RuntimeApi> = {
   /** Unique name for this ordering group */
   name: string;
   /** List of event types that belong to this group */
@@ -92,7 +93,7 @@ export type OrderingGroup<TA extends TrellisAPI = TrellisAPI> = {
 /**
  * A subscription that handles multiple events as a group with shared ordering semantics.
  */
-export type GroupedSubscription<TA extends TrellisAPI = TrellisAPI> = {
+export type GroupedSubscription<TA extends RuntimeApi = RuntimeApi> = {
   /** The ordering group configuration */
   group: OrderingGroup<TA>;
   /** Partial map of event types to their handlers */
@@ -105,7 +106,7 @@ export type GroupedSubscription<TA extends TrellisAPI = TrellisAPI> = {
  * @template E - The event type being subscribed to
  */
 export type SingleSubscription<
-  TA extends TrellisAPI = TrellisAPI,
+  TA extends RuntimeApi = RuntimeApi,
   E extends Events<TA> = Events<TA>,
 > = {
   /** The event type to subscribe to */
@@ -119,7 +120,7 @@ export type SingleSubscription<
 /**
  * Union type representing either a grouped or single subscription.
  */
-export type MultiEventSubscription<TA extends TrellisAPI = TrellisAPI> =
+export type MultiEventSubscription<TA extends RuntimeApi = RuntimeApi> =
   | GroupedSubscription<TA>
   | SingleSubscription<TA, Events<TA>>;
 
@@ -136,7 +137,7 @@ export type MultiSubscribeOpts = {
  * @param sub - The subscription to check
  * @returns True if the subscription is a GroupedSubscription
  */
-export function isGroupedSubscription<TA extends TrellisAPI>(
+export function isGroupedSubscription<TA extends RuntimeApi>(
   sub: MultiEventSubscription<TA>,
 ): sub is GroupedSubscription<TA> {
   return "group" in sub;

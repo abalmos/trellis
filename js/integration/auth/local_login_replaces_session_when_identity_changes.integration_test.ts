@@ -2,7 +2,7 @@ import { assert, assertEquals, assertNotEquals } from "@std/assert";
 import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import type { AuthSessionsListOutput } from "@qlever-llc/trellis/sdk/auth";
@@ -37,21 +37,21 @@ liveTrellisTest({
       runtime,
     );
     let originalClient:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
     let replacementClient:
-      | ConnectedTrellisClient<typeof fixture.updatedClientContract>
+      | CallerRuntime<typeof fixture.updatedClientContract>
       | undefined;
 
     try {
-      const replacementUser = await admin.rpc.auth.usersCreate({
+      const replacementUser = await admin.authUsersCreate({
         username: alternateUsername,
         name: "Replacement Local Login Admin",
         email: `${alternateUsername}@example.test`,
         active: true,
         capabilityGroups: ["admin"],
       }).orThrow();
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: replacementUser.user.userId,
       }).orThrow();
       await completeLocalPasswordAccountFlow({
@@ -108,10 +108,10 @@ liveTrellisTest({
         fixture.updatedClientDisplayName,
       );
 
-      const me = await replacementClient.rpc.auth.sessionsMe({}).orThrow();
+      const me = await replacementClient.authSessionsMe({}).orThrow();
       assertEquals(me.user?.userId, replacementUser.user.userId);
       await waitFor(async () => {
-        const result = await originalClient!.rpc.auth.sessionsMe({});
+        const result = await originalClient!.authSessionsMe({});
         return result.isErr();
       });
     } finally {
@@ -127,7 +127,7 @@ async function appSessionFor(
   admin: SessionAdminClient,
   sessionKey: string,
 ): Promise<AppSession> {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry): entry is AppSession =>
     entry.participantKind === "app" && entry.sessionKey === sessionKey
   );
@@ -192,7 +192,7 @@ async function completeLocalLoginFlow(args: {
   assert(isRecord(state), "expected portal flow state response object");
   if (state.status === "insufficient_capabilities") {
     const missingCapabilities = stringArray(state.missingCapabilities);
-    await args.admin.rpc.auth.usersUpdate({
+    await args.admin.authUsersUpdate({
       userId: args.userId,
       capabilities: [...new Set(["admin", ...missingCapabilities])].sort(),
     }).orThrow();

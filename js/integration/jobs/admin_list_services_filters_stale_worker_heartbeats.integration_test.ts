@@ -2,7 +2,7 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 import { join } from "@std/path";
 import { connect, credsAuthenticator } from "@nats-io/transport-deno";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import * as trellisJobs from "@qlever-llc/trellis/sdk/jobs";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -18,11 +18,7 @@ const adminClientContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.jobs-admin-client", CASE_ID),
   displayName: `Trellis Integration Jobs Admin Client (${fixture.slug})`,
   description: "Uses Jobs admin ListServices for worker-presence coverage.",
-  uses: {
-    required: {
-      jobs: trellisJobs.use({ rpc: { call: ["Jobs.ListServices"] } }),
-    },
-  },
+  uses: [trellisJobs.JobsListServices],
 }));
 
 const freshService = fixture.serviceName;
@@ -72,7 +68,7 @@ liveTrellisTest({
       await nc.flush();
 
       const page = await runtime.waitFor(async () => {
-        const current = await adminClient.rpc.jobs.listServices({ limit: 20 })
+        const current = await adminClient.jobsListServices({ limit: 20 })
           .orThrow();
         return current.entries.some((entry) =>
             entry.name === freshService &&
@@ -94,10 +90,10 @@ liveTrellisTest({
       assertEquals(freshEntry.workers[0]?.service, freshService);
       assertEquals(freshEntry.workers[0]?.jobType, jobType);
 
-      const firstPage = await adminClient.rpc.jobs.listServices({ limit: 1 })
+      const firstPage = await adminClient.jobsListServices({ limit: 1 })
         .orThrow();
       assert(firstPage.count >= 2);
-      const secondPage = await adminClient.rpc.jobs.listServices({
+      const secondPage = await adminClient.jobsListServices({
         limit: 1,
         offset: firstPage.nextOffset,
       }).orThrow();

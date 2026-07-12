@@ -1,5 +1,18 @@
-import { defineDeviceContract } from "@qlever-llc/trellis";
-import { sdk as trellisDemoService } from "@trellis-sdk/trellis-demo-service";
+import { defineDeviceContract, state } from "@qlever-llc/trellis";
+import {
+  AssignmentsList,
+  AuditRecorded,
+  EvidenceDownload,
+  EvidenceList,
+  EvidenceUpload,
+  EvidenceUploaded,
+  ReportsGenerate,
+  ReportsPublished,
+  SitesGet,
+  SitesList,
+  SitesRefresh,
+  SitesRefreshed,
+} from "@trellis-sdk/trellis-demo-service";
 import { Type } from "typebox";
 
 const schemas = {
@@ -17,29 +30,6 @@ const schemas = {
   }),
 } as const;
 
-const fieldOps = trellisDemoService.use({
-  rpc: {
-    call: [
-      "Assignments.List",
-      "Sites.List",
-      "Sites.Get",
-      "Evidence.List",
-      "Evidence.Download",
-    ],
-  },
-  operations: {
-    call: ["Sites.Refresh", "Reports.Generate", "Evidence.Upload"],
-  },
-  events: {
-    subscribe: [
-      "Audit.Recorded",
-      "Reports.Published",
-      "Evidence.Uploaded",
-      "Sites.Refreshed",
-    ],
-  },
-});
-
 const contract = defineDeviceContract(
   { schemas },
   (ref) => ({
@@ -51,30 +41,41 @@ const contract = defineDeviceContract(
       markdown:
         "Declares the Field Device demo's service usage and local state for selected sites and draft inspections.",
     },
-    uses: {
-      required: { fieldOps },
-    },
-    state: {
-      selectedSite: {
-        kind: "value",
-        schema: ref.schema("SelectedSiteState"),
-        stateVersion: "selected-site.v1",
-        docs: {
-          summary: "Selected site state.",
-          markdown: "Stores the active site selected in the device TUI.",
+    uses: [
+      AssignmentsList,
+      SitesList,
+      SitesGet,
+      EvidenceList,
+      EvidenceDownload,
+      SitesRefresh,
+      ReportsGenerate,
+      EvidenceUpload,
+      AuditRecorded.subscribe,
+      ReportsPublished.subscribe,
+      EvidenceUploaded.subscribe,
+      SitesRefreshed.subscribe,
+      state({
+        selectedSite: {
+          kind: "value",
+          schema: ref.schema("SelectedSiteState"),
+          stateVersion: "selected-site.v1",
+          docs: {
+            summary: "Selected site state.",
+            markdown: "Stores the active site selected in the device TUI.",
+          },
         },
-      },
-      draftInspections: {
-        kind: "map",
-        schema: ref.schema("DraftInspectionState"),
-        stateVersion: "draft-inspection.v1",
-        docs: {
-          summary: "Draft inspection state.",
-          markdown:
-            "Stores editable inspection draft notes keyed by inspection id.",
+        draftInspections: {
+          kind: "map",
+          schema: ref.schema("DraftInspectionState"),
+          stateVersion: "draft-inspection.v1",
+          docs: {
+            summary: "Draft inspection state.",
+            markdown:
+              "Stores editable inspection draft notes keyed by inspection id.",
+          },
         },
-      },
-    },
+      }),
+    ],
   }),
 );
 

@@ -4,10 +4,12 @@
     ClientAuthHandledError,
     TrellisClient,
     type ClientAuthOptions,
-    type ConnectedTrellisClient,
   } from "@qlever-llc/trellis/browser";
   import { onMount } from "svelte";
-  import type { TrellisContractLike } from "../context.svelte.ts";
+  import type {
+    TrellisClientFor,
+    TrellisContractLike,
+  } from "../context.svelte.ts";
   import { resolveTrellisAppUrl } from "../context.svelte.ts";
   import TrellisContextProvider from "./TrellisContextProvider.svelte";
   import type { TrellisProviderProps } from "./TrellisProvider.types.ts";
@@ -26,7 +28,7 @@
 
   type ProviderState = "connecting" | "connected" | "auth_handled" | "failed";
 
-  let trellis = $state<ConnectedTrellisClient<TContract> | null>(null);
+  let trellis = $state<TrellisClientFor<TContract> | null>(null);
   let connectError = $state<unknown>(null);
   let providerState = $state<ProviderState>("connecting");
 

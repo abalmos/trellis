@@ -1,4 +1,9 @@
-import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
+import {
+  defineAppContract,
+  defineServiceContract,
+  kv,
+  store,
+} from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
@@ -33,8 +38,8 @@ export function createResourcesFixture(caseId: string) {
       ),
       displayName: `Trellis Integration Resources Service (${slug})`,
       description: "Exercises service-bound KV and store resource handles.",
-      resources: {
-        kv: {
+      uses: [
+        kv({
           records: {
             purpose: "Store integration resource records",
             schema: ref.schema("ResourceRecord"),
@@ -49,8 +54,8 @@ export function createResourcesFixture(caseId: string) {
             history: 1,
             ttlMs: 0,
           },
-        },
-        store: {
+        }),
+        store({
           blobs: {
             purpose: "Store integration resource blobs",
             required: true,
@@ -65,8 +70,8 @@ export function createResourcesFixture(caseId: string) {
             maxObjectBytes: 1048576,
             maxTotalBytes: 4194304,
           },
-        },
-      },
+        }),
+      ],
       rpc: {
         "Resources.Exercise": {
           version: "v1",
@@ -89,13 +94,7 @@ export function createResourcesFixture(caseId: string) {
     displayName: `Trellis Integration Resources Client (${slug})`,
     description:
       "App/client participant for the resources integration fixture.",
-    uses: {
-      required: {
-        resourcesService: serviceContract.use({
-          rpc: { call: ["Resources.Exercise"] },
-        }),
-      },
-    },
+    uses: [serviceContract.ResourcesExercise],
   }));
 
   const serviceName = caseScopedName("resources-fixture-service", caseId);

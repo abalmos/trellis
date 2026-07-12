@@ -5,7 +5,7 @@ import {
   defineServiceContract,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   base64urlEncode,
   createAuth,
@@ -58,22 +58,14 @@ const deviceAdminContract = defineAppContract(() => ({
   displayName: "Trellis Bootstrap Non-Client Device Admin",
   description:
     "Admin app used to make a device contract known for bootstrap rejection coverage.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.DeploymentAuthority.AcceptMigration",
-            "Auth.DeploymentAuthority.AcceptUpdate",
-            "Auth.DeploymentAuthority.Get",
-            "Auth.DeploymentAuthority.Plan",
-            "Auth.DeploymentAuthority.Reconcile",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentAuthorityAcceptMigration,
+    trellisAuth.AuthDeploymentAuthorityAcceptUpdate,
+    trellisAuth.AuthDeploymentAuthorityGet,
+    trellisAuth.AuthDeploymentAuthorityPlan,
+    trellisAuth.AuthDeploymentAuthorityReconcile,
+  ],
 }));
 
 const deviceContract = defineDeviceContract(() => ({
@@ -109,28 +101,28 @@ async function approveDeviceContract(
   });
   try {
     const deploymentId = caseScopedName("bootstrap-non-client-device", CASE_ID);
-    await admin.rpc.auth.deploymentsCreate({
+    await admin.authDeploymentsCreate({
       deploymentId,
       kind: "device",
       reviewMode: "none",
     }).orThrow();
-    const planned = await admin.rpc.auth.deploymentAuthorityPlan({
+    const planned = await admin.authDeploymentAuthorityPlan({
       deploymentId,
       contract: deviceContract.CONTRACT,
       expectedDigest: deviceContract.CONTRACT_DIGEST,
     }).orThrow();
     const plan = planned.plan as { classification: string; planId: string };
     if (plan.classification === "update") {
-      await admin.rpc.auth.deploymentAuthorityAcceptUpdate({
+      await admin.authDeploymentAuthorityAcceptUpdate({
         planId: plan.planId,
       }).orThrow();
     } else {
-      await admin.rpc.auth.deploymentAuthorityAcceptMigration({
+      await admin.authDeploymentAuthorityAcceptMigration({
         planId: plan.planId,
         acknowledgement: "Approved by bootstrap non-client integration test.",
       }).orThrow();
     }
-    await admin.rpc.auth.deploymentAuthorityReconcile({ deploymentId })
+    await admin.authDeploymentAuthorityReconcile({ deploymentId })
       .orThrow();
   } finally {
     await admin.connection.close().catch(() => undefined);
@@ -139,7 +131,14 @@ async function approveDeviceContract(
 
 async function assertRejectedNonClientDigest(
   runtime: LiveTrellisRuntime,
-  contract: typeof serviceContract,
+  contract: {
+    readonly CONTRACT_DIGEST: string;
+    readonly CONTRACT: {
+      readonly id: string;
+      readonly displayName: string;
+      readonly description: string;
+    };
+  },
 ): Promise<void> {
   const sqlite = runtime.controlPlane?.sqlite;
   assert(sqlite, "live runtime must expose control-plane SQLite");

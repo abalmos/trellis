@@ -1,26 +1,19 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import {
-    CONTRACT as TRELLIS_AUTH_CONTRACT,
-    CONTRACT_DIGEST as TRELLIS_AUTH_DIGEST,
-  } from "@qlever-llc/trellis/sdk/auth";
+    TRELLIS_AUTH_CONTRACT,
+    TRELLIS_AUTH_DIGEST,
+    TRELLIS_CORE_CONTRACT,
+    TRELLIS_CORE_DIGEST,
+    TRELLIS_HEALTH_CONTRACT,
+    TRELLIS_HEALTH_DIGEST,
+    TRELLIS_JOBS_CONTRACT,
+    TRELLIS_JOBS_DIGEST,
+    TRELLIS_STATE_CONTRACT,
+    TRELLIS_STATE_DIGEST,
+  } from "$lib/contract-manifests";
   import type { TrellisCatalogOutput } from "@qlever-llc/trellis/sdk/core";
-  import {
-    CONTRACT as TRELLIS_CORE_CONTRACT,
-    CONTRACT_DIGEST as TRELLIS_CORE_DIGEST,
-  } from "@qlever-llc/trellis/sdk/core";
-  import {
-    CONTRACT as TRELLIS_HEALTH_CONTRACT,
-    CONTRACT_DIGEST as TRELLIS_HEALTH_DIGEST,
-  } from "@qlever-llc/trellis/sdk/health";
-  import {
-    CONTRACT as TRELLIS_JOBS_CONTRACT,
-    CONTRACT_DIGEST as TRELLIS_JOBS_DIGEST,
-  } from "@qlever-llc/trellis/sdk/jobs";
-  import {
-    CONTRACT as TRELLIS_STATE_CONTRACT,
-    CONTRACT_DIGEST as TRELLIS_STATE_DIGEST,
-  } from "@qlever-llc/trellis/sdk/state";
+  import { parseContractManifest, type TrellisContractV1 } from "@qlever-llc/trellis/contracts";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -32,7 +25,7 @@
   import { getTrellis } from "../../../../../lib/trellis";
 
   type CatalogContract = TrellisCatalogOutput["catalog"]["contracts"][number];
-  type ContractDetail = typeof TRELLIS_CORE_CONTRACT;
+  type ContractDetail = TrellisContractV1;
   type ContractEntry = {
     digest: string;
     id: string;
@@ -56,7 +49,6 @@
   ];
 
   const trellis = getTrellis();
-  const coreRequest = trellis.request.bind(trellis) as CoreRequest;
 
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -108,16 +100,16 @@
 
   async function hydrateCatalogEntry(entry: ContractEntry): Promise<ContractEntry> {
     if (entry.contract) return entry;
-    const response = await coreRequest("Trellis.Contract.Get", { digest: entry.digest }).take();
+    const response = await trellis.trellisContractGet({ digest: entry.digest }).take();
     if (isErr(response)) return entry;
-    return contractEntry(entry.digest, response.contract);
+    return contractEntry(entry.digest, parseContractManifest(response.contract));
   }
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const response = await coreRequest("Trellis.Catalog", {}).take();
+      const response = await trellis.trellisCatalog({}).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const catalogEntries = (response.catalog.contracts ?? []).map(catalogContractEntry);
       contracts = await Promise.all(mergeContractEntries([

@@ -32,7 +32,7 @@ liveTrellisTest({
     let handlerCalled = false;
 
     try {
-      await service.handle.rpc.validation.mixed(() => {
+      await service.handleValidationMixed(() => {
         handlerCalled = true;
         return Result.ok({ success: true });
       });
@@ -42,7 +42,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.validation.mixed({
+      const result = await client.validationMixed({
         items: [],
         name: "ab",
       });

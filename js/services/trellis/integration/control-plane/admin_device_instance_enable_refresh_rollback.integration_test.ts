@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,21 +24,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Device Instance Enable Rollback Admin",
   description:
     "Exercises Auth device instance enable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Devices.Disable",
-            "Auth.Devices.Enable",
-            "Auth.Devices.List",
-            "Auth.Devices.Provision",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDevicesDisable,
+    trellisAuth.AuthDevicesEnable,
+    trellisAuth.AuthDevicesList,
+    trellisAuth.AuthDevicesProvision,
+  ],
 }));
 
 liveTrellisTest({
@@ -52,19 +44,19 @@ liveTrellisTest({
       contract: adminContract,
     });
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "device",
         deploymentId,
         reviewMode: "none",
       }).orThrow();
-      const provisioned = await admin.rpc.auth.devicesProvision({
+      const provisioned = await admin.authDevicesProvision({
         deploymentId,
         publicIdentityKey: caseScopedName("enable-device-key", CASE_ID),
         activationKey: caseScopedName("enable-activation-key", CASE_ID),
         metadata: { name: caseScopedName("enable-device", CASE_ID) },
       }).orThrow();
       instanceId = provisioned.instance.instanceId;
-      await admin.rpc.auth.devicesDisable({ instanceId }).orThrow();
+      await admin.authDevicesDisable({ instanceId }).orThrow();
     } finally {
       await admin.connection.close().catch(() => undefined);
     }
@@ -79,12 +71,12 @@ liveTrellisTest({
       contract: adminContract,
     });
     try {
-      const failedEnable = await restartedAdmin.rpc.auth.devicesEnable({
+      const failedEnable = await restartedAdmin.authDevicesEnable({
         instanceId,
       });
       assertRefreshHookFailure(failedEnable, refreshHook);
 
-      const page = await restartedAdmin.rpc.auth.devicesList({
+      const page = await restartedAdmin.authDevicesList({
         deploymentId,
         limit: 500,
       }).orThrow();

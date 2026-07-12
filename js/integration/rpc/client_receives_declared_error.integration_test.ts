@@ -25,16 +25,15 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await service.handle.rpc.entity.get(({ input }) =>
-        Result.err(new fixture.NotFoundError({ entityId: input.id }))
-      );
+      await service.handleEntityGet(({ input }) =>
+        Result.err(new fixture.NotFoundError({ entityId: input.id })));
 
       const client = await runtime.connectClient({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.entity.get({ id: fixture.entityId });
+      const result = await client.entityGet({ id: fixture.entityId });
       assert(result.isErr());
       assertInstanceOf(result.error, fixture.NotFoundError);
       const serialized = result.error.toSerializable();

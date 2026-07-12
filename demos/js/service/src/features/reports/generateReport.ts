@@ -105,7 +105,7 @@ export const generateReport: OperationHandler<
     siteId: inspection?.siteId,
     publishedAt,
   };
-  await client.event.reports.published.publish(reportsPublishedEvent).orThrow();
+  await client.publishReportsPublished(reportsPublishedEvent).orThrow();
   recordReport(report);
   await recordActivity(client, {
     kind: "closeout-published",

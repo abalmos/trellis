@@ -1,6 +1,5 @@
-import type { TrellisFor } from "@qlever-llc/trellis";
 import { ulid } from "ulid";
-import type contract from "../../../contract.ts";
+import type { FieldOpsHandlerClient } from "../../deps.ts";
 
 type ActivityInput = {
   kind: string;
@@ -11,11 +10,11 @@ type ActivityInput = {
 
 /** Publishes a compact activity event for demo workflows. */
 export async function recordActivity(
-  client: TrellisFor<typeof contract>,
+  client: FieldOpsHandlerClient,
   activity: ActivityInput,
 ): Promise<void> {
   const occurredAt = new Date().toISOString();
-  await client.event.audit.recorded.publish({
+  await client.publishAuditRecorded({
     activityId: `activity-${ulid()}`,
     occurredAt,
     ...activity,

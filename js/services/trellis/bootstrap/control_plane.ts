@@ -2,8 +2,8 @@ import {
   digestContractManifest,
   type TrellisContractV1,
 } from "@qlever-llc/trellis/contracts";
-import { CONTRACT as trellisHealthContract } from "@qlever-llc/trellis/sdk/health";
-import { CONTRACT as trellisJobsContract } from "@qlever-llc/trellis/sdk/jobs";
+import { CONTRACT as trellisHealthContract } from "@qlever-llc/trellis/sdk/health/manifest";
+import { CONTRACT as trellisJobsContract } from "@qlever-llc/trellis/sdk/jobs/manifest";
 
 import { createServiceLookup } from "../auth/admin/service_lookup.ts";
 import {

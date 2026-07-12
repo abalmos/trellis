@@ -38,7 +38,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Deployments.List", { kind: "device", limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeploymentsList({ kind: "device", limit: 500, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
       const loadedActiveDeployments = loadedDeployments.filter((deployment) => !deployment.disabled);
@@ -87,9 +87,7 @@
     error = null;
     try {
       const metadata = parseProvisionMetadata();
-      const response = await trellis.request(
-        "Auth.Devices.Provision",
-        {
+      const response = await trellis.authDevicesProvision({
           deploymentId: provisionDeploymentId,
           publicIdentityKey: publicIdentityKey.trim(),
           activationKey: activationKey.trim(),

@@ -48,7 +48,7 @@
     loading = true;
     error = null;
     try {
-      const portalsResponse = await trellis.request("Auth.Portals.List", { limit: 500, offset: 0 }).take();
+      const portalsResponse = await trellis.authPortalsList({ limit: 500, offset: 0 }).take();
       if (isErr(portalsResponse)) {
         error = errorMessage(portalsResponse);
         return;
@@ -67,7 +67,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.request("Auth.Portals.Remove", { portalId: portal.portalId }).take();
+      const response = await trellis.authPortalsRemove({ portalId: portal.portalId }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;

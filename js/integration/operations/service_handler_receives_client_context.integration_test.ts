@@ -14,21 +14,19 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.operation.entity.process(
-        ({ input, caller, client }) => {
-          assertExists(client);
-          assertExists(caller);
-          assertEquals(input.message, fixture.message);
-          assert(caller.active, "operation caller should be active");
-          return Result.ok({ message: caller.type, done: true });
-        },
-      );
+      await service.handleEntityProcess(({ input, caller, client }) => {
+        assertExists(client);
+        assertExists(caller);
+        assertEquals(input.message, fixture.message);
+        assert(caller.active, "operation caller should be active");
+        return Result.ok({ message: caller.type, done: true });
+      },);
 
       const client = await runtime.connectClient({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

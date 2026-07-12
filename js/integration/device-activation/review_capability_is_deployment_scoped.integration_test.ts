@@ -5,7 +5,7 @@ import {
   defineAppContract,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { createDeviceActivationFixture } from "./_fixture.ts";
@@ -20,18 +20,10 @@ const reviewerContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Integration Device Activation Scoped Reviewer",
   description: "Scoped reviewer for device activation integration coverage.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.DeviceUserAuthorities.Reviews.Decide",
-            "Auth.DeviceUserAuthorities.Reviews.List",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeviceUserAuthoritiesReviewsDecide,
+    trellisAuth.AuthDeviceUserAuthoritiesReviewsList,
+  ],
 }));
 const reviewerUsername = caseScopedName(
   "device-activation-scoped-reviewer",
@@ -66,17 +58,15 @@ liveTrellisTest({
       otherDevice.identity,
     );
 
-    const ownResolve = await admin.operation.auth.deviceUserAuthoritiesResolve
-      .input({ flowId: ownActivation.flowId }).start().orThrow();
-    const otherResolve = await admin.operation.auth.deviceUserAuthoritiesResolve
-      .input({ flowId: otherActivation.flowId }).start().orThrow();
+    const ownResolve = await admin.authDeviceUserAuthoritiesResolve({ flowId: ownActivation.flowId }).start().orThrow();
+    const otherResolve = await admin.authDeviceUserAuthoritiesResolve({ flowId: otherActivation.flowId }).start().orThrow();
     const waitForReview = async (
       deploymentId: string,
       instanceId: string,
       publicIdentityKey: string,
     ) => {
       return await runtime.waitFor(async () => {
-        const reviews = await admin.rpc.auth.deviceUserAuthoritiesReviewsList({
+        const reviews = await admin.authDeviceUserAuthoritiesReviewsList({
           deploymentId,
           instanceId,
           state: "pending",
@@ -100,7 +90,7 @@ liveTrellisTest({
       otherDevice.identity.publicIdentityKey,
     );
 
-    const adminReviews = await admin.rpc.auth.deviceUserAuthoritiesReviewsList({
+    const adminReviews = await admin.authDeviceUserAuthoritiesReviewsList({
       state: "pending",
       limit: 20,
     }).orThrow();
@@ -118,7 +108,7 @@ liveTrellisTest({
     );
 
     const scopedCapability = `trellis.auth::device.review.${ownDeploymentId}`;
-    const reviewerUser = await admin.rpc.auth.usersCreate({
+    const reviewerUser = await admin.authUsersCreate({
       username: reviewerUsername,
       name: "Device Activation Scoped Reviewer",
       email: `${reviewerUsername}@example.test`,
@@ -126,7 +116,7 @@ liveTrellisTest({
       capabilities: [scopedCapability],
       capabilityGroups: [],
     }).orThrow();
-    const reset = await admin.rpc.auth.usersPasswordResetCreate({
+    const reset = await admin.authUsersPasswordResetCreate({
       userId: reviewerUser.user.userId,
     }).orThrow();
     await completeLocalPasswordAccountFlow({
@@ -157,8 +147,7 @@ liveTrellisTest({
         }),
     }).orThrow();
     try {
-      const scopedReviews = await reviewer.rpc.auth
-        .deviceUserAuthoritiesReviewsList({ state: "pending", limit: 20 })
+      const scopedReviews = await reviewer.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 20 })
         .orThrow();
       assert(
         scopedReviews.entries.some((entry) =>
@@ -173,22 +162,19 @@ liveTrellisTest({
         "scoped reviewer should not see other deployment reviews",
       );
 
-      const denied = await reviewer.rpc.auth.deviceUserAuthoritiesReviewsDecide(
-        {
-          reviewId: otherReview.reviewId,
-          decision: "approve",
-        },
-      );
+      const denied = await reviewer.authDeviceUserAuthoritiesReviewsDecide({
+        reviewId: otherReview.reviewId,
+        decision: "approve",
+      },);
       assert(
         denied.isErr(),
         "scoped reviewer must not decide other deployment",
       );
 
-      const decided = await reviewer.rpc.auth
-        .deviceUserAuthoritiesReviewsDecide({
-          reviewId: ownReview.reviewId,
-          decision: "approve",
-        }).orThrow();
+      const decided = await reviewer.authDeviceUserAuthoritiesReviewsDecide({
+        reviewId: ownReview.reviewId,
+        decision: "approve",
+      }).orThrow();
       assertEquals(decided.review.state, "approved");
       assertEquals(decided.review.deploymentId, ownDeploymentId);
 

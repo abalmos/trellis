@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import type { AuthIdentityGrantsListOutput } from "@qlever-llc/trellis/sdk/auth";
@@ -52,19 +52,19 @@ liveTrellisTest({
     const firstAgentAuth = runtime.clientAuth(firstAgentRegistration);
     const secondAgentAuth = runtime.clientAuth(secondAgentRegistration);
     let firstApp:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
     let secondApp:
-      | ConnectedTrellisClient<typeof fixture.clientContract>
+      | CallerRuntime<typeof fixture.clientContract>
       | undefined;
     let firstAgent:
-      | ConnectedTrellisClient<typeof fixture.agentContract>
+      | CallerRuntime<typeof fixture.agentContract>
       | undefined;
     let secondAgent:
-      | ConnectedTrellisClient<typeof fixture.agentContract>
+      | CallerRuntime<typeof fixture.agentContract>
       | undefined;
     let nonOwner:
-      | ConnectedTrellisClient<typeof fixture.sessionAdminContract>
+      | CallerRuntime<typeof fixture.sessionAdminContract>
       | undefined;
 
     try {
@@ -99,17 +99,17 @@ liveTrellisTest({
           await secondAgentAuth.onAuthRequired(ctx),
       }).orThrow();
 
-      await firstApp.rpc.authLogin.ping({ message: `${fixture.pingMessage}-1` })
+      await firstApp.authLoginPing({ message: `${fixture.pingMessage}-1` })
         .orThrow();
-      await secondApp.rpc.authLogin.ping({
+      await secondApp.authLoginPing({
         message: `${fixture.pingMessage}-2`,
       })
         .orThrow();
-      await firstAgent.rpc.authLogin.ping({
+      await firstAgent.authLoginPing({
         message: `${fixture.pingMessage}-agent-1`,
       })
         .orThrow();
-      await secondAgent.rpc.authLogin.ping({
+      await secondAgent.authLoginPing({
         message: `${fixture.pingMessage}-agent-2`,
       })
         .orThrow();
@@ -148,16 +148,16 @@ liveTrellisTest({
       );
 
       nonOwner = await connectNonOwnerAdmin(runtime, admin);
-      const denied = await nonOwner.rpc.auth.identityGrantsRevoke({
+      const denied = await nonOwner.authIdentityGrantsRevoke({
         identityGrantId: appIdentityGrantId,
       });
       assert(denied.isErr(), "expected non-owner grant revoke to be denied");
 
-      const appRevoked = await admin.rpc.auth.identityGrantsRevoke({
+      const appRevoked = await admin.authIdentityGrantsRevoke({
         identityGrantId: appIdentityGrantId,
       }).orThrow();
       assertEquals(appRevoked.success, true);
-      const agentRevoked = await admin.rpc.auth.identityGrantsRevoke({
+      const agentRevoked = await admin.authIdentityGrantsRevoke({
         identityGrantId: agentIdentityGrantId,
       }).orThrow();
       assertEquals(agentRevoked.success, true);
@@ -182,10 +182,10 @@ liveTrellisTest({
         await listGrant(admin, agentIdentityGrantId) === undefined
       );
       await waitFor(async () =>
-        (await firstApp!.rpc.auth.sessionsMe({})).isErr() &&
-        (await secondApp!.rpc.auth.sessionsMe({})).isErr() &&
-        (await firstAgent!.rpc.auth.sessionsMe({})).isErr() &&
-        (await secondAgent!.rpc.auth.sessionsMe({})).isErr()
+        (await firstApp!.authSessionsMe({})).isErr() &&
+        (await secondApp!.authSessionsMe({})).isErr() &&
+        (await firstAgent!.authSessionsMe({})).isErr() &&
+        (await secondAgent!.authSessionsMe({})).isErr()
       );
     } finally {
       await nonOwner?.connection.close().catch(() => undefined);
@@ -211,14 +211,14 @@ async function connectNonOwnerAdmin(
   runtime: LiveTrellisRuntime,
   admin: SessionAdminClient,
 ) {
-  const user = await admin.rpc.auth.usersCreate({
+  const user = await admin.authUsersCreate({
     username: nonOwnerUsername,
     name: "Identity Grant Revoke Non Owner",
     email: `${nonOwnerUsername}@example.test`,
     active: true,
     capabilityGroups: ["admin"],
   }).orThrow();
-  const reset = await admin.rpc.auth.usersPasswordResetCreate({
+  const reset = await admin.authUsersPasswordResetCreate({
     userId: user.user.userId,
   }).orThrow();
   await completeLocalPasswordAccountFlow({
@@ -259,7 +259,7 @@ async function userSessionFor(
   sessionKey: string,
   participantKind: "app" | "agent",
 ) {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry) =>
     entry.participantKind === participantKind && entry.sessionKey === sessionKey
   );
@@ -275,7 +275,7 @@ async function waitForSessionAbsent(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     return sessions.entries.every((entry) => entry.sessionKey !== sessionKey);
   });
@@ -286,7 +286,7 @@ async function waitForConnection(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const connections = await admin.rpc.auth.connectionsList({
+    const connections = await admin.authConnectionsList({
       sessionKey,
       limit: 500,
     }).orThrow();
@@ -299,7 +299,7 @@ async function waitForConnectionsAbsent(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const connections = await admin.rpc.auth.connectionsList({
+    const connections = await admin.authConnectionsList({
       sessionKey,
       limit: 500,
     }).orThrow();
@@ -311,7 +311,7 @@ async function listGrant(
   admin: SessionAdminClient,
   identityGrantId: string,
 ): Promise<IdentityGrant | undefined> {
-  const grants = await admin.rpc.auth.identityGrantsList({ limit: 500 })
+  const grants = await admin.authIdentityGrantsList({ limit: 500 })
     .orThrow();
   return grants.entries.find((entry) =>
     entry.identityGrantId === identityGrantId
@@ -405,7 +405,7 @@ async function completeLocalLoginFlow(args: {
   assert(isRecord(state), "expected portal flow state response object");
   if (state.status === "insufficient_capabilities") {
     const missingCapabilities = stringArray(state.missingCapabilities);
-    await args.admin.rpc.auth.usersUpdate({
+    await args.admin.authUsersUpdate({
       userId: args.userId,
       capabilities: [...new Set(["admin", ...missingCapabilities])].sort(),
     }).orThrow();

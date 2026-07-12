@@ -61,16 +61,10 @@ export function createEventsFixture(caseId: string) {
     displayName: `Trellis Integration Events PubSub Client (${slug})`,
     description:
       "App/client participant with event publish and subscribe authority.",
-    uses: {
-      required: {
-        eventsService: serviceContract.use({
-          events: {
-            publish: ["Entity.Changed"],
-            subscribe: ["Entity.Changed"],
-          },
-        }),
-      },
-    },
+    uses: [
+      serviceContract.EntityChanged.publish,
+      serviceContract.EntityChanged.subscribe,
+    ],
   }));
 
   const subscribeOnlyClientContract = defineAppContract(() => ({
@@ -80,13 +74,7 @@ export function createEventsFixture(caseId: string) {
     ),
     displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
     description: "App/client participant without event publish authority.",
-    uses: {
-      required: {
-        eventsService: serviceContract.use({
-          events: { subscribe: ["Entity.Changed"] },
-        }),
-      },
-    },
+    uses: [serviceContract.EntityChanged.subscribe],
   }));
 
   const publishOnlyClientContract = defineAppContract(() => ({
@@ -96,13 +84,7 @@ export function createEventsFixture(caseId: string) {
     ),
     displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
     description: "App/client participant without event subscribe authority.",
-    uses: {
-      required: {
-        eventsService: serviceContract.use({
-          events: { publish: ["Entity.Changed"] },
-        }),
-      },
-    },
+    uses: [serviceContract.EntityChanged.publish],
   }));
 
   return {

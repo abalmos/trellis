@@ -21,7 +21,7 @@ import {
   type HealthCheckResult,
   runAllHealthChecks,
   runHealthCheck,
-  ServiceHealth,
+  ServiceHealthRuntime,
 } from "./health.ts";
 import { HealthResponseSchema } from "./health_schemas.ts";
 import { HealthHeartbeatSampleSchema } from "../sdk/_generated/health/schemas.ts";
@@ -299,7 +299,7 @@ Deno.test("healthHeartbeatSubject encodes authoritative identity tokens", () => 
 });
 
 Deno.test("ServiceHealth aggregates registered checks and info", async () => {
-  const health = new ServiceHealth({
+  const health = new ServiceHealthRuntime({
     serviceName: "activity",
     contractId: "trellis.audit@v1",
     contractDigest: "digest",

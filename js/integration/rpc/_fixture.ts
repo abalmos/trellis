@@ -119,19 +119,11 @@ export function createRpcFixture(caseId: string) {
     id: caseScopedContractId("trellis.integration.rpc-client", caseId),
     displayName: `Trellis Integration RPC Client (${slug})`,
     description: "App/client participant for the RPC integration fixture.",
-    uses: {
-      required: {
-        rpcService: serviceContract.use({
-          rpc: {
-            call: [
-              "Entity.Get",
-              "Validation.Annotated",
-              "Validation.Mixed",
-            ],
-          },
-        }),
-      },
-    },
+    uses: [
+      serviceContract.EntityGet,
+      serviceContract.ValidationAnnotated,
+      serviceContract.ValidationMixed,
+    ],
   }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
@@ -141,11 +133,6 @@ export function createRpcFixture(caseId: string) {
     ),
     displayName: `Trellis Integration Unauthorized RPC Client (${slug})`,
     description: "App/client without rpc.call authority for Entity.Get.",
-    uses: {
-      required: {
-        rpcService: serviceContract.use({}),
-      },
-    },
   }));
 
   return {

@@ -65,13 +65,7 @@ const clientContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Catalog Restart Client",
   description:
     "Verifies active app contract authority remains usable after restart.",
-  uses: {
-    required: {
-      catalogRestartService: serviceContract.use({
-        rpc: { call: ["CatalogRestart.Ping"] },
-      }),
-    },
-  },
+  uses: [serviceContract.CatalogRestartPing],
 }));
 
 const serviceName = caseScopedName("catalog-restart-service", CASE_ID);
@@ -103,7 +97,7 @@ liveTrellisTest({
 
     try {
       assertEquals(
-        await client.rpc.catalogRestart.ping({ message: "before" }).orThrow(),
+        await client.catalogRestartPing({ message: "before" }).orThrow(),
         { message: "before", generation: 1 },
       );
 
@@ -121,7 +115,7 @@ liveTrellisTest({
       }).orThrow();
 
       assertEquals(
-        await client.rpc.catalogRestart.ping({ message: "after" }).orThrow(),
+        await client.catalogRestartPing({ message: "after" }).orThrow(),
         { message: "after", generation: 2 },
       );
     } finally {
@@ -144,7 +138,7 @@ async function connectService(
     telemetry: false,
     server: { log: false },
   }).orThrow();
-  service.handle.rpc.catalogRestart.ping(({ input }) =>
+  service.handleCatalogRestartPing(({ input }) =>
     Result.ok({ message: input.message, generation })
   );
   return service;

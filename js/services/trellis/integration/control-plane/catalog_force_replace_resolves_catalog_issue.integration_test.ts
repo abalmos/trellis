@@ -5,8 +5,8 @@ import {
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
-import { sdk as trellisCore } from "@qlever-llc/trellis/sdk/core.ts";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import * as trellisCore from "@qlever-llc/trellis/sdk/core.ts";
 import type { TrellisCatalogOutput } from "@qlever-llc/trellis/sdk/core.ts";
 import { Type } from "typebox";
 import {
@@ -88,13 +88,7 @@ const baseClientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Catalog Force Replace Base Client",
   description: "Calls the base force-replace probe service contract.",
-  uses: {
-    required: {
-      forceReplaceService: baseServiceContract.use({
-        rpc: { call: ["CatalogForce.Ping"] },
-      }),
-    },
-  },
+  uses: [baseServiceContract.CatalogForcePing],
 }));
 
 const catalogAdminContract = defineAppContract(() => ({
@@ -105,14 +99,7 @@ const catalogAdminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Catalog Force Replace Admin Client",
   description:
     "Observes the public catalog and invokes catalog issue resolution through generated admin RPCs.",
-  uses: {
-    required: {
-      core: trellisCore.use({ rpc: { call: ["Trellis.Catalog"] } }),
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.CatalogIssues.Resolve"] },
-      }),
-    },
-  },
+  uses: [trellisCore.TrellisCatalog, trellisAuth.AuthCatalogIssuesResolve],
 }));
 
 const baseDeploymentId = caseScopedName(
@@ -171,7 +158,7 @@ liveTrellisTest({
     let replacementService: { stop(): Promise<void> } | undefined;
 
     try {
-      baseService.handle.rpc.catalogForce.ping(({ input }) =>
+      baseService.handleCatalogForcePing(({ input }) =>
         Result.ok({ message: input.message, variant: "base" })
       );
 
@@ -181,7 +168,7 @@ liveTrellisTest({
       });
       try {
         assertEquals(
-          await baseClient.rpc.catalogForce.ping({ message: "before" })
+          await baseClient.catalogForcePing({ message: "before" })
             .orThrow(),
           { message: "before", variant: "base" },
         );
@@ -203,12 +190,12 @@ liveTrellisTest({
         server: { log: false },
       }).orThrow();
       replacementService = connectedReplacementService;
-      connectedReplacementService.handle.rpc.catalogForce.ping(({ input }) =>
+      connectedReplacementService.handleCatalogForcePing(({ input }) =>
         Result.ok({ count: input.count, variant: "replacement" })
       );
 
       const issue = await runtime.waitFor(async () => {
-        const catalog = await catalogAdmin.rpc.trellis.catalog({}).orThrow();
+        const catalog = await catalogAdmin.trellisCatalog({}).orThrow();
         return findForceReplaceIssue(catalog) ?? false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(issue.digest, replacementServiceContract.CONTRACT_DIGEST);
@@ -221,7 +208,7 @@ liveTrellisTest({
       );
 
       assertEquals(
-        await catalogAdmin.rpc.auth.catalogIssuesResolve({
+        await catalogAdmin.authCatalogIssuesResolve({
           issueId: issue.issueId,
           action: "force-replace",
         }).orThrow(),
@@ -233,7 +220,7 @@ liveTrellisTest({
       );
 
       const postResolve = await runtime.waitFor(async () => {
-        const catalog = await catalogAdmin.rpc.trellis.catalog({}).orThrow();
+        const catalog = await catalogAdmin.trellisCatalog({}).orThrow();
         return findForceReplaceIssue(catalog) === undefined ? catalog : false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(findForceReplaceIssue(postResolve), undefined);

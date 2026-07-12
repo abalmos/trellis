@@ -26,7 +26,7 @@ liveTrellisTest({
     const cancelledMessage = `${fixture.message}:cancelled`;
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         if (input.message === failedMessage) {
           await op.fail(new UnexpectedError({ cause: new Error("boom") }))
@@ -47,7 +47,7 @@ liveTrellisTest({
       });
 
       const callbackOrder: string[] = [];
-      const callbackRef = await client.operation.entity.process.input({
+      const callbackRef = await client.entityProcess({
         message: callbackMessage,
       })
         .onAccepted((event) => {
@@ -78,7 +78,7 @@ liveTrellisTest({
           callbackOrder.indexOf("completed:event"),
       );
 
-      const resumed = client.operation.entity.process.resume({
+      const resumed = client.entityProcess.resume({
         id: callbackRef.id,
         service: callbackRef.service,
         operation: callbackRef.operation,
@@ -88,7 +88,7 @@ liveTrellisTest({
       assertEquals(resumedSnapshot.output, callbackTerminal.output);
 
       const failedCallbacks: string[] = [];
-      const failedRef = await client.operation.entity.process.input({
+      const failedRef = await client.entityProcess({
         message: failedMessage,
       })
         .onFailed((event) => {
@@ -100,7 +100,7 @@ liveTrellisTest({
         .start().orThrow();
       const failedTerminal = await failedRef.wait().orThrow();
       assertEquals(failedTerminal.state, "failed");
-      const resumedFailed = client.operation.entity.process.resume({
+      const resumedFailed = client.entityProcess.resume({
         id: failedRef.id,
         service: failedRef.service,
         operation: failedRef.operation,
@@ -113,7 +113,7 @@ liveTrellisTest({
       );
 
       const cancelledCallbacks: string[] = [];
-      const cancelledRef = await client.operation.entity.process.input({
+      const cancelledRef = await client.entityProcess({
         message: cancelledMessage,
       })
         .onCancelled((event) => {
@@ -128,7 +128,7 @@ liveTrellisTest({
       cancelledGate.resolve();
       const cancelledTerminal = await cancelledRef.wait().orThrow();
       assertEquals(cancelledTerminal.state, "cancelled");
-      const resumedCancelled = client.operation.entity.process.resume({
+      const resumedCancelled = client.entityProcess.resume({
         id: cancelledRef.id,
         service: cancelledRef.service,
         operation: cancelledRef.operation,

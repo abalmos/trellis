@@ -1,5 +1,7 @@
 import {
   type AuthConfig,
+  type BrowserAuthRecoveryClassification,
+  type BrowserAuthRecoveryKind,
   type BrowserPortalFlowState as PortalFlowState,
   fetchPortalFlowState,
   portalFlowIdFromUrl,
@@ -11,12 +13,7 @@ export type CreatePortalFlowConfig = AuthConfig & {
   getUrl?: () => URL;
 };
 
-export type PortalFlowErrorClassification = {
-  kind: string;
-  recoverable: boolean;
-  reason?: string;
-  code?: string;
-};
+export type PortalFlowErrorClassification = BrowserAuthRecoveryClassification;
 
 type ErrorSignal = {
   code?: string;
@@ -99,7 +96,7 @@ function matchingSignal(
 }
 
 function classification(
-  kind: string,
+  kind: BrowserAuthRecoveryKind,
   recoverable: boolean,
   signal?: ErrorSignal,
 ): PortalFlowErrorClassification {

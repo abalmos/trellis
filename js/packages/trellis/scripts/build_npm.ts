@@ -13,6 +13,7 @@ const generatedSdkBuildUrl = new URL(
 const sdkExportDirs: Record<string, string> = {
   auth: "auth",
   core: "trellis-core",
+  eventlog: "eventlog",
   health: "health",
   jobs: "jobs",
   state: "state",
@@ -330,37 +331,6 @@ async function stageCanonicalGeneratedSdkArtifacts() {
         throw error;
       }
     });
-  }
-}
-
-async function addGeneratedSdkTypeImports() {
-  const trellisApiImport =
-    'import type { TrellisAPI } from "@qlever-llc/trellis/contracts";\n';
-
-  for (const format of ["esm", "script"]) {
-    const formatDir = new URL(
-      `../npm/${format}/`,
-      import.meta.url,
-    );
-
-    for await (const fileUrl of walkFiles(formatDir)) {
-      if (!fileUrl.pathname.endsWith(".d.ts")) {
-        continue;
-      }
-
-      const original = await Deno.readTextFile(fileUrl);
-      if (
-        !original.includes("TrellisAPI") ||
-        /^import\b.*\bTrellisAPI\b.*$/m.test(original) ||
-        /^export\s+(?:declare\s+)?(?:type|interface)\s+TrellisAPI\b/m.test(
-          original,
-        )
-      ) {
-        continue;
-      }
-
-      await Deno.writeTextFile(fileUrl, trellisApiImport + original);
-    }
   }
 }
 
@@ -709,9 +679,9 @@ await buildDntPackage({
     "./js/packages/trellis/device.ts",
     "./js/packages/trellis/device/deno.ts",
     "./js/packages/trellis/generate.ts",
-    "./js/packages/trellis/health.ts",
     "./js/packages/trellis/sdk/auth.ts",
     "./js/packages/trellis/sdk/core.ts",
+    "./js/packages/trellis/sdk/eventlog.ts",
     "./js/packages/trellis/sdk/health.ts",
     "./js/packages/trellis/sdk/jobs.ts",
     "./js/packages/trellis/sdk/state.ts",
@@ -780,7 +750,6 @@ await buildDntPackage({
 
 await normalizeModuleSpecifiers();
 await stageCanonicalGeneratedSdkArtifacts();
-await addGeneratedSdkTypeImports();
 await rewriteCanonicalGeneratedSdkSelfImports();
 await removeSdkWrapperPolyfills();
 await rewriteSdkWrapperTargets();

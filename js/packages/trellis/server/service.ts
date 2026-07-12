@@ -12,7 +12,7 @@ import {
   TypedStore,
   TypedStoreEntry,
 } from "../store.ts";
-import { sdk as trellisAuth } from "../sdk/auth.ts";
+import { AUTH_SESSION_API } from "../session_baseline.ts";
 import {
   TrellisServiceRuntime,
   type TrellisServiceRuntimeFor,
@@ -28,13 +28,19 @@ import {
   ContractResourceBindingsSchema,
   type InferSchemaType,
 } from "../contracts.ts";
-import type { TrellisAPI } from "../contracts.ts";
+import type { RuntimeApi } from "../contract_support/runtime.ts";
 import type { TrellisContractV1 } from "../contract_support/mod.ts";
 import type {
   ContractEventConsumers,
   ContractJobsMetadata,
   ContractKvMetadata,
 } from "../contract_support/mod.ts";
+import {
+  type ContractWithRuntime,
+  getContractRuntime,
+} from "../contract_support/contract_runtime.ts";
+import type { ActionDescriptor } from "../contract_support/descriptors.ts";
+import type { CallerRuntime } from "../caller.ts";
 import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
@@ -49,9 +55,10 @@ import {
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import {
-  ServiceHealth,
+  type ServiceHealth,
   type ServiceHealthCheckFn,
   type ServiceHealthInfoFn,
+  ServiceHealthRuntime,
 } from "./health.ts";
 import { publishHealthHeartbeatSample } from "../health_transport.ts";
 import type { EventDesc, RPCDesc } from "../contracts.ts";
@@ -76,11 +83,11 @@ import type {
   PreparedTrellisEvent,
   RpcHandlerContext,
   RpcHandlerErrorOf,
-} from "../trellis.ts";
+} from "../session.ts";
 import {
   annotateHandlerBoundaryError,
   createTrellisInternal,
-} from "../trellis.ts";
+} from "../session.ts";
 import type {
   NatsConnectFn,
   NatsConnectOpts,
@@ -88,6 +95,13 @@ import type {
 } from "./runtime.ts";
 import { ServiceTransfer } from "./transfer.ts";
 import { logger as noopLogger, type LoggerLike } from "../globals.ts";
+import {
+  createProviderRuntime,
+  PROVIDER_CALLER,
+  type ProviderCaller,
+  type ProviderHandlerClient,
+  type ProviderRuntime,
+} from "../provider.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
@@ -369,14 +383,14 @@ function dependencyWaitLogMessage(failure: ServiceBootstrapFailure): string {
     "Service contract activation pending; waiting for dependency closure";
 }
 
-type RpcMethodName<TA extends TrellisAPI> = keyof TA["rpc"] & string;
-type RpcMethodInput<TA extends TrellisAPI, M extends RpcMethodName<TA>> =
+type RpcMethodName<TA extends RuntimeApi> = keyof TA["rpc"] & string;
+type RpcMethodInput<TA extends RuntimeApi, M extends RpcMethodName<TA>> =
   InferSchemaType<TA["rpc"][M]["input"]>;
-type RpcMethodOutput<TA extends TrellisAPI, M extends RpcMethodName<TA>> =
+type RpcMethodOutput<TA extends RuntimeApi, M extends RpcMethodName<TA>> =
   InferSchemaType<TA["rpc"][M]["output"]>;
 type TrellisServiceRuntimeCreateOpts<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI | undefined = TOwnedApi,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi | undefined = TOwnedApi,
 > = {
   log?: LoggerLike | false;
   timeout?: number;
@@ -953,8 +967,8 @@ async function openServiceKvBindings<TKv extends ContractKvMetadata>(args: {
 }
 
 type TrellisServiceRuntimeConnectOpts<
-  TOwnedApi extends TrellisAPI = TrellisAPI,
-  TTrellisApi extends TrellisAPI = TOwnedApi,
+  TOwnedApi extends RuntimeApi = RuntimeApi,
+  TTrellisApi extends RuntimeApi = TOwnedApi,
 > = {
   /**
    * Session key seed (base64url Ed25519 private key seed) used to derive the service session key.
@@ -999,8 +1013,8 @@ type TrellisServiceRuntimeConnectOpts<
 };
 
 export type TrellisServiceConnectOpts<
-  TOwnedApi extends TrellisAPI = TrellisAPI,
-  TTrellisApi extends TrellisAPI | undefined = TOwnedApi,
+  TOwnedApi extends RuntimeApi = RuntimeApi,
+  TTrellisApi extends RuntimeApi | undefined = TOwnedApi,
 > = {
   trellisUrl: string;
   contract: ServiceContract<TOwnedApi, TTrellisApi>;
@@ -1029,7 +1043,7 @@ type ServiceKvFacade<TKv extends ContractKvMetadata> = {
 type ServiceHandlerResources<
   TKv extends ContractKvMetadata,
   TJobs extends ContractJobsMetadata,
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
 > = {
   kv: ServiceKvFacade<TKv>;
   store: Record<string, StoreHandle>;
@@ -1037,7 +1051,7 @@ type ServiceHandlerResources<
 };
 
 export type Trellis<
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata = ContractKvMetadata,
   TJobs extends ContractJobsMetadata = {},
 > =
@@ -1045,44 +1059,55 @@ export type Trellis<
   & ServiceHandlerResources<TKv, TJobs, TTrellisApi>;
 
 export type ServiceContract<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI | undefined,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi | undefined,
   TJobs extends ContractJobsMetadata = {},
   TKv extends ContractKvMetadata = ContractKvMetadata,
-> = {
-  CONTRACT_ID: string;
-  CONTRACT_DIGEST: string;
-  CONTRACT: TrellisContractV1;
-  API: {
-    owned: TOwnedApi;
-    trellis?: TTrellisApi;
+> =
+  & ContractWithRuntime<
+    ActionDescriptor,
+    TOwnedApi
+  >
+  & {
+    CONTRACT_ID: string;
+    CONTRACT_DIGEST: string;
+    CONTRACT: TrellisContractV1;
+    readonly [CONTRACT_JOBS_METADATA]?: TJobs;
+    readonly [CONTRACT_KV_METADATA]?: TKv;
   };
-  readonly [CONTRACT_JOBS_METADATA]?: TJobs;
-  readonly [CONTRACT_KV_METADATA]?: TKv;
-};
 
 type ContractOwnedApi<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata
   >,
-> = TContract["API"]["owned"];
+> = TContract extends ContractWithRuntime<
+  ActionDescriptor,
+  infer TOwnedApi,
+  infer _TUsedApi,
+  infer _TApi
+> ? Extract<TOwnedApi, RuntimeApi>
+  : RuntimeApi;
 
 type ContractTrellisApi<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata
   >,
-> = NonNullable<TContract["API"]["trellis"]> extends TrellisAPI
-  ? NonNullable<TContract["API"]["trellis"]>
+> = TContract extends ContractWithRuntime<
+  ActionDescriptor,
+  infer _TOwnedApi,
+  infer _TUsedApi,
+  infer TApi
+> ? Extract<TApi, RuntimeApi>
   : ContractOwnedApi<TContract>;
 
 type ContractJobsOf<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -1090,25 +1115,42 @@ type ContractJobsOf<
 
 type ContractKvOf<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
 > = NonNullable<TContract[typeof CONTRACT_KV_METADATA]>;
 
+type ServiceHandlerClient<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+> = ProviderHandlerClient<
+  TContract,
+  TrellisServiceSession<
+    ContractOwnedApi<TContract>,
+    ContractTrellisApi<TContract>,
+    ContractJobsOf<TContract>,
+    ContractKvOf<TContract>
+  >
+>;
+
 type ContractEventName<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata
   >,
 > = ServiceEventName<ContractTrellisApi<TContract>>;
 
 type ContractOperationName<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata
   >,
 > = keyof ContractOwnedApi<TContract>["operations"] & string;
@@ -1116,8 +1158,8 @@ type ContractOperationName<
 /** Typed RPC handler function for an extracted Trellis service handler. */
 export type RpcHandler<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -1129,11 +1171,7 @@ export type RpcHandler<
 }: {
   input: RpcMethodInput<ContractOwnedApi<TContract>, M>;
   context: RpcHandlerContext;
-  client: Trellis<
-    ContractTrellisApi<TContract>,
-    ContractKvOf<TContract>,
-    ContractJobsOf<TContract>
-  >;
+  client: ServiceHandlerClient<TContract>;
 }) =>
   | Promise<
     Result<
@@ -1149,8 +1187,8 @@ export type RpcHandler<
 /** Typed event listener function for an extracted Trellis service listener. */
 export type ServiceEventHandler<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -1159,19 +1197,15 @@ export type ServiceEventHandler<
   args: {
     event: ServiceEventOf<ContractTrellisApi<TContract>, E>;
     context: EventListenerContext;
-    client: Trellis<
-      ContractTrellisApi<TContract>,
-      ContractKvOf<TContract>,
-      ContractJobsOf<TContract>
-    >;
+    client: ServiceHandlerClient<TContract>;
   },
 ) => MaybeAsync<void, BaseError>;
 
 /** Typed operation handler function for an extracted Trellis service handler. */
 export type OperationHandler<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -1187,11 +1221,7 @@ export type OperationHandler<
       OperationUpdateOf<ContractOwnedApi<TContract>, O>
     >
     & {
-      client: Trellis<
-        ContractTrellisApi<TContract>,
-        ContractKvOf<TContract>,
-        ContractJobsOf<TContract>
-      >;
+      client: ServiceHandlerClient<TContract>;
     },
 ) => unknown | Promise<unknown>;
 
@@ -1204,7 +1234,7 @@ export type HealthCheckHandler = ServiceHealthCheckFn;
 export type JobQueue<
   TPayload,
   TResult,
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata = ContractKvMetadata,
   TJobs extends ContractJobsMetadata = {},
   TUpdate = never,
@@ -1230,7 +1260,7 @@ export type JobQueue<
 
 export type JobsFacadeOf<
   TJobs extends ContractJobsMetadata,
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata = ContractKvMetadata,
 > = {
   [K in keyof TJobs]: JobQueue<
@@ -1243,14 +1273,14 @@ export type JobsFacadeOf<
   >;
 };
 
-type ServiceEventName<TA extends TrellisAPI> = keyof TA["events"] & string;
+type ServiceEventName<TA extends RuntimeApi> = keyof TA["events"] & string;
 type ServiceEventOf<
-  TA extends TrellisAPI,
+  TA extends RuntimeApi,
   E extends ServiceEventName<TA>,
 > = TA["events"][E] extends EventDesc<infer TEvent> ? InferSchemaType<TEvent>
   : never;
 type ServiceEventPayloadOf<
-  TA extends TrellisAPI,
+  TA extends RuntimeApi,
   E extends ServiceEventName<TA>,
 > = ServiceEventOf<TA, E> & Record<string, unknown>;
 
@@ -1287,7 +1317,7 @@ export type TrellisServiceSqlOutboxOptions<TTx> =
 
 /** Typed transaction-scoped event facade that enqueues prepared events. */
 export type SqlOutboxEventEnqueueFacade<
-  TEventApi extends TrellisAPI = TrellisAPI,
+  TEventApi extends RuntimeApi = RuntimeApi,
 > = {
   readonly [TGroup in SurfaceGroupName<ServiceEventName<TEventApi>>]: {
     readonly [
@@ -1326,7 +1356,7 @@ export type SqlOutboxJobEnqueueFacade<TJobs extends ContractJobsMetadata> = {
 /** Context supplied to `outbox.transaction(...)` work callbacks. */
 export type SqlOutboxTransactionContext<
   TTx,
-  TEventApi extends TrellisAPI = TrellisAPI,
+  TEventApi extends RuntimeApi = RuntimeApi,
   TJobs extends ContractJobsMetadata = ContractJobsMetadata,
 > = {
   /** Service-owned transaction object supplied by the configured runner. */
@@ -1340,7 +1370,7 @@ export type SqlOutboxTransactionContext<
 /** Startup-created SQL outbox dependency for transactional event/job enqueue. */
 export type SqlOutbox<
   TTx,
-  TEventApi extends TrellisAPI = TrellisAPI,
+  TEventApi extends RuntimeApi = RuntimeApi,
   TJobs extends ContractJobsMetadata = ContractJobsMetadata,
 > = {
   /**
@@ -1367,7 +1397,7 @@ type ManagedJobWorkers = {
 
 type ManagedJobsFacade<
   TJobs extends ContractJobsMetadata,
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata = ContractKvMetadata,
 > = JobsFacadeOf<TJobs, TTrellisApi, TKv> & {
   [MANAGED_JOB_WORKERS]: ManagedJobWorkers;
@@ -1408,10 +1438,10 @@ type ServiceHandleFacade = {
 type ServiceEventPublishLeaf = {
   prepare(
     event: Record<string, unknown>,
-  ): ReturnType<HandlerTrellis<TrellisAPI>["prepare"]>;
+  ): ReturnType<HandlerTrellis<RuntimeApi>["prepare"]>;
   publish(
     event: Record<string, unknown>,
-  ): ReturnType<HandlerTrellis<TrellisAPI>["publish"]>;
+  ): ReturnType<HandlerTrellis<RuntimeApi>["publish"]>;
 };
 
 type ServiceEventLeaf = ServiceEventPublishLeaf & {
@@ -1425,7 +1455,7 @@ type ServiceEventLeaf = ServiceEventPublishLeaf & {
   ): AsyncResult<void, ValidationError | UnexpectedError>;
 };
 
-function createServiceEventPublishFacade<TA extends TrellisAPI>(outbound: {
+function createServiceEventPublishFacade<TA extends RuntimeApi>(outbound: {
   readonly api: TA;
   prepare(
     event: string,
@@ -1464,8 +1494,8 @@ type SurfaceKeysForGroup<TKeys extends string, TGroup extends string> =
     : never;
 
 type TypedServiceHandleFacade<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata,
   TJobs extends ContractJobsMetadata,
 > = {
@@ -1514,8 +1544,8 @@ type TypedServiceHandleFacade<
 };
 
 type RpcHandleFn<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   M extends RpcMethodName<TOwnedApi>,
   TKv extends ContractKvMetadata,
   TJobs extends ContractJobsMetadata,
@@ -1530,8 +1560,8 @@ type RpcHandleFn<
   | Result<RpcMethodOutput<TOwnedApi, M>, RpcHandlerErrorOf<TOwnedApi, M>>;
 
 type FeedHandleFn<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   F extends keyof TOwnedApi["feeds"] & string,
   TKv extends ContractKvMetadata,
   TJobs extends ContractJobsMetadata,
@@ -1546,8 +1576,8 @@ type FeedHandleFn<
 }) => unknown | Promise<unknown>;
 
 type OperationHandleFn<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   O extends keyof TOwnedApi["operations"] & string,
   TKv extends ContractKvMetadata,
   TJobs extends ContractJobsMetadata,
@@ -1588,8 +1618,8 @@ type OperationHandleFn<
   };
 
 export type OperationRegistration<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   O extends keyof TOwnedApi["operations"] & string,
   TKv extends ContractKvMetadata = ContractKvMetadata,
   TJobs extends ContractJobsMetadata = {},
@@ -1637,14 +1667,14 @@ export type OperationRegistration<
 };
 
 export type FeedRegistration<
-  TOwnedApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
   F extends keyof TOwnedApi["feeds"] & string,
 > = RootFeedRegistration<FeedInputOf<TOwnedApi, F>, FeedEventOf<TOwnedApi, F>>;
 
 export type TrellisServiceConnectArgs<
   TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -1661,9 +1691,27 @@ export type TrellisServiceConnectArgs<
   server?: TrellisServiceServerOpts;
 };
 
+/** Connected provider runtime inferred from a service contract. */
+export type ConnectedTrellisService<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+> = ProviderRuntime<
+  TContract,
+  TrellisServiceSession<
+    ContractOwnedApi<TContract>,
+    ContractTrellisApi<TContract>,
+    ContractJobsOf<TContract>,
+    ContractKvOf<TContract>
+  >
+>;
+
 export type TrellisServiceInternalConnectArgs<
-  TOwnedApi extends TrellisAPI = TrellisAPI,
-  TTrellisApi extends TrellisAPI = TOwnedApi,
+  TOwnedApi extends RuntimeApi = RuntimeApi,
+  TTrellisApi extends RuntimeApi = TOwnedApi,
   TKv extends ContractKvMetadata = {},
 > = TrellisServiceRuntimeConnectOpts<TOwnedApi, TTrellisApi> & {
   contractId?: string;
@@ -1679,8 +1727,8 @@ export type TrellisServiceInternalConnectArgs<
  * @internal Shared by Trellis-owned service bootstrap paths.
  */
 export async function createConnectedService<
-  TOwnedApi extends TrellisAPI,
-  TTrellisApi extends TrellisAPI,
+  TOwnedApi extends RuntimeApi,
+  TTrellisApi extends RuntimeApi,
   TJobs extends ContractJobsMetadata = {},
   TKv extends ContractKvMetadata = ContractKvMetadata,
 >(args: {
@@ -1701,7 +1749,7 @@ export async function createConnectedService<
   durableEventConsumerBeforeReadinessCheck?: TrellisServiceRuntimeDeps[
     "durableEventConsumerBeforeReadinessCheck"
   ];
-}): Promise<TrellisService<TOwnedApi, TTrellisApi, TJobs, TKv>> {
+}): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>> {
   const resolvedLog = resolveServiceLogger(args.server.log);
   const connection = observeNatsTrellisConnection({
     kind: "service",
@@ -1718,7 +1766,7 @@ export async function createConnectedService<
   const runtimeApi = {
     ...currentApi,
     rpc: {
-      ...trellisAuth.API.owned.rpc,
+      ...AUTH_SESSION_API.rpc,
       ...currentApi.rpc,
     },
   } as TOwnedApi & TTrellisApi;
@@ -1810,7 +1858,7 @@ export async function createConnectedService<
     },
   };
 
-  const health = new ServiceHealth({
+  const health = new ServiceHealthRuntime({
     serviceName: args.name,
     instanceId: args.healthIdentity?.instanceId,
     contractId: args.contractId ?? "unknown",
@@ -1878,7 +1926,7 @@ export async function createConnectedService<
     ),
   });
 
-  const service = Reflect.construct(TrellisService, [
+  const service = Reflect.construct(TrellisServiceSession, [
     args.name,
     args.auth,
     args.nc,
@@ -1893,7 +1941,7 @@ export async function createConnectedService<
     stopHealthPublishing,
     connection,
     trellisServiceConstructorToken,
-  ]) as TrellisService<TOwnedApi, TTrellisApi, TJobs, TKv>;
+  ]) as TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>;
   handlerResources = {
     kv: service.kv,
     store: service.store,
@@ -1949,7 +1997,7 @@ type SqlOutboxEventEnqueueLeaf = {
   ): AsyncResult<OutboxMessage, ValidationError | UnexpectedError>;
 };
 
-function createSqlOutboxEventEnqueueFacade<TEventApi extends TrellisAPI>(args: {
+function createSqlOutboxEventEnqueueFacade<TEventApi extends RuntimeApi>(args: {
   event: ActiveEventFacade<TEventApi>;
   repository: SqlOutboxRepository;
   onEnqueued(): void;
@@ -2639,7 +2687,7 @@ async function closeFailedServiceBootstrapConnection(
 
 function createJobsFacade<
   TJobs extends ContractJobsMetadata,
-  TTrellisApi extends TrellisAPI,
+  TTrellisApi extends RuntimeApi,
   TKv extends ContractKvMetadata = ContractKvMetadata,
 >(args: {
   serviceName: string;
@@ -3118,8 +3166,8 @@ function createJobsFacade<
  */
 export function connectTrellisServiceWithRuntimeDeps<
   const TContract extends ServiceContract<
-    TrellisAPI,
-    TrellisAPI | undefined,
+    RuntimeApi,
+    RuntimeApi | undefined,
     ContractJobsMetadata,
     ContractKvMetadata
   >,
@@ -3127,7 +3175,7 @@ export function connectTrellisServiceWithRuntimeDeps<
   args: TrellisServiceConnectArgs<TContract>,
   deps: Partial<TrellisServiceRuntimeDeps>,
 ): AsyncResult<
-  TrellisService<
+  TrellisServiceSession<
     ContractOwnedApi<TContract>,
     ContractTrellisApi<TContract>,
     ContractJobsOf<TContract>,
@@ -3219,16 +3267,12 @@ export function connectTrellisServiceWithRuntimeDeps<
       }
 
       try {
-        const server = args.contract.API.trellis
-          ? {
-            ...(args.server ?? {}),
-            api: args.contract.API.owned,
-            trellisApi: args.contract.API.trellis as TTrellisApi,
-          }
-          : {
-            ...(args.server ?? {}),
-            api: args.contract.API.owned,
-          };
+        const contractRuntime = getContractRuntime(args.contract);
+        const server = {
+          ...(args.server ?? {}),
+          api: contractRuntime.ownedApi as TOwnedApi,
+          trellisApi: contractRuntime.api as TTrellisApi,
+        };
 
         const service = await createConnectedService<
           TOwnedApi,
@@ -3281,9 +3325,10 @@ export function connectTrellisServiceWithRuntimeDeps<
   })());
 }
 
-export class TrellisService<
-  TOwnedApi extends TrellisAPI = TrellisAPI,
-  TTrellisApi extends TrellisAPI = TOwnedApi,
+/** @internal Private connected service session. */
+export class TrellisServiceSession<
+  TOwnedApi extends RuntimeApi = RuntimeApi,
+  TTrellisApi extends RuntimeApi = TOwnedApi,
   TJobs extends ContractJobsMetadata = {},
   TKv extends ContractKvMetadata = ContractKvMetadata,
 > {
@@ -3292,6 +3337,7 @@ export class TrellisService<
   readonly #server: TrellisServiceRuntimeFor<TOwnedApi & TTrellisApi>;
   readonly #nc: NatsConnection;
   readonly #handlerTrellis: Trellis<TTrellisApi, TKv, TJobs>;
+  declare readonly [PROVIDER_CALLER]: ProviderCaller;
   /** Event lifecycle surface for service startup listeners and publishers. */
   readonly event: ActiveEventFacade<TTrellisApi>;
   readonly kv: ServiceKvFacade<TKv>;
@@ -3321,7 +3367,7 @@ export class TrellisService<
     contractJobs: TJobs,
     bindings: ResourceBindings,
     operationTransfer: ServiceTransfer,
-    health: ServiceHealth,
+    health: ServiceHealthRuntime,
     stopHealthPublishing: () => Promise<void>,
     connection: TrellisConnection,
     token: typeof trellisServiceConstructorToken,
@@ -3340,6 +3386,9 @@ export class TrellisService<
       enumerable: false,
     });
     this.#handlerTrellis = handlerTrellis;
+    Object.defineProperty(this, PROVIDER_CALLER, {
+      value: handlerTrellis as ProviderCaller,
+    });
     this.event = event;
     this.kv = kv;
     this.store = Object.fromEntries(
@@ -3741,23 +3790,27 @@ export class TrellisService<
 
   static connect<
     const TContract extends ServiceContract<
-      TrellisAPI,
-      TrellisAPI | undefined,
+      RuntimeApi,
+      RuntimeApi | undefined,
       ContractJobsMetadata,
       ContractKvMetadata
     >,
   >(
     args: TrellisServiceConnectArgs<TContract>,
   ): AsyncResult<
-    TrellisService<
-      ContractOwnedApi<TContract>,
-      ContractTrellisApi<TContract>,
-      ContractJobsOf<TContract>,
-      ContractKvOf<TContract>
-    >,
+    ConnectedTrellisService<TContract>,
     TransportError | UnexpectedError
   > {
-    return connectTrellisServiceWithRuntimeDeps(args, {});
+    return AsyncResult.from((async () => {
+      const connected = await connectTrellisServiceWithRuntimeDeps(args, {});
+      if (isErr(connected)) {
+        return connected;
+      }
+      const service = connected.unwrapOrElse(() => {
+        throw new Error("Connected service result narrowed incorrectly");
+      });
+      return Result.ok(createProviderRuntime(service, args.contract));
+    })());
   }
 
   async wait(): Promise<void> {
@@ -3845,5 +3898,27 @@ export class TrellisService<
           })
         ),
     };
+  }
+}
+
+/** Public factory for connecting a descriptor-defined Trellis service. */
+export class TrellisService {
+  private constructor() {}
+
+  /** Connects a service and returns its provider-only runtime facade. */
+  static connect<
+    const TContract extends ServiceContract<
+      RuntimeApi,
+      RuntimeApi | undefined,
+      ContractJobsMetadata,
+      ContractKvMetadata
+    >,
+  >(
+    args: TrellisServiceConnectArgs<TContract>,
+  ): AsyncResult<
+    ConnectedTrellisService<TContract>,
+    TransportError | UnexpectedError
+  > {
+    return TrellisServiceSession.connect(args);
   }
 }

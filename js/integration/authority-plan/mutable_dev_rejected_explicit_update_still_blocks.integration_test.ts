@@ -25,7 +25,7 @@ liveTrellisTest({
     });
 
     let service:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
       | undefined;
     const connectPromise = fixture.connectServicePending({
       runtime,

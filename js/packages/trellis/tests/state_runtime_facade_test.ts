@@ -2,8 +2,32 @@ import { assertEquals } from "@std/assert";
 import { ValidationError } from "../index.ts";
 import { Type } from "typebox";
 
-import { createClient } from "../client.ts";
-import { defineAppContract } from "../contract.ts";
+import { createCallerRuntime } from "../caller.ts";
+import { defineAppContract, state } from "../contract.ts";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
+import { CONTRACT_STATE_METADATA } from "../contract_support/mod.ts";
+import { Trellis } from "../session.ts";
+import type { ContractWithRuntime } from "../contract_support/contract_runtime.ts";
+import type { RuntimeApi } from "../contract_support/runtime.ts";
+import type { RuntimeStateStores } from "../session.ts";
+
+type TestContract = ContractWithRuntime & {
+  readonly CONTRACT_ID: string;
+  readonly [CONTRACT_STATE_METADATA]?: RuntimeStateStores;
+};
+
+function createTestCaller<TContract extends TestContract>(contract: TContract) {
+  const session = new Trellis(
+    contract.CONTRACT_ID,
+    { options: { inboxPrefix: "_INBOX.test" } } as never,
+    { sessionKey: "test", sign: () => new Uint8Array(64) },
+    {
+      api: getContractRuntime(contract).api as RuntimeApi,
+      state: contract[CONTRACT_STATE_METADATA],
+    },
+  );
+  return { session, caller: createCallerRuntime(session, contract) };
+}
 
 Deno.test("connected runtime exposes typed named state stores", async () => {
   const contract = defineAppContract(
@@ -17,21 +41,17 @@ Deno.test("connected runtime exposes typed named state stores", async () => {
       id: "acme.state-runtime@v1",
       displayName: "State Runtime",
       description: "Exercise the connected state facade.",
-      state: {
+      uses: [state({
         preferences: { kind: "value", schema: ref.schema("Preferences") },
         drafts: { kind: "map", schema: ref.schema("Draft") },
-      },
+      })],
     }),
   );
 
-  const trellis = createClient(
-    contract,
-    { options: { inboxPrefix: "_INBOX.test" } } as never,
-    { sessionKey: "test", sign: () => new Uint8Array(64) },
-  );
+  const { session, caller: trellis } = createTestCaller(contract);
 
   const calls: Array<{ method: string; input: unknown }> = [];
-  const nats = Reflect.get(trellis, "nats") as {
+  const nats = Reflect.get(session, "nats") as {
     request(subject: string, payload: string): Promise<{
       json(): unknown;
       headers?: { get(name: string): string | null | undefined };
@@ -188,20 +208,16 @@ Deno.test("connected runtime validates store-specific state writes before reques
       id: "acme.state-runtime-validation@v1",
       displayName: "State Runtime Validation",
       description: "Exercise facade validation.",
-      state: {
+      uses: [state({
         preferences: { kind: "value", schema: ref.schema("Preferences") },
-      },
+      })],
     }),
   );
 
-  const trellis = createClient(
-    contract,
-    { options: { inboxPrefix: "_INBOX.test" } } as never,
-    { sessionKey: "test", sign: () => new Uint8Array(64) },
-  );
+  const { session, caller: trellis } = createTestCaller(contract);
 
   let requestCount = 0;
-  const nats = Reflect.get(trellis, "nats") as {
+  const nats = Reflect.get(session, "nats") as {
     request(): Promise<
       {
         json(): unknown;
@@ -252,20 +268,16 @@ Deno.test("connected runtime validates store-specific state reads after response
       id: "acme.state-runtime-read-validation@v1",
       displayName: "State Runtime Read Validation",
       description: "Exercise facade response validation.",
-      state: {
+      uses: [state({
         preferences: { kind: "value", schema: ref.schema("Preferences") },
         drafts: { kind: "map", schema: ref.schema("Draft") },
-      },
+      })],
     }),
   );
 
-  const trellis = createClient(
-    contract,
-    { options: { inboxPrefix: "_INBOX.test" } } as never,
-    { sessionKey: "test", sign: () => new Uint8Array(64) },
-  );
+  const { session, caller: trellis } = createTestCaller(contract);
 
-  const nats = Reflect.get(trellis, "nats") as {
+  const nats = Reflect.get(session, "nats") as {
     request(
       subject: string,
     ): Promise<
@@ -323,24 +335,20 @@ Deno.test("connected runtime surfaces accepted state migrations without running 
       id: "acme.state-runtime-migration@v1",
       displayName: "State Runtime Migration",
       description: "Exercise facade migration responses.",
-      state: {
+      uses: [state({
         drafts: {
           kind: "map",
           schema: ref.schema("Draft"),
           stateVersion: "draft.v1",
           acceptedVersions: { "draft.v0": ref.schema("DraftV0") },
         },
-      },
+      })],
     }),
   );
 
-  const trellis = createClient(
-    contract,
-    { options: { inboxPrefix: "_INBOX.test" } } as never,
-    { sessionKey: "test", sign: () => new Uint8Array(64) },
-  );
+  const { session, caller: trellis } = createTestCaller(contract);
 
-  const nats = Reflect.get(trellis, "nats") as {
+  const nats = Reflect.get(session, "nats") as {
     request(): Promise<{
       json(): unknown;
       headers?: { get(name: string): string | null | undefined };

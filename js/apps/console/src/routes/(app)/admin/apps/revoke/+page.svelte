@@ -33,7 +33,7 @@
     error = null;
     try {
       const requestedGrant = page.url.searchParams.get("grant");
-      const response = await trellis.request("Auth.IdentityGrants.List", { limit: 500, offset: 0 }).take();
+      const response = await trellis.authIdentityGrantsList({ limit: 500, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       identityGrants = response.entries ?? [];
       const match = identityGrants.find((entry) => entry.identityGrantId === requestedGrant) ?? identityGrants[0] ?? null;
@@ -50,7 +50,7 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.IdentityGrants.Revoke", {
+      const response = await trellis.authIdentityGrantsRevoke({
         identityGrantId: selectedGrant.identityGrantId,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }

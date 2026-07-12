@@ -134,8 +134,8 @@
     error = null;
     try {
       const [capabilitiesResponse, groupsResponse] = await Promise.all([
-        trellis.request("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.CapabilityGroups.List", { limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
       if (isErr(groupsResponse)) { error = errorMessage(groupsResponse); return; }
@@ -159,10 +159,10 @@
         return;
       }
 
-      const createResponse = await trellis.request("Auth.Users.Create", buildCreateInput(trimmedUsername)).take();
+      const createResponse = await trellis.authUsersCreate(buildCreateInput(trimmedUsername)).take();
       if (isErr(createResponse)) { error = errorMessage(createResponse); return; }
 
-      const setupResponse = await trellis.request("Auth.Users.PasswordReset.Create", {
+      const setupResponse = await trellis.authUsersPasswordResetCreate({
         userId: createResponse.user.userId,
       }).take();
       if (isErr(setupResponse)) { error = errorMessage(setupResponse); return; }

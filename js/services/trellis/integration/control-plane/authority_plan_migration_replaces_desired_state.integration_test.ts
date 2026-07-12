@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
@@ -92,13 +92,7 @@ const adminContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Authority Replace Admin",
   description: "Reads deployment authority after migration.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.DeploymentAuthority.Get"] },
-      }),
-    },
-  },
+  uses: [trellisAuth.AuthDeploymentAuthorityGet],
 }));
 
 const deployment = caseScopedName("authority-replace", CASE_ID);
@@ -142,7 +136,7 @@ liveTrellisTest({
     let replacementService: { stop(): Promise<void> } | undefined;
 
     try {
-      const before = await admin.rpc.auth.deploymentAuthorityGet({
+      const before = await admin.authDeploymentAuthorityGet({
         deploymentId: deployment,
       }).orThrow();
       assertEquals(
@@ -178,7 +172,7 @@ liveTrellisTest({
       await runtime.deployments.waitReady(deployment);
       replacementService = await connectPromise;
 
-      const after = await admin.rpc.auth.deploymentAuthorityGet({
+      const after = await admin.authDeploymentAuthorityGet({
         deploymentId: deployment,
       }).orThrow();
       assertEquals(

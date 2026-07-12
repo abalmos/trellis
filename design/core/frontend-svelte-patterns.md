@@ -103,11 +103,11 @@ Rules:
 - Svelte context is the runtime transport for the live Trellis instance and
   related browser state; the app-local module is the static typing boundary that
   keeps contract knowledge out of arbitrary page files
-- generated client facades are not needed for Svelte app-local helpers; the app
-  contract is the typing source for `createTrellisApp` and `TrellisProvider`
-- do not generate or import an app SDK just to type `getTrellis()`; use
-  `TrellisClientFor<typeof contract>` and reserve generated SDK imports for the
-  service contracts referenced by `sdk.use(spec)`
+- generated client facades do not exist; the app contract is the typing source
+  for `createTrellisApp` and `TrellisProvider`
+- do not generate or import an app SDK just to type `getTrellis()`; the app
+  contract passed to `createTrellisApp` infers its flat caller surface, while
+  generated service SDK imports provide the descriptors selected by that app
 - SvelteKit apps should usually source that fixed instance URL from public env
   such as `PUBLIC_TRELLIS_URL`; use `$env/dynamic/public` when local demos need
   a safe default and `$env/static/public` when the value must be fixed at build

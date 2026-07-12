@@ -134,11 +134,10 @@ Rules:
 Provides the first-party generated SDKs for Trellis-owned contracts such as
 auth, core, activity, jobs, health, and state.
 
-Generated SDK package exports are root-only. The root module re-exports the
-contract module as `sdk`, the standalone `use(...)` helper, typed DTOs, schemas,
-and public client/API types. Contract authors should import `sdk` with a local
-alias that describes the dependency and declare all required `uses` explicitly
-with `sdk.use(...)`.
+Generated owner SDK package roots export direct action descriptors, portable
+DTOs, and schemas. They do not export participant contracts, client/API facades,
+or dependency selectors. Contract authors import only the descriptors they need
+and place them directly in the participant contract's `uses` array.
 
 - public apps and peer services should not resolve those service-owned handles
   directly

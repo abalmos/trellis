@@ -17,30 +17,31 @@ liveTrellisTest({
 
     try {
       const sqlOutbox = fixture.createOutbox(service, db);
-      await service.handle.rpc.documents.processMultiEvent(
-        async ({ input }) => {
-          await sqlOutbox.transaction(async ({ event }) => {
-            await event.document.processed.enqueue({
-              documentId: input.documentId,
-            })
-              .orThrow();
-            await event.document.audited.enqueue({
-              documentId: input.documentId,
-              action: "process",
-            }).orThrow();
-          }).orThrow();
-          return Result.ok({
+      await service.handleDocumentsProcessMultiEvent(async ({ input }) => {
+        await sqlOutbox.transaction(async ({ event }) => {
+          await event.document.processed.enqueue({
             documentId: input.documentId,
-            processedBy: "outbox-multi",
-          });
-        },
-      );
+          })
+            .orThrow();
+          await event.document.audited.enqueue({
+            documentId: input.documentId,
+            action: "process",
+          }).orThrow();
+        }).orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          processedBy: "outbox-multi",
+        });
+      },);
       serviceWait = service.wait();
 
       const capture = await runtime.captureEvents({
         name: fixture.multiCaptureName,
         contract: fixture.serviceContract,
-        events: ["Document.Processed", "Document.Audited"],
+        events: [
+          fixture.serviceContract.DocumentProcessed.subscribe,
+          fixture.serviceContract.DocumentAudited.subscribe,
+        ],
       });
 
       try {
@@ -50,7 +51,7 @@ liveTrellisTest({
         });
 
         const rpcResult = requireOutboxDocOutput(
-          await client.rpc.documents.processMultiEvent({
+          await client.documentsProcessMultiEvent({
             documentId: fixture.multiDocumentId,
           }).orThrow(),
         );

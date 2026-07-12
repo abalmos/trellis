@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,20 +24,12 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Deployment Enable Rollback Admin",
   description:
     "Exercises Auth service deployment enable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.Disable",
-            "Auth.Deployments.Enable",
-            "Auth.Deployments.List",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsDisable,
+    trellisAuth.AuthDeploymentsEnable,
+    trellisAuth.AuthDeploymentsList,
+  ],
 }));
 
 liveTrellisTest({
@@ -50,13 +42,13 @@ liveTrellisTest({
       contract: adminContract,
     });
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
-      await admin.rpc.auth.deploymentsDisable({
+      await admin.authDeploymentsDisable({
         kind: "service",
         deploymentId,
       }).orThrow();
@@ -75,7 +67,7 @@ liveTrellisTest({
     });
     try {
       const deploymentDisabled = async () => {
-        const page = await restartedAdmin.rpc.auth.deploymentsList({
+        const page = await restartedAdmin.authDeploymentsList({
           kind: "service",
           limit: 500,
         }).orThrow();
@@ -84,7 +76,7 @@ liveTrellisTest({
         )?.disabled;
       };
 
-      const failedEnable = await restartedAdmin.rpc.auth.deploymentsEnable({
+      const failedEnable = await restartedAdmin.authDeploymentsEnable({
         kind: "service",
         deploymentId,
       });

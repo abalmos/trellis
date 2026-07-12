@@ -29,7 +29,7 @@ liveTrellisTest({
     assertEquals(connectInfo.connectInfo.deploymentId, deploymentId);
     assertEquals(connectInfo.connectInfo.auth.authority, "admin_reviewed");
 
-    const reviews = await admin.rpc.auth.deviceUserAuthoritiesReviewsList({
+    const reviews = await admin.authDeviceUserAuthoritiesReviewsList({
       deploymentId,
       instanceId: provisioned.instance.instanceId,
       limit: 20,
@@ -43,7 +43,7 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "device");
       assertEquals(me.device?.deploymentId, deploymentId);
       assertEquals(me.device?.runtimePublicKey, identity.publicIdentityKey);

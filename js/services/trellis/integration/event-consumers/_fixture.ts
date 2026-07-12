@@ -72,13 +72,7 @@ export function createEventConsumersFixture(caseId: string) {
       displayName: `Trellis Event Consumers Missing Group (${slug})`,
       description:
         "Uses source events but intentionally declares no durable event consumer group.",
-      uses: {
-        required: {
-          source: sourceContract.use({
-            events: { subscribe: ["Source.Pinged"] },
-          }),
-        },
-      },
+      uses: [sourceContract.SourcePinged.subscribe],
     }),
   );
 
@@ -92,21 +86,15 @@ export function createEventConsumersFixture(caseId: string) {
       displayName: `Trellis Event Consumers Ambiguous Group (${slug})`,
       description:
         "Declares two durable groups for the same source event to require opts.group.",
-      uses: {
-        required: {
-          source: sourceContract.use({
-            events: { subscribe: ["Source.Pinged"] },
-          }),
-        },
-      },
+      uses: [sourceContract.SourcePinged.subscribe],
       eventConsumers: {
         primary: {
-          uses: { source: ["Source.Pinged"] },
+          uses: { [sourceContract.CONTRACT_ID]: ["Source.Pinged"] },
           ackWaitMs: 1_000,
           maxDeliver: 2,
         },
         secondary: {
-          uses: { source: ["Source.Pinged"] },
+          uses: { [sourceContract.CONTRACT_ID]: ["Source.Pinged"] },
           ackWaitMs: 1_000,
           maxDeliver: 2,
         },
@@ -124,16 +112,10 @@ export function createEventConsumersFixture(caseId: string) {
       displayName: `Trellis Event Consumers Dependency (${slug})`,
       description:
         "Consumes source events through one Trellis-provisioned durable group.",
-      uses: {
-        required: {
-          source: sourceContract.use({
-            events: { subscribe: ["Source.Pinged"] },
-          }),
-        },
-      },
+      uses: [sourceContract.SourcePinged.subscribe],
       eventConsumers: {
         ingest: {
-          uses: { source: ["Source.Pinged"] },
+          uses: { [sourceContract.CONTRACT_ID]: ["Source.Pinged"] },
           ackWaitMs: 1_000,
           maxDeliver: 2,
         },
@@ -150,16 +132,10 @@ export function createEventConsumersFixture(caseId: string) {
       ),
       displayName: `Trellis Event Consumers Parallel (${slug})`,
       description: "Consumes source events without an ordering guarantee.",
-      uses: {
-        required: {
-          source: sourceContract.use({
-            events: { subscribe: ["Source.Pinged"] },
-          }),
-        },
-      },
+      uses: [sourceContract.SourcePinged.subscribe],
       eventConsumers: {
         ingest: {
-          uses: { source: ["Source.Pinged"] },
+          uses: { [sourceContract.CONTRACT_ID]: ["Source.Pinged"] },
           ordering: "parallel",
           ackWaitMs: 5_000,
           maxDeliver: 2,
@@ -178,16 +154,15 @@ export function createEventConsumersFixture(caseId: string) {
       displayName: `Trellis Event Consumers Grouped Dependency (${slug})`,
       description:
         "Consumes two source events through one Trellis-provisioned durable group.",
-      uses: {
-        required: {
-          source: sourceContract.use({
-            events: { subscribe: ["Source.Pinged", "Source.Ponged"] },
-          }),
-        },
-      },
+      uses: [
+        sourceContract.SourcePinged.subscribe,
+        sourceContract.SourcePonged.subscribe,
+      ],
       eventConsumers: {
         paired: {
-          uses: { source: ["Source.Pinged", "Source.Ponged"] },
+          uses: {
+            [sourceContract.CONTRACT_ID]: ["Source.Pinged", "Source.Ponged"],
+          },
           ackWaitMs: 1_000,
           maxDeliver: 2,
         },
@@ -244,13 +219,10 @@ export function createEventConsumersFixture(caseId: string) {
     ),
     displayName: `Trellis Event Consumers Publisher (${slug})`,
     description: "Publishes source events through a generated app facade.",
-    uses: {
-      required: {
-        source: sourceContract.use({
-          events: { publish: ["Source.Pinged", "Source.Ponged"] },
-        }),
-      },
-    },
+    uses: [
+      sourceContract.SourcePinged.publish,
+      sourceContract.SourcePonged.publish,
+    ],
   }));
 
   return {

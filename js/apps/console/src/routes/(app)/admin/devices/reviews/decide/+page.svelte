@@ -59,8 +59,8 @@
     error = null;
     try {
       const [reviewsResponse, instancesResponse] = await Promise.all([
-        trellis.request("Auth.DeviceUserAuthorities.Reviews.List", { state: "pending", limit: 500, offset: 0 }).take(),
-        trellis.request("Auth.Devices.List", { limit: 500, offset: 0 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500, offset: 0 }).take(),
+        trellis.authDevicesList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
@@ -86,9 +86,7 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.request(
-        "Auth.DeviceUserAuthorities.Reviews.Decide",
-        {
+      const response = await trellis.authDeviceUserAuthoritiesReviewsDecide({
           reviewId: selectedReview.reviewId,
           decision,
           ...(decision === "reject" && reason.trim() ? { reason: reason.trim() } : {}),

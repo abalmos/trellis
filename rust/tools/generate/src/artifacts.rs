@@ -16,7 +16,6 @@ use trellis_codegen_ts::{
     collect_ts_sdk_sources, GenerateTsSdkOpts, TsRuntimeDeps,
     TsRuntimeSource as CodegenTsRuntimeSource,
 };
-use trellis_contracts::LoadedManifest;
 
 use crate::cli::{ContractInputArgs, RuntimeSource};
 use crate::contract_input::{self, ResolvedContractInput};
@@ -293,11 +292,13 @@ fn write_ts_sdk_shell(
     runtime_source: RuntimeSource,
     runtime_repo_root: Option<PathBuf>,
 ) -> miette::Result<()> {
+    if out.exists() {
+        fs::remove_dir_all(out).into_diagnostic()?;
+    }
     fs::create_dir_all(out).into_diagnostic()?;
     let runtime_deps =
         ts_runtime_deps(runtime_source, trellis_package_version(), runtime_repo_root);
     let deno = ts_shell_deno_json(package_name, artifact_version, &runtime_deps);
-
     write_if_changed(
         &out.join("deno.json"),
         &format!(
@@ -305,84 +306,12 @@ fn write_ts_sdk_shell(
             serde_json::to_string_pretty(&deno).into_diagnostic()?
         ),
     )?;
-    write_if_changed(
-        &out.join("mod.ts"),
-        "export { API, OWNED_API } from \"./api.ts\";\nexport type { Api, ApiViews, OwnedApi } from \"./api.ts\";\nexport * from \"./types.ts\";\nexport * from \"./schemas.ts\";\nexport type { Client } from \"./client.ts\";\nexport { CONTRACT, CONTRACT_DIGEST, CONTRACT_ID, use, sdk } from \"./contract.ts\";\n",
-    )?;
-    write_if_changed(
-        &out.join("contract.ts"),
-        &render_ts_contract_shell(contract_id, &ts_shell_trellis_import(&runtime_deps)),
-    )?;
-    write_if_changed(
-        &out.join("api.ts"),
-        r#"type PermissiveApiRecord = Record<string, unknown>;
-
-function permissiveApiRecord(): PermissiveApiRecord {
-  return new Proxy({}, {
-    get: () => ({}),
-    has: () => true,
-    getOwnPropertyDescriptor: (_target, property) => typeof property === "string"
-      ? { configurable: true, enumerable: true, value: {} }
-      : undefined,
-  }) as PermissiveApiRecord;
-}
-
-export const OWNED_API = {
-  rpc: permissiveApiRecord(),
-  operations: permissiveApiRecord(),
-  events: permissiveApiRecord(),
-  feeds: permissiveApiRecord(),
-  subjects: {},
-  state: {},
-  jobs: {},
-  kv: {},
-  store: {},
-} as const;
-export const API = { owned: OWNED_API, used: {}, merged: OWNED_API } as const;
-export type OwnedApi = typeof OWNED_API;
-export type Api = typeof API;
-export type ApiViews = typeof API;
-"#,
-    )?;
-    write_if_changed(
-        &out.join("owned_api.ts"),
-        r#"type PermissiveApiRecord = Record<string, unknown>;
-
-function permissiveApiRecord(): PermissiveApiRecord {
-  return new Proxy({}, {
-    get: () => ({}),
-    has: () => true,
-    getOwnPropertyDescriptor: (_target, property) => typeof property === "string"
-      ? { configurable: true, enumerable: true, value: {} }
-      : undefined,
-  }) as PermissiveApiRecord;
-}
-
-export const OWNED_API = {
-  rpc: permissiveApiRecord(),
-  operations: permissiveApiRecord(),
-  events: permissiveApiRecord(),
-  feeds: permissiveApiRecord(),
-  subjects: {},
-  state: {},
-  jobs: {},
-  kv: {},
-  store: {},
-} as const;
-"#,
-    )?;
-    write_if_changed(&out.join("types.ts"), &format!("export const CONTRACT_ID = {} as const;\nexport const CONTRACT_DIGEST = \"shell\" as const;\n", js_string(contract_id)))?;
+    write_if_changed(&out.join("mod.ts"), "export * from \"./descriptors.ts\";\nexport * from \"./types.ts\";\nexport * from \"./schemas.ts\";\n")?;
+    write_if_changed(&out.join("descriptors.ts"), "")?;
+    write_if_changed(&out.join("types.ts"), "")?;
     write_if_changed(&out.join("schemas.ts"), "")?;
-    write_if_changed(&out.join("client.ts"), "export type Client = never;\n")?;
+    write_if_changed(&out.join("manifest.ts"), &format!("export const CONTRACT_ID = {} as const;\nexport const CONTRACT_DIGEST = \"shell\" as const;\n", js_string(contract_id)))?;
     Ok(())
-}
-
-fn render_ts_contract_shell(contract_id: &str, trellis_import: &str) -> String {
-    format!(
-        "import type {{ ContractDependencyUse, SdkContractModule, UseSpec }} from {};\n\nconst CONTRACT_MODULE_METADATA = Symbol.for(\"@qlever-llc/trellis/contracts/contract-module\");\n\ntype PermissiveApiRecord = Record<string, unknown>;\n\nfunction permissiveApiRecord(): PermissiveApiRecord {{\n  return new Proxy({{}}, {{\n    get: () => ({{}}),\n    has: () => true,\n    getOwnPropertyDescriptor: (_target, property) => typeof property === \"string\"\n      ? {{ configurable: true, enumerable: true, value: {{}} }}\n      : undefined,\n  }}) as PermissiveApiRecord;\n}}\n\nexport const CONTRACT_ID = {} as const;\nexport const CONTRACT_DIGEST = \"shell\" as const;\nexport const CONTRACT = {{ format: \"trellis.contract.v1\", id: CONTRACT_ID }};\nexport const API = {{\n  owned: {{\n    rpc: permissiveApiRecord(),\n    operations: permissiveApiRecord(),\n    events: permissiveApiRecord(),\n    feeds: permissiveApiRecord(),\n    subjects: {{}},\n  }},\n}} as const;\n\nexport const sdk: SdkContractModule<typeof CONTRACT_ID, typeof API.owned> = {{\n  CONTRACT_ID,\n  CONTRACT_DIGEST,\n  CONTRACT: CONTRACT as never,\n  API: API as never,\n  use: (<const TSpec extends UseSpec<typeof API.owned>>(spec: TSpec) => {{\n    const dependencyUse = {{\n      contract: CONTRACT_ID,\n      ...(spec.rpc?.call ? {{ rpc: {{ call: [...spec.rpc.call] }} }} : {{}}),\n      ...(spec.operations?.call ? {{ operations: {{ call: [...spec.operations.call] }} }} : {{}}),\n      ...((spec.events?.publish || spec.events?.subscribe) ? {{ events: {{ ...(spec.events.publish ? {{ publish: [...spec.events.publish] }} : {{}}), ...(spec.events.subscribe ? {{ subscribe: [...spec.events.subscribe] }} : {{}}) }} }} : {{}}),\n      ...(spec.feeds?.subscribe ? {{ feeds: {{ subscribe: [...spec.feeds.subscribe] }} }} : {{}}),\n    }};\n    Object.defineProperty(dependencyUse, CONTRACT_MODULE_METADATA, {{ value: sdk, enumerable: false }});\n    return dependencyUse as ContractDependencyUse<typeof CONTRACT_ID, typeof API.owned, TSpec>;\n  }}),\n}};\n\nexport const use = sdk.use;\n",
-        js_string(trellis_import),
-        js_string(contract_id)
-    )
 }
 
 fn write_rust_sdk_shell(
@@ -515,7 +444,7 @@ fn ts_shell_deno_json(
     );
     root.insert(
         "exports".to_string(),
-        serde_json::json!({ ".": "./mod.ts" }),
+        serde_json::json!({ ".": "./mod.ts", "./manifest": "./manifest.ts" }),
     );
     root.insert(
         "compilerOptions".to_string(),
@@ -566,13 +495,6 @@ fn ts_shell_extends(runtime_deps: &TsRuntimeDeps) -> Option<String> {
             .to_string_lossy()
             .replace('\\', "/"),
     )
-}
-
-fn ts_shell_trellis_import(runtime_deps: &TsRuntimeDeps) -> String {
-    match runtime_deps.source {
-        CodegenTsRuntimeSource::Registry => "@qlever-llc/trellis".to_string(),
-        CodegenTsRuntimeSource::Local => "@qlever-llc/trellis".to_string(),
-    }
 }
 
 fn js_string(value: &str) -> String {
@@ -686,49 +608,12 @@ pub fn stage_npm_ts_sources(
     package_name: &str,
     package_version: &str,
 ) -> miette::Result<NpmTsSources> {
-    let mut staged = BTreeSet::new();
-    let mut dependency_packages = BTreeSet::new();
-    let root_dir = stage_npm_manifest_ts_sources(
-        contract_id,
-        contract_id,
-        manifest_path,
-        staging_root,
-        package_name,
-        package_version,
-        &mut staged,
-        &mut dependency_packages,
-    )?;
-    Ok(NpmTsSources {
-        root_dir,
-        dependency_packages,
-    })
-}
-
-fn stage_npm_manifest_ts_sources(
-    root_contract_id: &str,
-    contract_id: &str,
-    manifest_path: &Path,
-    staging_root: &Path,
-    package_name: &str,
-    package_version: &str,
-    staged: &mut BTreeSet<String>,
-    dependency_packages: &mut BTreeSet<String>,
-) -> miette::Result<PathBuf> {
-    if !staged.insert(contract_id.to_string()) {
-        return Ok(staging_root.join(sdk_output_stem(contract_id)));
-    }
-
-    let loaded = trellis_contracts::load_manifest(manifest_path).into_diagnostic()?;
-    let out_dir = staging_root.join(sdk_output_stem(contract_id));
-    let generated_package_name = if contract_id == root_contract_id {
-        package_name.to_string()
-    } else {
-        ts_package_name_from_id(contract_id, "@trellis-sdk/")
-    };
+    let root_dir = staging_root.join(sdk_output_stem(contract_id));
+    fs::create_dir_all(&root_dir).into_diagnostic()?;
     let opts = GenerateTsSdkOpts {
         manifest_path: manifest_path.to_path_buf(),
-        out_dir: out_dir.clone(),
-        package_name: generated_package_name,
+        out_dir: root_dir.clone(),
+        package_name: package_name.to_string(),
         package_version: package_version.to_string(),
         runtime_deps: ts_runtime_deps(RuntimeSource::Registry, trellis_package_version(), None),
     };
@@ -739,36 +624,17 @@ fn stage_npm_manifest_ts_sources(
             .is_some_and(|extension| extension == "ts")
         {
             write_if_changed(
-                &out_dir.join(source.path),
-                &rewrite_npm_ts_imports(&source.contents, &loaded),
+                &root_dir.join(source.path),
+                &rewrite_npm_ts_imports(&source.contents),
             )?;
         } else if source.path == Path::new("README.md") {
-            write_if_changed(&out_dir.join(source.path), &source.contents)?;
+            write_if_changed(&root_dir.join(source.path), &source.contents)?;
         }
     }
-
-    if let Some(manifest_dir) = manifest_path.parent() {
-        for (_alias, use_ref) in loaded.manifest.uses.iter() {
-            let dependency_manifest = manifest_dir.join(format!("{}.json", use_ref.contract));
-            if dependency_manifest.exists() {
-                stage_npm_manifest_ts_sources(
-                    root_contract_id,
-                    &use_ref.contract,
-                    &dependency_manifest,
-                    staging_root,
-                    &ts_package_name_from_id(&use_ref.contract, "@trellis-sdk/"),
-                    package_version,
-                    staged,
-                    dependency_packages,
-                )?;
-            }
-            if let Some(package_name) = npm_dependency_package_name(&use_ref.contract) {
-                dependency_packages.insert(package_name);
-            }
-        }
-    }
-
-    Ok(out_dir)
+    Ok(NpmTsSources {
+        root_dir,
+        dependency_packages: BTreeSet::new(),
+    })
 }
 
 fn render_npm_tsconfig(npm_out: &Path) -> String {
@@ -801,23 +667,14 @@ fn write_npm_package_json(
     package_version: &str,
     trellis_runtime_version: &str,
     contract_id: &str,
-    dependency_packages: &BTreeSet<String>,
+    _dependency_packages: &BTreeSet<String>,
 ) -> miette::Result<()> {
     let trellis_dependency = format!("^{}", trellis_runtime_version);
-    let generated_dependency = format!("^{}", package_version);
     let mut peer_dependencies = serde_json::Map::new();
     peer_dependencies.insert(
         "@qlever-llc/trellis".to_string(),
         serde_json::Value::String(trellis_dependency.clone()),
     );
-    for dependency in dependency_packages {
-        if dependency != package_name {
-            peer_dependencies.insert(
-                dependency.clone(),
-                serde_json::Value::String(generated_dependency.clone()),
-            );
-        }
-    }
     write_if_changed(
         &npm_out.join("package.json"),
         &format!(
@@ -854,30 +711,8 @@ fn write_npm_package_json(
     )
 }
 
-fn rewrite_npm_ts_imports(contents: &str, loaded: &LoadedManifest) -> String {
-    let mut rewritten = contents.replace(".ts\"", ".js\"").replace(".ts'", ".js'");
-    for (_alias, use_ref) in loaded.manifest.uses.iter() {
-        let Some(package_name) = npm_dependency_package_name(&use_ref.contract) else {
-            continue;
-        };
-        let stem = sdk_output_stem(&use_ref.contract);
-        for file in ["types", "api", "owned_api"] {
-            rewritten = rewritten.replace(
-                &format!("\"../{stem}/{file}.js\""),
-                &js_string(&package_name),
-            );
-            rewritten = rewritten.replace(
-                &format!("'../{stem}/{file}.js'"),
-                &format!("'{package_name}'"),
-            );
-        }
-    }
-    rewritten
-}
-
-fn npm_dependency_package_name(contract_id: &str) -> Option<String> {
-    let package_name = ts_package_name_from_id(contract_id, "@trellis-sdk/");
-    (!package_name.starts_with("@qlever-llc/trellis/sdk/")).then_some(package_name)
+fn rewrite_npm_ts_imports(contents: &str) -> String {
+    contents.replace(".ts\"", ".js\"").replace(".ts'", ".js'")
 }
 
 fn resolve_tsc_bin() -> miette::Result<OsString> {
@@ -999,10 +834,10 @@ fn ts_key_outputs_exist(ts_out: Option<&Path>) -> bool {
         return true;
     };
     ts_out.join("mod.ts").exists()
-        && ts_out.join("api.ts").exists()
-        && ts_out.join("owned_api.ts").exists()
-        && ts_out.join("contract.ts").exists()
-        && ts_out.join("client.ts").exists()
+        && ts_out.join("descriptors.ts").exists()
+        && ts_out.join("types.ts").exists()
+        && ts_out.join("schemas.ts").exists()
+        && ts_out.join("manifest.ts").exists()
 }
 
 fn npm_key_outputs_exist(npm_out: Option<&Path>) -> bool {
@@ -1028,7 +863,7 @@ fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
     let embedded_dir = repo_root
         .join("js/packages/trellis/sdk/_generated")
         .join(module);
-    embedded_dir.join("mod.ts").exists() && embedded_dir.join("contract.ts").exists()
+    embedded_dir.join("mod.ts").exists() && embedded_dir.join("descriptors.ts").exists()
 }
 
 fn rust_key_outputs_exist(
@@ -1158,7 +993,7 @@ fn copy_embedded_trellis_owned_ts_sdk(
 }
 
 fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
-    let mut rewritten = contents
+    contents
         .replace(
             "from \"@qlever-llc/trellis/contracts\"",
             "from \"../../../contracts.ts\"",
@@ -1167,16 +1002,11 @@ fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
             "from \"../../../../js/packages/trellis/errors/index.ts\"",
             "from \"../../../errors/index.ts\"",
         )
-        .replace("from \"@qlever-llc/trellis\"", "from \"../../../index.ts\"");
-
-    for sdk_name in ["auth", "core", "health", "jobs", "state"] {
-        rewritten = rewritten.replace(
-            &format!("from \"@qlever-llc/trellis/sdk/{sdk_name}\""),
-            &format!("from \"../{sdk_name}/mod.ts\""),
-        );
-    }
-
-    rewritten
+        .replace(
+            "from \"@qlever-llc/trellis/errors\"",
+            "from \"../../../errors/index.ts\"",
+        )
+        .replace("from \"@qlever-llc/trellis\"", "from \"../../../index.ts\"")
 }
 
 fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool) -> String {
@@ -1524,31 +1354,10 @@ mod tests {
 
     #[test]
     fn npm_source_rewrite_changes_local_ts_specifiers_to_js() {
-        let temp = tempfile::tempdir().expect("create temp dir");
-        let manifest = temp.path().join("contract.json");
-        fs::write(
-            &manifest,
-            r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.app@v1",
-  "displayName": "App",
-  "description": "App",
-  "kind": "app",
-  "uses": {
-    "required": {
-      "dep": { "contract": "trellis.dep@v1", "rpc": { "call": ["Dep.Get"] } }
-    }
-  }
-}
-"#,
-        )
-        .expect("write manifest");
-        let loaded = trellis_contracts::load_manifest(&manifest).expect("load manifest");
-        let source = "export * from \"./types.ts\";\nimport type { Api } from '../dep/api.ts';\nimport { sdk } from '@qlever-llc/trellis';\n";
-        let rewritten = rewrite_npm_ts_imports(source, &loaded);
+        let source = "export * from \"./types.ts\";\nimport { rpcAction } from '@qlever-llc/trellis/contracts';\n";
+        let rewritten = rewrite_npm_ts_imports(source);
 
         assert!(rewritten.contains("./types.js"));
-        assert!(rewritten.contains("@trellis-sdk/trellis-dep"));
         assert!(rewritten.contains("@qlever-llc/trellis"));
         assert!(!rewritten.contains(".ts\""));
         assert!(!rewritten.contains(".ts'"));
@@ -1557,17 +1366,14 @@ mod tests {
     #[test]
     fn embedded_trellis_owned_ts_sdk_uses_package_relative_imports() {
         let source = concat!(
-            "import type { TrellisAPI } from \"@qlever-llc/trellis/contracts\";\n",
-            "import { schema } from \"@qlever-llc/trellis/contracts\";\n",
-            "import type { RpcHandlerFn } from \"@qlever-llc/trellis\";\n",
-            "import { OWNED_API as HealthApi } from \"@qlever-llc/trellis/sdk/health\";\n",
+            "import { rpcAction, schema } from \"@qlever-llc/trellis/contracts\";\n",
+            "import { TrellisError } from \"@qlever-llc/trellis/errors\";\n",
         );
 
         let rewritten = rewrite_embedded_trellis_owned_ts_sdk_source(source);
 
         assert!(rewritten.contains("from \"../../../contracts.ts\""));
-        assert!(rewritten.contains("from \"../../../index.ts\""));
-        assert!(rewritten.contains("from \"../health/mod.ts\""));
+        assert!(rewritten.contains("from \"../../../errors/index.ts\""));
         assert!(!rewritten.contains("from \"@qlever-llc/trellis"));
     }
 
@@ -1589,7 +1395,7 @@ mod tests {
     }
 
     #[test]
-    fn contract_shell_outputs_create_permissive_typescript_sdk() {
+    fn contract_shell_outputs_create_empty_typescript_vocabulary() {
         let temp = tempfile::tempdir().expect("create tempdir");
         let manifest = temp
             .path()
@@ -1614,23 +1420,24 @@ mod tests {
         )
         .expect("write shell outputs");
 
-        let contract = fs::read_to_string(ts_out.join("contract.ts")).expect("read contract shell");
-        let api = fs::read_to_string(ts_out.join("api.ts")).expect("read api shell");
+        let shell_manifest =
+            fs::read_to_string(ts_out.join("manifest.ts")).expect("read manifest shell");
         let deno = fs::read_to_string(ts_out.join("deno.json")).expect("read deno shell config");
-        let owned_api =
-            fs::read_to_string(ts_out.join("owned_api.ts")).expect("read owned api shell");
-        assert!(contract.contains("export const sdk"));
-        assert!(contract.contains("ContractDependencyUse"));
-        assert!(contract.contains("permissiveApiRecord"));
-        assert!(contract.contains("getOwnPropertyDescriptor"));
-        assert!(api.contains("permissiveApiRecord"));
-        assert!(api.contains("getOwnPropertyDescriptor"));
-        assert!(owned_api.contains("export const OWNED_API"));
-        assert!(owned_api.contains("permissiveApiRecord"));
+        assert_eq!(
+            fs::read_to_string(ts_out.join("descriptors.ts")).unwrap(),
+            ""
+        );
+        assert_eq!(fs::read_to_string(ts_out.join("types.ts")).unwrap(), "");
+        assert_eq!(fs::read_to_string(ts_out.join("schemas.ts")).unwrap(), "");
+        assert!(shell_manifest.contains("CONTRACT_ID"));
+        assert!(shell_manifest.contains("CONTRACT_DIGEST"));
+        assert!(!ts_out.join("contract.ts").exists());
+        assert!(!ts_out.join("api.ts").exists());
+        assert!(!ts_out.join("owned_api.ts").exists());
+        assert!(!ts_out.join("client.ts").exists());
         assert!(deno.contains(r#""lib": ["#));
         assert!(deno.contains(r#""dom""#));
         assert!(deno.contains(r#""deno.ns""#));
-        assert!(!contract.contains("assertSelectedKeysExist"));
         assert!(!metadata.exists());
     }
 

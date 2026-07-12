@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isErr, type AsyncResult, type BaseError } from "@qlever-llc/result";
+  import { isErr } from "@qlever-llc/result";
   import type { DeploymentAuthorityGrantOverride } from "@qlever-llc/trellis/auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
@@ -29,10 +29,6 @@
     deploymentId: string;
     overrides: DeploymentAuthorityGrantOverride[];
   };
-  type AuthRpcClient = {
-    request(subject: "Auth.DeploymentAuthority.GrantOverrides.List", input: ListPageInput): AsyncResult<GrantOverrideListOutput, BaseError>;
-    request(subject: "Auth.DeploymentAuthority.GrantOverrides.Remove", input: GrantOverrideMutationInput): AsyncResult<GrantOverrideMutationOutput, BaseError>;
-  };
   type GrantOverrideRow = DeploymentAuthorityGrantOverride;
   type GrantOverrideGroup = {
     key: string;
@@ -47,7 +43,6 @@
   };
 
   const trellis = getTrellis();
-  const authRpc = trellis as AuthRpcClient;
 
   let loading = $state(true);
   let removingKey = $state<string | null>(null);
@@ -207,7 +202,7 @@
     const entries: DeploymentAuthorityGrantOverride[] = [];
     let offset = 0;
     while (true) {
-      const response = await authRpc.request("Auth.DeploymentAuthority.GrantOverrides.List", { limit: 500, offset }).take();
+      const response = await trellis.authDeploymentAuthorityGrantOverridesList({ limit: 500, offset }).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       entries.push(...response.entries);
       if (response.nextOffset === undefined) return entries;
@@ -221,7 +216,7 @@
     error = null;
     saved = null;
     try {
-      const response = await authRpc.request("Auth.DeploymentAuthority.GrantOverrides.Remove", {
+      const response = await trellis.authDeploymentAuthorityGrantOverridesRemove({
         deploymentId: group.deploymentId,
         overrides: group.rows.map(rowToOverride),
       }).take();

@@ -108,42 +108,22 @@ export type AuthResolveDeviceUserAuthoritiesOperation = OperationRef<
   AuthResolveDeviceUserAuthoritiesOutput
 >;
 
-type RequestClient = {
-  rpc: {
-    auth: {
-      deviceUserAuthoritiesList(
-        input: AuthDeviceUserAuthoritiesListInput,
-      ): AsyncResult<AuthDeviceUserAuthoritiesListOutput, BaseError>;
-      deviceUserAuthoritiesRevoke(
-        input: AuthDeviceUserAuthoritiesRevokeInput,
-      ): AsyncResult<AuthDeviceUserAuthoritiesRevokeResponse, BaseError>;
-      devicesConnectInfoGet(
-        input: GetDeviceConnectInfoInput,
-      ): AsyncResult<GetDeviceConnectInfoOutput, BaseError>;
-    };
+export type DeviceActivationTransport = {
+  authDeviceUserAuthoritiesResolve(
+    input: AuthResolveDeviceUserAuthoritiesInput,
+  ): {
+    start(): AsyncResult<AuthResolveDeviceUserAuthoritiesOperation, BaseError>;
   };
+  authDeviceUserAuthoritiesList(
+    input: AuthDeviceUserAuthoritiesListInput,
+  ): AsyncResult<AuthDeviceUserAuthoritiesListOutput, BaseError>;
+  authDeviceUserAuthoritiesRevoke(
+    input: AuthDeviceUserAuthoritiesRevokeInput,
+  ): AsyncResult<AuthDeviceUserAuthoritiesRevokeResponse, BaseError>;
+  authDevicesConnectInfoGet(
+    input: GetDeviceConnectInfoInput,
+  ): AsyncResult<GetDeviceConnectInfoOutput, BaseError>;
 };
-
-type ResolveDeviceUserAuthoritiesOperationClient = {
-  operation: {
-    auth: {
-      deviceUserAuthoritiesResolve: {
-        input(
-          input: AuthResolveDeviceUserAuthoritiesInput,
-        ): {
-          start(): AsyncResult<
-            AuthResolveDeviceUserAuthoritiesOperation,
-            BaseError
-          >;
-        };
-      };
-    };
-  };
-};
-
-export type DeviceActivationTransport =
-  & RequestClient
-  & ResolveDeviceUserAuthoritiesOperationClient;
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {
   const size = parts.reduce((total, part) => total + part.length, 0);
@@ -669,19 +649,16 @@ export function createDeviceActivationClient(
 ) {
   return {
     resolveDeviceUserAuthorities(input: AuthResolveDeviceUserAuthoritiesInput) {
-      return client.operation.auth.deviceUserAuthoritiesResolve.input(input)
-        .start()
-        .orThrow();
+      return client.authDeviceUserAuthoritiesResolve(input).start().orThrow();
     },
     listDeviceActivations(input: AuthDeviceUserAuthoritiesListInput) {
-      return client.rpc.auth.deviceUserAuthoritiesList(input).orThrow();
+      return client.authDeviceUserAuthoritiesList(input).orThrow();
     },
     revokeDeviceActivation(input: AuthDeviceUserAuthoritiesRevokeInput) {
-      return client.rpc.auth.deviceUserAuthoritiesRevoke(input)
-        .orThrow();
+      return client.authDeviceUserAuthoritiesRevoke(input).orThrow();
     },
     getDeviceConnectInfo(input: GetDeviceConnectInfoInput) {
-      return client.rpc.auth.devicesConnectInfoGet(input).orThrow();
+      return client.authDevicesConnectInfoGet(input).orThrow();
     },
   };
 }

@@ -1,33 +1,18 @@
 import type {
-  ClientTrellis,
-  RuntimeStateStoresForContract,
-  TrellisAPI,
+  CallerContract,
+  CallerRuntime,
   TrellisConnection,
   TrellisConnectionStatus,
-  TrellisContractV1,
 } from "@qlever-llc/trellis";
 import { createContext } from "svelte";
 import { createSubscriber } from "svelte/reactivity";
 
 /** Minimal contract shape required to create a typed Trellis Svelte app context. */
-export type TrellisContractLike<TA extends TrellisAPI = TrellisAPI> = {
-  CONTRACT: TrellisContractV1;
-  CONTRACT_DIGEST: string;
-  API: {
-    trellis?: TA;
-  };
-};
-
-type TrellisApiFor<TContract extends TrellisContractLike> = NonNullable<
-  TContract["API"]["trellis"]
-> extends TrellisAPI ? NonNullable<TContract["API"]["trellis"]> : TrellisAPI;
+export type TrellisContractLike = CallerContract;
 
 /** Real connected Trellis client type exposed by a Svelte app context. */
 export type TrellisClientFor<TContract extends TrellisContractLike> =
-  ClientTrellis<
-    TrellisApiFor<TContract>,
-    RuntimeStateStoresForContract<TContract>
-  >;
+  CallerRuntime<TContract>;
 
 /** Minimal client surface required for Trellis Svelte context clients. */
 export type TrellisContextClient = {
@@ -111,8 +96,7 @@ export type TrellisAppOwner<
 /**
  * Public app-scoped typed Svelte context owner for a Trellis browser app.
  *
- * `TClient` is a type-only facade over the runtime client that `TrellisProvider`
- * installs. Use it with generated client facade types for the same contract.
+ * `TClient` is a type-only refinement over the descriptor-inferred caller runtime.
  */
 export interface TrellisApp<
   TContract extends TrellisContractLike = TrellisContractLike,
@@ -188,8 +172,7 @@ class TrellisAppImpl<
 /**
  * Creates an app-scoped typed Svelte context owner for a Trellis contract and URL.
  *
- * The optional `TClient` type parameter is a type-only facade over the connected
- * runtime client. It should be a generated client facade for `options.contract`.
+ * The optional `TClient` type parameter refines the connected caller runtime.
  */
 export function createTrellisApp<
   TContract extends TrellisContractLike,

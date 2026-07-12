@@ -1,12 +1,12 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
+  type CallerRuntime,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
   defineAppContract,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -27,20 +27,12 @@ const passwordAdminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Password Reset Change Client",
   description:
     "Verifies live local password reset and authenticated password change behavior.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Sessions.Me",
-            "Auth.Users.Create",
-            "Auth.Users.Password.Change",
-            "Auth.Users.PasswordReset.Create",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthSessionsMe,
+    trellisAuth.AuthUsersCreate,
+    trellisAuth.AuthUsersPasswordChange,
+    trellisAuth.AuthUsersPasswordResetCreate,
+  ],
 }));
 
 const initialClientName = caseScopedName("password-reset-initial", CASE_ID);
@@ -58,14 +50,14 @@ liveTrellisTest({
       contract: passwordAdminContract,
     });
     let oldPasswordClient:
-      | ConnectedTrellisClient<typeof passwordAdminContract>
+      | CallerRuntime<typeof passwordAdminContract>
       | undefined;
     let newPasswordClient:
-      | ConnectedTrellisClient<typeof passwordAdminContract>
+      | CallerRuntime<typeof passwordAdminContract>
       | undefined;
 
     try {
-      const created = await initialClient.rpc.auth.usersCreate({
+      const created = await initialClient.authUsersCreate({
         username: localAdminUsername,
         name: "Password Reset Change Admin",
         email: `${localAdminUsername}@example.test`,
@@ -73,7 +65,7 @@ liveTrellisTest({
         capabilityGroups: ["admin"],
       }).orThrow();
 
-      const reset = await initialClient.rpc.auth.usersPasswordResetCreate({
+      const reset = await initialClient.authUsersPasswordResetCreate({
         userId: created.user.userId,
       }).orThrow();
       await completeLocalPasswordAccountFlow({
@@ -97,7 +89,7 @@ liveTrellisTest({
       });
 
       assertEquals(
-        await oldPasswordClient.rpc.auth.usersPasswordChange({
+        await oldPasswordClient.authUsersPasswordChange({
           currentPassword: knownOldPassword,
           newPassword: knownNewPassword,
         }).orThrow(),
@@ -127,7 +119,7 @@ liveTrellisTest({
         username: localAdminUsername,
         password: knownNewPassword,
       });
-      const newPasswordMe = await newPasswordClient.rpc.auth.sessionsMe({})
+      const newPasswordMe = await newPasswordClient.authSessionsMe({})
         .orThrow();
       assertEquals(newPasswordMe.user?.userId, created.user.userId);
     } finally {
@@ -170,7 +162,7 @@ async function connectWithLocalPassword(args: {
   sessionKeySeed: string;
   username: string;
   password: string;
-}): Promise<ConnectedTrellisClient<typeof passwordAdminContract>> {
+}): Promise<CallerRuntime<typeof passwordAdminContract>> {
   return await TrellisClient.connect({
     trellisUrl: args.trellisUrl,
     name: args.name,

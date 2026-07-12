@@ -6,12 +6,7 @@ import Type, {
 } from "typebox";
 import { Value } from "typebox/value";
 import type { BaseError } from "@qlever-llc/result";
-import type { AuthSessionsMeResponse } from "../auth/protocol.ts";
 import { TrellisError } from "../errors/TrellisError.ts";
-import type {
-  AuthSessionsLogoutInput,
-  AuthSessionsLogoutResponse,
-} from "../models/auth/rpc/Logout.ts";
 import type {
   StateDeleteInput,
   StateDeleteResponse,
@@ -36,6 +31,26 @@ import {
   sha256Base64urlSync,
 } from "./canonical.ts";
 import {
+  CONTRACT_RUNTIME,
+  type ContractRuntime,
+  type RuntimeSelectedAction,
+} from "./contract_runtime.ts";
+import {
+  type ActionDescriptor,
+  actionRuntimeDescriptor,
+  type ConnectedActionName,
+  type EventActions,
+  eventActions,
+  feedAction,
+  operationAction,
+  type OptionalActionGroup,
+  rpcAction,
+} from "./descriptors.ts";
+import type {
+  RuntimeFeatureDescriptor,
+  RuntimeFeatureKind,
+} from "./features.ts";
+import {
   type EventDesc,
   type FeedDesc,
   type InferRuntimeRpcError,
@@ -43,12 +58,12 @@ import {
   type OperationDesc,
   type RPCDesc,
   type RpcErrorClass,
+  type RuntimeApi,
   type RuntimeRpcErrorDesc,
   type Schema,
   schema,
   type SchemaLike,
   type SerializableErrorData,
-  type TrellisAPI,
   unwrapSchema,
 } from "./runtime.ts";
 import {
@@ -132,6 +147,8 @@ export {
   assertDataPointersExistAndAreTokenable,
   getSubschemaAtDataPointer,
 } from "./schema_pointers.ts";
+export * from "./descriptors.ts";
+export * from "./features.ts";
 
 export const CONTRACT_FORMAT_V1 = "trellis.contract.v1" as const;
 export const CATALOG_FORMAT_V1 = "trellis.catalog.v1" as const;
@@ -340,14 +357,14 @@ export const TrellisCatalogV1Schema = Type.Object({
   })),
 });
 
-const CONTRACT_MODULE_METADATA = Symbol.for(
-  "@qlever-llc/trellis/contracts/contract-module",
-);
 export const CONTRACT_JOBS_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/jobs",
 );
 export const CONTRACT_KV_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/kv",
+);
+export const CONTRACT_STORE_METADATA = Symbol.for(
+  "@qlever-llc/trellis/contracts/store",
 );
 export const CONTRACT_STATE_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/state",
@@ -362,9 +379,6 @@ type UnionToIntersection<U> =
     : never;
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type StringKeyOf<T> = Extract<keyof T, string>;
-type KeysFromList<T> = T extends readonly (infer K)[] ? Extract<K, string>
-  : never;
 
 type ReservedDefinedErrorFieldName =
   | "id"
@@ -1044,7 +1058,11 @@ export type ContractSourceResources<TSchemaName extends string = string> = {
 export type ContractSourceUse = {
   contract: string;
   rpc?: { call?: readonly string[] };
-  operations?: { call?: readonly string[] };
+  operations?: {
+    call?: readonly string[];
+    cancel?: readonly string[];
+    control?: readonly string[];
+  };
   events?: { publish?: readonly string[]; subscribe?: readonly string[] };
   feeds?: { subscribe?: readonly string[] };
 };
@@ -1079,7 +1097,7 @@ export type TrellisContractSource = {
   resources?: ContractSourceResources;
 };
 
-export type TrellisApiLike = {
+type RuntimeApiLike = {
   rpc: Record<string, RPCDesc>;
   operations: Record<string, OperationDesc>;
   events: Record<string, EventDesc>;
@@ -1087,7 +1105,7 @@ export type TrellisApiLike = {
   subjects: Record<string, unknown>;
 };
 
-type ApiShape = {
+type RuntimeApiShape = {
   rpc: Record<string, unknown>;
   operations: Record<string, unknown>;
   events: Record<string, unknown>;
@@ -1095,28 +1113,11 @@ type ApiShape = {
   subjects: Record<string, unknown>;
 };
 
-export type EmptyApi = {
+type EmptyRuntimeApi = {
   rpc: {};
   operations: {};
   events: {};
   feeds?: {};
-  subjects: {};
-};
-
-type BaselineAuthApi = {
-  rpc: {
-    "Auth.Sessions.Me": RPCDesc<
-      Schema<Record<string, never>>,
-      Schema<AuthSessionsMeResponse>
-    >;
-    "Auth.Sessions.Logout": RPCDesc<
-      Schema<AuthSessionsLogoutInput>,
-      Schema<AuthSessionsLogoutResponse>
-    >;
-  };
-  operations: {};
-  events: {};
-  feeds: {};
   subjects: {};
 };
 
@@ -1136,119 +1137,91 @@ type BaselineStateApi = {
   subjects: {};
 };
 
-export type ContractApiViews<
-  TOwnedApi extends ApiShape,
-  TUsedApi extends ApiShape,
-  TTrellisApi extends ApiShape,
-> = {
-  owned: TOwnedApi;
-  used: TUsedApi;
-  trellis?: TTrellisApi;
-};
-
-export type UseSpec<TApi extends ApiShape> = {
-  rpc?: {
-    call?: readonly StringKeyOf<TApi["rpc"]>[];
-  };
-  operations?: {
-    call?: readonly StringKeyOf<TApi["operations"]>[];
-  };
-  events?: {
-    publish?: readonly StringKeyOf<TApi["events"]>[];
-    subscribe?: readonly StringKeyOf<TApi["events"]>[];
-  };
-  feeds?: {
-    subscribe?: readonly StringKeyOf<NonNullable<TApi["feeds"]>>[];
-  };
-};
-
-type UseRpcCall<TSpec> =
-  NonNullable<TSpec extends { rpc?: infer TRpc } ? TRpc : never> extends
-    { call?: infer TCall extends readonly string[] | undefined } ? TCall
-    : never;
-type UseEventsPublish<TSpec> = NonNullable<
-  TSpec extends { events?: infer TEvents } ? TEvents : never
-> extends { publish?: infer TPublish extends readonly string[] | undefined }
-  ? TPublish
-  : never;
-type UseOperationsCall<TSpec> = NonNullable<
-  TSpec extends { operations?: infer TOperations } ? TOperations : never
-> extends { call?: infer TCall extends readonly string[] | undefined } ? TCall
-  : never;
-type UseEventsSubscribe<TSpec> = NonNullable<
-  TSpec extends { events?: infer TEvents } ? TEvents : never
-> extends { subscribe?: infer TSubscribe extends readonly string[] | undefined }
-  ? TSubscribe
-  : never;
-type UseFeedsSubscribe<TSpec> = NonNullable<
-  TSpec extends { feeds?: infer TFeeds } ? TFeeds : never
-> extends { subscribe?: infer TSubscribe extends readonly string[] | undefined }
-  ? TSubscribe
-  : never;
-type ContractModuleMarker<
-  TContractModule = ContractModule<
-    string,
-    TrellisApiLike,
-    TrellisApiLike,
-    TrellisApiLike
-  >,
-> = {
-  readonly [CONTRACT_MODULE_METADATA]: TContractModule;
-};
-
-export type ContractDependencyUse<
-  TContractId extends string,
-  TApi extends ApiShape,
-  TSpec extends UseSpec<TApi> = UseSpec<TApi>,
-> = {
-  contract: TContractId;
-  readonly [CONTRACT_MODULE_METADATA]?: ContractModule<
-    TContractId,
-    TApi,
-    ApiShape,
-    ApiShape
+type ContractActionSelection =
+  | ActionDescriptor
+  | OptionalActionGroup<readonly ActionDescriptor[]>;
+type RuntimeFeatureSelection<TSchemaName extends string = string> =
+  | RuntimeFeatureDescriptor<"state", ContractSourceState<TSchemaName>>
+  | RuntimeFeatureDescriptor<"jobs", ContractSourceJobs<TSchemaName>>
+  | RuntimeFeatureDescriptor<
+    "kv",
+    Record<string, ContractSourceKvResource<TSchemaName>>
+  >
+  | RuntimeFeatureDescriptor<
+    "store",
+    Record<string, ContractSourceStoreResource>
   >;
-  rpc?: { call?: UseRpcCall<TSpec> };
-  operations?: { call?: UseOperationsCall<TSpec> };
-  events?: {
-    publish?: UseEventsPublish<TSpec>;
-    subscribe?: UseEventsSubscribe<TSpec>;
-  };
-  feeds?: { subscribe?: UseFeedsSubscribe<TSpec> };
-};
+type ContractSelection<TSchemaName extends string = string> =
+  | ContractActionSelection
+  | RuntimeFeatureSelection<TSchemaName>;
 
-type InternalContractDependencyUse<
-  TContractId extends string,
-  TApi extends ApiShape,
-  TSpec extends UseSpec<TApi> = UseSpec<TApi>,
-> = ContractDependencyUse<TContractId, TApi, TSpec> & ContractModuleMarker;
+type ContractActionSelections = readonly ContractActionSelection[];
+type ContractSelections<TSchemaName extends string = string> =
+  readonly ContractSelection<
+    TSchemaName
+  >[];
+type AuthorContractUses<TSchemaName extends string = string> =
+  ContractSelections<
+    TSchemaName
+  >;
 
-type AnyContractDependencyUse = InternalContractDependencyUse<
+export type SelectedActionsFromUses<TUses> = TUses extends readonly (
+  infer TSelection
+)[] ? TSelection extends OptionalActionGroup<infer TActions> ? TActions[number]
+  : TSelection extends ActionDescriptor ? TSelection
+  : never
+  : never;
+
+type ApiFromAction<TAction> = TAction extends ActionDescriptor<
   string,
-  TrellisApiLike,
-  UseSpec<TrellisApiLike>
->;
+  infer TName,
+  infer TKind,
+  infer TDescriptor,
+  string
+> ? TKind extends "rpc" ? {
+      rpc: { [K in TName]: TDescriptor };
+      operations: {};
+      events: {};
+      feeds: {};
+      subjects: {};
+    }
+  : TKind extends "operation" ? {
+      rpc: {};
+      operations: { [K in TName]: TDescriptor };
+      events: {};
+      feeds: {};
+      subjects: {};
+    }
+  : TKind extends "feed" ? {
+      rpc: {};
+      operations: {};
+      events: {};
+      feeds: { [K in TName]: TDescriptor };
+      subjects: {};
+    }
+  : TKind extends "event-publish" | "event-subscribe" ? {
+      rpc: {};
+      operations: {};
+      events: { [K in TName]: TDescriptor };
+      feeds: {};
+      subjects: {};
+    }
+  : EmptyRuntimeApi
+  : EmptyRuntimeApi;
 
-type AuthorContractDependencyUse = ContractDependencyUse<
-  string,
-  ApiShape,
-  UseSpec<ApiShape>
->;
-
-type AuthorContractUsesFlat = Readonly<
-  Record<string, AuthorContractDependencyUse>
->;
-
-type AuthorContractUsesGrouped = {
-  required?: AuthorContractUsesFlat;
-  optional?: AuthorContractUsesFlat;
+type UsedApiFromActions<TUses> = {
+  rpc: MergeRecordUnion<ApiFromAction<SelectedActionsFromUses<TUses>>["rpc"]>;
+  operations: MergeRecordUnion<
+    ApiFromAction<SelectedActionsFromUses<TUses>>["operations"]
+  >;
+  events: MergeRecordUnion<
+    ApiFromAction<SelectedActionsFromUses<TUses>>["events"]
+  >;
+  feeds: MergeRecordUnion<
+    ApiFromAction<SelectedActionsFromUses<TUses>>["feeds"]
+  >;
+  subjects: {};
 };
-
-type AuthorContractUses = AuthorContractUsesGrouped;
-
-export type ContractUseFn<TContractId extends string, TApi extends ApiShape> = <
-  const TSpec extends UseSpec<TApi>,
->(spec: TSpec) => ContractDependencyUse<TContractId, TApi, TSpec>;
 
 type MergeRecordUnion<U> = [U] extends [never] ? {}
   : Simplify<UnionToIntersection<U>>;
@@ -1289,6 +1262,7 @@ export type ContractKvMetadata = Record<string, {
   value: unknown;
   schema: TSchema;
 }>;
+export type ContractStoreMetadata = Record<string, { required: boolean }>;
 export type ContractStateMetadata = Record<string, {
   kind: ContractStateKind;
   value: unknown;
@@ -1359,14 +1333,48 @@ type ProjectedKvResources<
   : {}
   : {};
 
-type JobsFromSource<T> = T extends { jobs?: infer TJobs }
-  ? Extract<TJobs, ContractSourceJobs<string> | undefined>
+type ProjectedStoreResources<
+  T extends ContractSourceResources<string> | undefined,
+> = T extends { store?: infer TStore }
+  ? TStore extends Record<string, { required?: boolean }> ? {
+      [K in keyof TStore]: {
+        required: TStore[K] extends
+          { required: infer TRequired extends boolean } ? TRequired
+          : true;
+      };
+    }
+  : {}
+  : {};
+
+type FeatureConfigFromUses<TUses, TKind extends RuntimeFeatureKind> =
+  TUses extends readonly (infer TSelection)[]
+    ? TSelection extends RuntimeFeatureDescriptor<TKind, infer TConfig>
+      ? TConfig
+    : never
+    : never;
+
+type JobsFromSource<T> = T extends { uses?: infer TUses }
+  ? [FeatureConfigFromUses<TUses, "jobs">] extends [never] ? undefined
+  : Extract<FeatureConfigFromUses<TUses, "jobs">, ContractSourceJobs<string>>
   : undefined;
-type ResourcesFromSource<T> = T extends { resources?: infer TResources }
-  ? Extract<TResources, ContractSourceResources<string> | undefined>
+type ResourcesFromSource<T> = T extends { uses?: infer TUses } ? [
+    | FeatureConfigFromUses<TUses, "kv">
+    | FeatureConfigFromUses<TUses, "store">,
+  ] extends [never] ? undefined
+  : {
+    kv?: Extract<
+      FeatureConfigFromUses<TUses, "kv">,
+      Record<string, ContractSourceKvResource<string>>
+    >;
+    store?: Extract<
+      FeatureConfigFromUses<TUses, "store">,
+      Record<string, ContractSourceStoreResource>
+    >;
+  }
   : undefined;
-type StateFromSource<T> = T extends { state?: infer TState }
-  ? Extract<TState, ContractSourceState<string> | undefined>
+type StateFromSource<T> = T extends { uses?: infer TUses }
+  ? [FeatureConfigFromUses<TUses, "state">] extends [never] ? undefined
+  : Extract<FeatureConfigFromUses<TUses, "state">, ContractSourceState<string>>
   : undefined;
 
 type SchemasFromSource<T> = T extends { schemas?: infer TSchemas } ? TSchemas
@@ -1430,13 +1438,8 @@ type BuiltRpcDesc = {
   runtimeErrors?: readonly BuiltRuntimeErrorDesc[];
 };
 
-const TRELLIS_AUTH_CONTRACT_ID = "trellis.auth@v1";
 const TRELLIS_STATE_CONTRACT_ID = "trellis.state@v1";
 
-const BASELINE_AUTH_RPC_CALL = [
-  "Auth.Sessions.Me",
-  "Auth.Sessions.Logout",
-] as const;
 const BASELINE_STATE_RPC_CALL = [
   "State.Get",
   "State.Put",
@@ -1460,27 +1463,6 @@ function trellisRpcDesc<TInput, TOutput>(
   };
 }
 
-const BASELINE_AUTH_API: BaselineAuthApi = {
-  rpc: {
-    "Auth.Sessions.Me": trellisRpcDesc<
-      Record<string, never>,
-      AuthSessionsMeResponse
-    >(
-      "Auth.Sessions.Me",
-    ),
-    "Auth.Sessions.Logout": trellisRpcDesc<
-      AuthSessionsLogoutInput,
-      AuthSessionsLogoutResponse
-    >(
-      "Auth.Sessions.Logout",
-    ),
-  },
-  operations: {},
-  events: {},
-  feeds: {},
-  subjects: {},
-};
-
 const BASELINE_STATE_API: BaselineStateApi = {
   rpc: {
     "State.Get": trellisRpcDesc<StateGetInput, StateGetResponse>("State.Get"),
@@ -1497,6 +1479,33 @@ const BASELINE_STATE_API: BaselineStateApi = {
   feeds: {},
   subjects: {},
 };
+
+const BASELINE_STATE_ACTIONS = [
+  rpcAction(
+    TRELLIS_STATE_CONTRACT_ID,
+    "State.Get",
+    BASELINE_STATE_API.rpc["State.Get"],
+    "StateGet",
+  ),
+  rpcAction(
+    TRELLIS_STATE_CONTRACT_ID,
+    "State.Put",
+    BASELINE_STATE_API.rpc["State.Put"],
+    "StatePut",
+  ),
+  rpcAction(
+    TRELLIS_STATE_CONTRACT_ID,
+    "State.Delete",
+    BASELINE_STATE_API.rpc["State.Delete"],
+    "StateDelete",
+  ),
+  rpcAction(
+    TRELLIS_STATE_CONTRACT_ID,
+    "State.List",
+    BASELINE_STATE_API.rpc["State.List"],
+    "StateList",
+  ),
+] as const;
 
 type ProjectedRpc<
   T,
@@ -1630,7 +1639,7 @@ type ProjectedFeeds<
   }
   : {};
 
-export type OwnedApiFromSource<
+type OwnedApiFromSource<
   T extends {
     id?: unknown;
     capabilities?: unknown;
@@ -1655,77 +1664,128 @@ export type OwnedApiFromSource<
   subjects: {};
 };
 
-type RpcKeysFromSpec<TSpec> = TSpec extends { rpc?: { call?: infer TCall } }
-  ? KeysFromList<TCall>
-  : never;
-type EventKeysFromSpec<TSpec> =
-  | (TSpec extends { events?: { publish?: infer TPublish } }
-    ? KeysFromList<TPublish>
-    : never)
-  | (TSpec extends { events?: { subscribe?: infer TSubscribe } }
-    ? KeysFromList<TSubscribe>
-    : never);
-type OperationKeysFromSpec<TSpec> = TSpec extends
-  { operations?: { call?: infer TCall } } ? KeysFromList<TCall>
-  : never;
-type FeedKeysFromSpec<TSpec> = TSpec extends
-  { feeds?: { subscribe?: infer TSubscribe } } ? KeysFromList<TSubscribe>
-  : never;
-type ApiFromDependencyUse<TUse> = TUse extends
-  ContractDependencyUse<string, infer TApi, infer TSpec> ? {
-    rpc: Pick<TApi["rpc"], RpcKeysFromSpec<TSpec>>;
-    operations: Pick<TApi["operations"], OperationKeysFromSpec<TSpec>>;
-    events: Pick<TApi["events"], EventKeysFromSpec<TSpec>>;
-    feeds: Pick<NonNullable<TApi["feeds"]>, FeedKeysFromSpec<TSpec>>;
-    subjects: {};
+type ActionExportName<TName extends string> = TName extends
+  `${infer THead}.${infer TTail}`
+  ? `${Capitalize<THead>}${ActionExportName<TTail>}`
+  : TName extends `${infer THead}-${infer TTail}`
+    ? `${Capitalize<THead>}${ActionExportName<TTail>}`
+  : TName extends `${infer THead}_${infer TTail}`
+    ? `${Capitalize<THead>}${ActionExportName<TTail>}`
+  : Capitalize<TName>;
+
+type ContractSourceShape = {
+  id: string;
+  capabilities?: unknown;
+  schemas?: Readonly<Record<string, TSchema>>;
+  errors?: unknown;
+  rpc?: unknown;
+  operations?: unknown;
+  events?: unknown;
+  feeds?: unknown;
+};
+
+type OwnedRpcActionDescriptors<T extends ContractSourceShape> = T["rpc"] extends
+  Readonly<Record<string, ContractSourceRpcMethod>> ? {
+    [
+      K in Extract<keyof T["rpc"], string> as T["rpc"][K] extends {
+        internal: true;
+      } ? never
+        : ActionExportName<K>
+    ]: ActionDescriptor<
+      T["id"],
+      K,
+      "rpc",
+      OwnedApiFromSource<T>["rpc"][K] & RPCDesc,
+      ConnectedActionName<K>
+    >;
   }
-  : EmptyApi;
-type DependencyUsesFromUses<TUses> = TUses extends {
-  required?: AuthorContractUsesFlat;
-  optional?: AuthorContractUsesFlat;
-} ?
-    | NonNullable<TUses["required"]>[keyof NonNullable<TUses["required"]>]
-    | NonNullable<TUses["optional"]>[keyof NonNullable<TUses["optional"]>]
-  : never;
+  : {};
 
-export type UsedApiFromUses<TUses> = [TUses] extends [undefined] ? EmptyApi
-  : TUses extends Record<string, unknown> ? {
-      rpc: MergeRecordUnion<
-        ApiFromDependencyUse<DependencyUsesFromUses<TUses>>["rpc"]
-      >;
-      operations: MergeRecordUnion<
-        ApiFromDependencyUse<DependencyUsesFromUses<TUses>>["operations"]
-      >;
-      events: MergeRecordUnion<
-        ApiFromDependencyUse<DependencyUsesFromUses<TUses>>["events"]
-      >;
-      feeds: MergeRecordUnion<
-        ApiFromDependencyUse<DependencyUsesFromUses<TUses>>["feeds"]
-      >;
-      subjects: MergeRecordUnion<
-        ApiFromDependencyUse<DependencyUsesFromUses<TUses>>["subjects"]
-      >;
+type OwnedOperationActionDescriptors<T extends ContractSourceShape> =
+  T["operations"] extends Readonly<Record<string, ContractSourceOperation>> ? {
+      [K in Extract<keyof T["operations"], string> as ActionExportName<K>]:
+        ActionDescriptor<
+          T["id"],
+          K,
+          "operation",
+          OwnedApiFromSource<T>["operations"][K] & OperationDesc,
+          ConnectedActionName<K>
+        >;
     }
-  : EmptyApi;
+    : {};
 
-type ImplicitAuthApiForKind<TKind> = TKind extends "app" | "agent" | "device"
-  ? BaselineAuthApi
-  : EmptyApi;
+type OwnedEventActionDescriptors<T extends ContractSourceShape> =
+  T["events"] extends Readonly<Record<string, ContractSourceEvent>> ? {
+      [K in Extract<keyof T["events"], string> as ActionExportName<K>]:
+        EventActions<
+          ActionDescriptor<
+            T["id"],
+            K,
+            "event-subscribe",
+            OwnedApiFromSource<T>["events"][K] & EventDesc,
+            `on${ActionExportName<K>}`
+          >,
+          ActionDescriptor<
+            T["id"],
+            K,
+            "event-publish",
+            OwnedApiFromSource<T>["events"][K] & EventDesc,
+            `publish${ActionExportName<K>}`
+          >
+        >;
+    }
+    : {};
+
+type OwnedFeedActionDescriptors<T extends ContractSourceShape> =
+  T["feeds"] extends Readonly<Record<string, ContractSourceFeed>> ? {
+      [K in Extract<keyof T["feeds"], string> as ActionExportName<K>]:
+        ActionDescriptor<
+          T["id"],
+          K,
+          "feed",
+          OwnedApiFromSource<T>["feeds"][K] & FeedDesc,
+          ConnectedActionName<K>
+        >;
+    }
+    : {};
+
+export type OwnedActionDescriptorsFromSource<T extends ContractSourceShape> =
+  Simplify<
+    & OwnedRpcActionDescriptors<T>
+    & OwnedOperationActionDescriptors<T>
+    & OwnedEventActionDescriptors<T>
+    & OwnedFeedActionDescriptors<T>
+  >;
+
+type UsedApiFromUses<TUses> = [TUses] extends [undefined] ? EmptyRuntimeApi
+  : TUses extends ContractSelections ? UsedApiFromActions<TUses>
+  : EmptyRuntimeApi;
 
 type ImplicitStateApiForSource<T> = [StateFromSource<T>] extends [undefined]
-  ? EmptyApi
+  ? EmptyRuntimeApi
   : BaselineStateApi;
 
-type ImplicitTrellisApiFromSource<T> = T extends { kind: infer TKind }
-  ? MergeApis<ImplicitAuthApiForKind<TKind>, ImplicitStateApiForSource<T>>
-  : EmptyApi;
+type ImplicitSelectedActionsForSource<T> = [StateFromSource<T>] extends
+  [undefined] ? never
+  : typeof BASELINE_STATE_ACTIONS[number];
 
-export type UsedApiFromSource<T extends { uses?: unknown }> = MergeApis<
+type SelectedActionsFromSource<T extends { uses?: unknown }> =
+  | SelectedActionsFromUses<T["uses"]>
+  | ImplicitSelectedActionsForSource<T>;
+
+type ImplicitTrellisApiFromSource<T> = T extends { kind: infer TKind }
+  ? MergeRuntimeApis<EmptyRuntimeApi, ImplicitStateApiForSource<T>>
+  : EmptyRuntimeApi;
+
+type UsedApiFromSource<T extends { uses?: unknown }> = MergeRuntimeApis<
   UsedApiFromUses<T["uses"]>,
   ImplicitTrellisApiFromSource<T>
 >;
 
-export type MergeApis<TOwnedApi extends ApiShape, TUsedApi extends ApiShape> = {
+type MergeRuntimeApis<
+  TOwnedApi extends RuntimeApiShape,
+  TUsedApi extends RuntimeApiShape,
+> = {
   rpc: Simplify<TUsedApi["rpc"] & TOwnedApi["rpc"]>;
   operations: Simplify<TUsedApi["operations"] & TOwnedApi["operations"]>;
   events: Simplify<TUsedApi["events"] & TOwnedApi["events"]>;
@@ -1733,76 +1793,32 @@ export type MergeApis<TOwnedApi extends ApiShape, TUsedApi extends ApiShape> = {
   subjects: Simplify<TUsedApi["subjects"] & TOwnedApi["subjects"]>;
 };
 
-export type ContractModule<
-  TContractId extends string,
-  TOwnedApi extends ApiShape,
-  TUsedApi extends ApiShape,
-  TTrellisApi extends ApiShape,
-  TJobs extends ContractJobsMetadata = {},
-  TState extends ContractStateMetadata = {},
-  TKv extends ContractKvMetadata = ContractKvMetadata,
-> = {
-  CONTRACT_ID: TContractId;
-  CONTRACT: TrellisContractV1;
-  CONTRACT_DIGEST: string;
-  API: ContractApiViews<TOwnedApi, TUsedApi, TTrellisApi>;
-  use: ContractUseFn<TContractId, TOwnedApi>;
-  readonly [CONTRACT_JOBS_METADATA]?: TJobs;
-  readonly [CONTRACT_STATE_METADATA]?: TState;
-  readonly [CONTRACT_KV_METADATA]?: TKv;
-};
-
-export type SdkContractModule<
-  TContractId extends string,
-  TOwnedApi extends ApiShape,
-  TJobs extends ContractJobsMetadata = {},
-  TState extends ContractStateMetadata = {},
-  TKv extends ContractKvMetadata = ContractKvMetadata,
-> =
-  & Omit<
-    ContractModule<
-      TContractId,
-      TOwnedApi,
-      EmptyApi,
-      TOwnedApi,
-      TJobs,
-      TState,
-      TKv
-    >,
-    "use"
-  >
-  & {
-    use: ContractUseFn<TContractId, TOwnedApi>;
-  };
-
 export type DefinedContract<
-  TOwnedApi extends ApiShape,
-  TUsedApi extends ApiShape,
-  TTrellisApi extends ApiShape,
+  TOwnedApi extends RuntimeApiShape,
+  TUsedApi extends RuntimeApiShape,
+  TTrellisApi extends RuntimeApiShape,
   TContractId extends string = string,
   TJobs extends ContractJobsMetadata = {},
   TState extends ContractStateMetadata = {},
   TKv extends ContractKvMetadata = ContractKvMetadata,
-> =
-  & Omit<
-    ContractModule<
-      TContractId,
-      TOwnedApi,
-      TUsedApi,
-      TTrellisApi,
-      TJobs,
-      TState,
-      TKv
-    >,
-    "API"
-  >
-  & {
-    API: {
-      owned: TOwnedApi;
-      used: TUsedApi;
-      trellis: TTrellisApi;
-    };
-  };
+  TActions extends Record<string, unknown> = {},
+  TSelectedAction extends ActionDescriptor = ActionDescriptor,
+  TStore extends ContractStoreMetadata = ContractStoreMetadata,
+> = TActions & {
+  readonly CONTRACT_ID: TContractId;
+  readonly CONTRACT: TrellisContractV1;
+  readonly CONTRACT_DIGEST: string;
+  readonly [CONTRACT_RUNTIME]: ContractRuntime<
+    TSelectedAction,
+    TOwnedApi,
+    TUsedApi,
+    TTrellisApi
+  >;
+  readonly [CONTRACT_JOBS_METADATA]?: TJobs;
+  readonly [CONTRACT_STATE_METADATA]?: TState;
+  readonly [CONTRACT_KV_METADATA]?: TKv;
+  readonly [CONTRACT_STORE_METADATA]?: TStore;
+};
 
 export type DefineContractInput<
   TCapabilities extends ContractCapabilities | undefined =
@@ -1810,7 +1826,7 @@ export type DefineContractInput<
     | undefined,
   TSchemas extends Readonly<Record<string, TSchema>> | undefined = undefined,
   TUses extends
-    | AuthorContractUses
+    | AuthorContractUses<SchemaNameOf<TSchemas>>
     | undefined = undefined,
   TErrors extends
     | Readonly<Record<string, ErrorClass>>
@@ -1858,7 +1874,7 @@ export type DefineContractInput<
   capabilities?: ContractCapabilities;
   schemas?: TSchemas;
   exports?: ContractSourceExports<SchemaNameOf<TSchemas>>;
-  state?: ContractSourceState<SchemaNameOf<TSchemas>>;
+  state?: never;
   uses?: TUses;
   errors?: TErrors;
   rpc?: TRpc;
@@ -1873,9 +1889,9 @@ export type DefineContractInput<
       >
     >
   >;
-  jobs?: ContractSourceJobs<SchemaNameOf<TSchemas>>;
+  jobs?: never;
   eventConsumers?: ContractSourceEventConsumers;
-  resources?: ContractSourceResources<SchemaNameOf<TSchemas>>;
+  resources?: never;
 };
 
 type DefineContractSource = {
@@ -1910,7 +1926,7 @@ type ValidateDefineContractInput<T extends DefineContractSource> =
     T["schemas"],
     ConstrainSection<
       T["uses"],
-      AuthorContractUses
+      AuthorContractUses<SchemaNameOf<T["schemas"]>>
     >,
     ConstrainSection<
       T["errors"],
@@ -2093,7 +2109,8 @@ type DefineContractBodyInput<
     | ContractCapabilities
     | undefined,
   TSchemas extends Readonly<Record<string, TSchema>> | undefined = undefined,
-  TUses extends AuthorContractUses | undefined = undefined,
+  TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined =
+    undefined,
   TErrors extends
     | Readonly<Record<string, ErrorClass>>
     | undefined = undefined,
@@ -2154,7 +2171,8 @@ type ServiceContractBodyInput<
     | ContractCapabilities
     | undefined,
   TSchemas extends Readonly<Record<string, TSchema>> | undefined = undefined,
-  TUses extends AuthorContractUses | undefined = undefined,
+  TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined =
+    undefined,
   TErrors extends
     | Readonly<Record<string, ErrorClass>>
     | undefined = undefined,
@@ -2209,11 +2227,12 @@ type ServiceContractBodyInput<
 
 type ClientContractBodyInput<
   TSchemas extends Readonly<Record<string, TSchema>> | undefined = undefined,
-  TUses extends AuthorContractUses | undefined = undefined,
+  TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined =
+    undefined,
 > = ContractIdentityFields & {
   capabilities?: ContractCapabilities;
   exports?: ContractSourceExports<SchemaNameOf<TSchemas>>;
-  state?: ContractSourceState<SchemaNameOf<TSchemas>>;
+  state?: never;
   uses?: TUses;
   eventConsumers?: ContractSourceEventConsumers;
   kind?: never;
@@ -2223,6 +2242,7 @@ type ClientContractBodyInput<
   operations?: never;
   events?: never;
   subjects?: never;
+  jobs?: never;
   resources?: never;
 };
 
@@ -3731,6 +3751,17 @@ function buildContractKvMetadata(
   return metadata;
 }
 
+function buildContractStoreMetadata(
+  resources: ContractSourceResources | undefined,
+): ContractStoreMetadata {
+  return Object.fromEntries(
+    Object.entries(resources?.store ?? {}).map(([alias, resource]) => [
+      alias,
+      { required: resource.required ?? true },
+    ]),
+  );
+}
+
 function buildContractStateMetadata(
   state: ContractSourceState | undefined,
   schemas: ContractSourceSchemas | undefined,
@@ -4140,7 +4171,7 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
   };
 }
 
-function buildOwnedApi(source: TrellisContractSource): ApiShape {
+function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
   const localRuntimeErrors: Record<string, BuiltRuntimeErrorDesc> = {};
   for (const [name, errorDecl] of Object.entries(source.errors ?? {})) {
     const errorClass = getContractErrorRuntimeClass(errorDecl);
@@ -4362,7 +4393,7 @@ function buildOwnedApi(source: TrellisContractSource): ApiShape {
     ]),
   ) as Record<string, FeedDesc>;
 
-  return { rpc, operations, events, feeds, subjects: {} } as ApiShape;
+  return { rpc, operations, events, feeds, subjects: {} };
 }
 
 function mergeRecord(
@@ -4378,57 +4409,6 @@ function mergeRecord(
     }
     out[key] = value;
   }
-}
-
-function assertSelectedKeysExist(
-  contractId: string,
-  kind: "rpc" | "operations" | "events" | "feeds" | "subjects",
-  keys: readonly string[] | undefined,
-  api: Record<string, unknown>,
-) {
-  if (!keys) {
-    return;
-  }
-
-  for (const key of keys) {
-    if (!Object.hasOwn(api, key)) {
-      throw new Error(
-        `Contract '${contractId}' does not expose ${kind} key '${key}'`,
-      );
-    }
-  }
-}
-
-function assertValidUseSpec<TApi extends TrellisApiLike>(
-  contractId: string,
-  spec: UseSpec<TApi>,
-  api: TApi,
-) {
-  assertSelectedKeysExist(contractId, "rpc", spec.rpc?.call, api.rpc);
-  assertSelectedKeysExist(
-    contractId,
-    "operations",
-    spec.operations?.call,
-    api.operations,
-  );
-  assertSelectedKeysExist(
-    contractId,
-    "events",
-    spec.events?.publish,
-    api.events,
-  );
-  assertSelectedKeysExist(
-    contractId,
-    "events",
-    spec.events?.subscribe,
-    api.events,
-  );
-  assertSelectedKeysExist(
-    contractId,
-    "feeds",
-    spec.feeds?.subscribe,
-    api.feeds ?? {},
-  );
 }
 
 function contractUseByAlias(
@@ -4488,20 +4468,6 @@ function assertValidEventConsumers(
       }
     }
   }
-}
-
-function attachContractModuleMetadata<
-  TValue extends object,
-  TContractModule,
->(
-  value: TValue,
-  contractModule: TContractModule,
-): TValue & ContractModuleMarker<TContractModule> {
-  Object.defineProperty(value, CONTRACT_MODULE_METADATA, {
-    value: contractModule,
-    enumerable: false,
-  });
-  return value as TValue & ContractModuleMarker<TContractModule>;
 }
 
 function attachContractErrorRuntimeMetadata<
@@ -4694,251 +4660,186 @@ export function withTrellisValidation<
   return cloned as T;
 }
 
-function createUseHelper<
-  TContractId extends string,
-  TOwnedApi extends TrellisApiLike,
-  TUsedApi extends ApiShape,
-  TTrellisApi extends ApiShape,
->(
-  getContractModule: () => ContractModule<
-    TContractId,
-    TOwnedApi,
-    TUsedApi,
-    TTrellisApi
-  >,
-) {
-  return ((spec) => {
-    const contractModule = getContractModule();
-    assertValidUseSpec(
-      contractModule.CONTRACT_ID,
-      spec,
-      contractModule.API.owned,
-    );
+const RESERVED_CONNECTED_ACTION_NAMES = new Set([
+  "connection",
+  "health",
+  "handle",
+  "jobs",
+  "kv",
+  "state",
+  "store",
+  "transfer",
+  "wait",
+]);
 
-    const dependencyUse = {
-      contract: contractModule.CONTRACT_ID,
-      ...(spec.rpc?.call ? { rpc: { call: [...spec.rpc.call] } } : {}),
-      ...(spec.operations?.call
-        ? { operations: { call: [...spec.operations.call] } }
-        : {}),
-      ...((spec.events?.publish || spec.events?.subscribe)
-        ? {
-          events: {
-            ...(spec.events.publish
-              ? { publish: [...spec.events.publish] }
-              : {}),
-            ...(spec.events.subscribe
-              ? { subscribe: [...spec.events.subscribe] }
-              : {}),
-          },
-        }
-        : {}),
-      ...(spec.feeds?.subscribe
-        ? { feeds: { subscribe: [...spec.feeds.subscribe] } }
-        : {}),
-    };
-
-    return attachContractModuleMetadata(
-      dependencyUse,
-      contractModule,
-    );
-  }) as ContractUseFn<TContractId, TOwnedApi>;
+function isOptionalActionGroup(
+  selection: ContractActionSelection,
+): selection is OptionalActionGroup<readonly ActionDescriptor[]> {
+  return "optional" in selection && selection.optional === true;
 }
 
-function getContractModuleFromUse(
-  alias: string,
-  useValue: ContractSourceUse | AuthorContractDependencyUse,
-): ContractModule<string, TrellisApiLike, TrellisApiLike, TrellisApiLike> {
-  const contractModule = Object.getOwnPropertyDescriptor(
-    useValue,
-    CONTRACT_MODULE_METADATA,
-  )?.value as
-    | ContractModule<
-      string,
-      TrellisApiLike,
-      TrellisApiLike,
-      TrellisApiLike
-    >
-    | undefined;
-  if (!contractModule) {
-    throw new Error(
-      `Contract use '${alias}' must be created with contractModule.use(...) from @qlever-llc/trellis/contracts`,
-    );
-  }
-  return contractModule;
-}
-
-function normalizeUseEntries(
-  uses: AuthorContractUsesFlat | undefined,
+function normalizeActionUses(
+  selections: ContractActionSelections,
 ): {
-  manifestUses: Record<string, ContractSourceUse> | undefined;
-  usedApi: TrellisApiLike;
+  manifestUses: ContractSourceUses | undefined;
+  usedApi: RuntimeApiLike;
+  actions: readonly RuntimeSelectedAction[];
 } {
-  if (!uses) {
-    return {
-      manifestUses: undefined,
-      usedApi: { rpc: {}, operations: {}, events: {}, feeds: {}, subjects: {} },
-    };
+  const grouped = new Map<
+    string,
+    { optional: boolean; actions: Map<string, ActionDescriptor> }
+  >();
+  const connectedNames = new Map<string, ActionDescriptor>();
+  const selectedActions: RuntimeSelectedAction[] = [];
+
+  for (const selection of selections) {
+    const optionalGroup = isOptionalActionGroup(selection);
+    const actions: readonly ActionDescriptor[] = optionalGroup
+      ? selection.actions
+      : [selection];
+    for (const action of actions) {
+      if (RESERVED_CONNECTED_ACTION_NAMES.has(action.connectedName)) {
+        throw new Error(
+          `Action '${action.name}' uses reserved connected name '${action.connectedName}'`,
+        );
+      }
+      const collision = connectedNames.get(action.connectedName);
+      if (
+        collision &&
+        (collision.contractId !== action.contractId ||
+          collision.name !== action.name || collision.kind !== action.kind)
+      ) {
+        throw new Error(
+          `Connected action name '${action.connectedName}' collides between '${collision.contractId}' '${collision.name}' and '${action.contractId}' '${action.name}'`,
+        );
+      }
+      connectedNames.set(action.connectedName, action);
+      if (
+        !selectedActions.some((selected) =>
+          selected.action.contractId === action.contractId &&
+          selected.action.name === action.name &&
+          selected.action.kind === action.kind
+        )
+      ) {
+        selectedActions.push(
+          Object.freeze({ action, optional: optionalGroup }),
+        );
+      }
+
+      const owner = grouped.get(action.contractId);
+      if (owner && owner.optional !== optionalGroup) {
+        throw new Error(
+          `Contract '${action.contractId}' cannot mix required and optional actions`,
+        );
+      }
+      const entry = owner ?? {
+        optional: optionalGroup,
+        actions: new Map<string, ActionDescriptor>(),
+      };
+      entry.actions.set(`${action.kind}:${action.name}`, action);
+      grouped.set(action.contractId, entry);
+    }
   }
 
-  const manifestUses: Record<string, ContractSourceUse> = {};
-  const usedApi: TrellisApiLike = {
-    rpc: {},
-    operations: {},
-    events: {},
-    feeds: {},
-    subjects: {},
-  };
-
-  for (const [alias, useValue] of Object.entries(uses)) {
-    const contractModule = getContractModuleFromUse(alias, useValue);
-    const rpcCall = useValue.rpc?.call as readonly string[] | undefined;
-    const operationsCall = useValue.operations?.call as
-      | readonly string[]
-      | undefined;
-    const eventsPublish = useValue.events?.publish as
-      | readonly string[]
-      | undefined;
-    const eventsSubscribe = useValue.events?.subscribe as
-      | readonly string[]
-      | undefined;
-    const feedsSubscribe = useValue.feeds?.subscribe as
-      | readonly string[]
-      | undefined;
-    if (useValue.contract !== contractModule.CONTRACT_ID) {
-      throw new Error(
-        `Contract use '${alias}' references '${useValue.contract}' but module id is '${contractModule.CONTRACT_ID}'`,
-      );
-    }
-
-    assertValidUseSpec(
-      contractModule.CONTRACT_ID,
-      {
-        ...(rpcCall ? { rpc: { call: rpcCall } } : {}),
-        ...(operationsCall ? { operations: { call: operationsCall } } : {}),
-        ...((eventsPublish || eventsSubscribe)
-          ? {
-            events: {
-              ...(eventsPublish ? { publish: eventsPublish } : {}),
-              ...(eventsSubscribe ? { subscribe: eventsSubscribe } : {}),
-            },
-          }
-          : {}),
-        ...(feedsSubscribe ? { feeds: { subscribe: feedsSubscribe } } : {}),
-      },
-      contractModule.API.owned,
-    );
-
-    manifestUses[alias] = {
-      contract: contractModule.CONTRACT_ID,
-      ...(rpcCall ? { rpc: { call: [...rpcCall] } } : {}),
-      ...(operationsCall ? { operations: { call: [...operationsCall] } } : {}),
-      ...((eventsPublish || eventsSubscribe)
-        ? {
-          events: {
-            ...(eventsPublish ? { publish: [...eventsPublish] } : {}),
-            ...(eventsSubscribe ? { subscribe: [...eventsSubscribe] } : {}),
-          },
+  const required: Record<string, ContractSourceUse> = {};
+  const optional: Record<string, ContractSourceUse> = {};
+  const usedApi = emptyApi();
+  for (const contractId of [...grouped.keys()].sort()) {
+    const entry = grouped.get(contractId)!;
+    const use: ContractSourceUse = { contract: contractId };
+    for (
+      const action of [...entry.actions.values()].sort((left, right) =>
+        left.name.localeCompare(right.name) ||
+        left.kind.localeCompare(right.kind)
+      )
+    ) {
+      const descriptor = actionRuntimeDescriptor(action);
+      if (action.kind === "rpc") {
+        use.rpc ??= {};
+        use.rpc.call = [...(use.rpc.call ?? []), action.name];
+        mergeRecord("rpc", usedApi.rpc, { [action.name]: descriptor });
+      } else if (action.kind === "operation") {
+        const operation = descriptor as OperationDesc;
+        use.operations ??= {};
+        use.operations.call = [...(use.operations.call ?? []), action.name];
+        if (operation.cancel === true) {
+          use.operations.cancel = [
+            ...(use.operations.cancel ?? []),
+            action.name,
+          ];
         }
-        : {}),
-      ...(feedsSubscribe ? { feeds: { subscribe: [...feedsSubscribe] } } : {}),
-    };
-
-    const rpcKeys = selectedKeys(
-      rpcCall,
-    );
-    if (rpcKeys.length > 0) {
-      mergeRecord(
-        "rpc",
-        usedApi.rpc,
-        Object.fromEntries(
-          rpcKeys.map((key) => [key, contractModule.API.owned.rpc[key]]),
-        ),
-      );
+        if (
+          operation.controlCapabilities.length > 0 ||
+          Object.keys(operation.signals ?? {}).length > 0
+        ) {
+          use.operations.control = [
+            ...(use.operations.control ?? []),
+            action.name,
+          ];
+        }
+        mergeRecord("operations", usedApi.operations, {
+          [action.name]: descriptor,
+        });
+      } else if (action.kind === "feed") {
+        use.feeds ??= {};
+        use.feeds.subscribe = [...(use.feeds.subscribe ?? []), action.name];
+        mergeRecord("feeds", usedApi.feeds ?? {}, {
+          [action.name]: descriptor,
+        });
+      } else {
+        use.events ??= {};
+        const direction = action.kind === "event-publish"
+          ? "publish"
+          : "subscribe";
+        use.events[direction] = [
+          ...(use.events[direction] ?? []),
+          action.name,
+        ];
+        if (!Object.hasOwn(usedApi.events, action.name)) {
+          mergeRecord("events", usedApi.events, { [action.name]: descriptor });
+        }
+      }
     }
-
-    const operationKeys = selectedKeys(
-      operationsCall,
-    );
-    if (operationKeys.length > 0) {
-      mergeRecord(
-        "operations",
-        usedApi.operations,
-        Object.fromEntries(
-          operationKeys.map((
-            key,
-          ) => [key, contractModule.API.owned.operations[key]]),
-        ),
-      );
-    }
-
-    const eventKeys = new Set([
-      ...selectedKeys(eventsPublish),
-      ...selectedKeys(eventsSubscribe),
-    ]);
-    if (eventKeys.size > 0) {
-      mergeRecord(
-        "events",
-        usedApi.events,
-        Object.fromEntries(
-          [...eventKeys].map((
-            key,
-          ) => [key, contractModule.API.owned.events[key]]),
-        ),
-      );
-    }
-
-    const feedKeys = selectedKeys(feedsSubscribe);
-    if (feedKeys.length > 0) {
-      mergeRecord(
-        "feeds",
-        usedApi.feeds ?? {},
-        Object.fromEntries(
-          feedKeys.map((key) => [key, contractModule.API.owned.feeds?.[key]]),
-        ),
-      );
-    }
+    (entry.optional ? optional : required)[contractId] = use;
   }
 
-  return { manifestUses, usedApi };
+  return {
+    manifestUses: grouped.size === 0 ? undefined : {
+      ...(Object.keys(required).length > 0 ? { required } : {}),
+      ...(Object.keys(optional).length > 0 ? { optional } : {}),
+    },
+    usedApi,
+    actions: Object.freeze(selectedActions),
+  };
 }
 
 function normalizeUses(
   uses: AuthorContractUses | undefined,
 ): {
   manifestUses: ContractSourceUses | undefined;
-  usedApi: TrellisApiLike;
+  usedApi: RuntimeApiLike;
+  actions: readonly RuntimeSelectedAction[];
 } {
   if (!uses) {
     return {
       manifestUses: undefined,
       usedApi: emptyApi(),
+      actions: [],
     };
   }
-
-  const required = normalizeUseEntries(uses.required);
-  const optional = normalizeUseEntries(
-    omitRequiredUseAliases(uses.optional, uses.required),
-  );
-  const usedApi = emptyApi();
-  mergeUseIntoApi(usedApi, required.usedApi);
-  mergeUseIntoApi(usedApi, optional.usedApi);
-
-  return {
-    manifestUses: {
-      ...(required.manifestUses ? { required: required.manifestUses } : {}),
-      ...(optional.manifestUses ? { optional: optional.manifestUses } : {}),
-    },
-    usedApi,
-  };
+  const actions = uses.filter((
+    selection,
+  ): selection is ContractActionSelection => !("feature" in selection));
+  return normalizeActionUses(actions);
 }
 
 type NormalizedUse = {
   manifestUse: ContractSourceUse;
-  api: TrellisApiLike;
+  api: RuntimeApiLike;
+  actions: readonly ActionDescriptor[];
 };
 
-function emptyApi(): TrellisApiLike {
+function emptyApi(): RuntimeApiLike {
   return { rpc: {}, operations: {}, events: {}, feeds: {}, subjects: {} };
 }
 
@@ -5024,7 +4925,7 @@ function mergeApiAllowDuplicateSubject(
   }
 }
 
-function mergeUseIntoApi(target: TrellisApiLike, api: TrellisApiLike): void {
+function mergeUseIntoApi(target: RuntimeApiLike, api: RuntimeApiLike): void {
   mergeApiAllowDuplicateSubject("rpc", target.rpc, api.rpc);
   mergeApiAllowDuplicateSubject(
     "operations",
@@ -5039,9 +4940,10 @@ function mergeUseIntoApi(target: TrellisApiLike, api: TrellisApiLike): void {
 function baselineUse(
   contract: string,
   use: Omit<ContractSourceUse, "contract">,
-  api: TrellisApiLike,
+  api: RuntimeApiLike,
+  actions: readonly ActionDescriptor[],
 ): NormalizedUse {
-  return { manifestUse: { contract, ...use }, api };
+  return { manifestUse: { contract, ...use }, api, actions };
 }
 
 function deriveImplicitTrellisUses(source: DefineContractSource): Record<
@@ -5050,21 +4952,12 @@ function deriveImplicitTrellisUses(source: DefineContractSource): Record<
 > {
   const uses: Record<string, NormalizedUse> = {};
 
-  if (
-    source.kind === "app" || source.kind === "agent" || source.kind === "device"
-  ) {
-    uses.auth = baselineUse(
-      TRELLIS_AUTH_CONTRACT_ID,
-      { rpc: { call: [...BASELINE_AUTH_RPC_CALL] } },
-      BASELINE_AUTH_API,
-    );
-  }
-
   if (source.state) {
-    uses.state = baselineUse(
+    uses[TRELLIS_STATE_CONTRACT_ID] = baselineUse(
       TRELLIS_STATE_CONTRACT_ID,
       { rpc: { call: [...BASELINE_STATE_RPC_CALL] } },
       BASELINE_STATE_API,
+      BASELINE_STATE_ACTIONS,
     );
   }
 
@@ -5073,7 +4966,8 @@ function deriveImplicitTrellisUses(source: DefineContractSource): Record<
 
 function normalizeContractUses(source: DefineContractSource): {
   manifestUses: ContractSourceUses | undefined;
-  usedApi: TrellisApiLike;
+  usedApi: RuntimeApiLike;
+  actions: readonly RuntimeSelectedAction[];
 } {
   const explicit = normalizeUses(source.uses);
   const usedApi = emptyApi();
@@ -5085,12 +4979,14 @@ function normalizeContractUses(source: DefineContractSource): {
   const optional = explicit.manifestUses?.optional
     ? { ...explicit.manifestUses.optional }
     : undefined;
+  const actions = [...explicit.actions];
 
   for (
     const [alias, use] of Object.entries(deriveImplicitTrellisUses(source))
   ) {
     mergeUseIntoManifest(required, alias, use.manifestUse);
     mergeUseIntoApi(usedApi, use.api);
+    actions.push(...use.actions.map((action) => ({ action, optional: false })));
   }
 
   return {
@@ -5102,15 +4998,59 @@ function normalizeContractUses(source: DefineContractSource): {
       }
       : undefined,
     usedApi,
+    actions,
   };
 }
 
-function selectedKeys(keys: readonly string[] | undefined): readonly string[] {
-  return keys ?? [];
+function extractRuntimeFeatures(uses: AuthorContractUses | undefined): {
+  uses: AuthorContractUses | undefined;
+  state?: ContractSourceState;
+  jobs?: ContractSourceJobs;
+  resources?: ContractSourceResources;
+} {
+  const actions: ContractSelection[] = [];
+  const features = new Map<RuntimeFeatureKind, unknown>();
+  for (const selection of uses ?? []) {
+    if (!("feature" in selection)) {
+      actions.push(selection);
+      continue;
+    }
+    if (features.has(selection.feature)) {
+      throw new Error(`Duplicate runtime feature '${selection.feature}'`);
+    }
+    if (
+      typeof selection.config !== "object" || selection.config === null ||
+      Array.isArray(selection.config)
+    ) {
+      throw new Error(
+        `Runtime feature '${selection.feature}' requires an object`,
+      );
+    }
+    features.set(selection.feature, selection.config);
+  }
+
+  const kv = features.get("kv") as
+    | Record<string, ContractSourceKvResource>
+    | undefined;
+  const store = features.get("store") as
+    | Record<string, ContractSourceStoreResource>
+    | undefined;
+  return {
+    uses: actions.length > 0 ? actions : undefined,
+    ...(features.has("state")
+      ? { state: features.get("state") as ContractSourceState }
+      : {}),
+    ...(features.has("jobs")
+      ? { jobs: features.get("jobs") as ContractSourceJobs }
+      : {}),
+    ...(kv || store
+      ? { resources: { ...(kv ? { kv } : {}), ...(store ? { store } : {}) } }
+      : {}),
+  };
 }
 
 function mergeApiSection(
-  kind: keyof TrellisApiLike,
+  kind: keyof RuntimeApiLike,
   usedEntries: Record<string, unknown>,
   ownedEntries: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -5121,14 +5061,14 @@ function mergeApiSection(
 }
 
 function mergeDerivedApis<
-  TOwnedApi extends TrellisApiLike,
-  TUsedApi extends TrellisApiLike,
+  TOwnedApi extends RuntimeApiLike,
+  TUsedApi extends RuntimeApiLike,
 >(
   ownedApi: TOwnedApi,
   usedApi: TUsedApi,
-): MergeApis<TOwnedApi, TUsedApi> {
+): MergeRuntimeApis<TOwnedApi, TUsedApi> {
   return {
-    rpc: mergeApiSection("rpc", usedApi.rpc, ownedApi.rpc) as MergeApis<
+    rpc: mergeApiSection("rpc", usedApi.rpc, ownedApi.rpc) as MergeRuntimeApis<
       TOwnedApi,
       TUsedApi
     >["rpc"],
@@ -5136,23 +5076,97 @@ function mergeDerivedApis<
       "operations",
       usedApi.operations,
       ownedApi.operations,
-    ) as MergeApis<TOwnedApi, TUsedApi>["operations"],
+    ) as MergeRuntimeApis<TOwnedApi, TUsedApi>["operations"],
     events: mergeApiSection(
       "events",
       usedApi.events,
       ownedApi.events,
-    ) as MergeApis<TOwnedApi, TUsedApi>["events"],
+    ) as MergeRuntimeApis<TOwnedApi, TUsedApi>["events"],
     feeds: mergeApiSection(
       "feeds",
       usedApi.feeds ?? {},
       ownedApi.feeds ?? {},
-    ) as MergeApis<TOwnedApi, TUsedApi>["feeds"],
+    ) as MergeRuntimeApis<TOwnedApi, TUsedApi>["feeds"],
     subjects: mergeApiSection(
       "subjects",
       usedApi.subjects,
       ownedApi.subjects,
-    ) as MergeApis<TOwnedApi, TUsedApi>["subjects"],
+    ) as MergeRuntimeApis<TOwnedApi, TUsedApi>["subjects"],
   };
+}
+
+function actionExportName(name: string): string {
+  return name
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join("");
+}
+
+function buildOwnedActionDescriptors(
+  source: DefineContractSource,
+  ownedApi: RuntimeApiLike,
+): Record<string, unknown> {
+  const actions: Record<string, unknown> = {};
+  const add = (
+    name: string,
+    action: unknown,
+  ) => {
+    const exportName = actionExportName(name);
+    if (
+      !exportName || exportName === "CONTRACT" ||
+      exportName === "CONTRACT_ID" || exportName === "CONTRACT_DIGEST" ||
+      Object.hasOwn(actions, exportName)
+    ) {
+      throw new Error(`Owned action export name '${exportName}' collides`);
+    }
+    actions[exportName] = action;
+  };
+
+  for (const [name, method] of Object.entries(source.rpc ?? {})) {
+    if (method.internal === true) {
+      continue;
+    }
+    add(
+      name,
+      rpcAction(source.id, name, ownedApi.rpc[name]!, actionExportName(name)),
+    );
+  }
+  for (const name of Object.keys(source.operations ?? {})) {
+    add(
+      name,
+      operationAction(
+        source.id,
+        name,
+        ownedApi.operations[name]!,
+        actionExportName(name),
+      ),
+    );
+  }
+  for (const name of Object.keys(source.events ?? {})) {
+    add(
+      name,
+      eventActions(
+        source.id,
+        name,
+        ownedApi.events[name]!,
+        actionExportName(name),
+        true,
+      ),
+    );
+  }
+  for (const name of Object.keys(source.feeds ?? {})) {
+    add(
+      name,
+      feedAction(
+        source.id,
+        name,
+        ownedApi.feeds?.[name]!,
+        actionExportName(name),
+      ),
+    );
+  }
+  return actions;
 }
 
 function defineContract(
@@ -5160,16 +5174,16 @@ function defineContract(
   build: (
     ref: ContractRefBuilder,
   ) => Omit<DefineContractSource, "schemas" | "errors">,
-): DefinedContract<TrellisApiLike, ApiShape, ApiShape, string>;
+): DefinedContract<RuntimeApiLike, RuntimeApiShape, RuntimeApiShape, string>;
 function defineContract(
   registry: AnyDefineContractRegistry,
   build: (
     ref: ContractRefBuilder,
   ) => Omit<DefineContractSource, "schemas" | "errors">,
 ): DefinedContract<
-  TrellisApiLike,
-  ApiShape,
-  ApiShape,
+  RuntimeApiLike,
+  RuntimeApiShape,
+  RuntimeApiShape,
   string
 > {
   assertRegistryDoesNotDeclareExports(registry);
@@ -5180,18 +5194,30 @@ function defineContract(
     ...(registry.schemas ? { schemas: registry.schemas } : {}),
     ...(errorClasses ? { errors: errorClasses } : {}),
   }));
+  if ("state" in body || "jobs" in body || "resources" in body) {
+    throw new Error(
+      "Runtime features must be declared in uses with state(...), jobs(...), kv(...), or store(...)",
+    );
+  }
+  const runtimeFeatures = extractRuntimeFeatures(body.uses);
   const materializedSchemas = materializeErrorSchemas(
     registry.schemas,
     normalizedErrors,
   );
   const source: DefineContractSource = {
     ...body,
+    uses: runtimeFeatures.uses,
+    ...(runtimeFeatures.state ? { state: runtimeFeatures.state } : {}),
+    ...(runtimeFeatures.jobs ? { jobs: runtimeFeatures.jobs } : {}),
+    ...(runtimeFeatures.resources
+      ? { resources: runtimeFeatures.resources }
+      : {}),
     ...(materializedSchemas ? { schemas: materializedSchemas } : {}),
     ...(normalizedErrors ? { errors: normalizedErrors } : {}),
   };
   assertExportedSchemasExist(source.schemas, source.exports);
 
-  const { manifestUses, usedApi } = normalizeContractUses(source);
+  const { manifestUses, usedApi, actions } = normalizeContractUses(source);
   const emittedSource: TrellisContractSource = {
     id: source.id,
     displayName: source.displayName,
@@ -5214,33 +5240,27 @@ function defineContract(
   };
 
   const ownedApi = buildOwnedApi(emittedSource);
+  const ownedActions = buildOwnedActionDescriptors(source, ownedApi);
   const trellisApi = mergeDerivedApis(
-    ownedApi as ApiShape & TrellisApiLike,
-    usedApi as ApiShape & TrellisApiLike,
-  ) as ApiShape;
+    ownedApi as RuntimeApiShape & RuntimeApiLike,
+    usedApi as RuntimeApiShape & RuntimeApiLike,
+  ) as RuntimeApiShape;
   const CONTRACT = emitContract(emittedSource);
   const CONTRACT_DIGEST = digestContractManifest(CONTRACT);
 
   type ConcreteDefinedContract = DefinedContract<
-    TrellisApiLike,
-    ApiShape,
-    ApiShape,
+    RuntimeApiLike,
+    RuntimeApiShape,
+    RuntimeApiShape,
     string
   >;
 
   let contract!: ConcreteDefinedContract;
   contract = {
+    ...ownedActions,
     CONTRACT_ID: source.id,
     CONTRACT,
     CONTRACT_DIGEST,
-    API: {
-      owned: ownedApi as TrellisApiLike,
-      used: usedApi as ApiShape,
-      trellis: trellisApi,
-    },
-    use: createUseHelper(
-      () => contract,
-    ),
     [CONTRACT_JOBS_METADATA]: buildContractJobsMetadata(
       source.schemas,
       source.jobs,
@@ -5249,11 +5269,22 @@ function defineContract(
       source.resources,
       source.schemas,
     ),
+    [CONTRACT_STORE_METADATA]: buildContractStoreMetadata(source.resources),
     [CONTRACT_STATE_METADATA]: buildContractStateMetadata(
       source.state,
       source.schemas,
     ),
-  };
+  } as ConcreteDefinedContract;
+  Object.defineProperty(contract, CONTRACT_RUNTIME, {
+    value: Object.freeze(
+      {
+        ownedApi,
+        usedApi,
+        api: trellisApi,
+        actions,
+      } satisfies ContractRuntime,
+    ),
+  });
 
   return contract;
 }
@@ -5265,7 +5296,11 @@ export function defineServiceContract<
     TErrors
   >,
   const TCapabilities extends ContractCapabilities | undefined,
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends
+    | AuthorContractUses<
+      SchemaNameOf<RegistrySchemas<TRegistry>>
+    >
+    | undefined,
   const TRpc extends
     | Readonly<
       Record<
@@ -5322,7 +5357,7 @@ export function defineServiceContract<
     BuiltContractSource<TRegistry, WithKind<TBody, "service">>
   >,
   UsedApiFromSource<BuiltContractSource<TRegistry, WithKind<TBody, "service">>>,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<
       BuiltContractSource<TRegistry, WithKind<TBody, "service">>
     >,
@@ -5350,6 +5385,18 @@ export function defineServiceContract<
     SchemasFromSource<
       BuiltContractSource<TRegistry, WithKind<TBody, "service">>
     >
+  >,
+  OwnedActionDescriptorsFromSource<
+    BuiltContractSource<TRegistry, WithKind<TBody, "service">>
+  >,
+  SelectedActionsFromSource<WithKind<TBody, "service">>,
+  ProjectedStoreResources<
+    {
+      store?: Extract<
+        FeatureConfigFromUses<TUses, "store">,
+        Record<string, ContractSourceStoreResource>
+      >;
+    }
   >
 > {
   return defineContract(
@@ -5365,7 +5412,7 @@ export function defineServiceContract<
     UsedApiFromSource<
       BuiltContractSource<TRegistry, WithKind<TBody, "service">>
     >,
-    MergeApis<
+    MergeRuntimeApis<
       OwnedApiFromSource<
         BuiltContractSource<TRegistry, WithKind<TBody, "service">>
       >,
@@ -5397,6 +5444,18 @@ export function defineServiceContract<
       SchemasFromSource<
         BuiltContractSource<TRegistry, WithKind<TBody, "service">>
       >
+    >,
+    OwnedActionDescriptorsFromSource<
+      BuiltContractSource<TRegistry, WithKind<TBody, "service">>
+    >,
+    SelectedActionsFromSource<WithKind<TBody, "service">>,
+    ProjectedStoreResources<
+      {
+        store?: Extract<
+          FeatureConfigFromUses<TUses, "store">,
+          Record<string, ContractSourceStoreResource>
+        >;
+      }
     >
   >;
 }
@@ -5404,7 +5463,7 @@ export function defineServiceContract<
 function defineClientContract<
   const TKind extends Exclude<ContractKind, "service">,
   const TSchemas extends Readonly<Record<string, TSchema>> | undefined,
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined,
   const TBody extends ClientContractBodyInput<TSchemas, TUses>,
 >(
   kind: TKind,
@@ -5426,7 +5485,7 @@ function defineClientContract<
       WithKind<TBody, TKind>
     >
   >,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<
       BuiltContractSource<
         ClientContractRegistry<TSchemas>,
@@ -5455,7 +5514,10 @@ function defineClientContract<
         WithKind<TBody, TKind>
       >
     >
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, TKind>>
 > {
   return defineContract(
     registry,
@@ -5473,7 +5535,7 @@ function defineClientContract<
         WithKind<TBody, TKind>
       >
     >,
-    MergeApis<
+    MergeRuntimeApis<
       OwnedApiFromSource<
         BuiltContractSource<
           ClientContractRegistry<TSchemas>,
@@ -5502,13 +5564,16 @@ function defineClientContract<
           WithKind<TBody, TKind>
         >
       >
-    >
+    >,
+    {},
+    {},
+    SelectedActionsFromSource<WithKind<TBody, TKind>>
   >;
 }
 
 export function defineAppContract<
   const TSchemas extends Readonly<Record<string, TSchema>> | undefined,
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined,
   const TBody extends ClientContractBodyInput<TSchemas, TUses>,
 >(
   registry: ClientContractRegistry<TSchemas> & {
@@ -5529,7 +5594,7 @@ export function defineAppContract<
       WithKind<TBody, "app">
     >
   >,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<
       BuiltContractSource<
         ClientContractRegistry<TSchemas>,
@@ -5558,15 +5623,18 @@ export function defineAppContract<
         WithKind<TBody, "app">
       >
     >
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "app">>
 >;
 export function defineAppContract<
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<never> | undefined,
   const TBody extends ClientContractBodyInput<undefined, TUses>,
 >(build: () => TBody): DefinedContract<
   OwnedApiFromSource<WithKind<TBody, "app">>,
   UsedApiFromSource<WithKind<TBody, "app">>,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<WithKind<TBody, "app">>,
     UsedApiFromSource<WithKind<TBody, "app">>
   >,
@@ -5575,7 +5643,10 @@ export function defineAppContract<
   ProjectedState<
     StateFromSource<WithKind<TBody, "app">>,
     SchemasFromSource<WithKind<TBody, "app">>
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "app">>
 >;
 export function defineAppContract(
   ...args:
@@ -5600,7 +5671,7 @@ export function defineAppContract(
 
 export function defineAgentContract<
   const TSchemas extends Readonly<Record<string, TSchema>> | undefined,
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined,
   const TBody extends ClientContractBodyInput<TSchemas, TUses>,
 >(
   registry: ClientContractRegistry<TSchemas> & {
@@ -5621,7 +5692,7 @@ export function defineAgentContract<
       WithKind<TBody, "agent">
     >
   >,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<
       BuiltContractSource<
         ClientContractRegistry<TSchemas>,
@@ -5650,15 +5721,18 @@ export function defineAgentContract<
         WithKind<TBody, "agent">
       >
     >
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "agent">>
 >;
 export function defineAgentContract<
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<never> | undefined,
   const TBody extends ClientContractBodyInput<undefined, TUses>,
 >(build: () => TBody): DefinedContract<
   OwnedApiFromSource<WithKind<TBody, "agent">>,
   UsedApiFromSource<WithKind<TBody, "agent">>,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<WithKind<TBody, "agent">>,
     UsedApiFromSource<WithKind<TBody, "agent">>
   >,
@@ -5667,7 +5741,10 @@ export function defineAgentContract<
   ProjectedState<
     StateFromSource<WithKind<TBody, "agent">>,
     SchemasFromSource<WithKind<TBody, "agent">>
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "agent">>
 >;
 export function defineAgentContract(
   ...args:
@@ -5692,7 +5769,7 @@ export function defineAgentContract(
 
 export function defineDeviceContract<
   const TSchemas extends Readonly<Record<string, TSchema>> | undefined,
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<SchemaNameOf<TSchemas>> | undefined,
   const TBody extends ClientContractBodyInput<TSchemas, TUses>,
 >(
   registry: ClientContractRegistry<TSchemas> & {
@@ -5713,7 +5790,7 @@ export function defineDeviceContract<
       WithKind<TBody, "device">
     >
   >,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<
       BuiltContractSource<
         ClientContractRegistry<TSchemas>,
@@ -5742,15 +5819,18 @@ export function defineDeviceContract<
         WithKind<TBody, "device">
       >
     >
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "device">>
 >;
 export function defineDeviceContract<
-  const TUses extends AuthorContractUses | undefined,
+  const TUses extends AuthorContractUses<never> | undefined,
   const TBody extends ClientContractBodyInput<undefined, TUses>,
 >(build: () => TBody): DefinedContract<
   OwnedApiFromSource<WithKind<TBody, "device">>,
   UsedApiFromSource<WithKind<TBody, "device">>,
-  MergeApis<
+  MergeRuntimeApis<
     OwnedApiFromSource<WithKind<TBody, "device">>,
     UsedApiFromSource<WithKind<TBody, "device">>
   >,
@@ -5759,7 +5839,10 @@ export function defineDeviceContract<
   ProjectedState<
     StateFromSource<WithKind<TBody, "device">>,
     SchemasFromSource<WithKind<TBody, "device">>
-  >
+  >,
+  {},
+  {},
+  SelectedActionsFromSource<WithKind<TBody, "device">>
 >;
 export function defineDeviceContract(
   ...args:
@@ -5794,7 +5877,6 @@ export type {
   Schema,
   SchemaLike,
   SerializableErrorData,
-  TrellisAPI,
 };
 export {
   canonicalizeJson,

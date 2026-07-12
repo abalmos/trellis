@@ -25,7 +25,7 @@ Each service owns a local contract definition that emits the canonical
 
 ```ts
 import { defineError, defineServiceContract } from "@qlever-llc/trellis";
-import { sdk as core } from "@qlever-llc/trellis/sdk/core";
+import { TrellisCatalog } from "@qlever-llc/trellis/sdk/core";
 
 const schemas = {
   FindUser: FindUserSchema,
@@ -50,11 +50,7 @@ export const contract = defineServiceContract(
     id: "graph@v1",
     displayName: "Graph Service",
     description: "Serve graph RPCs and publish partner change events.",
-    uses: {
-      required: {
-        trellis: core.use({ rpc: { call: ["Trellis.Catalog"] } }),
-      },
-    },
+    uses: [TrellisCatalog],
     rpc: {
       "User.Find": {
         version: "v1",

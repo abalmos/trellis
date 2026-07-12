@@ -36,7 +36,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Deployments.List", { kind: "device", disabled: false, limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeploymentsList({ kind: "device", disabled: false, limit: 500, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
       const loadedActiveDeployments = loadedDeployments.filter((deployment) => !deployment.disabled);
@@ -59,9 +59,7 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.request(
-        "Auth.Deployments.Disable",
-        { deploymentId: selectedDeployment.deploymentId, kind: "device" } satisfies AuthDeploymentsDisableInput,
+      const response = await trellis.authDeploymentsDisable({ deploymentId: selectedDeployment.deploymentId, kind: "device" } satisfies AuthDeploymentsDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${selectedDeployment.deploymentId} disabled.`, "Disabled");

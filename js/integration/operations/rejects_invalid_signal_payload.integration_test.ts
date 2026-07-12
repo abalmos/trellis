@@ -19,14 +19,14 @@ liveTrellisTest({
     const consumed: unknown[] = [];
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         markWaitingForSignal();
-
+      
         const signal = await op.nextSignal("updateMessage").orThrow();
         consumed.push(signal.input);
         assertEquals(signal.input, { suffix: "valid" });
-
+      
         return Result.ok({
           message: `${input.message}:valid`,
           done: true,
@@ -37,7 +37,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

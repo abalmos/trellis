@@ -1,4 +1,4 @@
-import type { ContractModule, TrellisApiLike } from "@qlever-llc/trellis";
+import type { CallerContract } from "@qlever-llc/trellis";
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
 import type { TrellisTestRuntimeStartOptions } from "@qlever-llc/trellis-test";
 import {
@@ -30,12 +30,7 @@ export type LiveRuntimeScope = TrellisIntegrationScope;
 export type LiveTrellisRuntime = TrellisIntegrationRuntime;
 
 /** Contract module accepted by JS integration fixture helpers. */
-export type RuntimeContract = ContractModule<
-  string,
-  TrellisApiLike,
-  TrellisApiLike,
-  TrellisApiLike
->;
+export type RuntimeContract = CallerContract;
 
 export { runtimeScopeForCase, runtimeScopeIsolated };
 

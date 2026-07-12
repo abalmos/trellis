@@ -133,24 +133,12 @@ export function createOperationsFixture(
     displayName: `Trellis Integration Operations Client (${slug})`,
     description:
       "App/client participant for the operations integration fixture.",
-    uses: {
-      required: {
-        operationsService: serviceContract.use({
-          operations: {
-            call: [
-              "Entity.Process",
-              ...(options.statusOperation === true
-                ? (["Entity.Status"] as const)
-                : []),
-            ],
-            ...(options.cancelable === true
-              ? { cancel: ["Entity.Process"] }
-              : {}),
-            ...(clientControlsOperation ? { control: ["Entity.Process"] } : {}),
-          },
-        }),
-      },
-    },
+    uses: [
+      serviceContract.EntityProcess,
+      ...(options.statusOperation === true
+        ? [serviceContract.EntityStatus]
+        : []),
+    ],
   }));
 
   const unauthorizedClientContract = defineAppContract(() => ({
@@ -161,7 +149,6 @@ export function createOperationsFixture(
     displayName: `Trellis Integration Unauthorized Operations Client (${slug})`,
     description:
       "App/client without operation call authority for Entity.Process.",
-    uses: { required: { operationsService: serviceContract.use({}) } },
   }));
 
   const serviceName = caseScopedName("operations-fixture-service", caseId);

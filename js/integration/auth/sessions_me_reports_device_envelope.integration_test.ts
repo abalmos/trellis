@@ -44,7 +44,7 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "device");
       assert(me.user !== null, "expected activated device to include user");
       assertEquals(me.device?.deploymentId, deploymentId);

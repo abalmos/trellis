@@ -153,8 +153,7 @@
       const key = `evidence/${evidenceId}-${fileName}`;
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (!mounted || runId !== uploadRunId) return;
-      const upload = await trellis.operation("Evidence.Upload")
-        .input({
+      const upload = await trellis.evidenceUpload({
           key,
           contentType: file.type || "application/octet-stream",
           evidenceType,
@@ -192,7 +191,7 @@
     clearPreviewUrls();
 
     try {
-      const list = await trellis.request("Evidence.List", { ...listPage, prefix: "evidence/" }).orThrow();
+      const list = await trellis.evidenceList({ ...listPage, prefix: "evidence/" }).orThrow();
       if (!mounted || requestId !== galleryRequestId) return;
       gallery = list.entries
         .slice()
@@ -223,7 +222,7 @@
     updateGalleryItem(key, { previewUrl: undefined, previewError: undefined, previewing: true });
 
     try {
-      const download = await trellis.request("Evidence.Download", { key }).orThrow();
+      const download = await trellis.evidenceDownload({ key }).orThrow();
       const bytes = await trellis.transfer(download.transfer).bytes().orThrow();
       if (!mounted || downloadRunIds.get(key) !== runId) return;
       const latest = gallery.find((item) => item.key === key);
@@ -250,7 +249,7 @@
     error = null;
 
     try {
-      await trellis.request("Evidence.Delete", { key }).orThrow();
+      await trellis.evidenceDelete({ key }).orThrow();
       if (!mounted) return;
       const deleted = gallery.find((item) => item.key === key);
       if (deleted) revokePreviewUrl(deleted);

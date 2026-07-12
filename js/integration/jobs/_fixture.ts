@@ -2,6 +2,7 @@ import { assertJobCompleted } from "@qlever-llc/trellis-test";
 import {
   defineAppContract,
   defineServiceContract,
+  jobs,
   Result,
 } from "@qlever-llc/trellis";
 import { RetryJobError } from "@qlever-llc/trellis/jobs";
@@ -173,7 +174,7 @@ export function createJobsFixture(caseId: string) {
       id: caseScopedContractId("trellis.integration.jobs-service", caseId),
       displayName: `Trellis Integration Jobs Service (${slug})`,
       description: "Exercises service-local jobs behind a client-visible RPC.",
-      jobs: {
+      uses: [jobs({
         processDocument: {
           payload: ref.schema("JobPayload"),
           update: ref.schema("JobUpdate"),
@@ -234,7 +235,7 @@ export function createJobsFixture(caseId: string) {
             whenFull: "replace-oldest",
           },
         },
-      },
+      })],
       operations: {
         "Documents.ProcessWithUpdates": {
           version: "v1",
@@ -307,21 +308,13 @@ export function createJobsFixture(caseId: string) {
     id: caseScopedContractId("trellis.integration.jobs-client", caseId),
     displayName: `Trellis Integration Jobs Client (${slug})`,
     description: "App/client participant for the jobs integration fixture.",
-    uses: {
-      required: {
-        jobsService: serviceContract.use({
-          operations: { call: ["Documents.ProcessWithUpdates"] },
-          rpc: {
-            call: [
-              "Documents.Process",
-              "Documents.KeyedProcess",
-              "Documents.SubmitLongProcess",
-              "Documents.TerminalLocalEdges",
-            ],
-          },
-        }),
-      },
-    },
+    uses: [
+      serviceContract.DocumentsProcessWithUpdates,
+      serviceContract.DocumentsProcess,
+      serviceContract.DocumentsKeyedProcess,
+      serviceContract.DocumentsSubmitLongProcess,
+      serviceContract.DocumentsTerminalLocalEdges,
+    ],
   }));
 
   const serviceName = caseScopedName("jobs-fixture-service", caseId);
@@ -364,7 +357,7 @@ export function createJobsFixture(caseId: string) {
       });
     });
 
-    await service.handle.rpc.documents.process(async ({ input, client }) => {
+    await service.handleDocumentsProcess(async ({ input, client }) => {
       const ref = await client.jobs.processDocument.create({
         documentId: input.documentId,
       }).orThrow();
@@ -420,33 +413,31 @@ export function createJobsFixture(caseId: string) {
       });
     }, { concurrency: 2 });
 
-    await service.handle.rpc.documents.keyedProcess(
-      async ({ input, client }) => {
-        const ref = await client.jobs.keyedProcessDocument.create({
-          documentId: input.documentId,
-          groupKey: input.groupKey,
-          sequence: input.sequence,
-        }).orThrow();
-        const terminal = await assertJobCompleted(ref, {
-          documentId: input.documentId,
-          groupKey: input.groupKey,
-          sequence: input.sequence,
-          processedBy: "ts-service-keyed-job",
-        });
-        if (terminal.result === undefined) {
-          throw new Error(`job ${ref.id} completed without a result`);
-        }
-        return Result.ok({
-          documentId: terminal.result.documentId,
-          groupKey: terminal.result.groupKey,
-          sequence: terminal.result.sequence,
-          jobId: ref.id,
-          processedBy: terminal.result.processedBy,
-          requestId: terminal.result.requestId,
-          traceId: terminal.result.traceId,
-        });
-      },
-    );
+    await service.handleDocumentsKeyedProcess(async ({ input, client }) => {
+      const ref = await client.jobs.keyedProcessDocument.create({
+        documentId: input.documentId,
+        groupKey: input.groupKey,
+        sequence: input.sequence,
+      }).orThrow();
+      const terminal = await assertJobCompleted(ref, {
+        documentId: input.documentId,
+        groupKey: input.groupKey,
+        sequence: input.sequence,
+        processedBy: "ts-service-keyed-job",
+      });
+      if (terminal.result === undefined) {
+        throw new Error(`job ${ref.id} completed without a result`);
+      }
+      return Result.ok({
+        documentId: terminal.result.documentId,
+        groupKey: terminal.result.groupKey,
+        sequence: terminal.result.sequence,
+        jobId: ref.id,
+        processedBy: terminal.result.processedBy,
+        requestId: terminal.result.requestId,
+        traceId: terminal.result.traceId,
+      });
+    },);
 
     return {
       firstStarted,
@@ -482,23 +473,21 @@ export function createJobsFixture(caseId: string) {
       });
     });
 
-    await service.handle.rpc.documents.submitLongProcess(
-      async ({ input, client }) => {
-        const ref = await client.jobs.longProcessDocument.create({
-          documentId: input.documentId,
-        }).orThrow();
-        await started;
-        const cancelled = await ref.cancel().orThrow();
-        const terminal = await ref.wait().orThrow();
-        return Result.ok({
-          documentId: input.documentId,
-          jobId: ref.id,
-          processedBy: terminal.state,
-          requestId: cancelled.context.requestId,
-          traceId: cancelled.context.traceId,
-        });
-      },
-    );
+    await service.handleDocumentsSubmitLongProcess(async ({ input, client }) => {
+      const ref = await client.jobs.longProcessDocument.create({
+        documentId: input.documentId,
+      }).orThrow();
+      await started;
+      const cancelled = await ref.cancel().orThrow();
+      const terminal = await ref.wait().orThrow();
+      return Result.ok({
+        documentId: input.documentId,
+        jobId: ref.id,
+        processedBy: terminal.state,
+        requestId: cancelled.context.requestId,
+        traceId: cancelled.context.traceId,
+      });
+    },);
 
     return { started };
   }
@@ -533,23 +522,21 @@ export function createJobsFixture(caseId: string) {
       });
     });
 
-    await service.handle.rpc.documents.terminalLocalEdges(
-      async ({ input, client }) => {
-        const ref = await client.jobs.processDocument.create({
-          documentId: input.documentId,
-        }).orThrow();
-        const terminal = await ref.wait().orThrow();
-        const snapshot = await ref.get().orThrow();
-        const cancelAfterTerminal = await ref.cancel().orThrow();
-        return Result.ok({
-          documentId: input.documentId,
-          jobId: ref.id,
-          waitState: terminal.state,
-          getState: snapshot.state,
-          cancelState: cancelAfterTerminal.state,
-        });
-      },
-    );
+    await service.handleDocumentsTerminalLocalEdges(async ({ input, client }) => {
+      const ref = await client.jobs.processDocument.create({
+        documentId: input.documentId,
+      }).orThrow();
+      const terminal = await ref.wait().orThrow();
+      const snapshot = await ref.get().orThrow();
+      const cancelAfterTerminal = await ref.cancel().orThrow();
+      return Result.ok({
+        documentId: input.documentId,
+        jobId: ref.id,
+        waitState: terminal.state,
+        getState: snapshot.state,
+        cancelState: cancelAfterTerminal.state,
+      });
+    },);
   }
 
   return {

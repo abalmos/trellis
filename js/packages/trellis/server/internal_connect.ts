@@ -1,16 +1,15 @@
 import type { NatsConnection } from "@nats-io/nats-core";
-import {
-  API as TRELLIS_CORE_API,
-  type TrellisBindingsGetOutput,
-  type TrellisCatalogOutput,
-} from "../sdk/core.ts";
+import type { TrellisCatalogOutput } from "../sdk/core.ts";
+import type { StaticDecode } from "typebox";
+import { TrellisBindingsGetResponseSchema } from "../models/trellis/rpc/TrellisBindingsGet.ts";
+import { CORE_SESSION_API } from "../session_baseline.ts";
 import { createAuth } from "../auth.ts";
 import { isErr } from "@qlever-llc/result";
-import { Trellis as RootTrellis } from "../trellis.ts";
+import { Trellis as RootTrellis } from "../session.ts";
 
 import { logger as noopLogger, type LoggerLike } from "../globals.ts";
 import { serverLogger } from "../server_logger.ts";
-import type { TrellisAPI } from "../contracts.ts";
+import type { RuntimeApi } from "../contract_support/runtime.ts";
 import type { ContractKvMetadata } from "../contract_support/mod.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
@@ -21,19 +20,22 @@ import {
   createConnectedService,
   type ResourceBindings,
   type Trellis,
-  type TrellisService,
   type TrellisServiceInternalConnectArgs,
+  type TrellisServiceSession,
 } from "./service.ts";
 
 type BootstrapTrellisApi = {
   rpc: Pick<
-    typeof TRELLIS_CORE_API.owned.rpc,
+    typeof CORE_SESSION_API.rpc,
     "Trellis.Catalog" | "Trellis.Bindings.Get"
   >;
   operations: {};
   events: {};
   subjects: {};
 };
+type TrellisBindingsGetOutput = StaticDecode<
+  typeof TrellisBindingsGetResponseSchema
+>;
 
 function resolveServiceLogger(log?: LoggerLike | false): LoggerLike {
   if (log === false) {
@@ -89,14 +91,14 @@ async function closeFailedServiceBootstrapConnection(
 }
 
 export async function connectTrellisServiceInternal<
-  TOwnedApi extends TrellisAPI = TrellisAPI,
-  TTrellisApi extends TrellisAPI = TOwnedApi,
+  TOwnedApi extends RuntimeApi = RuntimeApi,
+  TTrellisApi extends RuntimeApi = TOwnedApi,
   TKv extends ContractKvMetadata = {},
 >(
   name: string,
   opts: TrellisServiceInternalConnectArgs<TOwnedApi, TTrellisApi, TKv>,
   deps: TrellisServiceRuntimeDeps,
-): Promise<TrellisService<TOwnedApi, TTrellisApi, {}, TKv>> {
+): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, {}, TKv>> {
   const connectFn = deps.connect;
   const readFileSync = deps.readFileSync;
   const credsAuthenticator = deps.credsAuthenticator;

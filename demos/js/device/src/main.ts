@@ -1,4 +1,3 @@
-import { ok } from "@qlever-llc/result";
 import { TrellisDevice } from "@qlever-llc/trellis";
 import { checkDeviceActivation } from "@qlever-llc/trellis/device/deno";
 import { TransportError } from "@qlever-llc/trellis/errors";
@@ -40,8 +39,6 @@ async function main(): Promise<void> {
 
   try {
     console.log(chalk.green.bold("== Connected Field Device"));
-    const me = await device.request("Auth.Sessions.Me", {}).orThrow();
-    console.dir(me, { depth: null });
 
     while (true) {
       printMenu();
@@ -118,7 +115,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Guided Inspection Wizard"));
   console.info("Step 1: choose an assigned inspection.");
   const assignments =
-    (await device.request("Assignments.List", LIST_PAGE).orThrow()).entries;
+    (await device.assignmentsList(LIST_PAGE).orThrow()).entries;
   if (assignments.length === 0) {
     console.info("No assignments are available for the guided workflow.");
     return;
@@ -142,7 +139,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
   }).orThrow();
 
   console.info("Step 2: review and refresh the selected site.");
-  const site = await device.request("Sites.Get", { siteId: selected.siteId })
+  const site = await device.sitesGet({ siteId: selected.siteId })
     .orThrow();
   if (site.site) printSite(site.site);
   await refreshSiteById(device, selected.siteId);
@@ -192,7 +189,7 @@ function safeFileName(fileName: string): string {
 
 async function listAssignments(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Assigned Inspections"));
-  const result = await device.request("Assignments.List", LIST_PAGE).orThrow();
+  const result = await device.assignmentsList(LIST_PAGE).orThrow();
 
   if (result.entries.length === 0) {
     console.info("No assigned inspections.");
@@ -218,7 +215,7 @@ async function viewSelectedSite(device: Device): Promise<void> {
     return;
   }
 
-  const result = await device.request("Sites.Get", {
+  const result = await device.sitesGet({
     siteId: selected.entry.value.siteId,
   }).orThrow();
 
@@ -242,8 +239,7 @@ async function refreshSite(device: Device): Promise<void> {
 
 async function refreshSiteById(device: Device, siteId: string): Promise<void> {
   console.log(chalk.green.bold("== Refreshing Site Summary"));
-  const operation = await device.operation("Sites.Refresh")
-    .input({ siteId })
+  const operation = await device.sitesRefresh({ siteId })
     .start()
     .orThrow();
   console.info(`Accepted refresh operation ${operation.id}`);
@@ -286,8 +282,10 @@ async function generateReportForInspection(
   reportComment: string,
 ): Promise<void> {
   console.log(chalk.green.bold("== Generating Inspection Report"));
-  const operation = await device.operation("Reports.Generate")
-    .input({ inspectionId, reportComment })
+  const operation = await device.reportsGenerate({
+    inspectionId,
+    reportComment,
+  })
     .start()
     .orThrow();
   console.info(`Accepted report operation ${operation.id}`);
@@ -331,17 +329,16 @@ async function uploadEvidenceFile(
   console.log(chalk.green.bold("== Uploading Evidence"));
   console.info(`Uploading ${bytes.length} bytes to ${key}`);
 
-  const upload = await device.operation("Evidence.Upload")
-    .input({
-      key,
-      contentType: contentTypeForFile(originalFileName),
+  const upload = await device.evidenceUpload({
+    key,
+    contentType: contentTypeForFile(originalFileName),
+    evidenceType: "field-photo",
+    metadata: {
+      evidenceId,
       evidenceType: "field-photo",
-      metadata: {
-        evidenceId,
-        evidenceType: "field-photo",
-        fileName: originalFileName,
-      },
-    })
+      fileName: originalFileName,
+    },
+  })
     .transfer(bytes)
     .onTransfer((event: { transfer: { transferredBytes: number } }) => {
       const percent = Math.floor(
@@ -370,7 +367,7 @@ async function uploadEvidenceFile(
 
 async function listAndDownloadEvidence(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Evidence Files"));
-  const result = await device.request("Evidence.List", {
+  const result = await device.evidenceList({
     ...LIST_PAGE,
     prefix: "evidence/",
   }).orThrow();
@@ -406,7 +403,7 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
   );
   const outputPath = prompt("Output path", `./${defaultName}`)?.trim() ||
     `./${defaultName}`;
-  const download = await device.request("Evidence.Download", {
+  const download = await device.evidenceDownload({
     key: selected.key,
   }).orThrow();
   const downloaded = await device.transfer(download.transfer).bytes().orThrow();
@@ -424,23 +421,17 @@ async function watchActivity(device: Device): Promise<void> {
   const timer = setTimeout(() => controller.abort(), EVENT_WATCH_MS);
 
   try {
-    await device.event(
-      "Audit.Recorded",
-      {},
+    await device.onAuditRecorded(
       (event) => {
         console.info("Audit.Recorded");
         console.dir(event, { depth: null });
-        return ok(undefined);
       },
       { mode: "ephemeral", replay: "new", signal: controller.signal },
     ).orThrow();
-    await device.event(
-      "Reports.Published",
-      {},
+    await device.onReportsPublished(
       (event) => {
         console.info("Reports.Published");
         console.dir(event, { depth: null });
-        return ok(undefined);
       },
       { mode: "ephemeral", replay: "new", signal: controller.signal },
     ).orThrow();
@@ -455,7 +446,7 @@ async function watchActivity(device: Device): Promise<void> {
 async function saveAndListDraftState(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Draft State"));
   const assignments =
-    (await device.request("Assignments.List", LIST_PAGE).orThrow()).entries;
+    (await device.assignmentsList(LIST_PAGE).orThrow()).entries;
   const selected = assignments[0];
   if (!selected) {
     console.info("No assignments available for sample state.");

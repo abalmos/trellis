@@ -1,12 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  type CallerRuntime,
   defineAppContract,
   defineServiceContract,
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
-import { sdk as trellisCore } from "@qlever-llc/trellis/sdk/core.ts";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import * as trellisCore from "@qlever-llc/trellis/sdk/core.ts";
 import type {
   TrellisCatalogOutput,
   TrellisSurfaceStatusOutput,
@@ -73,13 +74,7 @@ const consumerContract = defineServiceContract({ schemas }, (ref) => ({
   displayName: "Trellis Control-Plane Catalog Admin Consumer",
   description:
     "Requires the provider RPC so catalog admin issue filters can inspect the relationship.",
-  uses: {
-    required: {
-      provider: providerContract.use({
-        rpc: { call: ["CatalogAdmin.ProviderPing"] },
-      }),
-    },
-  },
+  uses: [providerContract.CatalogAdminProviderPing],
   rpc: {
     "CatalogAdmin.ConsumerPing": {
       version: "v1",
@@ -102,25 +97,13 @@ const adminContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Catalog Admin Client",
   description: "Exercises generated catalog and admin list RPCs.",
-  uses: {
-    required: {
-      core: trellisCore.use({
-        rpc: {
-          call: [
-            "Trellis.Catalog",
-            "Trellis.Contract.Get",
-            "Trellis.Surface.Status",
-          ],
-        },
-      }),
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.Deployments.List"] },
-      }),
-      provider: providerContract.use({
-        rpc: { call: ["CatalogAdmin.ProviderPing"] },
-      }),
-    },
-  },
+  uses: [
+    trellisCore.TrellisCatalog,
+    trellisCore.TrellisContractGet,
+    trellisCore.TrellisSurfaceStatus,
+    trellisAuth.AuthDeploymentsList,
+    providerContract.CatalogAdminProviderPing,
+  ],
 }));
 
 const providerDeployment = caseScopedName(
@@ -184,12 +167,12 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      providerService.handle.rpc.catalogAdmin.providerPing(({ input }) =>
+      providerService.handleCatalogAdminProviderPing(({ input }) =>
         Result.ok({ message: input.message, servedBy: providerName })
       );
 
       const catalog = await runtime.waitFor(async () => {
-        const current = await admin.rpc.trellis.catalog({}).orThrow();
+        const current = await admin.trellisCatalog({}).orThrow();
         return hasContract(current, providerDigest) &&
             hasContract(current, consumerDigest)
           ? current
@@ -198,7 +181,7 @@ liveTrellisTest({
       assert(hasContract(catalog, providerDigest));
       assert(hasContract(catalog, consumerDigest));
 
-      const serviceDeployments = await admin.rpc.auth.deploymentsList({
+      const serviceDeployments = await admin.authDeploymentsList({
         kind: "service",
         disabled: false,
         limit: 500,
@@ -228,12 +211,12 @@ liveTrellisTest({
         runtime: "live",
       });
 
-      const consumerGet = await admin.rpc.trellis.contractGet({
+      const consumerGet = await admin.trellisContractGet({
         digest: consumerDigest,
       }).orThrow();
       assertEquals(
         ((consumerGet.contract.uses as Record<string, unknown>)
-          .required as Record<string, unknown>).provider,
+          .required as Record<string, unknown>)[providerContractId],
         {
           contract: providerContractId,
           rpc: { call: ["CatalogAdmin.ProviderPing"] },
@@ -243,7 +226,7 @@ liveTrellisTest({
       await providerService.stop();
       await setProviderOfferActive(sqlite, providerDigest, false);
       const issue = await runtime.waitFor(async () => {
-        const current = await admin.rpc.trellis.catalog({}).orThrow();
+        const current = await admin.trellisCatalog({}).orThrow();
         return findIssue(current, consumerDigest) ?? false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(issue.kind, "invalid-active-contract-uses");
@@ -286,7 +269,7 @@ function hasContract(catalog: TrellisCatalogOutput, digest: string): boolean {
 async function providerStatus(
   admin: CatalogAdminClient,
 ): Promise<TrellisSurfaceStatusOutput["status"]> {
-  return (await admin.rpc.trellis.surfaceStatus({
+  return (await admin.trellisSurfaceStatus({
     contractId: providerContractId,
     kind: "rpc",
     surface: "CatalogAdmin.ProviderPing",
@@ -294,20 +277,7 @@ async function providerStatus(
   }).orThrow()).status;
 }
 
-type CatalogAdminClient = {
-  readonly rpc: {
-    readonly trellis: {
-      surfaceStatus(input: {
-        contractId: string;
-        kind: "rpc";
-        surface: string;
-        action: "call";
-      }): {
-        orThrow(): Promise<TrellisSurfaceStatusOutput>;
-      };
-    };
-  };
-};
+type CatalogAdminClient = CallerRuntime<typeof adminContract>;
 
 async function setProviderOfferActive(
   sqlite: ControlPlaneSqlite,

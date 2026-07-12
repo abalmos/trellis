@@ -1,6 +1,6 @@
 ---
 title: Trellis TypeScript Contract Authoring
-description: TypeScript contract authoring architecture centered on kind-specific helpers, uses, and derived contract views.
+description: TypeScript contract authoring architecture centered on kind-specific helpers, direct descriptors, and inferred runtime surfaces.
 order: 20
 ---
 
@@ -17,26 +17,11 @@ order: 20
 
 ## Context
 
-The current TypeScript contract ergonomics are split across two separate
-concepts:
-
-- `defineContractSource(...)` is the local authoring helper for a contract
-  manifest
-- `mergeApis(...)` is the runtime helper used to assemble the `trellis` API
-  surface from multiple SDK modules
-
-That split has several problems:
-
-- authors must understand and hand-write raw `uses.contract` ids and operation
-  name strings for remote services
-- imported SDK modules do not help type-check the `uses` section of the local
-  contract source
-- runtime callability is determined by a manually merged API list rather than by
-  the contract definition itself
-- a real remote RPC or event may exist in an SDK but still fail at runtime
-  because it was omitted from the local merged API
-- the contract is the permission blueprint for a participant, but the current
-  TypeScript runtime surface is not derived from that blueprint
+The participant contract is both the canonical permission blueprint and the
+source of the participant's TypeScript runtime surface. Dependency actions are
+selected with generated descriptors; runtime facilities are selected with
+`state(...)`, `kv(...)`, `store(...)`, and `jobs(...)` descriptors. Trellis
+derives connected methods and resource handles from those selections.
 
 This is especially awkward because Trellis participants are broader than
 long-running services. Apps, CLIs, browser clients, and other callers also
@@ -102,25 +87,30 @@ Rules:
 - generated API reference owns the precise package export inventory and helper
   signatures
 
-### 3) SDK-driven `uses`
+### 3) Descriptor-driven `uses`
 
 TypeScript authors do not hand-write remote dependency contract ids in normal
 use.
 
-Generated SDK modules expose a root-only package export. The root export
-includes a contract module object named `sdk` that includes:
+Generated owner SDKs export direct action descriptors, portable types, and
+schemas. They do not export participant contracts, merged API maps, clients, or
+dependency selectors. Authors place required descriptors directly in the
+contract's `uses` array and wrap optional descriptors with `optional(...)`.
 
-- stable contract identity, canonical manifest metadata, and manifest digest
-- projected API metadata, including owned, used, and merged views
-- a typed `use(...)` helper for declaring `uses`
-- optional generated subsystem metadata such as state, jobs, and KV helpers
+```ts
+uses: [
+  AccountsGet,
+  InvoicePaid.subscribe,
+  optional(HealthQuery, HealthWatch),
+  state({ drafts: { kind: "map", schema: ref.schema("Draft") } }),
+  kv({ cache: { schema: ref.schema("CacheEntry") } }),
+  store({ uploads: { purpose: "Pending uploads" } }),
+  jobs({ refresh: { payload: ref.schema("RefreshInput") } }),
+];
+```
 
-Authors import that stable export with a local alias that describes the
-dependency and use the SDK-backed selector for the `uses.required` or
-`uses.optional` entry. See `/guides/libraries/typescript` for complete examples.
-
-Generated SDKs do not expose dependency-specific default-use helpers. All
-caller-visible `uses` selections should be explicit in the authored contract.
+Action identity comes from the descriptor's exact owner contract ID. Local
+import names are not manifest aliases and do not affect digest identity.
 
 The required user-facing contract metadata is:
 
@@ -172,7 +162,7 @@ multi-contract layout:
 - emitted manifest fields such as `exports` are authored in the callback body,
   not in the local registry argument
 - app-, agent-, and device-style contracts may also take a `schemas` registry
-  when they declare schema-backed owned surfaces such as top-level `state`
+  when they declare schema-backed runtime features such as `state(...)`
 - schema and error references should use the public reference helpers so
   manifest emission can validate local declarations and built-in Trellis RPC
   errors
@@ -180,17 +170,12 @@ multi-contract layout:
   contract-authored RPC `errors: [...]` entry; it represents Trellis
   transport/runtime boundary failures rather than a handler-declared remote
   error
-- authors should not hand-assemble a wrapper object that re-exports
-  `CONTRACT_ID`, `CONTRACT`, `CONTRACT_DIGEST`, and `API` just to satisfy
-  generator tooling
-- generated SDK modules and locally defined contracts share this compatible
-  contract-module shape, and a locally defined contract must be usable wherever
-  generated SDK tooling expects a contract module
-- generated SDK package exports are root-only; contract source should import the
-  package root and should not depend on generated subpaths such as `./api`,
-  `./types`, or `./contract`
-- local `operations`, `rpc`, `events`, `state`, `errors`, and `resources` remain
-  the source for emitted owned contract content
+- authors should not construct generated-style contract or API wrapper objects
+- generated SDK package roots export `descriptors`, `types`, and `schemas`;
+  `manifest` is a tooling-only subpath
+- local `operations`, `rpc`, `events`, and `errors` remain the source for owned
+  actions; state, KV, store, and jobs are declared as runtime feature entries in
+  `uses`
 - local top-level `capabilities` metadata remains the source for emitted global
   capability metadata and approval copy
 - a participant may omit owned `operations`, `rpc`, or `events`, and may omit
@@ -235,32 +220,12 @@ Rules:
 - undeclared or unknown remote error payloads remain forward-compatible and fall
   back to `RemoteError`
 
-The `use(...)` helper:
-
-- fills in the target `contract` id automatically from the SDK
-- restricts `rpc.call` to keys from that SDK's owned RPC surface
-- restricts `operations.call` to keys from that SDK's owned operation surface
-- restricts `events.publish` and `events.subscribe` to keys from that SDK's
-  owned event surface
-- restricts `feeds.subscribe` to keys from that SDK's owned feed surface
-
-This makes imported SDK modules the source of truth for remote dependency names
-in TypeScript authoring.
-
-Contracts must place SDK-backed uses either in `uses.required` or
-`uses.optional`; aliases directly under `uses` are invalid and are not treated
-as implied required uses. Required uses fail closed when their referenced
-contract or surface is unknown. Optional uses are included in digest identity,
-but missing optional contracts or surfaces are skipped and grant no transport
-authority. If an alias appears in both groups, the required declaration wins.
-
-Some Trellis-owned surfaces are derived from the participant kind or local
-contract features. App, agent, and device contracts receive baseline auth RPCs
-such as `Auth.Sessions.Me` and `Auth.Sessions.Logout` without authoring
-boilerplate; service runtimes may also receive baseline auth surfaces such as
-`Auth.Requests.Validate` without each service authoring a `uses` entry.
-Contracts that need non-baseline auth surfaces still declare them with
-`auth.use(...)`.
+Required descriptors fail closed when their owner contract or surface is
+unavailable. Descriptors inside `optional(...)` remain part of contract identity
+but grant no authority when unavailable. Participant contracts do not receive
+implicit public Auth selections; caller-visible Auth actions must be explicit.
+State feature descriptors privately select the State transport actions needed by
+their typed state facade.
 
 ### 3b) Event consumer groups
 
@@ -269,12 +234,10 @@ TypeScript service contracts declare durable event processing with the top-level
 `eventConsumers.<group>.uses` and owned events through
 `eventConsumers.<group>.self`.
 
-Dependency selections use the same aliases declared at top-level `uses.required`
-or `uses.optional`; `eventConsumers.<group>.uses` does not name a remote
-contract by itself. A top-level `uses` subscription grants live subscribe
-authority, while `eventConsumers` asks Trellis to materialize a durable cursor
-over selected authorized dependency events and/or events owned by the same
-contract.
+Dependency selections use exact owner contract IDs. A subscribe descriptor in
+the top-level `uses` array grants live subscribe authority, while
+`eventConsumers` asks Trellis to materialize a durable cursor over selected
+authorized dependency events and/or events owned by the same contract.
 
 Example:
 
@@ -283,17 +246,11 @@ const contract = defineServiceContract({ schemas }, () => ({
   id: "billing-projection@v1",
   displayName: "Billing Projection",
   description: "Projects billing events into workspace state.",
-  uses: {
-    required: {
-      billing: billing.use({
-        events: { subscribe: ["Billing.SubscriptionConfirmed"] },
-      }),
-    },
-  },
+  uses: [BillingSubscriptionConfirmed.subscribe],
   eventConsumers: {
     workspaceBilling: {
       uses: {
-        billing: ["Billing.SubscriptionConfirmed"],
+        "billing@v1": ["Billing.SubscriptionConfirmed"],
       },
       replay: "new",
       ordering: "strict",
@@ -337,9 +294,9 @@ Rules:
   one owned event in `self`
 - group names are logical aliases; service code passes the alias as
   `opts.group`, while Trellis provisions the physical durable consumer name
-- `eventConsumers.<group>.uses.<alias>` must point at a top-level
-  `uses.required` or `uses.optional` alias, and each listed event must be
-  present in that alias's `events.subscribe` selection
+- `eventConsumers.<group>.uses.<contractId>` must point at the exact owner of a
+  subscribe descriptor selected in `uses`, and each listed event must be
+  selected there
 - `eventConsumers.<group>.self` names events from the same contract's `events`
   map
 - callers must not pass `durableName` for service event processing
@@ -352,12 +309,12 @@ Rules:
 
 ### 3c) Named contract state stores
 
-TypeScript contract authoring declares public Trellis-managed state through the
-top-level `state` map.
+TypeScript contract authoring declares public Trellis-managed state with a
+`state(...)` runtime feature descriptor in `uses`.
 
 Rules:
 
-- state stores are declared at top level under `state`
+- state stores are declared inside one `state({...})` selection
 - each state store requires `kind: "value" | "map"`
 - each state store requires `schema: ref.schema("...")`
 - the referenced schema must exist in the local `schemas` registry
@@ -400,44 +357,34 @@ The TypeScript type system must enforce both of these rules:
 - a referenced remote operation, RPC, event, or feed must exist on the imported
   SDK module
 - a participant may only invoke, call, publish, or subscribe to remote
-  operations, events, and feeds that are explicitly declared in its local
-  contract `uses`, except for Trellis-defined baseline surfaces automatically
-  available to that participant kind
+  operations, events, and feeds explicitly selected in its local contract
 
-This makes two important guarantees in normal authoring: if an SDK does not
-expose `Auth.Nope`, then `auth.use({ events: { subscribe: ["Auth.Nope"] } })` is
-a type error, and if a non-baseline remote surface exists in an imported SDK but
-the local contract did not declare it in `uses`, then the corresponding runtime
-call is a type error for that participant.
+This makes two important guarantees in normal authoring: nonexistent actions
+cannot be imported as descriptors, and actions omitted from `uses` do not appear
+on the connected runtime.
 
 No separate linting or external analysis tool is required for this workflow. The
 contract object itself defines the allowed TypeScript runtime surface.
 
-### 5) Derived runtime API surfaces
+### 5) Derived runtime surfaces
 
-The contract definition produces three distinct projected API views:
+The contract definition retains private transport metadata and exposes direct
+owned descriptors. Connection helpers project that metadata into two public
+roles:
 
-- `API.owned` - the operations, RPCs, events, and feeds owned by the local
-  participant and therefore mountable or publishable as owner behavior
-- `API.used` - the subset of remote SDK APIs explicitly permitted by `uses`
-- generated client and service facades - the concrete runtime surfaces derived
-  from the merged owned and used API, exposed as `rpc`, `event`, `feed`, and
-  `operation`
+- callers receive flat methods for selected actions
+- providers receive flat `handle<Name>` registrations for owned RPCs,
+  operations, and feeds; `on<Name>` for subscriptions; and `publish<Name>` for
+  owned publication
 
 Rules:
 
-- `API.owned` derives only from the local contract's `operations`, `rpc`,
-  `events`, and `feeds`
-- `API.used` derives only from the remote SDK operations explicitly selected
-  through `use(...)`, plus Trellis-owned baseline surfaces that are derived from
-  participant kind or local features
-- contracts that declare top-level `state` receive baseline `State.*` RPCs in
-  `API.used`, while normal application code uses `client.state.<store>`
-- generated active facades are the only general outbound runtime API surface
-- generated active facades are derived from the merge of `API.used` and
-  `API.owned`
-- server-side handler registration uses `service.handle` surfaces derived from
-  `API.owned`, not the outbound active facade
+- caller methods derive only from descriptors selected in `uses`
+- provider registrations and owned event publication derive only from locally
+  owned actions
+- state, KV, store, and jobs remain structured runtime handles
+- the private session may merge transport metadata internally, but no public API
+  map or merged facade is exported
 
 This preserves the distinction between what a participant owns and what it is
 merely allowed to use.
@@ -451,16 +398,13 @@ shapes and examples belong in `/guides/libraries/typescript` and `/api`.
 
 Rules:
 
-- connected clients and services expose generated active facades typed from the
-  merged owned and used contract surface
-- server handler registration is typed from `contract.API.owned`
-- `service.handle.rpc.<group>.<leaf>(...)` handlers should use the payload type
-  that Trellis derives from the contract; docs and examples should not re-parse
-  mounted RPC payloads just to recover types
+- connected clients and services expose contract-inferred flat methods
+- server registration uses `service.handle<Name>(handler)`
+- handlers should use the payload type Trellis derives from the registration;
+  docs and examples should not re-parse mounted payloads
 - mounted RPC handlers may return either `Result` or `Promise<Result>`
-- returned runtimes expose typed `rpc`, `event`, `feed`, and `operation` helpers
-  derived from the contract and must not widen the callable surface beyond what
-  the contract allows
+- returned runtimes must not expose raw request, publish, listen, NATS, or
+  JetStream escape hatches
 - service-side helpers must not expose used remote APIs as mountable local
   handlers
 - request and operation helpers may fail with `TransportError` for Trellis
@@ -471,19 +415,13 @@ Rules:
   builder flow and grant consumption through runtime transfer helpers
 - contract descriptors declare transfer direction explicitly for operations that
   ingest caller bytes and RPCs that issue service-owned byte grants
-- for locally owned TypeScript contracts, inline handlers can infer from
-  `service.handle...` registration, while extracted handlers should import
-  concrete aliases from the generated SDK after prepare/generation, such as
-  `MyMethodHandler`
+- inline handlers infer from `service.handle<Name>(...)`; extracted handlers use
+  `Parameters<ConnectedTrellisService<typeof contract>["handle<Name>"]>[0]`
 - extracted handler factories close over application dependencies; the handler
   type remains a plain function signature without a dependency slot
-- service-owned RPC handler docs and examples should prefer generated SDK
-  handler aliases for extracted signatures instead of handwritten request
-  parsing
 - callers do not manually assemble runtime API arrays for normal usage
 - locally authored contracts should normally export the helper return value
-  directly; do not wrap it in a handwritten default-export object that
-  reassembles `CONTRACT_ID`, `CONTRACT`, `CONTRACT_DIGEST`, and `API`
+  directly; do not wrap it in a generated-style compatibility object
 - for TypeScript contract source files, that direct export should be the file's
   default export so prepare/generation can resolve it consistently
 - single-contract examples should normally use a top-level `contract.ts`
@@ -522,22 +460,17 @@ The architectural rules are:
 - kind-specific helpers are the supported public authoring entrypoints for
   normal local contract modules
 - `@qlever-llc/trellis` exposes the preferred contract authoring helpers used by
-  apps and services while returning contract objects with projected API views
-  and manifest metadata
+  apps and services and returns contract objects with manifest and private
+  runtime metadata
 - `@qlever-llc/trellis` also remains the runtime package for
   `TrellisClient.connect(...)`, auth helpers, and `Result`
 - runtime connection helpers live in `@qlever-llc/trellis` and
   `@qlever-llc/trellis/service*`
-- locally defined contracts and generated SDK modules share one compatible
-  contract-module shape
-- `uses` declarations remain SDK-backed and contract-driven rather than
-  handwritten dependency objects in normal usage
-- the participant runtime surface remains derived from `API.owned` and
-  `API.used`, with generated active and provider facades as the public runtime
-  entrypoints
-- generated TypeScript SDKs include consumer client facade types that apps and
-  peer services can use as concrete editor-friendly views over the runtime
-  client
+- generated owner SDKs are vocabulary packages, not participant contracts
+- `uses` declarations are direct descriptor lists rather than handwritten
+  dependency objects
+- caller and provider surfaces are inferred at connection time from the local
+  participant contract
 - public documentation should lead with `TrellisClient.connect(...)`,
   `TrellisService.connect(...)`, and `TrellisDevice.connect(...)`; public
   service author guidance should not point at Trellis-internal bootstrap paths
@@ -548,15 +481,8 @@ The architectural rules are:
   and dependency-resolution rules
 - TypeScript authoring is an implementation of the canonical manifest
   architecture, not a parallel manifest format
-- generated SDK outputs still need the richer contract module shape with
-  `CONTRACT`, `CONTRACT_ID`, `CONTRACT_DIGEST`, projected API views, and typed
-  `use(...)` helpers
-- generated SDK outputs must include stable contract identity, canonical
-  manifest metadata, derived API projections, typed dependency selection, and a
-  concrete generated client facade for consumers
-- generated client facades should expose explicit `rpc`, `operation`, `event`,
-  `feed`, state, and common runtime members without requiring consumers to name
-  deep contract-derived runtime aliases
+- generated SDK outputs contain `mod.ts`, `descriptors.ts`, `types.ts`, and
+  `schemas.ts`; tooling may additionally consume the non-root `manifest` export
 
 The replacement rule also remains the same: normal TypeScript user code should
 not need to use `defineContractSource(...)`, `buildContractArtifacts(...)`, or
@@ -589,20 +515,14 @@ Rules:
 
 Expected type behavior:
 
-- `service.rpc.trellis.catalog({})` is valid because it is declared in `uses`
-- non-baseline auth RPCs remain type errors unless the service contract
-  explicitly declares them in `uses`; baseline auth RPCs such as
-  `Auth.Requests.Validate` may be generated or granted automatically by the
-  service runtime
-- `service.handle.rpc.trellis.catalog(...)` is a type error because that RPC is
-  used, not owned
-- `auth.use({ rpc: { call: ["Trellis.Catalog"] } })` is a type error because
-  that RPC is not part of `trellis.auth@v1`
+- `service.trellisCatalog({})` is valid when `TrellisCatalog` is selected
+- `service.handleTrellisCatalog(...)` is a type error because that RPC is used,
+  not owned
+- omitted descriptors do not produce callable methods
 
 ### Implementation notes
 
-- TS SDK generation should emit the contract module shape with nested API views
-  and typed `use(...)`
+- TS SDK generation emits owner-only descriptors, types, and schemas
 - runtime helpers should consume contract objects directly for client and
   service creation
 - the emitted manifest format and agent contract workflow stay stable

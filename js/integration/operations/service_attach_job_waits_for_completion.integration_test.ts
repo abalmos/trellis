@@ -22,7 +22,7 @@ liveTrellisTest({
     });
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         const task = {
           wait(): AsyncResult<unknown, BaseError> {
             return AsyncResult.from((async () => {
@@ -39,7 +39,7 @@ liveTrellisTest({
             })());
           },
         };
-
+      
         return await op.attach(task);
       });
 
@@ -47,7 +47,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

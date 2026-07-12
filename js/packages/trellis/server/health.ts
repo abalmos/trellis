@@ -279,7 +279,14 @@ export function createHealthHeartbeatSample(args: {
   };
 }
 
-export class ServiceHealth {
+/** Public health enrichment surface exposed by connected participants. */
+export type ServiceHealth = Readonly<{
+  setInfo(info: ServiceHealthInfo | ServiceHealthInfoFn): void;
+  add(name: string, check: ServiceHealthCheckFn): () => void;
+}>;
+
+/** Internal health runtime used by automatic heartbeat publishers. */
+export class ServiceHealthRuntime implements ServiceHealth {
   readonly serviceName: string;
   readonly kind: HealthHeartbeatSample["participant"]["kind"];
   readonly instanceId: string;

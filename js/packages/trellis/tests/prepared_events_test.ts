@@ -1,13 +1,14 @@
 import type { Msg, NatsConnection, Subscription } from "@nats-io/nats-core";
 import { assert, assertEquals } from "@std/assert";
 import { Type } from "typebox";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "../contract.ts";
 import {
   outboxMessageToPreparedEvent,
   preparedTrellisEventToOutboxRecord,
 } from "../service/outbox_inbox.ts";
-import { Trellis, type TrellisAuth } from "../trellis.ts";
+import { Trellis, type TrellisAuth } from "../session.ts";
 
 // Retained unit coverage: only deterministic prepare-time invariants remain.
 // Live prepared publish headers and handler-error annotation are covered by the
@@ -110,7 +111,7 @@ Deno.test("prepare creates stable frozen event without contract metadata", () =>
     createMockNatsConnection(),
     createMockAuth(),
     {
-      api: contract.API.owned,
+      api: getContractRuntime(contract).ownedApi,
     },
   );
   const prepared = trellis.event.thing.changed.prepare({
@@ -145,7 +146,7 @@ Deno.test("prepare preserves user body field named header when it is not runtime
     createMockNatsConnection(),
     createMockAuth(),
     {
-      api: contract.API.owned,
+      api: getContractRuntime(contract).ownedApi,
     },
   );
   const prepared = trellis.event.thing.headerNamed.prepare({
@@ -177,7 +178,7 @@ Deno.test("outbox records preserve prepared event runtime metadata", () => {
     createMockNatsConnection(),
     createMockAuth(),
     {
-      api: contract.API.owned,
+      api: getContractRuntime(contract).ownedApi,
     },
   );
   const prepared = trellis.event.thing.changed.prepare({

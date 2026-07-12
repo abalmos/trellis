@@ -34,7 +34,7 @@ liveTrellisTest({
     const observed: string[] = [];
 
     try {
-      await service.event.self.pinged.listen(
+      await service.onSelfPinged(
         (event) => {
           observed.push(`first:${event.id}`);
           return Result.ok(undefined);
@@ -42,13 +42,7 @@ liveTrellisTest({
         {},
         { group: "ingest", signal: firstController.signal },
       ).orThrow();
-      await runtime.waitFor(async () => {
-        const consumer = matchingConsumers(
-          await jsRuntime.listTrellisJetStreamConsumers(),
-        )[0];
-        return consumer !== undefined && consumerWaitingCount(consumer) > 0;
-      });
-      await service.event.self.pinged.publish({
+      await service.publishSelfPinged({
         id: fixture.eventId,
         value: "first",
       }).orThrow();
@@ -64,7 +58,7 @@ liveTrellisTest({
         return consumer === undefined || consumerWaitingCount(consumer) === 0;
       });
 
-      await service.event.self.pinged.publish({
+      await service.publishSelfPinged({
         id: fixture.secondEventId,
         value: "second",
       }).orThrow();
@@ -76,7 +70,7 @@ liveTrellisTest({
       });
       assertEquals(observed.includes(`first:${fixture.secondEventId}`), false);
 
-      await service.event.self.pinged.listen(
+      await service.onSelfPinged(
         (event) => {
           observed.push(`second:${event.id}`);
           return Result.ok(undefined);

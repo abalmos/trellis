@@ -44,7 +44,7 @@ export const refreshSite: OperationHandler<
 
   const completed = await op.complete(completedJob.result).orThrow();
 
-  await client.event.sites.refreshed.publish({
+  await client.publishSitesRefreshed({
     refreshId: completedJob.result.refreshId,
     site: completedJob.result.site,
     refreshedAt: new Date().toISOString(),

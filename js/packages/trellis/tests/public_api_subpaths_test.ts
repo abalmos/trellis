@@ -1,17 +1,15 @@
 import { assertEquals } from "@std/assert";
-import { Result } from "@qlever-llc/result";
 import { Type } from "typebox";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "@qlever-llc/trellis";
 import * as authSdk from "@qlever-llc/trellis/sdk/auth";
 import * as authSurface from "@qlever-llc/trellis/auth";
 import * as authBrowserSurface from "@qlever-llc/trellis/auth/browser";
-import type { TrellisCatalogHandler } from "@qlever-llc/trellis/sdk/core";
 import * as healthSdk from "@qlever-llc/trellis/sdk/health";
 import * as contracts from "@qlever-llc/trellis/contracts";
 import * as coreSdk from "@qlever-llc/trellis/sdk/core";
 import * as stateSdk from "@qlever-llc/trellis/sdk/state";
-import * as healthSurface from "@qlever-llc/trellis/health";
 import * as deviceDeno from "@qlever-llc/trellis/device/deno";
 import * as serviceSurface from "@qlever-llc/trellis/service";
 import type { TrellisService as TrellisServiceType } from "@qlever-llc/trellis/service";
@@ -25,7 +23,7 @@ type ServiceOperationsField = TrellisServiceType["operations"];
 // @ts-expect-error Raw NATS handles must not be public service fields.
 type ServiceNatsField = TrellisServiceType["nc"];
 
-Deno.test("service, health, and SDK subpaths expose the canonical wrapper API", () => {
+Deno.test("service and SDK subpaths expose the canonical wrapper API", () => {
   assertEquals("TrellisServer" in serviceSurface, false);
   assertEquals(typeof serviceSurface.TrellisService, "function");
   assertEquals(typeof serviceSurface.OutboxDispatcher, "function");
@@ -33,14 +31,10 @@ Deno.test("service, health, and SDK subpaths expose the canonical wrapper API", 
   assertEquals(typeof NodeTrellisService, "function");
   assertEquals("connectInternal" in DenoTrellisService, false);
   assertEquals("connectInternal" in NodeTrellisService, false);
-  assertEquals(typeof healthSurface.HealthHeartbeatSchema, "object");
-  assertEquals(typeof authSdk.sdk?.use, "function");
-  assertEquals(typeof coreSdk.use, "function");
-  assertEquals(typeof healthSdk.use, "function");
-  assertEquals(typeof stateSdk.use, "function");
-  assertEquals(coreSdk.sdk?.use, coreSdk.use);
-  assertEquals(healthSdk.sdk?.use, healthSdk.use);
-  assertEquals(stateSdk.sdk?.use, stateSdk.use);
+  assertEquals(authSdk.AuthSessionsMe.kind, "rpc");
+  assertEquals(coreSdk.TrellisCatalog.kind, "rpc");
+  assertEquals(healthSdk.HealthQuery.kind, "rpc");
+  assertEquals(stateSdk.StateGet.kind, "rpc");
 });
 
 Deno.test("auth and device runtime subpaths retain depended-on helpers", () => {
@@ -86,54 +80,7 @@ Deno.test("contracts subpath exposes only kind-specific contract helpers", () =>
 
   assertEquals(typeof contract.CONTRACT_ID, "string");
   assertEquals(
-    typeof contract.API.trellis.rpc["Example.Ping"].subject,
+    typeof getContractRuntime(contract).api.rpc["Example.Ping"].subject,
     "string",
   );
-});
-
-Deno.test("generated SDK exports handler aliases for extracted handlers", () => {
-  const handler: TrellisCatalogHandler = ({ input, context }) => {
-    const sessionKey: string = context.sessionKey;
-    assertEquals(Object.keys(input).length, 0);
-    assertEquals(typeof sessionKey, "string");
-    return Result.ok({
-      catalog: {
-        format: "trellis.catalog.v1",
-        contracts: [],
-      },
-    });
-  };
-
-  assertEquals(typeof handler, "function");
-});
-
-Deno.test("generated handler aliases support direct handler registration", () => {
-  const prefix = "dep";
-  const handler: TrellisCatalogHandler = ({ input, context }) => {
-    const sessionKey: string = context.sessionKey;
-    assertEquals(Object.keys(input).length, 0);
-    assertEquals(typeof sessionKey, "string");
-    assertEquals(typeof prefix, "string");
-    return Result.ok({
-      catalog: {
-        format: "trellis.catalog.v1",
-        contracts: [],
-      },
-    });
-  };
-
-  const register = (service: {
-    readonly handle: {
-      readonly rpc: {
-        readonly trellis: {
-          readonly catalog: (handler: TrellisCatalogHandler) => void;
-        };
-      };
-    };
-  }) => {
-    return service.handle.rpc.trellis.catalog(handler);
-  };
-
-  assertEquals(typeof handler, "function");
-  assertEquals(typeof register, "function");
 });

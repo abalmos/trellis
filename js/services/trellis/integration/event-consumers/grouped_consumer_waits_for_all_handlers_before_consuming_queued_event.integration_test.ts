@@ -39,7 +39,7 @@ liveTrellisTest({
     let observedPing: string | undefined;
 
     try {
-      await service.event.source.pinged.listen(
+      await service.onSourcePinged(
         (event) => {
           observedPing = event.id;
           return Result.ok(undefined);
@@ -47,7 +47,7 @@ liveTrellisTest({
         {},
         { group: "paired", signal: controller.signal },
       ).orThrow();
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "queued",
       }).orThrow();
@@ -61,11 +61,10 @@ liveTrellisTest({
       });
       assertEquals(observedPing, undefined);
 
-      await service.event.source.ponged.listen(
-        () => Result.ok(undefined),
-        {},
-        { group: "paired", signal: controller.signal },
-      ).orThrow();
+      await service.onSourcePonged(() => Result.ok(undefined), {}, {
+        group: "paired",
+        signal: controller.signal,
+      }).orThrow();
 
       await runtime.waitFor(() => observedPing === fixture.eventId);
     } finally {

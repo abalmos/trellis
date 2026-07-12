@@ -30,7 +30,7 @@ liveTrellisTest({
         jobServices.push(job.ref.service);
         return Promise.resolve(Result.ok({ ok: true }));
       });
-      await service.handle.rpc.documents.syncCustomer(async ({ input }) => {
+      await service.handleDocumentsSyncCustomer(async ({ input }) => {
         await sqlOutbox.transaction(async ({ job }) => {
           const created = await job.syncCustomer.create({
             customerId: `${input.customerId}-create`,
@@ -59,7 +59,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
       assertEquals(
-        await client.rpc.documents.syncCustomer({
+        await client.documentsSyncCustomer({
           customerId: fixture.documentId,
         })
           .orThrow(),

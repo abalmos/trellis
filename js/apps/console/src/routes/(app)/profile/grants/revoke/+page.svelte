@@ -20,7 +20,6 @@
     (method: "Auth.IdentityGrants.List", input: { limit: number; offset: number }): RpcTakeable<{ entries?: UserGrantRecord[] }>;
     (method: "Auth.IdentityGrants.Revoke", input: { identityGrantId: string }): RpcTakeable<{ success?: boolean }>;
   };
-  const identityGrantsRequest = trellis.request.bind(trellis) as IdentityGrantsRequest;
   const notifications = getNotifications();
 
   let loading = $state(true);
@@ -36,7 +35,7 @@
     loading = true;
     error = null;
     try {
-      const response = await identityGrantsRequest("Auth.IdentityGrants.List", { limit: 100, offset: 0 }).take();
+      const response = await trellis.authIdentityGrantsList({ limit: 100, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       grants = response.entries ?? [];
       const requestedGrant = page.url.searchParams.get("grant");
@@ -53,7 +52,7 @@
     pending = true;
     error = null;
     try {
-      const response = await identityGrantsRequest("Auth.IdentityGrants.Revoke", { identityGrantId: selectedGrant.identityGrantId }).take();
+      const response = await trellis.authIdentityGrantsRevoke({ identityGrantId: selectedGrant.identityGrantId }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`${participantKindLabel(selectedGrant.participantKind)} grant revoked.`, "Revoked");
       await load();

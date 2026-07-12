@@ -44,7 +44,6 @@
   type Tab = "desired" | "materialized" | "resources" | "capabilities" | "instances" | "plans";
 
   const trellis = getTrellis();
-  const request = trellis.request.bind(trellis) as AuthorityRequest;
   const selectedDeploymentId = $derived(decodeURIComponent(page.url.pathname.split("/").filter(Boolean).at(-1) ?? ""));
   const tabs: Tab[] = ["desired", "materialized", "resources", "capabilities", "instances", "plans"];
   const authorityPlansHref = resolve("/admin/authority/plans");
@@ -91,10 +90,10 @@
     notice = null;
     try {
       const [detailResponse, instancesResponse, plansResponse, capabilitiesResponse] = await Promise.all([
-        request("Auth.DeploymentAuthority.Get", { deploymentId: selectedDeploymentId }).take(),
-        request("Auth.ServiceInstances.List", { limit: 500, offset: 0 }).take(),
-        request("Auth.DeploymentAuthority.Plans.List", { deploymentId: selectedDeploymentId, limit: authorityPlanPreviewLimit, offset: 0 }).take(),
-        request("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityGet({ deploymentId: selectedDeploymentId }).take(),
+        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ deploymentId: selectedDeploymentId, limit: authorityPlanPreviewLimit, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(detailResponse)) { error = errorMessage(detailResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
@@ -117,7 +116,7 @@
     error = null;
     notice = null;
     try {
-      const response = await request("Auth.DeploymentAuthority.Reconcile", { deploymentId: authority.deploymentId, desiredVersion: authority.version }).take();
+      const response = await trellis.authDeploymentAuthorityReconcile({ deploymentId: authority.deploymentId, desiredVersion: authority.version }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       detail = {
         authority: response.authority,

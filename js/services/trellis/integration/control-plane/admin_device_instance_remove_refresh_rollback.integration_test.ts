@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,20 +24,12 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Device Instance Remove Rollback Admin",
   description:
     "Exercises Auth device instance remove refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Devices.List",
-            "Auth.Devices.Provision",
-            "Auth.Devices.Remove",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDevicesList,
+    trellisAuth.AuthDevicesProvision,
+    trellisAuth.AuthDevicesRemove,
+  ],
 }));
 
 liveTrellisTest({
@@ -52,24 +44,24 @@ liveTrellisTest({
     });
 
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "device",
         deploymentId,
         reviewMode: "none",
       }).orThrow();
-      const provisioned = await admin.rpc.auth.devicesProvision({
+      const provisioned = await admin.authDevicesProvision({
         deploymentId,
         publicIdentityKey: caseScopedName("remove-device-key", CASE_ID),
         activationKey: caseScopedName("remove-activation-key", CASE_ID),
         metadata: { name: caseScopedName("remove-device", CASE_ID) },
       }).orThrow();
 
-      const failedRemove = await admin.rpc.auth.devicesRemove({
+      const failedRemove = await admin.authDevicesRemove({
         instanceId: provisioned.instance.instanceId,
       });
       assertRefreshHookFailure(failedRemove, refreshHook);
 
-      const page = await admin.rpc.auth.devicesList({
+      const page = await admin.authDevicesList({
         deploymentId,
         limit: 500,
       }).orThrow();

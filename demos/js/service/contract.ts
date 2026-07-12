@@ -1,4 +1,4 @@
-import { defineServiceContract } from "@qlever-llc/trellis";
+import { defineServiceContract, jobs, kv, store } from "@qlever-llc/trellis";
 import * as schemas from "./src/schemas/index.ts";
 
 export const contract = defineServiceContract(
@@ -22,19 +22,19 @@ export const contract = defineServiceContract(
         "SiteSummary",
       ],
     },
-    jobs: {
-      refreshSiteSummary: {
-        payload: ref.schema("SiteRefreshJobPayload"),
-        result: ref.schema("SiteRefreshJobResult"),
-        docs: {
-          summary: "Refresh a site summary.",
-          markdown:
-            "Background work item that recomputes the latest summary for one site.",
+    uses: [
+      jobs({
+        refreshSiteSummary: {
+          payload: ref.schema("SiteRefreshJobPayload"),
+          result: ref.schema("SiteRefreshJobResult"),
+          docs: {
+            summary: "Refresh a site summary.",
+            markdown:
+              "Background work item that recomputes the latest summary for one site.",
+          },
         },
-      },
-    },
-    resources: {
-      kv: {
+      }),
+      kv({
         siteSummaries: {
           purpose: "Latest site summaries for the Field Ops demo.",
           schema: ref.schema("SiteSummary"),
@@ -46,8 +46,8 @@ export const contract = defineServiceContract(
               "Stores the current site summary records served by the demo APIs.",
           },
         },
-      },
-      store: {
+      }),
+      store({
         uploads: {
           purpose: "Persistent evidence locker files for the Field Ops demo.",
           ttlMs: 0,
@@ -59,8 +59,8 @@ export const contract = defineServiceContract(
               "Persists uploaded evidence files before they are listed or downloaded.",
           },
         },
-      },
-    },
+      }),
+    ],
     rpc: {
       "Assignments.List": {
         version: "v1",

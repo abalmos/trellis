@@ -10,8 +10,8 @@ import {
   templateToWildcard,
 } from "./uses.ts";
 import { getKvPermissionGrants } from "./resources.ts";
-import { CONTRACT_DIGEST as TRELLIS_JOBS_CONTRACT_DIGEST } from "@qlever-llc/trellis/sdk/jobs";
-import { CONTRACT_DIGEST as TRELLIS_EVENTLOG_CONTRACT_DIGEST } from "../../../../generated/packages/jsr/eventlog/mod.ts";
+import { CONTRACT_DIGEST as TRELLIS_JOBS_CONTRACT_DIGEST } from "@qlever-llc/trellis/sdk/jobs/manifest";
+import { CONTRACT_DIGEST as TRELLIS_EVENTLOG_CONTRACT_DIGEST } from "../../../../generated/packages/jsr/eventlog/manifest.ts";
 import { CONTRACT as trellisAuthContract } from "../contracts/trellis_auth.ts";
 import type { DeploymentAuthoritySurface } from "../auth/schemas.ts";
 

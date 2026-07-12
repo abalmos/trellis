@@ -1,8 +1,6 @@
 import {
   type ClientOpts,
   createAuth,
-  type EventName,
-  type TrellisAPI,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { TrellisTestRuntime } from "../runtime.ts";
@@ -10,6 +8,7 @@ import {
   startTrellisTestEventCapture,
   type TrellisTestEventCapture,
   type TrellisTestEventCaptureOptions,
+  type TrellisTestEventAction,
   type TrellisTestEventSourceContract,
 } from "../event_capture.ts";
 import type {
@@ -235,7 +234,7 @@ class AttachedTrellisIntegrationRuntime implements TrellisIntegrationRuntime {
 
   async registerClient(args: {
     readonly name: string;
-    readonly contract: TrellisTestClientContract<TrellisAPI>;
+    readonly contract: TrellisTestClientContract;
     readonly sessionKeySeed?: string;
   }): Promise<{ readonly seed: string; readonly sessionKey: string }> {
     const seed = args.sessionKeySeed ?? randomSessionSeed();
@@ -258,7 +257,7 @@ class AttachedTrellisIntegrationRuntime implements TrellisIntegrationRuntime {
     };
   }
 
-  async connectClient<TContract extends TrellisTestClientContract<TrellisAPI>>(
+  async connectClient<TContract extends TrellisTestClientContract>(
     args: ClientOpts & {
       readonly name: string;
       readonly contract: TContract;
@@ -279,10 +278,10 @@ class AttachedTrellisIntegrationRuntime implements TrellisIntegrationRuntime {
 
   async captureEvents<
     TContract extends TrellisTestEventSourceContract,
-    const TEvents extends readonly EventName<TContract>[],
+    const TEvents extends readonly TrellisTestEventAction[],
   >(
     args: TrellisTestEventCaptureOptions<TContract, TEvents>,
-  ): Promise<TrellisTestEventCapture<TContract, TEvents[number]>> {
+  ): Promise<TrellisTestEventCapture<TEvents[number]>> {
     const capture = await startTrellisTestEventCapture({
       runtime: this,
       options: args,

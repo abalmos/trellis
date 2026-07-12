@@ -29,18 +29,18 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await client.rpc.auth.sessionsMe({}).orThrow();
+      await client.authSessionsMe({}).orThrow();
 
       const session = await sqlite.takeSession(clientKey.sessionKey);
       assert(session !== null, "expected live user session row");
-      assert((await client.rpc.auth.sessionsMe({})).isErr());
+      assert((await client.authSessionsMe({})).isErr());
       await session.restore();
 
       await sqlite.execute(
         "DELETE FROM users WHERE user_id = (SELECT trellis_id FROM sessions WHERE session_key = ?)",
         [clientKey.sessionKey],
       );
-      const missingUser = await client.rpc.auth.sessionsMe({});
+      const missingUser = await client.authSessionsMe({});
       assert(missingUser.isErr());
     } finally {
       await client.connection.close().catch(() => undefined);

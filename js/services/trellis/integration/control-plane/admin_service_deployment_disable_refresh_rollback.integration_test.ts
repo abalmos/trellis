@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -25,19 +25,11 @@ const adminContract = defineAppContract(() => ({
     "Trellis Control-Plane Service Deployment Disable Rollback Admin",
   description:
     "Exercises Auth service deployment disable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.Disable",
-            "Auth.Deployments.List",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsDisable,
+    trellisAuth.AuthDeploymentsList,
+  ],
 }));
 
 liveTrellisTest({
@@ -53,7 +45,7 @@ liveTrellisTest({
 
     try {
       const deploymentDisabled = async () => {
-        const page = await admin.rpc.auth.deploymentsList({
+        const page = await admin.authDeploymentsList({
           kind: "service",
           limit: 500,
         }).orThrow();
@@ -62,14 +54,14 @@ liveTrellisTest({
         )?.disabled;
       };
 
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
 
-      const failedDisable = await admin.rpc.auth.deploymentsDisable({
+      const failedDisable = await admin.authDeploymentsDisable({
         kind: "service",
         deploymentId,
       });

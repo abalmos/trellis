@@ -3,11 +3,12 @@ import type { Msg } from "@nats-io/nats-core";
 import { isErr } from "@qlever-llc/result";
 import type { NatsConnection } from "@nats-io/nats-core";
 import { Type } from "typebox";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "../contract.ts";
+import { trellisCore } from "../../../services/trellis/contracts/trellis_core.ts";
 import { AuthError } from "../errors/index.ts";
-import { API as CORE_API } from "../sdk/core.ts";
-import { createTrellisInternal, type TrellisAuth } from "../trellis.ts";
+import { createTrellisInternal, type TrellisAuth } from "../session.ts";
 
 // Retained unit coverage: these are API/facade guards that should fail before a
 // network request is made. Live event-consumer and RPC recovery behavior has
@@ -132,12 +133,13 @@ const emptyRpcContract = defineServiceContract({}, () => ({
 
 Deno.test("generated core SDK keeps internal bindings RPC descriptor", () => {
   assertEquals(
-    CORE_API.owned.rpc["Trellis.Bindings.Get"].subject,
+    getContractRuntime(trellisCore).ownedApi.rpc["Trellis.Bindings.Get"]
+      .subject,
     "rpc.v1.Trellis.Bindings.Get",
   );
 });
 
-Deno.test("Trellis explains how to provide an API surface when none was configured", async () => {
+Deno.test("private transport explains when no API surface was configured", async () => {
   const trellis = createTrellisInternal(
     "test-client",
     // @ts-expect-error This test mock deliberately omits unused NATS compatibility members.
@@ -153,7 +155,7 @@ Deno.test("Trellis explains how to provide an API surface when none was configur
     value.error.cause.message,
     "No API surface was provided",
   );
-  assertStringIncludes(value.error.cause.message, "createCoreClient(...)");
+  assertStringIncludes(value.error.cause.message, "private transport session");
 });
 
 Deno.test("Trellis invokes session recovery for session_not_found RPC errors", async () => {
@@ -167,7 +169,7 @@ Deno.test("Trellis invokes session recovery for session_not_found RPC errors", a
     nats,
     createMockAuth(),
     {
-      api: rpcTestContract.API.owned,
+      api: getContractRuntime(rpcTestContract).ownedApi,
       onSessionNotFound: () => {
         recoveries += 1;
       },
@@ -190,7 +192,7 @@ Deno.test("RPC handle facade omits unknown RPC methods", () => {
     // @ts-expect-error Facade construction only needs JetStream's inbox prefix read.
     nats,
     createMockAuth(),
-    { api: emptyRpcContract.API.owned },
+    { api: getContractRuntime(emptyRpcContract).ownedApi },
   );
 
   assertEquals(Reflect.get(service.handle.rpc, "does"), undefined);

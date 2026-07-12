@@ -55,7 +55,7 @@
     error = null;
 
     try {
-      const response = await trellis.request("Reports.List", listPage).orThrow();
+      const response = await trellis.reportsList(listPage).orThrow();
       if (!mounted || runId !== requestId) return;
       const loadedReports: ReportRecord[] = response.entries;
       reports = loadedReports;

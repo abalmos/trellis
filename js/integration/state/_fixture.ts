@@ -1,6 +1,6 @@
-import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
-import { sdk as trellisState } from "@qlever-llc/trellis/sdk/state";
+import { defineAppContract, state } from "@qlever-llc/trellis";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
+import * as trellisState from "@qlever-llc/trellis/sdk/state";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
@@ -40,7 +40,7 @@ export function createStateFixture(caseId: string) {
       id: caseScopedContractId("trellis.integration.state-client", caseId),
       displayName: `Trellis Integration State Client (${slug})`,
       description: "Exercises generated contract-owned state store surfaces.",
-      state: {
+      uses: [state({
         preferences: {
           kind: "value",
           schema: ref.schema("Preferences"),
@@ -51,7 +51,7 @@ export function createStateFixture(caseId: string) {
           schema: ref.schema("Draft"),
           stateVersion: "drafts.v1",
         },
-      },
+      })],
     }),
   );
 
@@ -62,7 +62,7 @@ export function createStateFixture(caseId: string) {
       displayName: `Trellis Integration State Client v2 (${slug})`,
       description:
         "Exercises generated contract-owned state store migration surfaces.",
-      state: {
+      uses: [state({
         preferences: {
           kind: "value",
           schema: ref.schema("PreferencesV2"),
@@ -75,7 +75,7 @@ export function createStateFixture(caseId: string) {
           stateVersion: "drafts.v2",
           acceptedVersions: { "drafts.v1": ref.schema("Draft") },
         },
-      },
+      })],
     }),
   );
 
@@ -84,20 +84,12 @@ export function createStateFixture(caseId: string) {
     displayName: `Trellis Integration State Admin (${slug})`,
     description:
       "Admin participant for inspecting and deleting state through public generated RPCs.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({ rpc: { call: ["Auth.Sessions.List"] } }),
-        state: trellisState.use({
-          rpc: {
-            call: [
-              "State.Admin.Delete",
-              "State.Admin.Get",
-              "State.Admin.List",
-            ],
-          },
-        }),
-      },
-    },
+    uses: [
+      trellisAuth.AuthSessionsList,
+      trellisState.StateAdminDelete,
+      trellisState.StateAdminGet,
+      trellisState.StateAdminList,
+    ],
   }));
 
   return {

@@ -29,7 +29,7 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
 
     try {
-      const user = await admin.rpc.auth.usersCreate({
+      const user = await admin.authUsersCreate({
         username,
         name: "Grant Override Local Login User",
         email: `${username}@example.test`,
@@ -37,7 +37,7 @@ liveTrellisTest({
         capabilities: [],
         capabilityGroups: [],
       }).orThrow();
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: user.user.userId,
       }).orThrow();
       await completeLocalPasswordAccountFlow({
@@ -69,9 +69,9 @@ liveTrellisTest({
         password,
       });
       try {
-        const me = await webClient.rpc.auth.sessionsMe({}).orThrow();
+        const me = await webClient.authSessionsMe({}).orThrow();
         assertEquals(me.user?.capabilities, []);
-        const ping = await webClient.rpc.authLogin.ping({
+        const ping = await webClient.authLoginPing({
           message: fixture.pingMessage,
         }).orThrow();
         assertEquals(ping, { message: fixture.pingMessage, accepted: true });
@@ -103,7 +103,7 @@ liveTrellisTest({
         redirectTo: "/_trellis/test/client-auth",
       });
       try {
-        const ping = await sessionClient.rpc.authLogin.ping({
+        const ping = await sessionClient.authLoginPing({
           message: fixture.pingMessage,
         }).orThrow();
         assertEquals(ping, { message: fixture.pingMessage, accepted: true });
@@ -111,11 +111,10 @@ liveTrellisTest({
         await sessionClient.connection.close();
       }
 
-      const removed = await admin.rpc.auth
-        .deploymentAuthorityGrantOverridesRemove({
+      const removed = await admin.authDeploymentAuthorityGrantOverridesRemove({
           deploymentId: fixture.deploymentId,
           overrides: [sessionRow],
-        }).orThrow();
+      }).orThrow();
       assertEquals(removed.grantOverrides, []);
       await assertListed(admin);
     } finally {
@@ -129,7 +128,7 @@ async function putAndAssert(
   admin: Awaited<ReturnType<typeof fixture.setupSessionAdmin>>,
   row: GrantOverride,
 ): Promise<void> {
-  const put = await admin.rpc.auth.deploymentAuthorityGrantOverridesPut({
+  const put = await admin.authDeploymentAuthorityGrantOverridesPut({
     deploymentId: fixture.deploymentId,
     overrides: [row],
   }).orThrow();
@@ -140,7 +139,7 @@ async function assertListed(
   admin: Awaited<ReturnType<typeof fixture.setupSessionAdmin>>,
   row?: GrantOverride,
 ): Promise<void> {
-  const listed = await admin.rpc.auth.deploymentAuthorityGrantOverridesList({
+  const listed = await admin.authDeploymentAuthorityGrantOverridesList({
     limit: 500,
   }).orThrow();
   const rows = listed.entries.filter((entry) =>

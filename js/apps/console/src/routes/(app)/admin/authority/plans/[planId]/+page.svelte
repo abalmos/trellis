@@ -49,7 +49,6 @@
   };
 
   const trellis = getTrellis();
-  const request = trellis.request.bind(trellis) as AuthorityPlansRequest;
   const planId = $derived(decodeURIComponent(page.params.planId ?? ""));
 
   let loading = $state(true);
@@ -720,7 +719,7 @@
   }
 
   async function contractByDigest(digest: string): Promise<ContractDetail | null> {
-    const response = await request("Trellis.Contract.Get", { digest }).take();
+    const response = await trellis.trellisContractGet({ digest }).take();
     return isErr(response) ? null : response.contract;
   }
 
@@ -730,7 +729,7 @@
       const contract = await contractByDigest(previousDigest);
       if (contract) return contract;
     }
-    const response = await request("Auth.DeploymentAuthority.Plans.List", { deploymentId: value.deploymentId, state: "accepted", limit: 500 }).take();
+    const response = await trellis.authDeploymentAuthorityPlansList({ deploymentId: value.deploymentId, state: "accepted", limit: 500 }).take();
     if (isErr(response)) return null;
     const accepted = response.entries
       .filter((entry) => entry.planId !== value.planId && entry.proposal.contractId === value.proposal.contractId && entry.proposal.contractDigest !== value.proposal.contractDigest)
@@ -756,7 +755,7 @@
     if (clearNotice) notice = null;
     try {
       const response = await withTimeout(
-        request("Auth.DeploymentAuthority.Plans.Get", { planId }).take(),
+        trellis.authDeploymentAuthorityPlansGet({ planId }).take(),
         15000,
         "Loading the plan timed out.",
       );
@@ -768,7 +767,7 @@
         "Loading the previous contract timed out.",
       );
       const authorityResponse = await withTimeout(
-        request("Auth.DeploymentAuthority.Get", { deploymentId: response.plan.deploymentId }).take(),
+        trellis.authDeploymentAuthorityGet({ deploymentId: response.plan.deploymentId }).take(),
         15000,
         "Loading the deployment authority timed out.",
       );
@@ -784,7 +783,7 @@
     const currentPlan = plan;
     if (!currentPlan || currentPlan.classification !== "update") return;
     await runDecision(
-      () => request("Auth.DeploymentAuthority.AcceptUpdate", { planId: currentPlan.planId }).take(),
+      () => trellis.authDeploymentAuthorityAcceptUpdate({ planId: currentPlan.planId }).take(),
       "Contract applied.",
     );
   }
@@ -793,7 +792,7 @@
     const currentPlan = plan;
     if (!currentPlan || currentPlan.classification !== "migration" || !migrationAcknowledged) return;
     await runDecision(
-      () => request("Auth.DeploymentAuthority.AcceptMigration", { planId: currentPlan.planId, acknowledgement: `I have reviewed and approve migration of ${currentPlan.proposal.contractId} at ${new Date().toISOString()}.` }).take(),
+      () => trellis.authDeploymentAuthorityAcceptMigration({ planId: currentPlan.planId, acknowledgement: `I have reviewed and approve migration of ${currentPlan.proposal.contractId} at ${new Date().toISOString()}.` }).take(),
       "Migration applied.",
     );
   }
@@ -804,7 +803,7 @@
     const trimmedDetails = rejectDetails.trim();
     const reason = trimmedDetails.length > 0 ? `${rejectReason.trim()}: ${trimmedDetails}` : rejectReason.trim();
     await runDecision(
-      () => request("Auth.DeploymentAuthority.Reject", { planId: currentPlan.planId, reason }).take(),
+      () => trellis.authDeploymentAuthorityReject({ planId: currentPlan.planId, reason }).take(),
       "Contract rejected.",
     );
   }

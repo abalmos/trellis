@@ -8,7 +8,7 @@
     "../../js/packages/trellis-svelte"
   ],
   "tasks": {
-    "prepare": "cargo run --manifest-path ../../rust/tools/generate/Cargo.toml --bin trellis-generate -- prepare ..",
+    "prepare": "cargo run --manifest-path ../../rust/tools/generate/Cargo.toml --bin trellis-generate -- prepare .",
     "dev": "deno task prepare && deno run -A vite dev",
     "build": "deno task prepare && deno run -A vite build",
     "preview": "deno run -A vite preview",

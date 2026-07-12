@@ -36,7 +36,7 @@ liveTrellisTest({
     });
 
     try {
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         async (event) => {
           active += 1;
           maxActive = Math.max(maxActive, active);
@@ -47,19 +47,19 @@ liveTrellisTest({
         {},
         { group: "ingest", concurrency: 2 },
       ).orThrow();
-      const conflicting = await consumer.event.source.pinged.listen(
+      const conflicting = await consumer.onSourcePinged(
         () => Result.ok(undefined),
         {},
         { group: "ingest", concurrency: 3 },
       );
       assert(conflicting.isErr());
 
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "first",
       }).orThrow();
       await runtime.waitFor(() => active === 1);
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.secondEventId,
         value: "second",
       }).orThrow();

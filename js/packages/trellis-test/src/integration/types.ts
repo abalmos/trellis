@@ -1,8 +1,9 @@
-import type { ClientOpts, EventName, TrellisAPI } from "@qlever-llc/trellis";
+import type { ClientOpts } from "@qlever-llc/trellis";
 import type { TrellisTestRuntime } from "../runtime.ts";
 import type {
   TrellisTestEventCapture,
   TrellisTestEventCaptureOptions,
+  TrellisTestEventAction,
   TrellisTestEventSourceContract,
 } from "../event_capture.ts";
 import type { NatsMessageObserver } from "../nats_container.ts";
@@ -62,13 +63,13 @@ export type TrellisIntegrationRuntime = {
   /** Creates app/client session-key material for public Trellis clients. */
   registerClient(args: {
     readonly name: string;
-    readonly contract: TrellisTestClientContract<TrellisAPI>;
+    readonly contract: TrellisTestClientContract;
     readonly sessionKeySeed?: string;
   }): Promise<TrellisTestClientKey>;
   /** Returns auth options and continuation handling for a registered client key. */
   clientAuth(key: TrellisTestClientKey): TrellisTestClientAuth;
   /** Connects an app/client participant through the generated client surface. */
-  connectClient<TContract extends TrellisTestClientContract<TrellisAPI>>(
+  connectClient<TContract extends TrellisTestClientContract>(
     args: ClientOpts & {
       readonly name: string;
       readonly contract: TContract;
@@ -78,10 +79,10 @@ export type TrellisIntegrationRuntime = {
   /** Captures live decoded contract events through a synthetic app participant. */
   captureEvents<
     TContract extends TrellisTestEventSourceContract,
-    const TEvents extends readonly EventName<TContract>[],
+    const TEvents extends readonly TrellisTestEventAction[],
   >(
     args: TrellisTestEventCaptureOptions<TContract, TEvents>,
-  ): Promise<TrellisTestEventCapture<TContract, TEvents[number]>>;
+  ): Promise<TrellisTestEventCapture<TEvents[number]>>;
   /** Polls until `fn` returns a truthy value. */
   waitFor<T>(
     fn: () =>

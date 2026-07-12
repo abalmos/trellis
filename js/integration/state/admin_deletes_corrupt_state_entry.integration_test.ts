@@ -19,7 +19,7 @@ liveTrellisTest({
       contract: fixture.adminContract,
     });
 
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     const session = sessions.entries.find((entry) =>
       entry.participantKind === "app" &&
@@ -68,7 +68,7 @@ liveTrellisTest({
       Error,
     );
 
-    const deleted = await admin.rpc.state.adminDelete({
+    const deleted = await admin.stateAdminDelete({
       ...stateTarget,
       store: "preferences",
     }).orThrow();

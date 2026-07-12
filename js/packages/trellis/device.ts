@@ -37,32 +37,27 @@ import {
   estimateMidpointClockOffsetMs,
 } from "./auth/time.ts";
 import { buildNatsConnectSignaturePayload } from "./auth/session_auth.ts";
-import type { TrellisAPI } from "./contracts.ts";
+import type { RuntimeApi } from "./contract_support/runtime.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   loadDefaultRuntimeTransport,
   selectRuntimeTransportServers,
 } from "./runtime_transport.ts";
-import { ServiceHealth } from "./health.ts";
+import { type ServiceHealth, ServiceHealthRuntime } from "./server/health.ts";
 import { publishHealthHeartbeatSample } from "./health_transport.ts";
-import { type RuntimeStateStoresForContract, Trellis } from "./trellis.ts";
+import { type RuntimeStateStoresForContract, Trellis } from "./session.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
 import { TransferError, TransportError } from "./errors/index.ts";
-import type {
-  ReceiveTransferGrant,
-  ReceiveTransferHandle,
-  SendTransferGrant,
-  SendTransferHandle,
-} from "./transfer.ts";
 import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
+import { observeNatsTrellisConnection } from "./connection.ts";
+import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
-  observeNatsTrellisConnection,
-  type TrellisConnection,
-} from "./connection.ts";
+  type ContractWithRuntime,
+  getContractRuntime,
+} from "./contract_support/contract_runtime.ts";
 
 type DeviceContract<
-  TApi extends TrellisAPI = TrellisAPI,
   TContract extends {
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
@@ -70,25 +65,14 @@ type DeviceContract<
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   },
-> = {
+> = ContractWithRuntime & {
   CONTRACT_ID: string;
   CONTRACT_DIGEST: string;
   CONTRACT: TContract & {
     displayName?: string;
   };
-  API: {
-    trellis: TApi;
-  };
   readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
 };
-
-type DeviceContractApi<TContract extends DeviceContract> =
-  TContract["API"]["trellis"];
-
-type DeviceRuntime<
-  TApi extends TrellisAPI,
-  TState extends Record<string, { kind: "value" | "map"; value: unknown }>,
-> = Trellis<TApi, "client", TState>;
 
 type RuntimeStateShape = Record<
   string,
@@ -123,23 +107,8 @@ function deviceConnectResult<T>(
 }
 
 export type TrellisDeviceConnection<
-  TApi extends TrellisAPI = TrellisAPI,
-  TState extends Record<string, { kind: "value" | "map"; value: unknown }> = {},
-> = {
-  readonly request: DeviceRuntime<TApi, TState>["request"];
-  readonly publish: DeviceRuntime<TApi, TState>["publish"];
-  readonly event: DeviceRuntime<TApi, TState>["event"];
-  readonly operation: DeviceRuntime<TApi, TState>["operation"];
-  readonly transfer: {
-    (grant: SendTransferGrant): SendTransferHandle;
-    (grant: ReceiveTransferGrant): ReceiveTransferHandle;
-  };
-  readonly state: DeviceRuntime<TApi, TState>["state"];
-  readonly name: string;
-  readonly timeout: number;
-  readonly stream: string;
-  readonly api: TApi;
-  readonly connection: TrellisConnection;
+  TContract extends DeviceContract = DeviceContract,
+> = CallerRuntime<TContract> & {
   readonly health: ServiceHealth;
 };
 
@@ -208,11 +177,10 @@ export type TrellisDeviceActivationSession<
 };
 
 export type TrellisDeviceActivationArgs<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends DeviceContract<TApi, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<TApi, {
+  }> = DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
@@ -223,24 +191,22 @@ export type TrellisDeviceActivationArgs<
 };
 
 export type TrellisDeviceResumeActivationArgs<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends DeviceContract<TApi, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<TApi, {
+  }> = DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
-> = TrellisDeviceActivationArgs<TApi, TContract> & {
+> = TrellisDeviceActivationArgs<TContract> & {
   localState: TrellisDeviceLocalActivationState;
 };
 
 export type TrellisDeviceConnectArgs<
-  TApi extends TrellisAPI = TrellisAPI,
-  TContract extends DeviceContract<TApi, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<TApi, {
+  }> = DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
@@ -720,12 +686,12 @@ async function fetchDeviceBootstrap(args: {
  * @internal Exported for focused tests and platform-specific wrappers.
  */
 export async function startDeviceActivationWithDeps<
-  TContract extends DeviceContract<TrellisAPI, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
 >(
-  args: TrellisDeviceActivationArgs<DeviceContractApi<TContract>, TContract>,
+  args: TrellisDeviceActivationArgs<TContract>,
   _deps: Pick<DeviceConnectDeps, "now">,
 ): Promise<
   TrellisDeviceActivationSession<TrellisDevicePendingActivationState>
@@ -765,13 +731,13 @@ export async function startDeviceActivationWithDeps<
  */
 export async function resumeDeviceActivationWithDeps<
   TLocalState extends TrellisDeviceLocalActivationState,
-  TContract extends DeviceContract<TrellisAPI, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
 >(
   args:
-    & TrellisDeviceResumeActivationArgs<DeviceContractApi<TContract>, TContract>
+    & TrellisDeviceResumeActivationArgs<TContract>
     & {
       localState: TLocalState;
     },
@@ -793,18 +759,15 @@ export async function resumeDeviceActivationWithDeps<
  * `TrellisDevice.connect`.
  */
 export async function connectDeviceWithDeps<
-  TContract extends DeviceContract<TrellisAPI, {
+  TContract extends DeviceContract<{
     state?: Readonly<Record<string, unknown>>;
     schemas?: Readonly<Record<string, unknown>>;
   }>,
 >(
-  args: TrellisDeviceConnectArgs<DeviceContractApi<TContract>, TContract>,
+  args: TrellisDeviceConnectArgs<TContract>,
   deps: DeviceConnectDeps,
 ): Promise<
-  TrellisDeviceConnection<
-    DeviceContractApi<TContract>,
-    RuntimeStateStoresForContract<TContract>
-  >
+  TrellisDeviceConnection<TContract>
 > {
   const log = resolveDeviceLogger(args.log);
   const rootSecret = normalizeRootSecret(args.rootSecret);
@@ -887,7 +850,7 @@ export async function connectDeviceWithDeps<
   });
 
   const trellis = new Trellis<
-    DeviceContractApi<TContract>,
+    RuntimeApi,
     "client",
     RuntimeStateStoresForContract<TContract>
   >(
@@ -900,13 +863,13 @@ export async function connectDeviceWithDeps<
     },
     {
       log,
-      api: args.contract.API.trellis,
+      api: getContractRuntime(args.contract).api as RuntimeApi,
       state: args.contract[CONTRACT_STATE_METADATA],
       connection,
     },
   );
 
-  const health = new ServiceHealth({
+  const health = new ServiceHealthRuntime({
     serviceName: args.contract.CONTRACT?.displayName ??
       args.contract.CONTRACT_ID,
     kind: "device",
@@ -965,35 +928,19 @@ export async function connectDeviceWithDeps<
   }, health.publishIntervalMs);
   void nc.closed().finally(stopHeartbeat);
 
-  return {
-    request: trellis.request.bind(trellis),
-    publish: trellis.publish.bind(trellis),
-    event: trellis.event,
-    operation: trellis.operation,
-    transfer: trellis.transfer.bind(trellis),
-    state: trellis.state,
-    name: trellis.name,
-    timeout: trellis.timeout,
-    stream: trellis.stream,
-    api: trellis.api,
-    connection: trellis.connection,
-    health,
-  };
+  return Object.assign(createCallerRuntime(trellis, args.contract), { health });
 }
 
 export const TrellisDevice = {
   connect<
-    TContract extends DeviceContract<TrellisAPI, {
+    TContract extends DeviceContract<{
       state?: Readonly<Record<string, unknown>>;
       schemas?: Readonly<Record<string, unknown>>;
     }>,
   >(
-    args: TrellisDeviceConnectArgs<DeviceContractApi<TContract>, TContract>,
+    args: TrellisDeviceConnectArgs<TContract>,
   ): AsyncResult<
-    TrellisDeviceConnection<
-      DeviceContractApi<TContract>,
-      RuntimeStateStoresForContract<TContract>
-    >,
+    TrellisDeviceConnection<TContract>,
     TransportError | UnexpectedError
   > {
     return deviceConnectResult(connectDeviceWithDeps(args, defaultDeps));

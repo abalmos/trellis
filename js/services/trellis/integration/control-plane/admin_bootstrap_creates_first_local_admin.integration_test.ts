@@ -1,6 +1,6 @@
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -21,11 +21,7 @@ const adminBootstrapProbeContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Admin Bootstrap Probe",
   description:
     "Verifies first-admin bootstrap yields an authenticated admin session.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthSessionsMe],
 }));
 
 liveTrellisTest({
@@ -39,7 +35,7 @@ liveTrellisTest({
     });
 
     try {
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
 
       assertEquals(me.participantKind, "app");
       assert(me.user !== null, "expected Auth.Sessions.Me to return a user");

@@ -39,7 +39,7 @@ liveTrellisTest({
     const observed: string[] = [];
 
     try {
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         (event) => {
           observed.push(`first:${event.id}`);
           return Result.ok(undefined);
@@ -47,7 +47,7 @@ liveTrellisTest({
         {},
         { group: "ingest", signal: controller.signal },
       ).orThrow();
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         (event) => {
           observed.push(`second:${event.id}`);
           return Result.ok(undefined);
@@ -63,7 +63,7 @@ liveTrellisTest({
         return info !== undefined && consumerWaitingCount(info) === 1;
       });
 
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "duplicate",
       }).orThrow();

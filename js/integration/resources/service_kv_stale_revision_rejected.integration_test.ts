@@ -14,25 +14,25 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.rpc.resources.exercise(async ({ input, client }) => {
+      await service.handleResourcesExercise(async ({ input, client }) => {
         const kvKey = `${input.key}.kv`;
-
+      
         await client.kv.records.create(kvKey, { message: "initial" })
           .orThrow();
-
+      
         const entry = await client.kv.records.get(kvKey).orThrow();
         assertEquals(entry.value.message, "initial");
-
+      
         await client.kv.records.put(kvKey, { message: "updated" }).orThrow();
-
+      
         const stalePutResult = await entry.put({ message: "stale" }, true);
         assertEquals(stalePutResult.isErr(), true);
-
+      
         const staleDeleteResult = await entry.delete(true);
         assertEquals(staleDeleteResult.isErr(), true);
-
+      
         await client.kv.records.delete(kvKey).orThrow();
-
+      
         return Result.ok({
           provider: "ts",
           storeText: "",
@@ -45,7 +45,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.resources.exercise({
+      const result = await client.resourcesExercise({
         key: fixture.resourceKey,
         message: "client to resources",
       }).orThrow();

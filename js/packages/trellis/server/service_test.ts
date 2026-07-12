@@ -14,12 +14,13 @@ import {
   type Subscription,
 } from "@nats-io/nats-core";
 import { type BaseError, isErr, Result } from "@qlever-llc/result";
-import { sdk as core } from "@qlever-llc/trellis/sdk/core";
+import { trellisCore as core } from "../../../services/trellis/contracts/trellis_core.ts";
 import { Type } from "typebox";
 
 import type { LoggerLike } from "../globals.ts";
 import { TransportError } from "../errors/index.ts";
-import { defineServiceContract } from "../contract.ts";
+import { defineServiceContract, jobs } from "../contract.ts";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 import type { NatsConnectFn } from "./runtime.ts";
 import { connectTrellisServiceInternal } from "./internal_connect.ts";
 import {
@@ -99,12 +100,12 @@ const jobsHandlerTestContract = defineServiceContract(
     id: "trellis.server.jobs-handler-test@v1",
     displayName: "Jobs Handler Test",
     description: "Verify jobs handler registration and lifecycle ownership.",
-    jobs: {
+    uses: [jobs({
       refreshSummaries: {
         payload: ref.schema("RefreshPayload"),
         result: ref.schema("RefreshResult"),
       },
-    },
+    })],
     events: {
       "Jobs.Refreshed": {
         version: "v1",
@@ -1283,8 +1284,8 @@ Deno.test("internal service connect uses a reconnect-safe auth token authenticat
             authenticator: () => ({ jwt: "sentinel-jwt" }),
           },
           server: {
-            api: core.API.owned,
-            trellisApi: core.API.trellis,
+            api: getContractRuntime(core).ownedApi,
+            trellisApi: getContractRuntime(core).api,
             log: false,
           },
         }, {
@@ -1350,8 +1351,8 @@ Deno.test("internal service connect preserves explicit reconnect attempt overrid
           options: { maxReconnectAttempts: 3, waitOnFirstConnect: false },
         },
         server: {
-          api: core.API.owned,
-          trellisApi: core.API.trellis,
+          api: getContractRuntime(core).ownedApi,
+          trellisApi: getContractRuntime(core).api,
           log: false,
         },
       }, {
@@ -1772,8 +1773,8 @@ Deno.test("internal service connect accepts log false", async () => {
       authenticator: {},
     },
     server: {
-      api: core.API.owned,
-      trellisApi: core.API.trellis,
+      api: getContractRuntime(core).ownedApi,
+      trellisApi: getContractRuntime(core).api,
       log: false,
     },
   }, {
@@ -1798,8 +1799,8 @@ Deno.test("internal service connect uses the provided logger", async () => {
       authenticator: {},
     },
     server: {
-      api: core.API.owned,
-      trellisApi: core.API.trellis,
+      api: getContractRuntime(core).ownedApi,
+      trellisApi: getContractRuntime(core).api,
       log: testLogger.logger,
     },
   }, {
@@ -1821,8 +1822,8 @@ Deno.test("internal service connect logs explicit service NATS lifecycle events"
       authenticator: {},
     },
     server: {
-      api: core.API.owned,
-      trellisApi: core.API.trellis,
+      api: getContractRuntime(core).ownedApi,
+      trellisApi: getContractRuntime(core).api,
       log: testLogger.logger,
     },
   }, {
@@ -1902,8 +1903,8 @@ Deno.test("internal service connect logs service NATS errors at error severity",
       authenticator: {},
     },
     server: {
-      api: core.API.owned,
-      trellisApi: core.API.trellis,
+      api: getContractRuntime(core).ownedApi,
+      trellisApi: getContractRuntime(core).api,
       log: testLogger.logger,
     },
   }, {
@@ -1959,8 +1960,8 @@ Deno.test("internal service connect keeps final closed logging explicit", async 
       authenticator: {},
     },
     server: {
-      api: core.API.owned,
-      trellisApi: core.API.trellis,
+      api: getContractRuntime(core).ownedApi,
+      trellisApi: getContractRuntime(core).api,
       log: testLogger.logger,
     },
   }, {
@@ -2018,8 +2019,8 @@ Deno.test("service heartbeat publishing stops after terminal NATS close", async 
       deploymentId: "deployment-test",
     },
     server: {
-      api: heartbeatTestContract.API.owned,
-      trellisApi: heartbeatTestContract.API.trellis,
+      api: getContractRuntime(heartbeatTestContract).ownedApi,
+      trellisApi: getContractRuntime(heartbeatTestContract).api,
       log: false,
       health: { publishIntervalMs: 10 },
     },
@@ -2074,8 +2075,8 @@ Deno.test("internal service connect cleans up the connection when bootstrap prob
           authenticator: {},
         },
         server: {
-          api: core.API.owned,
-          trellisApi: core.API.trellis,
+          api: getContractRuntime(core).ownedApi,
+          trellisApi: getContractRuntime(core).api,
           log: false,
         },
       }, {
@@ -2211,8 +2212,8 @@ Deno.test({
         authenticator: {},
       },
       server: {
-        api: core.API.owned,
-        trellisApi: core.API.trellis,
+        api: getContractRuntime(core).ownedApi,
+        trellisApi: getContractRuntime(core).api,
       },
     }, {
       connect: async () => createFakeNatsConnection(),

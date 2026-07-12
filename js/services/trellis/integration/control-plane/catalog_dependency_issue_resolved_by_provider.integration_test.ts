@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  type CallerRuntime,
   defineAppContract,
   defineServiceContract,
   Result,
@@ -52,13 +53,7 @@ const clientContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Catalog Dependency Client",
   description:
     "Requires the catalog dependency provider RPC for dependency-resolution coverage.",
-  uses: {
-    required: {
-      dependencyProvider: providerContract.use({
-        rpc: { call: ["CatalogDependency.Ping"] },
-      }),
-    },
-  },
+  uses: [providerContract.CatalogDependencyPing],
 }));
 
 const providerName = caseScopedName("catalog-dependency-provider", CASE_ID);
@@ -100,13 +95,13 @@ liveTrellisTest({
         server: { log: false },
       }).orThrow();
       service = connectedService;
-      connectedService.handle.rpc.catalogDependency.ping(({ input }) =>
+      connectedService.handleCatalogDependencyPing(({ input }) =>
         Result.ok({ message: input.message, servedBy: providerName })
       );
 
       const result = await runtime.waitFor(async () => {
         try {
-          return await client.rpc.catalogDependency.ping({
+          return await client.catalogDependencyPing({
             message: "after-provider",
           }).orThrow();
         } catch {
@@ -129,7 +124,7 @@ async function assertProviderRpcUnavailable(
 ) {
   let error: unknown;
   try {
-    await client.rpc.catalogDependency.ping({ message: "before-provider" })
+    await client.catalogDependencyPing({ message: "before-provider" })
       .orThrow();
   } catch (caught) {
     error = caught;
@@ -141,12 +136,4 @@ async function assertProviderRpcUnavailable(
   );
 }
 
-type ProviderRpcClient = {
-  readonly rpc: {
-    readonly catalogDependency: {
-      ping(input: { message: string }): {
-        orThrow(): Promise<unknown>;
-      };
-    };
-  };
-};
+type ProviderRpcClient = CallerRuntime<typeof clientContract>;

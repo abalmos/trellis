@@ -42,12 +42,15 @@ Deno.test("event capture rejects duplicate event names", async () => {
         options: {
           name: "duplicate-events",
           contract: duplicateEventContract,
-          events: ["Entity.Changed", "Entity.Changed"],
+          events: [
+            duplicateEventContract.EntityChanged.subscribe,
+            duplicateEventContract.EntityChanged.subscribe,
+          ],
         },
         onStop: () => undefined,
       }),
     Error,
-    "Duplicate event name 'Entity.Changed' in Trellis event capture options",
+    "Duplicate event 'Entity.Changed' in capture options",
   );
 });
 
@@ -70,7 +73,7 @@ Deno.test("event capture approves its source in the selected deployment", async 
           name: "selected-deployment",
           contract: duplicateEventContract,
           deployment: "source-deployment",
-          events: ["Entity.Changed"],
+          events: [duplicateEventContract.EntityChanged.subscribe],
         },
         onStop: () => undefined,
       }),

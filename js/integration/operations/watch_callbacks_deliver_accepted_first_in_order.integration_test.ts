@@ -21,7 +21,7 @@ liveTrellisTest({
     });
 
     try {
-      await service.handle.operation.entity.process(async ({ input, op }) => {
+      await service.handleEntityProcess(async ({ input, op }) => {
         if (input.message === orderedMessage) {
           await orderedWorkGate;
         }
@@ -41,7 +41,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
       const callbacks: string[] = [];
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: orderedMessage,
       })
         .onAccepted((event) => {
@@ -79,7 +79,7 @@ liveTrellisTest({
       assertEquals(callbacks.at(-1), "completed");
 
       const fastCallbacks: string[] = [];
-      const fastRef = await client.operation.entity.process.input({
+      const fastRef = await client.entityProcess({
         message: fastMessage,
       })
         .onAccepted((event) => {

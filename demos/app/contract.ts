@@ -1,6 +1,18 @@
-import { defineAppContract } from "@qlever-llc/trellis";
+import { defineAppContract, state } from "@qlever-llc/trellis";
 
-import { sdk as trellisDemoService } from "@trellis-sdk/trellis-demo-service";
+import {
+  AssignmentsList,
+  AuditFeed,
+  EvidenceDelete,
+  EvidenceDownload,
+  EvidenceList,
+  EvidenceUpload,
+  ReportsGenerate,
+  ReportsList,
+  SitesGet,
+  SitesList,
+  SitesRefresh,
+} from "@trellis-sdk/trellis-demo-service";
 import * as schemas from "./schemas/index.ts";
 
 const contract = defineAppContract({ schemas }, (ref) => ({
@@ -12,39 +24,31 @@ const contract = defineAppContract({ schemas }, (ref) => ({
     markdown:
       "Declares the browser app's Field Ops service usage and workspace context state.",
   },
-  uses: {
-    required: {
-      fieldOps: trellisDemoService.use({
-        rpc: {
-          call: [
-            "Assignments.List",
-            "Sites.List",
-            "Sites.Get",
-            "Evidence.List",
-            "Evidence.Download",
-            "Evidence.Delete",
-            "Reports.List",
-          ],
+  uses: [
+    AssignmentsList,
+    SitesList,
+    SitesGet,
+    EvidenceList,
+    EvidenceDownload,
+    EvidenceDelete,
+    ReportsList,
+    SitesRefresh,
+    ReportsGenerate,
+    EvidenceUpload,
+    AuditFeed,
+    state({
+      workspaceContext: {
+        kind: "map",
+        schema: ref.schema("InspectionContextState"),
+        stateVersion: "inspection-context.v1",
+        docs: {
+          summary: "Workspace context state.",
+          markdown:
+            "Stores per-workspace inspection context used by the browser console.",
         },
-        operations: {
-          call: ["Sites.Refresh", "Reports.Generate", "Evidence.Upload"],
-        },
-        feeds: { subscribe: ["Audit.Feed"] },
-      }),
-    },
-  },
-  state: {
-    workspaceContext: {
-      kind: "map",
-      schema: ref.schema("InspectionContextState"),
-      stateVersion: "inspection-context.v1",
-      docs: {
-        summary: "Workspace context state.",
-        markdown:
-          "Stores per-workspace inspection context used by the browser console.",
       },
-    },
-  },
+    }),
+  ],
 }));
 
 export default contract;

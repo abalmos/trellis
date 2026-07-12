@@ -5,10 +5,8 @@ import {
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import {
-  type AuthSessionsMeOutput,
-  sdk as trellisAuth,
-} from "@qlever-llc/trellis/sdk/auth";
+import type { AuthSessionsMeOutput } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
@@ -50,11 +48,7 @@ export function createAuthLocalLoginFixture(caseId: string) {
         description: "Call the RPC used by the auth local-login fixture.",
       },
     },
-    uses: {
-      required: {
-        auth: trellisAuth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-      },
-    },
+    uses: [trellisAuth.AuthSessionsMe],
     rpc: {
       "AuthLogin.Ping": {
         version: "v1",
@@ -85,16 +79,11 @@ export function createAuthLocalLoginFixture(caseId: string) {
     ),
     displayName: clientDisplayName,
     description: "App participant for the auth local-login binding fixture.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({
-          rpc: { call: ["Auth.Sessions.Logout", "Auth.Sessions.Me"] },
-        }),
-        loginService: serviceContract.use({
-          rpc: { call: ["AuthLogin.Ping"] },
-        }),
-      },
-    },
+    uses: [
+      trellisAuth.AuthSessionsLogout,
+      trellisAuth.AuthSessionsMe,
+      serviceContract.AuthLoginPing,
+    ],
   }));
 
   const agentContract = defineAgentContract(() => ({
@@ -104,16 +93,7 @@ export function createAuthLocalLoginFixture(caseId: string) {
     ),
     displayName: agentDisplayName,
     description: "Agent participant for the auth local-login binding fixture.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({
-          rpc: { call: ["Auth.Sessions.Me"] },
-        }),
-        loginService: serviceContract.use({
-          rpc: { call: ["AuthLogin.Ping"] },
-        }),
-      },
-    },
+    uses: [trellisAuth.AuthSessionsMe, serviceContract.AuthLoginPing],
   }));
 
   const updatedClientContract = defineAppContract(() => ({
@@ -124,16 +104,11 @@ export function createAuthLocalLoginFixture(caseId: string) {
     displayName: updatedClientDisplayName,
     description:
       "Updated app participant for proving local-login rebinds refresh authority.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({
-          rpc: { call: ["Auth.Sessions.Me", "Auth.Connections.List"] },
-        }),
-        loginService: serviceContract.use({
-          rpc: { call: ["AuthLogin.Ping"] },
-        }),
-      },
-    },
+    uses: [
+      trellisAuth.AuthSessionsMe,
+      trellisAuth.AuthConnectionsList,
+      serviceContract.AuthLoginPing,
+    ],
   }));
 
   const sessionAdminContract = defineAppContract(() => ({
@@ -144,41 +119,34 @@ export function createAuthLocalLoginFixture(caseId: string) {
     displayName: `Trellis Integration Auth Session Revoke Admin (${slug})`,
     description:
       "Admin participant for revoking app sessions through public Auth RPCs.",
-    uses: {
-      required: {
-        auth: trellisAuth.use({
-          rpc: {
-            call: [
-              "Auth.Connections.List",
-              "Auth.CapabilityGroups.Delete",
-              "Auth.CapabilityGroups.Get",
-              "Auth.CapabilityGroups.List",
-              "Auth.CapabilityGroups.Put",
-              "Auth.DeploymentAuthority.GrantOverrides.List",
-              "Auth.DeploymentAuthority.GrantOverrides.Put",
-              "Auth.DeploymentAuthority.GrantOverrides.Remove",
-              "Auth.IdentityGrants.List",
-              "Auth.IdentityGrants.Revoke",
-              "Auth.Portals.LoginSettings.Update",
-              "Auth.Portals.List",
-              "Auth.Portals.Put",
-              "Auth.Portals.Remove",
-              "Auth.Portals.Routes.Put",
-              "Auth.Portals.Routes.Remove",
-              "Auth.Sessions.List",
-              "Auth.Sessions.Revoke",
-              "Auth.UserIdentities.List",
-              "Auth.UserIdentities.Unlink",
-              "Auth.Users.Create",
-              "Auth.Users.Get",
-              "Auth.Users.List",
-              "Auth.Users.PasswordReset.Create",
-              "Auth.Users.Update",
-            ],
-          },
-        }),
-      },
-    },
+    uses: [
+      trellisAuth.AuthConnectionsList,
+      trellisAuth.AuthCapabilityGroupsDelete,
+      trellisAuth.AuthCapabilityGroupsGet,
+      trellisAuth.AuthCapabilityGroupsList,
+      trellisAuth.AuthCapabilityGroupsPut,
+      trellisAuth.AuthDeploymentAuthorityGrantOverridesList,
+      trellisAuth.AuthDeploymentAuthorityGrantOverridesPut,
+      trellisAuth.AuthDeploymentAuthorityGrantOverridesRemove,
+      trellisAuth.AuthIdentityGrantsList,
+      trellisAuth.AuthIdentityGrantsRevoke,
+      trellisAuth.AuthPortalsLoginSettingsUpdate,
+      trellisAuth.AuthPortalsList,
+      trellisAuth.AuthPortalsPut,
+      trellisAuth.AuthPortalsRemove,
+      trellisAuth.AuthPortalsRoutesPut,
+      trellisAuth.AuthPortalsRoutesRemove,
+      trellisAuth.AuthSessionsList,
+      trellisAuth.AuthSessionsMe,
+      trellisAuth.AuthSessionsRevoke,
+      trellisAuth.AuthUserIdentitiesList,
+      trellisAuth.AuthUserIdentitiesUnlink,
+      trellisAuth.AuthUsersCreate,
+      trellisAuth.AuthUsersGet,
+      trellisAuth.AuthUsersList,
+      trellisAuth.AuthUsersPasswordResetCreate,
+      trellisAuth.AuthUsersUpdate,
+    ],
   }));
 
   const serviceName = caseScopedName(
@@ -205,14 +173,11 @@ export function createAuthLocalLoginFixture(caseId: string) {
       server: { log: false },
     }).orThrow();
 
-    service.handle.rpc.authLogin.ping(async ({ input, client }) => {
+    service.handleAuthLoginPing(async ({ input, client }) => {
       if (input.message !== "sessions-me") {
         return Result.ok({ message: input.message, accepted: true });
       }
-      const me: AuthSessionsMeOutput = await client.request(
-        "Auth.Sessions.Me",
-        {},
-      ).orThrow();
+      const me: AuthSessionsMeOutput = await client.authSessionsMe({}).orThrow();
       return Result.ok({
         message: input.message,
         accepted: true,

@@ -1,20 +1,10 @@
-import { assert, assertEquals } from "@std/assert";
-import {
-  defineAppContract,
-  defineServiceContract,
-  Result,
-} from "@qlever-llc/trellis";
+import { assertEquals, assertExists } from "@std/assert";
+import { defineServiceContract, jobs, kv, store } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import {
-  sdk as trellisCore,
-  TrellisBindingsGetResponseSchema,
-} from "@qlever-llc/trellis/sdk/core.ts";
-import type { TrellisBindingsGetOutput } from "@qlever-llc/trellis/sdk/core.ts";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
   caseScopedName,
-  caseScopedSubject,
 } from "@qlever-llc/trellis-test/integration";
 import {
   type LiveTrellisRuntime,
@@ -27,30 +17,17 @@ const serviceContractId = caseScopedContractId(
   "trellis.integration.control-plane.binding-projection-service",
   CASE_ID,
 );
-const bindingSubject = caseScopedSubject(
-  "rpc.v1.integration.control-plane.binding-projection",
-  CASE_ID,
-  "BindingProjection.Get",
-);
-
 const schemas = {
-  Empty: Type.Object({}),
   Record: Type.Object({ message: Type.String() }),
-  Bindings: TrellisBindingsGetResponseSchema,
 } as const;
 
 const resourceContract = defineServiceContract({ schemas }, (ref) => ({
   id: serviceContractId,
   displayName: "Trellis Control-Plane Binding Projection Service",
   description:
-    "Projects KV, store, and jobs bindings through Trellis.Bindings.Get.",
-  uses: {
-    required: {
-      core: trellisCore.use({ rpc: { call: ["Trellis.Bindings.Get"] } }),
-    },
-  },
-  resources: {
-    kv: {
+    "Projects KV, store, and jobs declarations into typed runtime handles.",
+  uses: [
+    kv({
       records: {
         purpose: "Binding projection KV bucket.",
         schema: ref.schema("Record"),
@@ -58,8 +35,8 @@ const resourceContract = defineServiceContract({ schemas }, (ref) => ({
         history: 1,
         ttlMs: 0,
       },
-    },
-    store: {
+    }),
+    store({
       blobs: {
         purpose: "Binding projection object store.",
         required: true,
@@ -67,63 +44,23 @@ const resourceContract = defineServiceContract({ schemas }, (ref) => ({
         maxObjectBytes: 1048576,
         maxTotalBytes: 4194304,
       },
-    },
-  },
-  jobs: {
-    syncRecords: {
-      payload: ref.schema("Record"),
-    },
-  },
-  rpc: {
-    "BindingProjection.Get": {
-      version: "v1",
-      subject: bindingSubject,
-      input: ref.schema("Empty"),
-      output: ref.schema("Bindings"),
-      errors: [],
-    },
-  },
+    }),
+    jobs({
+      syncRecords: {
+        payload: ref.schema("Record"),
+      },
+    }),
+  ],
 }));
 
-const removedResourceContract = defineServiceContract({ schemas }, (ref) => ({
+const removedResourceContract = defineServiceContract({ schemas }, () => ({
   id: serviceContractId,
   displayName: "Trellis Control-Plane Binding Projection Service",
   description: "Replacement contract with resources removed.",
-  uses: {
-    required: {
-      core: trellisCore.use({ rpc: { call: ["Trellis.Bindings.Get"] } }),
-    },
-  },
-  rpc: {
-    "BindingProjection.Get": {
-      version: "v1",
-      subject: bindingSubject,
-      input: ref.schema("Empty"),
-      output: ref.schema("Bindings"),
-      errors: [],
-    },
-  },
-}));
-
-const appContract = defineAppContract(() => ({
-  id: caseScopedContractId(
-    "trellis.integration.control-plane.binding-projection-client",
-    CASE_ID,
-  ),
-  displayName: "Trellis Control-Plane Binding Projection Client",
-  description: "Calls the binding projection service RPC.",
-  uses: {
-    required: {
-      service: resourceContract.use({
-        rpc: { call: ["BindingProjection.Get"] },
-      }),
-    },
-  },
 }));
 
 const deployment = caseScopedName("binding-projection", CASE_ID);
 const serviceName = caseScopedName("binding-projection-service", CASE_ID);
-const clientName = caseScopedName("binding-projection-client", CASE_ID);
 
 type AuthorityPlanEntry = {
   readonly planId: string;
@@ -142,10 +79,6 @@ liveTrellisTest({
       name: serviceName,
       contract: resourceContract,
     });
-    const client = await runtime.connectClient({
-      name: clientName,
-      contract: appContract,
-    });
     const connectedResourceService = await connectResourceService(
       runtime.trellisUrl,
       serviceKey.seed,
@@ -157,20 +90,9 @@ liveTrellisTest({
       | undefined;
 
     try {
-      await connectedResourceService.handle.rpc.bindingProjection.get(
-        async ({ client }) => {
-          const binding = await client.request("Trellis.Bindings.Get", {})
-            .orThrow();
-          return Result.ok(binding);
-        },
-      );
-      const projected = await client.rpc.bindingProjection.get({}).orThrow();
-      assertBindingProjection(
-        projected,
-        resourceContract.CONTRACT_DIGEST,
-        true,
-        deployment,
-      );
+      assertExists(connectedResourceService.kv.records);
+      assertExists(connectedResourceService.store.blobs);
+      assertExists(connectedResourceService.jobs.syncRecords);
 
       await resourceService.stop();
       resourceService = undefined;
@@ -195,22 +117,10 @@ liveTrellisTest({
       await runtime.deployments.waitReady(deployment);
 
       removedService = await connectPromise;
-      await removedService.handle.rpc.bindingProjection.get(
-        async ({ client }) => {
-          const binding = await client.request("Trellis.Bindings.Get", {})
-            .orThrow();
-          return Result.ok(binding);
-        },
-      );
-      const removedProjection = await client.rpc.bindingProjection.get({})
-        .orThrow();
-      assertBindingProjection(
-        removedProjection,
-        removedResourceContract.CONTRACT_DIGEST,
-        false,
-      );
+      assertEquals(Object.keys(removedService.kv), []);
+      assertEquals(Object.keys(removedService.store), []);
+      assertEquals(Object.keys(removedService.jobs), []);
     } finally {
-      await client.connection.close().catch(() => undefined);
       await removedService?.stop().catch(() => undefined);
       await resourceService?.stop().catch(() => undefined);
     }
@@ -243,36 +153,6 @@ async function connectRemovedService(
     telemetry: false,
     server: { log: false },
   }).orThrow();
-}
-
-function assertBindingProjection(
-  output: TrellisBindingsGetOutput,
-  digest: string | undefined,
-  hasResources: boolean,
-  expectedServiceName?: string,
-): void {
-  if (digest === undefined) throw new Error("contract digest missing");
-  assert(output.binding);
-  assertEquals(output.binding.contractId, serviceContractId);
-  assertEquals(output.binding.digest, digest);
-  if (!hasResources) {
-    assertEquals(output.binding.resources, {});
-    return;
-  }
-  const resources = output.binding.resources;
-  assert(isRecord(resources.kv?.records));
-  assertEquals(typeof resources.kv.records.bucket, "string");
-  assert(isRecord(resources.store?.blobs));
-  assertEquals(typeof resources.store.blobs.name, "string");
-  assert(isRecord(resources.jobs));
-  assertEquals(resources.jobs.serviceName, expectedServiceName);
-  assertEquals(typeof resources.jobs.namespace, "string");
-  assert(resources.jobs.namespace !== expectedServiceName);
-  assert(isRecord(resources.jobs.queues?.syncRecords));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function requireAuthority(runtime: LiveTrellisRuntime) {

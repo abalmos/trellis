@@ -34,9 +34,8 @@ liveTrellisTest({
     });
 
     try {
-      await service.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
-      );
+      await service.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
 
       const result = await fixture.connectClientAndPing(runtime, "preapproved");
       assertEquals(result, { message: "preapproved", variant: "base" });

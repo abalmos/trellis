@@ -16,7 +16,7 @@ import type {
   OperationTransferHandle,
   RuntimeOperationTransferProgress,
   TrellisAuth,
-} from "../trellis.ts";
+} from "../session.ts";
 import type { StoreError } from "../errors/StoreError.ts";
 import { TransferError } from "../errors/TransferError.ts";
 import { type StoreInfo, TypedStore, TypedStoreEntry } from "../store.ts";

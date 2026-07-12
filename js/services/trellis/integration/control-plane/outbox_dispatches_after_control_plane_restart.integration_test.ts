@@ -76,13 +76,7 @@ const clientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Outbox Restart Client",
   description: "Queues outbox restart fixture events through generated RPC.",
-  uses: {
-    required: {
-      outboxRestartService: serviceContract.use({
-        rpc: { call: ["Documents.Queue"] },
-      }),
-    },
-  },
+  uses: [serviceContract.DocumentsQueue],
 }));
 
 const serviceName = caseScopedName("outbox-restart-service", CASE_ID);
@@ -105,7 +99,7 @@ liveTrellisTest({
 
     try {
       const firstOutbox = createOutbox(service, db, { debounceMs: 60_000 });
-      await service.handle.rpc.documents.queue(async ({ input }) => {
+      await service.handleDocumentsQueue(async ({ input }) => {
         await firstOutbox.transaction(async ({ event }) => {
           await event.document.queued.enqueue({
             documentId: input.documentId,
@@ -120,7 +114,7 @@ liveTrellisTest({
         contract: clientContract,
       });
       assertEquals(
-        await client.rpc.documents.queue({ documentId }).orThrow(),
+        await client.documentsQueue({ documentId }).orThrow(),
         { documentId },
       );
 
@@ -133,7 +127,7 @@ liveTrellisTest({
       const capture = await runtime.captureEvents({
         name: captureName,
         contract: serviceContract,
-        events: ["Document.Queued"],
+        events: [serviceContract.DocumentQueued.subscribe],
       });
 
       try {

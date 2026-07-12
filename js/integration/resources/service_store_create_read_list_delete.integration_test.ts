@@ -14,13 +14,13 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.rpc.resources.exercise(async ({ input, client }) => {
+      await service.handleResourcesExercise(async ({ input, client }) => {
         const encoder = new TextEncoder();
         const decoder = new TextDecoder();
         const store = await client.store.blobs.open().orThrow();
         const storeKey = `${input.key}.store`;
         const storeText = `store:${input.message}`;
-
+      
         await store.create(storeKey, encoder.encode(storeText), {
           contentType: "text/plain",
           metadata: { source: "resources-integration" },
@@ -32,7 +32,7 @@ liveTrellisTest({
         assertEquals(storeEntry.info.contentType, "text/plain");
         assertEquals(storeEntry.info.metadata.source, "resources-integration");
         const readText = decoder.decode(await storeEntry.bytes().orThrow());
-
+      
         const status = await store.status().orThrow();
         assertEquals(status.ttlMs, 0);
         assertEquals(status.maxTotalBytes, 4194304);
@@ -41,9 +41,9 @@ liveTrellisTest({
         if (!listed.entries.some((entry) => entry.key === storeKey)) {
           throw new Error(`store list did not include ${storeKey}`);
         }
-
+      
         await store.delete(storeKey).orThrow();
-
+      
         return Result.ok({
           provider: "ts",
           storeText: readText,
@@ -56,7 +56,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.resources.exercise({
+      const result = await client.resourcesExercise({
         key: fixture.resourceKey,
         message: "client to resources",
       }).orThrow();

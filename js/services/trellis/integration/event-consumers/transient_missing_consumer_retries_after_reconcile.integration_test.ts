@@ -53,7 +53,7 @@ liveTrellisTest({
     let observed: string | undefined;
 
     try {
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         (event) => {
           observed = event.id;
           return Result.ok(undefined);
@@ -69,7 +69,7 @@ liveTrellisTest({
           .length === 1
       );
 
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "recovered",
       }).orThrow();

@@ -13,7 +13,7 @@ import {
   sha256,
   utf8,
 } from "@qlever-llc/trellis/auth";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
@@ -64,11 +64,7 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
       description: "Call the auth validation test RPC.",
     },
   },
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Requests.Validate"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthRequestsValidate],
   rpc: {
     "Validate.Probe": {
       version: "v1",
@@ -85,11 +81,7 @@ const clientContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.auth-validate-client", CASE_ID),
   displayName: "Trellis Integration Auth Validate Client",
   description: "App participant for Auth.Requests.Validate integration.",
-  uses: {
-    required: {
-      service: serviceContract.use({ rpc: { call: ["Validate.Probe"] } }),
-    },
-  },
+  uses: [serviceContract.ValidateProbe],
 }));
 
 function assertProbeReason(
@@ -120,8 +112,8 @@ liveTrellisTest({
       telemetry: false,
       server: { log: false },
     }).orThrow();
-    await service.handle.rpc.validate.probe(async ({ input, client }) => {
-      const result = await client.request("Auth.Requests.Validate", input);
+    await service.handleValidateProbe(async ({ input, client }) => {
+      const result = await client.authRequestsValidate(input);
       const validation = result.take();
       if (isErr(validation)) {
         return Result.ok({
@@ -168,8 +160,8 @@ liveTrellisTest({
       const encodedPayloadHash = base64urlEncode(payloadHash);
       const now = Math.floor(Date.now() / 1000);
 
-      const probe = (input: Parameters<typeof invoker.rpc.validate.probe>[0]) =>
-        invoker.rpc.validate.probe(input).orThrow();
+      const probe = (input: Parameters<typeof invoker.validateProbe>[0]) =>
+        invoker.validateProbe(input).orThrow();
       const validateApp = async (
         requestId: string,
         iat = now,

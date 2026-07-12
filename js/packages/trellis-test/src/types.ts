@@ -2,11 +2,8 @@ import type {
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
-  ConnectedTrellisClient,
-  ContractModule,
-  TrellisAPI,
-  TrellisApiLike,
-  TrellisContractV1,
+  CallerContract,
+  CallerRuntime,
 } from "@qlever-llc/trellis";
 
 import type { TrellisControlPlaneOAuthProvider } from "./control_plane_config.ts";
@@ -125,31 +122,10 @@ export type TrellisTestContractApproval = {
 };
 
 /** Contract value accepted by the Trellis test runtime. */
-export type TrellisTestContract = ContractModule<
-  string,
-  TrellisApiLike,
-  TrellisApiLike,
-  TrellisApiLike
->;
+export type TrellisTestContract = TrellisTestContractLike;
 
 /** Contract value accepted by app/client helpers. */
-export type TrellisTestClientContract<TApi extends TrellisAPI = TrellisAPI> = {
-  CONTRACT: TrellisContractV1;
-  CONTRACT_DIGEST?: string;
-  API: {
-    owned?: TApi;
-    trellis?: TApi;
-  };
-};
-
-type ApiForTestClientContract<TContract> = TContract extends {
-  API: { trellis: infer TApi };
-} ? TApi extends TrellisAPI ? TApi : TrellisAPI
-  : TContract extends { API: { owned: infer TApi } }
-    ? TApi extends TrellisAPI ? TApi : TrellisAPI
-  : TrellisAPI;
+export type TrellisTestClientContract = CallerContract;
 
 /** Connected app/client type returned by `TrellisTestRuntime.connectClient`. */
-export type TrellisTestConnectedClient<TContract> = ConnectedTrellisClient<
-  TContract & { API: { trellis: ApiForTestClientContract<TContract> } }
->;
+export type TrellisTestConnectedClient<TContract> = CallerRuntime<TContract>;

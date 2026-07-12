@@ -818,8 +818,12 @@ Deno.test("deployment authority grant override RPC schemas validate", () => {
 });
 
 Deno.test("generated auth contract exposes deployment authority RPC keys only", () => {
-  assertEquals(GeneratedAuth.CONTRACT_ID, "trellis.auth@v1");
-  const rpcKeys = Object.keys(GeneratedAuth.OWNED_API.rpc);
+  const rpcKeys: string[] = Object.values(GeneratedAuth).flatMap((value) =>
+    typeof value === "object" && value !== null && "kind" in value &&
+      value.kind === "rpc" && "name" in value && typeof value.name === "string"
+      ? [value.name]
+      : []
+  );
   for (
     const key of [
       "Auth.DeploymentAuthority.List",

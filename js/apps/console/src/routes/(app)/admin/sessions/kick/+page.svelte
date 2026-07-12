@@ -31,7 +31,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Connections.List", { limit: 500, offset: 0 }).take();
+      const response = await trellis.authConnectionsList({ limit: 500, offset: 0 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       connections = response.entries ?? [];
       const requestedUserNkey = page.url.searchParams.get("userNkey");
@@ -49,7 +49,7 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Connections.Kick", { userNkey: selectedConnection.userNkey } satisfies AuthConnectionsKickInput).take();
+      const response = await trellis.authConnectionsKick({ userNkey: selectedConnection.userNkey } satisfies AuthConnectionsKickInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Disconnected ${summary.title}.`, "Kicked");
       await load();

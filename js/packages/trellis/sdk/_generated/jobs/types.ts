@@ -1,28 +1,7 @@
 // Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
-import type {
-  AsyncResult,
-  BaseError,
-  HandlerTrellis,
-  Result,
-  RpcHandlerContext,
-  SessionCaller,
-  TrellisErrorInstance,
-  UnexpectedError,
-  ValidationError,
-} from "../../../index.ts";
-
-import type { Api } from "./api.ts";
-
 import type { SerializableErrorData } from "../../../contracts.ts";
 import { TrellisError } from "../../../errors/index.ts";
-
 import { NotFoundErrorDataSchema } from "./schemas.ts";
-
-export type HandlerClient = HandlerTrellis<Api>;
-
-export const CONTRACT_ID = "trellis.jobs@v1" as const;
-export const CONTRACT_DIGEST =
-  "Kdfzu18EAjSVk1UlsMKMZDgUTkTgbb3x7HihXsmiJCY" as const;
 
 export type JobsCancelInput = { id: string; reason?: string };
 export type JobsCancelOutput = {
@@ -1333,17 +1312,6 @@ export type JobsWatchEvent = { kind: "ready"; timestamp: string } | {
   reason: "matched-job-changed" | "unknown-match";
   timestamp: string;
 } | { id: string; kind: "jobInspectChanged"; timestamp: string };
-export type JobsWatchFeedHandler = (
-  context: {
-    input: JobsWatchInput;
-    caller: SessionCaller;
-    signal: AbortSignal;
-    emit(
-      event: JobsWatchEvent,
-    ): AsyncResult<void, ValidationError | UnexpectedError>;
-    client: HandlerClient;
-  },
-) => unknown | Promise<unknown>;
 
 export type NotFoundErrorData = {
   context?: { [k: string]: unknown };
@@ -1358,7 +1326,6 @@ export class NotFoundError extends TrellisError<NotFoundErrorData> {
   static readonly schema = NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;
   readonly data: NotFoundErrorData;
-
   constructor(data: NotFoundErrorData) {
     super(data.message, {
       id: data.id,
@@ -1366,174 +1333,10 @@ export class NotFoundError extends TrellisError<NotFoundErrorData> {
     });
     this.data = data;
   }
-
   static fromSerializable(data: NotFoundErrorData): NotFoundError {
     return new NotFoundError(data);
   }
-
   override toSerializable(): NotFoundErrorData {
     return this.data;
   }
-}
-
-export interface RpcMap {
-  "Jobs.Cancel": { input: JobsCancelInput; output: JobsCancelOutput };
-  "Jobs.DismissDLQ": {
-    input: JobsDismissDLQInput;
-    output: JobsDismissDLQOutput;
-  };
-  "Jobs.GetKey": { input: JobsGetKeyInput; output: JobsGetKeyOutput };
-  "Jobs.Inspect": { input: JobsInspectInput; output: JobsInspectOutput };
-  "Jobs.ListDLQ": { input: JobsListDLQInput; output: JobsListDLQOutput };
-  "Jobs.ListServices": {
-    input: JobsListServicesInput;
-    output: JobsListServicesOutput;
-  };
-  "Jobs.Metrics": { input: JobsMetricsInput; output: JobsMetricsOutput };
-  "Jobs.Query": { input: JobsQueryInput; output: JobsQueryOutput };
-  "Jobs.ReplayDLQ": { input: JobsReplayDLQInput; output: JobsReplayDLQOutput };
-  "Jobs.Retry": { input: JobsRetryInput; output: JobsRetryOutput };
-}
-
-export type JobsCancelHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsCancelHandlerResult = Result<
-  JobsCancelOutput,
-  JobsCancelHandlerError
->;
-export type JobsCancelHandler = (
-  args: {
-    input: JobsCancelInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsCancelHandlerResult | Promise<JobsCancelHandlerResult>;
-export type JobsDismissDLQHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsDismissDLQHandlerResult = Result<
-  JobsDismissDLQOutput,
-  JobsDismissDLQHandlerError
->;
-export type JobsDismissDLQHandler = (
-  args: {
-    input: JobsDismissDLQInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsDismissDLQHandlerResult | Promise<JobsDismissDLQHandlerResult>;
-export type JobsGetKeyHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsGetKeyHandlerResult = Result<
-  JobsGetKeyOutput,
-  JobsGetKeyHandlerError
->;
-export type JobsGetKeyHandler = (
-  args: {
-    input: JobsGetKeyInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsGetKeyHandlerResult | Promise<JobsGetKeyHandlerResult>;
-export type JobsInspectHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsInspectHandlerResult = Result<
-  JobsInspectOutput,
-  JobsInspectHandlerError
->;
-export type JobsInspectHandler = (
-  args: {
-    input: JobsInspectInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsInspectHandlerResult | Promise<JobsInspectHandlerResult>;
-export type JobsListDLQHandlerError = TrellisErrorInstance;
-export type JobsListDLQHandlerResult = Result<
-  JobsListDLQOutput,
-  JobsListDLQHandlerError
->;
-export type JobsListDLQHandler = (
-  args: {
-    input: JobsListDLQInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsListDLQHandlerResult | Promise<JobsListDLQHandlerResult>;
-export type JobsListServicesHandlerError = TrellisErrorInstance;
-export type JobsListServicesHandlerResult = Result<
-  JobsListServicesOutput,
-  JobsListServicesHandlerError
->;
-export type JobsListServicesHandler = (
-  args: {
-    input: JobsListServicesInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsListServicesHandlerResult | Promise<JobsListServicesHandlerResult>;
-export type JobsMetricsHandlerError = TrellisErrorInstance;
-export type JobsMetricsHandlerResult = Result<
-  JobsMetricsOutput,
-  JobsMetricsHandlerError
->;
-export type JobsMetricsHandler = (
-  args: {
-    input: JobsMetricsInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsMetricsHandlerResult | Promise<JobsMetricsHandlerResult>;
-export type JobsQueryHandlerError = TrellisErrorInstance;
-export type JobsQueryHandlerResult = Result<
-  JobsQueryOutput,
-  JobsQueryHandlerError
->;
-export type JobsQueryHandler = (
-  args: {
-    input: JobsQueryInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsQueryHandlerResult | Promise<JobsQueryHandlerResult>;
-export type JobsReplayDLQHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsReplayDLQHandlerResult = Result<
-  JobsReplayDLQOutput,
-  JobsReplayDLQHandlerError
->;
-export type JobsReplayDLQHandler = (
-  args: {
-    input: JobsReplayDLQInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsReplayDLQHandlerResult | Promise<JobsReplayDLQHandlerResult>;
-export type JobsRetryHandlerError =
-  | TrellisErrorInstance
-  | BaseError<NotFoundErrorData>;
-export type JobsRetryHandlerResult = Result<
-  JobsRetryOutput,
-  JobsRetryHandlerError
->;
-export type JobsRetryHandler = (
-  args: {
-    input: JobsRetryInput;
-    context: RpcHandlerContext;
-    client: HandlerClient;
-  },
-) => JobsRetryHandlerResult | Promise<JobsRetryHandlerResult>;
-
-export interface EventMap {
-}
-
-export interface FeedMap {
-  "Jobs.Watch": { input: JobsWatchInput; event: JobsWatchEvent };
-}
-
-export interface SubjectMap {
 }

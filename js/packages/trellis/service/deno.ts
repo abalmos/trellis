@@ -1,4 +1,5 @@
 export {
+  type ConnectedTrellisService,
   type HealthCheckHandler,
   type HealthInfoHandler,
   type JobQueue,
@@ -8,7 +9,6 @@ export {
   type RpcHandler,
   type ServiceContract,
   type ServiceEventHandler,
-  type Trellis,
   TrellisService,
   type TrellisServiceConnectOpts,
   type TrellisServiceConnectTelemetryOpts,

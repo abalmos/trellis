@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { createAuth, defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -23,21 +23,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Deployment Rollback Admin",
   description:
     "Exercises generated Auth service deployment rollback RPCs through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.List",
-            "Auth.Deployments.Remove",
-            "Auth.ServiceInstances.List",
-            "Auth.ServiceInstances.Provision",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsList,
+    trellisAuth.AuthDeploymentsRemove,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthServiceInstancesProvision,
+  ],
 }));
 
 liveTrellisTest({
@@ -52,7 +44,7 @@ liveTrellisTest({
 
     try {
       const findDeployment = async () => {
-        const page = await admin.rpc.auth.deploymentsList({
+        const page = await admin.authDeploymentsList({
           kind: "service",
           limit: 500,
         }).orThrow();
@@ -61,7 +53,7 @@ liveTrellisTest({
         );
       };
       const findServiceInstance = async (instanceId: string) => {
-        const page = await admin.rpc.auth.serviceInstancesList({
+        const page = await admin.authServiceInstancesList({
           deploymentId,
           limit: 500,
         }).orThrow();
@@ -72,7 +64,7 @@ liveTrellisTest({
 
       const createHook = "auth.admin.serviceDeployments.createAuthority";
       await restartWithFailOnceHook(runtime, createHook);
-      const failedCreate = await admin.rpc.auth.deploymentsCreate({
+      const failedCreate = await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
@@ -81,28 +73,28 @@ liveTrellisTest({
       assertRefreshHookFailure(failedCreate, createHook);
       assertEquals(await findDeployment(), undefined);
 
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
       const auth = await createAuth({ sessionKeySeed: randomSessionSeed() });
-      const provisioned = await admin.rpc.auth.serviceInstancesProvision({
+      const provisioned = await admin.authServiceInstancesProvision({
         deploymentId,
         instanceKey: auth.sessionKey,
       }).orThrow();
       const secondAuth = await createAuth({
         sessionKeySeed: randomSessionSeed(),
       });
-      const secondProvisioned = await admin.rpc.auth.serviceInstancesProvision({
+      const secondProvisioned = await admin.authServiceInstancesProvision({
         deploymentId,
         instanceKey: secondAuth.sessionKey,
       }).orThrow();
 
       const removeHook = "auth.admin.serviceDeployments.deleteCascadeRecord";
       await restartWithFailOnceHook(runtime, removeHook);
-      const failedRemove = await admin.rpc.auth.deploymentsRemove({
+      const failedRemove = await admin.authDeploymentsRemove({
         kind: "service",
         deploymentId,
         cascade: true,
@@ -121,7 +113,7 @@ liveTrellisTest({
       );
 
       assertEquals(
-        await admin.rpc.auth.deploymentsRemove({
+        await admin.authDeploymentsRemove({
           kind: "service",
           deploymentId,
           cascade: true,

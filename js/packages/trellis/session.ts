@@ -16,8 +16,12 @@ import type {
   FeedDesc,
   InferSchemaType,
   RPCDesc,
-  TrellisAPI,
 } from "./contracts.ts";
+import type { RuntimeApi } from "./contract_support/runtime.ts";
+import {
+  CONTRACT_RUNTIME,
+  type ContractRuntime,
+} from "./contract_support/contract_runtime.ts";
 import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
@@ -373,12 +377,16 @@ export type TrellisAuth = {
   currentIat?: () => number;
 };
 
-export type AnyTrellisAPI = TrellisAPI;
 export type TrellisMode = "client" | "server";
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type OwnedApiFor<TContract> = TContract extends
-  { API: { owned: infer TOwnedApi } }
-  ? TOwnedApi extends AnyTrellisAPI ? TOwnedApi
+type OwnedApiFor<TContract> = TContract extends {
+  readonly [CONTRACT_RUNTIME]: ContractRuntime<
+    never,
+    infer TOwnedApi,
+    RuntimeApi,
+    RuntimeApi
+  >;
+} ? TOwnedApi extends RuntimeApi ? TOwnedApi
   : never
   : never;
 type ContractKvFor<TContract> = TContract extends {
@@ -404,45 +412,50 @@ export type RuntimeStateStoresForContract<TContract> = TContract extends {
 } ? NonNullable<TState> extends RuntimeStateStores ? NonNullable<TState>
   : {}
   : {};
-type TrellisApiFor<TContract> = TContract extends
-  { API: { trellis?: infer TTrellisApi } }
-  ? NonNullable<TTrellisApi> extends AnyTrellisAPI ? NonNullable<TTrellisApi>
-  : OwnedApiFor<TContract>
+type TrellisApiFor<TContract> = TContract extends {
+  readonly [CONTRACT_RUNTIME]: ContractRuntime<
+    never,
+    RuntimeApi,
+    RuntimeApi,
+    infer TTrellisApi
+  >;
+} ? TTrellisApi extends RuntimeApi ? TTrellisApi
+  : never
   : OwnedApiFor<TContract>;
-type RpcMethodsOf<TA extends AnyTrellisAPI> = TA["rpc"];
-export type MethodsOf<TA extends AnyTrellisAPI> =
+type RpcMethodsOf<TA extends RuntimeApi> = TA["rpc"];
+export type MethodsOf<TA extends RuntimeApi> =
   & keyof RpcMethodsOf<TA>
   & string;
-export type RpcMethodNameOf<TA extends AnyTrellisAPI> = MethodsOf<TA>;
-export type OperationsOf<TA extends AnyTrellisAPI> =
+export type RpcMethodNameOf<TA extends RuntimeApi> = MethodsOf<TA>;
+export type OperationsOf<TA extends RuntimeApi> =
   & keyof TA["operations"]
   & string;
-type EventsOf<TA extends AnyTrellisAPI> = keyof TA["events"] & string;
-export type FeedsOf<TA extends AnyTrellisAPI> =
+type EventsOf<TA extends RuntimeApi> = keyof TA["events"] & string;
+export type FeedsOf<TA extends RuntimeApi> =
   & keyof NonNullable<TA["feeds"]>
   & string;
-type RpcMethodOf<TA extends AnyTrellisAPI, M extends keyof TA["rpc"] & string> =
+type RpcMethodOf<TA extends RuntimeApi, M extends keyof TA["rpc"] & string> =
   RpcMethodsOf<TA>[M];
 type MethodInputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends keyof TA["rpc"] & string,
 > = RpcMethodOf<TA, M> extends { input: infer TInput } ? InferSchemaType<TInput>
   : never;
 export type RpcInputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends RpcMethodNameOf<TA>,
 > = MethodInputOf<TA, M>;
 type MethodOutputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends keyof TA["rpc"] & string,
 > = RpcMethodOf<TA, M> extends { output: infer TOutput }
   ? InferSchemaType<TOutput>
   : never;
 export type RpcOutputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends RpcMethodNameOf<TA>,
 > = MethodOutputOf<TA, M>;
-type RpcRequestShapes<TA extends AnyTrellisAPI> = {
+type RpcRequestShapes<TA extends RuntimeApi> = {
   [M in keyof TA["rpc"] & string]: {
     input: MethodInputOf<TA, M>;
     output: MethodOutputOf<TA, M>;
@@ -454,7 +467,7 @@ type RequestInputOf<TRequests, M extends RequestMethodOf<TRequests>> =
 type RequestOutputOf<TRequests, M extends RequestMethodOf<TRequests>> =
   TRequests[M] extends { output: infer TOutput } ? TOutput : never;
 type RpcDescriptorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends keyof TA["rpc"] & string,
 > = RpcMethodOf<TA, M> extends {
   input: infer TInput;
@@ -479,25 +492,25 @@ type DeclaredRuntimeErrorOf<TRuntimeErrors> = TRuntimeErrors extends readonly (
 )[] ? InferRuntimeRpcError<TRuntimeError>
   : never;
 type MethodDeclaredErrorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends keyof TA["rpc"] & string,
 > = RpcDescriptorOf<TA, M> extends {
   errors?: infer TErrors;
   runtimeErrors?: infer TRuntimeErrors;
 } ? DeclaredBuiltinErrorOf<TErrors> | DeclaredRuntimeErrorOf<TRuntimeErrors>
   : never;
-type RequestErrorOf<TA extends AnyTrellisAPI, M extends MethodsOf<TA>> =
+type RequestErrorOf<TA extends RuntimeApi, M extends MethodsOf<TA>> =
   | MethodDeclaredErrorOf<TA, M>
   | RemoteError
   | TransportError
   | ValidationError
   | UnexpectedError;
-type HandlerErrorOf<TA extends AnyTrellisAPI, M extends MethodsOf<TA>> =
+type HandlerErrorOf<TA extends RuntimeApi, M extends MethodsOf<TA>> =
   | MethodDeclaredErrorOf<TA, M>
   | TrellisErrorInstance;
 
 type OperationDescriptorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends {
   input: infer TInput;
@@ -517,7 +530,7 @@ type OperationDescriptorOf<
   : never;
 
 type OperationDeclaredErrorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = OperationDescriptorOf<TA, O> extends {
   errors?: infer TErrors;
@@ -526,21 +539,21 @@ type OperationDeclaredErrorOf<
   : never;
 
 export type OperationHandlerErrorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = OperationDeclaredErrorOf<TA, O> | TrellisErrorInstance;
-type EventMessageOf<TA extends AnyTrellisAPI, E extends EventsOf<TA>> =
+type EventMessageOf<TA extends RuntimeApi, E extends EventsOf<TA>> =
   TA["events"][E] extends EventDesc<infer TEvent> ? InferSchemaType<TEvent>
     : never;
-type EventOf<TA extends AnyTrellisAPI, E extends EventsOf<TA>> = EventMessageOf<
+type EventOf<TA extends RuntimeApi, E extends EventsOf<TA>> = EventMessageOf<
   TA,
   E
 >;
-type EventDescriptorOf<TA extends AnyTrellisAPI, E extends EventsOf<TA>> =
+type EventDescriptorOf<TA extends RuntimeApi, E extends EventsOf<TA>> =
   TA["events"][E] extends EventDesc<infer TEvent>
     ? EventDesc<TEvent> & TA["events"][E]
     : never;
-type EventPayloadOf<TA extends AnyTrellisAPI, E extends EventsOf<TA>> =
+type EventPayloadOf<TA extends RuntimeApi, E extends EventsOf<TA>> =
   & EventOf<TA, E>
   & Record<string, unknown>;
 /** Runtime metadata assigned to every Trellis event message. */
@@ -571,26 +584,26 @@ export type PreparedTrellisEvent<
   encodedPayload: string;
   headers: Readonly<Record<string, string>>;
 }>;
-export type FeedInputOf<TA extends AnyTrellisAPI, F extends FeedsOf<TA>> =
+export type FeedInputOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
   NonNullable<TA["feeds"]>[F] extends FeedDesc<infer TInput, infer _TEvent>
     ? InferSchemaType<TInput>
     : never;
-export type FeedEventOf<TA extends AnyTrellisAPI, F extends FeedsOf<TA>> =
+export type FeedEventOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
   NonNullable<TA["feeds"]>[F] extends FeedDesc<infer _TInput, infer TEvent>
     ? InferSchemaType<TEvent>
     : never;
-type FeedDescriptorOf<TA extends AnyTrellisAPI, F extends FeedsOf<TA>> =
+type FeedDescriptorOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
   NonNullable<TA["feeds"]>[F] extends FeedDesc<infer TInput, infer TEvent>
     ? FeedDesc<TInput, TEvent> & NonNullable<TA["feeds"]>[F]
     : never;
 export type OperationInputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends { input: infer TInput }
   ? InferSchemaType<TInput>
   : never;
 export type OperationProgressOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends { progress?: infer TProgress }
   ? TProgress extends undefined ? unknown
@@ -598,13 +611,13 @@ export type OperationProgressOf<
   : unknown;
 /** Infers the transient update payload for an operation descriptor. */
 export type OperationUpdateOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends { update?: infer TUpdate }
   ? TUpdate extends undefined ? unknown : InferSchemaType<NonNullable<TUpdate>>
   : unknown;
 export type OperationOutputOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends { output?: infer TOutput }
   ? TOutput extends undefined ? unknown : InferSchemaType<NonNullable<TOutput>>
@@ -817,14 +830,14 @@ export type OperationRegistration<
   ): Promise<void>;
 };
 export type OperationTransferContextOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   O extends OperationsOf<TA>,
 > = TA["operations"][O] extends { transfer: infer TTransfer }
   ? TTransfer extends undefined ? undefined
   : OperationTransferHandle
   : undefined;
 export type OperationSurface<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   TMode extends TrellisMode,
   O extends OperationsOf<TA>,
 > = TMode extends "server" ? OperationRegistration<
@@ -1157,7 +1170,7 @@ type NoResponderRetryOpts = {
   baseDelayMs?: number;
 };
 
-export type TrellisOpts<TA extends AnyTrellisAPI> = {
+export type TrellisOpts<TA extends RuntimeApi> = {
   log?: LoggerLike;
   timeout?: number;
   stream?: string;
@@ -1273,7 +1286,7 @@ function isConsumerNotFoundError(error: unknown): boolean {
   );
 }
 
-type TrellisInternalOpts<TA extends AnyTrellisAPI> = TrellisOpts<TA> & {
+type TrellisInternalOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   eventConsumers?: RuntimeEventConsumers;
   durableEventConsumerBeforeReadinessCheck?:
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
@@ -1284,7 +1297,7 @@ const internalDurableEventConsumerBeforeReadinessCheck = Symbol(
   "trellis.internal.durableEventConsumerBeforeReadinessCheck",
 );
 
-type InternalizedTrellisOpts<TA extends AnyTrellisAPI> = TrellisOpts<TA> & {
+type InternalizedTrellisOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   [internalEventConsumers]?: RuntimeEventConsumers;
   [internalDurableEventConsumerBeforeReadinessCheck]?:
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
@@ -1296,7 +1309,7 @@ type InternalizedTrellisOpts<TA extends AnyTrellisAPI> = TrellisOpts<TA> & {
  * @internal
  */
 export function createTrellisInternal<
-  TA extends AnyTrellisAPI = TrellisAPI,
+  TA extends RuntimeApi = RuntimeApi,
   TMode extends TrellisMode = "client",
   TState extends RuntimeStateStores = RuntimeStateStores,
 >(
@@ -1319,14 +1332,14 @@ export function createTrellisInternal<
   return new Trellis<TA, TMode, TState>(name, nats, auth, internalOpts);
 }
 
-type DurableEventRegistration<TA extends AnyTrellisAPI> = {
+type DurableEventRegistration<TA extends RuntimeApi> = {
   event: EventsOf<TA>;
   ctx: EventDescriptorOf<TA, EventsOf<TA>>;
   subject: string;
   fn: EventCallback<EventOf<TA, EventsOf<TA>>>;
 };
 
-type DurableEventConsumerLoop<TA extends AnyTrellisAPI> = {
+type DurableEventConsumerLoop<TA extends RuntimeApi> = {
   registrations: Array<DurableEventRegistration<TA>>;
   concurrency: number;
   startedWorkers: Set<number>;
@@ -1408,7 +1421,7 @@ type SurfaceKeysForGroup<TKeys extends string, TGroup extends string> =
   TKeys extends string ? SurfaceGroupName<TKeys> extends TGroup ? TKeys : never
     : never;
 
-export type ActiveRpcFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
+export type ActiveRpcFacade<TA extends RuntimeApi = RuntimeApi> = {
   readonly [TGroup in SurfaceGroupName<MethodsOf<TA>>]: {
     readonly [
       M in SurfaceKeysForGroup<MethodsOf<TA>, TGroup> as SurfaceLeafName<M>
@@ -1419,7 +1432,7 @@ export type ActiveRpcFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
   };
 };
 
-export type ActiveEventFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
+export type ActiveEventFacade<TA extends RuntimeApi = RuntimeApi> = {
   readonly [TGroup in SurfaceGroupName<EventsOf<TA>>]: {
     readonly [
       E in SurfaceKeysForGroup<EventsOf<TA>, TGroup> as SurfaceLeafName<E>
@@ -1442,7 +1455,7 @@ export type ActiveEventFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
   };
 };
 
-export type ActiveEventPublishFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
+export type ActiveEventPublishFacade<TA extends RuntimeApi = RuntimeApi> = {
   readonly [TGroup in SurfaceGroupName<EventsOf<TA>>]: {
     readonly [
       E in SurfaceKeysForGroup<EventsOf<TA>, TGroup> as SurfaceLeafName<E>
@@ -1460,7 +1473,7 @@ export type ActiveEventPublishFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
   };
 };
 
-export type ActiveFeedFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
+export type ActiveFeedFacade<TA extends RuntimeApi = RuntimeApi> = {
   readonly [TGroup in SurfaceGroupName<FeedsOf<TA>>]: {
     readonly [
       F in SurfaceKeysForGroup<FeedsOf<TA>, TGroup> as SurfaceLeafName<F>
@@ -1471,7 +1484,7 @@ export type ActiveFeedFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
   };
 };
 
-export type ActiveOperationFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
+export type ActiveOperationFacade<TA extends RuntimeApi = RuntimeApi> = {
   readonly [TGroup in SurfaceGroupName<OperationsOf<TA>>]: {
     readonly [
       O in SurfaceKeysForGroup<OperationsOf<TA>, TGroup> as SurfaceLeafName<O>
@@ -1482,7 +1495,7 @@ export type ActiveOperationFacade<TA extends AnyTrellisAPI = TrellisAPI> = {
 };
 
 export type ActiveRpcHandleFacade<
-  TA extends AnyTrellisAPI = TrellisAPI,
+  TA extends RuntimeApi = RuntimeApi,
   TRequests = RpcRequestShapes<TA>,
 > = {
   readonly [TGroup in SurfaceGroupName<MethodsOf<TA>>]: {
@@ -1495,7 +1508,7 @@ export type ActiveRpcHandleFacade<
 };
 
 export type FeedSurface<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   TMode extends TrellisMode,
   F extends FeedsOf<TA>,
 > = TMode extends "server"
@@ -1519,7 +1532,7 @@ export type RpcHandlerContext = {
 };
 
 export type HandlerTrellis<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   TRequests = RpcRequestShapes<TA>,
 > = {
   readonly rpc: ActiveRpcFacade<TA>;
@@ -1646,61 +1659,10 @@ export type HandlerTrellisForContract<TContract> =
     >;
   };
 
-/** Public client-side surface returned by `TrellisClient.connect`. */
-export type ClientTrellis<
-  TA extends AnyTrellisAPI = TrellisAPI,
-  TState extends RuntimeStateStores = {},
-  TRequests = RpcRequestShapes<TA>,
-> = {
-  readonly name: string;
-  readonly timeout: number;
-  readonly stream: string;
-  readonly api: TA;
-  readonly state: StateFacade<TState>;
-  readonly connection: TrellisConnection;
-  readonly rpc: ActiveRpcFacade<TA>;
-  readonly event: ActiveEventFacade<TA>;
-  readonly feed: ActiveFeedFacade<TA>;
-  readonly operation: ActiveOperationFacade<TA>;
-  readonly handle: { readonly rpc: ActiveRpcHandleFacade<TA, TRequests> };
-  request<const M extends RequestMethodOf<TRequests>>(
-    method: M,
-    input: RequestInputOf<TRequests, M>,
-    opts?: RequestOpts,
-  ): AsyncResult<RequestOutputOf<TRequests, M>, BaseError>;
-  publish<E extends EventsOf<TA>>(
-    event: E,
-    data: EventPayloadOf<TA, E>,
-  ): AsyncResult<void, ValidationError | UnexpectedError>;
-  prepare<E extends EventsOf<TA>>(
-    event: E,
-    data: EventPayloadOf<TA, E>,
-  ): Result<
-    PreparedTrellisEvent<EventPayloadOf<TA, E>>,
-    ValidationError | UnexpectedError
-  >;
-  publishPrepared(
-    event: PreparedTrellisEvent,
-  ): AsyncResult<void, UnexpectedError>;
-  transfer(grant: SendTransferGrant): SendTransferHandle;
-  transfer(grant: ReceiveTransferGrant): ReceiveTransferHandle;
-  wait(): AsyncResult<void, BaseError>;
-};
-
-/** Connected client type for a generated Trellis contract. */
-export type ConnectedTrellisClient<TContract> = Simplify<
-  ClientTrellis<
-    TContract extends { API: { trellis?: infer TApi } }
-      ? NonNullable<TApi> extends AnyTrellisAPI ? NonNullable<TApi> : TrellisAPI
-      : TrellisAPI,
-    RuntimeStateStoresForContract<TContract>
-  >
->;
-
 export type HandlerFn<
-  TMountApi extends AnyTrellisAPI,
+  TMountApi extends RuntimeApi,
   M extends MethodsOf<TMountApi>,
-  TOutboundApi extends AnyTrellisAPI = TMountApi,
+  TOutboundApi extends RuntimeApi = TMountApi,
   TTrellis = HandlerTrellis<TOutboundApi>,
 > = (args: {
   input: MethodInputOf<TMountApi, M>;
@@ -1997,11 +1959,11 @@ function validateStateListResult(
 }
 
 export type RpcRequestErrorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends RpcMethodNameOf<TA>,
 > = RequestErrorOf<TA, M>;
 export type RpcHandlerErrorOf<
-  TA extends AnyTrellisAPI,
+  TA extends RuntimeApi,
   M extends RpcMethodNameOf<TA>,
 > = HandlerErrorOf<TA, M>;
 export type EventName<TContract> = EventsOf<OwnedApiFor<TContract>>;
@@ -2056,7 +2018,7 @@ function traceIdFromTraceparent(
   return traceId;
 }
 
-const EMPTY_TRELLIS_API: TrellisAPI = {
+const EMPTY_TRELLIS_API: RuntimeApi = {
   rpc: {},
   operations: {},
   events: {},
@@ -2181,7 +2143,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 export class Trellis<
-  TA extends AnyTrellisAPI = TrellisAPI,
+  TA extends RuntimeApi = RuntimeApi,
   TMode extends TrellisMode = "client",
   TState extends RuntimeStateStores = {},
   TRequests = RpcRequestShapes<TA>,
@@ -2528,7 +2490,7 @@ export class Trellis<
       return new Error(`${base} Did you forget to include its API module?`);
     }
     return new Error(
-      `${base} No API surface was provided. Pass opts.api, use createClient(contract, ...), or await createCoreClient(...) instead.`,
+      `${base} No API surface was provided to the private transport session.`,
     );
   }
 

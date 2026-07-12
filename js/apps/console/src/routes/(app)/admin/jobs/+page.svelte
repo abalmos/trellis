@@ -150,8 +150,8 @@
     unavailableMessage = null;
     try {
       const data = await loadJobsPageData({
-        listServices: (input) => trellis.request("Jobs.ListServices", input, { timeout: rpcTimeout }),
-        queryJobs: (input) => trellis.request("Jobs.Query", input, { timeout: rpcTimeout }),
+        listServices: (input) => trellis.jobsListServices(input, { timeout: rpcTimeout }),
+        queryJobs: (input) => trellis.jobsQuery(input, { timeout: rpcTimeout }),
       }, buildQuery());
       if (sequence !== jobsSequence) return;
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
@@ -175,7 +175,7 @@
     metricsError = null;
     try {
       const payload = await loadJobsMetrics(
-        { metrics: (input) => trellis.request("Jobs.Metrics", input, { timeout: rpcTimeout }) },
+        { metrics: (input) => trellis.jobsMetrics(input, { timeout: rpcTimeout }) },
         { groupBy: "type", step: resolveMetricsStep(metricsWindow), window: metricsWindow },
       );
       if (sequence !== metricsSequence) return;

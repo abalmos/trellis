@@ -106,8 +106,7 @@ export function createPortalDeviceActivationController() {
 
       return {
         async activateDevice(input): Promise<DeviceActivationOperationRef> {
-          return await trellis.operation.auth.deviceUserAuthoritiesResolve
-            .input(input)
+          return await trellis.authDeviceUserAuthoritiesResolve(input)
             .start()
             .orThrow();
         },

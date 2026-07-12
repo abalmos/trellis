@@ -5,10 +5,11 @@ import {
   type NatsConnection,
 } from "@nats-io/nats-core";
 import Type from "typebox";
+import { getContractRuntime } from "./contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "./contract.ts";
 import { TransportError, UnexpectedError } from "./errors/index.ts";
-import { Trellis } from "./trellis.ts";
+import { Trellis } from "./session.ts";
 
 const contract = defineServiceContract(
   {
@@ -72,7 +73,7 @@ Deno.test("Trellis.request returns declared RPC errors as Err results", async ()
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
   }, {
-    api: contract.API.owned,
+    api: getContractRuntime(contract).ownedApi,
   });
 
   const result = await trellis.request("Demo.Fail", {});
@@ -99,7 +100,7 @@ Deno.test("Trellis.request maps unavailable capability routes to TransportError"
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
   }, {
-    api: contract.API.owned,
+    api: getContractRuntime(contract).ownedApi,
     noResponderRetry: { maxAttempts: 0, baseDelayMs: 0 },
   });
 
@@ -133,7 +134,7 @@ Deno.test("Trellis.request maps denied request routes to TransportError", async 
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
   }, {
-    api: contract.API.owned,
+    api: getContractRuntime(contract).ownedApi,
   });
 
   const result = await trellis.request("Demo.Fail", {});
@@ -173,7 +174,7 @@ Deno.test("Trellis.request maps invalid JSON replies to TransportError", async (
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
   }, {
-    api: contract.API.owned,
+    api: getContractRuntime(contract).ownedApi,
   });
 
   const result = await trellis.request("Demo.Fail", {});
@@ -201,7 +202,7 @@ Deno.test("Trellis.operation start maps unavailable capability routes to Transpo
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
   }, {
-    api: contract.API.owned,
+    api: getContractRuntime(contract).ownedApi,
     noResponderRetry: { maxAttempts: 0, baseDelayMs: 0 },
   });
 

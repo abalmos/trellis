@@ -2,6 +2,7 @@ import {
   defineAppContract,
   defineServiceContract,
   Result,
+  store,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
@@ -132,8 +133,7 @@ export function createTransferFixture(
       id: caseScopedContractId("trellis.integration.transfer-service", caseId),
       displayName: `Trellis Integration Transfer Service (${slug})`,
       description: "Exercises generated operation and RPC transfer surfaces.",
-      resources: {
-        store: {
+      uses: [store({
           uploads: {
             purpose: "Temporary integration transfer files",
             required: true,
@@ -141,8 +141,7 @@ export function createTransferFixture(
             maxObjectBytes,
             maxTotalBytes: 4194304,
           },
-        },
-      },
+      })],
       operations: {
         "Files.Upload": {
           version: "v1",
@@ -188,22 +187,20 @@ export function createTransferFixture(
     id: caseScopedContractId("trellis.integration.transfer-client", caseId),
     displayName: `Trellis Integration Transfer Client (${slug})`,
     description: "App/client participant for the transfer integration fixture.",
-    uses: {
-      required: {
-        transferService: serviceContract.use({
-          operations: { call: ["Files.Upload"] },
-          rpc: { call: ["Files.Download"] },
-        }),
-      },
-    },
+    uses: [serviceContract.FilesUpload, serviceContract.FilesDownload],
   }));
 
   const serviceName = caseScopedName("transfer-fixture-service", caseId);
+  type ConnectedTransferService = Awaited<
+    ReturnType<
+      ReturnType<typeof TrellisService.connect<typeof serviceContract>>["orThrow"]
+    >
+  >;
 
   async function withTransferFixture(
     runtime: LiveTrellisRuntime,
     fn: (
-      ctx: { runtime: LiveTrellisRuntime; service: TrellisService },
+      ctx: { runtime: LiveTrellisRuntime; service: ConnectedTransferService },
     ) => Promise<void>,
   ) {
     const serviceKey = await runtime.registerService({
@@ -220,7 +217,7 @@ export function createTransferFixture(
     }).orThrow();
 
     try {
-      await service.handle.operation.files.upload(
+      await service.handleFilesUpload(
         async ({ input, op, transfer, client }) => {
           const transferred = await transfer.completed().orThrow();
           if (options.onStored) {
@@ -241,7 +238,7 @@ export function createTransferFixture(
         },
       );
 
-      await service.handle.rpc.files.download(
+      await service.handleFilesDownload(
         async ({ input, context, client }) => {
           const payload = new TextEncoder().encode(`download:${input.key}`);
           const store = await client.store.uploads.open().orThrow();

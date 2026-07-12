@@ -100,6 +100,4 @@ export const trellisCore = defineServiceContract(
 export const CONTRACT_ID = trellisCore.CONTRACT_ID;
 export const CONTRACT = trellisCore.CONTRACT;
 export const CONTRACT_DIGEST = trellisCore.CONTRACT_DIGEST;
-export const API: typeof trellisCore.API = trellisCore.API;
-export const use: typeof trellisCore.use = trellisCore.use;
 export default trellisCore;

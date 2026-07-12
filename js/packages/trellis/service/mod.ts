@@ -8,11 +8,10 @@
  */
 
 export {
-  createHealthHeartbeatSample,
   type HealthCheckResult,
   runAllServiceHealthChecks,
   runServiceHealthCheck,
-  ServiceHealth,
+  type ServiceHealth,
   type ServiceHealthCheck,
   type ServiceHealthCheckFn,
   type ServiceHealthInfo,
@@ -23,10 +22,7 @@ export {
   HealthInfoSchema,
 } from "../server/health_schemas.ts";
 export {
-  type HealthHeartbeatSample,
-  HealthHeartbeatSampleSchema,
-} from "../health.ts";
-export {
+  type ConnectedTrellisService,
   type HealthCheckHandler,
   type HealthInfoHandler,
   type JobQueue,
@@ -42,8 +38,6 @@ export {
   type SqlOutboxJobSubmission,
   type SqlOutboxTransactionContext,
   type SqlOutboxTransactionRunner,
-  StoreHandle,
-  type Trellis,
   TrellisService,
   type TrellisServiceConnectOpts,
   type TrellisServiceConnectTelemetryOpts,

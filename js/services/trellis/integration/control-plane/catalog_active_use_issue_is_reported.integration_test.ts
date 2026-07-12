@@ -5,7 +5,7 @@ import {
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisCore } from "@qlever-llc/trellis/sdk/core.ts";
+import * as trellisCore from "@qlever-llc/trellis/sdk/core.ts";
 import type { TrellisCatalogOutput } from "@qlever-llc/trellis/sdk/core.ts";
 import { Type } from "typebox";
 import {
@@ -60,13 +60,7 @@ const consumerContract = defineServiceContract({ schemas }, (ref) => ({
   displayName: "Trellis Control-Plane Catalog Active Use Consumer",
   description:
     "Requires the provider RPC so catalog active-use validation can report missing active dependencies.",
-  uses: {
-    required: {
-      provider: providerContract.use({
-        rpc: { call: ["CatalogActiveUse.ProviderPing"] },
-      }),
-    },
-  },
+  uses: [providerContract.CatalogActiveUseProviderPing],
   rpc: {
     "CatalogActiveUse.ConsumerPing": {
       version: "v1",
@@ -89,11 +83,7 @@ const catalogAdminContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Catalog Active Use Admin",
   description: "Reads the public catalog issue projection.",
-  uses: {
-    required: {
-      core: trellisCore.use({ rpc: { call: ["Trellis.Catalog"] } }),
-    },
-  },
+  uses: [trellisCore.TrellisCatalog],
 }));
 
 const providerDeployment = caseScopedName(
@@ -167,15 +157,15 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      connectedProviderService.handle.rpc.catalogActiveUse.providerPing((
+      connectedProviderService.handleCatalogActiveUseProviderPing((
         { input },
       ) => Result.ok({ message: input.message }));
-      consumerService.handle.rpc.catalogActiveUse.consumerPing(({ input }) =>
+      consumerService.handleCatalogActiveUseConsumerPing(({ input }) =>
         Result.ok({ message: input.message })
       );
 
       await runtime.waitFor(async () => {
-        const catalog = await catalogAdmin.rpc.trellis.catalog({}).orThrow();
+        const catalog = await catalogAdmin.trellisCatalog({}).orThrow();
         return catalog.catalog.contracts.some((contract) =>
           contract.digest === providerDigest
         ) && catalog.catalog.contracts.some((contract) =>
@@ -188,7 +178,7 @@ liveTrellisTest({
       await setProviderOfferActive(sqlite, providerDigest, false);
 
       const issue = await runtime.waitFor(async () => {
-        const catalog = await catalogAdmin.rpc.trellis.catalog({}).orThrow();
+        const catalog = await catalogAdmin.trellisCatalog({}).orThrow();
         return findActiveUseIssue(catalog, consumerDigest) ?? false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
 
@@ -203,7 +193,7 @@ liveTrellisTest({
 
       await setProviderOfferActive(sqlite, providerDigest, true);
       const restoredCatalog = await runtime.waitFor(async () => {
-        const catalog = await catalogAdmin.rpc.trellis.catalog({}).orThrow();
+        const catalog = await catalogAdmin.trellisCatalog({}).orThrow();
         return findActiveUseIssue(catalog, consumerDigest) === undefined
           ? catalog
           : false;

@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -22,13 +22,7 @@ const sessionsRestartClientContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Sessions Restart Client",
   description:
     "Verifies approved app sessions remain authenticated after control-plane restart.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.Sessions.Me", "Auth.Sessions.List"] },
-      }),
-    },
-  },
+  uses: [trellisAuth.AuthSessionsMe, trellisAuth.AuthSessionsList],
 }));
 
 liveTrellisTest({
@@ -51,12 +45,12 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const beforeMe = await client.rpc.auth.sessionsMe({}).orThrow();
+      const beforeMe = await client.authSessionsMe({}).orThrow();
       assertEquals(beforeMe.participantKind, "app");
       assert(beforeMe.user !== null, "expected authenticated user session");
 
       assertSessionListed(
-        await client.rpc.auth.sessionsList({ limit: 100 }).orThrow(),
+        await client.authSessionsList({ limit: 100 }).orThrow(),
         clientKey.sessionKey,
       );
 
@@ -74,13 +68,13 @@ liveTrellisTest({
         },
       }).orThrow();
 
-      const afterMe = await client.rpc.auth.sessionsMe({}).orThrow();
+      const afterMe = await client.authSessionsMe({}).orThrow();
       assertEquals(afterMe.participantKind, "app");
       assertEquals(afterMe.user?.userId, beforeMe.user.userId);
       assertEquals(afterMe.user?.active, true);
 
       assertSessionListed(
-        await client.rpc.auth.sessionsList({ limit: 100 }).orThrow(),
+        await client.authSessionsList({ limit: 100 }).orThrow(),
         clientKey.sessionKey,
       );
     } finally {

@@ -3,31 +3,15 @@ import type { NatsConnection } from "@nats-io/nats-core";
 
 import { deriveDeviceIdentity, startDeviceActivationRequest } from "./auth.ts";
 import { connectDeviceWithDeps } from "./device.ts";
-import type { TrellisAPI } from "./contracts.ts";
+import { defineDeviceContract } from "./contract.ts";
 import { TransportError } from "./errors/index.ts";
 import type { LoggerLike } from "./globals.ts";
-import type { TrellisAuth } from "./trellis.ts";
 
-const emptyApi = {
-  rpc: {},
-  operations: {},
-  events: {},
-  subjects: {},
-} satisfies TrellisAPI;
-
-const testContract = {
-  CONTRACT_ID: "example.device@v1",
-  CONTRACT_DIGEST: "digest-a",
-  CONTRACT: {
-    displayName: "Example Device",
-  },
-  API: {
-    trellis: emptyApi,
-  },
-  createClient(_nc: NatsConnection, _auth: TrellisAuth) {
-    throw new Error("unreachable");
-  },
-};
+const testContract = defineDeviceContract(() => ({
+  id: "example.device@v1",
+  displayName: "Example Device",
+  description: "Exercise device connection behavior.",
+}));
 
 function createTestLogger() {
   const childBindings: Array<Record<string, unknown>> = [];
@@ -269,7 +253,7 @@ Deno.test("connectDeviceWithDeps maps runtime connection failures to TransportEr
               instanceId: "dev_123",
               deploymentId: "reader.default",
               contractId: "example.device@v1",
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: {
                   natsServers: ["nats://127.0.0.1:4222"],
@@ -413,7 +397,7 @@ Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range usin
               instanceId: "dev_123",
               deploymentId: "reader.default",
               contractId: "example.device@v1",
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: {
                   natsServers: ["nats://127.0.0.1:4222"],
@@ -482,7 +466,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS lifecycle status even
               instanceId: "dev_123",
               deploymentId: "reader.default",
               contractId: "example.device@v1",
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: {
                   natsServers: ["nats://127.0.0.1:4222"],
@@ -538,6 +522,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS lifecycle status even
         "Device forcing NATS reconnect",
         "Device NATS connection became stale",
         "Device NATS connection closed",
+        "Failed to build or publish health heartbeat",
       ].sort(),
     );
     assertEquals(testLogger.infoCalls.length, 1);
@@ -562,7 +547,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS closed outcomes", asy
               instanceId: "dev_123",
               deploymentId: "reader.default",
               contractId: "example.device@v1",
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: {
                   natsServers: ["nats://127.0.0.1:4222"],
@@ -601,10 +586,13 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS closed outcomes", asy
 
     await delay(0);
 
-    assertEquals(closedLogger.warnCalls.length, 1);
+    assertEquals(closedLogger.warnCalls.length, 2);
     assertEquals(
-      closedLogger.warnCalls[0]?.[1],
-      "Device NATS connection closed",
+      closedLogger.warnCalls.map((call) => call[1]).sort(),
+      [
+        "Device NATS connection closed",
+        "Failed to build or publish health heartbeat",
+      ].sort(),
     );
     assertEquals(closedLogger.errorCalls.length, 0);
 

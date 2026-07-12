@@ -1,12 +1,11 @@
-import { ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
+import { ok } from "@qlever-llc/trellis";
+import type { FieldOpsService } from "../../deps.ts";
 import { recordActivity } from "../activity/index.ts";
 
-type Args = RpcArgs<typeof contract, "Evidence.Delete">;
-type Result = RpcResult<typeof contract, "Evidence.Delete">;
+type Handler = Parameters<FieldOpsService["handleEvidenceDelete"]>[0];
 
 /** Deletes a stored evidence object from the demo evidence locker. */
-export async function deleteEvidence({ input, client }: Args): Promise<Result> {
+export const deleteEvidence: Handler = async ({ input, client }) => {
   const uploads = await client.store.uploads.open().orThrow();
   await uploads.delete(input.key).orThrow();
   await recordActivity(client, {
@@ -15,4 +14,4 @@ export async function deleteEvidence({ input, client }: Args): Promise<Result> {
   });
 
   return ok({ key: input.key, deleted: true });
-}
+};

@@ -1,12 +1,11 @@
-import { ok, type RpcArgs, type RpcResult } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
+import { ok } from "@qlever-llc/trellis";
+import type { FieldOpsService } from "../../deps.ts";
 import { listReports as listReportRecords } from "./reportStore.ts";
 
-type Args = RpcArgs<typeof contract, "Reports.List">;
-type Result = RpcResult<typeof contract, "Reports.List">;
+type Handler = Parameters<FieldOpsService["handleReportsList"]>[0];
 
 /** Lists completed closeout reports generated during this demo service run. */
-export function listReports({ input }: Args): Result {
+export const listReports: Handler = ({ input }) => {
   const reports = listReportRecords();
   const offset = input.offset ?? 0;
   const count = reports.length;
@@ -19,4 +18,4 @@ export function listReports({ input }: Args): Result {
       ? { nextOffset: offset + input.limit }
       : {}),
   });
-}
+};

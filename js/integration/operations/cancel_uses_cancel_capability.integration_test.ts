@@ -19,7 +19,7 @@ liveTrellisTest({
     const service = await fixture.connectService(runtime);
 
     try {
-      await service.handle.operation.entity.process(async ({ op }) => {
+      await service.handleEntityProcess(async ({ op }) => {
         await op.started().orThrow();
         return op.defer();
       });
@@ -28,7 +28,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

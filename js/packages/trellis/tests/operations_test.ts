@@ -1,5 +1,6 @@
 import { assertEquals, assertExists, assertInstanceOf } from "@std/assert";
 import { Type } from "typebox";
+import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 import { AsyncResult, err, ok, type Result } from "../../result/mod.ts";
 import type { JsonValue } from "@qlever-llc/trellis";
 import { defineServiceContract } from "../contract.ts";
@@ -83,7 +84,7 @@ const billing = defineServiceContract(
 );
 
 const refundOperation = {
-  ...billing.API.owned.operations["Billing.Refund"],
+  ...getContractRuntime(billing).ownedApi.operations["Billing.Refund"],
   update: schemas.RefundUpdate,
 } as const;
 const uploadOperation = {

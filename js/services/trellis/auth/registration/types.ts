@@ -1,20 +1,22 @@
 import type { ContractsModule } from "../../catalog/runtime.ts";
 import type { trellisControlPlaneApi } from "../../bootstrap/control_plane_api.ts";
-import type { API as trellisAuthApi } from "../../contracts/trellis_auth.ts";
 import type { AuthRuntimeDeps } from "../runtime_deps.ts";
-import type { TrellisService } from "@qlever-llc/trellis/service";
+import type { TrellisServiceSession } from "../../../../packages/trellis/server/service.ts";
 
-type AuthOwnedApi = typeof trellisAuthApi.owned;
+type AuthOwnedApi = typeof trellisControlPlaneApi.owned;
 type ControlPlaneTrellisApi = NonNullable<
   typeof trellisControlPlaneApi.trellis
 >;
 
-type AuthService = TrellisService<
+type AuthService = TrellisServiceSession<
   AuthOwnedApi,
   ControlPlaneTrellisApi
 >;
 
-export type AuthRpcMethod = keyof AuthOwnedApi["rpc"] & string;
+export type AuthRpcMethod = Extract<
+  keyof AuthOwnedApi["rpc"],
+  `Auth.${string}`
+>;
 
 export type RpcRegistrar = { handle: AuthService["handle"] };
 

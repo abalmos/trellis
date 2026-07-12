@@ -19,7 +19,7 @@ export {
   runAllServiceHealthChecks,
   runHealthCheck,
   runServiceHealthCheck,
-  ServiceHealth,
+  type ServiceHealth,
   type ServiceHealthCheck,
   type ServiceHealthCheckFn,
   type ServiceHealthInfo,

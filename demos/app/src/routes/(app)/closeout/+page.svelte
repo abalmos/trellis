@@ -81,7 +81,7 @@
     error = null;
 
     try {
-      const response = await trellis.request("Assignments.List", listPage).orThrow();
+      const response = await trellis.assignmentsList(listPage).orThrow();
       if (!mounted || requestId !== assignmentRequestId) return;
       assignments = response.entries;
       selectedInspectionId = response.entries.some((assignment) => assignment.inspectionId === preferredInspectionId)
@@ -137,7 +137,7 @@
 
     try {
       const reportInput: ReportsGenerateInputWithComment = { inspectionId: selectedInspectionId, reportComment: comment };
-      const ref = await trellis.operation("Reports.Generate").input(reportInput).start().orThrow();
+      const ref = await trellis.reportsGenerate(reportInput).start().orThrow();
       if (!mounted || runId !== operationRunId) return;
       currentRef = ref;
       acceptedId = ref.id;

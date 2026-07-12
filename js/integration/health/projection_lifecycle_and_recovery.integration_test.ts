@@ -23,7 +23,7 @@ liveTrellisTest({
     const service = await fixture.setupService(runtime);
     const waitForHealth = async (status: string) =>
       await runtime.waitFor(async () => {
-        const response = await observer.rpc.health.query({
+        const response = await observer.healthQuery({
           participantKinds: ["service"],
           contractIds: [fixture.serviceContract.CONTRACT_ID],
           limit: 20,
@@ -49,7 +49,7 @@ liveTrellisTest({
       const offline = await waitForHealth("offline");
       assertEquals(offline.entries[0].offlineInstances, 1);
       await runtime.waitFor(async () => {
-        const inspect = await observer.rpc.health.inspect({
+        const inspect = await observer.healthInspect({
           participantKind: "service",
           contractId: fixture.serviceContract.CONTRACT_ID,
           historyLimit: 20,
@@ -62,7 +62,7 @@ liveTrellisTest({
           : undefined;
       }, { timeoutMs: 5_000, intervalMs: 100 });
       const now = Date.now();
-      const metrics = await observer.rpc.health.metrics({
+      const metrics = await observer.healthMetrics({
         participantKind: "service",
         contractId: fixture.serviceContract.CONTRACT_ID,
         start: new Date(now - 5 * 60_000).toISOString(),

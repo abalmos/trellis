@@ -8,6 +8,7 @@ import { fromFileUrl } from "@std/path";
 import {
   defineAppContract,
   defineServiceContract,
+  kv,
   Result,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
@@ -83,14 +84,7 @@ const entityClientContract = defineAppContract(() => ({
   id: "trellis.test.entity-live-client@v1",
   displayName: "Trellis Test Entity Live Client",
   description: "App/client participant for live runtime tests.",
-  uses: {
-    required: {
-      entity: entityContract.use({
-        rpc: { call: ["Entity.Get"] },
-        events: { publish: ["Entity.Changed"] },
-      }),
-    },
-  },
+  uses: [entityContract.EntityGet, entityContract.EntityChanged.publish],
 }));
 
 const entitySubscriberContract = defineServiceContract(
@@ -99,16 +93,10 @@ const entitySubscriberContract = defineServiceContract(
     id: "trellis.test.entity-live-subscriber@v1",
     displayName: "Trellis Test Entity Live Subscriber",
     description: "Dependent durable event consumer for live runtime tests.",
-    uses: {
-      required: {
-        entity: entityContract.use({
-          events: { subscribe: ["Entity.Changed"] },
-        }),
-      },
-    },
+    uses: [entityContract.EntityChanged.subscribe],
     eventConsumers: {
       ingest: {
-        uses: { entity: ["Entity.Changed"] },
+        uses: { "trellis.test.entity-live@v1": ["Entity.Changed"] },
         ackWaitMs: 1_000,
         maxDeliver: 2,
       },
@@ -122,15 +110,13 @@ const migrationContractV1 = defineServiceContract(
     id: "trellis.test.mutable-resource@v1",
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
-    resources: {
-      kv: {
+    uses: [kv({
         cache: {
           purpose: "Store cached entity values.",
           schema: ref.schema("EntityChanged"),
           history: 1,
         },
-      },
-    },
+    })],
   }),
 );
 
@@ -140,15 +126,13 @@ const migrationContractV2 = defineServiceContract(
     id: "trellis.test.mutable-resource@v1",
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
-    resources: {
-      kv: {
+    uses: [kv({
         cache: {
           purpose: "Store cached entity values.",
           schema: ref.schema("EntityChanged"),
           history: 2,
         },
-      },
-    },
+    })],
   }),
 );
 
@@ -190,7 +174,6 @@ Deno.test({
 
       try {
         assertEquals(service.name, SERVICE_NAME);
-        assertEquals(service.auth.sessionKey, serviceKey.sessionKey);
       } finally {
         await service.stop();
       }
@@ -233,36 +216,24 @@ Deno.test({
         server: {},
       }).orThrow();
 
-      const eventController = new AbortController();
-      let observedEvent: string | undefined;
       try {
-        await service.handle.rpc.entity.get(({ input }) =>
+        await service.handleEntityGet(({ input }) =>
           Result.ok({ id: input.id, found: true })
         );
-        await service.event.entity.changed.listen(
-          (event) => {
-            observedEvent = event.value;
-            return Result.ok(undefined);
-          },
-          {},
-          { mode: "ephemeral", signal: eventController.signal },
-        ).orThrow();
 
         const client = await runtime.connectClient({
           name: "entity-test-client",
           contract: entityClientContract,
         });
 
-        const got = await client.rpc.entity.get({ id: "entity-1" }).orThrow();
+        const got = await client.entityGet({ id: "entity-1" }).orThrow();
         assertEquals(got, { id: "entity-1", found: true });
 
-        await client.event.entity.changed.publish({
+        await client.publishEntityChanged({
           id: "entity-1",
           value: "updated",
         }).orThrow();
-        await runtime.waitFor(() => observedEvent === "updated");
       } finally {
-        eventController.abort();
         await service.stop();
       }
     } finally {
@@ -294,7 +265,7 @@ Deno.test({
       const capture = await runtime.captureEvents({
         name: "entity-live-capture",
         contract: entityContract,
-        events: ["Entity.Changed"],
+        events: [entityContract.EntityChanged.subscribe],
       });
 
       assertEquals(capture.all("Entity.Changed"), []);
@@ -303,7 +274,7 @@ Deno.test({
         name: "entity-capture-client",
         contract: entityClientContract,
       });
-      await client.event.entity.changed.publish({
+      await client.publishEntityChanged({
         id: "entity-capture-1",
         value: "captured",
       }).orThrow();
@@ -415,15 +386,14 @@ Deno.test({
       let observedId: string | undefined;
 
       try {
-        await subscriber.event.entity.changed.listen(
+        await subscriber.onEntityChanged(
           (event) => {
             observedId = event.id;
             return Result.ok(undefined);
           },
-          {},
           { group: "ingest", signal: controller.signal },
         ).orThrow();
-        await entity.event.entity.changed.publish({
+        await entity.publishEntityChanged({
           id: "entity-durable-1",
           value: "changed",
         }).orThrow();

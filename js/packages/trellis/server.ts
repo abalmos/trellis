@@ -1,6 +1,6 @@
 import type { Msg, NatsConnection } from "@nats-io/nats-core";
 import { Pointer } from "typebox/value";
-import type { TrellisAPI } from "./contracts.ts";
+import type { RuntimeApi } from "./contract_support/runtime.ts";
 import {
   AsyncResult,
   BaseError,
@@ -32,7 +32,6 @@ import {
 import {
   type AcceptedOperation,
   annotateHandlerBoundaryError,
-  type AnyTrellisAPI,
   type AuthRequestsValidateResponse,
   base64urlDecode,
   base64urlEncode,
@@ -68,10 +67,10 @@ import {
   type TrellisAuth,
   type TrellisMode,
   type TrellisOpts,
-} from "./trellis.ts";
+} from "./session.ts";
 import type { SendTransferGrant } from "./transfer.ts";
 
-type TrellisServiceRuntimeOpts<TA extends AnyTrellisAPI> =
+type TrellisServiceRuntimeOpts<TA extends RuntimeApi> =
   & Omit<TrellisOpts<TA>, "api">
   & {
     api: TA;
@@ -79,7 +78,7 @@ type TrellisServiceRuntimeOpts<TA extends AnyTrellisAPI> =
     version?: string;
   };
 
-export type TrellisServiceRuntimeFor<TA extends AnyTrellisAPI = TrellisAPI> =
+export type TrellisServiceRuntimeFor<TA extends RuntimeApi = RuntimeApi> =
   & Omit<TrellisServiceRuntime, "mount" | "operationHandle">
   & {
     mount<M extends MethodsOf<TA>>(
@@ -239,7 +238,7 @@ function recordOperationServerError(
   });
 }
 
-export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
+export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
   #nats: NatsConnection;
   #version?: string;
   #log: LoggerLike;
@@ -253,7 +252,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
     name: string,
     nats: NatsConnection,
     auth: TrellisAuth,
-    opts?: TrellisServiceRuntimeOpts<TrellisAPI>,
+    opts?: TrellisServiceRuntimeOpts<RuntimeApi>,
   ) {
     super(name, nats, auth, { ...opts, log: opts?.log ?? serverLogger });
     this.#nats = nats;
@@ -1221,12 +1220,12 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
 
   mountRuntime(
     method: string,
-    fn: Parameters<Trellis<TrellisAPI, TrellisMode>["mount"]>[1],
+    fn: Parameters<Trellis<RuntimeApi, TrellisMode>["mount"]>[1],
   ): Promise<void> {
     return super.mount(method, fn);
   }
 
-  static create<TA extends AnyTrellisAPI>(
+  static create<TA extends RuntimeApi>(
     name: string,
     nats: NatsConnection,
     auth: TrellisAuth,
@@ -1236,7 +1235,7 @@ export class TrellisServiceRuntime extends Trellis<TrellisAPI, TrellisMode> {
       name,
       nats,
       auth,
-      opts as TrellisServiceRuntimeOpts<TrellisAPI>,
+      opts as TrellisServiceRuntimeOpts<RuntimeApi>,
     );
     return runtime as TrellisServiceRuntime & TrellisServiceRuntimeFor<TA>;
   }

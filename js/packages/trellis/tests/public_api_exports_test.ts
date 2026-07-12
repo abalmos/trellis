@@ -14,8 +14,6 @@ import {
   defineServiceContract,
   err,
   FileInfoSchema,
-  HealthCheckResultSchema,
-  HealthHeartbeatSchema,
   isErr,
   isOk,
   normalizeCursorQuery,
@@ -88,8 +86,8 @@ Deno.test("root public API includes core runtime, contracts, and result helpers"
   assertEquals(typeof StoreError, "function");
   assertEquals(typeof TransferError, "function");
   assertEquals(typeof FileInfoSchema, "object");
-  assertEquals(typeof HealthCheckResultSchema, "object");
-  assertEquals(typeof HealthHeartbeatSchema, "object");
+  assertEquals("HealthCheckResultSchema" in trellis, false);
+  assertEquals("HealthHeartbeatSampleSchema" in trellis, false);
   assertEquals(typeof ok, "function");
   assertEquals(typeof err, "function");
   assertEquals(typeof isOk, "function");

@@ -60,13 +60,6 @@
   type GrantOverrideMutationOutput = {
     grantOverrides: DeploymentAuthorityGrantOverride[];
   };
-  type AuthRpcClient = {
-    request(subject: "Auth.DeploymentAuthority.List", input: ListPageInput): AsyncResult<AuthorityListOutput, BaseError>;
-    request(subject: "Auth.DeploymentAuthority.Get", input: AuthorityGetInput): AsyncResult<AuthorityGetOutput, BaseError>;
-    request(subject: "Auth.Capabilities.List", input: ListPageInput): AsyncResult<CapabilityListOutput, BaseError>;
-    request(subject: "Auth.CapabilityGroups.List", input: ListPageInput): AsyncResult<CapabilityGroupListOutput, BaseError>;
-    request(subject: "Auth.DeploymentAuthority.GrantOverrides.Put", input: GrantOverrideMutationInput): AsyncResult<GrantOverrideMutationOutput, BaseError>;
-  };
   type CapabilitySection = {
     key: string;
     title: string;
@@ -75,7 +68,6 @@
   };
 
   const trellis = getTrellis();
-  const authRpc = trellis as AuthRpcClient;
   const grantIdentityKinds: GrantIdentityKind[] = ["web", "session"];
 
   let loading = $state(true);
@@ -294,9 +286,9 @@
     saved = null;
     try {
       const [listResponse, capabilitiesResponse, groupsResponse] = await Promise.all([
-        authRpc.request("Auth.DeploymentAuthority.List", { limit: 500, offset: 0 }).take(),
-        authRpc.request("Auth.Capabilities.List", { limit: 500, offset: 0 }).take(),
-        authRpc.request("Auth.CapabilityGroups.List", { limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(listResponse)) {
         error = errorMessage(listResponse);
@@ -328,7 +320,7 @@
   }
 
   async function loadDeploymentAuthorityGrantOverrides(deployment: DeploymentAuthority): Promise<DeploymentAuthorityGrantOverride[]> {
-    const response = await authRpc.request("Auth.DeploymentAuthority.Get", { deploymentId: deployment.deploymentId }).take();
+    const response = await trellis.authDeploymentAuthorityGet({ deploymentId: deployment.deploymentId }).take();
     if (isErr(response)) throw new Error(`Failed to load ${deployment.deploymentId}: ${errorMessage(response)}`);
     return response.grantOverrides.map(cleanGrantOverride);
   }
@@ -360,7 +352,7 @@
     error = null;
     saved = null;
     try {
-      const response = await authRpc.request("Auth.DeploymentAuthority.GrantOverrides.Put", {
+      const response = await trellis.authDeploymentAuthorityGrantOverridesPut({
         deploymentId: storageDeploymentId,
         overrides: [...existingForStorageDeployment, ...uniqueNewOverrides.map(cleanGrantOverride)],
       }).take();

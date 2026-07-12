@@ -51,14 +51,14 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "device");
     } finally {
       await device.connection.close();
     }
 
     const activations = requireDeviceAuthorityList(
-      await admin.rpc.auth.deviceUserAuthoritiesList({
+      await admin.authDeviceUserAuthoritiesList({
         deploymentId,
         instanceId: provisioned.instance.instanceId,
         state: "activated",

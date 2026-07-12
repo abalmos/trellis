@@ -15,7 +15,7 @@ liveTrellisTest({
     let handlerRuns = 0;
 
     try {
-      await service.handle.operation.entity.process(async ({ op }) => {
+      await service.handleEntityProcess(async ({ op }) => {
         handlerRuns += 1;
         await op.started().orThrow();
         return op.defer();
@@ -25,14 +25,12 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 
       await runtime.waitFor(() => handlerRuns === 1);
-      const controlled = await service.handle.operation.entity.process.control(
-        ref.id,
-      ).orThrow();
+      const controlled = await service.handleEntityProcess.control(ref.id,).orThrow();
       await controlled.progress({ message: "approved", step: 2 }).orThrow();
       await controlled.complete({
         message: `${fixture.message}:done`,

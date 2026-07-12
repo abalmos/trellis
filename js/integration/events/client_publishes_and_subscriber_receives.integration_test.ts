@@ -14,7 +14,7 @@ liveTrellisTest({
     const capture = await runtime.captureEvents({
       name: fixture.captureName,
       contract: fixture.serviceContract,
-      events: ["Entity.Changed"],
+      events: [fixture.serviceContract.EntityChanged.subscribe],
     });
 
     try {
@@ -24,7 +24,7 @@ liveTrellisTest({
       });
       const payload = { id: fixture.publishedEntityId, value: "published" };
 
-      await client.event.entity.changed.publish(payload).orThrow();
+      await client.publishEntityChanged(payload).orThrow();
 
       const captured = await assertEventCaptured(
         capture,

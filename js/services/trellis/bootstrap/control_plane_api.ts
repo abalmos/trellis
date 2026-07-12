@@ -1,6 +1,11 @@
-import { API as trellisAuthApi } from "../contracts/trellis_auth.ts";
-import { API as trellisCoreApi } from "../contracts/trellis_core.ts";
-import { API as trellisStateApi } from "../contracts/trellis_state.ts";
+import { getContractRuntime } from "@qlever-llc/trellis/internal/contract-runtime";
+import trellisAuth from "../contracts/trellis_auth.ts";
+import trellisCore from "../contracts/trellis_core.ts";
+import trellisState from "../contracts/trellis_state.ts";
+
+const trellisAuthApi = getContractRuntime(trellisAuth);
+const trellisCoreApi = getContractRuntime(trellisCore);
+const trellisStateApi = getContractRuntime(trellisState);
 
 const CONTROL_PLANE_APIS = [
   trellisCoreApi,
@@ -71,15 +76,15 @@ function assertComposableApi() {
       for (const kind of OWNED_API_KINDS) {
         assertNoOverlap(
           kind === "operations" ? "operation" : kind.slice(0, -1),
-          left.owned[kind],
-          right.owned[kind],
+          left.ownedApi[kind],
+          right.ownedApi[kind],
         );
       }
       for (const kind of TRELLIS_API_KINDS) {
         assertNoConflictingOverlap(
           kind === "operations" ? "operation" : kind.slice(0, -1),
-          left.trellis?.[kind] ?? {},
-          right.trellis?.[kind] ?? {},
+          left.api[kind] ?? {},
+          right.api[kind] ?? {},
         );
       }
     }
@@ -91,46 +96,46 @@ assertComposableApi();
 export const trellisControlPlaneApi = {
   owned: {
     rpc: {
-      ...trellisCoreApi.owned.rpc,
-      ...trellisAuthApi.owned.rpc,
-      ...trellisStateApi.owned.rpc,
+      ...trellisCoreApi.ownedApi.rpc,
+      ...trellisAuthApi.ownedApi.rpc,
+      ...trellisStateApi.ownedApi.rpc,
     },
     operations: {
-      ...trellisCoreApi.owned.operations,
-      ...trellisAuthApi.owned.operations,
-      ...trellisStateApi.owned.operations,
+      ...trellisCoreApi.ownedApi.operations,
+      ...trellisAuthApi.ownedApi.operations,
+      ...trellisStateApi.ownedApi.operations,
     },
     events: {
-      ...trellisCoreApi.owned.events,
-      ...trellisAuthApi.owned.events,
-      ...trellisStateApi.owned.events,
+      ...trellisCoreApi.ownedApi.events,
+      ...trellisAuthApi.ownedApi.events,
+      ...trellisStateApi.ownedApi.events,
     },
     subjects: {
-      ...trellisCoreApi.owned.subjects,
-      ...trellisAuthApi.owned.subjects,
-      ...trellisStateApi.owned.subjects,
+      ...trellisCoreApi.ownedApi.subjects,
+      ...trellisAuthApi.ownedApi.subjects,
+      ...trellisStateApi.ownedApi.subjects,
     },
   },
   trellis: {
     rpc: {
-      ...trellisCoreApi.trellis?.rpc,
-      ...trellisAuthApi.trellis?.rpc,
-      ...trellisStateApi.trellis?.rpc,
+      ...trellisCoreApi.api.rpc,
+      ...trellisAuthApi.api.rpc,
+      ...trellisStateApi.api.rpc,
     },
     operations: {
-      ...trellisCoreApi.trellis?.operations,
-      ...trellisAuthApi.trellis?.operations,
-      ...trellisStateApi.trellis?.operations,
+      ...trellisCoreApi.api.operations,
+      ...trellisAuthApi.api.operations,
+      ...trellisStateApi.api.operations,
     },
     events: {
-      ...trellisCoreApi.trellis?.events,
-      ...trellisAuthApi.trellis?.events,
-      ...trellisStateApi.trellis?.events,
+      ...trellisCoreApi.api.events,
+      ...trellisAuthApi.api.events,
+      ...trellisStateApi.api.events,
     },
     subjects: {
-      ...trellisCoreApi.trellis?.subjects,
-      ...trellisAuthApi.trellis?.subjects,
-      ...trellisStateApi.trellis?.subjects,
+      ...trellisCoreApi.api.subjects,
+      ...trellisAuthApi.api.subjects,
+      ...trellisStateApi.api.subjects,
     },
   },
 } as const;

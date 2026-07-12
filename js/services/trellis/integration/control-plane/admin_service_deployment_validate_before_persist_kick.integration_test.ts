@@ -5,7 +5,7 @@ import {
   Result,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import {
@@ -69,13 +69,7 @@ const clientContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Admin Service Validate Client",
   description:
     "Calls the live service after a failed deployment-disable validation.",
-  uses: {
-    required: {
-      validateService: serviceContract.use({
-        rpc: { call: ["ValidateKick.Ping"] },
-      }),
-    },
-  },
+  uses: [serviceContract.ValidateKickPing],
 }));
 
 const adminContract = defineAppContract(() => ({
@@ -86,15 +80,7 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Deployment Validate Admin",
   description:
     "Exercises Auth.Deployments.Disable staged validation failure through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: ["Auth.Deployments.Disable", "Auth.Deployments.List"],
-        },
-      }),
-    },
-  },
+  uses: [trellisAuth.AuthDeploymentsDisable, trellisAuth.AuthDeploymentsList],
 }));
 
 liveTrellisTest({
@@ -124,7 +110,7 @@ liveTrellisTest({
 
     try {
       assertEquals(
-        await client.rpc.validateKick.ping({ message: "before" }).orThrow(),
+        await client.validateKickPing({ message: "before" }).orThrow(),
         { message: "before" },
       );
 
@@ -134,13 +120,13 @@ liveTrellisTest({
         contract: adminContract,
       });
       try {
-        const failedDisable = await admin.rpc.auth.deploymentsDisable({
+        const failedDisable = await admin.authDeploymentsDisable({
           kind: "service",
           deploymentId,
         });
         assertRefreshHookFailure(failedDisable, validateHook);
 
-        const page = await admin.rpc.auth.deploymentsList({
+        const page = await admin.authDeploymentsList({
           kind: "service",
           limit: 500,
         }).orThrow();
@@ -151,7 +137,7 @@ liveTrellisTest({
           false,
         );
         assertEquals(
-          await client.rpc.validateKick.ping({ message: "after" }).orThrow(),
+          await client.validateKickPing({ message: "after" }).orThrow(),
           { message: "after" },
         );
       } finally {
@@ -173,7 +159,7 @@ async function connectService(trellisUrl: string, sessionKeySeed: string) {
     telemetry: false,
     server: { log: false },
   }).orThrow();
-  service.handle.rpc.validateKick.ping(({ input }) =>
+  service.handleValidateKickPing(({ input }) =>
     Result.ok({ message: input.message })
   );
   return service;

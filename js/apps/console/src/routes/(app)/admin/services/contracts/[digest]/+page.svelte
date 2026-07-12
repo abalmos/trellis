@@ -42,7 +42,6 @@
   };
 
   const trellis = getTrellis();
-  const coreRequest = trellis.request.bind(trellis) as CoreRequest;
   const tabs: Tab[] = ["docs", "rpc", "events", "operations", "feeds", "schemas", "capabilities"];
 
   let loading = $state(true);
@@ -283,7 +282,7 @@
     error = null;
     contract = null;
     try {
-      const response = await coreRequest("Trellis.Contract.Get", { digest }).take();
+      const response = await trellis.trellisContractGet({ digest }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       contract = response.contract;
     } catch (cause) {

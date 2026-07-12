@@ -41,7 +41,7 @@
     error = null;
     try {
       currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
-      const response = await trellis.request("Auth.Sessions.List", {
+      const response = await trellis.authSessionsList({
         user: sessionFilterUser.trim() || undefined,
         limit: 500,
         offset: 0,
@@ -59,7 +59,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.Connections.List", {
+      const response = await trellis.authConnectionsList({
         user: connFilterUser.trim() || undefined,
         sessionKey: connFilterSessionKey.trim() || undefined,
         limit: 500,

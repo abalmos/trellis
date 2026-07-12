@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -28,11 +28,7 @@ const clientContract = defineAppContract(() => ({
   displayName: "Trellis Bootstrap Insufficient User Client",
   description:
     "Creates a bound app session for insufficient-capability bootstrap cleanup.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Users.List"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthUsersList],
 }));
 
 liveTrellisTest({

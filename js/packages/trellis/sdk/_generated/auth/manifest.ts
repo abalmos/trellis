@@ -1,20 +1,10 @@
 // Generated from ./generated/contracts/manifests/trellis.auth@v1.json
-import type {
-  ContractDependencyUse,
-  SdkContractModule,
-  TrellisContractV1,
-  UseSpec,
-} from "../../../index.ts";
-import { API } from "./api.ts";
-
-const CONTRACT_MODULE_METADATA = Symbol.for(
-  "@qlever-llc/trellis/contracts/contract-module",
-);
+import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
   "li4JAKPNat2wbdqv-oKo1eTF_8RQq2WFT3PYy_QI9nc" as const;
-export const CONTRACT = {
+export const CONTRACT: TrellisContractV1 = {
   "capabilities": {
     "trellis.auth::device.review": {
       "description": "Review and decide pending device activation requests.",
@@ -11217,80 +11207,4 @@ export const CONTRACT = {
       "type": "object",
     },
   },
-} as TrellisContractV1;
-
-function assertSelectedKeysExist(
-  kind: "rpc" | "operations" | "events" | "feeds",
-  keys: readonly string[] | undefined,
-  api: Record<string, unknown>,
-) {
-  if (!keys) {
-    return;
-  }
-
-  for (const key of keys) {
-    if (!Object.hasOwn(api, key)) {
-      throw new Error(
-        `Contract '${CONTRACT_ID}' does not expose ${kind} key '${key}'`,
-      );
-    }
-  }
-}
-
-function assertValidUseSpec(spec: UseSpec<typeof API.owned>) {
-  assertSelectedKeysExist("rpc", spec.rpc?.call, API.owned.rpc);
-  assertSelectedKeysExist(
-    "operations",
-    spec.operations?.call,
-    API.owned.operations,
-  );
-  assertSelectedKeysExist("events", spec.events?.publish, API.owned.events);
-  assertSelectedKeysExist("events", spec.events?.subscribe, API.owned.events);
-  assertSelectedKeysExist("feeds", spec.feeds?.subscribe, API.owned.feeds);
-}
-
-export const sdk: SdkContractModule<typeof CONTRACT_ID, typeof API.owned> = {
-  CONTRACT_ID,
-  CONTRACT_DIGEST,
-  CONTRACT,
-  API,
-  use: <const TSpec extends UseSpec<typeof API.owned>>(spec: TSpec) => {
-    assertValidUseSpec(spec);
-
-    const dependencyUse = {
-      contract: CONTRACT_ID,
-      ...(spec.rpc?.call ? { rpc: { call: [...spec.rpc.call] } } : {}),
-      ...(spec.operations?.call
-        ? { operations: { call: [...spec.operations.call] } }
-        : {}),
-      ...((spec.events?.publish || spec.events?.subscribe)
-        ? {
-          events: {
-            ...(spec.events.publish
-              ? { publish: [...spec.events.publish] }
-              : {}),
-            ...(spec.events.subscribe
-              ? { subscribe: [...spec.events.subscribe] }
-              : {}),
-          },
-        }
-        : {}),
-      ...(spec.feeds?.subscribe
-        ? { feeds: { subscribe: [...spec.feeds.subscribe] } }
-        : {}),
-    };
-
-    Object.defineProperty(dependencyUse, CONTRACT_MODULE_METADATA, {
-      value: sdk,
-      enumerable: false,
-    });
-
-    return dependencyUse as ContractDependencyUse<
-      typeof CONTRACT_ID,
-      typeof API.owned,
-      TSpec
-    >;
-  },
 };
-
-export const use = sdk.use;

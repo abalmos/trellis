@@ -30,7 +30,7 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const first = await client.rpc.auth.sessionsMe({}).orThrow();
+      const first = await client.authSessionsMe({}).orThrow();
       assert(first.user !== null, "expected Auth.Sessions.Me to return a user");
       assertEquals(first.user.active, true);
       assertArrayIncludes(first.user.capabilities, ["admin"]);
@@ -45,7 +45,7 @@ liveTrellisTest({
           userId,
         ],
       );
-      const grouped = await client.rpc.auth.sessionsMe({}).orThrow();
+      const grouped = await client.authSessionsMe({}).orThrow();
       assertArrayIncludes(grouped.user?.capabilities ?? [], [
         "trellis.auth::device.review",
       ]);
@@ -75,7 +75,7 @@ liveTrellisTest({
         "UPDATE service_instances SET capabilities = ? WHERE instance_key = ?",
         [JSON.stringify(["service.current"]), serviceKey.sessionKey],
       );
-      const serviceMe = await client.rpc.authLogin.ping({
+      const serviceMe = await client.authLoginPing({
         message: "sessions-me",
       }).orThrow();
       assertEquals(serviceMe.participantKind, "service");
@@ -92,7 +92,7 @@ liveTrellisTest({
           userId,
         ],
       );
-      assert((await client.rpc.auth.sessionsMe({})).isErr());
+      assert((await client.authSessionsMe({})).isErr());
     } finally {
       await client.connection.close().catch(() => undefined);
       await service.stop();

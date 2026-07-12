@@ -33,7 +33,7 @@ liveTrellisTest({
     let observed: { id: string; context: EventListenerContext } | undefined;
 
     try {
-      const ambiguous = await consumer.event.source.pinged.listen(() =>
+      const ambiguous = await consumer.onSourcePinged(() =>
         Result.ok(undefined)
       );
       const ambiguousValue = ambiguous.take();
@@ -45,7 +45,7 @@ liveTrellisTest({
         "is declared in multiple event consumer groups",
       );
 
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         (event, context) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
@@ -53,7 +53,7 @@ liveTrellisTest({
         {},
         { group: "primary", signal: controller.signal },
       ).orThrow();
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "primary",
       }).orThrow();

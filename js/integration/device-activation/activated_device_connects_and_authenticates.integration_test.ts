@@ -48,7 +48,7 @@ liveTrellisTest({
       log: false,
     }).orThrow();
     try {
-      const me = await device.request("Auth.Sessions.Me", {}).orThrow();
+      const me = await device.authSessionsMe({}).orThrow();
       assertEquals(me.participantKind, "device");
       assertEquals(me.device?.deploymentId, deploymentId);
       assertEquals(me.device?.runtimePublicKey, identity.publicIdentityKey);

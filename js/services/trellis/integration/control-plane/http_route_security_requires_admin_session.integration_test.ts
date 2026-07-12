@@ -6,7 +6,7 @@ import {
   sha256,
   utf8,
 } from "@qlever-llc/trellis/auth.ts";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -27,13 +27,7 @@ const adminHttpRouteProbeContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane HTTP Route Security Probe",
   description:
     "Verifies control-plane HTTP bootstrap requires an authenticated admin session.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: { call: ["Auth.Sessions.Me", "Auth.Users.List"] },
-      }),
-    },
-  },
+  uses: [trellisAuth.AuthSessionsMe, trellisAuth.AuthUsersList],
 }));
 
 liveTrellisTest({
@@ -57,7 +51,7 @@ liveTrellisTest({
     });
 
     try {
-      const me = await client.rpc.auth.sessionsMe({}).orThrow();
+      const me = await client.authSessionsMe({}).orThrow();
       assert(me.user !== null, "expected admin client session user");
       assertArrayIncludes(me.user.capabilities, ["admin"]);
 

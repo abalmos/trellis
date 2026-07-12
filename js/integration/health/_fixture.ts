@@ -1,5 +1,5 @@
 import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
-import { sdk as health } from "@qlever-llc/trellis/sdk/health";
+import * as health from "@qlever-llc/trellis/sdk/health";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
@@ -20,14 +20,12 @@ export function createHealthFixture(caseId: string) {
     id: caseScopedContractId("trellis.integration.health-observer", caseId),
     displayName: `Trellis Integration Health Observer (${slug})`,
     description: "Reads the projected Trellis health lifecycle.",
-    uses: {
-      required: {
-        health: health.use({
-          rpc: { call: ["Health.Query", "Health.Inspect", "Health.Metrics"] },
-          feeds: { subscribe: ["Health.Watch"] },
-        }),
-      },
-    },
+    uses: [
+      health.HealthQuery,
+      health.HealthInspect,
+      health.HealthMetrics,
+      health.HealthWatch,
+    ],
   }));
 
   async function setupService(runtime: LiveTrellisRuntime) {

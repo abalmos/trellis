@@ -44,7 +44,7 @@ liveTrellisTest({
           .length,
         0,
       );
-      await service.event.source.pinged.listen(
+      await service.onSourcePinged(
         (event, context) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
@@ -58,7 +58,7 @@ liveTrellisTest({
         0,
       );
 
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "ephemeral",
       }).orThrow();

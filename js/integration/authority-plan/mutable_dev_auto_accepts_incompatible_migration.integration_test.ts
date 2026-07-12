@@ -22,7 +22,7 @@ liveTrellisTest({
       contract: fixture.baseContract,
     });
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.baseContract>>>
       | undefined = await fixture.connectService({
         runtime,
         contract: fixture.baseContract,
@@ -30,13 +30,12 @@ liveTrellisTest({
         seed: baseKey.seed,
       });
     let replacementService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.incompatibleSchemaContract>>>
       | undefined;
 
     try {
-      await baseService.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
-      );
+      await baseService.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
       const before = await fixture.connectClientAndPing(
         runtime,
         "mutable-before",
@@ -67,18 +66,17 @@ liveTrellisTest({
       await runtime.deployments.waitReady(fixture.mutableDeployment);
 
       replacementService = await connectPromise;
-      await replacementService.handle.rpc.plan.ping(({ input }) =>
+      await replacementService.handlePlanPing(({ input }) =>
         Result.ok({
           count: fixture.pingCount(input),
           variant: "mutable-incompatible",
-        })
-      );
+        }));
 
       const client = await runtime.connectClient({
         name: fixture.incompatibleClientName,
         contract: fixture.incompatibleClientContract,
       });
-      const result = await client.rpc.plan.ping({ count: 11 }).orThrow();
+      const result = await client.planPing({ count: 11 }).orThrow();
       assertEquals(result, { count: 11, variant: "mutable-incompatible" });
     } finally {
       await replacementService?.stop();

@@ -289,28 +289,26 @@ async function writeConsumerProject(projectDir: string) {
     `import { Result } from "@qlever-llc/result";
 import { ValidationError } from "@qlever-llc/trellis";
 import { completeSessionLogout } from "@qlever-llc/trellis/auth/browser";
-import { API, sdk as auth, type Client } from "@qlever-llc/trellis/sdk/auth";
-import { sdk as health } from "@qlever-llc/trellis/sdk/health";
-import { sdk as state } from "@qlever-llc/trellis/sdk/state";
+import * as auth from "@qlever-llc/trellis/sdk/auth";
+import * as health from "@qlever-llc/trellis/sdk/health";
+import * as state from "@qlever-llc/trellis/sdk/state";
 import { createTrellisApp, TrellisProvider, type TrellisProviderProps } from "@qlever-llc/trellis-svelte";
 
-type AuthClient = Client;
+type AuthClient = auth.AuthSessionsMeOutput;
 type ProviderProps = TrellisProviderProps;
 
-const authUse = auth.use({ rpc: { call: ["Auth.Sessions.Me"] } });
-const healthUse = health.use({ rpc: { call: ["Health.Query"] } });
-const stateUse = state.use({ rpc: { call: ["State.Get"] } });
-const rpc = API.owned.rpc;
+const authAction = auth.AuthSessionsMe;
+const healthAction = health.HealthQuery;
+const stateAction = state.StateGet;
 
 void Result;
 void ValidationError;
 void completeSessionLogout;
 void createTrellisApp;
 void TrellisProvider;
-void authUse;
-void healthUse;
-void stateUse;
-void rpc;
+void authAction;
+void healthAction;
+void stateAction;
 
 export type { AuthClient, ProviderProps };
 `,

@@ -27,14 +27,12 @@ liveTrellisTest({
       identity,
     );
 
-    const activationRef = await admin.operation.auth
-      .deviceUserAuthoritiesResolve
-      .input({ flowId })
+    const activationRef = await admin.authDeviceUserAuthoritiesResolve({ flowId })
       .start()
       .orThrow();
 
     const review = await runtime.waitFor(async () => {
-      const reviews = await admin.rpc.auth.deviceUserAuthoritiesReviewsList({
+      const reviews = await admin.authDeviceUserAuthoritiesReviewsList({
         deploymentId,
         instanceId: provisioned.instance.instanceId,
         state: "pending",
@@ -47,7 +45,7 @@ liveTrellisTest({
       );
     }, { timeoutMs: 10_000, intervalMs: 25 });
 
-    const decided = await admin.rpc.auth.deviceUserAuthoritiesReviewsDecide({
+    const decided = await admin.authDeviceUserAuthoritiesReviewsDecide({
       reviewId: review.reviewId,
       decision: "reject",
       reason: rejectionReason,

@@ -21,30 +21,28 @@ stream-derived projections.
 
 ### Contract Declaration
 
-Service-owned KV resources are schema-backed requested needs under
-`resources.kv`. Accepted KV requests become deployment authority desired state.
-Reconciliation is the only path that creates, updates, removes, or adopts
-materialized KV buckets and bindings.
+Service-owned KV resources are schema-backed requested needs declared with
+`kv({...})` in the contract's `uses` array. Accepted KV requests become
+deployment authority desired state. Reconciliation is the only path that
+creates, updates, removes, or adopts materialized KV buckets and bindings.
 
 Example:
 
 ```ts
-resources: {
-  kv: {
-    activity: {
-      purpose: "Store normalized activity entries",
-      schema: ref.schema("AuditEntry"),
-      required: true,
-      history: 1,
-      ttlMs: 0,
-    },
+uses: [kv({
+  activity: {
+    purpose: "Store normalized activity entries",
+    schema: ref.schema("AuditEntry"),
+    required: true,
+    history: 1,
+    ttlMs: 0,
   },
-}
+})];
 ```
 
 Rules:
 
-- each `resources.kv.<alias>` entry must declare `schema: ref.schema("...")`
+- each `kv({...})` alias must declare `schema: ref.schema("...")`
 - the referenced schema must exist in the contract's top-level `schemas` map
 - `required` defaults to `true`; it controls whether generated service code sees
   the alias as required or optional

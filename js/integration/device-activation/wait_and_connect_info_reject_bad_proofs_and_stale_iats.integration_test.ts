@@ -189,7 +189,7 @@ liveTrellisTest({
       "contract_digest_not_allowed",
     );
 
-    await admin.rpc.auth.deploymentsDisable({
+    await admin.authDeploymentsDisable({
       kind: "device",
       deploymentId,
     }).orThrow();

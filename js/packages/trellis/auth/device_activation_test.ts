@@ -653,23 +653,14 @@ Deno.test("device activation client wrappers hide method strings", async () => {
   }
 
   const transport: DeviceActivationTransport = {
-    operation: {
-      auth: {
-        deviceUserAuthoritiesResolve: operation(
-          "Auth.DeviceUserAuthorities.Resolve",
-        ),
-      },
-    },
-    rpc: {
-      auth: {
-        deviceUserAuthoritiesList: (input) =>
-          request("Auth.DeviceUserAuthorities.List", input),
-        deviceUserAuthoritiesRevoke: (input) =>
-          request("Auth.DeviceUserAuthorities.Revoke", input),
-        devicesConnectInfoGet: (input) =>
-          request("Auth.Devices.ConnectInfo.Get", input),
-      },
-    },
+    authDeviceUserAuthoritiesResolve: (input) =>
+      operation("Auth.DeviceUserAuthorities.Resolve").input(input),
+    authDeviceUserAuthoritiesList: (input) =>
+      request("Auth.DeviceUserAuthorities.List", input),
+    authDeviceUserAuthoritiesRevoke: (input) =>
+      request("Auth.DeviceUserAuthorities.Revoke", input),
+    authDevicesConnectInfoGet: (input) =>
+      request("Auth.Devices.ConnectInfo.Get", input),
   };
   const client = createDeviceActivationClient(transport);
 

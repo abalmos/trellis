@@ -28,7 +28,7 @@ liveTrellisTest({
     });
 
     let state = await storedServiceState(admin, sessionKey);
-    await admin.rpc.auth.deploymentsDisable({
+    await admin.authDeploymentsDisable({
       kind: "service",
       deploymentId: fixture.deploymentId,
     }).orThrow();
@@ -39,7 +39,7 @@ liveTrellisTest({
       status: 403,
       state,
     });
-    await admin.rpc.auth.deploymentsEnable({
+    await admin.authDeploymentsEnable({
       kind: "service",
       deploymentId: fixture.deploymentId,
     }).orThrow();
@@ -47,7 +47,7 @@ liveTrellisTest({
 
     const instanceId = (await storedServiceState(admin, sessionKey)).instance
       .instanceId;
-    await admin.rpc.auth.serviceInstancesDisable({ instanceId }).orThrow();
+    await admin.authServiceInstancesDisable({ instanceId }).orThrow();
     state = await storedServiceState(admin, sessionKey);
     await assertDeniedBootstrap(runtime, seed, {
       admin,
@@ -55,7 +55,7 @@ liveTrellisTest({
       status: 403,
       state,
     });
-    await admin.rpc.auth.serviceInstancesEnable({ instanceId }).orThrow();
+    await admin.authServiceInstancesEnable({ instanceId }).orThrow();
     await assertServiceReconnects(runtime, seed);
 
     await sqlite.execute("DELETE FROM contracts WHERE digest = ?", [
@@ -183,7 +183,7 @@ async function fetchServiceBootstrap(
 }
 
 async function storedServiceState(admin: AdminClient, instanceKey: string) {
-  const deployments = await admin.rpc.auth.deploymentsList({
+  const deployments = await admin.authDeploymentsList({
     kind: "service",
     limit: 500,
   }).orThrow();
@@ -192,7 +192,7 @@ async function storedServiceState(admin: AdminClient, instanceKey: string) {
   );
   assert(deployment, "expected service deployment row");
 
-  const instances = await admin.rpc.auth.serviceInstancesList({
+  const instances = await admin.authServiceInstancesList({
     deploymentId: fixture.deploymentId,
     limit: 500,
   }).orThrow();

@@ -53,21 +53,19 @@ liveTrellisTest({
       | undefined;
 
     try {
-      await service.event.entity.changed.listen(
-        (event, context) => {
-          observed = { event, context };
-          throw thrown;
-        },
-        {},
-        { mode: "ephemeral", signal: controller.signal },
-      ).orThrow();
+      await service.onEntityChanged((event, context) => {
+        observed = { event, context };
+        throw thrown;
+      },
+      {},
+      { mode: "ephemeral", signal: controller.signal },).orThrow();
 
       const payload = {
         id: fixture.publishedEntityId,
         value: "prepared",
         header: "payload-header-value",
       };
-      const prepared = service.event.entity.changed.prepare(payload).orThrow();
+      const prepared = service.publishEntityChanged.prepare(payload).orThrow();
       await service.publishPrepared(Object.freeze({
         ...prepared,
         headers: Object.freeze({

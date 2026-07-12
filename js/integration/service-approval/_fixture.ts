@@ -4,7 +4,7 @@ import {
   defineAppContract,
   defineServiceContract,
 } from "@qlever-llc/trellis";
-import { sdk as authSdk } from "@qlever-llc/trellis/sdk/auth";
+import * as authSdk from "@qlever-llc/trellis/sdk/auth";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
@@ -63,23 +63,15 @@ export function createServiceApprovalFixture(caseId: string) {
     displayName: `Trellis Integration Service Approval Admin (${slug})`,
     description:
       "Test admin participant that provisions service instance keys through public Auth RPCs.",
-    uses: {
-      required: {
-        auth: authSdk.use({
-          rpc: {
-            call: [
-              "Auth.ServiceInstances.Provision",
-              "Auth.ServiceInstances.List",
-              "Auth.ServiceInstances.Disable",
-              "Auth.ServiceInstances.Enable",
-              "Auth.Deployments.List",
-              "Auth.Deployments.Disable",
-              "Auth.Deployments.Enable",
-            ],
-          },
-        }),
-      },
-    },
+    uses: [
+      authSdk.AuthServiceInstancesProvision,
+      authSdk.AuthServiceInstancesList,
+      authSdk.AuthServiceInstancesDisable,
+      authSdk.AuthServiceInstancesEnable,
+      authSdk.AuthDeploymentsList,
+      authSdk.AuthDeploymentsDisable,
+      authSdk.AuthDeploymentsEnable,
+    ],
   }));
 
   const clientContract = defineAppContract(() => ({
@@ -89,13 +81,7 @@ export function createServiceApprovalFixture(caseId: string) {
     ),
     displayName: `Trellis Integration Service Approval Client (${slug})`,
     description: "App/client participant for the service approval fixture.",
-    uses: {
-      required: {
-        approvalService: serviceContract.use({
-          rpc: { call: ["Startup.Ping"] },
-        }),
-      },
-    },
+    uses: [serviceContract.StartupPing],
   }));
 
   function randomSessionSeed(): string {
@@ -113,7 +99,7 @@ export function createServiceApprovalFixture(caseId: string) {
     const seed = randomSessionSeed();
     const serviceAuth = await createAuth({ sessionKeySeed: seed });
     const admin = await connectAdmin(runtime);
-    await admin.rpc.auth.serviceInstancesProvision({
+    await admin.authServiceInstancesProvision({
       deploymentId: caseScopedName("service-approval-deployment", caseId),
       instanceKey: serviceAuth.sessionKey,
     }).orThrow();

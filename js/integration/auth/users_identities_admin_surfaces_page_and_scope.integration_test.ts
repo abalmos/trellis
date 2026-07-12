@@ -3,7 +3,7 @@ import {
   AuthError,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { isErr } from "@qlever-llc/result";
@@ -22,7 +22,7 @@ const observerUsername = caseScopedName(
 const observerPassword =
   `trellis-integration-${CASE_ID}-observer-password-2026`;
 
-type SessionAdminAppClient = ConnectedTrellisClient<
+type SessionAdminAppClient = CallerRuntime<
   typeof fixture.sessionAdminContract
 >;
 type ControlPlaneSqlite = NonNullable<
@@ -39,19 +39,19 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
 
     try {
-      const target = await admin.rpc.auth.usersCreate({
+      const target = await admin.authUsersCreate({
         username: targetUsername,
         name: "Users Identities Target",
         email: `${targetUsername}@example.test`,
         active: true,
       }).orThrow();
-      const observerUser = await admin.rpc.auth.usersCreate({
+      const observerUser = await admin.authUsersCreate({
         username: observerUsername,
         name: "Users Identities Observer",
         email: `${observerUsername}@example.test`,
         active: true,
       }).orThrow();
-      const reset = await admin.rpc.auth.usersPasswordResetCreate({
+      const reset = await admin.authUsersPasswordResetCreate({
         userId: observerUser.user.userId,
       }).orThrow();
       await completeLocalPasswordAccountFlow({
@@ -62,16 +62,16 @@ liveTrellisTest({
       });
       await seedExtraIdentity(sqlite, target.user.userId);
 
-      const firstPage = await admin.rpc.auth.usersList({ limit: 1 }).orThrow();
+      const firstPage = await admin.authUsersList({ limit: 1 }).orThrow();
       assert(firstPage.count >= 3, "expected bootstrap and created users");
       assertEquals(firstPage.offset, 0);
       assertEquals(firstPage.limit, 1);
       assertEquals(firstPage.entries.length, 1);
       assertEquals(firstPage.nextOffset, 1);
-      const repeatedFirstPage = await admin.rpc.auth.usersList({ limit: 1 })
+      const repeatedFirstPage = await admin.authUsersList({ limit: 1 })
         .orThrow();
       assertEquals(repeatedFirstPage.entries[0], firstPage.entries[0]);
-      const secondPage = await admin.rpc.auth.usersList({ offset: 1, limit: 1 })
+      const secondPage = await admin.authUsersList({ offset: 1, limit: 1 })
         .orThrow();
       assertEquals(secondPage.offset, 1);
       assertEquals(secondPage.limit, 1);
@@ -84,13 +84,13 @@ liveTrellisTest({
         "expected Auth.Users.List pages to preserve stable userId ordering",
       );
 
-      const got = await admin.rpc.auth.usersGet({
+      const got = await admin.authUsersGet({
         userId: target.user.userId,
       }).orThrow();
       assertEquals(got.user.userId, target.user.userId);
       assert(got.user.identities.length >= 2, "expected target identities");
 
-      const identities = await admin.rpc.auth.userIdentitiesList({
+      const identities = await admin.authUserIdentitiesList({
         userId: target.user.userId,
         limit: 1,
       }).orThrow();
@@ -103,7 +103,7 @@ liveTrellisTest({
         identities.entries[0]?.identityId,
         got.user.identities[0]?.identityId,
       );
-      const nextIdentities = await admin.rpc.auth.userIdentitiesList({
+      const nextIdentities = await admin.authUserIdentitiesList({
         userId: target.user.userId,
         offset: 1,
         limit: 1,
@@ -118,7 +118,7 @@ liveTrellisTest({
       );
 
       await assertAuthErrorReason(
-        admin.rpc.auth.userIdentitiesUnlink({
+        admin.authUserIdentitiesUnlink({
           userId: target.user.userId,
           identityId: `${target.user.userId}:missing`,
         }),

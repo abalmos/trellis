@@ -1,13 +1,14 @@
 import {
   defineAppContract,
   defineServiceContract,
+  jobs,
   Result,
 } from "@qlever-llc/trellis";
 import {
   caseScopedContractId,
   caseScopedName,
 } from "@qlever-llc/trellis-test/integration";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import * as trellisJobs from "@qlever-llc/trellis/sdk/jobs";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { assert, assertEquals } from "@std/assert";
 import { Type } from "typebox";
@@ -29,12 +30,12 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
   displayName: "Trellis Control-Plane Jobs Admin Probe Service",
   description:
     "Creates a long-running service-local job for Jobs admin integration coverage.",
-  jobs: {
+  uses: [jobs({
     holdOpen: {
       payload: ref.schema("HoldPayload"),
       result: ref.schema("HoldResult"),
     },
-  },
+  })],
 }));
 
 const adminClientContract = defineAppContract(() => ({
@@ -44,20 +45,12 @@ const adminClientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Jobs Admin Probe Client",
   description: "Uses the generated Jobs admin SDK surface.",
-  uses: {
-    required: {
-      jobs: trellisJobs.use({
-        rpc: {
-          call: [
-            "Jobs.Query",
-            "Jobs.Inspect",
-            "Jobs.Cancel",
-            "Jobs.ListServices",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisJobs.JobsQuery,
+    trellisJobs.JobsInspect,
+    trellisJobs.JobsCancel,
+    trellisJobs.JobsListServices,
+  ],
 }));
 
 const serviceName = caseScopedName("jobs-admin-probe-service", CASE_ID);
@@ -115,7 +108,7 @@ liveTrellisTest({
       assertEquals(activeJob.payload.marker, marker);
 
       const listedJob = await runtime.waitFor(async () => {
-        const page = await adminClient.rpc.jobs.query({
+        const page = await adminClient.jobsQuery({
           service: ref.service,
           type: ref.type,
           limit: 20,
@@ -126,24 +119,24 @@ liveTrellisTest({
       assertEquals(listedJob.type, ref.type);
 
       const listedService = await runtime.waitFor(async () => {
-        const page = await adminClient.rpc.jobs.listServices({ limit: 20 })
+        const page = await adminClient.jobsListServices({ limit: 20 })
           .orThrow();
         return page.entries.find((entry) => entry.name === ref.service) ??
           false;
       }, { timeoutMs: 15_000, intervalMs: 100 });
       assertEquals(listedService.workers[0]?.jobType, ref.type);
 
-      const detail = await adminClient.rpc.jobs.inspect({ id: ref.id })
+      const detail = await adminClient.jobsInspect({ id: ref.id })
         .orThrow();
       assertEquals(detail.job.id, ref.id);
       assertEquals(detail.job.service, ref.service);
       assertEquals(detail.job.type, ref.type);
 
-      const cancelled = await adminClient.rpc.jobs.cancel({ id: ref.id })
+      const cancelled = await adminClient.jobsCancel({ id: ref.id })
         .orThrow();
       assertEquals(cancelled.job.id, ref.id);
       const terminal = await runtime.waitFor(async () => {
-        const current = await adminClient.rpc.jobs.inspect({ id: ref.id })
+        const current = await adminClient.jobsInspect({ id: ref.id })
           .orThrow();
         return current.job.state === "cancelled" ? current.job : false;
       }, { timeoutMs: 15_000, intervalMs: 100 });

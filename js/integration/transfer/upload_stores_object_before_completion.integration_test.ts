@@ -26,7 +26,7 @@ liveTrellisTest({
       });
 
       const uploadBytes = new TextEncoder().encode(uploadBody);
-      const upload = await client.operation.files.upload.input({
+      const upload = await client.filesUpload({
         key: fixture.uploadKey,
         contentType: "text/plain",
       }).transfer(uploadBytes).start().orThrow();

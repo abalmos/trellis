@@ -68,25 +68,25 @@ async function main(): Promise<void> {
     features.sites.createRefreshSiteSummaryHandler(deps),
   );
 
-  await service.handle.rpc.assignments.list(
+  await service.handleAssignmentsList(
     features.assignments.listAssignments,
   );
-  await service.handle.rpc.sites.list(features.sites.listSites);
-  await service.handle.rpc.sites.get(features.sites.getSite);
-  await service.handle.rpc.evidence.list(features.evidence.listEvidence);
-  await service.handle.rpc.evidence.download(
+  await service.handleSitesList(features.sites.listSites);
+  await service.handleSitesGet(features.sites.getSite);
+  await service.handleEvidenceList(features.evidence.listEvidence);
+  await service.handleEvidenceDownload(
     features.evidence.createDownloadEvidenceHandler(deps),
   );
-  await service.handle.rpc.evidence.delete(features.evidence.deleteEvidence);
-  await service.handle.rpc.reports.list(features.reports.listReports);
-  await service.handle.operation.sites.refresh(features.sites.refreshSite);
-  await service.handle.operation.reports.generate(
+  await service.handleEvidenceDelete(features.evidence.deleteEvidence);
+  await service.handleReportsList(features.reports.listReports);
+  await service.handleSitesRefresh(features.sites.refreshSite);
+  await service.handleReportsGenerate(
     features.reports.generateReport,
   );
-  await service.handle.operation.evidence.upload(
+  await service.handleEvidenceUpload(
     features.evidence.uploadEvidence,
   );
-  await service.handle.feed.audit.feed(
+  await service.handleAuditFeed(
     async ({ emit, signal }) => {
       const controller = new AbortController();
       const stop = () => {
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       signal.addEventListener("abort", stop, { once: true });
 
       try {
-        await service.event.audit.recorded.listen(
+        await service.onAuditRecorded(
           (event) => {
             return emit({
               name: deps.activityFeedEventNames.auditRecorded,
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
           {},
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
-        await service.event.reports.published.listen(
+        await service.onReportsPublished(
           (event) => {
             return emit({
               name: deps.activityFeedEventNames.reportsPublished,
@@ -115,7 +115,7 @@ async function main(): Promise<void> {
           {},
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
-        await service.event.evidence.uploaded.listen(
+        await service.onEvidenceUploaded(
           (event) => {
             return emit({
               name: deps.activityFeedEventNames.evidenceUploaded,
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
           {},
           { mode: "ephemeral", replay: "new", signal: controller.signal },
         ).orThrow();
-        await service.event.sites.refreshed.listen(
+        await service.onSitesRefreshed(
           (event) => {
             return emit({
               name: deps.activityFeedEventNames.sitesRefreshed,

@@ -23,7 +23,7 @@ liveTrellisTest({
       contract: fixture.resourceBaseContract,
     });
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.resourceBaseContract>>>
       | undefined = await fixture.connectService({
         runtime,
         contract: fixture.resourceBaseContract,
@@ -31,7 +31,7 @@ liveTrellisTest({
         seed: baseKey.seed,
       });
     let changedService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.resourceChangedContract>>>
       | undefined;
 
     try {
@@ -65,32 +65,30 @@ liveTrellisTest({
 
       changedService = await connectPromise;
       assertEquals(typeof changedService.kv.records, "object");
-      await changedService.handle.rpc.plan.resourcePing(
-        async ({ input, client }) => {
-          const resourceInput = fixture.resourceInput(input);
-          await client.kv.records.create(resourceInput.key, {
-            message: resourceInput.message,
-          })
-            .orThrow();
-          await client.kv.records.put(resourceInput.key, {
-            message: `bound:${resourceInput.message}`,
-          }).orThrow();
-          const entry = await client.kv.records.get(resourceInput.key)
-            .orThrow();
-          await entry.delete(true).orThrow();
-          return Result.ok({
-            key: resourceInput.key,
-            message: fixture.resourceRecordMessage(entry.value),
-            history: 2,
-          });
-        },
-      );
+      await changedService.handlePlanResourcePing(async ({ input, client }) => {
+        const resourceInput = fixture.resourceInput(input);
+        await client.kv.records.create(resourceInput.key, {
+          message: resourceInput.message,
+        })
+          .orThrow();
+        await client.kv.records.put(resourceInput.key, {
+          message: `bound:${resourceInput.message}`,
+        }).orThrow();
+        const entry = await client.kv.records.get(resourceInput.key)
+          .orThrow();
+        await entry.delete(true).orThrow();
+        return Result.ok({
+          key: resourceInput.key,
+          message: fixture.resourceRecordMessage(entry.value),
+          history: 2,
+        });
+      },);
 
       const client = await runtime.connectClient({
         name: fixture.resourceClientName,
         contract: fixture.resourceClientContract,
       });
-      const result = await client.rpc.plan.resourcePing({
+      const result = await client.planResourcePing({
         key: fixture.resourceKey,
         message: "resource",
       }).orThrow();

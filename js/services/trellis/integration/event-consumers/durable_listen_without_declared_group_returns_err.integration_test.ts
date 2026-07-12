@@ -27,9 +27,7 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      const result = await service.event.source.pinged.listen(() =>
-        Result.ok(undefined)
-      );
+      const result = await service.onSourcePinged(() => Result.ok(undefined));
       const value = result.take();
 
       assert(isErr(value));

@@ -5,4 +5,3 @@ export {
   defineDeviceContract,
   defineServiceContract,
 } from "./contract.ts";
-export type { DefinedContract } from "./contract.ts";

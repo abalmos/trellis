@@ -14,7 +14,7 @@ liveTrellisTest({
     let handlerSettled = false;
 
     try {
-      await service.handle.operation.entity.process(async ({ op }) => {
+      await service.handleEntityProcess(async ({ op }) => {
         await op.started().orThrow();
         await op.progress({ message: "waiting for external control", step: 1 })
           .orThrow();
@@ -26,7 +26,7 @@ liveTrellisTest({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
-      const ref = await client.operation.entity.process.input({
+      const ref = await client.entityProcess({
         message: fixture.message,
       }).start().orThrow();
 

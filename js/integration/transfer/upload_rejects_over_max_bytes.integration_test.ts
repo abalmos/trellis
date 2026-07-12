@@ -16,7 +16,7 @@ liveTrellisTest({
         contract: fixture.clientContract,
       });
 
-      const upload = await client.operation.files.upload.input({
+      const upload = await client.filesUpload({
         key: fixture.uploadKey,
         contentType: "application/octet-stream",
       }).transfer(new Uint8Array(2048)).start().orThrow();

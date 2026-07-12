@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertInstanceOf } from "@std/assert";
 import {
+  type CallerRuntime,
   defineAppContract,
   defineServiceContract,
   isErr,
@@ -8,7 +9,7 @@ import {
   ValidationError,
 } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { Type } from "typebox";
 import {
   caseScopedContractId,
@@ -65,13 +66,7 @@ const clientContract = defineAppContract(() => ({
   ),
   displayName: "Trellis Control-Plane Service Admin Removal Client",
   description: "Calls the service after rejected deployment removal attempts.",
-  uses: {
-    required: {
-      removalService: serviceContract.use({
-        rpc: { call: ["RemovalReject.Ping"] },
-      }),
-    },
-  },
+  uses: [serviceContract.RemovalRejectPing],
 }));
 
 const adminContract = defineAppContract(() => ({
@@ -82,21 +77,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Admin Removal Admin",
   description:
     "Exercises rejected Auth.Deployments.Remove paths through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.DeploymentAuthority.Get",
-            "Auth.Deployments.List",
-            "Auth.Deployments.Remove",
-            "Auth.ServiceInstances.List",
-            "Auth.Sessions.List",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentAuthorityGet,
+    trellisAuth.AuthDeploymentsList,
+    trellisAuth.AuthDeploymentsRemove,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthSessionsList,
+  ],
 }));
 
 liveTrellisTest({
@@ -123,7 +110,7 @@ liveTrellisTest({
       telemetry: false,
       server: { log: false },
     }).orThrow();
-    service.handle.rpc.removalReject.ping(({ input }) =>
+    service.handleRemovalRejectPing(({ input }) =>
       Result.ok({ message: input.message })
     );
     const client = await TrellisClient.connect({
@@ -161,7 +148,7 @@ liveTrellisTest({
         clientKey.sessionKey,
       );
       assertEquals(
-        await client.rpc.removalReject.ping({ message: "after" }).orThrow(),
+        await client.removalRejectPing({ message: "after" }).orThrow(),
         { message: "after" },
       );
     } finally {
@@ -176,8 +163,8 @@ async function assertRemoveValidationError(
   admin: RemovalAdmin,
   input: Record<string, unknown>,
 ): Promise<void> {
-  const method: string = "Auth.Deployments.Remove";
-  const value = await admin.request(method, input).take();
+  // @ts-expect-error The test deliberately sends incomplete removal input.
+  const value = await admin.authDeploymentsRemove(input).take();
   assert(isErr(value));
   assertInstanceOf(value.error, ValidationError);
 }
@@ -187,7 +174,7 @@ async function assertRecordsStillListed(
   serviceSessionKey: string,
   clientSessionKey: string,
 ): Promise<void> {
-  const deployments = await admin.rpc.auth.deploymentsList({
+  const deployments = await admin.authDeploymentsList({
     kind: "service",
     limit: 500,
   }).orThrow();
@@ -198,7 +185,7 @@ async function assertRecordsStillListed(
     true,
   );
 
-  const instances = await admin.rpc.auth.serviceInstancesList({
+  const instances = await admin.authServiceInstancesList({
     deploymentId,
     limit: 500,
   }).orThrow();
@@ -209,14 +196,14 @@ async function assertRecordsStillListed(
     true,
   );
 
-  const authority = await admin.rpc.auth.deploymentAuthorityGet({
+  const authority = await admin.authDeploymentAuthorityGet({
     deploymentId,
   })
     .orThrow();
   assertEquals(authority.authority.deploymentId, deploymentId);
   assertEquals(authority.authority.disabled, false);
 
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   assertSessionListed(sessions.entries, serviceSessionKey, "service");
   assertSessionListed(sessions.entries, clientSessionKey, "app");
 }
@@ -235,30 +222,4 @@ function assertSessionListed(
   );
 }
 
-type RemovalAdmin = {
-  request(method: string, input: unknown): { take(): Promise<unknown> };
-  rpc: {
-    auth: {
-      deploymentsList(input: { kind: "service"; limit: number }): {
-        orThrow(): Promise<{
-          entries: Array<{ deploymentId: string; disabled: boolean }>;
-        }>;
-      };
-      serviceInstancesList(input: { deploymentId: string; limit: number }): {
-        orThrow(): Promise<{
-          entries: Array<{ instanceKey: string; disabled: boolean }>;
-        }>;
-      };
-      deploymentAuthorityGet(input: { deploymentId: string }): {
-        orThrow(): Promise<{
-          authority: { deploymentId: string; disabled: boolean };
-        }>;
-      };
-      sessionsList(input: { limit: number }): {
-        orThrow(): Promise<{
-          entries: Array<{ sessionKey: string; participantKind: string }>;
-        }>;
-      };
-    };
-  };
-};
+type RemovalAdmin = CallerRuntime<typeof adminContract>;

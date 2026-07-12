@@ -82,9 +82,7 @@
   }
 
   async function loadParticipants(): Promise<void> {
-    const result = await trellis.request(
-      "Health.Query",
-      { limit: 200, offset: 0 },
+    const result = await trellis.healthQuery({ limit: 200, offset: 0 },
       { timeout: RPC_TIMEOUT_MS },
     ).take();
     if (isErr(result)) throw result;
@@ -105,18 +103,14 @@
     const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
     try {
       const [inspectResult, metricsResult] = await Promise.all([
-        trellis.request(
-          "Health.Inspect",
-          {
+        trellis.healthInspect({
             participantKind: participant.participantKind,
             contractId: participant.contractId,
             historyLimit: 100,
           },
           { timeout: RPC_TIMEOUT_MS },
         ).take(),
-        trellis.request(
-          "Health.Metrics",
-          {
+        trellis.healthMetrics({
             participantKind: participant.participantKind,
             contractId: participant.contractId,
             start: start.toISOString(),
@@ -163,7 +157,7 @@
       }
 
       try {
-        const result = await trellis.feed.health.watch(
+        const result = await trellis.healthWatch(
           {},
           { signal: controller.signal },
         ).take();

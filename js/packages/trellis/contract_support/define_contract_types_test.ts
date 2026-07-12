@@ -7,15 +7,20 @@ import {
   defineDeviceContract,
   defineError,
   defineServiceContract,
+  jobs,
+  kv,
   type SerializableErrorData,
+  state,
+  store,
 } from "./mod.ts";
+import { getContractRuntime } from "./contract_runtime.ts";
 import type {
   OperationHandlerErrorOf,
   OperationOutputOf,
   OperationProgressOf,
   OperationRuntimeHandle,
   OperationUpdateOf,
-} from "../trellis.ts";
+} from "../session.ts";
 
 const EmptySchema = Type.Object({});
 const StringSchema = Type.Object({ value: Type.String() });
@@ -104,15 +109,11 @@ const audit = defineServiceContract(
     id: "trellis.audit@v1",
     displayName: "Audit",
     description: "Expose audit RPCs and subscribe to auth events for tests.",
-    uses: {
-      required: {
-        auth: auth.use({
-          rpc: { call: ["Auth.Sessions.Me"] },
-          events: { subscribe: ["Auth.Connections.Opened"] },
-          feeds: { subscribe: ["Auth.ConnectFeed"] },
-        }),
-      },
-    },
+    uses: [
+      auth.AuthSessionsMe,
+      auth.AuthConnectionsOpened.subscribe,
+      auth.AuthConnectFeed,
+    ],
     rpc: {
       "Audit.List": {
         version: "v1",
@@ -129,42 +130,32 @@ const audit = defineServiceContract(
   }),
 );
 
-audit.API.owned.rpc["Audit.List"].subject;
-audit.API.used.rpc["Auth.Sessions.Me"].subject;
-audit.API.used.events["Auth.Connections.Opened"].subject;
-audit.API.used.feeds["Auth.ConnectFeed"].subject;
-audit.API.trellis.rpc["Audit.List"].subject;
-audit.API.trellis.rpc["Auth.Sessions.Me"].subject;
-audit.API.trellis.feeds["Auth.ConnectFeed"].subject;
+getContractRuntime(audit).ownedApi.rpc["Audit.List"].subject;
+getContractRuntime(audit).usedApi.rpc["Auth.Sessions.Me"].subject;
+getContractRuntime(audit).usedApi.events["Auth.Connections.Opened"].subject;
+getContractRuntime(audit).usedApi.feeds["Auth.ConnectFeed"].subject;
+getContractRuntime(audit).api.rpc["Audit.List"].subject;
+getContractRuntime(audit).api.rpc["Auth.Sessions.Me"].subject;
+getContractRuntime(audit).api.feeds["Auth.ConnectFeed"].subject;
 auth.CONTRACT.feeds?.["Auth.ConnectFeed"]?.subject;
 auth.CONTRACT.feeds?.["Auth.ConnectFeed"]?.capabilities?.subscribe?.[0];
 auth.CONTRACT.exports?.schemas?.[0];
 
-type AuthUseArg = Parameters<typeof auth.use>[0];
-type AuthUseRpcCall = NonNullable<
-  NonNullable<AuthUseArg["rpc"]>["call"]
->[number];
-type _AuthUseDoesNotExposeRawSubjects = Assert<
-  Not<HasKey<AuthUseArg, "subjects">>
+type _AuthContractDoesNotExposeRawSubjects = Assert<
+  Not<HasKey<typeof auth, "subjects">>
 >;
-type _AuthUseDoesNotAcceptTrellisCatalog = Assert<
-  Not<HasMember<AuthUseRpcCall, "Trellis.Catalog">>
+type _AuthContractDoesNotExposeTrellisCatalog = Assert<
+  Not<HasKey<typeof auth, "TrellisCatalog">>
 >;
 
 const dashboard = defineAppContract(() => ({
   id: "trellis.dashboard@v1",
   displayName: "Dashboard",
   description: "Consume audit events in contract typing tests.",
-  uses: {
-    required: {
-      audit: audit.use({
-        events: { subscribe: ["Audit.Recorded"] },
-      }),
-    },
-  },
+  uses: [audit.AuditRecorded.subscribe],
 }));
 
-dashboard.API.used.events["Audit.Recorded"].subject;
+getContractRuntime(dashboard).usedApi.events["Audit.Recorded"].subject;
 
 const preferencesSchemas = {
   Preferences: Type.Object({ theme: Type.String() }),
@@ -177,7 +168,7 @@ const preferencesApp = defineAppContract(
     id: "trellis.preferences@v1",
     displayName: "Preferences",
     description: "Declare named state stores for client contracts.",
-    state: {
+    uses: [state({
       preferences: {
         kind: "value",
         schema: ref.schema("Preferences"),
@@ -186,7 +177,7 @@ const preferencesApp = defineAppContract(
         kind: "map",
         schema: ref.schema("Draft"),
       },
-    },
+    })],
   }),
 );
 
@@ -194,13 +185,11 @@ preferencesApp.CONTRACT.state?.preferences.kind;
 preferencesApp.CONTRACT.state?.preferences.schema.schema;
 preferencesApp.CONTRACT.state?.drafts.kind;
 preferencesApp.CONTRACT.state?.drafts.schema.schema;
-preferencesApp.API.used.rpc["Auth.Sessions.Me"].subject;
-preferencesApp.API.used.rpc["Auth.Sessions.Logout"].subject;
-preferencesApp.API.used.rpc["State.Get"].subject;
-preferencesApp.API.used.rpc["State.Put"].subject;
-preferencesApp.API.used.rpc["State.Delete"].subject;
-preferencesApp.API.used.rpc["State.List"].subject;
-preferencesApp.API.trellis.rpc["State.Get"].subject;
+getContractRuntime(preferencesApp).usedApi.rpc["State.Get"].subject;
+getContractRuntime(preferencesApp).usedApi.rpc["State.Put"].subject;
+getContractRuntime(preferencesApp).usedApi.rpc["State.Delete"].subject;
+getContractRuntime(preferencesApp).usedApi.rpc["State.List"].subject;
+getContractRuntime(preferencesApp).api.rpc["State.Get"].subject;
 
 if (false) {
   defineAppContract(
@@ -209,8 +198,9 @@ if (false) {
       id: "trellis.invalid-state@v1",
       displayName: "Invalid State",
       description: "Should fail type checking.",
-      state: {
-        // @ts-expect-error top-level state declarations require kind
+      // @ts-expect-error invalid state feature is not a valid contract selection
+      uses: [state({
+        // @ts-expect-error state feature declarations require kind
         prefs: {
           schema: ref.schema("Preferences"),
         },
@@ -219,7 +209,7 @@ if (false) {
           kind: "set",
           schema: ref.schema("Draft"),
         },
-      },
+      })],
     }),
   );
 }
@@ -293,13 +283,7 @@ const payments = defineServiceContract(
     id: "trellis.payments@v1",
     displayName: "Payments",
     description: "Consume billing operations for contract typing tests.",
-    uses: {
-      required: {
-        billing: billing.use({
-          operations: { call: ["Billing.Refund"] },
-        }),
-      },
-    },
+    uses: [billing.BillingRefund],
     operations: {
       "Payments.Capture": {
         version: "v1",
@@ -310,21 +294,19 @@ const payments = defineServiceContract(
   }),
 );
 
-payments.API.owned.operations["Payments.Capture"].subject;
-payments.API.used.operations["Billing.Refund"].subject;
-payments.API.trellis.operations["Payments.Capture"].subject;
-payments.API.trellis.operations["Billing.Refund"].subject;
-payments.API.used.operations["Billing.Refund"].signals?.selectReason.input;
+getContractRuntime(payments).ownedApi.operations["Payments.Capture"].subject;
+getContractRuntime(payments).usedApi.operations["Billing.Refund"].subject;
+getContractRuntime(payments).api.operations["Payments.Capture"].subject;
+getContractRuntime(payments).api.operations["Billing.Refund"].subject;
+getContractRuntime(payments).usedApi.operations["Billing.Refund"].signals
+  ?.selectReason.input;
 
+const paymentsRuntime = getContractRuntime(payments);
 type _PaymentsDoesNotExposeBillingWriteoff = Assert<
-  Not<HasKey<typeof payments.API.trellis.operations, "Billing.Writeoff">>
+  Not<HasKey<typeof paymentsRuntime.api.operations, "Billing.Writeoff">>
 >;
-type BillingUseArg = Parameters<typeof billing.use>[0];
-type BillingUseOperationCall = NonNullable<
-  NonNullable<BillingUseArg["operations"]>["call"]
->[number];
-type _BillingUseDoesNotAcceptWriteoff = Assert<
-  Not<HasMember<BillingUseOperationCall, "Billing.Writeoff">>
+type _BillingDoesNotExposeWriteoff = Assert<
+  Not<HasKey<typeof billing, "BillingWriteoff">>
 >;
 
 const inlineSchemaContract = defineServiceContract(
@@ -354,18 +336,19 @@ const inlineSchemaContract = defineServiceContract(
         output: { schema: "Result" },
       },
     },
-    jobs: {
+    uses: [jobs({
       import: {
         payload: { schema: "Empty" },
         result: { schema: "Result" },
       },
-    },
+    })],
   }),
 );
 
 inlineSchemaContract.CONTRACT.jobs?.import?.payload.schema;
-inlineSchemaContract.API.owned.rpc["Inline.Run"].subject;
-inlineSchemaContract.API.owned.operations["Inline.Import"].subject;
+getContractRuntime(inlineSchemaContract).ownedApi.rpc["Inline.Run"].subject;
+getContractRuntime(inlineSchemaContract).ownedApi.operations["Inline.Import"]
+  .subject;
 
 const topLevelJobsContract = defineServiceContract(
   {
@@ -378,7 +361,7 @@ const topLevelJobsContract = defineServiceContract(
     id: "trellis.top-level-jobs@v1",
     displayName: "Top Level Jobs",
     description: "Ensure jobs are typed as a first-class contract surface.",
-    jobs: {
+    uses: [jobs({
       import: {
         payload: { schema: "Empty" },
         result: { schema: "Result" },
@@ -386,7 +369,7 @@ const topLevelJobsContract = defineServiceContract(
       export: {
         payload: { schema: "Empty" },
       },
-    },
+    })],
   }),
 );
 
@@ -404,8 +387,8 @@ if (false) {
       id: "trellis.invalid-jobs-resource@v1",
       displayName: "Invalid Jobs Resource",
       description: "Should fail type checking.",
+      // @ts-expect-error runtime features must be declared in uses
       resources: {
-        // @ts-expect-error jobs are now a first-class top-level contract section
         jobs: {
           queues: {
             import: {
@@ -431,21 +414,21 @@ const transferContract = defineServiceContract(
     id: "trellis.transfer@v1",
     displayName: "Transfer",
     description: "Exercise transfer-capable operation typing.",
-    resources: {
-      kv: {
+    uses: [
+      kv({
         uploadsByKey: {
           purpose: "Track upload metadata",
           schema: ref.schema("UploadInput"),
         },
-      },
-      store: {
+      }),
+      store({
         uploads: {
           purpose: "Temporary uploads",
           ttlMs: 60_000,
           maxObjectBytes: 1024,
         },
-      },
-    },
+      }),
+    ],
     operations: {
       "Demo.Files.Upload": {
         version: "v1",
@@ -463,7 +446,8 @@ const transferContract = defineServiceContract(
   }),
 );
 
-transferContract.API.owned.operations["Demo.Files.Upload"].transfer?.store;
+getContractRuntime(transferContract).ownedApi.operations["Demo.Files.Upload"]
+  .transfer?.store;
 transferContract.CONTRACT.resources?.kv?.uploadsByKey?.schema.schema;
 
 const builderContract = defineServiceContract(
@@ -502,10 +486,12 @@ const builderContract = defineServiceContract(
   }),
 );
 
-builderContract.API.owned.rpc["Builder.Run"].subject;
-builderContract.API.owned.operations["Builder.Process"].subject;
+getContractRuntime(builderContract).ownedApi.rpc["Builder.Run"].subject;
+getContractRuntime(builderContract).ownedApi.operations["Builder.Process"]
+  .subject;
 
-type BuilderOwnedApi = typeof builderContract.API.owned;
+const builderRuntime = getContractRuntime(builderContract);
+type BuilderOwnedApi = typeof builderRuntime.ownedApi;
 type BuilderProcessHandle = OperationRuntimeHandle<
   OperationProgressOf<BuilderOwnedApi, "Builder.Process">,
   OperationOutputOf<BuilderOwnedApi, "Builder.Process">,
@@ -533,29 +519,19 @@ const appContract = defineAppContract(() => ({
   id: "trellis.builder-app@v1",
   displayName: "Builder App",
   description: "Exercise the app helper.",
-  uses: {
-    required: {
-      auth: auth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-    },
-  },
+  uses: [auth.AuthSessionsMe],
 }));
 
-appContract.API.used.rpc["Auth.Sessions.Me"].subject;
-appContract.API.used.rpc["Auth.Sessions.Logout"].subject;
+getContractRuntime(appContract).usedApi.rpc["Auth.Sessions.Me"].subject;
 
 const deviceContract = defineDeviceContract(() => ({
   id: "trellis.builder-device@v1",
   displayName: "Builder Device",
   description: "Exercise the device helper.",
-  uses: {
-    required: {
-      auth: auth.use({ rpc: { call: ["Auth.Sessions.Logout"] } }),
-    },
-  },
+  uses: [auth.AuthSessionsLogout],
 }));
 
-deviceContract.API.used.rpc["Auth.Sessions.Logout"].subject;
-deviceContract.API.used.rpc["Auth.Sessions.Me"].subject;
+getContractRuntime(deviceContract).usedApi.rpc["Auth.Sessions.Logout"].subject;
 
 if (false) {
   const invalidRpcSchemas = {
@@ -584,12 +560,12 @@ if (false) {
       id: "trellis.invalid-job-schema@v1",
       displayName: "Invalid Job Schema",
       description: "Should fail type checking.",
-      jobs: {
+      // @ts-expect-error job queue schema refs must use local schema keys
+      uses: [jobs({
         import: {
-          // @ts-expect-error job queue schema refs must use local schema keys
           payload: { schema: "Missing" },
         },
-      },
+      })],
     }),
   );
 
@@ -603,15 +579,13 @@ if (false) {
       id: "trellis.invalid-kv-schema@v1",
       displayName: "Invalid KV Schema",
       description: "Should fail type checking.",
-      resources: {
-        kv: {
-          cache: {
-            purpose: "Broken KV schema ref",
-            // @ts-expect-error kv resource schema refs must use local schema keys
-            schema: ref.schema("Missing"),
-          },
+      uses: [kv({
+        cache: {
+          purpose: "Broken KV schema ref",
+          // @ts-expect-error kv resource schema refs must use local schema keys
+          schema: ref.schema("Missing"),
         },
-      },
+      })],
     }),
   );
 
@@ -727,11 +701,6 @@ if (false) {
       description: "Should fail type checking.",
     }),
   );
-
-  auth.use({
-    // @ts-expect-error raw subject dependencies are not contract authoring API
-    subjects: { subscribe: ["Audit"] },
-  });
 
   defineServiceContract(
     {

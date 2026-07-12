@@ -60,7 +60,7 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             ),
     )
     .use_ref(
-        "fieldOps",
+        "trellis.demo-service@v1",
         use_contract("trellis.demo-service@v1")
             .with_rpc_call([
                 "Assignments.List",
@@ -78,11 +78,7 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             ]),
     )
     .use_ref(
-        "auth",
-        use_contract("trellis.auth@v1").with_rpc_call(["Auth.Sessions.Logout", "Auth.Sessions.Me"]),
-    )
-    .use_ref(
-        "state",
+        "trellis.state@v1",
         use_contract("trellis.state@v1").with_rpc_call([
             "State.Delete",
             "State.Get",

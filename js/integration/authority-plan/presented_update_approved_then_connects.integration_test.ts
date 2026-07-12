@@ -26,7 +26,7 @@ liveTrellisTest({
     });
 
     let service:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
       | undefined;
     const connectPromise = fixture.connectServicePending({
       runtime,
@@ -57,19 +57,18 @@ liveTrellisTest({
       });
       assertEquals(accepted.planId, plan.planId);
 
-      await connectedService.handle.rpc.plan.addedPing(({ input }) =>
+      await connectedService.handlePlanAddedPing(({ input }) =>
         Result.ok({
           message: fixture.pingMessage(input),
           variant: "additive",
           added: true,
-        })
-      );
+        }));
 
       const client = await runtime.connectClient({
         name: fixture.additiveClientName,
         contract: fixture.additiveClientContract,
       });
-      const result = await client.rpc.plan.addedPing({ message: "approved" })
+      const result = await client.planAddedPing({ message: "approved" })
         .orThrow();
       assertEquals(result, {
         message: "approved",

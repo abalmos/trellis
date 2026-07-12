@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -18,21 +18,13 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Device Deployment Rollback Admin",
   description:
     "Exercises generated Auth device deployment rollback RPCs through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.List",
-            "Auth.Deployments.Remove",
-            "Auth.Devices.List",
-            "Auth.Devices.Provision",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsList,
+    trellisAuth.AuthDeploymentsRemove,
+    trellisAuth.AuthDevicesList,
+    trellisAuth.AuthDevicesProvision,
+  ],
 }));
 
 liveTrellisTest({
@@ -53,7 +45,7 @@ liveTrellisTest({
 
     try {
       const findDeployment = async () => {
-        const page = await admin.rpc.auth.deploymentsList({
+        const page = await admin.authDeploymentsList({
           kind: "device",
           limit: 500,
         }).orThrow();
@@ -62,14 +54,14 @@ liveTrellisTest({
         );
       };
       const findDevice = async (instanceId: string) => {
-        const page = await admin.rpc.auth.devicesList({
+        const page = await admin.authDevicesList({
           deploymentId,
           limit: 500,
         }).orThrow();
         return page.entries.find((device) => device.instanceId === instanceId);
       };
 
-      const failedCreate = await admin.rpc.auth.deploymentsCreate({
+      const failedCreate = await admin.authDeploymentsCreate({
         kind: "device",
         deploymentId,
         reviewMode: "none",
@@ -77,25 +69,25 @@ liveTrellisTest({
       assert(failedCreate.isErr());
       assertEquals(await findDeployment(), undefined);
 
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "device",
         deploymentId,
         reviewMode: "none",
       }).orThrow();
-      const provisioned = await admin.rpc.auth.devicesProvision({
+      const provisioned = await admin.authDevicesProvision({
         deploymentId,
         publicIdentityKey: caseScopedName("rollback-device-key", CASE_ID),
         activationKey: caseScopedName("rollback-activation-key", CASE_ID),
         metadata: { name: caseScopedName("rollback-device", CASE_ID) },
       }).orThrow();
-      const secondProvisioned = await admin.rpc.auth.devicesProvision({
+      const secondProvisioned = await admin.authDevicesProvision({
         deploymentId,
         publicIdentityKey: caseScopedName("rollback-device-key-2", CASE_ID),
         activationKey: caseScopedName("rollback-activation-key-2", CASE_ID),
         metadata: { name: caseScopedName("rollback-device-2", CASE_ID) },
       }).orThrow();
 
-      const failedRemove = await admin.rpc.auth.deploymentsRemove({
+      const failedRemove = await admin.authDeploymentsRemove({
         kind: "device",
         deploymentId,
         cascade: true,
@@ -112,7 +104,7 @@ liveTrellisTest({
       );
 
       assertEquals(
-        await admin.rpc.auth.deploymentsRemove({
+        await admin.authDeploymentsRemove({
           kind: "device",
           deploymentId,
           cascade: true,

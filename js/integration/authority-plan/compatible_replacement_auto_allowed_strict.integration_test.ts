@@ -22,7 +22,7 @@ liveTrellisTest({
       contract: fixture.baseContract,
     });
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.baseContract>>>
       | undefined = await fixture.connectService({
         runtime,
         contract: fixture.baseContract,
@@ -30,13 +30,12 @@ liveTrellisTest({
         seed: baseKey.seed,
       });
     let replacementService:
-      | Awaited<ReturnType<typeof fixture.connectService>>
+      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleMetadataContract>>>
       | undefined;
 
     try {
-      await baseService.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
-      );
+      await baseService.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
       const before = await fixture.connectClientAndPing(
         runtime,
         "metadata-before",
@@ -54,9 +53,8 @@ liveTrellisTest({
         name: fixture.replacementServiceName,
         seed: replacementKey.seed,
       });
-      await replacementService.handle.rpc.plan.ping(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "metadata" })
-      );
+      await replacementService.handlePlanPing(({ input }) =>
+        Result.ok({ message: fixture.pingMessage(input), variant: "metadata" }));
 
       const result = await fixture.connectClientAndPing(
         runtime,

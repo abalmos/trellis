@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
-  type ConnectedTrellisClient,
+  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { waitFor } from "@qlever-llc/trellis-test";
@@ -34,10 +34,10 @@ liveTrellisTest({
     const firstAuth = runtime.clientAuth(firstRegistration);
     const secondAuth = runtime.clientAuth(secondRegistration);
     let first:
-      | ConnectedTrellisClient<typeof fixture.agentContract>
+      | CallerRuntime<typeof fixture.agentContract>
       | undefined;
     let second:
-      | ConnectedTrellisClient<typeof fixture.agentContract>
+      | CallerRuntime<typeof fixture.agentContract>
       | undefined;
 
     try {
@@ -56,9 +56,9 @@ liveTrellisTest({
         onAuthRequired: async (ctx) => await secondAuth.onAuthRequired(ctx),
       }).orThrow();
 
-      await first.rpc.authLogin.ping({ message: `${fixture.pingMessage}-1` })
+      await first.authLoginPing({ message: `${fixture.pingMessage}-1` })
         .orThrow();
-      await second.rpc.authLogin.ping({ message: `${fixture.pingMessage}-2` })
+      await second.authLoginPing({ message: `${fixture.pingMessage}-2` })
         .orThrow();
       await userSessionFor(admin, firstRegistration.sessionKey, "agent");
       await userSessionFor(admin, secondRegistration.sessionKey, "agent");
@@ -72,7 +72,7 @@ liveTrellisTest({
       );
       assertEquals(await grantExists(sqlite, identityGrantId), true);
 
-      const revoked = await admin.rpc.auth.sessionsRevoke({
+      const revoked = await admin.authSessionsRevoke({
         sessionKey: firstRegistration.sessionKey,
       }).orThrow();
       assertEquals(revoked.success, true);
@@ -83,8 +83,8 @@ liveTrellisTest({
       await waitForConnectionsAbsent(admin, secondRegistration.sessionKey);
       await waitFor(async () => !(await grantExists(sqlite, identityGrantId)));
       await waitFor(async () =>
-        (await first!.rpc.auth.sessionsMe({})).isErr() &&
-        (await second!.rpc.auth.sessionsMe({})).isErr()
+        (await first!.authSessionsMe({})).isErr() &&
+        (await second!.authSessionsMe({})).isErr()
       );
     } finally {
       await first?.connection.close().catch(() => undefined);
@@ -108,7 +108,7 @@ async function userSessionFor(
   sessionKey: string,
   participantKind: "app" | "agent",
 ) {
-  const sessions = await admin.rpc.auth.sessionsList({ limit: 500 }).orThrow();
+  const sessions = await admin.authSessionsList({ limit: 500 }).orThrow();
   const session = sessions.entries.find((entry) =>
     entry.participantKind === participantKind && entry.sessionKey === sessionKey
   );
@@ -124,7 +124,7 @@ async function waitForSessionAbsent(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const sessions = await admin.rpc.auth.sessionsList({ limit: 500 })
+    const sessions = await admin.authSessionsList({ limit: 500 })
       .orThrow();
     return sessions.entries.every((entry) => entry.sessionKey !== sessionKey);
   });
@@ -135,7 +135,7 @@ async function waitForConnection(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const connections = await admin.rpc.auth.connectionsList({
+    const connections = await admin.authConnectionsList({
       sessionKey,
       limit: 500,
     }).orThrow();
@@ -148,7 +148,7 @@ async function waitForConnectionsAbsent(
   sessionKey: string,
 ) {
   await waitFor(async () => {
-    const connections = await admin.rpc.auth.connectionsList({
+    const connections = await admin.authConnectionsList({
       sessionKey,
       limit: 500,
     }).orThrow();

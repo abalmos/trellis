@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisJobs } from "@qlever-llc/trellis/sdk/jobs";
+import * as trellisJobs from "@qlever-llc/trellis/sdk/jobs";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { createJobsFixture } from "./_fixture.ts";
@@ -12,11 +12,7 @@ const adminContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.jobs-admin-client", CASE_ID),
   displayName: "Trellis Integration Jobs Admin Client",
   description: "Observes jobs through the generated Jobs admin SDK surface.",
-  uses: {
-    required: {
-      jobs: trellisJobs.use({ rpc: { call: ["Jobs.Inspect"] } }),
-    },
-  },
+  uses: [trellisJobs.JobsInspect],
 }));
 
 liveTrellisTest({
@@ -41,7 +37,7 @@ liveTrellisTest({
 
       let lastAdminState = "missing";
       const adminDead = await runtime.waitFor(async () => {
-        const current = await admin.rpc.jobs.inspect({ id: ref.id })
+        const current = await admin.jobsInspect({ id: ref.id })
           .orThrow();
         lastAdminState = current.job.state;
         return current.job.state === "dead" ? current.job : false;

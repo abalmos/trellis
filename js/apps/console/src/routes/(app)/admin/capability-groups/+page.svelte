@@ -45,7 +45,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.request("Auth.CapabilityGroups.List", { limit: 500, offset: 0 }).take();
+      const response = await trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;
@@ -64,7 +64,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.request("Auth.CapabilityGroups.Delete", { groupKey: group.groupKey }).take();
+      const response = await trellis.authCapabilityGroupsDelete({ groupKey: group.groupKey }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;

@@ -25,46 +25,46 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
     const appOrigin = new URL(runtime.trellisUrl).origin;
     try {
-      await admin.rpc.auth.portalsList({ limit: 10 }).orThrow();
-      await assertValidationError(admin.rpc.auth.portalsPut({
+      await admin.authPortalsList({ limit: 10 }).orThrow();
+      await assertValidationError(admin.authPortalsPut({
         portalId: builtInPortalId,
         displayName: "Blocked Built-in Portal Update",
         entryUrl,
       }));
-      await assertValidationError(admin.rpc.auth.portalsRemove({
+      await assertValidationError(admin.authPortalsRemove({
         portalId: builtInPortalId,
       }));
 
-      await admin.rpc.auth.portalsPut({
+      await admin.authPortalsPut({
         portalId,
         displayName: "Portal Admin Conflicts",
         entryUrl,
       }).orThrow();
-      await admin.rpc.auth.portalsPut({
+      await admin.authPortalsPut({
         portalId: conflictPortalId,
         displayName: "Portal Admin Conflicts Alt",
         entryUrl: conflictEntryUrl,
       }).orThrow();
-      await admin.rpc.auth.portalsRoutesPut({
+      await admin.authPortalsRoutesPut({
         portalId,
         contractId: fixture.clientContract.CONTRACT.id,
         origin: appOrigin,
       }).orThrow();
 
-      await assertValidationError(admin.rpc.auth.portalsRoutesPut({
+      await assertValidationError(admin.authPortalsRoutesPut({
         portalId: conflictPortalId,
         contractId: fixture.clientContract.CONTRACT.id,
         origin: appOrigin,
       }));
-      await assertValidationError(admin.rpc.auth.portalsRemove({ portalId }));
+      await assertValidationError(admin.authPortalsRemove({ portalId }));
 
-      const removedRoute = await admin.rpc.auth.portalsRoutesRemove({
+      const removedRoute = await admin.authPortalsRoutesRemove({
         portalId,
         contractId: fixture.clientContract.CONTRACT.id,
         origin: appOrigin,
       }).orThrow();
       assertEquals(removedRoute.success, true);
-      const removedPortal = await admin.rpc.auth.portalsRemove({ portalId })
+      const removedPortal = await admin.authPortalsRemove({ portalId })
         .orThrow();
       assertEquals(removedPortal.success, true);
     } finally {

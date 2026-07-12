@@ -1,19 +1,8 @@
-import {
-  BaseError,
-  isErr,
-  ok,
-  Result,
-  type RpcArgs,
-  type RpcResult,
-  StoreError,
-} from "@qlever-llc/trellis";
+import { BaseError, isErr, ok, Result, StoreError } from "@qlever-llc/trellis";
 import type { TransferError } from "@qlever-llc/trellis";
-import contract from "../../../contract.ts";
-import type { FieldOpsDeps } from "../../deps.ts";
+import type { FieldOpsDeps, FieldOpsService } from "../../deps.ts";
 
-type Args = RpcArgs<typeof contract, "Evidence.Download">;
-type HandlerArgs = Pick<Args, "context" | "input">;
-type HandlerResult = RpcResult<typeof contract, "Evidence.Download">;
+type Handler = Parameters<FieldOpsService["handleEvidenceDownload"]>[0];
 
 const EVIDENCE_STORE = "uploads";
 const TRANSFER_GRANT_TTL_MS = 60_000;
@@ -125,7 +114,7 @@ function shouldCheckStoreVisibility(error: TransferError): boolean {
 /** Returns a receive transfer grant for stored evidence. */
 export function createDownloadEvidenceHandler(
   deps: FieldOpsDeps,
-): (args: HandlerArgs) => Promise<HandlerResult> {
+): Handler {
   return async ({ context, input }) => {
     const transferIssuer = deps.transferIssuer;
     const storeTtlMs = transferIssuer.store?.uploads?.binding?.ttlMs;
@@ -173,7 +162,9 @@ export function createDownloadEvidenceHandler(
           visibilityCheck: visible && isErr(visible)
             ? "not_visible_after_wait"
             : "visibility_check_unavailable",
-          visibilityError: visible && isErr(visible) ? visible.error : undefined,
+          visibilityError: visible && isErr(visible)
+            ? visible.error
+            : undefined,
         }));
       }
 

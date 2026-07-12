@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { defineServiceContract } from "@qlever-llc/trellis";
+import { defineServiceContract, kv, store } from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import {
@@ -27,8 +27,8 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
   displayName: "Trellis Control-Plane Resources Restart Service",
   description:
     "Verifies service-owned resource bindings and backing data remain usable after control-plane restart.",
-  resources: {
-    kv: {
+  uses: [
+    kv({
       records: {
         purpose: "Store restart-persistence KV records",
         schema: ref.schema("ResourceRecord"),
@@ -36,8 +36,8 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
         history: 1,
         ttlMs: 0,
       },
-    },
-    store: {
+    }),
+    store({
       blobs: {
         purpose: "Store restart-persistence blobs",
         required: true,
@@ -45,8 +45,8 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
         maxObjectBytes: 1048576,
         maxTotalBytes: 4194304,
       },
-    },
-  },
+    }),
+  ],
 }));
 
 const serviceName = caseScopedName("resources-restart-service", CASE_ID);

@@ -26,16 +26,15 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await service.handle.rpc.entity.get(({ input }) =>
-        Result.ok({ id: input.id, found: true })
-      );
+      await service.handleEntityGet(({ input }) =>
+        Result.ok({ id: input.id, found: true }));
 
       const client = await runtime.connectClient({
         name: fixture.clientName,
         contract: fixture.clientContract,
       });
 
-      const result = await client.rpc.entity.get({ id: fixture.entityId })
+      const result = await client.entityGet({ id: fixture.entityId })
         .orThrow();
       assertEquals(result.id, fixture.entityId);
       assertEquals(result.found, true);

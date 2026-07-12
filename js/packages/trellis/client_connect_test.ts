@@ -10,50 +10,35 @@ import {
   connectClientWithDeps,
   TrellisClient,
 } from "./client_connect.ts";
-import type { TrellisAPI } from "./contracts.ts";
+import { defineAppContract, defineServiceContract } from "./contract.ts";
 import { AuthError, TransportError } from "./errors/index.ts";
 
-const emptyApi = {
-  rpc: {},
-  operations: {},
-  events: {},
-  subjects: {},
-} satisfies TrellisAPI;
-
-const testContract = {
-  CONTRACT: {
-    format: "trellis.contract.v1",
-    id: "client.example@v1",
-    displayName: "Example Client",
-    description: "Example client contract",
-    kind: "app",
-  },
-  CONTRACT_DIGEST: "digest-a",
-  API: {
-    trellis: emptyApi,
-  },
-} as const;
-
-const authRequiredRpcContract = {
-  CONTRACT: testContract.CONTRACT,
-  CONTRACT_DIGEST: testContract.CONTRACT_DIGEST,
-  API: {
-    trellis: {
-      rpc: {
-        "Admin.TestAuthRequired": {
-          subject: "rpc.v1.Admin.TestAuthRequired",
-          input: Type.Object({}),
-          output: Type.Object({}),
-          callerCapabilities: ["admin:write"],
-          errors: ["AuthError"],
-        },
+const authRequiredRpcOwner = defineServiceContract(
+  { schemas: { Empty: Type.Object({}) }, errors: { AuthError } },
+  (ref) => ({
+    id: "admin.test-auth-required@v1",
+    displayName: "Auth Required Test",
+    description: "Expose one authenticated RPC for connection tests.",
+    rpc: {
+      "Admin.TestAuthRequired": {
+        version: "v1",
+        subject: "rpc.v1.Admin.TestAuthRequired",
+        input: ref.schema("Empty"),
+        output: ref.schema("Empty"),
+        errors: [ref.error("AuthError")],
       },
-      operations: {},
-      events: {},
-      subjects: {},
     },
-  },
-} as const;
+  }),
+);
+
+const testContract = defineAppContract(() => ({
+  id: "client.example@v1",
+  displayName: "Example Client",
+  description: "Example client contract",
+  uses: [authRequiredRpcOwner.AdminTestAuthRequired],
+}));
+
+const authRequiredRpcContract = testContract;
 
 const TEST_SEED = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const textDecoder = new TextDecoder();
@@ -303,7 +288,7 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
             connectInfo: {
               sessionKey: "session-key",
               contractId: testContract.CONTRACT.id,
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: { natsServers: ["nats://127.0.0.1:4222"] },
                 websocket: { natsServers: ["ws://localhost:8080"] },
@@ -366,7 +351,7 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
     assertEquals(connectInboxPrefix, "_INBOX.session-key");
     assertEquals(maxReconnectAttempts, -1);
     assertEquals(firstToken.sessionKey, auth.sessionKey);
-    assertEquals(firstToken.contractDigest, "digest-a");
+    assertEquals(firstToken.contractDigest, testContract.CONTRACT_DIGEST);
     assertEquals(firstToken.bindingToken, undefined);
     assertEquals(
       firstToken.sig,
@@ -421,7 +406,7 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                   websocket: { natsServers: ["ws://localhost:8080"] },
@@ -835,7 +820,7 @@ Deno.test("connectClientWithDeps maps runtime connection failures to TransportEr
             connectInfo: {
               sessionKey: "session-key",
               contractId: testContract.CONTRACT.id,
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: { natsServers: ["nats://127.0.0.1:4222"] },
               },
@@ -896,7 +881,7 @@ Deno.test("connectClientWithDeps preserves trellisUrl path when calling bootstra
             connectInfo: {
               sessionKey: "session-key",
               contractId: testContract.CONTRACT.id,
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: { natsServers: ["nats://127.0.0.1:4222"] },
               },
@@ -968,7 +953,7 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
             connectInfo: {
               sessionKey: "session-key",
               contractId: testContract.CONTRACT.id,
-              contractDigest: "digest-a",
+              contractDigest: testContract.CONTRACT_DIGEST,
               transports: {
                 native: { natsServers: ["nats://127.0.0.1:4222"] },
               },
@@ -1029,8 +1014,8 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
       contractDigest: string;
     };
 
-    assertEquals(firstToken.contractDigest, "digest-a");
-    assertEquals(secondToken.contractDigest, "digest-a");
+    assertEquals(firstToken.contractDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(secondToken.contractDigest, testContract.CONTRACT_DIGEST);
     assert(secondToken.iat > firstToken.iat);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1072,7 +1057,7 @@ Deno.test("connectClientWithDeps does not bind browser callbacks from window.loc
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                 },
@@ -1623,7 +1608,7 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
                 connectInfo: {
                   sessionKey: "session-key",
                   contractId: testContract.CONTRACT.id,
-                  contractDigest: "digest-a",
+                  contractDigest: testContract.CONTRACT_DIGEST,
                   transports: {
                     native: { natsServers: ["nats://127.0.0.1:4222"] },
                   },
@@ -1789,7 +1774,7 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
           ? "other.app@v1"
           : testContract.CONTRACT.id;
         const contractDigest = bootstrapCalls === 1
-          ? "digest-a"
+          ? testContract.CONTRACT_DIGEST
           : bootstrapCalls === 2
           ? "digest-other"
           : testContract.CONTRACT_DIGEST;
@@ -1969,7 +1954,7 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                   websocket: { natsServers: ["ws://localhost:8080"] },
@@ -2300,7 +2285,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                   websocket: { natsServers: ["ws://localhost:8080"] },
@@ -2571,7 +2556,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                   websocket: { natsServers: ["ws://localhost:8080"] },
@@ -2700,7 +2685,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
               connectInfo: {
                 sessionKey: "session-key",
                 contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-a",
+                contractDigest: testContract.CONTRACT_DIGEST,
                 transports: {
                   native: { natsServers: ["nats://127.0.0.1:4222"] },
                   websocket: { natsServers: ["ws://localhost:8080"] },
@@ -2836,11 +2821,7 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
     });
 
     const error = await assertRejects(
-      () =>
-        trellis.request(
-          "Admin.TestAuthRequired",
-          {},
-        ).orThrow(),
+      () => trellis.adminTestAuthRequired({}).orThrow(),
       AuthError,
     );
 

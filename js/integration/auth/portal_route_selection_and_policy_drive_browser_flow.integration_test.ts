@@ -48,22 +48,22 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
     const appOrigin = new URL(runtime.trellisUrl).origin;
     try {
-      await admin.rpc.auth.portalsPut({
+      await admin.authPortalsPut({
         portalId: defaultPortalId,
         displayName: "Default Route Selection Portal",
         entryUrl: defaultEntryUrl,
       }).orThrow();
-      await admin.rpc.auth.portalsRoutesPut({
+      await admin.authPortalsRoutesPut({
         portalId: defaultPortalId,
         contractId: null,
         origin: null,
       }).orThrow();
-      await admin.rpc.auth.portalsPut({
+      await admin.authPortalsPut({
         portalId,
         displayName: "Custom Route Selection Portal",
         entryUrl: customEntryUrl,
       }).orThrow();
-      await admin.rpc.auth.portalsLoginSettingsUpdate({
+      await admin.authPortalsLoginSettingsUpdate({
         portalId,
         localRegistrationEnabled: false,
         federatedRegistrationEnabled: true,
@@ -107,7 +107,7 @@ liveTrellisTest({
       );
 
       await putCustomRoute(admin, appOrigin, false);
-      await admin.rpc.auth.portalsRoutesRemove({
+      await admin.authPortalsRoutesRemove({
         portalId,
         contractId: fixture.clientContract.CONTRACT.id,
         origin: appOrigin,
@@ -137,7 +137,7 @@ async function putCustomRoute(
   origin: string,
   disabled: boolean,
 ): Promise<void> {
-  await admin.rpc.auth.portalsRoutesPut({
+  await admin.authPortalsRoutesPut({
     portalId,
     contractId: fixture.clientContract.CONTRACT.id,
     origin,

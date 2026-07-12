@@ -17,11 +17,11 @@ liveTrellisTest({
     const admin = await fixture.setupSessionAdmin(runtime);
     const groupKey = caseScopedName("auth-capability-group", CASE_ID);
     try {
-      const me = await admin.rpc.auth.sessionsMe({}).orThrow();
+      const me = await admin.authSessionsMe({}).orThrow();
       assert(me.user, "expected admin session user");
       const adminUserId = me.user.userId;
 
-      const put = await admin.rpc.auth.capabilityGroupsPut({
+      const put = await admin.authCapabilityGroupsPut({
         groupKey,
         displayName: "Integration Capability Group",
         description: "Grants the auth local-login fixture capability.",
@@ -30,29 +30,29 @@ liveTrellisTest({
       assertEquals(put.group.groupKey, groupKey);
       assertArrayIncludes(put.group.capabilities, [fixture.pingCapability]);
 
-      const listed = await admin.rpc.auth.capabilityGroupsList({ limit: 500 })
+      const listed = await admin.authCapabilityGroupsList({ limit: 500 })
         .orThrow();
       assert(
         listed.entries.some((group) => group.groupKey === groupKey),
         "expected custom capability group in list",
       );
-      const got = await admin.rpc.auth.capabilityGroupsGet({ groupKey })
+      const got = await admin.authCapabilityGroupsGet({ groupKey })
         .orThrow();
       assertEquals(got.group.groupKey, groupKey);
 
-      await admin.rpc.auth.usersUpdate({
+      await admin.authUsersUpdate({
         userId: adminUserId,
         capabilities: ["admin"],
         capabilityGroups: [groupKey],
       }).orThrow();
-      const groupedMe = await admin.rpc.auth.sessionsMe({}).orThrow();
+      const groupedMe = await admin.authSessionsMe({}).orThrow();
       assert(groupedMe.user, "expected grouped admin session user");
       assertArrayIncludes(groupedMe.user.capabilities, [
         fixture.pingCapability,
       ]);
 
       await assertAuthErrorReason(
-        admin.rpc.auth.capabilityGroupsPut({
+        admin.authCapabilityGroupsPut({
           groupKey: `${groupKey}.invalid`,
           displayName: "Invalid Capability Group",
           description: "References an unknown capability.",
@@ -61,7 +61,7 @@ liveTrellisTest({
         "invalid_request",
       );
       await assertAuthErrorReason(
-        admin.rpc.auth.capabilityGroupsPut({
+        admin.authCapabilityGroupsPut({
           groupKey: "admin",
           displayName: "Blocked Admin Group",
           description: "Built-in group mutation must fail.",
@@ -69,16 +69,16 @@ liveTrellisTest({
         "invalid_request",
       );
       await assertAuthErrorReason(
-        admin.rpc.auth.capabilityGroupsDelete({ groupKey: "admin" }),
+        admin.authCapabilityGroupsDelete({ groupKey: "admin" }),
         "invalid_request",
       );
 
       await assertAuthErrorReason(
-        admin.rpc.auth.usersUpdate({ userId: adminUserId, active: false }),
+        admin.authUsersUpdate({ userId: adminUserId, active: false }),
         "last_admin_required",
       );
       await assertAuthErrorReason(
-        admin.rpc.auth.usersUpdate({
+        admin.authUsersUpdate({
           userId: adminUserId,
           capabilities: [],
           capabilityGroups: [groupKey],
@@ -86,25 +86,25 @@ liveTrellisTest({
         "last_admin_required",
       );
 
-      const adminUser = await admin.rpc.auth.usersGet({ userId: adminUserId })
+      const adminUser = await admin.authUsersGet({ userId: adminUserId })
         .orThrow();
       assert(adminUser.user.identities.length > 0, "expected admin identity");
       await assertAuthErrorReason(
-        admin.rpc.auth.userIdentitiesUnlink({
+        admin.authUserIdentitiesUnlink({
           userId: adminUserId,
           identityId: adminUser.user.identities[0].identityId,
         }),
         "last_admin_required",
       );
 
-      await admin.rpc.auth.usersCreate({
+      await admin.authUsersCreate({
         username: caseScopedName("auth-capability-second-admin", CASE_ID),
         name: "Capability Group Second Admin",
         email: "capability-group-second-admin@example.test",
         active: true,
         capabilityGroups: ["admin"],
       }).orThrow();
-      const permitted = await admin.rpc.auth.usersUpdate({
+      const permitted = await admin.authUsersUpdate({
         userId: adminUserId,
         capabilities: [],
         capabilityGroups: [groupKey],

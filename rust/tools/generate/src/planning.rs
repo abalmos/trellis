@@ -500,10 +500,10 @@ fn ts_shell_key_outputs_exist(ts_out: Option<&Path>) -> bool {
         return true;
     };
     ts_out.join("mod.ts").exists()
-        && ts_out.join("api.ts").exists()
-        && ts_out.join("owned_api.ts").exists()
-        && ts_out.join("contract.ts").exists()
-        && ts_out.join("client.ts").exists()
+        && ts_out.join("descriptors.ts").exists()
+        && ts_out.join("types.ts").exists()
+        && ts_out.join("schemas.ts").exists()
+        && ts_out.join("manifest.ts").exists()
 }
 
 fn npm_shell_key_outputs_exist(npm_out: Option<&Path>) -> bool {
@@ -708,14 +708,14 @@ mod tests {
         fs::write(
             notifications.join("notifications.ts"),
             concat!(
-                "import * as krishiSherpa from \"@trellis-sdk/krishi-sherpa\";\n",
+                "import { SherpaRunIngested } from \"@trellis-sdk/krishi-sherpa\";\n",
                 "import { defineServiceContract } from \"@qlever-llc/trellis\";\n",
                 "export const notifications = defineServiceContract(() => ({\n",
                 "  id: \"krishi.notifications@v1\",\n",
                 "  kind: \"service\",\n",
                 "  displayName: \"Notifications\",\n",
                 "  description: \"Notifications\",\n",
-                "  uses: { sherpa: krishiSherpa.use({ events: { subscribe: [\"Sherpa.RunIngested\"] } }) },\n",
+                "  uses: [SherpaRunIngested.subscribe],\n",
                 "}));\n",
                 "export default notifications;\n",
             ),

@@ -20,7 +20,7 @@ liveTrellisTest({
       });
 
       const grant = requireReceiveTransferGrant(
-        await client.rpc.files.download({
+        await client.filesDownload({
           key: fixture.downloadKey,
         }).orThrow(),
       );

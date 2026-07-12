@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { createAuth, defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,20 +24,12 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Service Instance Remove Rollback Admin",
   description:
     "Exercises Auth service instance remove refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.ServiceInstances.List",
-            "Auth.ServiceInstances.Provision",
-            "Auth.ServiceInstances.Remove",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthServiceInstancesList,
+    trellisAuth.AuthServiceInstancesProvision,
+    trellisAuth.AuthServiceInstancesRemove,
+  ],
 }));
 
 liveTrellisTest({
@@ -52,24 +44,24 @@ liveTrellisTest({
     });
 
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "service",
         deploymentId,
         namespaces: ["admin", "rollback"],
         contractCompatibilityMode: "mutable-dev",
       }).orThrow();
       const auth = await createAuth({ sessionKeySeed: randomSessionSeed() });
-      const provisioned = await admin.rpc.auth.serviceInstancesProvision({
+      const provisioned = await admin.authServiceInstancesProvision({
         deploymentId,
         instanceKey: auth.sessionKey,
       }).orThrow();
 
-      const failedRemove = await admin.rpc.auth.serviceInstancesRemove({
+      const failedRemove = await admin.authServiceInstancesRemove({
         instanceId: provisioned.instance.instanceId,
       });
       assertRefreshHookFailure(failedRemove, refreshHook);
 
-      const page = await admin.rpc.auth.serviceInstancesList({
+      const page = await admin.authServiceInstancesList({
         deploymentId,
         limit: 500,
       }).orThrow();

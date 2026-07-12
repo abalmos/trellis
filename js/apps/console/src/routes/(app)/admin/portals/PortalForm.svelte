@@ -230,7 +230,7 @@
   }
 
   async function loadPortalDetail(target: string) {
-    const response = await trellis.request("Auth.Portals.Get", { portalId: target }).take();
+    const response = await trellis.authPortalsGet({ portalId: target }).take();
     if (isErr(response)) {
       error = errorMessage(response);
       return;
@@ -241,7 +241,7 @@
   async function loadAllCapabilities(): Promise<CapabilityView[]> {
     const loaded: CapabilityView[] = [];
     for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-      const response = await trellis.request("Auth.Capabilities.List", { limit: CATALOG_PAGE_SIZE, offset }).take();
+      const response = await trellis.authCapabilitiesList({ limit: CATALOG_PAGE_SIZE, offset }).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       const page = response.entries ?? [];
       loaded.push(...page);
@@ -252,7 +252,7 @@
   async function loadAllCapabilityGroups(): Promise<CapabilityGroupView[]> {
     const loaded: CapabilityGroupView[] = [];
     for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-      const response = await trellis.request("Auth.CapabilityGroups.List", { limit: CATALOG_PAGE_SIZE, offset }).take();
+      const response = await trellis.authCapabilityGroupsList({ limit: CATALOG_PAGE_SIZE, offset }).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       const page = response.entries ?? [];
       loaded.push(...page);
@@ -322,7 +322,7 @@
     saved = null;
     try {
       if (!metadataReadOnly) {
-        const portalResponse = await trellis.request("Auth.Portals.Put", {
+        const portalResponse = await trellis.authPortalsPut({
           portalId: target,
           displayName: trimmedDisplayName,
           entryUrl: trimmedEntryUrl,
@@ -334,7 +334,7 @@
         }
       }
 
-      const settingsResponse = await trellis.request("Auth.Portals.LoginSettings.Update", {
+      const settingsResponse = await trellis.authPortalsLoginSettingsUpdate({
         portalId: target,
         localRegistrationEnabled,
         federatedRegistrationEnabled,
@@ -383,7 +383,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.request("Auth.Portals.Routes.Put", {
+      const response = await trellis.authPortalsRoutesPut({
         portalId: portal.portalId,
         contractId: selector.contractId,
         origin: selector.origin,
@@ -394,7 +394,7 @@
         return;
       }
       if (selectorChanged) {
-        const removeResponse = await trellis.request("Auth.Portals.Routes.Remove", {
+        const removeResponse = await trellis.authPortalsRoutesRemove({
           portalId: existingRoute.portalId,
           contractId: existingRoute.contractId,
           origin: existingRoute.origin,
@@ -419,7 +419,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.request("Auth.Portals.Routes.Remove", {
+      const response = await trellis.authPortalsRoutesRemove({
         portalId: route.portalId,
         contractId: route.contractId,
         origin: route.origin,

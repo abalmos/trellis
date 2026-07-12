@@ -1,6 +1,6 @@
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import { defineAppContract, TrellisClient } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { caseScopedContractId, caseScopedName } from "../_support/names.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createAuthLocalLoginFixture } from "./_fixture.ts";
@@ -11,11 +11,7 @@ const resolveOnlyContract = defineAppContract(() => ({
   id: caseScopedContractId("trellis.integration.auth-user-resolve", CASE_ID),
   displayName: "Trellis Integration Auth User Resolve",
   description: "Resolves explicit auth user ids without directory access.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Users.Resolve"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthUsersResolve],
 }));
 
 liveTrellisTest({
@@ -42,13 +38,13 @@ liveTrellisTest({
       try {
         assert(authRequired, "expected local-login flow to require auth");
 
-        const me = await client.rpc.auth.sessionsMe({}).orThrow();
+        const me = await client.authSessionsMe({}).orThrow();
         assertEquals(me.participantKind, "app");
         assert(me.user !== null, "expected Auth.Sessions.Me to return a user");
         assertEquals(me.user.active, true);
         assertArrayIncludes(me.user.capabilities, ["admin"]);
 
-        const ping = await client.rpc.authLogin.ping({
+        const ping = await client.authLoginPing({
           message: fixture.pingMessage,
         }).orThrow();
         assertEquals(ping, { message: fixture.pingMessage, accepted: true });
@@ -59,10 +55,10 @@ liveTrellisTest({
         });
         try {
           assert(
-            !("Auth.Users.List" in resolveOnlyContract.API.used.rpc),
+            !("authUsersList" in resolveClient),
             "resolve-only contract must not receive directory access",
           );
-          const resolved = await resolveClient.rpc.auth.usersResolve({
+          const resolved = await resolveClient.authUsersResolve({
             userIds: [me.user.userId, "usr_missing", me.user.userId],
           }).orThrow();
           assertEquals(resolved, {

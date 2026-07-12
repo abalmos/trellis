@@ -44,7 +44,7 @@ liveTrellisTest({
     let observed: { id: string; context: EventListenerContext } | undefined;
 
     try {
-      await consumer.event.source.pinged.listen(
+      await consumer.onSourcePinged(
         (event, context) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
@@ -58,7 +58,7 @@ liveTrellisTest({
       assertEquals(after.length, 1);
       assertEquals(consumerName(after[0]), consumerName(before[0]));
 
-      await publisher.event.source.pinged.publish({
+      await publisher.publishSourcePinged({
         id: fixture.eventId,
         value: "bound",
       }).orThrow();

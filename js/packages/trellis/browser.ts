@@ -34,7 +34,7 @@ export {
   schema,
   unwrapSchema,
 } from "./contracts.ts";
-export type { InferSchemaType, JsonValue, TrellisAPI } from "./contracts.ts";
+export type { InferSchemaType, JsonValue } from "./contracts.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
 export { defineError, withTrellisValidation } from "./contract_support/mod.ts";
@@ -72,18 +72,7 @@ export {
   defineDeviceContract,
   defineServiceContract,
 } from "./contract.ts";
-export type {
-  ContractApiViews,
-  ContractDependencyUse,
-  ContractModule,
-  ContractUseFn,
-  DefineContractInput,
-  EmptyApi,
-  SdkContractModule,
-  TrellisApiLike,
-  TrellisContractV1,
-  UseSpec,
-} from "./contract.ts";
+export type { DefineContractInput, TrellisContractV1 } from "./contract.ts";
 export {
   AsyncResult,
   BaseError,
@@ -170,8 +159,6 @@ export type {
 export { controlSubject, OperationInvoker } from "./operations.ts";
 export type {
   AcceptedOperation,
-  ClientTrellis,
-  ConnectedTrellisClient,
   EventListenerContext,
   EventName,
   EventOpts,
@@ -206,5 +193,5 @@ export type {
   SessionCaller,
   StateFacade,
   ValueStateStoreClient,
-} from "./trellis.ts";
-export type { TrellisAuth } from "./trellis.ts";
+} from "./session.ts";
+export type { TrellisAuth } from "./session.ts";

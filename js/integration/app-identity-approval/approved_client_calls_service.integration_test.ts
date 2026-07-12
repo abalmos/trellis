@@ -24,7 +24,7 @@ liveTrellisTest({
       }).orThrow();
 
       try {
-        const result = await client.rpc.grant.ping({
+        const result = await client.grantPing({
           message: fixture.pingMessage,
         }).orThrow();
         assertEquals(result, { message: fixture.pingMessage, approved: true });

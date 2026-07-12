@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import {
   caseScopedContractId,
   caseScopedName,
@@ -24,20 +24,12 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Control-Plane Device Deployment Enable Rollback Admin",
   description:
     "Exercises Auth device deployment enable refresh rollback through live Trellis.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({
-        rpc: {
-          call: [
-            "Auth.Deployments.Create",
-            "Auth.Deployments.Disable",
-            "Auth.Deployments.Enable",
-            "Auth.Deployments.List",
-          ],
-        },
-      }),
-    },
-  },
+  uses: [
+    trellisAuth.AuthDeploymentsCreate,
+    trellisAuth.AuthDeploymentsDisable,
+    trellisAuth.AuthDeploymentsEnable,
+    trellisAuth.AuthDeploymentsList,
+  ],
 }));
 
 liveTrellisTest({
@@ -50,12 +42,12 @@ liveTrellisTest({
       contract: adminContract,
     });
     try {
-      await admin.rpc.auth.deploymentsCreate({
+      await admin.authDeploymentsCreate({
         kind: "device",
         deploymentId,
         reviewMode: "none",
       }).orThrow();
-      await admin.rpc.auth.deploymentsDisable({
+      await admin.authDeploymentsDisable({
         kind: "device",
         deploymentId,
       }).orThrow();
@@ -71,7 +63,7 @@ liveTrellisTest({
     });
     try {
       const deploymentDisabled = async () => {
-        const page = await restartedAdmin.rpc.auth.deploymentsList({
+        const page = await restartedAdmin.authDeploymentsList({
           kind: "device",
           limit: 500,
         }).orThrow();
@@ -80,7 +72,7 @@ liveTrellisTest({
         )?.disabled;
       };
 
-      const failedEnable = await restartedAdmin.rpc.auth.deploymentsEnable({
+      const failedEnable = await restartedAdmin.authDeploymentsEnable({
         kind: "device",
         deploymentId,
       });

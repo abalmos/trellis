@@ -31,6 +31,10 @@ export {
   TrellisBindingsGetResponseSchema,
 } from "./models/trellis/rpc/TrellisBindingsGet.ts";
 export {
+  AuthSessionsLogoutResponseSchema,
+  AuthSessionsLogoutSchema,
+} from "./models/auth/rpc/Logout.ts";
+export {
   TrellisCatalogRequestSchema,
   TrellisCatalogResponseSchema,
 } from "./models/trellis/rpc/TrellisCatalog.ts";
@@ -42,26 +46,9 @@ export {
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
 } from "./models/trellis/rpc/TrellisSurfaceStatus.ts";
-export type { InferSchemaType, JsonValue, TrellisAPI } from "./contracts.ts";
+export type { InferSchemaType, JsonValue } from "./contracts.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";
-export type {
-  HealthCheckResult,
-  HealthHeartbeatSample,
-  ServiceHealthCheck,
-  ServiceHealthCheckFn,
-  ServiceHealthInfo,
-  ServiceHealthInfoFn,
-} from "./health.ts";
-export {
-  createHealthHeartbeatSample,
-  HealthCheckResultSchema,
-  HealthHeartbeatSampleSchema,
-  HealthInfoSchema,
-  runAllServiceHealthChecks,
-  runServiceHealthCheck,
-  ServiceHealth,
-} from "./health.ts";
 export { defineError, withTrellisValidation } from "./contract_support/mod.ts";
 export {
   buildCursorPage,
@@ -96,19 +83,13 @@ export {
   defineAppContract,
   defineDeviceContract,
   defineServiceContract,
+  jobs,
+  kv,
+  state,
+  store,
 } from "./contract.ts";
-export type {
-  ContractApiViews,
-  ContractDependencyUse,
-  ContractModule,
-  ContractUseFn,
-  DefineContractInput,
-  EmptyApi,
-  SdkContractModule,
-  TrellisApiLike,
-  TrellisContractV1,
-  UseSpec,
-} from "./contract.ts";
+export { optional } from "./contract_support/descriptors.ts";
+export type { DefineContractInput, TrellisContractV1 } from "./contract.ts";
 export {
   AsyncResult,
   BaseError,
@@ -120,6 +101,7 @@ export {
 } from "@qlever-llc/result";
 export type { MaybeAsync } from "@qlever-llc/result";
 export type { ClientOpts } from "./client.ts";
+export type { CallerContract, CallerRuntime } from "./caller.ts";
 export type {
   ClientAuthContinuation,
   ClientAuthOptions,
@@ -227,8 +209,6 @@ export type {
 export { controlSubject, OperationInvoker } from "./operations.ts";
 export type {
   AcceptedOperation,
-  ClientTrellis,
-  ConnectedTrellisClient,
   EventListenerContext,
   EventName,
   EventOpts,
@@ -265,5 +245,5 @@ export type {
   TrellisEventHeader,
   TrellisEventMessage,
   ValueStateStoreClient,
-} from "./trellis.ts";
+} from "./session.ts";
 export type { TrellisDeviceConnection } from "./device.ts";

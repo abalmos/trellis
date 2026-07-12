@@ -7,7 +7,7 @@ import {
   sha256,
   utf8,
 } from "@qlever-llc/trellis/auth.ts";
-import { sdk as trellisAuth } from "@qlever-llc/trellis/sdk/auth";
+import * as trellisAuth from "@qlever-llc/trellis/sdk/auth";
 import { waitFor } from "@qlever-llc/trellis-test";
 import {
   caseScopedContractId,
@@ -26,11 +26,7 @@ const clientContract = defineAppContract(() => ({
   displayName: "Trellis Session Logout Kick Client",
   description:
     "Keeps live app connections open to verify HTTP logout revokes runtime access.",
-  uses: {
-    required: {
-      auth: trellisAuth.use({ rpc: { call: ["Auth.Sessions.Me"] } }),
-    },
-  },
+  uses: [trellisAuth.AuthSessionsMe],
 }));
 
 liveTrellisTest({
@@ -59,8 +55,8 @@ liveTrellisTest({
     }).orThrow();
 
     try {
-      await first.rpc.auth.sessionsMe({}).orThrow();
-      await second.rpc.auth.sessionsMe({}).orThrow();
+      await first.authSessionsMe({}).orThrow();
+      await second.authSessionsMe({}).orThrow();
 
       const logout = await fetchSessionLogout(
         runtime.trellisUrl,
@@ -69,8 +65,8 @@ liveTrellisTest({
       assert(logout.ok, `expected logout to succeed, got ${logout.status}`);
 
       await waitFor(async () => {
-        const firstMe = await first.rpc.auth.sessionsMe({});
-        const secondMe = await second.rpc.auth.sessionsMe({});
+        const firstMe = await first.authSessionsMe({});
+        const secondMe = await second.authSessionsMe({});
         return firstMe.isErr() && secondMe.isErr();
       });
     } finally {

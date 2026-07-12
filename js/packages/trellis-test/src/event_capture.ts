@@ -1,49 +1,55 @@
-import {
-  type ClientOpts,
-  type ContractModule,
-  defineAppContract,
-  type EventListenerContext,
-  type EventName,
-  type EventType,
-  type TrellisAPI,
-  type TrellisApiLike,
-} from "@qlever-llc/trellis";
-import { sdk as auth } from "@qlever-llc/trellis/sdk/auth";
 import type {
-  TrellisTestClientContract,
-  TrellisTestConnectedClient,
-  WaitForOptions,
-} from "./types.ts";
+  CallerContract,
+  CallerRuntime,
+  ClientOpts,
+  EventListenerContext,
+  InferSchemaType,
+} from "@qlever-llc/trellis";
+import { defineAppContract } from "@qlever-llc/trellis";
+import type {
+  ActionDescriptor,
+  DescriptorForAction,
+} from "@qlever-llc/trellis/contracts";
+import type { EventDesc } from "@qlever-llc/trellis/contracts";
+import { AuthEventsValidate } from "@qlever-llc/trellis/sdk/auth";
 
-type EventSourceContract = ContractModule<
+import type { WaitForOptions } from "./types.ts";
+
+export type TrellisTestEventAction = ActionDescriptor<
   string,
-  TrellisAPI,
-  TrellisApiLike,
-  TrellisApiLike
+  string,
+  "event-subscribe",
+  EventDesc,
+  string
 >;
+type EventSubscribeAction = TrellisTestEventAction;
+type EventName<TAction extends EventSubscribeAction> = TAction["name"];
+type EventPayload<
+  TAction extends EventSubscribeAction,
+  TName extends EventName<TAction>,
+> = Extract<TAction, { name: TName }> extends infer TSelected extends
+  EventSubscribeAction
+  ? DescriptorForAction<TSelected> extends EventDesc<infer TSchema>
+    ? InferSchemaType<TSchema>
+  : never
+  : never;
 
 type ConnectedClient = { connection: { close(): Promise<void> } };
-
-type EventListenerStart = { orThrow(): Promise<void> };
-
-type EventCaptureListener<TEvent> = {
-  listen(
-    handler: (event: TEvent, context: EventListenerContext) => void,
-    subjectData: Record<string, unknown>,
-    opts: { mode: "ephemeral"; signal: AbortSignal },
-  ): EventListenerStart;
-};
+type EventListener<TEvent> = (
+  handler: (event: TEvent, context: EventListenerContext) => unknown,
+  opts: { mode: "ephemeral"; signal: AbortSignal },
+) => { orThrow(): Promise<void> };
 
 type EventCaptureRuntime = {
   contracts: {
     approve(args: {
-      contract: EventSourceContract;
+      contract: TrellisTestEventSourceContract;
       deployment?: string;
     }): Promise<unknown>;
   };
-  connectClient<TContract extends TrellisTestClientContract<TrellisAPI>>(
+  connectClient<TContract extends CallerContract>(
     args: ClientOpts & { name: string; contract: TContract },
-  ): Promise<TrellisTestConnectedClient<TContract>>;
+  ): Promise<CallerRuntime<TContract>>;
   waitFor<T>(
     fn: () =>
       | T
@@ -56,192 +62,98 @@ type EventCaptureRuntime = {
 };
 
 /** Contract value accepted by `TrellisTestRuntime.captureEvents`. */
-export type TrellisTestEventSourceContract = EventSourceContract;
+export type TrellisTestEventSourceContract = CallerContract;
 
 /** Options for starting a live decoded contract event capture. */
 export type TrellisTestEventCaptureOptions<
   TContract extends TrellisTestEventSourceContract,
-  TEvents extends readonly EventName<TContract>[],
+  TEvents extends readonly EventSubscribeAction[],
 > = ClientOpts & {
-  /** Logical name for the synthetic app/client participant used by the capture. */
   name: string;
-  /** Source contract whose owned events should be captured. */
   contract: TContract;
-  /** Existing source deployment to approve without mutating the runtime default. */
   deployment?: string;
-  /** Owned event names to subscribe to through the generated event facade. */
   events: TEvents;
 };
 
 /** Transport-neutral listener metadata captured with a test event. */
 export type TrellisTestCapturedEventContext = {
-  /** Stable event id from the Trellis event header. */
   readonly id: string;
-  /** Event creation time from the Trellis event header. */
   readonly time: Date;
-  /** Runtime listener mode that delivered the event. */
   readonly mode: "ephemeral";
 };
 
 /** A decoded contract event observed by a `TrellisTestEventCapture`. */
 export type TrellisTestCapturedEvent<
-  TContract extends TrellisTestEventSourceContract,
-  E extends EventName<TContract>,
-> = {
-  [K in E]: {
-    /** Contract event name that matched this captured event. */
-    readonly event: K;
-    /** Decoded event payload from the generated Trellis event facade. */
-    readonly payload: EventType<TContract, K>;
-    /** Listener metadata without transport subjects or envelopes. */
+  TAction extends EventSubscribeAction,
+  TName extends EventName<TAction>,
+> = TName extends EventName<TAction> ? {
+    readonly event: TName;
+    readonly payload: EventPayload<TAction, TName>;
     readonly context: TrellisTestCapturedEventContext;
-    /** Wall-clock time when the test capture observed this event. */
     readonly receivedAt: Date;
-  };
-}[E];
+  }
+  : never;
 
 /** Predicate used by `TrellisTestEventCapture.waitFor`. */
 export type TrellisTestCapturedEventPredicate<
-  TContract extends TrellisTestEventSourceContract,
-  E extends EventName<TContract>,
+  TAction extends EventSubscribeAction,
+  TName extends EventName<TAction>,
 > = (
-  event: TrellisTestCapturedEvent<TContract, E>,
+  event: TrellisTestCapturedEvent<TAction, TName>,
 ) => boolean | Promise<boolean>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isEventCaptureListener<TEvent>(
-  value: unknown,
-): value is EventCaptureListener<TEvent> {
-  return isRecord(value) && typeof value.listen === "function";
-}
-
-function lowerCamelIdent(value: string): string {
-  const pascal = value
-    .split(/[^A-Za-z0-9]+/u)
-    .filter((part) => part.length > 0)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join("");
-  return pascal.length === 0 ? "_" : pascal[0]!.toLowerCase() + pascal.slice(1);
-}
-
-function surfaceGroupName(event: string): string {
-  return lowerCamelIdent(event.split(".")[0] ?? event);
-}
-
-function surfaceLeafName(event: string): string {
-  const parts = event.split(".");
-  parts.shift();
-  return lowerCamelIdent(parts.length === 0 ? event : parts.join("."));
-}
-
 function captureContractName(name: string): string {
-  const safe = name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(
+  return name.toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(
     /^-+|-+$/gu,
     "",
-  );
-  return safe || "capture";
+  ) || "capture";
 }
 
-function selectedEvents<
-  TContract extends TrellisTestEventSourceContract,
-  TEvents extends readonly EventName<TContract>[],
->(
-  contract: TContract,
+function selectedEvents<TEvents extends readonly EventSubscribeAction[]>(
+  contract: TrellisTestEventSourceContract,
   events: TEvents,
 ): TEvents {
   if (events.length === 0) {
-    throw new Error("Trellis event capture requires at least one event name");
+    throw new Error("Trellis event capture requires at least one event action");
   }
-
-  const known = Object.keys(contract.API.owned.events ?? {});
   const seen = new Set<string>();
   for (const event of events) {
-    const eventName = String(event);
-    if (seen.has(eventName)) {
+    if (event.contractId !== contract.CONTRACT.id) {
       throw new Error(
-        `Duplicate event name '${eventName}' in Trellis event capture options`,
+        `Event '${event.name}' belongs to '${event.contractId}', not '${contract.CONTRACT.id}'`,
       );
     }
-    seen.add(eventName);
-    if (!known.includes(String(event))) {
-      throw new Error(
-        `Cannot capture unknown event '${eventName}' from contract '${contract.CONTRACT.id}'. Known events: ${
-          known.join(", ") || "none"
-        }`,
-      );
+    if (seen.has(event.name)) {
+      throw new Error(`Duplicate event '${event.name}' in capture options`);
     }
+    seen.add(event.name);
   }
   return events;
 }
 
-function isCapturedEvent<
-  TContract extends TrellisTestEventSourceContract,
-  TSelectedEvent extends EventName<TContract>,
-  E extends TSelectedEvent,
->(
-  event: TrellisTestCapturedEvent<TContract, TSelectedEvent>,
-  name: E,
-): event is TrellisTestCapturedEvent<TContract, E> {
+type InternalCapturedEvent = {
+  readonly event: string;
+  readonly payload: unknown;
+  readonly context: TrellisTestCapturedEventContext;
+  readonly receivedAt: Date;
+};
+
+function isCapturedEvent(event: InternalCapturedEvent, name: string): boolean {
   return event.event === name;
 }
 
-function getEventListener<
-  TContract extends TrellisTestEventSourceContract,
-  E extends EventName<TContract>,
->(
-  client: TrellisTestConnectedClient<TrellisTestClientContract>,
-  event: E,
-): EventCaptureListener<EventType<TContract, E>> {
-  const eventFacade: unknown = client.event;
-  if (!isRecord(eventFacade)) {
-    throw new Error("Connected Trellis client is missing its event facade");
-  }
-
-  const groupName = surfaceGroupName(String(event));
-  const leafName = surfaceLeafName(String(event));
-  const group = eventFacade[groupName];
-  if (!isRecord(group)) {
-    throw new Error(
-      `Generated event facade is missing group '${groupName}' for event '${
-        String(event)
-      }'`,
-    );
-  }
-
-  const leaf = group[leafName];
-  if (!isEventCaptureListener<EventType<TContract, E>>(leaf)) {
-    throw new Error(
-      `Generated event facade is missing listener '${groupName}.${leafName}' for event '${
-        String(event)
-      }'`,
-    );
-  }
-  return leaf;
-}
-
-/**
- * Disposable helper that captures live decoded contract events in integration tests.
- *
- * Create instances with `TrellisTestRuntime.captureEvents(...)`. The capture uses a
- * synthetic app contract with normal `uses.events.subscribe` authority and ephemeral
- * generated event facade listeners.
- */
+/** Disposable live event capture for integration tests. */
 export class TrellisTestEventCapture<
-  TContract extends TrellisTestEventSourceContract,
-  TSelectedEvent extends EventName<TContract>,
+  TAction extends EventSubscribeAction,
 > implements AsyncDisposable {
   readonly #client: ConnectedClient;
   readonly #waitFor: EventCaptureRuntime["waitFor"];
   readonly #onStop: (
     client: ConnectedClient,
-    capture: TrellisTestEventCapture<TContract, TSelectedEvent>,
+    capture: TrellisTestEventCapture<TAction>,
   ) => void;
   readonly #controller = new AbortController();
-  readonly #events: Array<TrellisTestCapturedEvent<TContract, TSelectedEvent>> =
-    [];
+  readonly #events: InternalCapturedEvent[] = [];
   #stopped = false;
 
   protected constructor(args: {
@@ -249,7 +161,7 @@ export class TrellisTestEventCapture<
     waitFor: EventCaptureRuntime["waitFor"];
     onStop: (
       client: ConnectedClient,
-      capture: TrellisTestEventCapture<TContract, TSelectedEvent>,
+      capture: TrellisTestEventCapture<TAction>,
     ) => void;
   }) {
     this.#client = args.client;
@@ -262,55 +174,48 @@ export class TrellisTestEventCapture<
   }
 
   protected record(
-    event: TrellisTestCapturedEvent<TContract, TSelectedEvent>,
+    event: InternalCapturedEvent,
   ): void {
     this.#events.push(event);
   }
 
-  /** Returns captured events, optionally filtered by event name. */
+  /** Returns all captured events, optionally filtered by event name. */
   all(): ReadonlyArray<
-    TrellisTestCapturedEvent<TContract, TSelectedEvent>
+    TrellisTestCapturedEvent<TAction, EventName<TAction>>
   >;
-  all<E extends TSelectedEvent>(
-    name: E,
-  ): ReadonlyArray<TrellisTestCapturedEvent<TContract, E>>;
-  all<E extends TSelectedEvent>(
-    name?: E,
-  ):
-    | ReadonlyArray<TrellisTestCapturedEvent<TContract, TSelectedEvent>>
-    | ReadonlyArray<TrellisTestCapturedEvent<TContract, E>> {
-    if (name === undefined) return [...this.#events];
-    return this.#events.filter((event) => isCapturedEvent(event, name));
+  all<TName extends EventName<TAction>>(
+    name: TName,
+  ): ReadonlyArray<TrellisTestCapturedEvent<TAction, TName>>;
+  all<TName extends EventName<TAction>>(
+    name?: TName,
+  ): ReadonlyArray<InternalCapturedEvent> {
+    return name === undefined
+      ? [...this.#events]
+      : this.#events.filter((event) => isCapturedEvent(event, name));
   }
 
-  /** Removes all events captured so far without stopping live listeners. */
+  /** Removes all captured events without stopping listeners. */
   clear(): void {
     this.#events.length = 0;
   }
 
-  /**
-   * Waits for the first captured event with the requested name and optional predicate.
-   *
-   * Already-captured events are checked first, then future live events are observed
-   * until the runtime wait timeout elapses.
-   */
-  async waitFor<E extends TSelectedEvent>(
-    name: E,
-    predicate?: TrellisTestCapturedEventPredicate<TContract, E>,
+  /** Waits for a matching captured event. */
+  async waitFor<TName extends EventName<TAction>>(
+    name: TName,
+    predicate?: TrellisTestCapturedEventPredicate<TAction, TName>,
     opts?: WaitForOptions,
-  ): Promise<TrellisTestCapturedEvent<TContract, E>> {
+  ): Promise<TrellisTestCapturedEvent<TAction, TName>> {
     return await this.#waitFor(async () => {
       for (const event of this.#events) {
         if (!isCapturedEvent(event, name)) continue;
-        if (predicate === undefined || await predicate(event)) {
-          return event;
-        }
+        const typed = event as TrellisTestCapturedEvent<TAction, TName>;
+        if (predicate === undefined || await predicate(typed)) return typed;
       }
       return false;
     }, opts);
   }
 
-  /** Stops live listeners and closes the synthetic capture client connection once. */
+  /** Stops listeners and closes the synthetic client. */
   async stop(): Promise<void> {
     if (this.#stopped) return;
     this.#controller.abort();
@@ -326,15 +231,14 @@ export class TrellisTestEventCapture<
 }
 
 class StartedTrellisTestEventCapture<
-  TContract extends TrellisTestEventSourceContract,
-  TSelectedEvent extends EventName<TContract>,
-> extends TrellisTestEventCapture<TContract, TSelectedEvent> {
+  TAction extends EventSubscribeAction,
+> extends TrellisTestEventCapture<TAction> {
   constructor(args: {
     client: ConnectedClient;
     waitFor: EventCaptureRuntime["waitFor"];
     onStop: (
       client: ConnectedClient,
-      capture: TrellisTestEventCapture<TContract, TSelectedEvent>,
+      capture: TrellisTestEventCapture<TAction>,
     ) => void;
   }) {
     super(args);
@@ -345,24 +249,24 @@ class StartedTrellisTestEventCapture<
   }
 
   recordCaptured(
-    event: TrellisTestCapturedEvent<TContract, TSelectedEvent>,
+    event: InternalCapturedEvent,
   ): void {
     this.record(event);
   }
 }
 
-/** @internal Starts a capture using runtime-owned client connection helpers. */
+/** @internal Starts a capture through runtime-owned client helpers. */
 export async function startTrellisTestEventCapture<
   TContract extends TrellisTestEventSourceContract,
-  const TEvents extends readonly EventName<TContract>[],
+  const TEvents extends readonly EventSubscribeAction[],
 >(args: {
   runtime: EventCaptureRuntime;
   options: TrellisTestEventCaptureOptions<TContract, TEvents>;
   onStop: (
     client: ConnectedClient,
-    capture: TrellisTestEventCapture<TContract, TEvents[number]>,
+    capture: TrellisTestEventCapture<TEvents[number]>,
   ) => void;
-}): Promise<TrellisTestEventCapture<TContract, TEvents[number]>> {
+}): Promise<TrellisTestEventCapture<TEvents[number]>> {
   const events = selectedEvents(args.options.contract, args.options.events);
   await args.runtime.contracts.approve({
     contract: args.options.contract,
@@ -370,71 +274,40 @@ export async function startTrellisTestEventCapture<
   });
 
   const appContract = defineAppContract(() => ({
-    id: `trellis.test.event-capture.${
-      captureContractName(args.options.name)
-    }@v1`,
+    id: `trellis.test.event-capture.${captureContractName(args.options.name)}@v1`,
     displayName: `Trellis Test Event Capture: ${args.options.name}`,
-    description:
-      "Synthetic app/client participant for live test event capture.",
-    uses: {
-      required: {
-        auth: auth.use({ rpc: { call: ["Auth.Events.Validate"] } }),
-        source: args.options.contract.use({
-          events: { subscribe: events },
-        }),
-      },
-    },
+    description: "Synthetic app participant for live test event capture.",
+    uses: [AuthEventsValidate, ...events],
   }));
-
   const {
     contract: _sourceContract,
     deployment: _deployment,
     events: _events,
     ...clientOptions
   } = args.options;
-  const clientContract = appContract as TrellisTestClientContract<TrellisAPI>;
   const client = await args.runtime.connectClient({
     ...clientOptions,
-    contract: clientContract,
+    contract: appContract,
   });
-  const capture = new StartedTrellisTestEventCapture<
-    TContract,
-    TEvents[number]
-  >({
+  const capture = new StartedTrellisTestEventCapture<TEvents[number]>({
     client,
     waitFor: args.runtime.waitFor.bind(args.runtime),
     onStop: args.onStop,
   });
 
-  async function startListener<E extends TEvents[number]>(
-    event: E,
-  ): Promise<void> {
-    const listener = getEventListener<TContract, E>(
-      client,
-      event,
-    );
-    await listener.listen(
-      (decoded, context) => {
-        const captured: TrellisTestCapturedEvent<TContract, E> = {
-          event,
-          payload: decoded,
-          context: {
-            id: context.id,
-            time: context.time,
-            mode: "ephemeral",
-          },
-          receivedAt: new Date(),
-        };
-        capture.recordCaptured(captured);
-      },
-      {},
-      { mode: "ephemeral", signal: capture.signal },
-    ).orThrow();
-  }
-
   try {
     for (const event of events) {
-      await startListener(event);
+      const listener = Reflect.get(client, event.connectedName) as EventListener<
+        EventPayload<TEvents[number], typeof event.name>
+      >;
+      await listener((decoded, context) => {
+        capture.recordCaptured({
+          event: event.name,
+          payload: decoded,
+          context: { id: context.id, time: context.time, mode: "ephemeral" },
+          receivedAt: new Date(),
+        });
+      }, { mode: "ephemeral", signal: capture.signal }).orThrow();
     }
   } catch (error) {
     await capture.stop().catch(() => undefined);

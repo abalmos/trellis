@@ -64,7 +64,7 @@ liveTrellisTest({
 
     try {
       let handlerCalls = 0;
-      await service.handle.rpc.entity.get(({ input }) => {
+      await service.handleEntityGet(({ input }) => {
         handlerCalls += 1;
         return Result.ok({ id: input.id, found: true });
       });
@@ -72,7 +72,7 @@ liveTrellisTest({
       const sessionSnapshot = await runtime.waitFor(() =>
         sqlite.takeSession(clientKey.sessionKey)
       );
-      const call = client.rpc.entity.get({ id: fixture.entityId }).orThrow();
+      const call = client.entityGet({ id: fixture.entityId }).orThrow();
       await runtime.waitFor(
         () =>
           authReplyObserver.frames().some((frame) =>
