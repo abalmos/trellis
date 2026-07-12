@@ -1,7 +1,8 @@
 import { isErr, ok } from "@qlever-llc/trellis";
-import type { FieldOpsService } from "../../deps.ts";
+import type { RpcHandler } from "@qlever-llc/trellis/service";
+import type contract from "../../../contract.ts";
 
-type Handler = Parameters<FieldOpsService["handleSitesGet"]>[0];
+type Handler = RpcHandler<typeof contract, "Sites.Get">;
 
 export const getSite: Handler = async ({ input, client }) => {
   const entry = await client.kv.siteSummaries.get(input.siteId).take();

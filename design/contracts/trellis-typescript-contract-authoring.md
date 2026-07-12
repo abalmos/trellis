@@ -111,6 +111,9 @@ uses: [
 
 Action identity comes from the descriptor's exact owner contract ID. Local
 import names are not manifest aliases and do not affect digest identity.
+Connected identifiers use acronym-aware word boundaries shared with Rust:
+`AI.GenerateJSON` becomes TypeScript `aiGenerateJson` and Rust
+`rpc().ai().generate_json()`.
 
 The required user-facing contract metadata is:
 
@@ -416,7 +419,8 @@ Rules:
 - contract descriptors declare transfer direction explicitly for operations that
   ingest caller bytes and RPCs that issue service-owned byte grants
 - inline handlers infer from `service.handle<Name>(...)`; extracted handlers use
-  `Parameters<ConnectedTrellisService<typeof contract>["handle<Name>"]>[0]`
+  `RpcHandler`, `OperationHandler`, `FeedHandler`, `ServiceEventHandler`, or
+  `JobHandler` with the local contract and canonical action or queue name
 - extracted handler factories close over application dependencies; the handler
   type remains a plain function signature without a dependency slot
 - callers do not manually assemble runtime API arrays for normal usage

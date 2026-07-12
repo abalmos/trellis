@@ -47,6 +47,38 @@ const HealthQuery = rpcAction(
   "HealthQuery",
 );
 
+const acronymActions = [
+  rpcAction("ai@v1", "AI.GenerateJSON", {
+    subject: "rpc.v1.AI.GenerateJSON",
+    input: Empty,
+    output: Empty,
+    callerCapabilities: [],
+  }, "AIGenerateJSON"),
+  rpcAction("ai@v1", "AI.OCR", {
+    subject: "rpc.v1.AI.OCR",
+    input: Empty,
+    output: Empty,
+    callerCapabilities: [],
+  }, "AIOCR"),
+  rpcAction("jobs@v1", "Jobs.ListDLQ", {
+    subject: "rpc.v1.Jobs.ListDLQ",
+    input: Empty,
+    output: Empty,
+    callerCapabilities: [],
+  }, "JobsListDLQ"),
+] as const;
+
+Deno.test("connected names preserve Rust-compatible acronym word boundaries", () => {
+  const [generateJson, ocr, listDlq] = acronymActions;
+  const generateJsonName: "aiGenerateJson" = generateJson.connectedName;
+  const ocrName: "aiOcr" = ocr.connectedName;
+  const listDlqName: "jobsListDlq" = listDlq.connectedName;
+
+  assertEquals(generateJsonName, "aiGenerateJson");
+  assertEquals(ocrName, "aiOcr");
+  assertEquals(listDlqName, "jobsListDlq");
+});
+
 Deno.test("direct action descriptors emit deterministic canonical uses", () => {
   const contract = defineAppContract(() => ({
     id: "storefront@v1",

@@ -1,4 +1,12 @@
 import type { EventDesc, FeedDesc, OperationDesc, RPCDesc } from "./runtime.ts";
+import {
+  type ConnectedActionName,
+  lowerCamelSurfaceName,
+  type PascalActionName,
+  pascalSurfaceName,
+} from "./surface_names.ts";
+
+export type { ConnectedActionName } from "./surface_names.ts";
 
 export const ACTION_METADATA: unique symbol = Symbol("trellis.action.metadata");
 
@@ -11,20 +19,6 @@ export type ActionKind =
   | "event-subscribe";
 
 type RuntimeDescriptor = RPCDesc | OperationDesc | FeedDesc | EventDesc;
-
-type PascalSurfaceName<TName extends string> = TName extends
-  `${infer THead}.${infer TTail}`
-  ? `${Capitalize<THead>}${PascalSurfaceName<TTail>}`
-  : TName extends `${infer THead}-${infer TTail}`
-    ? `${Capitalize<THead>}${PascalSurfaceName<TTail>}`
-  : TName extends `${infer THead}_${infer TTail}`
-    ? `${Capitalize<THead>}${PascalSurfaceName<TTail>}`
-  : Capitalize<TName>;
-
-/** The deterministic flat connected name for a canonical surface name. */
-export type ConnectedActionName<TName extends string> = Uncapitalize<
-  PascalSurfaceName<TName>
->;
 
 type ActionMetadata<TDescriptor extends RuntimeDescriptor> = {
   descriptor: TDescriptor;
@@ -87,15 +81,6 @@ export type AliasedAction<
   TAction[typeof ACTION_METADATA]["descriptor"],
   TConnectedName
 >;
-
-function lowerCamelSurfaceName(name: string): string {
-  const pascal = name
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join("");
-  return pascal[0] ? pascal[0].toLowerCase() + pascal.slice(1) : "";
-}
 
 function createAction<
   const TContractId extends string,
@@ -236,27 +221,25 @@ export function eventActions<
     TName,
     "event-subscribe",
     TDescriptor,
-    `on${PascalSurfaceName<TName>}`
+    `on${PascalActionName<TName>}`
   >,
   TDelegatedPublish extends true ? ActionDescriptor<
       TContractId,
       TName,
       "event-publish",
       TDescriptor,
-      `publish${PascalSurfaceName<TName>}`
+      `publish${PascalActionName<TName>}`
     >
     : undefined
 > {
-  const baseName = lowerCamelSurfaceName(name);
+  const baseName = pascalSurfaceName(name);
   const subscribe = createAction({
     contractId,
     name,
     kind: "event-subscribe",
     descriptor,
     exportName: `${exportName}Subscribe`,
-    connectedName: `on${baseName[0]?.toUpperCase() ?? ""}${
-      baseName.slice(1)
-    }` as `on${PascalSurfaceName<TName>}`,
+    connectedName: `on${baseName}` as `on${PascalActionName<TName>}`,
   });
   const publish = delegatedPublish
     ? createAction({
@@ -265,9 +248,9 @@ export function eventActions<
       kind: "event-publish",
       descriptor,
       exportName: `${exportName}Publish`,
-      connectedName: `publish${baseName[0]?.toUpperCase() ?? ""}${
-        baseName.slice(1)
-      }` as `publish${PascalSurfaceName<TName>}`,
+      connectedName: `publish${baseName}` as `publish${PascalActionName<
+        TName
+      >}`,
     })
     : undefined;
   return Object.freeze({ subscribe, publish }) as EventActions<
@@ -276,14 +259,14 @@ export function eventActions<
       TName,
       "event-subscribe",
       TDescriptor,
-      `on${PascalSurfaceName<TName>}`
+      `on${PascalActionName<TName>}`
     >,
     TDelegatedPublish extends true ? ActionDescriptor<
         TContractId,
         TName,
         "event-publish",
         TDescriptor,
-        `publish${PascalSurfaceName<TName>}`
+        `publish${PascalActionName<TName>}`
       >
       : undefined
   >;

@@ -21,6 +21,10 @@ import type {
   CONTRACT_STORE_METADATA,
 } from "./contract_support/mod.ts";
 import type { PreparedTrellisEvent } from "./session.ts";
+import {
+  type PascalActionName,
+  pascalSurfaceName,
+} from "./contract_support/surface_names.ts";
 
 export const PROVIDER_CALLER = Symbol("trellis.provider.caller");
 
@@ -48,11 +52,6 @@ export type ProviderCaller = Readonly<{
   >;
 }>;
 
-type PascalSurfaceName<TName extends string> = TName extends
-  `${infer THead}.${infer TTail}`
-  ? `${Capitalize<THead>}${PascalSurfaceName<TTail>}`
-  : Capitalize<TName>;
-
 type EventBody<TDescriptor> = TDescriptor extends EventDesc<infer TEvent>
   ? TEvent extends { readonly __trellisType?: infer TValue } ? TValue : unknown
   : unknown;
@@ -79,7 +78,7 @@ type SurfaceGroup<TName extends string> = TName extends
   `${infer THead}.${string}` ? Uncapitalize<THead>
   : never;
 type SurfaceLeaf<TName extends string> = TName extends
-  `${string}.${infer TTail}` ? Uncapitalize<PascalSurfaceName<TTail>>
+  `${string}.${infer TTail}` ? Uncapitalize<PascalActionName<TTail>>
   : never;
 type HandlerKind<TAction extends ActionDescriptor> = TAction["kind"] extends
   "rpc" ? "rpc"
@@ -148,7 +147,7 @@ type ProviderActionRecord<TAction, TService, TClient> = TAction extends
       >;
     }
   : TAction["kind"] extends "event-publish" ? {
-      readonly [K in `publish${PascalSurfaceName<TAction["name"]>}`]:
+      readonly [K in `publish${PascalActionName<TAction["name"]>}`]:
         & ((
           event: EventBody<DescriptorForAction<TAction>>,
         ) => AsyncResult<void, BaseError>)
@@ -159,7 +158,7 @@ type ProviderActionRecord<TAction, TService, TClient> = TAction extends
         };
     }
   : {
-    readonly [K in `handle${PascalSurfaceName<TAction["name"]>}`]:
+    readonly [K in `handle${PascalActionName<TAction["name"]>}`]:
       ServiceRegistration<TService, TAction, TClient>;
   }
   : {};
@@ -175,7 +174,7 @@ type ProviderSelectedEventRecord<TAction, TService> = TAction extends
 
 type ProviderOwnedEventPublisherRecord<TAction> = TAction extends
   ActionDescriptor<string, string, "event-publish"> ? {
-    readonly [K in `publish${PascalSurfaceName<TAction["name"]>}`]:
+    readonly [K in `publish${PascalActionName<TAction["name"]>}`]:
       & ((
         event: EventBody<DescriptorForAction<TAction>>,
       ) => AsyncResult<void, BaseError>)
@@ -377,9 +376,7 @@ export function createProviderRuntime<
 
   for (const name of Object.keys(getContractRuntime(contract).ownedApi.rpc)) {
     const [group, leaf] = surfacePath(name);
-    const exportName = name.split(".").map((part) =>
-      part[0]!.toUpperCase() + part.slice(1)
-    ).join("");
+    const exportName = pascalSurfaceName(name);
     const register = service.handle.rpc![group]![leaf]!;
     provider[`handle${exportName}`] = (
       handler: (args: Record<string, unknown>) => unknown,
@@ -389,9 +386,7 @@ export function createProviderRuntime<
     const name of Object.keys(getContractRuntime(contract).ownedApi.operations)
   ) {
     const [group, leaf] = surfacePath(name);
-    const exportName = name.split(".").map((part) =>
-      part[0]!.toUpperCase() + part.slice(1)
-    ).join("");
+    const exportName = pascalSurfaceName(name);
     const register = service.handle.operation![group]![leaf]!;
     const expose = (
       handler: (args: Record<string, unknown>) => unknown,
@@ -405,9 +400,7 @@ export function createProviderRuntime<
     const name of Object.keys(getContractRuntime(contract).ownedApi.feeds ?? {})
   ) {
     const [group, leaf] = surfacePath(name);
-    const exportName = name.split(".").map((part) =>
-      part[0]!.toUpperCase() + part.slice(1)
-    ).join("");
+    const exportName = pascalSurfaceName(name);
     const register = service.handle.feed![group]![leaf]!;
     provider[`handle${exportName}`] = (
       handler: (args: Record<string, unknown>) => unknown,
@@ -417,9 +410,7 @@ export function createProviderRuntime<
     const name of Object.keys(getContractRuntime(contract).ownedApi.events)
   ) {
     const [group, leaf] = surfacePath(name);
-    const exportName = name.split(".").map((part) =>
-      part[0]!.toUpperCase() + part.slice(1)
-    ).join("");
+    const exportName = pascalSurfaceName(name);
     const event = service.event[group]![leaf]!;
     provider[`on${exportName}`] = event.listen.bind(event);
     const publish = Object.assign(event.publish.bind(event), {

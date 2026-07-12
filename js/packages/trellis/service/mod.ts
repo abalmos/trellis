@@ -23,8 +23,10 @@ export {
 } from "../server/health_schemas.ts";
 export {
   type ConnectedTrellisService,
+  type FeedHandler,
   type HealthCheckHandler,
   type HealthInfoHandler,
+  type JobHandler,
   type JobQueue,
   type JobsFacadeOf,
   type OperationHandler,

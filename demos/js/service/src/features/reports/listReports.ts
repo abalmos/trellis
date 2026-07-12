@@ -1,8 +1,9 @@
 import { ok } from "@qlever-llc/trellis";
-import type { FieldOpsService } from "../../deps.ts";
+import type { RpcHandler } from "@qlever-llc/trellis/service";
+import type contract from "../../../contract.ts";
 import { listReports as listReportRecords } from "./reportStore.ts";
 
-type Handler = Parameters<FieldOpsService["handleReportsList"]>[0];
+type Handler = RpcHandler<typeof contract, "Reports.List">;
 
 /** Lists completed closeout reports generated during this demo service run. */
 export const listReports: Handler = ({ input }) => {

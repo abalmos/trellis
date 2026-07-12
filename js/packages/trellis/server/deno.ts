@@ -1,4 +1,6 @@
 export {
+  type FeedHandler,
+  type JobHandler,
   type JobQueue,
   type JobsFacadeOf,
   type OperationHandler,

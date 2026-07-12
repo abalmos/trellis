@@ -1,6 +1,8 @@
 export {
+  type FeedHandler,
   type HealthCheckHandler,
   type HealthInfoHandler,
+  type JobHandler,
   type JobQueue,
   type JobsFacadeOf,
   type OperationHandler,

@@ -1,7 +1,8 @@
 import { ok } from "@qlever-llc/trellis";
-import type { FieldOpsService } from "../../deps.ts";
+import type { RpcHandler } from "@qlever-llc/trellis/service";
+import type contract from "../../../contract.ts";
 
-type Handler = Parameters<FieldOpsService["handleEvidenceList"]>[0];
+type Handler = RpcHandler<typeof contract, "Evidence.List">;
 
 function evidenceIdForKey(
   key: string,

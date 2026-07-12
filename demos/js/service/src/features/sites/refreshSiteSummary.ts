@@ -1,9 +1,9 @@
 import { Result, UnexpectedError } from "@qlever-llc/trellis";
-import type { FieldOpsDeps, FieldOpsService } from "../../deps.ts";
+import type { JobHandler } from "@qlever-llc/trellis/service";
+import type contract from "../../../contract.ts";
+import type { FieldOpsDeps } from "../../deps.ts";
 
-type Handler = Parameters<
-  FieldOpsService["jobs"]["refreshSiteSummary"]["handle"]
->[0];
+type Handler = JobHandler<typeof contract, "refreshSiteSummary">;
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

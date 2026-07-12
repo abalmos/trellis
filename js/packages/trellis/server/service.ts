@@ -69,8 +69,10 @@ import type {
   EventListenerContext,
   EventOpts,
   FeedEventOf,
+  FeedHandlerContext,
   FeedInputOf,
   FeedRegistration as RootFeedRegistration,
+  FeedsOf,
   HandlerTrellis,
   OperationHandlerContext,
   OperationHandlerErrorOf,
@@ -1155,6 +1157,23 @@ type ContractOperationName<
   >,
 > = keyof ContractOwnedApi<TContract>["operations"] & string;
 
+type ContractFeedName<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata
+  >,
+> = FeedsOf<ContractOwnedApi<TContract>>;
+
+type ContractJobName<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+> = keyof ContractJobsOf<TContract> & string;
+
 /** Typed RPC handler function for an extracted Trellis service handler. */
 export type RpcHandler<
   TContract extends ServiceContract<
@@ -1224,6 +1243,44 @@ export type OperationHandler<
       client: ServiceHandlerClient<TContract>;
     },
 ) => unknown | Promise<unknown>;
+
+/** Typed feed handler function for an extracted Trellis service handler. */
+export type FeedHandler<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+  F extends ContractFeedName<TContract>,
+> = (
+  context: FeedHandlerContext<
+    FeedInputOf<ContractOwnedApi<TContract>, F>,
+    FeedEventOf<ContractOwnedApi<TContract>, F>
+  >,
+) => unknown | Promise<unknown>;
+
+/** Typed job handler function for an extracted Trellis service job. */
+export type JobHandler<
+  TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+  K extends ContractJobName<TContract>,
+> = (args: {
+  job: PublicActiveJob<
+    ContractJobsOf<TContract>[K]["payload"],
+    ContractJobsOf<TContract>[K]["result"],
+    ContractJobsOf<TContract>[K]["update"]
+  >;
+  client: Trellis<
+    ContractTrellisApi<TContract>,
+    ContractKvOf<TContract>,
+    ContractJobsOf<TContract>
+  >;
+}) => Promise<Result<ContractJobsOf<TContract>[K]["result"], BaseError>>;
 
 /** Typed health info function for an extracted service health handler. */
 export type HealthInfoHandler = ServiceHealthInfoFn;

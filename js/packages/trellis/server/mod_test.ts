@@ -21,9 +21,11 @@ import type { TrellisServiceSession } from "./service.ts";
 // Import the module under test
 import {
   type EventContext,
+  type FeedHandler,
   type HealthCheckHandler,
   type HealthCheckResult,
   type HealthInfoHandler,
+  type JobHandler,
   type OperationHandler,
   type OrderingGroup,
   type RpcHandler,
@@ -498,6 +500,21 @@ Deno.test("service handler aliases expose narrow client object args", () => {
     return Result.ok(undefined);
   };
 
+  const boundFeedHandler: FeedHandler<
+    typeof depsTypeTestContract,
+    "Test.Stream"
+  > = async ({ input, emit }) => {
+    await emit({ value: input.value }).orThrow();
+  };
+
+  const boundJobHandler: JobHandler<
+    typeof depsTypeTestContract,
+    "refresh"
+  > = async ({ job, client }) => {
+    assertExists(client.kv.items);
+    return Result.ok({ value: job.payload.value });
+  };
+
   const boundHealthInfoHandler: HealthInfoHandler = () => ({
     version: prefix,
   });
@@ -519,6 +536,8 @@ Deno.test("service handler aliases expose narrow client object args", () => {
   assertExists(boundRpcHandler);
   assertExists(boundEventHandler);
   assertExists(boundOperationHandler);
+  assertExists(boundFeedHandler);
+  assertExists(boundJobHandler);
   assertExists(boundHealthInfoHandler);
   assertExists(boundHealthCheckHandler);
   assertExists(operationHandler);

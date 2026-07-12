@@ -1,8 +1,10 @@
 import { BaseError, isErr, ok, Result, StoreError } from "@qlever-llc/trellis";
 import type { TransferError } from "@qlever-llc/trellis";
-import type { FieldOpsDeps, FieldOpsService } from "../../deps.ts";
+import type { RpcHandler } from "@qlever-llc/trellis/service";
+import type contract from "../../../contract.ts";
+import type { FieldOpsDeps } from "../../deps.ts";
 
-type Handler = Parameters<FieldOpsService["handleEvidenceDownload"]>[0];
+type Handler = RpcHandler<typeof contract, "Evidence.Download">;
 
 const EVIDENCE_STORE = "uploads";
 const TRANSFER_GRANT_TTL_MS = 60_000;
