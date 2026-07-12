@@ -14,7 +14,7 @@ import type {
   OperationDesc,
   RPCDesc,
 } from "./contract_support/runtime.ts";
-import type { CallerRuntime } from "./caller.ts";
+import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
@@ -22,35 +22,15 @@ import type {
 } from "./contract_support/mod.ts";
 import type { PreparedTrellisEvent } from "./session.ts";
 import {
+  type ConnectedActionName,
+  lowerCamelSurfaceName,
   type PascalActionName,
   pascalSurfaceName,
 } from "./contract_support/surface_names.ts";
 
 export const PROVIDER_CALLER = Symbol("trellis.provider.caller");
 
-export type ProviderCaller = Readonly<{
-  rpc: Record<string, Record<string, (input: unknown) => unknown>>;
-  operation: Record<
-    string,
-    Record<
-      string,
-      { input(input: unknown): unknown; resume(input: unknown): unknown }
-    >
-  >;
-  feed: Record<string, Record<string, (input: unknown) => unknown>>;
-  event: Record<
-    string,
-    Record<
-      string,
-      {
-        publish(event: Record<string, unknown>): unknown;
-        prepare(
-          event: Record<string, unknown>,
-        ): Result<PreparedTrellisEvent, BaseError>;
-      }
-    >
-  >;
-}>;
+export type ProviderCaller = object;
 
 type EventBody<TDescriptor> = TDescriptor extends EventDesc<infer TEvent>
   ? TEvent extends { readonly __trellisType?: infer TValue } ? TValue : unknown
@@ -75,10 +55,10 @@ type ProviderCallerSurface<TContract> = Omit<
 >;
 
 type SurfaceGroup<TName extends string> = TName extends
-  `${infer THead}.${string}` ? Uncapitalize<THead>
+  `${infer THead}.${string}` ? ConnectedActionName<THead>
   : never;
 type SurfaceLeaf<TName extends string> = TName extends
-  `${string}.${infer TTail}` ? Uncapitalize<PascalActionName<TTail>>
+  `${string}.${infer TTail}` ? ConnectedActionName<TTail>
   : never;
 type HandlerKind<TAction extends ActionDescriptor> = TAction["kind"] extends
   "rpc" ? "rpc"
@@ -124,48 +104,68 @@ type ServiceRegistration<
     : never
   : never
   : never;
-type ServiceEventListener<TService, TAction extends ActionDescriptor> =
-  TService extends { event: infer TEvent }
-    ? SurfaceGroup<TAction["name"]> extends keyof TEvent
-      ? SurfaceLeaf<TAction["name"]> extends
-        keyof TEvent[SurfaceGroup<TAction["name"]>]
-        ? TEvent[SurfaceGroup<TAction["name"]>][
-          SurfaceLeaf<TAction["name"]>
-        ] extends {
-          listen: infer TListen;
-        } ? TListen
+type ServiceEventListener<
+  TContract,
+  TService,
+  TAction extends ActionDescriptor,
+> = TService extends { event: infer TEvent }
+  ? SurfaceGroup<TAction["name"]> extends keyof TEvent
+    ? SurfaceLeaf<TAction["name"]> extends
+      keyof TEvent[SurfaceGroup<TAction["name"]>]
+      ? TEvent[SurfaceGroup<TAction["name"]>][
+        SurfaceLeaf<TAction["name"]>
+      ] extends {
+        listen: infer TListen;
+      } ? TListen extends (
+          handler: (
+            event: infer TEvent,
+            context: infer TContext,
+          ) => infer THandlerResult,
+          ...args: infer TRest
+        ) => infer TResult ? (
+            handler: (args: {
+              event: TEvent;
+              context: TContext;
+              client: ProviderHandlerClient<TContract, TService>;
+            }) => THandlerResult,
+            ...args: TRest
+          ) => TResult
         : never
       : never
     : never
-    : never;
+  : never
+  : never;
 
-type ProviderActionRecord<TAction, TService, TClient> = TAction extends
-  ActionDescriptor ? TAction["kind"] extends "event-subscribe" ? {
-      readonly [K in TAction["connectedName"]]: ServiceEventListener<
-        TService,
-        TAction
-      >;
-    }
-  : TAction["kind"] extends "event-publish" ? {
-      readonly [K in `publish${PascalActionName<TAction["name"]>}`]:
-        & ((
-          event: EventBody<DescriptorForAction<TAction>>,
-        ) => AsyncResult<void, BaseError>)
-        & {
-          prepare(
+type ProviderActionRecord<TContract, TAction, TService, TClient> =
+  TAction extends ActionDescriptor
+    ? TAction["kind"] extends "event-subscribe" ? {
+        readonly [K in TAction["connectedName"]]: ServiceEventListener<
+          TContract,
+          TService,
+          TAction
+        >;
+      }
+    : TAction["kind"] extends "event-publish" ? {
+        readonly [K in `publish${PascalActionName<TAction["name"]>}`]:
+          & ((
             event: EventBody<DescriptorForAction<TAction>>,
-          ): Result<PreparedTrellisEvent, BaseError>;
-        };
+          ) => AsyncResult<void, BaseError>)
+          & {
+            prepare(
+              event: EventBody<DescriptorForAction<TAction>>,
+            ): Result<PreparedTrellisEvent, BaseError>;
+          };
+      }
+    : {
+      readonly [K in `handle${PascalActionName<TAction["name"]>}`]:
+        ServiceRegistration<TService, TAction, TClient>;
     }
-  : {
-    readonly [K in `handle${PascalActionName<TAction["name"]>}`]:
-      ServiceRegistration<TService, TAction, TClient>;
-  }
-  : {};
+    : {};
 
-type ProviderSelectedEventRecord<TAction, TService> = TAction extends
+type ProviderSelectedEventRecord<TContract, TAction, TService> = TAction extends
   ActionDescriptor<string, string, "event-subscribe"> ? {
     readonly [K in TAction["connectedName"]]: ServiceEventListener<
+      TContract,
       TService,
       TAction
     >;
@@ -231,10 +231,36 @@ type SelectedServiceProperty<TService, TKey extends PropertyKey, TMetadata> =
         : TService[TKey];
     }
     : {};
+type ProviderJobs<TContract, TService> = TService extends {
+  readonly jobs: infer TJobs;
+} ? {
+    readonly jobs: {
+      readonly [K in keyof ContractJobs<TContract> & keyof TJobs]:
+        TJobs[K] extends { handle: infer THandle }
+          ? Omit<TJobs[K], "handle"> & {
+            handle: THandle extends (
+              handler: (args: infer TArgs) => infer THandlerResult,
+              ...args: infer TRest
+            ) => infer TResult ? (
+                handler: (
+                  args: TArgs extends { client: unknown }
+                    ? Omit<TArgs, "client"> & {
+                      client: ProviderHandlerClient<TContract, TService>;
+                    }
+                    : TArgs,
+                ) => THandlerResult,
+                ...args: TRest
+              ) => TResult
+              : never;
+          }
+          : TJobs[K];
+    };
+  }
+  : {};
 type ProviderFeatures<TContract, TService> =
   & SelectedServiceProperty<TService, "kv", ContractKv<TContract>>
   & SelectedServiceProperty<TService, "store", ContractStore<TContract>>
-  & SelectedServiceProperty<TService, "jobs", ContractJobs<TContract>>;
+  & ProviderJobs<TContract, TService>;
 type ProviderResources<TContract, TService> =
   & ProviderBase<TService>
   & ProviderFeatures<TContract, TService>;
@@ -253,13 +279,14 @@ export type ProviderRuntime<TContract, TService> =
   & ProviderCallerSurface<TContract>
   & UnionToIntersection<
     ProviderActionRecord<
+      TContract,
       DirectAction<TContract>,
       TService,
       ProviderHandlerClient<TContract, TService>
     >
   >
   & UnionToIntersection<
-    ProviderSelectedEventRecord<SelectedAction<TContract>, TService>
+    ProviderSelectedEventRecord<TContract, SelectedAction<TContract>, TService>
   >;
 
 type ProviderService = {
@@ -292,7 +319,11 @@ type ProviderService = {
       prepare(
         event: Record<string, unknown>,
       ): Result<PreparedTrellisEvent, BaseError>;
-      listen(handler: (event: unknown) => unknown): unknown;
+      listen(
+        handler: (event: unknown, context: unknown) => unknown,
+        subjectData?: Record<string, unknown>,
+        options?: unknown,
+      ): unknown;
     }>
   >;
   readonly [PROVIDER_CALLER]: ProviderCaller;
@@ -303,17 +334,10 @@ type ProviderService = {
 
 function surfacePath(name: string): readonly [string, string] {
   const [head, ...tail] = name.split(".");
-  const lowerCamel = (value: string) =>
-    value
-      .split(/[^A-Za-z0-9]+/)
-      .filter(Boolean)
-      .map((part, index) =>
-        index === 0
-          ? part[0]!.toLowerCase() + part.slice(1)
-          : part[0]!.toUpperCase() + part.slice(1)
-      )
-      .join("");
-  return [lowerCamel(head!), lowerCamel(tail.join("."))];
+  return [
+    lowerCamelSurfaceName(head!),
+    lowerCamelSurfaceName(tail.join(".")),
+  ];
 }
 
 /** Projects a connected service into its flat provider and caller vocabulary. */
@@ -328,7 +352,6 @@ export function createProviderRuntime<
   const provider: Record<string, unknown> = {
     kv: service.kv,
     store: service.store,
-    jobs: service.jobs,
     health: service.health,
     connection: service.connection,
     name: service.name,
@@ -338,39 +361,51 @@ export function createProviderRuntime<
     wait: service.wait.bind(service),
     stop: service.stop.bind(service),
   };
-  const caller = service[PROVIDER_CALLER];
+  provider.jobs = Object.fromEntries(
+    Object.entries(service.jobs as Record<string, Record<string, unknown>>).map(
+      ([name, queue]) => [name, {
+        ...queue,
+        handle: (
+          handler: (args: Record<string, unknown>) => unknown,
+          options?: unknown,
+        ) =>
+          (queue.handle as (
+            handler: (args: Record<string, unknown>) => unknown,
+            options?: unknown,
+          ) => unknown)(
+            (args) => handler({ ...args, client: provider }),
+            options,
+          ),
+      }],
+    ),
+  );
+  const caller = createCallerRuntime(service[PROVIDER_CALLER], contract) as
+    & Record<string, unknown>
+    & CallerRuntime<TContract>;
   for (const { action } of getContractRuntime(contract).actions) {
-    const [group, leaf] = surfacePath(action.name);
-    switch (action.kind) {
-      case "rpc":
-        provider[action.connectedName] = caller.rpc[group]![leaf]!;
-        break;
-      case "operation":
-        {
-          const operation = caller.operation[group]![leaf]!;
-          const invoke = (input: unknown) => operation.input(input);
-          invoke.resume = operation.resume.bind(operation);
-          provider[action.connectedName] = invoke;
-        }
-        break;
-      case "feed":
-        provider[action.connectedName] = caller.feed[group]![leaf]!;
-        break;
-      case "event-publish":
-        {
-          const event = caller.event[group]![leaf]!;
-          const publish = Object.assign(event.publish.bind(event), {
-            prepare: event.prepare.bind(event),
-          });
-          provider[action.connectedName] = publish;
-        }
-        break;
-      case "event-subscribe":
-        {
-          const event = service.event[group]![leaf]!;
-          provider[action.connectedName] = event.listen.bind(event);
-        }
-        break;
+    const connected = caller[action.connectedName];
+    if (action.kind === "event-subscribe") {
+      provider[action.connectedName] = (
+        handler: (args: Record<string, unknown>) => unknown,
+        subjectData?: Record<string, unknown>,
+        options?: unknown,
+      ) =>
+        (service[PROVIDER_CALLER] as {
+          listenEvent(
+            event: string,
+            subjectData: Record<string, unknown>,
+            handler: (message: unknown, context: unknown) => unknown,
+            options?: unknown,
+          ): unknown;
+        }).listenEvent(
+          action.name,
+          subjectData ?? {},
+          (message, context) =>
+            handler({ event: message, context, client: provider }),
+          options,
+        );
+    } else {
+      provider[action.connectedName] = connected;
     }
   }
 
@@ -409,13 +444,41 @@ export function createProviderRuntime<
   for (
     const name of Object.keys(getContractRuntime(contract).ownedApi.events)
   ) {
-    const [group, leaf] = surfacePath(name);
     const exportName = pascalSurfaceName(name);
-    const event = service.event[group]![leaf]!;
-    provider[`on${exportName}`] = event.listen.bind(event);
-    const publish = Object.assign(event.publish.bind(event), {
-      prepare: event.prepare.bind(event),
-    });
+    provider[`on${exportName}`] = (
+      handler: (args: Record<string, unknown>) => unknown,
+      subjectData?: Record<string, unknown>,
+      options?: unknown,
+    ) =>
+      (service[PROVIDER_CALLER] as {
+        listenEvent(
+          event: string,
+          subjectData: Record<string, unknown>,
+          handler: (message: unknown, context: unknown) => unknown,
+          options?: unknown,
+        ): unknown;
+      }).listenEvent(
+        name,
+        subjectData ?? {},
+        (message, context) =>
+          handler({ event: message, context, client: provider }),
+        options,
+      );
+    const publish = Object.assign(
+      (event: Record<string, unknown>) =>
+        (service[PROVIDER_CALLER] as {
+          publish(event: string, data: Record<string, unknown>): unknown;
+        }).publish(name, event),
+      {
+        prepare: (event: Record<string, unknown>) =>
+          (service[PROVIDER_CALLER] as {
+            prepare(
+              event: string,
+              data: Record<string, unknown>,
+            ): Result<PreparedTrellisEvent, BaseError>;
+          }).prepare(name, event),
+      },
+    );
     provider[`publish${exportName}`] = publish;
   }
 

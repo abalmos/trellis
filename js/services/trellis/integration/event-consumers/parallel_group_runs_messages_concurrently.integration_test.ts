@@ -37,7 +37,7 @@ liveTrellisTest({
 
     try {
       await consumer.onSourcePinged(
-        async (event) => {
+        async ({ event: event }) => {
           active += 1;
           maxActive = Math.max(maxActive, active);
           if (event.value === "first") await firstBlocked;

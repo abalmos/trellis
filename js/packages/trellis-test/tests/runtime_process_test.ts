@@ -386,13 +386,8 @@ Deno.test({
       let observedId: string | undefined;
 
       try {
-        await subscriber.onEntityChanged(
-          (event) => {
-            observedId = event.id;
-            return Result.ok(undefined);
-          },
-          { group: "ingest", signal: controller.signal },
-        ).orThrow();
+        await subscriber.onEntityChanged(({ event }) => { observedId = event.id;
+        return Result.ok(undefined); }, { group: "ingest", signal: controller.signal }).orThrow();
         await entity.publishEntityChanged({
           id: "entity-durable-1",
           value: "changed",

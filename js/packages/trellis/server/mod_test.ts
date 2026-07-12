@@ -8,6 +8,12 @@ import { Type } from "typebox";
 import { AsyncResult, Result } from "@qlever-llc/result";
 import { defineServiceContract, jobs, kv, store } from "../contract.ts";
 import {
+  eventActions,
+  feedAction,
+  operationAction,
+  rpcAction,
+} from "../contracts.ts";
+import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
 } from "../contract_support/mod.ts";
@@ -16,6 +22,7 @@ import { UnexpectedError } from "../errors/index.ts";
 import type { StoreError } from "@qlever-llc/trellis";
 import type { TypedKV } from "../kv.ts";
 import type { TypedStore } from "../store.ts";
+import type { ProviderRuntime } from "../provider.ts";
 import type { TrellisServiceSession } from "./service.ts";
 
 // Import the module under test
@@ -200,6 +207,12 @@ const depsTypeTestContract = defineServiceContract(
         output: ref.schema("Output"),
         errors: [ref.error("UnexpectedError")],
       },
+      "AI.OCR": {
+        version: "v1",
+        input: ref.schema("Input"),
+        output: ref.schema("Output"),
+        errors: [ref.error("UnexpectedError")],
+      },
     },
     events: {
       "Test.Changed": {
@@ -255,6 +268,13 @@ Deno.test("TrellisServiceRuntime export exists", () => {
     false,
   );
   assertEquals(typeof StoreHandle, "function");
+});
+
+Deno.test("contracts entrypoint exports descriptor helpers", () => {
+  assertExists(eventActions);
+  assertExists(feedAction);
+  assertExists(operationAction);
+  assertExists(rpcAction);
 });
 
 Deno.test("Health types are re-exported", () => {
@@ -429,7 +449,27 @@ Deno.test("bound service wrapper injects deps across handler surfaces", () => {
     return service.name;
   }
 
+  function expectProviderService(
+    service: ProviderRuntime<DepsContract, DepsService>,
+  ) {
+    void service.handleAiOcr(({ input }) => Result.ok({ ok: !!input.value }));
+
+    void service.onTestChanged(({ event, context, client }) => {
+      const value: string = event.value;
+      const subject: string = context.subject;
+      assertExists(client.kv.items);
+      assertExists(`${value}:${subject}`);
+      return Result.ok(undefined);
+    });
+
+    void service.jobs.refresh.handle(async ({ job, client }) => {
+      assertExists(client.publishTestChanged({ value: job.payload.value }));
+      return Result.ok({ value: job.payload.value });
+    });
+  }
+
   assertExists(expectBoundService);
+  assertExists(expectProviderService);
 });
 
 Deno.test("server RPC helper types support extracted handlers", () => {
@@ -512,6 +552,7 @@ Deno.test("service handler aliases expose narrow client object args", () => {
     "refresh"
   > = async ({ job, client }) => {
     assertExists(client.kv.items);
+    assertExists(client.publishTestChanged({ value: job.payload.value }));
     return Result.ok({ value: job.payload.value });
   };
 

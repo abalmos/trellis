@@ -29,7 +29,7 @@ liveTrellisTest({
 
     try {
       await service.onSelfPinged(
-        (event, context) => {
+        ({ event: event, context: context }) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
         },

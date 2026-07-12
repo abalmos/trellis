@@ -45,7 +45,7 @@ liveTrellisTest({
 
     try {
       await consumer.onSourcePinged(
-        (event, context) => {
+        ({ event: event, context: context }) => {
           observed = { id: event.id, context };
           return Result.ok(undefined);
         },

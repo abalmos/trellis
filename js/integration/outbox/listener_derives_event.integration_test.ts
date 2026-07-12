@@ -19,7 +19,7 @@ liveTrellisTest({
     try {
       const sqlOutbox = fixture.createOutbox(service, db);
       await service.onDocumentProcessed(
-        async (event) => {
+        async ({ event: event }) => {
           await sqlOutbox.transaction(async ({ event: out }) => {
             await out.document.audited.enqueue({
               documentId: event.documentId,

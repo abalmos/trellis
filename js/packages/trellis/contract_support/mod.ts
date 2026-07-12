@@ -71,6 +71,7 @@ import {
   getSubschemaAtDataPointer,
   type SubjectParam,
 } from "./schema_pointers.ts";
+import type { PascalActionName } from "./surface_names.ts";
 import {
   type ContractEventConsumerGroup,
   type ContractEventConsumers,
@@ -1664,14 +1665,7 @@ type OwnedApiFromSource<
   subjects: {};
 };
 
-type ActionExportName<TName extends string> = TName extends
-  `${infer THead}.${infer TTail}`
-  ? `${Capitalize<THead>}${ActionExportName<TTail>}`
-  : TName extends `${infer THead}-${infer TTail}`
-    ? `${Capitalize<THead>}${ActionExportName<TTail>}`
-  : TName extends `${infer THead}_${infer TTail}`
-    ? `${Capitalize<THead>}${ActionExportName<TTail>}`
-  : Capitalize<TName>;
+type ActionExportName<TName extends string> = PascalActionName<TName>;
 
 type ContractSourceShape = {
   id: string;

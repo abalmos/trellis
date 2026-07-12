@@ -40,6 +40,10 @@ import {
   getContractRuntime,
 } from "../contract_support/contract_runtime.ts";
 import type { ActionDescriptor } from "../contract_support/descriptors.ts";
+import {
+  type ConnectedActionName,
+  lowerCamelSurfaceName,
+} from "../contract_support/surface_names.ts";
 import type { CallerRuntime } from "../caller.ts";
 import {
   CONTRACT_JOBS_METADATA,
@@ -435,12 +439,7 @@ function surfaceLeafName(key: string): string {
 }
 
 function lowerCamelIdent(value: string): string {
-  const pascal = value
-    .split(/[^A-Za-z0-9]+/)
-    .filter((part) => part.length > 0)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join("");
-  return pascal.length === 0 ? "_" : pascal[0]!.toLowerCase() + pascal.slice(1);
+  return lowerCamelSurfaceName(value) || "_";
 }
 
 function addSurfaceLeaf<TLeaf>(
@@ -1275,11 +1274,7 @@ export type JobHandler<
     ContractJobsOf<TContract>[K]["result"],
     ContractJobsOf<TContract>[K]["update"]
   >;
-  client: Trellis<
-    ContractTrellisApi<TContract>,
-    ContractKvOf<TContract>,
-    ContractJobsOf<TContract>
-  >;
+  client: ServiceHandlerClient<TContract>;
 }) => Promise<Result<ContractJobsOf<TContract>[K]["result"], BaseError>>;
 
 /** Typed health info function for an extracted service health handler. */
@@ -1533,19 +1528,12 @@ function createServiceEventPublishFacade<TA extends RuntimeApi>(outbound: {
   return surface as ActiveEventPublishFacade<TA>;
 }
 
-type PascalSurfaceName<T extends string> = T extends
-  `${infer Head}.${infer Tail}`
-  ? `${Capitalize<Head>}${PascalSurfaceName<Tail>}`
-  : Capitalize<T>;
-type LowerCamelSurfaceName<T extends string> = Uncapitalize<
-  PascalSurfaceName<T>
->;
 type SurfaceGroupName<T extends string> = T extends `${infer Head}.${string}`
-  ? LowerCamelSurfaceName<Head>
-  : LowerCamelSurfaceName<T>;
+  ? ConnectedActionName<Head>
+  : ConnectedActionName<T>;
 type SurfaceLeafName<T extends string> = T extends `${string}.${infer Tail}`
-  ? LowerCamelSurfaceName<Tail>
-  : LowerCamelSurfaceName<T>;
+  ? ConnectedActionName<Tail>
+  : ConnectedActionName<T>;
 type SurfaceKeysForGroup<TKeys extends string, TGroup extends string> =
   TKeys extends string ? SurfaceGroupName<TKeys> extends TGroup ? TKeys : never
     : never;
@@ -1989,6 +1977,7 @@ export async function createConnectedService<
     args.nc,
     server,
     outbound.event,
+    outbound,
     handlerTrellis,
     kv,
     args.contractJobs,
@@ -3419,6 +3408,7 @@ export class TrellisServiceSession<
     nc: NatsConnection,
     server: TrellisServiceRuntimeFor<TOwnedApi & TTrellisApi>,
     event: ActiveEventFacade<TTrellisApi>,
+    providerCaller: ProviderCaller,
     handlerTrellis: Trellis<TTrellisApi, TKv, TJobs>,
     kv: ServiceKvFacade<TKv>,
     contractJobs: TJobs,
@@ -3444,7 +3434,7 @@ export class TrellisServiceSession<
     });
     this.#handlerTrellis = handlerTrellis;
     Object.defineProperty(this, PROVIDER_CALLER, {
-      value: handlerTrellis as ProviderCaller,
+      value: providerCaller,
     });
     this.event = event;
     this.kv = kv;

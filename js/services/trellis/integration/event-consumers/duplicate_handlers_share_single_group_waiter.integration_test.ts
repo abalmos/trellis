@@ -40,18 +40,14 @@ liveTrellisTest({
 
     try {
       await consumer.onSourcePinged(
-        (event) => {
-          observed.push(`first:${event.id}`);
-          return Result.ok(undefined);
-        },
+        ({ event }) => { observed.push(`first:${event.id}`);
+        return Result.ok(undefined); },
         {},
         { group: "ingest", signal: controller.signal },
       ).orThrow();
       await consumer.onSourcePinged(
-        (event) => {
-          observed.push(`second:${event.id}`);
-          return Result.ok(undefined);
-        },
+        ({ event }) => { observed.push(`second:${event.id}`);
+        return Result.ok(undefined); },
         {},
         { group: "ingest", signal: controller.signal },
       ).orThrow();

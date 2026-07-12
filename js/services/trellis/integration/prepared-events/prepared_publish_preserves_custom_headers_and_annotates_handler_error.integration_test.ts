@@ -53,12 +53,14 @@ liveTrellisTest({
       | undefined;
 
     try {
-      await service.onEntityChanged((event, context) => {
-        observed = { event, context };
-        throw thrown;
-      },
-      {},
-      { mode: "ephemeral", signal: controller.signal },).orThrow();
+      await service.onEntityChanged(
+        ({ event: event, context: context }) => {
+          observed = { event, context };
+          throw thrown;
+        },
+        {},
+        { mode: "ephemeral", signal: controller.signal },
+      ).orThrow();
 
       const payload = {
         id: fixture.publishedEntityId,
