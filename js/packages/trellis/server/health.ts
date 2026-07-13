@@ -12,7 +12,7 @@ import { type Result } from "@qlever-llc/result";
 import type { JsonValue } from "../contracts.ts";
 import { type TrellisError } from "../errors/index.ts";
 import { ulid } from "ulid";
-import type { HealthHeartbeatSample } from "../sdk/_generated/health/types.ts";
+import type { HealthHeartbeatSample } from "../sdk/health.ts";
 
 type MaybePromise<T> = T | Promise<T>;
 

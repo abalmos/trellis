@@ -21,7 +21,7 @@ liveTrellisTest({
       contract: fixture.observerContract,
     });
     const service = await fixture.setupService(runtime);
-    const waitForHealth = async (status: string) =>
+    const waitForHealth = async (status: string, afterRevision = -1) =>
       await runtime.waitFor(async () => {
         const response = await observer.healthQuery({
           participantKinds: ["service"],
@@ -29,7 +29,8 @@ liveTrellisTest({
           limit: 20,
           offset: 0,
         }).orThrow().catch(() => undefined);
-        return response?.entries[0]?.effectiveStatus === status
+        return response?.entries[0]?.effectiveStatus === status &&
+            response.projection.revision > afterRevision
           ? response
           : undefined;
       }, { timeoutMs: 30_000, intervalMs: 100 });
@@ -41,8 +42,7 @@ liveTrellisTest({
       await stopHealthRuntime(healthProcess);
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       healthProcess = startHealthRuntime(configPath);
-      const recovered = await waitForHealth("healthy");
-      assert(recovered.projection.revision > initialRevision);
+      const recovered = await waitForHealth("healthy", initialRevision);
       assertEquals(recovered.projection.gapDetected, false);
 
       await service.stop();

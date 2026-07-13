@@ -350,6 +350,11 @@ async function rewriteCanonicalGeneratedSdkSelfImports() {
 
       const original = await Deno.readTextFile(fileUrl);
       let updated = original
+        .replaceAll("../../../errors/index.js", "../../errors/index.js")
+        .replaceAll(
+          "@qlever-llc/trellis/errors/index.js",
+          "../../errors/index.js",
+        )
         .replaceAll("../../../contracts.js", "@qlever-llc/trellis/contracts")
         .replaceAll("../../contracts.js", "@qlever-llc/trellis/contracts")
         .replaceAll("../../../contract.js", "@qlever-llc/trellis")

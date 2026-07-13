@@ -20,7 +20,6 @@ const runtimeImports = [
   "@qlever-llc/trellis/contracts",
   "@qlever-llc/trellis/errors",
   "@qlever-llc/trellis/generate",
-  "@qlever-llc/trellis/health",
   "@qlever-llc/trellis/host",
   "@qlever-llc/trellis/host/node",
   "@qlever-llc/trellis/sdk/auth",
