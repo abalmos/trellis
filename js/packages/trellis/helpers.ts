@@ -5,18 +5,31 @@ import { Pointer } from "typebox/value";
  */
 export function template(
   template: string,
-  data: Record<string, string | number | boolean>,
+  data: Record<string, string | number>,
   opts: { allowWildcards: boolean } = { allowWildcards: false },
 ): string {
   return template.replace(/\{([^}]+)\}/g, (_, key) => {
     const token = Pointer.Get(data, key);
-    const v = token ? escapeNats(`${token}`) : "*";
-
-    if (!opts.allowWildcards && v === "*") {
-      throw new Error("All option templates must have values at runtime.");
+    if (token === undefined || token === null) {
+      if (!opts.allowWildcards) {
+        throw new Error("All option templates must have values at runtime.");
+      }
+      return "*";
+    }
+    if (typeof token !== "string" && typeof token !== "number") {
+      throw new Error("Subject template values must be strings or numbers.");
+    }
+    if (
+      typeof token === "number" &&
+      (!Number.isFinite(token) ||
+        (Number.isInteger(token) && !Number.isSafeInteger(token)))
+    ) {
+      throw new Error(
+        "Subject template numbers must be finite and safe integers.",
+      );
     }
 
-    return v;
+    return escapeNats(`${Object.is(token, -0) ? 0 : token}`);
   });
 }
 

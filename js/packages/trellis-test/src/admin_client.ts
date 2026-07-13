@@ -1,7 +1,7 @@
 import {
+  type CallerRuntime,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type CallerRuntime,
   createAuth,
   defineAppContract,
   TrellisClient,
@@ -327,7 +327,7 @@ export class TrellisTestAdminAutomation {
     const startedAt = performance.now();
     const promise = (async () => {
       const client = await this.#client();
-       await client.authDeploymentsCreate({
+      await client.authDeploymentsCreate({
         deploymentId: deployment,
         kind: "service",
         namespaces: [],

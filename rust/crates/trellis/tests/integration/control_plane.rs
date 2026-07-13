@@ -10,22 +10,18 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
-use trellis_rs::client::{
-    EventDescriptor, OutboxDispatchResult, OutboxStore, RpcDescriptor, ServiceConnectOptions,
-    ServiceConnectWithContractOptions, TrellisClient,
-};
+use trellis_rs::client::{EventDescriptor, OutboxDispatchResult, OutboxStore, RpcDescriptor};
 use trellis_rs::sdk::auth::types::{
     AuthConnectionsKickRequest, AuthConnectionsListRequest,
     AuthDeploymentAuthorityAcceptMigrationRequest, AuthDeploymentAuthorityGetRequest,
     AuthDeploymentAuthorityPlanRequest, AuthDeploymentAuthorityPlansListRequest,
-    AuthDeploymentsCreateRequest, AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest,
-    AuthDeploymentsListRequest, AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest,
-    AuthDevicesEnableRequest, AuthDevicesListRequest, AuthDevicesProvisionRequest,
-    AuthDevicesRemoveRequest, AuthServiceInstancesDisableRequest,
-    AuthServiceInstancesEnableRequest, AuthServiceInstancesListRequest,
-    AuthServiceInstancesProvisionRequest, AuthServiceInstancesRemoveRequest,
-    AuthSessionsListRequest, AuthUsersCreateRequest, AuthUsersListRequest,
-    AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
+    AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest, AuthDeploymentsListRequest,
+    AuthDeploymentsRemoveRequest, AuthDevicesDisableRequest, AuthDevicesEnableRequest,
+    AuthDevicesListRequest, AuthDevicesProvisionRequest, AuthDevicesRemoveRequest,
+    AuthServiceInstancesDisableRequest, AuthServiceInstancesEnableRequest,
+    AuthServiceInstancesListRequest, AuthServiceInstancesProvisionRequest,
+    AuthServiceInstancesRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
+    AuthUsersListRequest, AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
 };
 use trellis_rs::service::{
     ConnectedServiceRuntime, GeneratedServiceContract, KvResourceClient, StoreResourceClient,
@@ -98,14 +94,12 @@ const STATE_RESTART_DRAFT_KEY: &str = "state-draft";
 const RESOURCES_RESTART_CASE_ID: &str = "control-plane.resources-survive-control-plane-restart";
 const RESOURCES_RESTART_SERVICE_ID: &str =
     "trellis.integration.control-plane.resources-restart-service@v1";
-const RESOURCES_RESTART_SERVICE_NAME: &str = "resources-restart-service";
 const RESOURCES_RESTART_KV_KEY: &str = "restart.resources.kv";
 const RESOURCES_RESTART_STORE_KEY: &str = "restart/resources/store";
 const OUTBOX_RESTART_CASE_ID: &str = "control-plane.outbox-dispatches-after-control-plane-restart";
 const OUTBOX_RESTART_SERVICE_ID: &str =
     "trellis.integration.control-plane.outbox-restart-service@v1";
 const OUTBOX_RESTART_CLIENT_ID: &str = "trellis.integration.control-plane.outbox-restart-client@v1";
-const OUTBOX_RESTART_SERVICE_NAME: &str = "outbox-restart-service";
 const OUTBOX_RESTART_RPC_SUBJECT: &str =
     "rpc.v1.integration.control-plane.outbox-restart.Documents.Queue";
 const OUTBOX_RESTART_EVENT_SUBJECT: &str =
@@ -143,10 +137,6 @@ const CATALOG_FORCE_REPLACE_BASE_DEPLOYMENT: &str =
     "catalog-force-replace-base-deployment-control-plane-catalog-force-replace-resolves-catalog-issue";
 const CATALOG_FORCE_REPLACE_REPLACEMENT_DEPLOYMENT: &str =
     "catalog-force-replace-replacement-deployment-control-plane-catalog-force-replace-resolves-catalog-issue";
-const CATALOG_FORCE_REPLACE_BASE_SERVICE_NAME: &str =
-    "catalog-force-replace-base-control-plane-catalog-force-replace-resolves-catalog-issue";
-const CATALOG_FORCE_REPLACE_REPLACEMENT_SERVICE_NAME: &str =
-    "catalog-force-replace-replacement-control-plane-catalog-force-replace-resolves-catalog-issue";
 const CATALOG_SURFACE_STATUS_CASE_ID: &str =
     "control-plane.catalog-surface-status-reports-provider-runtime";
 const CATALOG_SURFACE_STATUS_PROVIDER_ID: &str =
@@ -161,8 +151,6 @@ const CATALOG_SURFACE_STATUS_CAPABILITY: &str =
     "trellis.integration.control-plane.catalog-surface-status-provider.control-plane-catalog-surface-status-reports-provider-runtime::ping";
 const CATALOG_SURFACE_STATUS_PROVIDER_NAME: &str =
     "catalog-surface-status-provider-control-plane-catalog-surface-status-reports-provider-runtime";
-const CATALOG_SURFACE_STATUS_OLD_PROVIDER_NAME: &str =
-    "catalog-surface-status-old-provider-control-plane-catalog-surface-status-reports-provider-runtime";
 const CATALOG_SURFACE_STATUS_SHAPE_DEPLOYMENT: &str =
     "catalog-surface-status-shape-only-control-plane-catalog-surface-status-reports-provider-runtime";
 const CATALOG_SURFACE_STATUS_OLD_PROVIDER_DEPLOYMENT: &str =
@@ -190,8 +178,6 @@ const CATALOG_BINDING_PROJECTION_CLIENT_ID: &str =
     "trellis.integration.control-plane.binding-projection-client.control-plane-catalog-resource-binding-projection@v1";
 const CATALOG_BINDING_PROJECTION_DEPLOYMENT: &str =
     "binding-projection-control-plane-catalog-resource-binding-projection";
-const CATALOG_BINDING_PROJECTION_SERVICE_NAME: &str =
-    "binding-projection-service-control-plane-catalog-resource-binding-projection";
 const CATALOG_BINDING_PROJECTION_RPC_SUBJECT: &str =
     "rpc.v1.integration.control-plane.binding-projection.control-plane-catalog-resource-binding-projection.BindingProjection.Get";
 const ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_CASE_ID: &str =
@@ -690,8 +676,6 @@ impl GeneratedServiceContract for CatalogRestartServiceContract {
     const CONTRACT_JSON: &'static str = CATALOG_RESTART_SERVICE_CONTRACT_JSON;
 }
 
-type CatalogRestartServiceRuntime = ConnectedServiceRuntime<CatalogRestartServiceContract>;
-
 struct CatalogDependencyProviderContract;
 
 impl GeneratedServiceContract for CatalogDependencyProviderContract {
@@ -775,6 +759,14 @@ impl GeneratedServiceContract for OutboxRestartServiceContract {
 }
 
 type OutboxRestartServiceRuntime = ConnectedServiceRuntime<OutboxRestartServiceContract>;
+
+struct CatalogAdminConsumerContract;
+
+impl GeneratedServiceContract for CatalogAdminConsumerContract {
+    const CONTRACT_ID: &'static str = CATALOG_ADMIN_CONSUMER_ID;
+    const CONTRACT_DIGEST: &'static str = "";
+    const CONTRACT_JSON: &'static str = "{}";
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct CatalogRestartPingInput {
@@ -1026,7 +1018,7 @@ async fn control_plane_admin_bootstrap_creates_first_local_admin() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust admin bootstrap probe client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let me = auth
         .rpc()
         .auth()
@@ -1061,7 +1053,8 @@ async fn control_plane_password_reset_change_invalidates_old_password() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust password reset admin client");
-    let initial_auth = trellis_rs::sdk::auth::AuthClient::new(&initial_client);
+    let initial_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&initial_client));
     let created = initial_auth
         .rpc()
         .auth()
@@ -1103,7 +1096,8 @@ async fn control_plane_password_reset_change_invalidates_old_password() {
     )
     .await
     .expect("connect with reset old password through public local login flow");
-    let old_password_auth = trellis_rs::sdk::auth::AuthClient::new(&old_password_client);
+    let old_password_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&old_password_client));
     let changed = old_password_auth
         .rpc()
         .auth()
@@ -1142,7 +1136,8 @@ async fn control_plane_password_reset_change_invalidates_old_password() {
     )
     .await
     .expect("connect with changed new password through public local login flow");
-    let new_password_auth = trellis_rs::sdk::auth::AuthClient::new(&new_password_client);
+    let new_password_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&new_password_client));
     let me = new_password_auth
         .rpc()
         .auth()
@@ -1151,7 +1146,7 @@ async fn control_plane_password_reset_change_invalidates_old_password() {
         .expect("call Auth.Sessions.Me after new-password login");
     assert_eq!(
         me.user
-            .as_object()
+            .as_ref()
             .and_then(|user| user.get("userId"))
             .and_then(Value::as_str),
         Some(created.user.user_id.as_str())
@@ -1192,7 +1187,7 @@ async fn control_plane_http_route_security_requires_admin_session() {
         .connect_client_with_session_seed(&bootstrap_url, &contract, admin_session_seed.clone())
         .await
         .expect("connect live Rust HTTP route probe client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let me = auth
         .rpc()
         .auth()
@@ -1746,8 +1741,8 @@ async fn control_plane_session_logout_kicks_runtime_access() {
         .connect_client_with_session_seed(&bootstrap_url, &contract, seed.clone())
         .await
         .expect("connect second live Rust session logout client");
-    let first_auth = trellis_rs::sdk::auth::AuthClient::new(&first);
-    let second_auth = trellis_rs::sdk::auth::AuthClient::new(&second);
+    let first_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&first));
+    let second_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&second));
     first_auth
         .rpc()
         .auth()
@@ -1938,14 +1933,9 @@ async fn control_plane_catalog_active_contracts_survive_restart() {
         .expect("provision live catalog restart service instance");
     let client_session_seed = trellis_rs::auth::generate_session_keypair().0;
 
-    let service_task = start_catalog_restart_service(
-        runtime.trellis_url(),
-        &service_contract,
-        &service_key,
-        1,
-        true,
-    )
-    .await;
+    let service_task =
+        start_catalog_restart_service(runtime.trellis_url(), &service_contract, &service_key, 1)
+            .await;
     let (client, client_reconnect) = admin
         .connect_client_with_session_seed_reconnectable(
             &bootstrap_url,
@@ -1970,14 +1960,9 @@ async fn control_plane_catalog_active_contracts_survive_restart() {
         .await
         .expect("restart only the Trellis control-plane process");
 
-    let service_task = start_catalog_restart_service(
-        runtime.trellis_url(),
-        &service_contract,
-        &service_key,
-        2,
-        false,
-    )
-    .await;
+    let service_task =
+        start_catalog_restart_service(runtime.trellis_url(), &service_contract, &service_key, 2)
+            .await;
     let client = client_reconnect
         .connect_bound_only()
         .await
@@ -2132,7 +2117,7 @@ async fn control_plane_catalog_force_replace_resolves_catalog_issue() {
         &replacement_key,
     )
     .await;
-    let core = trellis_rs::sdk::core::CoreClient::new(&admin_client);
+    let core = trellis_rs::sdk::core::CoreClient::new(crate::generated_caller(&admin_client));
     let issue = wait_for_catalog_force_replace_issue(
         &core,
         base_contract.digest(),
@@ -2152,14 +2137,14 @@ async fn control_plane_catalog_force_replace_resolves_catalog_issue() {
         "expected catalog issue to expose the public force-replace action"
     );
 
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let resolved = auth
         .rpc()
         .auth()
         .catalog_issues_resolve(
             &trellis_rs::sdk::auth::types::AuthCatalogIssuesResolveRequest {
                 issue_id: issue.issue_id.clone(),
-                action: "force-replace".to_string(),
+                action: crate::wire("force-replace"),
             },
         )
         .await
@@ -2214,7 +2199,7 @@ async fn control_plane_catalog_surface_status_reports_provider_runtime() {
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust catalog surface status client");
-    let core = trellis_rs::sdk::core::CoreClient::new(&client);
+    let core = trellis_rs::sdk::core::CoreClient::new(crate::generated_caller(&client));
 
     wait_for_catalog_surface_status(
         &core,
@@ -2334,7 +2319,7 @@ async fn control_plane_catalog_surface_status_reports_provider_runtime() {
             "runtime": "live"
         })
     );
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let observer_user = auth
         .rpc()
         .auth()
@@ -2377,7 +2362,7 @@ async fn control_plane_catalog_surface_status_reports_provider_runtime() {
     )
     .await
     .expect("connect catalog surface status observer as non-admin user");
-    let observer_core = trellis_rs::sdk::core::CoreClient::new(&observer);
+    let observer_core = trellis_rs::sdk::core::CoreClient::new(crate::generated_caller(&observer));
     assert_eq!(
         catalog_surface_status(&observer_core).await,
         json!({
@@ -2431,16 +2416,13 @@ async fn control_plane_catalog_surface_status_reports_provider_runtime() {
         .await
         .expect("provision old live catalog surface status provider service instance");
     let _old_provider_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: CATALOG_SURFACE_STATUS_PROVIDER_ID,
-            contract_digest: old_provider_contract.digest(),
-            contract_json: CATALOG_SURFACE_STATUS_OLD_PROVIDER_CONTRACT_JSON,
-            session_key_seed_base64url: &old_provider_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
+        trellis_test::connect_service_runtime::<CatalogSurfaceStatusProviderContract>(
+            runtime.trellis_url(),
+            CATALOG_SURFACE_STATUS_PROVIDER_ID,
+            old_provider_contract.digest(),
+            CATALOG_SURFACE_STATUS_OLD_PROVIDER_CONTRACT_JSON,
+            &old_provider_key.seed,
+        )
         .await
         .expect("connect old live catalog surface status provider service");
     wait_for_auth_connection_user_nkey(&auth, &old_provider_key.session_key)
@@ -2566,25 +2548,21 @@ async fn control_plane_catalog_admin_rpc_list_status_and_issue_filters() {
     .await;
     let consumer_contract_json = serde_json::to_string(consumer_contract.manifest())
         .expect("serialize catalog admin consumer contract");
-    let _consumer_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: CATALOG_ADMIN_CONSUMER_ID,
-            contract_digest: consumer_contract.digest(),
-            contract_json: &consumer_contract_json,
-            session_key_seed_base64url: &consumer_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect catalog admin consumer service");
+    let _consumer_client = trellis_test::connect_service_runtime::<CatalogAdminConsumerContract>(
+        runtime.trellis_url(),
+        CATALOG_ADMIN_CONSUMER_ID,
+        consumer_contract.digest(),
+        &consumer_contract_json,
+        &consumer_key.seed,
+    )
+    .await
+    .expect("connect catalog admin consumer service");
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect catalog admin RPC client");
-    let core = trellis_rs::sdk::core::CoreClient::new(&admin_client);
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let core = trellis_rs::sdk::core::CoreClient::new(crate::generated_caller(&admin_client));
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     wait_for_catalog_contracts(
         &core,
@@ -2597,7 +2575,7 @@ async fn control_plane_catalog_admin_rpc_list_status_and_issue_filters() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: Some(false),
             offset: None,
             limit: 500,
@@ -2714,24 +2692,20 @@ async fn control_plane_catalog_active_use_issue_is_reported() {
     .await;
     let consumer_contract_json = serde_json::to_string(consumer_contract.manifest())
         .expect("serialize catalog active-use consumer contract");
-    let _consumer_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: CATALOG_ADMIN_CONSUMER_ID,
-            contract_digest: consumer_contract.digest(),
-            contract_json: &consumer_contract_json,
-            session_key_seed_base64url: &consumer_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect catalog active-use consumer service");
+    let _consumer_client = trellis_test::connect_service_runtime::<CatalogAdminConsumerContract>(
+        runtime.trellis_url(),
+        CATALOG_ADMIN_CONSUMER_ID,
+        consumer_contract.digest(),
+        &consumer_contract_json,
+        &consumer_key.seed,
+    )
+    .await
+    .expect("connect catalog active-use consumer service");
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect catalog active-use admin client");
-    let core = trellis_rs::sdk::core::CoreClient::new(&admin_client);
+    let core = trellis_rs::sdk::core::CoreClient::new(crate::generated_caller(&admin_client));
 
     wait_for_catalog_contracts(
         &core,
@@ -2889,12 +2863,12 @@ async fn control_plane_admin_service_deployment_lifecycle() {
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust deployment admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     let created = auth
         .rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT,
             "kind": "service",
             "namespaces": ["admin", "admin", "ops"],
@@ -2902,32 +2876,30 @@ async fn control_plane_admin_service_deployment_lifecycle() {
         })))
         .await
         .expect("create service deployment through generated Auth RPC");
+    let trellis_rs::sdk::auth::types::AuthDeploymentsCreateResponseDeployment::Service {
+        contract_compatibility_mode,
+        deployment_id,
+        disabled,
+        namespaces,
+    } = created.deployment
+    else {
+        panic!("expected service deployment");
+    };
+    assert_eq!(deployment_id, ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT);
+    assert!(!disabled);
+    assert_eq!(namespaces, ["admin", "ops"]);
     assert_eq!(
-        deployment_field(&created.deployment, "kind"),
-        Some("service")
-    );
-    assert_eq!(
-        deployment_field(&created.deployment, "deploymentId"),
-        Some(ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT)
-    );
-    assert_eq!(
-        created.deployment.get("disabled"),
-        Some(&Value::Bool(false))
-    );
-    assert_eq!(
-        created.deployment.get("namespaces"),
-        Some(&json!(["admin", "ops"]))
-    );
-    assert_eq!(
-        deployment_field(&created.deployment, "contractCompatibilityMode"),
-        Some("mutable-dev")
+        contract_compatibility_mode
+            .expect("service compatibility mode")
+            .as_str(),
+        "mutable-dev"
     );
 
     let listed = auth
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -2939,29 +2911,32 @@ async fn control_plane_admin_service_deployment_lifecycle() {
             &listed.entries,
             ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT
         )
-        .and_then(|entry| entry.get("disabled")),
-        Some(&Value::Bool(false))
+        .map(listed_deployment_disabled),
+        Some(false)
     );
 
     let disabled = auth
         .rpc()
         .auth()
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT.to_string(),
         })
         .await
         .expect("disable service deployment through generated Auth RPC");
-    assert_eq!(
-        disabled.deployment.get("disabled"),
-        Some(&Value::Bool(true))
-    );
+    assert!(matches!(
+        disabled.deployment,
+        trellis_rs::sdk::auth::types::AuthDeploymentsDisableResponseDeployment::Service {
+            disabled: true,
+            ..
+        }
+    ));
 
     let disabled_list = auth
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: Some(true),
             offset: None,
             limit: 500,
@@ -2978,21 +2953,24 @@ async fn control_plane_admin_service_deployment_lifecycle() {
         .rpc()
         .auth()
         .deployments_enable(&AuthDeploymentsEnableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT.to_string(),
         })
         .await
         .expect("enable service deployment through generated Auth RPC");
-    assert_eq!(
-        enabled.deployment.get("disabled"),
-        Some(&Value::Bool(false))
-    );
+    assert!(matches!(
+        enabled.deployment,
+        trellis_rs::sdk::auth::types::AuthDeploymentsEnableResponseDeployment::Service {
+            disabled: false,
+            ..
+        }
+    ));
 
     let removed = auth
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT.to_string(),
             cascade: None,
             purge_unused_contracts: None,
@@ -3005,7 +2983,7 @@ async fn control_plane_admin_service_deployment_lifecycle() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3022,7 +3000,7 @@ async fn control_plane_admin_service_deployment_lifecycle() {
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_LIFECYCLE_DEPLOYMENT.to_string(),
             cascade: None,
             purge_unused_contracts: None,
@@ -3058,12 +3036,12 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust service deployment rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     let failed_create = auth
         .rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT,
             "kind": "service",
             "namespaces": ["admin", "rollback"],
@@ -3075,7 +3053,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3090,7 +3068,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
 
     auth.rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT,
             "kind": "service",
             "namespaces": ["admin", "rollback"],
@@ -3113,7 +3091,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT.to_string(),
             cascade: Some(true),
             purge_unused_contracts: None,
@@ -3124,7 +3102,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3156,7 +3134,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: ADMIN_SERVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT.to_string(),
             cascade: Some(true),
             purge_unused_contracts: None,
@@ -3168,7 +3146,7 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("service".to_string()),
+            kind: Some(crate::wire("service")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3224,12 +3202,12 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust device deployment rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     let failed_create = auth
         .rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": ADMIN_DEVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT,
             "kind": "device",
             "reviewMode": "none",
@@ -3240,7 +3218,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("device".to_string()),
+            kind: Some(crate::wire("device")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3255,7 +3233,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
 
     auth.rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": ADMIN_DEVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT,
             "kind": "device",
             "reviewMode": "none",
@@ -3281,7 +3259,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "device".to_string(),
+            kind: crate::wire("device"),
             deployment_id: ADMIN_DEVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT.to_string(),
             cascade: Some(true),
             purge_unused_contracts: None,
@@ -3292,7 +3270,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("device".to_string()),
+            kind: Some(crate::wire("device")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3324,7 +3302,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_remove(&AuthDeploymentsRemoveRequest {
-            kind: "device".to_string(),
+            kind: crate::wire("device"),
             deployment_id: ADMIN_DEVICE_DEPLOYMENT_ROLLBACK_DEPLOYMENT.to_string(),
             cascade: Some(true),
             purge_unused_contracts: None,
@@ -3336,7 +3314,7 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         .rpc()
         .auth()
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some("device".to_string()),
+            kind: Some(crate::wire("device")),
             disabled: None,
             offset: None,
             limit: 500,
@@ -3388,14 +3366,9 @@ async fn control_plane_admin_service_deployment_validate_before_persist_kick() {
         .provision_service_instance(&bootstrap_url, &service_contract, Some(deployment_id), None)
         .await
         .expect("provision live service deployment validation probe");
-    let service_task = start_catalog_restart_service(
-        runtime.trellis_url(),
-        &service_contract,
-        &service_key,
-        1,
-        true,
-    )
-    .await;
+    let service_task =
+        start_catalog_restart_service(runtime.trellis_url(), &service_contract, &service_key, 1)
+            .await;
 
     let client_contract =
         catalog_restart_client_contract().expect("build service deployment validation client");
@@ -3432,11 +3405,11 @@ async fn control_plane_admin_service_deployment_validate_before_persist_kick() {
         .connect_bound_only()
         .await
         .expect("reconnect service deployment validation admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let failed = auth_rpc
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: deployment_id.to_string(),
         })
         .await;
@@ -3484,22 +3457,18 @@ async fn control_plane_service_admin_removal_rejects_unsafe_purge_and_noncascade
         .provision_service_instance(&bootstrap_url, &service_contract, Some(deployment_id), None)
         .await
         .expect("provision live service admin removal probe");
-    let service_task = start_catalog_restart_service(
-        runtime.trellis_url(),
-        &service_contract,
-        &service_key,
-        1,
-        true,
-    )
-    .await;
+    let service_task =
+        start_catalog_restart_service(runtime.trellis_url(), &service_contract, &service_key, 1)
+            .await;
 
     let client_contract = catalog_restart_client_contract().expect("build service removal client");
     let client_seed = trellis_rs::auth::generate_session_keypair().0;
+    let client_session_key = trellis_rs::auth::session_public_key(&client_seed)
+        .expect("derive service removal client session key");
     let client = admin
         .connect_client_with_session_seed(&bootstrap_url, &client_contract, client_seed)
         .await
         .expect("connect live Rust service removal client");
-    let client_session_key = client.auth().session_key.clone();
     assert_eq!(
         call_catalog_restart_with_retry(&client, "before").await,
         CatalogRestartPingOutput {
@@ -3523,7 +3492,7 @@ async fn control_plane_service_admin_removal_rejects_unsafe_purge_and_noncascade
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust service admin removal admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
 
     assert_deployments_remove_validation_error(
@@ -3623,14 +3592,14 @@ async fn control_plane_admin_service_deployment_disable_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust service deployment disable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
     create_service_deployment(&auth_rpc, deployment_id).await;
     let failed = auth_rpc
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: deployment_id.to_string(),
         })
         .await;
@@ -3671,14 +3640,14 @@ async fn control_plane_admin_service_deployment_enable_refresh_rollback() {
         .connect_client_with_session_seed_reconnectable(&bootstrap_url, &contract, seed)
         .await
         .expect("connect live Rust service deployment enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
     create_service_deployment(&auth_rpc, deployment_id).await;
     auth_rpc
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: deployment_id.to_string(),
         })
         .await
@@ -3700,11 +3669,11 @@ async fn control_plane_admin_service_deployment_enable_refresh_rollback() {
         .connect_bound_only()
         .await
         .expect("reconnect service deployment enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let failed = auth_rpc
         .deployments_enable(&AuthDeploymentsEnableRequest {
-            kind: "service".to_string(),
+            kind: crate::wire("service"),
             deployment_id: deployment_id.to_string(),
         })
         .await;
@@ -3741,7 +3710,7 @@ async fn control_plane_admin_service_instance_disable_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust service instance disable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -3787,7 +3756,7 @@ async fn control_plane_admin_service_instance_enable_refresh_rollback() {
         .connect_client_with_session_seed_reconnectable(&bootstrap_url, &contract, seed)
         .await
         .expect("connect live Rust service instance enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -3813,7 +3782,7 @@ async fn control_plane_admin_service_instance_enable_refresh_rollback() {
         .connect_bound_only()
         .await
         .expect("reconnect service instance enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let failed = auth_rpc
         .service_instances_enable(&AuthServiceInstancesEnableRequest {
@@ -3850,7 +3819,7 @@ async fn control_plane_admin_service_instance_remove_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust service instance remove rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -3890,14 +3859,14 @@ async fn control_plane_admin_device_deployment_disable_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust device deployment disable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
     create_device_deployment(&auth_rpc, deployment_id).await;
     let failed = auth_rpc
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "device".to_string(),
+            kind: crate::wire("device"),
             deployment_id: deployment_id.to_string(),
         })
         .await;
@@ -3938,14 +3907,14 @@ async fn control_plane_admin_device_deployment_enable_refresh_rollback() {
         .connect_client_with_session_seed_reconnectable(&bootstrap_url, &contract, seed)
         .await
         .expect("connect live Rust device deployment enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
     create_device_deployment(&auth_rpc, deployment_id).await;
     auth_rpc
         .deployments_disable(&AuthDeploymentsDisableRequest {
-            kind: "device".to_string(),
+            kind: crate::wire("device"),
             deployment_id: deployment_id.to_string(),
         })
         .await
@@ -3967,11 +3936,11 @@ async fn control_plane_admin_device_deployment_enable_refresh_rollback() {
         .connect_bound_only()
         .await
         .expect("reconnect device deployment enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let failed = auth_rpc
         .deployments_enable(&AuthDeploymentsEnableRequest {
-            kind: "device".to_string(),
+            kind: crate::wire("device"),
             deployment_id: deployment_id.to_string(),
         })
         .await;
@@ -4008,7 +3977,7 @@ async fn control_plane_admin_device_instance_disable_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust device instance disable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -4054,7 +4023,7 @@ async fn control_plane_admin_device_instance_enable_refresh_rollback() {
         .connect_client_with_session_seed_reconnectable(&bootstrap_url, &contract, seed)
         .await
         .expect("connect live Rust device instance enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -4080,7 +4049,7 @@ async fn control_plane_admin_device_instance_enable_refresh_rollback() {
         .connect_bound_only()
         .await
         .expect("reconnect device instance enable rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let failed = auth_rpc
         .devices_enable(&AuthDevicesEnableRequest {
@@ -4117,7 +4086,7 @@ async fn control_plane_admin_device_instance_remove_refresh_rollback() {
         .connect_client(&bootstrap_url, &contract)
         .await
         .expect("connect live Rust device instance remove rollback admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let auth_rpc = auth.rpc().auth();
     let deployment_id = case_id;
 
@@ -4133,10 +4102,35 @@ async fn control_plane_admin_device_instance_remove_refresh_rollback() {
     assert_device_state(&auth_rpc, deployment_id, &instance_id, "registered").await;
 }
 
-fn listed_deployment<'a>(entries: &'a [Value], deployment_id: &str) -> Option<&'a Value> {
-    entries
-        .iter()
-        .find(|entry| deployment_field(entry, "deploymentId") == Some(deployment_id))
+fn listed_deployment<'a>(
+    entries: &'a [trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem],
+    deployment_id: &str,
+) -> Option<&'a trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem> {
+    entries.iter().find(|entry| match entry {
+        trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem::Service {
+            deployment_id: id,
+            ..
+        }
+        | trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem::Device {
+            deployment_id: id,
+            ..
+        } => id == deployment_id,
+    })
+}
+
+fn listed_deployment_disabled(
+    deployment: &trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem,
+) -> bool {
+    match deployment {
+        trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem::Service {
+            disabled,
+            ..
+        }
+        | trellis_rs::sdk::auth::types::AuthDeploymentsListResponseEntriesItem::Device {
+            disabled,
+            ..
+        } => *disabled,
+    }
 }
 
 fn deployment_field<'a>(deployment: &'a Value, field: &str) -> Option<&'a str> {
@@ -4192,7 +4186,7 @@ async fn create_service_deployment(
     deployment_id: &str,
 ) {
     auth_rpc
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": deployment_id,
             "kind": "service",
             "namespaces": ["admin", "refresh", "rollback"],
@@ -4207,7 +4201,7 @@ async fn create_device_deployment(
     deployment_id: &str,
 ) {
     auth_rpc
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": deployment_id,
             "kind": "device",
             "reviewMode": "none",
@@ -4223,16 +4217,14 @@ async fn deployment_disabled(
 ) -> Option<bool> {
     let listed = auth_rpc
         .deployments_list(&AuthDeploymentsListRequest {
-            kind: Some(kind.to_string()),
+            kind: Some(crate::wire(kind)),
             disabled: None,
             offset: None,
             limit: 500,
         })
         .await
         .expect("list deployments through generated Auth RPC");
-    listed_deployment(&listed.entries, deployment_id)
-        .and_then(|entry| entry.get("disabled"))
-        .and_then(Value::as_bool)
+    listed_deployment(&listed.entries, deployment_id).map(listed_deployment_disabled)
 }
 
 async fn provision_service_instance(
@@ -4334,6 +4326,8 @@ async fn control_plane_sessions_survive_control_plane_restart() {
     let contract =
         sessions_restart_client_contract().expect("build sessions restart client contract");
     let client_session_seed = trellis_rs::auth::generate_session_keypair().0;
+    let session_key = trellis_rs::auth::session_public_key(&client_session_seed)
+        .expect("derive sessions restart client session key");
     let (client, client_reconnect) = admin
         .connect_client_with_session_seed_reconnectable(
             &bootstrap_url,
@@ -4342,8 +4336,7 @@ async fn control_plane_sessions_survive_control_plane_restart() {
         )
         .await
         .expect("connect live Rust sessions restart client before restart");
-    let session_key = client.auth().session_key.clone();
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let before_me = auth
         .rpc()
         .auth()
@@ -4373,7 +4366,7 @@ async fn control_plane_sessions_survive_control_plane_restart() {
         .connect_bound_only()
         .await
         .expect("reconnect bound sessions restart client after restart without fresh auth flow");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let after_me = auth
         .rpc()
         .auth()
@@ -4706,13 +4699,13 @@ async fn control_plane_outbox_dispatches_after_control_plane_restart() {
         .subscribe::<OutboxRestartQueuedEvent>()
         .await
         .expect("subscribe to Document.Queued after restart");
-    let service_client = connect_outbox_restart_service_client(
+    let service = connect_outbox_restart_service_client(
         runtime.trellis_url(),
         service_contract.digest(),
         &service_key,
     )
     .await;
-    let dispatch_result = dispatch_outbox_restart_once(&db, &service_client)
+    let dispatch_result = dispatch_outbox_restart_once(&db, &service.event_publisher())
         .await
         .expect("dispatch queued outbox event after control-plane restart");
     assert_eq!(
@@ -5265,44 +5258,31 @@ async fn connect_resources_restart_service(
     contract_digest: &str,
     service_key: &trellis_test::TrellisTestServiceKey,
 ) -> ResourcesRestartServiceRuntime {
-    ConnectedServiceRuntime::from_connected_client(
-        RESOURCES_RESTART_SERVICE_NAME,
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url,
-                contract_id: RESOURCES_RESTART_SERVICE_ID,
-                contract_digest,
-                contract_json: RESOURCES_RESTART_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &service_key.seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust resources restart service"),
-        ),
+    trellis_test::connect_service_runtime::<ResourcesRestartServiceContract>(
+        trellis_url,
+        RESOURCES_RESTART_SERVICE_ID,
+        contract_digest,
+        RESOURCES_RESTART_SERVICE_CONTRACT_JSON,
+        &service_key.seed,
     )
-    .expect("build resources restart service runtime")
+    .await
+    .expect("connect resources restart service runtime")
 }
 
 async fn connect_outbox_restart_service_client(
     trellis_url: &str,
     contract_digest: &str,
     service_key: &trellis_test::TrellisTestServiceKey,
-) -> TrellisClient {
-    TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+) -> OutboxRestartServiceRuntime {
+    trellis_test::connect_service_runtime::<OutboxRestartServiceContract>(
         trellis_url,
-        contract_id: OUTBOX_RESTART_SERVICE_ID,
+        OUTBOX_RESTART_SERVICE_ID,
         contract_digest,
-        contract_json: OUTBOX_RESTART_SERVICE_CONTRACT_JSON,
-        session_key_seed_base64url: &service_key.seed,
-        timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-        retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-        authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-    })
+        OUTBOX_RESTART_SERVICE_CONTRACT_JSON,
+        &service_key.seed,
+    )
     .await
-    .expect("connect live Rust outbox restart service")
+    .expect("connect live Rust outbox restart service runtime")
 }
 
 fn assert_resources_restart_bindings(service: &ResourcesRestartServiceRuntime) {
@@ -5327,39 +5307,19 @@ async fn start_catalog_restart_service(
     service_contract: &trellis_test::TrellisTestContract,
     service_key: &trellis_test::TrellisTestServiceKey,
     generation: u32,
-    present_contract: bool,
 ) -> AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>> {
     let trellis_url = trellis_url.to_string();
     let contract_digest = service_contract.digest().to_string();
     let seed = service_key.seed.clone();
-    let client = if present_contract {
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: &trellis_url,
-            contract_id: CATALOG_RESTART_SERVICE_ID,
-            contract_digest: &contract_digest,
-            contract_json: CATALOG_RESTART_SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-    } else {
-        TrellisClient::connect_service(ServiceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_id: CATALOG_RESTART_SERVICE_ID,
-            contract_digest: &contract_digest,
-            session_key_seed_base64url: &seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-        })
-        .await
-    }
-    .expect("connect live Rust catalog restart service");
-    let mut service = CatalogRestartServiceRuntime::from_connected_client(
-        "catalog-restart-service",
-        Arc::new(client),
+    let mut service = trellis_test::connect_service_runtime::<CatalogRestartServiceContract>(
+        &trellis_url,
+        CATALOG_RESTART_SERVICE_ID,
+        &contract_digest,
+        CATALOG_RESTART_SERVICE_CONTRACT_JSON,
+        &seed,
     )
-    .expect("build catalog restart service runtime");
+    .await
+    .expect("connect live Rust catalog restart service runtime");
 
     service.register_rpc::<CatalogRestartPingRpc, _, _>(move |_context, input| async move {
         Ok(CatalogRestartPingOutput {
@@ -5380,25 +5340,15 @@ async fn start_catalog_dependency_provider_service(
     let contract_digest = provider_contract.digest().to_string();
     let seed = service_key.seed.clone();
     let mut service: CatalogDependencyProviderRuntime =
-        ConnectedServiceRuntime::from_connected_client(
-            CATALOG_DEPENDENCY_PROVIDER_NAME,
-            Arc::new(
-                TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                    trellis_url: &trellis_url,
-                    contract_id: CATALOG_DEPENDENCY_PROVIDER_ID,
-                    contract_digest: &contract_digest,
-                    contract_json: CATALOG_DEPENDENCY_PROVIDER_CONTRACT_JSON,
-                    session_key_seed_base64url: &seed,
-                    timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                    retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                    authority_pending_timeout_ms:
-                        trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-                })
-                .await
-                .expect("connect live Rust catalog dependency provider service"),
-            ),
+        trellis_test::connect_service_runtime::<CatalogDependencyProviderContract>(
+            &trellis_url,
+            CATALOG_DEPENDENCY_PROVIDER_ID,
+            &contract_digest,
+            CATALOG_DEPENDENCY_PROVIDER_CONTRACT_JSON,
+            &seed,
         )
-        .expect("build catalog dependency provider service runtime");
+        .await
+        .expect("connect live Rust catalog dependency provider service runtime");
 
     service.register_rpc::<CatalogDependencyPingRpc, _, _>(move |_context, input| async move {
         Ok(CatalogDependencyPingOutput {
@@ -5419,25 +5369,15 @@ async fn start_catalog_force_replace_base_service(
     let contract_digest = contract_digest.to_string();
     let seed = service_key.seed.clone();
     let mut service: CatalogForceReplaceBaseRuntime =
-        ConnectedServiceRuntime::from_connected_client(
-            CATALOG_FORCE_REPLACE_BASE_SERVICE_NAME,
-            Arc::new(
-                TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                    trellis_url: &trellis_url,
-                    contract_id: CATALOG_FORCE_REPLACE_SERVICE_ID,
-                    contract_digest: &contract_digest,
-                    contract_json: CATALOG_FORCE_REPLACE_BASE_CONTRACT_JSON,
-                    session_key_seed_base64url: &seed,
-                    timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                    retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                    authority_pending_timeout_ms:
-                        trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-                })
-                .await
-                .expect("connect live Rust catalog force-replace base service"),
-            ),
+        trellis_test::connect_service_runtime::<CatalogForceReplaceBaseContract>(
+            &trellis_url,
+            CATALOG_FORCE_REPLACE_SERVICE_ID,
+            &contract_digest,
+            CATALOG_FORCE_REPLACE_BASE_CONTRACT_JSON,
+            &seed,
         )
-        .expect("build catalog force-replace base service runtime");
+        .await
+        .expect("connect live Rust catalog force-replace base service runtime");
 
     service.register_rpc::<CatalogForceReplaceBasePingRpc, _, _>(
         move |_context, input| async move {
@@ -5460,25 +5400,15 @@ async fn start_catalog_force_replace_replacement_service(
     let contract_digest = contract_digest.to_string();
     let seed = service_key.seed.clone();
     let mut service: CatalogForceReplaceReplacementRuntime =
-        ConnectedServiceRuntime::from_connected_client(
-            CATALOG_FORCE_REPLACE_REPLACEMENT_SERVICE_NAME,
-            Arc::new(
-                TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                    trellis_url: &trellis_url,
-                    contract_id: CATALOG_FORCE_REPLACE_SERVICE_ID,
-                    contract_digest: &contract_digest,
-                    contract_json: CATALOG_FORCE_REPLACE_REPLACEMENT_CONTRACT_JSON,
-                    session_key_seed_base64url: &seed,
-                    timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                    retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                    authority_pending_timeout_ms:
-                        trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-                })
-                .await
-                .expect("connect live Rust catalog force-replace replacement service"),
-            ),
+        trellis_test::connect_service_runtime::<CatalogForceReplaceReplacementContract>(
+            &trellis_url,
+            CATALOG_FORCE_REPLACE_SERVICE_ID,
+            &contract_digest,
+            CATALOG_FORCE_REPLACE_REPLACEMENT_CONTRACT_JSON,
+            &seed,
         )
-        .expect("build catalog force-replace replacement service runtime");
+        .await
+        .expect("connect live Rust catalog force-replace replacement service runtime");
 
     service.register_rpc::<CatalogForceReplaceReplacementPingRpc, _, _>(
         move |_context, input| async move {
@@ -5501,25 +5431,15 @@ async fn start_catalog_surface_status_provider_service(
     let contract_digest = contract_digest.to_string();
     let seed = service_key.seed.clone();
     let mut service: CatalogSurfaceStatusProviderRuntime =
-        ConnectedServiceRuntime::from_connected_client(
-            CATALOG_SURFACE_STATUS_PROVIDER_NAME,
-            Arc::new(
-                TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                    trellis_url: &trellis_url,
-                    contract_id: CATALOG_SURFACE_STATUS_PROVIDER_ID,
-                    contract_digest: &contract_digest,
-                    contract_json: CATALOG_SURFACE_STATUS_PROVIDER_CONTRACT_JSON,
-                    session_key_seed_base64url: &seed,
-                    timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                    retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                    authority_pending_timeout_ms:
-                        trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-                })
-                .await
-                .expect("connect live Rust catalog surface status provider service"),
-            ),
+        trellis_test::connect_service_runtime::<CatalogSurfaceStatusProviderContract>(
+            &trellis_url,
+            CATALOG_SURFACE_STATUS_PROVIDER_ID,
+            &contract_digest,
+            CATALOG_SURFACE_STATUS_PROVIDER_CONTRACT_JSON,
+            &seed,
         )
-        .expect("build catalog surface status provider service runtime");
+        .await
+        .expect("connect live Rust catalog surface status provider service runtime");
 
     service.register_rpc::<CatalogSurfaceStatusPingRpc, _, _>(move |_context, input| async move {
         Ok(CatalogDependencyPingOutput {
@@ -5536,23 +5456,15 @@ async fn connect_catalog_binding_projection_resource_service(
     contract_digest: &str,
     service_key: &trellis_test::TrellisTestServiceKey,
 ) -> CatalogBindingProjectionResourceRuntime {
-    let client = TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+    trellis_test::connect_service_runtime::<CatalogBindingProjectionResourceContract>(
         trellis_url,
-        contract_id: CATALOG_BINDING_PROJECTION_SERVICE_ID,
+        CATALOG_BINDING_PROJECTION_SERVICE_ID,
         contract_digest,
-        contract_json: CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON,
-        session_key_seed_base64url: &service_key.seed,
-        timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-        retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-        authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-    })
-    .await
-    .expect("connect live Rust binding projection resource service");
-    ConnectedServiceRuntime::from_connected_client(
-        CATALOG_BINDING_PROJECTION_SERVICE_NAME,
-        Arc::new(client),
+        CATALOG_BINDING_PROJECTION_RESOURCE_CONTRACT_JSON,
+        &service_key.seed,
     )
-    .expect("build binding projection resource service runtime")
+    .await
+    .expect("connect live Rust binding projection resource service runtime")
 }
 
 fn start_catalog_binding_projection_resource_service(
@@ -5561,7 +5473,7 @@ fn start_catalog_binding_projection_resource_service(
     service.register_rpc::<BindingProjectionGetRpc, _, _>(|context, _input| async move {
         let output = context
             .handle()
-            .client()
+            .caller()
             .call::<trellis_rs::sdk::core::rpc::TrellisBindingsGetRpc>(
                 &trellis_rs::sdk::core::types::TrellisBindingsGetRequest {
                     contract_id: None,
@@ -5585,23 +5497,14 @@ fn spawn_catalog_binding_projection_removed_connect(
     let trellis_url = trellis_url.to_string();
     let contract_digest = contract_digest.to_string();
     tokio::spawn(async move {
-        let client =
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: CATALOG_BINDING_PROJECTION_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await?;
-        ConnectedServiceRuntime::from_connected_client(
-            CATALOG_BINDING_PROJECTION_SERVICE_NAME,
-            Arc::new(client),
+        trellis_test::connect_service_runtime::<CatalogBindingProjectionRemovedContract>(
+            &trellis_url,
+            CATALOG_BINDING_PROJECTION_SERVICE_ID,
+            &contract_digest,
+            CATALOG_BINDING_PROJECTION_REMOVED_CONTRACT_JSON,
+            &seed,
         )
+        .await
     })
 }
 
@@ -5611,7 +5514,7 @@ fn start_catalog_binding_projection_removed_service(
     service.register_rpc::<BindingProjectionGetRpc, _, _>(|context, _input| async move {
         let output = context
             .handle()
-            .client()
+            .caller()
             .call::<trellis_rs::sdk::core::rpc::TrellisBindingsGetRpc>(
                 &trellis_rs::sdk::core::types::TrellisBindingsGetRequest {
                     contract_id: None,
@@ -5637,7 +5540,7 @@ async fn provision_binding_projection_instance_only(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
     auth.rpc()
         .auth()
         .service_instances_provision(&AuthServiceInstancesProvisionRequest {
@@ -5663,28 +5566,33 @@ async fn wait_for_binding_projection_migration_plan(
             .connect_admin(bootstrap_url)
             .await
             .expect("get admin client");
-        let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+        let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
         let plans = auth
             .rpc()
             .auth()
             .deployment_authority_plans_list(&AuthDeploymentAuthorityPlansListRequest {
                 deployment_id: Some(CATALOG_BINDING_PROJECTION_DEPLOYMENT.to_string()),
-                state: Some("pending".to_string()),
-                classification: Some("migration".to_string()),
+                state: Some(crate::wire("pending")),
+                classification: Some(crate::wire("migration")),
                 kind: None,
                 limit: 20,
                 offset: None,
             })
             .await
             .expect("list binding projection migration plans");
-        if let Some(plan) = plans.entries.into_iter().find(|entry| {
-            entry
-                .get("proposal")
-                .and_then(Value::as_object)
-                .and_then(|proposal| proposal.get("contractDigest"))
-                .and_then(Value::as_str)
-                == Some(digest)
-        }) {
+        if let Some(plan) = plans
+            .entries
+            .into_iter()
+            .map(crate::wire::<Value, _>)
+            .find(|entry| {
+                entry
+                    .get("proposal")
+                    .and_then(Value::as_object)
+                    .and_then(|proposal| proposal.get("contractDigest"))
+                    .and_then(Value::as_str)
+                    == Some(digest)
+            })
+        {
             return BindingProjectionPlan {
                 plan_id: plan
                     .get("planId")
@@ -5715,7 +5623,7 @@ async fn accept_binding_projection_migration(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     auth.rpc()
         .auth()
         .deployment_authority_accept_migration(&AuthDeploymentAuthorityAcceptMigrationRequest {
@@ -5731,7 +5639,10 @@ async fn accept_binding_projection_migration(
         .expect("reconcile binding projection deployment authority");
 }
 
-async fn call_binding_projection_with_retry(client: &TrellisClient, label: &str) -> Value {
+async fn call_binding_projection_with_retry(
+    client: &trellis_rs::generated::Caller,
+    label: &str,
+) -> Value {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         match client.call::<BindingProjectionGetRpc>(&json!({})).await {
@@ -5802,13 +5713,8 @@ async fn start_outbox_restart_service(
     service_key: &trellis_test::TrellisTestServiceKey,
     db: Arc<std::sync::Mutex<Connection>>,
 ) -> AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>> {
-    let mut service = OutboxRestartServiceRuntime::from_connected_client(
-        OUTBOX_RESTART_SERVICE_NAME,
-        Arc::new(
-            connect_outbox_restart_service_client(trellis_url, contract_digest, service_key).await,
-        ),
-    )
-    .expect("build outbox restart service runtime");
+    let mut service =
+        connect_outbox_restart_service_client(trellis_url, contract_digest, service_key).await;
 
     service.register_rpc::<OutboxRestartQueueRpc, _, _>(move |_context, input| {
         let db = Arc::clone(&db);
@@ -5816,8 +5722,9 @@ async fn start_outbox_restart_service(
             let queued = OutboxRestartDocumentQueued {
                 document_id: input.document_id.clone(),
             };
-            let prepared = trellis_rs::client::prepare_event::<OutboxRestartQueuedEvent>(&queued)
-                .map_err(trellis_rs::service::ServerError::Json)?;
+            let prepared =
+                trellis_rs::client::prepare_event::<OutboxRestartQueuedEvent>(&queued)
+                    .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             {
                 let conn = db.lock().expect("lock outbox restart SQLite database");
                 let mut store = trellis_rs::client::SqliteOutboxStore::new(&conn);
@@ -5845,12 +5752,12 @@ fn create_outbox_restart_db() -> Connection {
 
 async fn dispatch_outbox_restart_once(
     db: &Arc<std::sync::Mutex<Connection>>,
-    service_client: &TrellisClient,
+    publisher: &trellis_rs::service::EventPublisher,
 ) -> Result<OutboxDispatchResult, trellis_rs::client::EventStoreError> {
     let conn = db.lock().expect("lock outbox restart SQLite database");
     let mut store = trellis_rs::client::SqliteOutboxStore::new(&conn);
     trellis_rs::client::dispatch_outbox_once(&mut store, |event| async move {
-        service_client.publish_prepared(&event).await
+        publisher.publish_prepared(&event).await
     })
     .await
 }
@@ -5872,7 +5779,7 @@ fn outbox_restart_server_error(
 }
 
 async fn call_catalog_restart_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     message: &str,
 ) -> CatalogRestartPingOutput {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -5894,7 +5801,7 @@ async fn call_catalog_restart_with_retry(
     }
 }
 
-async fn assert_catalog_dependency_unavailable(client: &trellis_rs::client::TrellisClient) {
+async fn assert_catalog_dependency_unavailable(client: &trellis_rs::generated::Caller) {
     let result = client
         .call::<CatalogDependencyPingRpc>(&CatalogDependencyPingInput {
             message: "before-provider".to_string(),
@@ -5907,7 +5814,7 @@ async fn assert_catalog_dependency_unavailable(client: &trellis_rs::client::Trel
 }
 
 async fn call_catalog_dependency_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     message: &str,
 ) -> CatalogDependencyPingOutput {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -5930,7 +5837,7 @@ async fn call_catalog_dependency_with_retry(
 }
 
 async fn call_catalog_surface_status_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     message: &str,
 ) -> CatalogDependencyPingOutput {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -5970,17 +5877,19 @@ async fn catalog_surface_status_for(
     surface: &str,
     action: Option<&str>,
 ) -> Value {
-    core.rpc()
-        .trellis()
-        .surface_status(&trellis_rs::sdk::core::types::TrellisSurfaceStatusRequest {
-            action: action.map(str::to_string),
-            contract_id: contract_id.to_string(),
-            kind: kind.to_string(),
-            surface: surface.to_string(),
-        })
-        .await
-        .expect("call generated Trellis.Surface.Status")
-        .status
+    crate::wire(
+        core.rpc()
+            .trellis()
+            .surface_status(&trellis_rs::sdk::core::types::TrellisSurfaceStatusRequest {
+                action: action.map(crate::wire),
+                contract_id: contract_id.to_string(),
+                kind: crate::wire(kind),
+                surface: surface.to_string(),
+            })
+            .await
+            .expect("call generated Trellis.Surface.Status")
+            .status,
+    )
 }
 
 async fn assert_catalog_surface_status_validation_error(
@@ -5994,34 +5903,30 @@ async fn assert_catalog_surface_status_validation_error(
         .rpc()
         .trellis()
         .surface_status(&trellis_rs::sdk::core::types::TrellisSurfaceStatusRequest {
-            action: action.map(str::to_string),
+            action: action.map(crate::wire),
             contract_id: contract_id.to_string(),
-            kind: kind.to_string(),
+            kind: crate::wire(kind),
             surface: surface.to_string(),
         })
         .await;
     match result {
-        Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => {
-            let error = payload
-                .decode_validation()
-                .expect("decode ValidationError payload")
-                .expect("expected ValidationError payload");
-            assert_eq!(error.error_type, "ValidationError");
-        }
+        Err(
+            trellis_rs::client::CallError::Validation(_)
+            | trellis_rs::client::CallError::Declared(_),
+        ) => {}
         Ok(output) => panic!("expected Surface.Status validation error, got {output:?}"),
         Err(error) => panic!("expected Surface.Status ValidationError, got {error}"),
     }
 }
 
 async fn assert_deployments_remove_validation_error(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     input: Value,
 ) {
-    let result = client
-        .request_json_value("rpc.v1.Auth.Deployments.Remove", &input)
-        .await;
+    let result =
+        trellis_test::call_malformed_rpc(client, "rpc.v1.Auth.Deployments.Remove", &input).await;
     match result {
-        Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => {
+        Err(trellis_rs::generated::TrellisClientError::RpcError(payload)) => {
             let error = payload
                 .decode_validation()
                 .expect("decode ValidationError payload")
@@ -6213,23 +6118,19 @@ async fn auth_connection_user_nkeys(
         .expect("list live connections through generated Auth.Connections.List")
         .entries
         .into_iter()
-        .filter_map(|entry| {
-            if entry.get("sessionKey").and_then(Value::as_str) == Some(session_key)
-                && entry.get("participantKind").and_then(Value::as_str) == Some("service")
-            {
-                entry
-                    .get("userNkey")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            } else {
-                None
-            }
+        .filter_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthConnectionsListResponseEntriesItem::Service {
+                session_key: entry_session_key,
+                user_nkey,
+                ..
+            } if entry_session_key == session_key => Some(user_nkey),
+            _ => None,
         })
         .collect()
 }
 
 async fn call_outbox_restart_queue_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     document_id: &str,
 ) -> OutboxRestartQueueOutput {
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -6256,8 +6157,9 @@ async fn wait_for_outbox_restart_queued<S>(
     document_id: &str,
 ) -> OutboxRestartDocumentQueued
 where
-    S: Stream<Item = Result<OutboxRestartDocumentQueued, trellis_rs::client::TrellisClientError>>
-        + Unpin,
+    S: Stream<
+            Item = Result<OutboxRestartDocumentQueued, trellis_rs::generated::TrellisClientError>,
+        > + Unpin,
 {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -6525,21 +6427,21 @@ fn find_catalog_force_replace_issue<'a>(
         })
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }
 
 fn assert_admin_app_session(me: &trellis_rs::sdk::auth::types::AuthSessionsMeResponse) {
-    assert_eq!(me.participant_kind.as_str(), Some("app"));
+    assert_eq!(me.participant_kind.as_str(), "app");
     let user = me
         .user
-        .as_object()
+        .as_ref()
         .expect("Auth.Sessions.Me should return an active user");
     assert_eq!(user.get("active").and_then(Value::as_bool), Some(true));
     let capabilities = user
@@ -6553,10 +6455,10 @@ fn assert_admin_app_session(me: &trellis_rs::sdk::auth::types::AuthSessionsMeRes
 }
 
 fn assert_app_user_session(me: &trellis_rs::sdk::auth::types::AuthSessionsMeResponse) {
-    assert_eq!(me.participant_kind.as_str(), Some("app"));
+    assert_eq!(me.participant_kind.as_str(), "app");
     let user = me
         .user
-        .as_object()
+        .as_ref()
         .expect("Auth.Sessions.Me should return an active user");
     assert_eq!(user.get("active").and_then(Value::as_bool), Some(true));
     assert!(
@@ -6569,7 +6471,7 @@ fn assert_app_user_session(me: &trellis_rs::sdk::auth::types::AuthSessionsMeResp
 
 fn session_user_id(me: &trellis_rs::sdk::auth::types::AuthSessionsMeResponse) -> Option<String> {
     me.user
-        .as_object()
+        .as_ref()
         .and_then(|user| user.get("userId"))
         .and_then(Value::as_str)
         .map(str::to_string)
@@ -6595,17 +6497,31 @@ fn assert_session_listed_with_kind(
     session_key: &str,
     participant_kind: &str,
 ) {
-    let session = sessions
+    let kind = sessions
         .entries
         .iter()
-        .filter_map(Value::as_object)
-        .find(|entry| entry.get("sessionKey").and_then(Value::as_str) == Some(session_key))
+        .find_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::App {
+                session_key: key,
+                ..
+            } if key == session_key => Some("app"),
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Agent {
+                session_key: key,
+                ..
+            } if key == session_key => Some("agent"),
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Device {
+                session_key: key,
+                ..
+            } if key == session_key => Some("device"),
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Service {
+                session_key: key,
+                ..
+            } if key == session_key => Some("service"),
+            _ => None,
+        })
         .unwrap_or_else(|| panic!("expected Auth.Sessions.List to include {session_key}"));
 
-    assert_eq!(
-        session.get("participantKind").and_then(Value::as_str),
-        Some(participant_kind)
-    );
+    assert_eq!(kind, participant_kind);
 }
 
 async fn assert_bootstrap_rejects_stored_contract(
@@ -6749,11 +6665,11 @@ async fn approve_bootstrap_non_client_device_contract(
         .connect_client(bootstrap_url, admin_contract)
         .await
         .expect("connect bootstrap non-client device admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let deployment_id = "bootstrap-non-client-device";
     auth.rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": deployment_id,
             "kind": "device",
             "reviewMode": "none"
@@ -6778,14 +6694,11 @@ async fn approve_bootstrap_non_client_device_contract(
         })
         .await
         .expect("plan bootstrap non-client device contract authority");
-    let plan_id = planned
-        .plan
-        .get("planId")
-        .and_then(Value::as_str)
-        .expect("device authority planId")
-        .to_string();
-    match planned.plan.get("classification").and_then(Value::as_str) {
-        Some("update") => {
+    match planned.plan {
+        trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanResponsePlan::Update {
+            plan_id,
+            ..
+        } => {
             auth.rpc()
                 .auth()
                 .deployment_authority_accept_update(
@@ -6797,7 +6710,10 @@ async fn approve_bootstrap_non_client_device_contract(
                 .await
                 .expect("accept bootstrap non-client device contract update");
         }
-        Some("migration") => {
+        trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanResponsePlan::Migration {
+            plan_id,
+            ..
+        } => {
             auth.rpc()
                 .auth()
                 .deployment_authority_accept_migration(
@@ -6811,7 +6727,6 @@ async fn approve_bootstrap_non_client_device_contract(
                 .await
                 .expect("accept bootstrap non-client device contract migration");
         }
-        other => panic!("unexpected device authority plan classification: {other:?}"),
     }
     auth.rpc()
         .auth()
@@ -7016,7 +6931,7 @@ async fn connect_with_local_password(
     session_seed: &str,
     username: &str,
     password: &str,
-) -> Result<trellis_rs::client::TrellisClient, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<trellis_rs::generated::Caller, Box<dyn std::error::Error + Send + Sync>> {
     let auth = trellis_rs::client::SessionAuth::from_seed_base64url(session_seed)?;
     let redirect_to = format!(
         "{}/_trellis/test/password-reset-change",
@@ -7052,14 +6967,16 @@ async fn connect_with_local_password(
     })?;
     let servers = native.servers.join(",");
     Ok(
-        trellis_rs::client::TrellisClient::connect_user(trellis_rs::client::UserConnectOptions {
-            servers: &servers,
-            sentinel_jwt: &sentinel.jwt,
-            sentinel_seed: &sentinel.seed,
-            session_key_seed_base64url: session_seed,
-            contract_digest: contract.digest(),
-            timeout_ms: 5_000,
-        })
+        trellis_rs::generated::Caller::connect_user(
+            trellis_rs::generated::UserConnectOptions::new(
+                &servers,
+                &sentinel.jwt,
+                &sentinel.seed,
+                session_seed,
+                contract.digest(),
+                5_000,
+            ),
+        )
         .await?,
     )
 }

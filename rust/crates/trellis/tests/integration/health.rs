@@ -8,11 +8,11 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::client::{verify_event_proof, ServiceConnectWithContractOptions, TrellisClient};
+use trellis_rs::client::{verify_event_proof, PreparedTrellisEvent};
 use trellis_rs::sdk::health::client::HealthClient;
 use trellis_rs::sdk::health::types::{
     HealthInspectRequest, HealthMetricsRequest, HealthQueryRequest, HealthQueryResponse,
-    HealthWatchInput,
+    HealthWatchEvent, HealthWatchInput,
 };
 use ulid::Ulid;
 
@@ -44,6 +44,14 @@ const OBSERVER_CONTRACT_JSON: &str = r#"{
     }
   }
 }"#;
+
+struct HealthFixtureContract;
+
+impl trellis_rs::service::GeneratedServiceContract for HealthFixtureContract {
+    const CONTRACT_ID: &'static str = SERVICE_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
+}
 
 struct HealthRuntimeProcess {
     child: Child,
@@ -195,16 +203,13 @@ async fn health_projection_lifecycle_and_recovery() {
         .await
         .expect("flush observer subscriptions");
 
-    let service = TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-        trellis_url: runtime.trellis_url(),
-        contract_id: SERVICE_ID,
-        contract_digest: service_contract.digest(),
-        contract_json: SERVICE_CONTRACT_JSON,
-        session_key_seed_base64url: &service_key.seed,
-        timeout_ms: 5_000,
-        retry_delay_ms: 100,
-        authority_pending_timeout_ms: Some(15_000),
-    })
+    let service_runtime = trellis_test::connect_service_runtime::<HealthFixtureContract>(
+        runtime.trellis_url(),
+        SERVICE_ID,
+        service_contract.digest(),
+        SERVICE_CONTRACT_JSON,
+        &service_key.seed,
+    )
     .await
     .expect("connect Rust health service");
     let first_heartbeat = tokio::time::timeout(Duration::from_secs(20), heartbeats.next())
@@ -216,7 +221,7 @@ async fn health_projection_lifecycle_and_recovery() {
     assert_eq!(sample["participant"]["contractId"], SERVICE_ID);
     assert_eq!(sample["participant"]["runtime"], "rust");
 
-    let health = HealthClient::new(&observer);
+    let health = HealthClient::new(crate::generated_caller(&observer));
     let initial = wait_for_query(&health, SERVICE_ID, |entry| entry.online_instances == 1).await;
     assert_eq!(initial.entries[0].effective_status, "healthy");
     let initial_revision = initial.projection.revision;
@@ -228,7 +233,7 @@ async fn health_projection_lifecycle_and_recovery() {
             contract_ids: Some(vec![SERVICE_ID.to_string()]),
             deployment_ids: None,
             instance_ids: None,
-            participant_kinds: Some(vec!["service".to_string()]),
+            participant_kinds: Some(vec![crate::wire("service")]),
         })
         .await
         .expect("subscribe to Health.Watch");
@@ -237,25 +242,26 @@ async fn health_projection_lifecycle_and_recovery() {
         .expect("receive Health.Watch ready frame")
         .expect("health watch remains open")
         .expect("decode health watch ready frame");
-    assert_eq!(ready.0["type"], "ready");
+    assert!(matches!(ready, HealthWatchEvent::Ready { .. }));
 
     update_sample(&mut sample, "healthy", 1_000);
-    service
-        .internal_nats()
-        .publish(first_heartbeat.subject.clone(), sample.to_string().into())
+    service_runtime
+        .event_publisher()
+        .publish_prepared(&PreparedTrellisEvent::new(
+            first_heartbeat.subject.to_string(),
+            sample.to_string().into(),
+        ))
         .await
         .expect("publish short-deadline heartbeat");
-    service
-        .internal_nats()
-        .flush()
-        .await
-        .expect("flush short-deadline heartbeat");
     let invalidated = tokio::time::timeout(Duration::from_secs(5), watch.next())
         .await
         .expect("receive Health.Watch invalidation")
         .expect("health watch remains open")
         .expect("decode health invalidation");
-    assert_eq!(invalidated.0["type"], "healthInvalidated");
+    assert!(matches!(
+        invalidated,
+        HealthWatchEvent::HealthInvalidated { .. }
+    ));
 
     let offline = wait_for_query(&health, SERVICE_ID, |entry| entry.offline_instances == 1).await;
     assert_eq!(offline.entries[0].effective_status, "offline");
@@ -274,7 +280,7 @@ async fn health_projection_lifecycle_and_recovery() {
             history_limit: Some(20),
             history_since: None,
             instance_id: None,
-            participant_kind: "service".to_string(),
+            participant_kind: crate::wire("service"),
         })
         .await
         .expect("inspect projected health");
@@ -292,7 +298,7 @@ async fn health_projection_lifecycle_and_recovery() {
                 .format(&Rfc3339)
                 .expect("format metrics end"),
             instance_ids: None,
-            participant_kind: "service".to_string(),
+            participant_kind: crate::wire("service"),
             start: (now - time::Duration::minutes(5))
                 .format(&Rfc3339)
                 .expect("format metrics start"),
@@ -305,16 +311,14 @@ async fn health_projection_lifecycle_and_recovery() {
 
     health_runtime.stop();
     update_sample(&mut sample, "degraded", 30_000);
-    service
-        .internal_nats()
-        .publish(first_heartbeat.subject, sample.to_string().into())
+    service_runtime
+        .event_publisher()
+        .publish_prepared(&PreparedTrellisEvent::new(
+            first_heartbeat.subject.to_string(),
+            sample.to_string().into(),
+        ))
         .await
         .expect("publish heartbeat while projector is stopped");
-    service
-        .internal_nats()
-        .flush()
-        .await
-        .expect("flush heartbeat while projector is stopped");
     health_runtime.restart();
     let recovered = wait_for_query(&health, SERVICE_ID, |entry| {
         entry.effective_status == "degraded"
@@ -368,7 +372,7 @@ async fn wait_for_query(
                 deployment_ids: None,
                 limit: Some(20),
                 offset: Some(0),
-                participant_kinds: Some(vec!["service".to_string()]),
+                participant_kinds: Some(vec![crate::wire("service")]),
                 search: None,
                 statuses: None,
             })

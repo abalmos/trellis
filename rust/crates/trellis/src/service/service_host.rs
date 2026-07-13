@@ -21,22 +21,6 @@ impl<H> ServiceHost<H> {
             handler,
         }
     }
-
-    pub fn service_name(&self) -> &str {
-        &self.service_name
-    }
-
-    pub fn binding(&self) -> &BootstrapBinding {
-        &self.binding
-    }
-
-    pub fn handler(&self) -> &H {
-        &self.handler
-    }
-
-    pub fn into_parts(self) -> (String, BootstrapBinding, H) {
-        (self.service_name, self.binding, self.handler)
-    }
 }
 
 impl<H> RequestHandler for ServiceHost<H>

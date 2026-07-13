@@ -177,7 +177,8 @@ export function createAuthLocalLoginFixture(caseId: string) {
       if (input.message !== "sessions-me") {
         return Result.ok({ message: input.message, accepted: true });
       }
-      const me: AuthSessionsMeOutput = await client.authSessionsMe({}).orThrow();
+      const me: AuthSessionsMeOutput = await client.authSessionsMe({})
+        .orThrow();
       return Result.ok({
         message: input.message,
         accepted: true,

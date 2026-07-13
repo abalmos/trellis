@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 #[path = "integration/support/mod.rs"]
 mod support;
 
@@ -54,6 +56,15 @@ mod event_consumers;
 
 #[path = "integration/prepared_events.rs"]
 mod prepared_events;
+
+fn generated_caller(client: &trellis_rs::generated::Caller) -> &trellis_rs::generated::Caller {
+    client
+}
+
+fn wire<T: serde::de::DeserializeOwned, S: serde::Serialize>(value: S) -> T {
+    serde_json::from_value(serde_json::to_value(value).expect("serialize test wire value"))
+        .expect("deserialize test wire value")
+}
 
 #[test]
 fn rust_integration_manifest_conforms_to_shared_matrix() {

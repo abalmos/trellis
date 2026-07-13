@@ -34,6 +34,7 @@ impl StateTransport for TrellisClient {
 
 /// Expected revision behavior for state puts.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(ExpectedPutRevision), "`.")]
 pub enum ExpectedPutRevision {
     /// Omit `expectedRevision` for unconditional create-or-overwrite.
     Unconditional,
@@ -51,21 +52,29 @@ impl Default for ExpectedPutRevision {
 
 /// Options for state put requests.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(PutStateOptions), "`.")]
 pub struct PutStateOptions {
+    #[doc = concat!("The `", stringify!(ttl_ms), "` value.")]
     pub ttl_ms: Option<u64>,
+    #[doc = concat!("The `", stringify!(expected_revision), "` value.")]
     pub expected_revision: ExpectedPutRevision,
 }
 
 /// Options for state delete requests.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeleteStateOptions), "`.")]
 pub struct DeleteStateOptions {
+    #[doc = concat!("The `", stringify!(expected_revision), "` value.")]
     pub expected_revision: Option<String>,
 }
 
 /// Options for map state list requests.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(ListStateOptions), "`.")]
 pub struct ListStateOptions {
+    #[doc = concat!("The `", stringify!(offset), "` value.")]
     pub offset: Option<u64>,
+    #[doc = concat!("The `", stringify!(limit), "` value.")]
     pub limit: Option<u64>,
 }
 
@@ -73,10 +82,14 @@ pub struct ListStateOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StateEntry<TValue = Value> {
+    #[doc = concat!("The `", stringify!(value), "` value.")]
     pub value: TValue,
+    #[doc = concat!("The `", stringify!(revision), "` value.")]
     pub revision: String,
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<String>,
 }
 
@@ -84,11 +97,16 @@ pub struct StateEntry<TValue = Value> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MapStateEntry<TValue = Value> {
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(value), "` value.")]
     pub value: TValue,
+    #[doc = concat!("The `", stringify!(revision), "` value.")]
     pub revision: String,
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<String>,
 }
 
@@ -104,10 +122,15 @@ pub enum StateValue<TEntry, TMigrationEntry = StateEntry<Value>> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StateMigrationRequired<TEntry = StateEntry<Value>> {
+    #[doc = concat!("The `", stringify!(migration_required), "` value.")]
     pub migration_required: bool,
+    #[doc = concat!("The `", stringify!(entry), "` value.")]
     pub entry: TEntry,
+    #[doc = concat!("The `", stringify!(state_version), "` value.")]
     pub state_version: String,
+    #[doc = concat!("The `", stringify!(current_state_version), "` value.")]
     pub current_state_version: String,
+    #[doc = concat!("The `", stringify!(writer_contract_digest), "` value.")]
     pub writer_contract_digest: String,
 }
 
@@ -131,10 +154,13 @@ pub enum StateGetResult<TEntry, TMigrationEntry = StateEntry<Value>> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatePutResult<TEntry, TMigrationEntry = StateEntry<Value>> {
+    #[doc = concat!("The `", stringify!(applied), "` value.")]
     pub applied: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(found), "` value.")]
     pub found: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(entry), "` value.")]
     pub entry: Option<StateValue<TEntry, TMigrationEntry>>,
 }
 
@@ -142,8 +168,10 @@ pub struct StatePutResult<TEntry, TMigrationEntry = StateEntry<Value>> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StateDeleteResult<TEntry, TMigrationEntry = StateEntry<Value>> {
+    #[doc = concat!("The `", stringify!(deleted), "` value.")]
     pub deleted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(entry), "` value.")]
     pub entry: Option<StateValue<TEntry, TMigrationEntry>>,
 }
 
@@ -161,6 +189,7 @@ pub struct ValueStateStore<'a, TTransport, TValue> {
 
 impl<'a, TTransport, TValue> ValueStateStore<'a, TTransport, TValue> {
     /// Create a typed value state store helper.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(transport: &'a TTransport, store: &'static str) -> Self {
         Self {
             transport,
@@ -176,6 +205,7 @@ where
     TValue: Serialize + DeserializeOwned,
 {
     /// Read the current value state entry.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(&self) -> Result<StateGetResult<StateEntry<TValue>>, TrellisClientError> {
         let response = self
             .transport
@@ -185,6 +215,7 @@ where
     }
 
     /// Write the value state entry unconditionally.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put), "`.")]
     pub async fn put(
         &self,
         value: &TValue,
@@ -194,6 +225,7 @@ where
     }
 
     /// Write the value state entry with TTL and revision options.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put_with_options), "`.")]
     pub async fn put_with_options(
         &self,
         value: &TValue,
@@ -207,6 +239,7 @@ where
     }
 
     /// Delete the value state entry.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(
         &self,
     ) -> Result<StateDeleteResult<StateEntry<TValue>>, TrellisClientError> {
@@ -215,6 +248,7 @@ where
     }
 
     /// Delete the value state entry with revision options.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete_with_options), "`.")]
     pub async fn delete_with_options(
         &self,
         options: &DeleteStateOptions,
@@ -238,6 +272,7 @@ pub struct MapStateStore<'a, TTransport, TValue> {
 
 impl<'a, TTransport, TValue> MapStateStore<'a, TTransport, TValue> {
     /// Create a typed map state store helper.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(transport: &'a TTransport, store: &'static str) -> Self {
         Self {
             transport,
@@ -248,6 +283,7 @@ impl<'a, TTransport, TValue> MapStateStore<'a, TTransport, TValue> {
     }
 
     /// Return a view of this map store rooted at a composed path prefix.
+    #[doc = concat!("Trellis API operation `", stringify!(prefix), "`.")]
     pub fn prefix(&self, path: &str) -> Self {
         Self {
             transport: self.transport,
@@ -264,6 +300,7 @@ where
     TValue: Serialize + DeserializeOwned,
 {
     /// Read one map state entry by key.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(
         &self,
         key: &str,
@@ -277,6 +314,7 @@ where
     }
 
     /// Write one map state entry unconditionally.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put), "`.")]
     pub async fn put(
         &self,
         key: &str,
@@ -288,6 +326,7 @@ where
     }
 
     /// Write one map state entry with TTL and revision options.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put_with_options), "`.")]
     pub async fn put_with_options(
         &self,
         key: &str,
@@ -307,6 +346,7 @@ where
     }
 
     /// Delete one map state entry.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(
         &self,
         key: &str,
@@ -317,6 +357,7 @@ where
     }
 
     /// Delete one map state entry with revision options.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete_with_options), "`.")]
     pub async fn delete_with_options(
         &self,
         key: &str,
@@ -335,6 +376,7 @@ where
     }
 
     /// List map entries under the current prefix.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(list), "`.")]
     pub async fn list(
         &self,
         options: &ListStateOptions,

@@ -7,15 +7,13 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use trellis_participant_demo_device::contract as device_contract;
 use trellis_participant_demo_device::state::{DraftInspectionState, SelectedSiteState};
+use trellis_participant_demo_device::{connect, ConnectOptions, ConnectedClient};
 use trellis_rs::{
     auth::{
         derive_device_identity, start_device_activation_request, DeviceActivationLocalState,
         DeviceActivationSession, DeviceActivationSessionBuilder, DeviceActivationStatus,
     },
-    client::{
-        download_transfer_grant_from_value, DeviceConnectOptions, ServiceConnectOptions,
-        TrellisClient,
-    },
+    client::download_transfer_grant_from_value,
 };
 use trellis_sdk_demo_service::types::{
     AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
@@ -32,14 +30,6 @@ struct Args {
     /// Trellis HTTP URL for service bootstrap mode.
     #[arg(long, env = "TRELLIS_URL")]
     trellis_url: Option<String>,
-
-    /// Session key seed encoded as base64url.
-    #[arg(long, env = "TRELLIS_SESSION_KEY_SEED")]
-    session_key_seed: Option<String>,
-
-    /// Connect as a service principal instead of user/session mode.
-    #[arg(long)]
-    service_bootstrap: bool,
 
     /// Use demo-local activated-device persistence and connect flow.
     #[arg(long, env = "TRELLIS_DEMO_DEVICE")]
@@ -76,37 +66,16 @@ async fn main() -> anyhow::Result<()> {
     wizard_loop(client.as_ref()).await
 }
 
-async fn connect_if_configured(args: &Args) -> anyhow::Result<Option<TrellisClient>> {
+async fn connect_if_configured(args: &Args) -> anyhow::Result<Option<ConnectedClient>> {
     if args.device {
         return connect_device_if_configured(args).await;
     }
 
-    if args.service_bootstrap {
-        let Some(session_key_seed) = args.session_key_seed.as_deref() else {
-            println!("Missing --session-key-seed; running offline.");
-            return Ok(None);
-        };
-        let Some(trellis_url) = args.trellis_url.as_deref() else {
-            println!("Missing --trellis-url; running offline.");
-            return Ok(None);
-        };
-        return Ok(Some(
-            TrellisClient::connect_service(ServiceConnectOptions {
-                trellis_url,
-                contract_id: device_contract::CONTRACT_ID,
-                contract_digest: device_contract::CONTRACT_DIGEST,
-                session_key_seed_base64url: session_key_seed,
-                timeout_ms: 10_000,
-            })
-            .await?,
-        ));
-    }
-
-    println!("No activated-device or service bootstrap credentials provided; running offline.");
+    println!("No activated-device credentials provided; running offline.");
     Ok(None)
 }
 
-async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<TrellisClient>> {
+async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<ConnectedClient>> {
     let store_path = device_store_path(args);
     let persisted = load_device_state(&store_path)?;
     let mut persisted = if let Some(persisted) = persisted {
@@ -147,13 +116,12 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Trel
 
     let identity = derive_device_identity(&persisted.device_root_secret)?;
     Ok(Some(
-        TrellisClient::connect_device(DeviceConnectOptions {
-            trellis_url: &persisted.trellis_url,
-            contract_digest: device_contract::CONTRACT_DIGEST,
-            public_identity_key: &persisted.local_state.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 10_000,
-        })
+        connect(ConnectOptions::new(
+            &persisted.trellis_url,
+            &persisted.local_state.public_identity_key,
+            &identity.identity_seed_base64url,
+            10_000,
+        ))
         .await?,
     ))
 }
@@ -241,9 +209,9 @@ fn hex_lower(bytes: &[u8]) -> String {
     out
 }
 
-async fn spawn_event_watchers(client: &TrellisClient) -> anyhow::Result<()> {
-    let mut activity = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
+    let mut activity = client
+        .trellis_demo_service_v1()
         .subscribe_audit_recorded()
         .await?;
     tokio::spawn(async move {
@@ -255,8 +223,8 @@ async fn spawn_event_watchers(client: &TrellisClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut evidence = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let mut evidence = client
+        .trellis_demo_service_v1()
         .subscribe_evidence_uploaded()
         .await?;
     tokio::spawn(async move {
@@ -268,8 +236,8 @@ async fn spawn_event_watchers(client: &TrellisClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut reports = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let mut reports = client
+        .trellis_demo_service_v1()
         .subscribe_reports_published()
         .await?;
     tokio::spawn(async move {
@@ -281,8 +249,8 @@ async fn spawn_event_watchers(client: &TrellisClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut sites = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let mut sites = client
+        .trellis_demo_service_v1()
         .subscribe_sites_refreshed()
         .await?;
     tokio::spawn(async move {
@@ -297,7 +265,7 @@ async fn spawn_event_watchers(client: &TrellisClient) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn wizard_loop(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn wizard_loop(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     loop {
         println!();
         println!("1. List sites");
@@ -321,10 +289,10 @@ async fn wizard_loop(client: Option<&TrellisClient>) -> anyhow::Result<()> {
     }
 }
 
-async fn list_sites(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn list_sites(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let sites = if let Some(client) = client {
-        trellis_participant_demo_device::Client::new(client)
-            .field_ops()
+        client
+            .trellis_demo_service_v1()
             .sites_list(&SitesListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -349,7 +317,7 @@ async fn list_sites(client: Option<&TrellisClient>) -> anyhow::Result<()> {
 }
 
 async fn save_selected_site(
-    client: Option<&TrellisClient>,
+    client: Option<&ConnectedClient>,
     sites: &[SitesListResponseEntriesItem],
 ) -> anyhow::Result<()> {
     if sites.is_empty() {
@@ -380,7 +348,8 @@ async fn save_selected_site(
         return Ok(());
     };
 
-    trellis_participant_demo_device::Client::new(client)
+    client
+        .client()
         .state()
         .selected_site()
         .put(&selected_site)
@@ -390,10 +359,10 @@ async fn save_selected_site(
     Ok(())
 }
 
-async fn list_assignments(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn list_assignments(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
-        let response = trellis_participant_demo_device::Client::new(client)
-            .field_ops()
+        let response = client
+            .trellis_demo_service_v1()
             .assignments_list(&AssignmentsListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -414,10 +383,10 @@ async fn list_assignments(client: Option<&TrellisClient>) -> anyhow::Result<()> 
     Ok(())
 }
 
-async fn list_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn list_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
-        let response = trellis_participant_demo_device::Client::new(client)
-            .field_ops()
+        let response = client
+            .trellis_demo_service_v1()
             .evidence_list(&EvidenceListRequest {
                 limit: LIST_LIMIT,
                 offset: Some(LIST_OFFSET),
@@ -433,24 +402,24 @@ async fn list_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn download_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn download_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let key = prompt("Evidence key")?;
     let Some(client) = client else {
         println!("Offline mode cannot download transfer bytes.");
         return Ok(());
     };
 
-    let response = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let service = client.trellis_demo_service_v1();
+    let response = service
         .evidence_download(&EvidenceDownloadRequest { key })
         .await?;
     let grant = download_transfer_grant_from_value(serde_json::to_value(response.transfer)?)?;
-    let bytes = client.download_transfer(&grant).await?;
+    let bytes = service.download_transfer(&grant).await?;
     println!("Downloaded {} bytes for {}", bytes.len(), grant.info.key);
     Ok(())
 }
 
-async fn upload_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn upload_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let key = prompt("Evidence key")?;
     let content = prompt("Text content")?;
     let input = EvidenceUploadInput {
@@ -469,8 +438,8 @@ async fn upload_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let started = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let started = client
+        .trellis_demo_service_v1()
         .evidence_upload()
         .input(&input)
         .transfer(content.as_bytes())
@@ -496,7 +465,7 @@ async fn upload_evidence(client: Option<&TrellisClient>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn generate_report(client: Option<&TrellisClient>) -> anyhow::Result<()> {
+async fn generate_report(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let inspection_id = prompt("Inspection id")?;
     let site_id = prompt("Site id for draft state")?;
     let checklist_name = prompt("Checklist name for draft state")?;
@@ -518,8 +487,8 @@ async fn generate_report(client: Option<&TrellisClient>) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let operation = trellis_participant_demo_device::Client::new(client)
-        .field_ops()
+    let operation = client
+        .trellis_demo_service_v1()
         .reports_generate()
         .start(&ReportsGenerateInput {
             inspection_id,
@@ -532,7 +501,7 @@ async fn generate_report(client: Option<&TrellisClient>) -> anyhow::Result<()> {
 }
 
 async fn save_draft_inspection(
-    client: Option<&TrellisClient>,
+    client: Option<&ConnectedClient>,
     draft: DraftInspectionState,
 ) -> anyhow::Result<()> {
     let Some(client) = client else {
@@ -543,7 +512,8 @@ async fn save_draft_inspection(
         return Ok(());
     };
 
-    trellis_participant_demo_device::Client::new(client)
+    client
+        .client()
         .state()
         .draft_inspections()
         .put(&draft.inspection_id, &draft)

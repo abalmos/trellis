@@ -667,11 +667,21 @@ fn read_json_version(path: &Path) -> Option<String> {
 fn read_cargo_version(path: &Path) -> Option<String> {
     let contents = fs::read_to_string(path).ok()?;
     let mut in_package = false;
+    let mut in_workspace_package = false;
     let mut uses_workspace_version = false;
+    let mut workspace_version = None;
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
             in_package = trimmed == "[package]";
+            in_workspace_package = trimmed == "[workspace.package]";
+            continue;
+        }
+        if in_workspace_package && trimmed.starts_with("version =") {
+            let value = trimmed.split_once('=')?.1.trim().trim_matches('"');
+            if !value.is_empty() {
+                workspace_version = Some(value.to_string());
+            }
             continue;
         }
         if !in_package {
@@ -695,7 +705,7 @@ fn read_cargo_version(path: &Path) -> Option<String> {
     if uses_workspace_version {
         return read_workspace_cargo_version(path);
     }
-    None
+    workspace_version
 }
 
 fn read_workspace_cargo_version(path: &Path) -> Option<String> {

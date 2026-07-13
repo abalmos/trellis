@@ -1,8 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import {
-  type CallerRuntime,
-  TrellisClient,
-} from "@qlever-llc/trellis";
+import { type CallerRuntime, TrellisClient } from "@qlever-llc/trellis";
 import type {
   AuthConnectionsListOutput,
   AuthSessionsListOutput,
@@ -83,7 +80,9 @@ liveTrellisTest({
         fixture.updatedClientDisplayName,
       );
 
-      const allowedByUpdatedAuthority = await reboundClient.authConnectionsList({ sessionKey: clientKey.sessionKey, limit: 500 })
+      const allowedByUpdatedAuthority = await reboundClient.authConnectionsList(
+        { sessionKey: clientKey.sessionKey, limit: 500 },
+      )
         .orThrow();
       assertEquals(allowedByUpdatedAuthority.entries.length, 1);
 

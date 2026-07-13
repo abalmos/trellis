@@ -38,7 +38,7 @@ pub struct NscVersion {
 
 impl NscVersion {
     fn parse(output: &str) -> Option<Self> {
-        let mut parts = output.trim().split_whitespace();
+        let mut parts = output.split_whitespace();
         if parts.next()? != "nsc" || parts.next()? != "version" {
             return None;
         }

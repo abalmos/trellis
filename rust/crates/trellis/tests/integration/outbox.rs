@@ -6,10 +6,8 @@ use futures_util::StreamExt;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
-use trellis_rs::client::{
-    PreparedTrellisEvent, RpcDescriptor, ServiceConnectWithContractOptions, TrellisClient,
-    TrellisClientError,
-};
+use trellis_rs::client::{PreparedTrellisEvent, RpcDescriptor};
+use trellis_rs::generated::TrellisClientError;
 use trellis_rs::service::ConnectedServiceRuntime;
 
 use crate::support::assertions::assert_case_registered;
@@ -134,6 +132,12 @@ impl trellis_rs::client::EventDescriptor for AuditedEvent {
 
 struct OutboxContract;
 
+impl trellis_rs::service::GeneratedServiceContract for OutboxContract {
+    const CONTRACT_ID: &'static str = SERVICE_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = OUTBOX_SERVICE_CONTRACT_JSON;
+}
+
 struct AbortOnDrop<T> {
     handle: Option<JoinHandle<T>>,
 }
@@ -172,7 +176,7 @@ async fn outbox_commits_event_through_sql_outbox() {
     let fixture = start_outbox_fixture().await;
     let db = Arc::new(tokio::sync::Mutex::new(create_db()));
     let mut service = fixture.service;
-    let service_client = Arc::clone(service.client());
+    let service_client = Arc::new(service.event_publisher());
     let handler_db = Arc::clone(&db);
     service.register_rpc::<ProcessRpc, _, _>(move |_context, input| {
         let db = Arc::clone(&handler_db);
@@ -182,7 +186,7 @@ async fn outbox_commits_event_through_sql_outbox() {
                 document_id: input.document_id.clone(),
             };
             let prepared = trellis_rs::client::prepare_event::<ProcessedEvent>(&processed)
-                .map_err(trellis_rs::service::ServerError::Json)?;
+                .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             {
                 let conn = db.lock().await;
                 conn.execute_batch("BEGIN").map_err(sqlite_server_error)?;
@@ -238,7 +242,7 @@ async fn outbox_rollback_does_not_publish() {
                 document_id: input.document_id,
             };
             let prepared = trellis_rs::client::prepare_event::<ProcessedEvent>(&processed)
-                .map_err(trellis_rs::service::ServerError::Json)?;
+                .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             let conn = db.lock().await;
             conn.execute_batch("BEGIN").map_err(sqlite_server_error)?;
             enqueue_sql_event(&conn, "rollback-event", &prepared)?;
@@ -274,7 +278,7 @@ async fn outbox_multiple_events_in_one_transaction() {
     let fixture = start_outbox_fixture().await;
     let db = Arc::new(tokio::sync::Mutex::new(create_db()));
     let mut service = fixture.service;
-    let service_client = Arc::clone(service.client());
+    let service_client = Arc::new(service.event_publisher());
     let handler_db = Arc::clone(&db);
     service.register_rpc::<ProcessMultiEventRpc, _, _>(move |_context, input| {
         let db = Arc::clone(&handler_db);
@@ -283,12 +287,12 @@ async fn outbox_multiple_events_in_one_transaction() {
             let processed = trellis_rs::client::prepare_event::<ProcessedEvent>(&DocProcessed {
                 document_id: input.document_id.clone(),
             })
-            .map_err(trellis_rs::service::ServerError::Json)?;
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             let audited = trellis_rs::client::prepare_event::<AuditedEvent>(&DocAudited {
                 document_id: input.document_id.clone(),
                 action: "multi".to_string(),
             })
-            .map_err(trellis_rs::service::ServerError::Json)?;
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             {
                 let conn = db.lock().await;
                 conn.execute_batch("BEGIN").map_err(sqlite_server_error)?;
@@ -345,8 +349,9 @@ async fn outbox_listener_derives_event() {
     let fixture = start_outbox_fixture().await;
     let db = Arc::new(tokio::sync::Mutex::new(create_db()));
     let mut service = fixture.service;
-    let service_client = Arc::clone(service.client());
-    let listener_client = Arc::clone(&service_client);
+    let listener_client = service.caller().clone();
+    let service_client = Arc::new(service.event_publisher());
+    let listener_publisher = Arc::clone(&service_client);
     let listener_db = Arc::clone(&db);
     let listener_task = AbortOnDrop::new(tokio::spawn(async move {
         let mut stream = listener_client
@@ -371,7 +376,7 @@ async fn outbox_listener_derives_event() {
             }
             publish_and_mark_dispatched(
                 &listener_db,
-                &listener_client,
+                &listener_publisher,
                 vec![("listener-audited".to_string(), audited)],
             )
             .await
@@ -388,7 +393,7 @@ async fn outbox_listener_derives_event() {
             let processed = trellis_rs::client::prepare_event::<ProcessedEvent>(&DocProcessed {
                 document_id: input.document_id.clone(),
             })
-            .map_err(trellis_rs::service::ServerError::Json)?;
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             {
                 let conn = db.lock().await;
                 conn.execute_batch("BEGIN").map_err(sqlite_server_error)?;
@@ -442,7 +447,7 @@ async fn outbox_sql_row_state_is_dispatched() {
     let fixture = start_outbox_fixture().await;
     let db = Arc::new(tokio::sync::Mutex::new(create_db()));
     let mut service = fixture.service;
-    let service_client = Arc::clone(service.client());
+    let service_client = Arc::new(service.event_publisher());
     let handler_db = Arc::clone(&db);
     service.register_rpc::<ProcessRpc, _, _>(move |_context, input| {
         let db = Arc::clone(&handler_db);
@@ -451,7 +456,7 @@ async fn outbox_sql_row_state_is_dispatched() {
             let prepared = trellis_rs::client::prepare_event::<ProcessedEvent>(&DocProcessed {
                 document_id: input.document_id.clone(),
             })
-            .map_err(trellis_rs::service::ServerError::Json)?;
+            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
             {
                 let conn = db.lock().await;
                 conn.execute_batch("BEGIN").map_err(sqlite_server_error)?;
@@ -558,7 +563,7 @@ async fn outbox_sqlite_010_schema_upgrades() {
 struct OutboxFixture {
     _runtime: trellis_test::TrellisTestRuntime,
     service: ConnectedServiceRuntime<OutboxContract>,
-    client: TrellisClient,
+    client: trellis_rs::generated::Caller,
 }
 
 async fn start_outbox_fixture() -> OutboxFixture {
@@ -584,24 +589,15 @@ async fn start_outbox_fixture() -> OutboxFixture {
         .expect("provision outbox service instance");
     let contract_json =
         serde_json::to_string(service_contract.manifest()).expect("serialize service contract");
-    let service_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: SERVICE_CONTRACT_ID,
-            contract_digest: service_contract.digest(),
-            contract_json: &contract_json,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect outbox service client");
-    let service = ConnectedServiceRuntime::<OutboxContract>::from_connected_client(
-        "outbox-fixture-service",
-        Arc::new(service_client),
+    let service = trellis_test::connect_service_runtime::<OutboxContract>(
+        runtime.trellis_url(),
+        SERVICE_CONTRACT_ID,
+        service_contract.digest(),
+        &contract_json,
+        &service_key.seed,
     )
-    .expect("build outbox service runtime");
+    .await
+    .expect("connect outbox service runtime");
     let client = admin
         .connect_client(&bootstrap_url, &outbox_client_contract())
         .await
@@ -681,14 +677,11 @@ fn enqueue_sql_event(
 
 async fn publish_and_mark_dispatched(
     db: &Arc<tokio::sync::Mutex<Connection>>,
-    client: &TrellisClient,
+    publisher: &trellis_rs::service::EventPublisher,
     events: Vec<(String, PreparedTrellisEvent)>,
 ) -> Result<(), trellis_rs::service::ServerError> {
     for (id, event) in events {
-        client
-            .publish_prepared(&event)
-            .await
-            .map_err(|error| trellis_rs::service::ServerError::Nats(error.to_string()))?;
+        publisher.publish_prepared(&event).await?;
         let conn = db.lock().await;
         conn.execute(
             "UPDATE trellis_outbox SET state = 'dispatched', attempts = attempts + 1 WHERE id = ?1",
@@ -814,7 +807,11 @@ fn temp_sqlite_path(name: &str) -> PathBuf {
     ))
 }
 
-async fn call_rpc_with_retry<D>(client: &TrellisClient, input: &D::Input, label: &str) -> D::Output
+async fn call_rpc_with_retry<D>(
+    client: &trellis_rs::generated::Caller,
+    input: &D::Input,
+    label: &str,
+) -> D::Output
 where
     D: RpcDescriptor,
 {
@@ -843,10 +840,10 @@ fn is_retryable_service_startup_error(error: &TrellisClientError) -> bool {
 }
 
 async fn capture_processed(
-    client: &TrellisClient,
+    client: &trellis_rs::generated::Caller,
 ) -> futures_util::stream::BoxStream<
     'static,
-    Result<DocProcessed, trellis_rs::client::TrellisClientError>,
+    Result<DocProcessed, trellis_rs::generated::TrellisClientError>,
 > {
     client
         .subscribe::<ProcessedEvent>()
@@ -856,10 +853,10 @@ async fn capture_processed(
 }
 
 async fn capture_audited(
-    client: &TrellisClient,
+    client: &trellis_rs::generated::Caller,
 ) -> futures_util::stream::BoxStream<
     'static,
-    Result<DocAudited, trellis_rs::client::TrellisClientError>,
+    Result<DocAudited, trellis_rs::generated::TrellisClientError>,
 > {
     client
         .subscribe::<AuditedEvent>()
@@ -871,7 +868,7 @@ async fn capture_audited(
 async fn wait_for_processed(
     stream: &mut futures_util::stream::BoxStream<
         'static,
-        Result<DocProcessed, trellis_rs::client::TrellisClientError>,
+        Result<DocProcessed, trellis_rs::generated::TrellisClientError>,
     >,
     document_id: &str,
 ) -> DocProcessed {
@@ -891,7 +888,7 @@ async fn wait_for_processed(
 async fn wait_for_audited(
     stream: &mut futures_util::stream::BoxStream<
         'static,
-        Result<DocAudited, trellis_rs::client::TrellisClientError>,
+        Result<DocAudited, trellis_rs::generated::TrellisClientError>,
     >,
     document_id: &str,
     action: &str,
@@ -914,7 +911,7 @@ async fn wait_for_audited(
 async fn assert_no_processed(
     stream: &mut futures_util::stream::BoxStream<
         'static,
-        Result<DocProcessed, trellis_rs::client::TrellisClientError>,
+        Result<DocProcessed, trellis_rs::generated::TrellisClientError>,
     >,
     document_id: &str,
 ) {

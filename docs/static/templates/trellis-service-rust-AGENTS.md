@@ -52,18 +52,16 @@ Trellis by hand-building NATS subjects, envelopes, or JSON wire payloads.
 
 ## Rust Rules
 
-- Prefer generated participant facades and generated SDK client methods when
-  available.
-- Use descriptor APIs such as `publish::<Descriptor>(...)`,
-  `subscribe::<Descriptor>()`, and `operation::<Operation>().start(...)` when a
-  generated facade is not available.
-- Register service providers through generated `service.handle()` facades where
-  available.
+- Connect only through the generated participant facade. Owner SDK crates are
+  typed vocabulary and do not own runtime connections.
+- Use generated participant alias methods for outbound RPCs, operations, feeds,
+  events, state, resources, and jobs.
+- Register owned providers through generated `service.handle()` facades.
 - Use public `trellis` runtime facades and `trellis-contracts` contract-model
   APIs. Do not depend on unpublished low-level runtime crates from application
   code.
-- Do not extract or construct raw transport handles for normal application
-  communication.
+- Do not import `trellis_rs::client` or `trellis_rs::generated`, extract or
+  construct raw transport handles, or build subjects in application code.
 - Direct descriptor publish is the default. Use prepared events only when event
   publication must be coupled to local durable state.
 - Use SQL outbox/inbox stores when they must participate in a SQL transaction.

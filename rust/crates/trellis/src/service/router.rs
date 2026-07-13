@@ -167,9 +167,11 @@ impl Router {
                     Box::pin(async move {
                         let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
                         let output = handler(ctx, input).await?;
-                        Ok(HandlerResponse::Frames(vec![Bytes::from(
-                            serde_json::to_vec(&output)?,
-                        )]))
+                        let output = serde_json::to_value(output)?;
+                        validate_provider_value(D::KEY, D::OUTPUT_SCHEMA_JSON, &output)?;
+                        Ok(HandlerResponse::Frames(vec![Bytes::from(serde_json::to_vec(
+                            &output,
+                        )?)]))
                     })
                 },
             ),
@@ -226,9 +228,11 @@ impl Router {
                             key,
                             cancellations,
                         };
-                        Ok(HandlerResponse::FeedStream(feed_response_stream(
+                         Ok(HandlerResponse::FeedStream(feed_response_stream(
                             handler(ctx, input).take_until(cancellation),
-                        )))
+                            D::KEY,
+                            D::EVENT_SCHEMA_JSON,
+                         )))
                     })
                 },
             ),
@@ -521,6 +525,7 @@ impl Router {
                     Box::pin(async move {
                         let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
                         let output = start(ctx, input).await?;
+                        validate_operation_snapshot::<D>(&output.snapshot)?;
                         Ok(HandlerResponse::Frames(vec![Bytes::from(
                             serde_json::to_vec(&output)?,
                         )]))
@@ -555,7 +560,7 @@ impl Router {
                             "operation control request"
                         );
                         let frames = match request.action.as_str() {
-                            "get" => HandlerResponse::Frames(vec![snapshot_frame(
+                            "get" => HandlerResponse::Frames(vec![snapshot_frame::<D>(
                                 get(ctx, request.operation_id).await?,
                             )?]),
                             "wait" => {
@@ -576,7 +581,7 @@ impl Router {
                                             .to_string(),
                                     )
                                 })?;
-                                HandlerResponse::Frames(vec![snapshot_frame(snapshot)?])
+                                HandlerResponse::Frames(vec![snapshot_frame::<D>(snapshot)?])
                             }
                             "watch" => {
                                 let include_updates = request.include_updates.unwrap_or(false);
@@ -586,14 +591,14 @@ impl Router {
                                         action: "watch:updates".to_string(),
                                     });
                                 }
-                                HandlerResponse::Stream(watch_response_stream(
+                                HandlerResponse::Stream(watch_response_stream::<D, TUpdate>(
                                     watch(ctx, request.operation_id),
                                     include_updates,
                                     update_schema_json,
                                 ))
                             }
                             "cancel" if D::CANCELABLE => {
-                                HandlerResponse::Frames(vec![snapshot_frame(
+                                HandlerResponse::Frames(vec![snapshot_frame::<D>(
                                     cancel(ctx, request.operation_id).await?,
                                 )?])
                             }
@@ -621,7 +626,7 @@ impl Router {
                                         format!("failed to serialize signal schema: {e}")
                                     ))?;
                                 validate_input_schema(&signal_schema_str, signal_value)?;
-                                HandlerResponse::Frames(vec![signal_frame(
+                                HandlerResponse::Frames(vec![signal_frame::<D>(
                                     signal(ctx, request.operation_id, signal_name, request.input)
                                         .await?,
                                 )?])
@@ -808,24 +813,42 @@ where
 
 fn feed_response_stream<TEvent>(
     events: impl Stream<Item = Result<TEvent, ServerError>> + Send + 'static,
+    key: &'static str,
+    schema_json: &'static str,
 ) -> ResponseStream
 where
     TEvent: serde::Serialize + 'static,
 {
-    Box::pin(
-        events.map(|event| event.and_then(|event| Ok(Bytes::from(serde_json::to_vec(&event)?)))),
-    )
+    Box::pin(events.map(move |event| {
+        event.and_then(|event| {
+            let event = serde_json::to_value(event)?;
+            validate_provider_value(key, schema_json, &event)?;
+            Ok(Bytes::from(serde_json::to_vec(&event)?))
+        })
+    }))
 }
 
-fn watch_response_stream<TProgress, TUpdate, TOutput>(
-    events: OperationLiveWatch<TProgress, TUpdate, TOutput>,
+fn validate_provider_value(
+    key: &str,
+    schema_json: &str,
+    value: &serde_json::Value,
+) -> Result<(), ServerError> {
+    validate_input_schema(schema_json, value).map_err(|error| {
+        tracing::error!(surface = key, %error, "provider emitted an invalid contract payload");
+        ServerError::Nats(format!(
+            "provider output for `{key}` violated its contract schema"
+        ))
+    })
+}
+
+fn watch_response_stream<D, TUpdate>(
+    events: OperationLiveWatch<D::Progress, TUpdate, D::Output>,
     include_updates: bool,
     update_schema_json: Option<&'static str>,
 ) -> ResponseStream
 where
-    TProgress: serde::Serialize + 'static,
+    D: OperationDescriptor,
     TUpdate: serde::Serialize + 'static,
-    TOutput: serde::Serialize + 'static,
 {
     let mut sent_initial_snapshot = false;
     Box::pin(
@@ -834,7 +857,7 @@ where
                 Ok(OperationLiveEvent::Snapshot(snapshot)) => {
                     let index = usize::from(sent_initial_snapshot);
                     sent_initial_snapshot = true;
-                    Some(operation_watch_frame(index, snapshot))
+                    Some(operation_watch_frame::<D>(index, snapshot))
                 }
                 Ok(OperationLiveEvent::Update(update)) if include_updates => {
                     Some(operation_update_frame(update, update_schema_json))
@@ -871,40 +894,41 @@ where
     }))?))
 }
 
-fn snapshot_frame<TProgress, TOutput>(
-    snapshot: OperationSnapshot<TProgress, TOutput>,
+fn snapshot_frame<D>(
+    snapshot: OperationSnapshot<D::Progress, D::Output>,
 ) -> Result<Bytes, ServerError>
 where
-    TProgress: serde::Serialize,
-    TOutput: serde::Serialize,
+    D: OperationDescriptor,
 {
+    validate_operation_snapshot::<D>(&snapshot)?;
     Ok(Bytes::from(serde_json::to_vec(&OperationSnapshotFrame {
         kind: "snapshot".to_string(),
         snapshot,
     })?))
 }
 
-fn signal_frame<TProgress, TOutput>(
-    accepted: OperationSignalAccepted<TProgress, TOutput>,
+fn signal_frame<D>(
+    accepted: OperationSignalAccepted<D::Progress, D::Output>,
 ) -> Result<Bytes, ServerError>
 where
-    TProgress: serde::Serialize,
-    TOutput: serde::Serialize,
+    D: OperationDescriptor,
 {
+    validate_operation_snapshot::<D>(&accepted.snapshot)?;
     Ok(Bytes::from(serde_json::to_vec(&accepted)?))
 }
 
-fn operation_watch_frame<TProgress, TOutput>(
+fn operation_watch_frame<D>(
     index: usize,
-    snapshot: OperationSnapshot<TProgress, TOutput>,
+    snapshot: OperationSnapshot<D::Progress, D::Output>,
 ) -> Result<Bytes, ServerError>
 where
-    TProgress: serde::Serialize,
-    TOutput: serde::Serialize,
+    D: OperationDescriptor,
 {
     if index == 0 {
-        return snapshot_frame(snapshot);
+        return snapshot_frame::<D>(snapshot);
     }
+
+    validate_operation_snapshot::<D>(&snapshot)?;
 
     let event_type = match snapshot.state {
         super::OperationState::Pending => "accepted",
@@ -940,6 +964,25 @@ where
         "sequence": index,
         "event": event,
     }))?))
+}
+
+fn validate_operation_snapshot<D>(
+    snapshot: &OperationSnapshot<D::Progress, D::Output>,
+) -> Result<(), ServerError>
+where
+    D: OperationDescriptor,
+{
+    if let (Some(schema), Some(progress)) = (D::PROGRESS_SCHEMA_JSON, &snapshot.progress) {
+        validate_provider_value(D::KEY, schema, &serde_json::to_value(progress)?)?;
+    }
+    if let Some(output) = &snapshot.output {
+        validate_provider_value(
+            D::KEY,
+            D::OUTPUT_SCHEMA_JSON,
+            &serde_json::to_value(output)?,
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

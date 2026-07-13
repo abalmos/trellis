@@ -39,7 +39,10 @@ tokio::select! {
 }
 ```
 
-If your service spawns event listeners, feed workers, transfer endpoints, or job workers, keep their `JoinHandle`s or stop handles and abort or drain them here. The low-level Rust service runner owns the NATS request-loop task you await; background work you create is your responsibility.
+`service.run()` owns the authenticated request host, generated durable listeners,
+and generated job workers. It supervises them as one runtime and fails if a
+worker exits unexpectedly. Retain and drain only domain background tasks that
+your service creates outside that generated lifecycle.
 
 {/snippet}
 </LanguageTabs>

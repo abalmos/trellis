@@ -27,7 +27,8 @@ liveTrellisTest({
 
     try {
       await service.handleEntityGet(({ input }) =>
-        Result.ok({ id: input.id, found: true }));
+        Result.ok({ id: input.id, found: true })
+      );
 
       const client = await runtime.connectClient({
         name: fixture.clientName,

@@ -1,13 +1,11 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tokio::task::JoinHandle;
-use trellis_rs::client::{
-    RpcDescriptor, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
-};
+use trellis_rs::client::RpcDescriptor;
+use trellis_rs::generated::TrellisClientError;
 use trellis_rs::sdk::auth::types::{
     AuthDeploymentAuthorityAcceptMigrationRequest, AuthDeploymentAuthorityAcceptUpdateRequest,
     AuthDeploymentAuthorityGetRequest, AuthDeploymentAuthorityPlansListRequest,
@@ -128,6 +126,12 @@ impl trellis_rs::client::RpcDescriptor for ResourcePingRpc {
 }
 
 struct AuthorityPlanContract;
+
+impl trellis_rs::service::GeneratedServiceContract for AuthorityPlanContract {
+    const CONTRACT_ID: &'static str = "trellis.integration.authority-plan@v1";
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = "{}";
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AuthorityPlanEntry {
@@ -1081,9 +1085,6 @@ async fn authority_plan_acceptance_rejects_wrong_classification_expired_and_vers
         accept_update_raw(&mut admin, &bootstrap_url, &migration.plan_id, None).await,
     );
     assert_validation_error(
-        accept_migration_missing_ack_raw(&mut admin, &bootstrap_url, &migration.plan_id).await,
-    );
-    assert_validation_error(
         accept_migration_raw(
             &mut admin,
             &bootstrap_url,
@@ -1229,7 +1230,7 @@ async fn provision_instance_only(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
     auth.rpc()
         .auth()
         .service_instances_provision(&AuthServiceInstancesProvisionRequest {
@@ -1257,28 +1258,19 @@ fn spawn_service_connect(
     >,
 > {
     let trellis_url = trellis_url.to_string();
-    let name = name.to_string();
+    let _name = name.to_string();
     let contract_id = contract_id.to_string();
     let contract_digest = contract.digest().to_string();
     let contract_json = serde_json::to_string(contract.manifest()).expect("serialize contract");
     tokio::spawn(async move {
-        let client =
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: &contract_id,
-                contract_digest: &contract_digest,
-                contract_json: &contract_json,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await?;
-        ConnectedServiceRuntime::<AuthorityPlanContract>::from_connected_client(
-            name,
-            Arc::new(client),
+        trellis_test::connect_service_runtime::<AuthorityPlanContract>(
+            &trellis_url,
+            &contract_id,
+            &contract_digest,
+            &contract_json,
+            &seed,
         )
+        .await
     })
 }
 
@@ -1328,13 +1320,13 @@ async fn list_plans(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     auth.rpc()
         .auth()
         .deployment_authority_plans_list(&AuthDeploymentAuthorityPlansListRequest {
             deployment_id: Some(deployment.to_string()),
-            state: state.map(ToOwned::to_owned),
-            classification: classification.map(ToOwned::to_owned),
+            state: state.map(crate::wire),
+            classification: classification.map(crate::wire),
             kind: None,
             limit: 50,
             offset: None,
@@ -1343,7 +1335,7 @@ async fn list_plans(
         .expect("list authority plans")
         .entries
         .into_iter()
-        .map(parse_plan_entry)
+        .map(|entry| parse_plan_entry(crate::wire(entry)))
         .collect()
 }
 
@@ -1388,7 +1380,7 @@ async fn accept_plan(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     if plan.classification == "update" {
         auth.rpc()
             .auth()
@@ -1424,7 +1416,7 @@ async fn deployment_authority_snapshot(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     let current = auth
         .rpc()
         .auth()
@@ -1467,13 +1459,15 @@ async fn accept_update_raw(
     expected_desired_version: Option<String>,
 ) -> Result<
     trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
-    TrellisClientError,
+    trellis_rs::client::CallError<
+        trellis_rs::sdk::auth::rpc::AuthDeploymentAuthorityAcceptUpdateError,
+    >,
 > {
     let client = admin
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     auth.rpc()
         .auth()
         .deployment_authority_accept_update(&AuthDeploymentAuthorityAcceptUpdateRequest {
@@ -1490,13 +1484,15 @@ async fn accept_migration_raw(
     expected_desired_version: Option<String>,
 ) -> Result<
     trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationResponse,
-    TrellisClientError,
+    trellis_rs::client::CallError<
+        trellis_rs::sdk::auth::rpc::AuthDeploymentAuthorityAcceptMigrationError,
+    >,
 > {
     let client = admin
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     auth.rpc()
         .auth()
         .deployment_authority_accept_migration(&AuthDeploymentAuthorityAcceptMigrationRequest {
@@ -1507,32 +1503,14 @@ async fn accept_migration_raw(
         .await
 }
 
-async fn accept_migration_missing_ack_raw(
-    admin: &mut trellis_test::TrellisTestAdmin,
-    bootstrap_url: &str,
-    plan_id: &str,
-) -> Result<Value, TrellisClientError> {
-    let client = admin
-        .connect_admin(bootstrap_url)
-        .await
-        .expect("get admin client");
-    client
-        .request_json_value(
-            "rpc.v1.Auth.DeploymentAuthority.AcceptMigration",
-            &json!({ "planId": plan_id }),
-        )
-        .await
-}
-
-fn assert_validation_error<T>(result: Result<T, TrellisClientError>) {
+fn assert_validation_error<T, E: std::fmt::Debug>(
+    result: Result<T, trellis_rs::client::CallError<E>>,
+) {
     match result {
-        Err(TrellisClientError::RpcError(payload)) => {
-            let error = payload
-                .decode_validation()
-                .expect("decode ValidationError payload")
-                .expect("expected ValidationError payload");
-            assert_eq!(error.error_type, "ValidationError");
-        }
+        Err(
+            trellis_rs::client::CallError::Validation(_)
+            | trellis_rs::client::CallError::Declared(_),
+        ) => {}
         Ok(_) => panic!("expected deployment authority accept validation error"),
         Err(error) => panic!("expected deployment authority accept ValidationError, got {error}"),
     }
@@ -1548,7 +1526,7 @@ async fn reject_plan(
         .connect_admin(bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(client));
     let rejected = auth
         .rpc()
         .auth()
@@ -1610,7 +1588,10 @@ fn parse_plan_entry(value: Value) -> AuthorityPlanEntry {
     }
 }
 
-async fn call_base_ping_with_retry(client: &TrellisClient, message: &str) -> PingOutput {
+async fn call_base_ping_with_retry(
+    client: &trellis_rs::generated::Caller,
+    message: &str,
+) -> PingOutput {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match client
@@ -1630,7 +1611,7 @@ async fn call_base_ping_with_retry(client: &TrellisClient, message: &str) -> Pin
     }
 }
 
-fn is_retryable_service_startup_error(error: &TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
         TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")

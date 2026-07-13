@@ -20,7 +20,209 @@ pub fn parse_manifest(value: Value) -> Result<ContractManifest, ContractsError> 
     validate_manifest(&value)?;
     let manifest: ContractManifest = serde_json::from_value(value)?;
     validate_schema_refs(&manifest)?;
+    validate_event_subjects(&manifest)?;
     Ok(manifest)
+}
+
+fn validate_event_subjects(manifest: &ContractManifest) -> Result<(), ContractsError> {
+    for (name, event) in &manifest.events {
+        let pointers = subject_template_pointers(&event.subject).map_err(|details| {
+            ContractsError::SchemaValidation {
+                kind: "contract",
+                details: format!("Event '{name}' {details}"),
+            }
+        })?;
+        if event.params.as_deref().unwrap_or_default() != pointers {
+            return Err(ContractsError::SchemaValidation {
+                kind: "contract",
+                details: format!(
+                    "Event '{name}' params must list subject template pointers in order"
+                ),
+            });
+        }
+
+        let schema = manifest.schemas.get(&event.event.schema).ok_or_else(|| {
+            ContractsError::SchemaValidation {
+                kind: "contract",
+                details: format!(
+                    "Event '{name}' references unknown schema '{}'",
+                    event.event.schema
+                ),
+            }
+        })?;
+        for pointer in pointers {
+            let segments = pointer[1..]
+                .split('/')
+                .map(|segment| segment.replace("~1", "/").replace("~0", "~"))
+                .collect::<Vec<_>>();
+            let mut schemas = Vec::new();
+            if !collect_pointer_schemas(schema, &segments, &mut schemas) {
+                return Err(ContractsError::SchemaValidation {
+                    kind: "contract",
+                    details: format!(
+                        "Invalid event subject param pointer '{pointer}' for event '{name}' (path not found in schema)"
+                    ),
+                });
+            }
+            if schemas.iter().any(|schema| !is_tokenable_schema(schema)) {
+                return Err(ContractsError::SchemaValidation {
+                    kind: "contract",
+                    details: format!(
+                        "Invalid event subject param pointer '{pointer}' for event '{name}' (must resolve to string/number schema with safe integer bounds)"
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn subject_template_pointers(subject: &str) -> Result<Vec<String>, String> {
+    let mut pointers = Vec::new();
+    let mut rest = subject;
+    while let Some(open) = rest.find('{') {
+        if rest[..open].contains('}') {
+            return Err("subject has malformed template token".to_string());
+        }
+        let placeholder = &rest[open + 1..];
+        let close = placeholder
+            .find('}')
+            .ok_or_else(|| "subject has malformed template token".to_string())?;
+        let pointer = &placeholder[..close];
+        if pointer.contains(['{', '}']) || !is_json_pointer(pointer) {
+            return Err(format!(
+                "subject template token '{pointer}' must be a JSON Pointer"
+            ));
+        }
+        pointers.push(pointer.to_string());
+        rest = &placeholder[close + 1..];
+    }
+    if rest.contains('}') {
+        return Err("subject has malformed template token".to_string());
+    }
+    Ok(pointers)
+}
+
+fn is_json_pointer(pointer: &str) -> bool {
+    if !pointer.starts_with('/') {
+        return false;
+    }
+    let bytes = pointer.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'~' {
+            index += 1;
+            if index == bytes.len() || !matches!(bytes[index], b'0' | b'1') {
+                return false;
+            }
+        }
+        index += 1;
+    }
+    true
+}
+
+fn collect_pointer_schemas<'a>(
+    schema: &'a Value,
+    segments: &[String],
+    resolved: &mut Vec<&'a Value>,
+) -> bool {
+    if segments.is_empty() {
+        resolved.push(schema);
+        return true;
+    }
+    let Some(object) = schema.as_object() else {
+        return false;
+    };
+
+    let mut found = false;
+    if let Some(property) = object
+        .get("properties")
+        .and_then(Value::as_object)
+        .and_then(|properties| properties.get(&segments[0]))
+    {
+        found |= collect_pointer_schemas(property, &segments[1..], resolved);
+    }
+    if let Some(branches) = object.get("allOf").and_then(Value::as_array) {
+        for branch in branches {
+            found |= collect_pointer_schemas(branch, segments, resolved);
+        }
+    }
+    for keyword in ["anyOf", "oneOf"] {
+        let Some(branches) = object.get(keyword).and_then(Value::as_array) else {
+            continue;
+        };
+        let mut branch_schemas = Vec::new();
+        let every_branch = branches
+            .iter()
+            .all(|branch| collect_pointer_schemas(branch, segments, &mut branch_schemas));
+        if every_branch {
+            found = true;
+        }
+        resolved.extend(branch_schemas);
+    }
+    found
+}
+
+fn is_tokenable_schema(schema: &Value) -> bool {
+    let Some(object) = schema.as_object() else {
+        return false;
+    };
+    for keyword in ["allOf", "anyOf", "oneOf"] {
+        if let Some(branches) = object.get(keyword).and_then(Value::as_array) {
+            if !branches.is_empty() {
+                return branches.iter().all(is_tokenable_schema);
+            }
+        }
+    }
+    if let Some(constant) = object.get("const") {
+        return is_safe_token_value(constant);
+    }
+    if let Some(values) = object.get("enum").and_then(Value::as_array) {
+        return !values.is_empty() && values.iter().all(is_safe_token_value);
+    }
+
+    match object.get("type") {
+        Some(Value::String(kind)) => is_tokenable_type(kind, object),
+        Some(Value::Array(kinds)) => {
+            !kinds.is_empty()
+                && kinds.iter().all(|kind| {
+                    kind.as_str()
+                        .is_some_and(|kind| is_tokenable_type(kind, object))
+                })
+        }
+        _ => false,
+    }
+}
+
+fn is_tokenable_type(kind: &str, schema: &serde_json::Map<String, Value>) -> bool {
+    match kind {
+        "string" | "number" => true,
+        "integer" => {
+            schema
+                .get("minimum")
+                .and_then(Value::as_f64)
+                .is_some_and(|minimum| minimum >= -9_007_199_254_740_991_f64)
+                && schema
+                    .get("maximum")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|maximum| maximum <= 9_007_199_254_740_991_f64)
+        }
+        _ => false,
+    }
+}
+
+fn is_safe_token_value(value: &Value) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::Number(number) if number.is_i64() => number
+            .as_i64()
+            .is_some_and(|value| value.unsigned_abs() <= 9_007_199_254_740_991),
+        Value::Number(number) if number.is_u64() => number
+            .as_u64()
+            .is_some_and(|value| value <= 9_007_199_254_740_991),
+        Value::Number(_) => true,
+        _ => false,
+    }
 }
 
 fn reject_unsupported_contract_fields(value: &Value) -> Result<(), ContractsError> {

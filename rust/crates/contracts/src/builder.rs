@@ -18,6 +18,7 @@ pub struct ContractManifestBuilder {
 }
 
 impl ContractManifestBuilder {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(new), "`.")]
     pub fn new(
         id: impl Into<String>,
         display_name: impl Into<String>,
@@ -49,12 +50,14 @@ impl ContractManifestBuilder {
         }
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(schema), "`.")]
     pub fn schema(mut self, name: impl Into<String>, schema: Value) -> Self {
         self.manifest.schemas.insert(name.into(), schema);
         self
     }
 
     /// Attach summarized programmer-facing Markdown documentation to the contract.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -68,6 +71,7 @@ impl ContractManifestBuilder {
     }
 
     /// Declare a contract-local structured error backed by a named schema.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(error), "`.")]
     pub fn error(
         mut self,
         name: impl Into<String>,
@@ -85,6 +89,7 @@ impl ContractManifestBuilder {
     }
 
     /// Declare human-facing metadata for a contract-local capability.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(capability), "`.")]
     pub fn capability(
         mut self,
         name: impl Into<String>,
@@ -94,6 +99,7 @@ impl ContractManifestBuilder {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(use_ref), "`.")]
     pub fn use_ref(mut self, alias: impl Into<String>, use_ref: ContractUseRef) -> Self {
         self.manifest
             .uses
@@ -102,6 +108,7 @@ impl ContractManifestBuilder {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(optional_use_ref), "`.")]
     pub fn optional_use_ref(mut self, alias: impl Into<String>, use_ref: ContractUseRef) -> Self {
         self.manifest
             .uses
@@ -110,46 +117,55 @@ impl ContractManifestBuilder {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(export_schema), "`.")]
     pub fn export_schema(mut self, name: impl Into<String>) -> Self {
         self.manifest.exports.schemas.push(name.into());
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(state), "`.")]
     pub fn state(mut self, name: impl Into<String>, state: ContractStateStore) -> Self {
         self.manifest.state.insert(name.into(), state);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(rpc), "`.")]
     pub fn rpc(mut self, name: impl Into<String>, rpc: ContractRpcMethod) -> Self {
         self.manifest.rpc.insert(name.into(), rpc);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(operation), "`.")]
     pub fn operation(mut self, name: impl Into<String>, operation: ContractOperation) -> Self {
         self.manifest.operations.insert(name.into(), operation);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(event), "`.")]
     pub fn event(mut self, name: impl Into<String>, event: ContractEvent) -> Self {
         self.manifest.events.insert(name.into(), event);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(feed), "`.")]
     pub fn feed(mut self, name: impl Into<String>, feed: ContractFeed) -> Self {
         self.manifest.feeds.insert(name.into(), feed);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(kv_resource), "`.")]
     pub fn kv_resource(mut self, name: impl Into<String>, kv: ContractKvResource) -> Self {
         self.manifest.resources.kv.insert(name.into(), kv);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(store_resource), "`.")]
     pub fn store_resource(mut self, name: impl Into<String>, store: ContractStoreResource) -> Self {
         self.manifest.resources.store.insert(name.into(), store);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(job_queue), "`.")]
     pub fn job_queue(
         mut self,
         queue_type: impl Into<String>,
@@ -159,12 +175,14 @@ impl ContractManifestBuilder {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(build), "`.")]
     pub fn build(mut self) -> Result<ContractManifest, ContractsError> {
         self.project_declared_capabilities()?;
         let value = serde_json::to_value(self.manifest)?;
         parse_manifest(value)
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(build_unvalidated), "`.")]
     pub fn build_unvalidated(mut self) -> ContractManifest {
         let _ = self.project_declared_capabilities();
         self.manifest
@@ -377,6 +395,7 @@ fn assert_capability_list_external(
     Ok(())
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(schema_ref), "`.")]
 pub fn schema_ref(name: impl Into<String>) -> ContractSchemaRef {
     ContractSchemaRef {
         schema: name.into(),
@@ -384,6 +403,7 @@ pub fn schema_ref(name: impl Into<String>) -> ContractSchemaRef {
 }
 
 /// Return the global capability namespace for a contract id.
+#[doc = concat!("Constructs or updates contract data with `", stringify!(contract_capability_namespace), "`.")]
 pub fn contract_capability_namespace(contract_id: &str) -> String {
     let Some((namespace, version)) = contract_id.rsplit_once("@v") else {
         return contract_id.to_string();
@@ -396,17 +416,19 @@ pub fn contract_capability_namespace(contract_id: &str) -> String {
 }
 
 /// Return the globally qualified name for a contract-local capability.
+#[doc = concat!("Constructs or updates contract data with `", stringify!(global_capability_name), "`.")]
 pub fn global_capability_name(contract_id: &str, local_capability: &str) -> String {
     let namespace = contract_capability_namespace(contract_id);
     for prefix in local_capability_namespace_prefixes(contract_id) {
         assert!(
-            !local_capability.starts_with(&prefix),
-            "local capability '{local_capability}' must not start with contract namespace prefix '{prefix}'"
-        );
+        !local_capability.starts_with(&prefix),
+        "local capability '{local_capability}' must not start with contract namespace prefix '{prefix}'"
+    );
     }
     format!("{namespace}::{local_capability}")
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(rpc), "`.")]
 pub fn rpc(
     version: impl Into<String>,
     subject: impl Into<String>,
@@ -426,6 +448,7 @@ pub fn rpc(
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(operation), "`.")]
 pub fn operation(
     version: impl Into<String>,
     subject: impl Into<String>,
@@ -449,6 +472,7 @@ pub fn operation(
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(event), "`.")]
 pub fn event(
     version: impl Into<String>,
     subject: impl Into<String>,
@@ -464,6 +488,7 @@ pub fn event(
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(feed), "`.")]
 pub fn feed(
     version: impl Into<String>,
     subject: impl Into<String>,
@@ -480,6 +505,7 @@ pub fn feed(
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(state), "`.")]
 pub fn state(kind: ContractStateKind, schema: impl Into<String>) -> ContractStateStore {
     ContractStateStore {
         kind,
@@ -490,6 +516,7 @@ pub fn state(kind: ContractStateKind, schema: impl Into<String>) -> ContractStat
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(use_contract), "`.")]
 pub fn use_contract(contract: impl Into<String>) -> ContractUseRef {
     ContractUseRef {
         contract: contract.into(),
@@ -500,6 +527,7 @@ pub fn use_contract(contract: impl Into<String>) -> ContractUseRef {
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(kv), "`.")]
 pub fn kv(purpose: impl Into<String>, schema: impl Into<String>) -> ContractKvResource {
     ContractKvResource {
         purpose: purpose.into(),
@@ -512,6 +540,7 @@ pub fn kv(purpose: impl Into<String>, schema: impl Into<String>) -> ContractKvRe
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(store), "`.")]
 pub fn store(purpose: impl Into<String>) -> ContractStoreResource {
     ContractStoreResource {
         purpose: purpose.into(),
@@ -523,6 +552,7 @@ pub fn store(purpose: impl Into<String>) -> ContractStoreResource {
     }
 }
 
+#[doc = concat!("Constructs or updates contract data with `", stringify!(job_queue), "`.")]
 pub fn job_queue(
     payload: ContractSchemaRef,
     result: Option<ContractSchemaRef>,
@@ -552,6 +582,7 @@ fn docs(summary: impl Into<String>, markdown: impl Into<String>) -> ContractDocs
 }
 
 impl ContractRpcMethod {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -564,6 +595,7 @@ impl ContractRpcMethod {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_receive_transfer), "`.")]
     pub fn with_receive_transfer(mut self) -> Self {
         self.transfer = Some(ContractRpcTransfer {
             direction: ContractRpcTransferDirection::Receive,
@@ -571,6 +603,7 @@ impl ContractRpcMethod {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_call_capabilities), "`.")]
     pub fn with_call_capabilities(
         mut self,
         call: impl IntoIterator<Item = impl Into<String>>,
@@ -581,6 +614,7 @@ impl ContractRpcMethod {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_error_types), "`.")]
     pub fn with_error_types(
         mut self,
         error_types: impl IntoIterator<Item = impl Into<String>>,
@@ -596,6 +630,7 @@ impl ContractRpcMethod {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(internal), "`.")]
     pub fn internal(mut self) -> Self {
         self.internal = Some(true);
         self
@@ -604,11 +639,13 @@ impl ContractRpcMethod {
 
 impl ContractOperation {
     /// Declare the live-only update payload schema for this operation.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_update_schema), "`.")]
     pub fn with_update_schema(mut self, schema: impl Into<String>) -> Self {
         self.update = Some(schema_ref(schema));
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -618,6 +655,7 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_transfer), "`.")]
     pub fn with_transfer(
         mut self,
         store: impl Into<String>,
@@ -639,6 +677,7 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_error_types), "`.")]
     pub fn with_error_types(
         mut self,
         error_types: impl IntoIterator<Item = impl Into<String>>,
@@ -654,6 +693,7 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_call_capabilities), "`.")]
     pub fn with_call_capabilities(
         mut self,
         call: impl IntoIterator<Item = impl Into<String>>,
@@ -665,6 +705,7 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_observe_capabilities), "`.")]
     pub fn with_observe_capabilities(
         mut self,
         observe: impl IntoIterator<Item = impl Into<String>>,
@@ -676,6 +717,7 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_cancel_capabilities), "`.")]
     pub fn with_cancel_capabilities(
         mut self,
         cancel_capabilities: impl IntoIterator<Item = impl Into<String>>,
@@ -688,6 +730,7 @@ impl ContractOperation {
     }
 
     /// Sets the capabilities required for named operation-control signals.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_control_capabilities), "`.")]
     pub fn with_control_capabilities(
         mut self,
         control_capabilities: impl IntoIterator<Item = impl Into<String>>,
@@ -699,11 +742,13 @@ impl ContractOperation {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(cancel), "`.")]
     pub fn cancel(mut self, cancel: bool) -> Self {
         self.cancel = Some(cancel);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(signal), "`.")]
     pub fn signal(mut self, name: impl Into<String>, input: impl Into<String>) -> Self {
         self.signals.insert(
             name.into(),
@@ -718,6 +763,7 @@ impl ContractOperation {
 
 impl ContractJobQueueResource {
     /// Declare the live-only update payload schema for this jobs queue.
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_update_schema), "`.")]
     pub fn with_update_schema(mut self, schema: impl Into<String>) -> Self {
         self.update = Some(schema_ref(schema));
         self
@@ -725,6 +771,7 @@ impl ContractJobQueueResource {
 }
 
 impl ContractEvent {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -734,6 +781,7 @@ impl ContractEvent {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_publish_capabilities), "`.")]
     pub fn with_publish_capabilities(
         mut self,
         publish: impl IntoIterator<Item = impl Into<String>>,
@@ -745,6 +793,7 @@ impl ContractEvent {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_subscribe_capabilities), "`.")]
     pub fn with_subscribe_capabilities(
         mut self,
         subscribe: impl IntoIterator<Item = impl Into<String>>,
@@ -758,6 +807,7 @@ impl ContractEvent {
 }
 
 impl ContractFeed {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -767,6 +817,7 @@ impl ContractFeed {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_subscribe_capabilities), "`.")]
     pub fn with_subscribe_capabilities(
         mut self,
         subscribe: impl IntoIterator<Item = impl Into<String>>,
@@ -780,6 +831,7 @@ impl ContractFeed {
 }
 
 impl ContractStateStore {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -789,11 +841,13 @@ impl ContractStateStore {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(state_version), "`.")]
     pub fn state_version(mut self, state_version: impl Into<String>) -> Self {
         self.state_version = Some(state_version.into());
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(accepted_version), "`.")]
     pub fn accepted_version(
         mut self,
         version: impl Into<String>,
@@ -806,6 +860,7 @@ impl ContractStateStore {
 }
 
 impl ContractUseRef {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_rpc_call), "`.")]
     pub fn with_rpc_call(mut self, call: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.rpc = Some(ContractUseRpc {
             call: Some(call.into_iter().map(Into::into).collect()),
@@ -813,6 +868,7 @@ impl ContractUseRef {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_event_publish), "`.")]
     pub fn with_event_publish(
         mut self,
         publish: impl IntoIterator<Item = impl Into<String>>,
@@ -822,6 +878,7 @@ impl ContractUseRef {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_operation_call), "`.")]
     pub fn with_operation_call(
         mut self,
         call: impl IntoIterator<Item = impl Into<String>>,
@@ -832,6 +889,7 @@ impl ContractUseRef {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_event_subscribe), "`.")]
     pub fn with_event_subscribe(
         mut self,
         subscribe: impl IntoIterator<Item = impl Into<String>>,
@@ -841,6 +899,7 @@ impl ContractUseRef {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(with_feed_subscribe), "`.")]
     pub fn with_feed_subscribe(
         mut self,
         subscribe: impl IntoIterator<Item = impl Into<String>>,
@@ -853,6 +912,7 @@ impl ContractUseRef {
 }
 
 impl ContractKvResource {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -862,16 +922,19 @@ impl ContractKvResource {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(required), "`.")]
     pub fn required(mut self, required: bool) -> Self {
         self.required = Some(required);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(history), "`.")]
     pub fn history(mut self, history: i64) -> Self {
         self.history = Some(history);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(ttl_ms), "`.")]
     pub fn ttl_ms(mut self, ttl_ms: i64) -> Self {
         self.ttl_ms = Some(ttl_ms);
         self
@@ -879,6 +942,7 @@ impl ContractKvResource {
 }
 
 impl ContractStoreResource {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,
@@ -888,21 +952,25 @@ impl ContractStoreResource {
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(required), "`.")]
     pub fn required(mut self, required: bool) -> Self {
         self.required = Some(required);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(ttl_ms), "`.")]
     pub fn ttl_ms(mut self, ttl_ms: i64) -> Self {
         self.ttl_ms = Some(ttl_ms);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(max_object_bytes), "`.")]
     pub fn max_object_bytes(mut self, max_object_bytes: i64) -> Self {
         self.max_object_bytes = Some(max_object_bytes);
         self
     }
 
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(max_total_bytes), "`.")]
     pub fn max_total_bytes(mut self, max_total_bytes: i64) -> Self {
         self.max_total_bytes = Some(max_total_bytes);
         self
@@ -910,6 +978,7 @@ impl ContractStoreResource {
 }
 
 impl ContractJobQueueResource {
+    #[doc = concat!("Constructs or updates contract data with `", stringify!(docs_with_summary), "`.")]
     pub fn docs_with_summary(
         mut self,
         summary: impl Into<String>,

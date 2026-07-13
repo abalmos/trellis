@@ -75,7 +75,9 @@ Do not pass a `durableName`. Durable event consumer names, filters, and permissi
 {/snippet}
 {#snippet rust()}
 
-Add the auth contract use to the service manifest. Rust client subscriptions are live/ephemeral by default; service-level durable event consumers should still be represented in the canonical manifest as `eventConsumers` so Trellis can provision matching bindings.
+Add the auth contract use and an `eventConsumers` group to the service contract.
+Prepare generates the durable group facade after Trellis can resolve the selected
+event through that dependency alias.
 
 ```rust
 use trellis_contracts::use_contract;
@@ -87,33 +89,25 @@ use trellis_contracts::use_contract;
 )
 ```
 
-Then subscribe with the auth SDK descriptor:
+Then register the generated durable handler before `service.run()`:
 
 ```rust
-use futures_util::StreamExt;
-use trellis_rs::client::{
-    EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode, TrellisClientError,
-};
-use trellis_rs::sdk::auth::events::AuthConnectionsOpenedEventDescriptor;
-
-let mut auth_events = client
-    .subscribe_messages::<AuthConnectionsOpenedEventDescriptor>(EventSubscribeOptions {
-        mode: EventSubscriptionMode::Ephemeral,
-        replay: EventReplayPolicy::New,
-        durable_name: None,
+service
+    .event_consumers()
+    .auth_connections()
+    .auth_connections_opened(|event, context| async move {
+        tracing::info!(
+            event_id = ?context.id,
+            caller = ?event.caller,
+            "auth connection opened",
+        );
+        Ok(())
     })
     .await?;
-
-tokio::spawn(async move {
-    while let Some(message) = auth_events.next().await {
-        let message = message?;
-        let event = message.decode()?;
-        tracing::info!(event = ?event, "auth connection opened");
-        message.ack().await?;
-    }
-    Ok::<(), TrellisClientError>(())
-});
 ```
+
+Trellis resolves the durable name, filters, replay policy, and permissions from
+the bootstrap binding. Do not inspect JetStream or pass a durable name.
 
 {/snippet}
 </LanguageTabs>

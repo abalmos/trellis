@@ -29,9 +29,9 @@ import {
 import { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 import {
   startTrellisTestEventCapture,
+  type TrellisTestEventAction,
   TrellisTestEventCapture,
   type TrellisTestEventCaptureOptions,
-  type TrellisTestEventAction,
   type TrellisTestEventSourceContract,
 } from "./event_capture.ts";
 import { NatsTestContainer } from "./nats_container.ts";

@@ -1,5 +1,5 @@
 pub mod bootstrap {
-    use trellis_rs::client::TrellisClientError;
+    use trellis_rs::generated::TrellisClientError;
     use trellis_rs::sdk::core::types::{
         TrellisBindingsGetRequest, TrellisBindingsGetResponse, TrellisCatalogResponse,
     };

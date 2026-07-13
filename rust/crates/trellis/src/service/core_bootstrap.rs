@@ -48,6 +48,12 @@ impl<'a> CoreBootstrapClientPort for CoreClient<'a> {
 pub struct CoreBootstrapBinding(TrellisBindingsGetResponseBinding);
 
 impl CoreBootstrapBinding {
+    pub(crate) fn jobs_runtime_binding(
+        &self,
+    ) -> Result<crate::jobs::JobsRuntimeBinding, crate::jobs::bindings::JobsBindingError> {
+        crate::jobs::JobsRuntimeBinding::try_from(&self.0)
+    }
+
     pub fn new(binding: TrellisBindingsGetResponseBinding) -> Self {
         Self(binding)
     }

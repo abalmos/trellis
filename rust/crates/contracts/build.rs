@@ -1,3 +1,5 @@
+//! Embeds the canonical contract meta-schema for runtime validation.
+
 use std::fs;
 use std::path::PathBuf;
 

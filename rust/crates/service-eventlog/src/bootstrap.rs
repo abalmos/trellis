@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use trellis_rs::client::TrellisClientError;
+use trellis_rs::generated::TrellisClientError;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServerError, ServiceConnectOptions, ServiceRuntimeError,
 };
@@ -37,10 +37,9 @@ impl EventLogServiceMode {
 impl RuntimeLoops {
     async fn start(
         eventlog_runtime: EventLogRuntime,
-        auth_client: std::sync::Arc<trellis_rs::client::TrellisClient>,
         store: EventLogStore,
     ) -> Result<Self, ServerError> {
-        let projector = start_eventlog_projector(eventlog_runtime, auth_client, store).await?;
+        let projector = start_eventlog_projector(eventlog_runtime, store).await?;
         Ok(Self { projector })
     }
 
@@ -83,13 +82,8 @@ impl ConnectedEventLogService {
     /// Run the Event Log service with an explicit loop ownership mode.
     pub async fn run_with_mode(mut self, mode: EventLogServiceMode) -> Result<(), ServerError> {
         tracing::info!(?mode, "registering Event Log runtime surfaces");
-        let eventlog_runtime = EventLogRuntime::from_client(self.runtime.client());
-        let auth_client = self.runtime.client().clone();
-        let query = EventLogQuery::new(
-            self.store.clone(),
-            eventlog_runtime.clone(),
-            auth_client.clone(),
-        );
+        let eventlog_runtime = self.runtime.eventlog_runtime();
+        let query = EventLogQuery::new(self.store.clone(), eventlog_runtime.clone());
         match eventlog_runtime.expire_obsolete_watch_consumers().await {
             Ok(count) if count > 0 => {
                 tracing::info!(
@@ -104,18 +98,12 @@ impl ConnectedEventLogService {
         }
         register_eventlog_rpc_handlers(&mut self.runtime, query);
         register_eventlog_watch_feed(&mut self.runtime, eventlog_runtime.clone());
-        run_eventlog_service_runtime(
-            eventlog_runtime,
-            auth_client,
-            self.store,
-            mode,
-            async move {
-                self.runtime
-                    .run()
-                    .await
-                    .map_err(service_runtime_error_to_server_error)
-            },
-        )
+        run_eventlog_service_runtime(eventlog_runtime, self.store, mode, async move {
+            self.runtime
+                .run()
+                .await
+                .map_err(service_runtime_error_to_server_error)
+        })
         .await
     }
 }
@@ -148,7 +136,6 @@ fn open_eventlog_store(path: &Path) -> Result<EventLogStore, ServerError> {
 
 async fn run_eventlog_service_runtime<F>(
     eventlog_runtime: EventLogRuntime,
-    auth_client: std::sync::Arc<trellis_rs::client::TrellisClient>,
     store: EventLogStore,
     mode: EventLogServiceMode,
     service_run: F,
@@ -157,7 +144,7 @@ where
     F: std::future::Future<Output = Result<(), ServerError>>,
 {
     let mut loops = if mode.starts_runtime_loops() {
-        Some(RuntimeLoops::start(eventlog_runtime, auth_client, store).await?)
+        Some(RuntimeLoops::start(eventlog_runtime, store).await?)
     } else {
         tracing::info!(?mode, "Event Log owner loops disabled");
         None

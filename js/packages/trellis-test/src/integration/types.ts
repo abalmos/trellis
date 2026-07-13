@@ -1,9 +1,9 @@
 import type { ClientOpts } from "@qlever-llc/trellis";
 import type { TrellisTestRuntime } from "../runtime.ts";
 import type {
+  TrellisTestEventAction,
   TrellisTestEventCapture,
   TrellisTestEventCaptureOptions,
-  TrellisTestEventAction,
   TrellisTestEventSourceContract,
 } from "../event_capture.ts";
 import type { NatsMessageObserver } from "../nats_container.ts";

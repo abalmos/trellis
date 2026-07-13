@@ -583,7 +583,7 @@ async fn identity_grants_list_command(
         .map(|entry| {
             vec![
                 entry.identity_grant_id,
-                entry.participant_kind,
+                entry.participant_kind.as_str().to_string(),
                 entry.display_name,
                 entry.description,
                 entry.contract_evidence.contract_digest,

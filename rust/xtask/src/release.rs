@@ -1435,6 +1435,7 @@ fn verify_command_specs(
             "integration".to_string(),
             "--".to_string(),
             "--nocapture".to_string(),
+            "--test-threads=1".to_string(),
         ];
         if keep_workdir {
             rust_args.insert(0, "cargo".to_string());
@@ -1933,7 +1934,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture"
+            "cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1"
         );
     }
 
@@ -1950,7 +1951,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1"
         );
     }
 

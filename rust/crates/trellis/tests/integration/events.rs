@@ -140,8 +140,8 @@ async fn events_client_publishes_and_subscriber_receives() {
     let observed_events = Arc::new(tokio::sync::Mutex::new(Vec::<EntityChangedEvent>::new()));
     let handler_observed_events = Arc::clone(&observed_events);
 
-    let service_client = Arc::clone(service.client());
-    let event_stream = service_client
+    let event_stream = service
+        .caller()
         .subscribe::<EntityChangedEventDescriptor>()
         .await
         .expect("subscribe to Entity.Changed events");

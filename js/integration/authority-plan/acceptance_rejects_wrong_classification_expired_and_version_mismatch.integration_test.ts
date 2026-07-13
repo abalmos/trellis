@@ -51,10 +51,22 @@ liveTrellisTest({
       seed: baseKey.seed,
     });
     let replacementService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.incompatibleSchemaContract>>>
+      | Awaited<
+        ReturnType<
+          typeof fixture.connectService<
+            typeof fixture.incompatibleSchemaContract
+          >
+        >
+      >
       | undefined;
     let additiveService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
+      | Awaited<
+        ReturnType<
+          typeof fixture.connectService<
+            typeof fixture.compatibleAdditiveContract
+          >
+        >
+      >
       | undefined;
     const admin = await runtime.connectClient({
       name: caseScopedName("authority-plan-acceptance-admin", CASE_ID),

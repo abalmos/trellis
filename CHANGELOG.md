@@ -8,44 +8,97 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.7] - 2026-07-13
+
+### Public Breaking Changes
+
+- Replaced TypeScript owner SDK runtime packages with vocabulary-only generated
+  packages and participant-contract-derived caller/provider facades. Removed the
+  old generated `api`, `client`, and `contract` surfaces, implicit contract uses,
+  low-level connection constructors, and direct binding/resource bootstrap.
+- Changed TypeScript participant contracts to select explicit RPC, event,
+  operation, feed, state, KV, store, and Jobs descriptors. Generated action
+  names, handler registration types, and connected runtime access now derive
+  only from those selections.
+- Replaced runnable Rust owner SDKs and generic runtime clients with
+  vocabulary-only owner SDK crates plus materialized, contract-filtered
+  participant facades for services, apps, devices, and agents.
+- Removed public raw-transport and compatibility surfaces from normal service
+  code, including Rust `TrellisClient`, raw NATS/binding access, owner
+  `connect_service(...)`, and the `trellis-auth`, `trellis-client`,
+  `trellis-service`, and `trellis-service-runtime` compatibility crates.
+- Split event consumption into typed live caller subscriptions and generated,
+  Trellis-provisioned durable service groups. Service code no longer chooses
+  durable consumer names or combines live and durable options in one API.
+- Changed public contract object schemas to be open by default. Contracts must
+  now set `additionalProperties: false` explicitly when unknown fields are a
+  security-sensitive validation error.
+
 ### Added
 
 - Added signed event proofs, `Auth.Events.Validate`, and retained publisher
-  session snapshots so event consumers can verify historical event provenance
-  after ordinary session expiry or closure.
-- Added the optional Rust Event Log service, its generated TypeScript and Rust
-  SDKs, and Console Events route for browsing persisted platform events,
-  publisher verification, and durable-consumer health.
-- Added job trigger and parent/root lineage, active-job wait evidence for child
-  jobs and operations, and corresponding Jobs admin inspection fields.
+  session history so consumers can verify historical provenance after ordinary
+  session expiry or closure.
+- Added the optional Rust Event Log service, generated TypeScript and Rust Event
+  Log SDKs, and a Console Events workspace for persisted envelopes, publisher
+  verification, integrity exceptions, metrics, and durable-consumer health.
+- Added a Rust-owned Health heartbeat projection with latest instance state,
+  status intervals, five-minute metrics, replay recovery, snapshot/watch APIs,
+  and runtime failure supervision.
+- Added typed live updates for Jobs, operations, feeds, and event listeners,
+  including ordered operation signals and durable operation resume behavior.
+- Added Jobs trigger, parent/root lineage, active wait evidence, worker-presence
+  projection, job-type metrics, error fingerprints, and related-job inspection.
+- Added generated Rust service resource, state, Jobs, event-consumer, operation
+  provider, typed publisher, prepared-event, and transfer facades backed by
+  bootstrap-resolved bindings and an opaque generated-code ABI.
+- Added typed declared RPC and operation errors, provider/caller wire-schema
+  validation, safe templated-event subject resolution, nullable tri-state
+  support, tagged object unions, and deterministic generation diagnostics.
+- Added portable prepare-time Rust owner/participant crates with relative Cargo
+  dependencies, embedded contract metadata, compile fixtures for every
+  participant kind, Rust 1.88 MSRV verification, and enforced Rustdoc coverage.
 
 ### Changed
 
-- Updated Jobs projections and Console timelines to retain and display active
-  wait edges, related wait targets, and elapsed time between lifecycle events.
-- Updated the Console job detail view so the error panel reads the Trellis error
-  payload directly (typed headline, cause message, optional stack), the raw
-  error JSON is hidden behind a collapsed disclosure, the header surfaces the
-  deployment name as a linked eyebrow, and the timeline classifies events by
-  type with PROGRESS events taking precedence over STARTED so progress updates
-  are not mislabeled as the job's start.
-- Updated the Console deployment authority plan view so the Decision panel
-  sticks to the top of the viewport on wide screens, keeping the Accept update
-  action visible while reviewing long contract changes.
-- Updated Jobs guide pages and service-author LLM guidance for the current
-  job-type diagnostics and related-job matching behavior.
+- Updated the Console Jobs workspace around a job-type health matrix, scoped
+  throughput and latency charts, execution-story timelines, attempt details,
+  lineage, wait edges, related jobs, worker state, and structured Trellis errors.
+- Updated deployment authority acceptance to commit desired state and return
+  while physical reconciliation continues in the background. The Console plan
+  workspace now surfaces structured schema/capability/resource breakage and
+  keeps the decision action visible during long reviews.
+- Updated Health, Jobs, and Event Log ownership so their server-side projection
+  and RPC/feed implementations run in Rust behind purpose-scoped runtime ports.
+- Updated first-party Rust services, tests, CLI code, and demos to consume
+  generated participant facades and generated types directly. Generated service
+  runtimes now supervise authenticated handlers, durable listeners, and Jobs
+  workers as one lifecycle.
+- Moved Jobs and Event Log raw transport needs behind purpose-scoped Trellis
+  runtimes; production services no longer borrow NATS from authenticated
+  sessions.
 
 ### Fixed
 
-- Fixed deployment authority acceptance to return after committing desired state
-  while physical reconciliation continues in the background, preventing
-  successful accepts from surfacing client timeouts, and fixed the Console plan
-  view's decision errors, reactive expansion state, and return navigation.
-- Fixed Rust service bootstrap to poll pending deployment authority indefinitely
-  by default, matching TypeScript, while retaining an optional overall deadline.
-- Fixed service bootstrap authority planning so additive provided RPC,
-  operation, feed, and event surfaces are included in safe auto-applied updates,
-  preventing stale materialized NATS subscription grants after contract uploads.
+- Fixed keyed Jobs queues so processing failures request redelivery, release
+  active slots best-effort, keep worker loops alive, and initialize distributed
+  key coordination through generated service facades.
+- Fixed event subject templates to resolve payload pointers consistently across
+  TypeScript and Rust, including zero values, safe-integer enforcement, and
+  canonical token escaping.
+- Fixed generated event, feed, RPC, operation, and signal payload validation and
+  preserved typed declared error data at caller/provider boundaries.
+- Fixed deployment authority planning so contributed provided surfaces and safe
+  resource changes reconcile materialized permissions, while new grants and
+  strict migrations still require approval.
+- Fixed Rust service bootstrap to wait for pending deployment authority by
+  default, matching TypeScript while retaining an optional overall deadline.
+- Fixed generated Rust worker heartbeat identity so Jobs worker presence
+  projects correctly.
+- Fixed untagged generated Rust object unions so more-specific branches decode
+  before open broad branches and do not discard fields.
+- Fixed physical resource reconciliation so deleting already-absent streams,
+  stores, buckets, or consumers is idempotent.
 
 ## [0.11.0-rc.6] - 2026-07-08
 

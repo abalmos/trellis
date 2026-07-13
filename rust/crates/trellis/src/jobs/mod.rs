@@ -66,11 +66,78 @@ pub type NatsJobEventPublisher = TrellisJobEventPublisher;
 
 #[doc(hidden)]
 pub mod internal {
+    use std::sync::Arc;
+
+    use futures_util::future::BoxFuture;
+
     pub use super::runtime_worker::{
         process_work_payload, process_work_payload_with_context,
         process_work_payload_with_context_and_heartbeat, start_worker_host_from_binding,
         WorkerHostError,
     };
+
+    pub fn typed_active_job<D>(
+        active: super::WorkerActiveJob<
+            super::TrellisJobEventPublisher,
+            super::TrellisJobMetaSource,
+        >,
+    ) -> Result<super::ActiveJob<D::Payload, D::Result>, super::JobsError>
+    where
+        D: super::JobDescriptor,
+    {
+        let payload = serde_json::from_value(active.job().payload.clone())
+            .map_err(super::JobsError::DecodePayload)?;
+        let context = active.context().clone();
+        let state = active.job().state;
+        let tries = active.job().tries;
+        let cancellation = active.cancellation_token();
+        let active = Arc::new(active);
+        let heartbeat_active = Arc::clone(&active);
+        let progress_active = Arc::clone(&active);
+        let log_active = Arc::clone(&active);
+        Ok(super::ActiveJob::new(
+            context,
+            payload,
+            state,
+            tries,
+            cancellation,
+            move || {
+                let active = Arc::clone(&heartbeat_active);
+                Box::pin(async move {
+                    active
+                        .heartbeat()
+                        .await
+                        .map_err(|error| jobs_message(error.to_string()))
+                }) as BoxFuture<'static, _>
+            },
+            move |progress| {
+                let active = Arc::clone(&progress_active);
+                Box::pin(async move {
+                    active
+                        .update_progress(
+                            progress.current.unwrap_or_default(),
+                            progress.total.unwrap_or_default(),
+                            progress.message,
+                        )
+                        .await
+                        .map_err(|error| jobs_message(error.to_string()))
+                }) as BoxFuture<'static, _>
+            },
+            move |entry| {
+                let active = Arc::clone(&log_active);
+                Box::pin(async move {
+                    active
+                        .log(entry.level, entry.message)
+                        .await
+                        .map_err(|error| jobs_message(error.to_string()))
+                }) as BoxFuture<'static, _>
+            },
+        ))
+    }
+
+    fn jobs_message(message: String) -> super::JobsError {
+        super::JobsError::Message { message }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +177,7 @@ impl JobEventPublisher for TrellisJobEventPublisher {
 }
 
 /// Start a service-private job worker host using a connected Trellis client.
-pub async fn start_worker_host_from_client<MF, M, H, Fut, E>(
+pub(crate) async fn start_worker_host_from_client<MF, M, H, Fut, E>(
     client: &TrellisClient,
     binding: JobsRuntimeBinding,
     instance_id: String,
@@ -140,4 +207,55 @@ where
         options,
     )
     .await
+}
+
+/// Jobs-only worker host access for Trellis integration tests.
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct TestJobsWorkerRuntime {
+    client: std::sync::Arc<TrellisClient>,
+    binding: JobsRuntimeBinding,
+}
+
+#[cfg(feature = "test-support")]
+impl TestJobsWorkerRuntime {
+    pub(crate) fn new(client: std::sync::Arc<TrellisClient>, binding: JobsRuntimeBinding) -> Self {
+        Self { client, binding }
+    }
+
+    /// Return the resolved Jobs binding for queue-level assertions.
+    pub fn binding(&self) -> &JobsRuntimeBinding {
+        &self.binding
+    }
+
+    /// Start a worker host against the connected service's Jobs binding.
+    pub async fn start<MF, M, H, Fut, E>(
+        &self,
+        instance_id: String,
+        meta_factory: MF,
+        handler: H,
+        options: WorkerHostOptions,
+    ) -> Result<WorkerHostHandle, runtime_worker::WorkerHostError>
+    where
+        MF: Fn(&str, u32) -> M + Clone + Send + Sync + 'static,
+        M: JobMetaSource + Send + Sync + 'static,
+        H: Fn(active_job::ActiveJob<TrellisJobEventPublisher, M>) -> Fut
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        Fut: Future<Output = Result<Value, JobProcessError<E>>> + Send + 'static,
+        E: ToString + Send + 'static,
+    {
+        start_worker_host_from_client(
+            &self.client,
+            self.binding.clone(),
+            instance_id,
+            meta_factory,
+            handler,
+            options,
+        )
+        .await
+    }
 }

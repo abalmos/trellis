@@ -43,7 +43,7 @@ liveTrellisTest({
       await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         await afterClientCancel.promise;
-      
+
         const progressAfterCancel = await op.progress({
           message: input.message,
           step: 2,

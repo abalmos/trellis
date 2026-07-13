@@ -22,9 +22,12 @@ const testContract = defineAppContract(
     id: "trellis.svelte.context-test@v1",
     displayName: "Trellis Svelte Context Test",
     description: "Typecheck the Svelte context public API.",
-    uses: [AuthSessionsMe, state({
-      preferences: { kind: "value", schema: ref.schema("Preferences") },
-    })],
+    uses: [
+      AuthSessionsMe,
+      state({
+        preferences: { kind: "value", schema: ref.schema("Preferences") },
+      }),
+    ],
   }),
 );
 

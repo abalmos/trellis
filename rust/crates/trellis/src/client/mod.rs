@@ -13,18 +13,22 @@ mod events;
 mod operations;
 mod proof;
 mod state;
+mod subject;
 mod transfer;
 
 pub use auth::SessionAuth;
+pub(crate) use client::ServiceConnectWithContractOptions;
+pub(crate) use client::TrellisClient;
 pub use client::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, ServiceConnectOptions, ServiceConnectWithContractOptions, TrellisClient,
-    UserConnectOptions,
+    EventSubscriptionMode, UserConnectOptions,
 };
 pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{
-    RpcErrorPayload, SchemaValidationErrorPayload, SchemaValidationIssue, TrellisClientError,
-    ValidationErrorPayload, ValidationIssue,
+    AuthErrorPayload, AuthenticationError, CallError, DeclaredError, DeclaredErrorPayload,
+    NoDeclaredError, ProtocolError, RemoteErrorPayload, RpcErrorPayload,
+    SchemaValidationErrorPayload, SchemaValidationIssue, TransportError, TrellisClientError,
+    ValidationErrorPayload, ValidationFailure, ValidationIssue,
 };
 pub use events::{
     dispatch_outbox_once, prepare_event, prepare_event_value, EventStoreError, InboxReceipt,
@@ -45,6 +49,7 @@ pub use state::{
     MapStateStore, PutStateOptions, StateDeleteResult, StateEntry, StateGetResult,
     StateMigrationRequired, StatePutResult, StateTransport, StateValue, ValueStateStore,
 };
+pub use subject::SubjectError;
 pub use transfer::{
     download_transfer_grant_from_value, DownloadTransferGrant, FileInfo, UploadTransferGrant,
 };

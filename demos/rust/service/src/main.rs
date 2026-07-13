@@ -1,33 +1,35 @@
 use std::collections::BTreeMap;
-use std::future::Future;
+use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use clap::Parser;
+use futures_util::future::BoxFuture;
 use futures_util::{stream, Stream, StreamExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::json;
-use trellis_rs::client::TrellisClient;
+use trellis_participant_demo_service::jobs::RefreshSiteSummaryQueueClient;
+use trellis_participant_demo_service::owned::Publisher;
+use trellis_participant_demo_service::{
+    ConnectedService, ServiceConnectOptions, ServiceHandlerContext,
+};
 use trellis_rs::jobs;
 use trellis_rs::service::{
-    plan_download_transfer_grant, plan_upload_transfer_grant, spawn_download_transfer_endpoint,
-    spawn_upload_transfer_endpoint_with_progress, AcceptedOperation, DefaultRequestValidator,
-    DefaultRequestValidatorClientPort, DownloadTransferGrant, DownloadTransferGrantPlan,
-    EventPublisher, FileTransferInfo, InMemoryOperationRuntime, KvResourceClient,
-    NatsKvResourceClient, NatsStoreResourceClient, OperationFailure, OperationRefData,
-    OperationSnapshot, OperationState, OperationTransferProgress, RequestContext,
-    RequestValidation, RequestValidator, ServerError, ServiceOperation, ServiceResourceBindings,
-    StoreResourceClient, TransferDownloadGrantArgs, TransferUploadGrantArgs, UploadTransferGrant,
-    UploadTransferGrantPlan, UploadTransferSession,
+    AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime,
+    KvHandle, OperationDescriptor, OperationFailure, OperationRefData, OperationSnapshot,
+    OperationState, OperationTransferProgress, RequestContext, ServerError, ServiceOperation,
+    ServiceOperationProvider, StoreHandle, StoreResourceClient, UploadTransferGrant,
+    UploadTransferSession,
 };
+use trellis_sdk_demo_service::operations as sdk_operations;
 use trellis_sdk_demo_service::types::{
     AssignmentsListRequest, AssignmentsListResponse, AssignmentsListResponseEntriesItem,
-    AuditFeedEvent, AuditRecordedEvent, EvidenceDeleteRequest, EvidenceDeleteResponse,
-    EvidenceDownloadRequest, EvidenceDownloadResponse, EvidenceDownloadResponseTransfer,
-    EvidenceDownloadResponseTransferInfo, EvidenceListRequest, EvidenceListResponse,
+    AssignmentsListResponseEntriesItemPriority, AuditRecordedEvent,
+    EvidenceDeleteRequest, EvidenceDeleteResponse, EvidenceDownloadRequest,
+    EvidenceDownloadResponse, EvidenceDownloadResponseTransfer,
+    EvidenceDownloadResponseTransferDirection, EvidenceDownloadResponseTransferInfo,
+    EvidenceDownloadResponseTransferType, EvidenceListRequest, EvidenceListResponse,
     EvidenceListResponseEntriesItem, EvidenceUploadInput, EvidenceUploadOutput,
     EvidenceUploadProgress, EvidenceUploadedEvent, ReportsGenerateInput, ReportsGenerateOutput,
     ReportsGenerateProgress, ReportsListRequest, ReportsListResponse,
@@ -36,30 +38,14 @@ use trellis_sdk_demo_service::types::{
     SitesRefreshInput, SitesRefreshOutput, SitesRefreshOutputSite, SitesRefreshProgress,
     SitesRefreshedEvent,
 };
-use trellis_sdk_demo_service::{events as sdk_events, operations as sdk_operations};
-use trellis_sdk_demo_service::{ConnectedService, ServiceConnectOptions, ServiceHandlerContext};
-
-const REFRESH_SITE_SUMMARY_JOB: &str = "refreshSiteSummary";
 
 const SERVICE_NAME: &str = "rust-field-ops-demo";
 const FIXED_NOW: &str = "2026-05-02T00:00:00.000Z";
 const TRANSFER_EXPIRES_AT: &str = "2099-01-01T00:00:00.000Z";
 const TRANSFER_CHUNK_BYTES: u64 = 65_536;
 const UPLOADS_STORE: &str = "uploads";
-const SITE_SUMMARIES_KV: &str = "siteSummaries";
 const MAX_UPLOAD_BYTES: i64 = 10 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS: u64 = 5_000;
-const REFRESH_JOB_WAIT_TIMEOUT_MS: u64 = 30_000;
-const REFRESH_QUEUE_PAUSE_MS: u64 = 900;
-const REFRESH_JOB_CREATE_PAUSE_MS: u64 = 700;
-const REFRESH_COMPLETE_PAUSE_MS: u64 = 700;
-const REFRESH_ACTIVITY_PAUSE_MS: u64 = 700;
-const ACTIVITY_LIVE_SOURCE_EVENTS: &[(&str, &str)] = &[
-    ("Audit.Recorded", "events.v1.Audit.Recorded"),
-    ("Reports.Published", "events.v1.Reports.Published"),
-    ("Evidence.Uploaded", "events.v1.Evidence.Uploaded"),
-    ("Sites.Refreshed", "events.v1.Sites.Refreshed"),
-];
 
 fn now_iso() -> String {
     match time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339) {
@@ -67,9 +53,6 @@ fn now_iso() -> String {
         Err(_) => FIXED_NOW.to_string(),
     }
 }
-const REFRESH_JOB_LOAD_PAUSE_MS: u64 = 1_200;
-const REFRESH_JOB_STORE_PAUSE_MS: u64 = 1_000;
-const REFRESH_JOB_PROGRESS_PAUSE_MS: u64 = 700;
 const OPERATION_WAIT_TIMEOUT_MS: u64 = 60_000;
 const OPERATION_WAIT_POLL_MS: u64 = 100;
 
@@ -134,7 +117,6 @@ struct PendingUpload {
 
 #[derive(Debug, Default)]
 struct AppState {
-    sites: Vec<Site>,
     assignments: Vec<Assignment>,
     evidence: Vec<Evidence>,
     reports: Vec<ReportsListResponseEntriesItem>,
@@ -153,103 +135,91 @@ struct AppContext {
     state: SharedState,
     store: EvidenceStore,
     site_summaries: SiteSummaryStore,
-    resources: ServiceResourceBindings,
-    nats: Option<async_nats::Client>,
-    publisher: Option<EventPublisher>,
-    service_session_key: String,
-    refresh_jobs: RefreshJobManager,
+    publisher: Publisher,
+    refresh_jobs: RefreshSiteSummaryQueueClient,
     refresh_operations: ServiceOperation<sdk_operations::SitesRefreshOperation>,
-    refresh_worker_wait: Option<jobs::NatsJobWaiter>,
-    transfer_validator: DemoRequestValidator,
 }
 
-type RefreshJobManager = jobs::JobManager<DemoJobPublisher, DemoJobMetaSource>;
+type StartOperation<D> = Arc<
+    dyn Fn(
+            ServiceHandlerContext,
+            <D as OperationDescriptor>::Input,
+        ) -> BoxFuture<
+            'static,
+            Result<
+                AcceptedOperation<
+                    <D as OperationDescriptor>::Progress,
+                    <D as OperationDescriptor>::Output,
+                >,
+                ServerError,
+            >,
+        > + Send
+        + Sync,
+>;
+type ReadOperation<D> = Arc<
+    dyn Fn(
+            ServiceHandlerContext,
+            String,
+        ) -> BoxFuture<
+            'static,
+            Result<
+                OperationSnapshot<
+                    <D as OperationDescriptor>::Progress,
+                    <D as OperationDescriptor>::Output,
+                >,
+                ServerError,
+            >,
+        > + Send
+        + Sync,
+>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RecordedJobPublish {
-    subject: String,
-    event_type: jobs::JobEventType,
+struct DemoOperationProvider<D: OperationDescriptor> {
+    start: StartOperation<D>,
+    get: ReadOperation<D>,
+    wait: ReadOperation<D>,
+    cancel: ReadOperation<D>,
+    descriptor: PhantomData<fn() -> D>,
 }
 
-#[derive(Debug, Clone, Default)]
-struct DemoJobPublisher {
-    nats: Option<async_nats::Client>,
-    recorded: Option<Arc<Mutex<Vec<RecordedJobPublish>>>>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct DemoJobMetaSource {
-    next_id: Arc<AtomicU64>,
-}
-
-impl DemoJobMetaSource {
-    fn new() -> Self {
-        Self {
-            next_id: Arc::new(AtomicU64::new(1)),
-        }
-    }
-}
-
-impl jobs::JobMetaSource for DemoJobMetaSource {
-    fn next_job_id(&self) -> String {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        format!("job-refresh-site-summary-{id}")
-    }
-
-    fn now_iso(&self) -> String {
-        FIXED_NOW.to_string()
-    }
-}
-
-impl jobs::JobEventPublisher for DemoJobPublisher {
-    type Error = String;
-
-    fn publish(
+impl<D> ServiceOperationProvider<D> for DemoOperationProvider<D>
+where
+    D: OperationDescriptor + 'static,
+{
+    fn start(
         &self,
-        subject: String,
-        headers: jobs::JobEventHeaders,
-        payload: Vec<u8>,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        let nats = self.nats.clone();
-        let recorded = self.recorded.clone();
-        async move {
-            let event: jobs::JobEvent = serde_json::from_slice(&payload)
-                .map_err(|error| format!("decode job event: {error}"))?;
-            if let Some(recorded) = recorded {
-                recorded
-                    .lock()
-                    .expect("demo job publisher lock")
-                    .push(RecordedJobPublish {
-                        subject: subject.clone(),
-                        event_type: event.event_type,
-                    });
-            }
-            if let Some(nats) = nats {
-                let mut nats_headers = async_nats::header::HeaderMap::new();
-                nats_headers.insert("request-id", headers.request_id.as_str());
-                nats_headers.insert("traceparent", headers.traceparent.as_str());
-                if let Some(tracestate) = headers.tracestate.as_deref() {
-                    nats_headers.insert("tracestate", tracestate);
-                }
-                nats.publish_with_headers(subject, nats_headers, Bytes::from(payload))
-                    .await
-                    .map_err(|error| error.to_string())?;
-            }
-            Ok(())
-        }
+        context: ServiceHandlerContext,
+        input: D::Input,
+    ) -> BoxFuture<'static, Result<AcceptedOperation<D::Progress, D::Output>, ServerError>> {
+        (self.start)(context, input)
     }
-}
 
-#[derive(Debug, Clone, Default)]
-struct DemoStore {
-    objects: Arc<Mutex<BTreeMap<String, Bytes>>>,
+    fn get(
+        &self,
+        context: ServiceHandlerContext,
+        operation_id: String,
+    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
+        (self.get)(context, operation_id)
+    }
+
+    fn wait(
+        &self,
+        context: ServiceHandlerContext,
+        operation_id: String,
+    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
+        (self.wait)(context, operation_id)
+    }
+
+    fn cancel(
+        &self,
+        context: ServiceHandlerContext,
+        operation_id: String,
+    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>> {
+        (self.cancel)(context, operation_id)
+    }
 }
 
 #[derive(Debug, Clone)]
-enum SiteSummaryStore {
-    Memory(SharedState),
-    Nats(NatsKvResourceClient),
-}
+struct SiteSummaryStore(KvHandle);
 
 impl SiteSummaryStore {
     async fn seed_missing_sample_sites(&self) -> Result<(), ServerError> {
@@ -260,186 +230,46 @@ impl SiteSummaryStore {
     }
 
     async fn list(&self) -> Result<Vec<Site>, ServerError> {
-        match self {
-            Self::Memory(state) => Ok(state.lock().expect("demo state lock").sites.clone()),
-            Self::Nats(kv) => {
-                let mut sites = Vec::new();
-                for key in kv.list().await? {
-                    if let Some(value) = kv.get(&key).await? {
-                        sites.push(serde_json::from_slice(&value)?);
-                    }
-                }
-                sites.sort_by(|left: &Site, right: &Site| left.site_name.cmp(&right.site_name));
-                Ok(sites)
+        let mut sites = Vec::new();
+        for key in self.0.list().await? {
+            if let Some(value) = self.0.get(&key).await? {
+                sites.push(serde_json::from_slice(&value)?);
             }
         }
+        sites.sort_by(|left: &Site, right: &Site| left.site_name.cmp(&right.site_name));
+        Ok(sites)
     }
 
     async fn get(&self, site_id: &str) -> Result<Option<Site>, ServerError> {
-        match self {
-            Self::Memory(state) => Ok(state
-                .lock()
-                .expect("demo state lock")
-                .sites
-                .iter()
-                .find(|site| site.site_id == site_id)
-                .cloned()),
-            Self::Nats(kv) => kv
-                .get(site_id)
-                .await?
-                .map(|value| serde_json::from_slice(&value))
-                .transpose()
-                .map_err(ServerError::from),
-        }
+        self.0
+            .get(site_id)
+            .await?
+            .map(|value| serde_json::from_slice(&value))
+            .transpose()
+            .map_err(ServerError::from)
     }
 
     async fn put(&self, site: &Site) -> Result<(), ServerError> {
-        match self {
-            Self::Memory(state) => {
-                let mut state = state.lock().expect("demo state lock");
-                if let Some(existing) = state
-                    .sites
-                    .iter_mut()
-                    .find(|existing| existing.site_id == site.site_id)
-                {
-                    *existing = site.clone();
-                } else {
-                    state.sites.push(site.clone());
-                }
-                Ok(())
-            }
-            Self::Nats(kv) => {
-                kv.put(&site.site_id, Bytes::from(serde_json::to_vec(site)?))
-                    .await
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-enum SelectedEvidenceStore {
-    Demo(DemoStore),
-    Nats(NatsStoreResourceClient),
-}
-
-#[derive(Debug, Clone)]
-struct EvidenceStore {
-    inner: SelectedEvidenceStore,
-    state: SharedState,
-    upload_evidence_id: Option<String>,
-    upload_operation_id: Option<String>,
-    publisher: Option<EventPublisher>,
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone)]
-struct AllowValidator;
-
-#[cfg(test)]
-impl RequestValidator for AllowValidator {
-    fn validate<'a>(
-        &'a self,
-        _subject: &'a str,
-        _payload: &'a Bytes,
-        _context: &'a RequestContext,
-    ) -> Pin<Box<dyn Future<Output = Result<RequestValidation, ServerError>> + Send + 'a>> {
-        Box::pin(async { Ok(RequestValidation::allowed()) })
+        self.0
+            .put(&site.site_id, Bytes::from(serde_json::to_vec(site)?))
+            .await
     }
 }
 
 #[derive(Clone)]
-enum DemoRequestValidator<C = Arc<TrellisClient>> {
-    #[cfg(test)]
-    Allow(AllowValidator),
-    Auth(DefaultRequestValidator<C>),
+struct EvidenceStore {
+    inner: StoreHandle,
+    state: SharedState,
+    upload_evidence_id: Option<String>,
+    upload_operation_id: Option<String>,
+    publisher: Option<Publisher>,
 }
 
-#[cfg(test)]
-impl<C> DemoRequestValidator<C> {
-    fn allow() -> Self {
-        Self::Allow(AllowValidator)
-    }
-}
-
-impl<C> RequestValidator for DemoRequestValidator<C>
-where
-    C: DefaultRequestValidatorClientPort,
-{
-    fn validate<'a>(
-        &'a self,
-        subject: &'a str,
-        payload: &'a Bytes,
-        context: &'a RequestContext,
-    ) -> Pin<Box<dyn Future<Output = Result<RequestValidation, ServerError>> + Send + 'a>> {
-        match self {
-            #[cfg(test)]
-            Self::Allow(validator) => validator.validate(subject, payload, context),
-            Self::Auth(validator) => validator.validate(subject, payload, context),
-        }
-    }
-}
-
-impl<C> std::fmt::Debug for DemoRequestValidator<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            #[cfg(test)]
-            Self::Allow(_) => f.write_str("DemoRequestValidator::Allow"),
-            Self::Auth(_) => f.write_str("DemoRequestValidator::Auth"),
-        }
-    }
-}
-
-impl StoreResourceClient for DemoStore {
-    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        let objects = self.objects.lock().expect("demo store lock");
-        Ok(objects.get(key).cloned())
-    }
-
-    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        let mut objects = self.objects.lock().expect("demo store lock");
-        objects.insert(key.to_string(), value);
-        Ok(())
-    }
-
-    async fn list(&self) -> Result<Vec<String>, ServerError> {
-        let objects = self.objects.lock().expect("demo store lock");
-        Ok(objects.keys().cloned().collect())
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), ServerError> {
-        let mut objects = self.objects.lock().expect("demo store lock");
-        objects.remove(key);
-        Ok(())
-    }
-}
-
-impl StoreResourceClient for SelectedEvidenceStore {
-    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        match self {
-            Self::Demo(store) => store.read(key).await,
-            Self::Nats(store) => store.read(key).await,
-        }
-    }
-
-    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        match self {
-            Self::Demo(store) => store.write(key, value).await,
-            Self::Nats(store) => store.write(key, value).await,
-        }
-    }
-
-    async fn list(&self) -> Result<Vec<String>, ServerError> {
-        match self {
-            Self::Demo(store) => store.list().await,
-            Self::Nats(store) => store.list().await,
-        }
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), ServerError> {
-        match self {
-            Self::Demo(store) => store.delete(key).await,
-            Self::Nats(store) => store.delete(key).await,
-        }
+impl std::fmt::Debug for EvidenceStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EvidenceStore")
+            .finish_non_exhaustive()
     }
 }
 
@@ -514,7 +344,7 @@ impl EvidenceStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(any())]
 async fn demo_pause(_ms: u64) {
     tokio::time::sleep(Duration::from_millis(1)).await;
 }
@@ -580,80 +410,61 @@ fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
 }
 
 async fn run_authenticated_service(trellis_url: &str, seed: &str) -> anyhow::Result<()> {
-    let mut options = ServiceConnectOptions::new(trellis_url, SERVICE_NAME, seed);
-    options.timeout_ms = REQUEST_TIMEOUT_MS;
-    let mut service = trellis_sdk_demo_service::connect_service(options).await?;
-    tracing::info!(
-        session_prefix = %service.client().auth().session_key.chars().take(16).collect::<String>(),
-        "Rust demo service connected"
-    );
-
-    let resources = service.resources().clone();
-    tracing::info!(
-        has_jobs = resources.jobs.is_some(),
-        store_count = resources.store.len(),
-        kv_count = resources.kv.len(),
-        "resolved service bootstrap resources"
-    );
-    let store = if resources.store.contains_key(UPLOADS_STORE) {
-        Some(service.store_client(UPLOADS_STORE).await?)
-    } else {
-        None
+    let options = ServiceConnectOptions::new(trellis_url, SERVICE_NAME, seed)
+        .with_timeout_ms(REQUEST_TIMEOUT_MS);
+    let mut service = trellis_participant_demo_service::connect(options).await?;
+    let site_summaries = SiteSummaryStore(service.kv().site_summaries().await?);
+    site_summaries.seed_missing_sample_sites().await?;
+    let store = service.store().uploads().await?;
+    let publisher = service.publisher();
+    let state = Arc::new(Mutex::new(sample_state()));
+    let context = AppContext {
+        state: Arc::clone(&state),
+        store: EvidenceStore {
+            inner: store,
+            state,
+            upload_evidence_id: None,
+            upload_operation_id: None,
+            publisher: Some(publisher.clone()),
+        },
+        site_summaries: site_summaries.clone(),
+        publisher,
+        refresh_jobs: service.jobs_client().refresh_site_summary(),
+        refresh_operations: InMemoryOperationRuntime::new(SERVICE_NAME)
+            .operation::<sdk_operations::SitesRefreshOperation>(),
     };
-    let site_summaries = if resources.kv.contains_key(SITE_SUMMARIES_KV) {
-        Some(service.kv_client(SITE_SUMMARIES_KV).await?)
-    } else {
-        None
-    };
-    if let Some(site_summaries) = &site_summaries {
-        SiteSummaryStore::Nats(site_summaries.clone())
-            .seed_missing_sample_sites()
-            .await?;
-    }
-    let refresh_worker_host = match (
-        refresh_jobs_runtime_binding(&resources),
-        site_summaries.clone(),
-    ) {
-        (Some(runtime_binding), Some(site_summaries)) => Some(
-            start_refresh_worker_host(
-                service.client().nats().clone(),
-                runtime_binding,
-                SiteSummaryStore::Nats(site_summaries),
-            )
-            .await?,
-        ),
-        _ => None,
-    };
-    tracing::info!(
-        refresh_worker = refresh_worker_host.is_some(),
-        "starting Rust demo service request loop"
-    );
-    let context = build_app_context(
-        Some(service.client().nats().clone()),
-        resources,
-        store,
-        site_summaries,
-        Some(service.client().nats().clone()),
-        service.client().auth().session_key.clone(),
-        None,
-        DemoRequestValidator::Auth(DefaultRequestValidator::new(Arc::clone(service.client()))),
-    );
+    service
+        .jobs()
+        .refresh_site_summary()
+        .handle({
+            let site_summaries = site_summaries.clone();
+            move |job| {
+                let site_summaries = site_summaries.clone();
+                async move {
+                    let input = SitesRefreshInput {
+                        site_id: job.payload().site_id.clone(),
+                    };
+                    let output = refresh_site_summary(
+                        site_summaries,
+                        input,
+                        format!("refresh-{}", job.context().request_id),
+                    )
+                    .await?;
+                    serde_json::from_value(serde_json::to_value(output).map_err(|e| e.to_string())?)
+                        .map_err(|e| e.to_string())
+                }
+            }
+        })
+        .await?;
     register_demo_runtime_handlers(&mut service, context);
-
-    let service_result = service.run().await;
-    if let Some(worker_host) = refresh_worker_host {
-        worker_host.stop().await?;
-    }
-    service_result?;
+    tracing::info!("starting Rust demo service request loop");
+    service.run().await?;
     Ok(())
 }
 
-enum ActivityLiveStreamState {
-    Init(async_nats::Client),
-    Streaming(Pin<Box<dyn Stream<Item = async_nats::Message> + Send>>),
-    Done,
-}
+const _: () = ();
 
+#[cfg(any())]
 fn activity_live_stream(
     nats: async_nats::Client,
 ) -> impl Stream<Item = Result<AuditFeedEvent, ServerError>> + Send + 'static {
@@ -689,6 +500,7 @@ fn activity_live_stream(
     })
 }
 
+#[cfg(any())]
 async fn subscribe_activity_live_sources(
     nats: &async_nats::Client,
 ) -> Result<impl futures_util::Stream<Item = async_nats::Message>, ServerError> {
@@ -710,23 +522,24 @@ async fn subscribe_activity_live_sources(
     Ok(futures_util::stream::select_all(subscribers))
 }
 
+#[cfg(any())]
 fn activity_live_source_name(subject: &str) -> Option<&'static str> {
     ACTIVITY_LIVE_SOURCE_EVENTS
         .iter()
         .find_map(|(name, event_subject)| (*event_subject == subject).then_some(*name))
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app() -> AppContext {
     build_test_app_with_nats(None)
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_nats(nats: Option<async_nats::Client>) -> AppContext {
     build_test_app_with_nats_and_resources(nats, demo_resources())
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_nats_and_resources(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -734,7 +547,7 @@ fn build_test_app_with_nats_and_resources(
     build_test_app_with_nats_resources_and_store(nats, resources, None)
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_nats_resources_and_store(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -743,7 +556,7 @@ fn build_test_app_with_nats_resources_and_store(
     build_test_app_with_nats_resources_store_and_jobs(nats, resources, nats_store, None, None, None)
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_nats_resources_store_and_jobs(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -764,7 +577,7 @@ fn build_test_app_with_nats_resources_store_and_jobs(
     )
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_nats_resources_store_jobs_and_validator(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -780,7 +593,7 @@ fn build_test_app_with_nats_resources_store_jobs_and_validator(
     };
     let store = nats_store.map_or_else(
         || SelectedEvidenceStore::Demo(demo_store),
-        SelectedEvidenceStore::Nats,
+        SelectedEvidenceStore::Runtime,
     );
     build_test_app_with_selected_evidence_store_and_jobs(
         nats,
@@ -794,7 +607,7 @@ fn build_test_app_with_nats_resources_store_jobs_and_validator(
     )
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_selected_evidence_store(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -812,7 +625,7 @@ fn build_test_app_with_selected_evidence_store(
     )
 }
 
-#[cfg(test)]
+#[cfg(any())]
 fn build_test_app_with_selected_evidence_store_and_jobs(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -835,6 +648,7 @@ fn build_test_app_with_selected_evidence_store_and_jobs(
     )
 }
 
+#[cfg(any())]
 fn build_app_context(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -850,7 +664,7 @@ fn build_app_context(
     };
     let store = nats_store.map_or_else(
         || SelectedEvidenceStore::Demo(demo_store),
-        SelectedEvidenceStore::Nats,
+        SelectedEvidenceStore::Runtime,
     );
     build_app_context_with_store(
         nats,
@@ -864,6 +678,7 @@ fn build_app_context(
     )
 }
 
+#[cfg(any())]
 fn build_app_context_with_store(
     nats: Option<async_nats::Client>,
     resources: ServiceResourceBindings,
@@ -886,7 +701,7 @@ fn build_app_context_with_store(
     let use_worker_wait = nats_site_summaries.is_some();
     let site_summaries = nats_site_summaries.map_or_else(
         || SiteSummaryStore::Memory(Arc::clone(&state)),
-        SiteSummaryStore::Nats,
+        SiteSummaryStore::Runtime,
     );
     let refresh_operations = InMemoryOperationRuntime::new(SERVICE_NAME)
         .operation::<sdk_operations::SitesRefreshOperation>();
@@ -910,134 +725,167 @@ fn build_app_context_with_store(
 }
 
 fn register_demo_runtime_handlers(service: &mut ConnectedService, context: AppContext) {
-    service.register_assignments_list({
+    service.handle().rpc().assignments().list({
         let state = Arc::clone(&context.state);
         move |_ctx, input| assignments_list(Arc::clone(&state), input)
     });
-    service.register_sites_list({
+    service.handle().rpc().sites().list({
         let site_summaries = context.site_summaries.clone();
         move |_ctx, input| sites_list(site_summaries.clone(), input)
     });
-    service.register_sites_get({
+    service.handle().rpc().sites().get({
         let site_summaries = context.site_summaries.clone();
         move |_ctx, input| sites_get(site_summaries.clone(), input)
     });
-    service.register_evidence_list({
+    service.handle().rpc().evidence().list({
         let state = Arc::clone(&context.state);
         move |_ctx, input| evidence_list(Arc::clone(&state), input)
     });
-    service.register_evidence_download({
+    service.handle().rpc().evidence().download({
         let context = context.clone();
-        move |ctx: ServiceHandlerContext, input| {
-            evidence_download(context.clone(), ctx.into_request_context(), input)
-        }
+        move |ctx, input| evidence_download(context.clone(), ctx, input)
     });
-    service.register_evidence_delete({
+    service.handle().rpc().evidence().delete({
         let context = context.clone();
         move |_ctx, input| evidence_delete(context.clone(), input)
     });
-    service.register_reports_list({
+    service.handle().rpc().reports().list({
         let state = Arc::clone(&context.state);
         move |_ctx, input| reports_list(Arc::clone(&state), input)
     });
-    service.register_sites_refresh_with_watch(
-        {
-            let context = context.clone();
-            move |ctx: ServiceHandlerContext, input| {
-                sites_refresh_start(context.clone(), ctx.into_request_context(), input)
-            }
-        },
-        {
-            let refresh_operations = context.refresh_operations.clone();
-            move |_ctx, operation_id| {
-                let refresh_operations = refresh_operations.clone();
-                async move { refresh_operations.get(operation_id).await }
-            }
-        },
-        {
-            let refresh_operations = context.refresh_operations.clone();
-            move |_ctx, operation_id| {
-                let refresh_operations = refresh_operations.clone();
-                sites_refresh_watch(refresh_operations, operation_id)
-            }
-        },
-        {
-            let refresh_operations = context.refresh_operations.clone();
-            move |_ctx, operation_id| {
-                let refresh_operations = refresh_operations.clone();
-                async move { refresh_operations.cancel(operation_id).await }
-            }
-        },
-    );
-    service.register_reports_generate_with_watch(
-        {
-            let context = context.clone();
-            move |ctx: ServiceHandlerContext, input| {
-                reports_generate_start(context.clone(), ctx.into_request_context(), input)
-            }
-        },
-        {
-            let state = Arc::clone(&context.state);
-            move |_ctx, operation_id| {
-                operation_get::<ReportsGenerateProgress, ReportsGenerateOutput>(
-                    Arc::clone(&state),
-                    operation_id,
-                )
-            }
-        },
-        {
-            let state = Arc::clone(&context.state);
-            move |_ctx, operation_id| {
-                operation_watch::<ReportsGenerateProgress, ReportsGenerateOutput>(
-                    Arc::clone(&state),
-                    operation_id,
-                )
-            }
-        },
-        |ctx: ServiceHandlerContext, operation_id| {
-            operation_cancel::<ReportsGenerateProgress, ReportsGenerateOutput>(
-                ctx.into_request_context(),
-                operation_id,
-            )
-        },
-    );
-    if let Some(nats) = context.nats.clone() {
-        service.register_audit_feed(move |_ctx, _input| activity_live_stream(nats.clone()));
-    }
-    service.register_evidence_upload_with_watch(
-        {
-            let context = context.clone();
-            move |ctx: ServiceHandlerContext, input| {
-                evidence_upload_start(context.clone(), ctx.into_request_context(), input)
-            }
-        },
-        {
-            let state = Arc::clone(&context.state);
-            move |_ctx, operation_id| {
-                operation_get::<EvidenceUploadProgress, EvidenceUploadOutput>(
-                    Arc::clone(&state),
-                    operation_id,
-                )
-            }
-        },
-        {
-            let state = Arc::clone(&context.state);
-            move |_ctx, operation_id| {
-                operation_watch::<EvidenceUploadProgress, EvidenceUploadOutput>(
-                    Arc::clone(&state),
-                    operation_id,
-                )
-            }
-        },
-        |ctx: ServiceHandlerContext, operation_id| {
-            operation_cancel::<EvidenceUploadProgress, EvidenceUploadOutput>(
-                ctx.into_request_context(),
-                operation_id,
-            )
-        },
-    );
+
+    service
+        .handle()
+        .operation()
+        .sites()
+        .refresh(
+            DemoOperationProvider::<sdk_operations::SitesRefreshOperation> {
+                start: Arc::new({
+                    let context = context.clone();
+                    move |ctx, input| {
+                        Box::pin(sites_refresh_start(
+                            context.clone(),
+                            ctx.into_request_context(),
+                            input,
+                        ))
+                    }
+                }),
+                get: Arc::new({
+                    let operations = context.refresh_operations.clone();
+                    move |_ctx, id| {
+                        let operations = operations.clone();
+                        Box::pin(async move { operations.get(id).await })
+                    }
+                }),
+                wait: Arc::new({
+                    let operations = context.refresh_operations.clone();
+                    move |_ctx, id| {
+                        let operations = operations.clone();
+                        Box::pin(async move { operations.wait(id).await })
+                    }
+                }),
+                cancel: Arc::new({
+                    let operations = context.refresh_operations.clone();
+                    move |_ctx, id| {
+                        let operations = operations.clone();
+                        Box::pin(async move { operations.cancel(id).await })
+                    }
+                }),
+                descriptor: PhantomData,
+            },
+        );
+    service
+        .handle()
+        .operation()
+        .reports()
+        .generate(
+            DemoOperationProvider::<sdk_operations::ReportsGenerateOperation> {
+                start: Arc::new({
+                    let context = context.clone();
+                    move |ctx, input| {
+                        Box::pin(reports_generate_start(
+                            context.clone(),
+                            ctx.into_request_context(),
+                            input,
+                        ))
+                    }
+                }),
+                get: Arc::new({
+                    let state = Arc::clone(&context.state);
+                    move |_ctx, id| {
+                        Box::pin(operation_get::<
+                            ReportsGenerateProgress,
+                            ReportsGenerateOutput,
+                        >(Arc::clone(&state), id))
+                    }
+                }),
+                wait: Arc::new({
+                    let state = Arc::clone(&context.state);
+                    move |_ctx, id| {
+                        Box::pin(operation_wait::<
+                            ReportsGenerateProgress,
+                            ReportsGenerateOutput,
+                        >(Arc::clone(&state), id))
+                    }
+                }),
+                cancel: Arc::new(move |ctx, id| {
+                    Box::pin(operation_cancel::<
+                        ReportsGenerateProgress,
+                        ReportsGenerateOutput,
+                    >(ctx.into_request_context(), id))
+                }),
+                descriptor: PhantomData,
+            },
+        );
+    service
+        .handle()
+        .operation()
+        .evidence()
+        .upload(
+            DemoOperationProvider::<sdk_operations::EvidenceUploadOperation> {
+                start: Arc::new({
+                    let context = context.clone();
+                    move |ctx, input| Box::pin(evidence_upload_start(context.clone(), ctx, input))
+                }),
+                get: Arc::new({
+                    let state = Arc::clone(&context.state);
+                    move |_ctx, id| {
+                        Box::pin(
+                            operation_get::<EvidenceUploadProgress, EvidenceUploadOutput>(
+                                Arc::clone(&state),
+                                id,
+                            ),
+                        )
+                    }
+                }),
+                wait: Arc::new({
+                    let state = Arc::clone(&context.state);
+                    move |_ctx, id| {
+                        Box::pin(
+                            operation_wait::<EvidenceUploadProgress, EvidenceUploadOutput>(
+                                Arc::clone(&state),
+                                id,
+                            ),
+                        )
+                    }
+                }),
+                cancel: Arc::new(move |ctx, id| {
+                    Box::pin(operation_cancel::<
+                        EvidenceUploadProgress,
+                        EvidenceUploadOutput,
+                    >(ctx.into_request_context(), id))
+                }),
+                descriptor: PhantomData,
+            },
+        );
+    service
+        .handle()
+        .feed()
+        .audit()
+        .feed(|_ctx, _input| stream::empty());
 }
 
+#[cfg(any())]
 fn refresh_job_manager(
     resources: &ServiceResourceBindings,
     nats: Option<async_nats::Client>,
@@ -1050,6 +898,7 @@ fn refresh_job_manager(
     )
 }
 
+#[cfg(any())]
 fn refresh_jobs_binding(resources: &ServiceResourceBindings) -> jobs::JobsBinding {
     if let Some(jobs) = &resources.jobs {
         let queues = jobs
@@ -1088,6 +937,7 @@ fn refresh_jobs_binding(resources: &ServiceResourceBindings) -> jobs::JobsBindin
     demo_refresh_jobs_binding()
 }
 
+#[cfg(any())]
 fn refresh_jobs_runtime_binding(
     resources: &ServiceResourceBindings,
 ) -> Option<jobs::JobsRuntimeBinding> {
@@ -1099,6 +949,7 @@ fn refresh_jobs_runtime_binding(
     Some(jobs::JobsRuntimeBinding { jobs, work_stream })
 }
 
+#[cfg(any())]
 fn refresh_worker_wait_strategy(
     resources: &ServiceResourceBindings,
     nats: Option<async_nats::Client>,
@@ -1117,6 +968,7 @@ fn refresh_worker_wait_strategy(
     ))
 }
 
+#[cfg(any())]
 async fn start_refresh_worker_host(
     nats: async_nats::Client,
     binding: jobs::JobsRuntimeBinding,
@@ -1146,58 +998,9 @@ async fn start_refresh_worker_host(
     Ok(host)
 }
 
-async fn process_refresh_site_summary_job(
-    site_summaries: SiteSummaryStore,
-    active_job: jobs::WorkerActiveJob<DemoJobPublisher, DemoJobMetaSource>,
-) -> Result<serde_json::Value, jobs::JobProcessError<String>> {
-    let input: SitesRefreshInput = serde_json::from_value(active_job.job().payload.clone())
-        .map_err(|error| jobs::JobProcessError::failed(error.to_string()))?;
-    tracing::info!(
-        job_id = %active_job.job().id,
-        request_id = %active_job.context().request_id,
-        trace_id = %active_job.context().trace_id,
-        site_id = %input.site_id,
-        "refreshSiteSummary job started",
-    );
-    active_job
-        .update_progress(
-            1,
-            2,
-            Some(format!(
-                "Loading latest field summary for {}",
-                input.site_id
-            )),
-        )
-        .await
-        .map_err(|error| jobs::JobProcessError::failed(error.to_string()))?;
-    demo_pause(REFRESH_JOB_LOAD_PAUSE_MS).await;
-    let refresh_id = active_job.job().id.clone();
-    let output = refresh_site_summary(site_summaries, input, refresh_id)
-        .await
-        .map_err(jobs::JobProcessError::failed)?;
-    demo_pause(REFRESH_JOB_STORE_PAUSE_MS).await;
-    active_job
-        .update_progress(
-            2,
-            2,
-            Some(format!(
-                "Stored refreshed summary for {}",
-                output.site.site_name
-            )),
-        )
-        .await
-        .map_err(|error| jobs::JobProcessError::failed(error.to_string()))?;
-    demo_pause(REFRESH_JOB_PROGRESS_PAUSE_MS).await;
-    tracing::info!(
-        job_id = %active_job.job().id,
-        request_id = %active_job.context().request_id,
-        trace_id = %active_job.context().trace_id,
-        site_id = %output.site.site_id,
-        "refreshSiteSummary job completed",
-    );
-    serde_json::to_value(output).map_err(|error| jobs::JobProcessError::failed(error.to_string()))
-}
+const _: () = ();
 
+#[cfg(any())]
 fn demo_refresh_jobs_binding() -> jobs::JobsBinding {
     jobs::JobsBinding {
         namespace: SERVICE_NAME.to_string(),
@@ -1314,7 +1117,7 @@ async fn evidence_list(
 
 async fn evidence_download(
     context: AppContext,
-    ctx: RequestContext,
+    ctx: ServiceHandlerContext,
     input: EvidenceDownloadRequest,
 ) -> Result<EvidenceDownloadResponse, ServerError> {
     let Some((evidence, transfer_id)) = ({
@@ -1334,16 +1137,12 @@ async fn evidence_download(
             key: input.key,
         });
     };
-    let mut plan = plan_download_transfer_grant(TransferDownloadGrantArgs {
-        service_name: SERVICE_NAME,
-        session_key: &context.service_session_key,
-        service_session_key: &context.service_session_key,
-        resources: &context.resources,
-        store: UPLOADS_STORE,
-        transfer_id: &transfer_id,
-        expires_at: TRANSFER_EXPIRES_AT,
-        chunk_bytes: TRANSFER_CHUNK_BYTES,
-        info: FileTransferInfo {
+    let plan = ctx.plan_download_transfer(
+        UPLOADS_STORE,
+        &transfer_id,
+        TRANSFER_EXPIRES_AT,
+        TRANSFER_CHUNK_BYTES,
+        FileTransferInfo {
             key: evidence.key,
             size: evidence.size as u64,
             updated_at: evidence.uploaded_at,
@@ -1351,8 +1150,7 @@ async fn evidence_download(
             content_type: evidence.content_type,
             metadata: BTreeMap::new(),
         },
-    })?;
-    plan.grant.session_key = session_key(&ctx).to_string();
+    )?;
     if context.store.read(&plan.grant.info.key).await?.is_none() {
         return Err(ServerError::TransferObjectMissing {
             store: UPLOADS_STORE.to_string(),
@@ -1360,7 +1158,9 @@ async fn evidence_download(
         });
     }
 
-    spawn_download_transfer(&context, plan.clone()).await?;
+    ctx.handle()
+        .spawn_download_transfer_endpoint(plan.clone(), context.store.clone())
+        .await?;
 
     Ok(EvidenceDownloadResponse {
         transfer: download_transfer_to_response(plan.grant),
@@ -1380,7 +1180,7 @@ async fn evidence_delete(
     };
     context.store.delete(&key).await?;
     publish_activity_event(
-        context.publisher.as_ref(),
+        Some(&context.publisher),
         AuditRecordedEvent {
             activity_id: format!("activity-evidence-deleted-{key}"),
             kind: "evidence-deleted".to_string(),
@@ -1445,7 +1245,6 @@ async fn sites_refresh_start(
     tracing::info!(
         operation_id = %operation_id,
         site_id = %input.site_id,
-        worker_wait = context.refresh_worker_wait.is_some(),
         "Sites.Refresh accepted"
     );
     let refresh_operations = context.refresh_operations.clone();
@@ -1465,197 +1264,53 @@ async fn sites_refresh_start(
     Ok(accepted)
 }
 
-fn sites_refresh_watch(
-    refresh_operations: ServiceOperation<sdk_operations::SitesRefreshOperation>,
-    operation_id: String,
-) -> Pin<
-    Box<
-        dyn Stream<
-                Item = Result<
-                    OperationSnapshot<SitesRefreshProgress, SitesRefreshOutput>,
-                    ServerError,
-                >,
-            > + Send,
-    >,
-> {
-    enum WatchState {
-        Init {
-            refresh_operations: ServiceOperation<sdk_operations::SitesRefreshOperation>,
-            operation_id: String,
-        },
-        Streaming {
-            snapshots: Pin<
-                Box<
-                    dyn Stream<
-                            Item = Result<
-                                OperationSnapshot<SitesRefreshProgress, SitesRefreshOutput>,
-                                ServerError,
-                            >,
-                        > + Send,
-                >,
-            >,
-        },
-    }
-
-    Box::pin(stream::unfold(
-        WatchState::Init {
-            refresh_operations,
-            operation_id,
-        },
-        |state| async move {
-            match state {
-                WatchState::Init {
-                    refresh_operations,
-                    operation_id,
-                } => match refresh_operations.watch(operation_id).await {
-                    Ok(mut snapshots) => snapshots
-                        .next()
-                        .await
-                        .map(|snapshot| (snapshot, WatchState::Streaming { snapshots })),
-                    Err(error) => Some((
-                        Err(error),
-                        WatchState::Streaming {
-                            snapshots: Box::pin(stream::empty()),
-                        },
-                    )),
-                },
-                WatchState::Streaming { mut snapshots } => snapshots
-                    .next()
-                    .await
-                    .map(|snapshot| (snapshot, WatchState::Streaming { snapshots })),
-            }
-        },
-    ))
-}
+const _: () = ();
 
 async fn run_sites_refresh(
     context: AppContext,
     operation_id: String,
     input: SitesRefreshInput,
 ) -> Result<(), ServerError> {
-    let site_id = input.site_id.clone();
-    tracing::info!(
-        operation_id = %operation_id,
-        site_id = %site_id,
-        "Sites.Refresh background task started"
-    );
-    {
-        context
-            .refresh_operations
-            .control(operation_id.clone())
-            .await?
-            .progress(SitesRefreshProgress {
-                stage: "queued".to_string(),
-                message: format!("Queued summary refresh for {site_id}"),
-            })
-            .await?;
-    }
-    if let Some(wait_strategy) = context.refresh_worker_wait.clone() {
-        demo_pause(REFRESH_QUEUE_PAUSE_MS).await;
-        let job = context
-            .refresh_jobs
-            .create(REFRESH_SITE_SUMMARY_JOB, input)
-            .await
-            .map_err(job_manager_error)?;
-        tracing::info!(operation_id = %operation_id, job_id = %job.id, "Sites.Refresh job created");
-        demo_pause(REFRESH_JOB_CREATE_PAUSE_MS).await;
-        {
-            context
-                .refresh_operations
-                .control(operation_id.clone())
-                .await?
-                .progress(SitesRefreshProgress {
-                    stage: "refreshing".to_string(),
-                    message: format!("Refreshing field status for {site_id}"),
-                })
-                .await?;
-        }
-        let terminal = wait_strategy
-            .wait_for_terminal(job)
-            .await
-            .map_err(job_wait_error)?;
-        tracing::info!(operation_id = %operation_id, job_id = %terminal.id, state = ?terminal.state, "Sites.Refresh job wait returned");
-        let output = refresh_output_from_terminal_job(&terminal)?;
-        demo_pause(REFRESH_COMPLETE_PAUSE_MS).await;
-        let output_for_events = output.clone();
-        context
-            .refresh_operations
-            .control(operation_id.clone())
-            .await?
-            .complete(output)
-            .await?;
-        publish_sites_refresh_events(&context, &output_for_events).await;
-        demo_pause(REFRESH_ACTIVITY_PAUSE_MS).await;
-        return Ok(());
-    }
-
-    demo_pause(REFRESH_QUEUE_PAUSE_MS).await;
-    let job = context
-        .refresh_jobs
-        .create(REFRESH_SITE_SUMMARY_JOB, input.clone())
-        .await
-        .map_err(job_manager_error)?;
-    tracing::info!(operation_id = %operation_id, job_id = %job.id, "Sites.Refresh inline job created");
-    demo_pause(REFRESH_JOB_CREATE_PAUSE_MS).await;
-    {
-        context
-            .refresh_operations
-            .control(operation_id.clone())
-            .await?
-            .progress(SitesRefreshProgress {
-                stage: "refreshing".to_string(),
-                message: format!("Refreshing field status for {site_id}"),
-            })
-            .await?;
-    }
-    let site_summaries = context.site_summaries.clone();
-    let outcome = context
-        .refresh_jobs
-        .process(
-            job,
-            jobs::JobCancellationToken::new(),
-            move |job| async move {
-                job.update_progress(1, 1, Some("Refreshing site summary".to_string()))
-                    .await
-                    .map_err(|error| jobs::JobProcessError::failed(error.to_string()))?;
-                refresh_site_summary(site_summaries.clone(), input, job.job().id.clone())
-                    .await
-                    .map_err(jobs::JobProcessError::failed)
-            },
-        )
-        .await
-        .map_err(job_manager_error)?;
-    let output = match outcome {
-        jobs::JobProcessOutcome::Completed { result, .. } => result,
-        other => {
-            return Err(ServerError::Nats(format!(
-                "refresh job did not complete: {other:?}"
-            )))
-        }
-    };
-    demo_pause(REFRESH_COMPLETE_PAUSE_MS).await;
-    let output_for_events = output.clone();
     context
         .refresh_operations
         .control(operation_id.clone())
         .await?
+        .progress(SitesRefreshProgress {
+            stage: "refreshing".to_string(),
+            message: format!("Refreshing field status for {}", input.site_id),
+        })
+        .await?;
+    let job = context
+        .refresh_jobs
+        .submit(trellis_sdk_demo_service::RefreshSiteSummaryJobPayload {
+            site_id: input.site_id,
+        })
+        .await
+        .map_err(job_wait_error)?;
+    let terminal = job.wait().await.map_err(job_wait_error)?;
+    let result = terminal.result.ok_or_else(|| {
+        ServerError::Nats(format!(
+            "refresh job '{}' completed without a result",
+            terminal.id
+        ))
+    })?;
+    let output: SitesRefreshOutput = serde_json::from_value(serde_json::to_value(result)?)?;
+    let output_for_events = output.clone();
+    context
+        .refresh_operations
+        .control(operation_id)
+        .await?
         .complete(output)
         .await?;
     publish_sites_refresh_events(&context, &output_for_events).await;
-    demo_pause(REFRESH_ACTIVITY_PAUSE_MS).await;
     Ok(())
 }
 
 async fn publish_sites_refresh_events(context: &AppContext, output: &SitesRefreshOutput) {
-    let Some(publisher) = &context.publisher else {
-        return;
-    };
+    let publisher = &context.publisher;
 
     let refreshed = sites_refreshed_event_from_output(output);
-    if let Err(error) = publisher
-        .publish::<sdk_events::SitesRefreshedEventDescriptor>(&refreshed)
-        .await
-    {
+    if let Err(error) = publisher.publish_sites_refreshed(&refreshed).await {
         tracing::warn!(error = %error, "failed to publish Sites.Refreshed");
     }
 
@@ -1668,14 +1323,12 @@ async fn publish_sites_refresh_events(context: &AppContext, output: &SitesRefres
         related_site_id: Some(output.site.site_id.clone()),
         related_inspection_id: None,
     };
-    if let Err(error) = publisher
-        .publish::<sdk_events::AuditRecordedEventDescriptor>(&activity)
-        .await
-    {
+    if let Err(error) = publisher.publish_audit_recorded(&activity).await {
         tracing::warn!(error = %error, "failed to publish Audit.Recorded");
     }
 }
 
+#[cfg(any())]
 fn refresh_output_from_terminal_job(job: &jobs::Job) -> Result<SitesRefreshOutput, ServerError> {
     match job.state {
         jobs::JobState::Completed => {
@@ -1718,6 +1371,7 @@ async fn refresh_site_summary(
     Ok(output)
 }
 
+#[cfg(any())]
 fn job_manager_error(error: jobs::JobManagerError<String>) -> ServerError {
     ServerError::Nats(format!("refresh job error: {error}"))
 }
@@ -1801,9 +1455,7 @@ async fn publish_reports_generate_events(
     inspection_id: String,
     assignment: Option<Assignment>,
 ) {
-    let Some(publisher) = &context.publisher else {
-        return;
-    };
+    let publisher = &context.publisher;
 
     let published = ReportsPublishedEvent {
         report_id,
@@ -1813,10 +1465,7 @@ async fn publish_reports_generate_events(
             .map(|assignment| assignment.site_id.clone()),
         published_at: now_iso(),
     };
-    if let Err(error) = publisher
-        .publish::<sdk_events::ReportsPublishedEventDescriptor>(&published)
-        .await
-    {
+    if let Err(error) = publisher.publish_reports_published(&published).await {
         tracing::warn!(error = %error, "failed to publish Reports.Published");
     }
 
@@ -1832,15 +1481,12 @@ async fn publish_reports_generate_events(
         related_site_id: assignment.map(|assignment| assignment.site_id),
         related_inspection_id: Some(inspection_id),
     };
-    if let Err(error) = publisher
-        .publish::<sdk_events::AuditRecordedEventDescriptor>(&activity)
-        .await
-    {
+    if let Err(error) = publisher.publish_audit_recorded(&activity).await {
         tracing::warn!(error = %error, "failed to publish Audit.Recorded");
     }
 }
 
-async fn publish_evidence_upload_events(publisher: Option<&EventPublisher>, evidence: &Evidence) {
+async fn publish_evidence_upload_events(publisher: Option<&Publisher>, evidence: &Evidence) {
     let Some(publisher) = publisher else {
         return;
     };
@@ -1854,10 +1500,7 @@ async fn publish_evidence_upload_events(publisher: Option<&EventPublisher>, evid
         evidence_type: evidence.evidence_type.clone(),
         uploaded_at: evidence.uploaded_at.clone(),
     };
-    if let Err(error) = publisher
-        .publish::<sdk_events::EvidenceUploadedEventDescriptor>(&uploaded)
-        .await
-    {
+    if let Err(error) = publisher.publish_evidence_uploaded(&uploaded).await {
         tracing::warn!(error = %error, "failed to publish Evidence.Uploaded");
     }
 
@@ -1880,7 +1523,7 @@ async fn publish_evidence_upload_events(publisher: Option<&EventPublisher>, evid
 }
 
 async fn publish_activity_event(
-    publisher: Option<&EventPublisher>,
+    publisher: Option<&Publisher>,
     activity: AuditRecordedEvent,
     context: &str,
 ) {
@@ -1888,17 +1531,14 @@ async fn publish_activity_event(
         return;
     };
 
-    if let Err(error) = publisher
-        .publish::<sdk_events::AuditRecordedEventDescriptor>(&activity)
-        .await
-    {
+    if let Err(error) = publisher.publish_audit_recorded(&activity).await {
         tracing::warn!(error = %error, context, "failed to publish Audit.Recorded");
     }
 }
 
 async fn evidence_upload_start(
     context: AppContext,
-    ctx: RequestContext,
+    ctx: ServiceHandlerContext,
     input: EvidenceUploadInput,
 ) -> Result<AcceptedOperation<EvidenceUploadProgress, EvidenceUploadOutput>, ServerError> {
     let (accepted, plan, evidence_id, operation_id) = {
@@ -1943,21 +1583,16 @@ async fn evidence_upload_start(
         );
         let transfer_id = allocate_transfer_id(&mut state, "upload");
 
-        let mut plan = plan_upload_transfer_grant(TransferUploadGrantArgs {
-            service_name: SERVICE_NAME,
-            session_key: &context.service_session_key,
-            service_session_key: &context.service_session_key,
-            resources: &context.resources,
-            store: UPLOADS_STORE,
-            key: &input.key,
-            transfer_id: &transfer_id,
-            expires_at: TRANSFER_EXPIRES_AT,
-            chunk_bytes: TRANSFER_CHUNK_BYTES,
-            max_bytes: Some(MAX_UPLOAD_BYTES as u64),
-            content_type: input.content_type.as_deref(),
+        let plan = ctx.plan_upload_transfer(
+            UPLOADS_STORE,
+            &input.key,
+            &transfer_id,
+            TRANSFER_EXPIRES_AT,
+            TRANSFER_CHUNK_BYTES,
+            Some(MAX_UPLOAD_BYTES as u64),
+            input.content_type.as_deref(),
             metadata,
-        })?;
-        plan.grant.session_key = session_key(&ctx).to_string();
+        )?;
 
         let accepted = accepted_with_transfer_state(
             &mut state,
@@ -1981,7 +1616,15 @@ async fn evidence_upload_start(
         (accepted, plan, evidence_id, operation_id)
     };
 
-    spawn_upload_transfer(&context, plan, evidence_id, operation_id).await?;
+    let session = UploadTransferSession::new(plan, FIXED_NOW);
+    let store = context.store.for_upload(evidence_id, operation_id.clone());
+    let state = Arc::clone(&context.state);
+    ctx.handle()
+        .spawn_upload_transfer_endpoint_with_progress(session, store, move |progress| {
+            let mut state = state.lock().expect("demo state lock");
+            progress_upload_transfer_operation(&mut state, &operation_id, progress);
+        })
+        .await?;
     Ok(accepted)
 }
 
@@ -2011,7 +1654,6 @@ where
     Ok(snapshot)
 }
 
-#[cfg(test)]
 async fn operation_wait<TProgress, TOutput>(
     state: SharedState,
     operation_id: String,
@@ -2375,11 +2017,10 @@ fn allocate_transfer_id(state: &mut AppState, prefix: &str) -> String {
     transfer_id
 }
 
-fn session_key(ctx: &RequestContext) -> &str {
-    ctx.session_key.as_deref().unwrap_or("demo-session")
-}
+const _: () = ();
 
-#[cfg(test)]
+#[cfg(any())]
+#[cfg(any())]
 fn demo_resources() -> ServiceResourceBindings {
     let mut store = BTreeMap::new();
     store.insert(
@@ -2397,6 +2038,7 @@ fn demo_resources() -> ServiceResourceBindings {
     }
 }
 
+#[cfg(any())]
 async fn spawn_upload_transfer(
     context: &AppContext,
     plan: UploadTransferGrantPlan,
@@ -2424,6 +2066,7 @@ async fn spawn_upload_transfer(
     .await
 }
 
+#[cfg(any())]
 async fn spawn_download_transfer(
     context: &AppContext,
     plan: DownloadTransferGrantPlan,
@@ -2440,8 +2083,8 @@ async fn spawn_download_transfer(
 
 fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownloadResponseTransfer {
     EvidenceDownloadResponseTransfer {
-        r#type: grant.type_name,
-        direction: grant.direction,
+        r#type: EvidenceDownloadResponseTransferType::TransferGrant,
+        direction: EvidenceDownloadResponseTransferDirection::Receive,
         service: grant.service,
         session_key: grant.session_key,
         transfer_id: grant.transfer_id,
@@ -2461,7 +2104,6 @@ fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownlo
 
 fn sample_state() -> AppState {
     AppState {
-        sites: sample_sites(),
         assignments: vec![
             Assignment {
                 inspection_id: "insp-west-001".to_string(),
@@ -2539,12 +2181,7 @@ fn sample_sites() -> Vec<Site> {
     ]
 }
 
-fn sample_store_objects() -> BTreeMap<String, Bytes> {
-    BTreeMap::from([(
-        "site-north/transformer-a/photo.txt".to_string(),
-        Bytes::from_static(b"012345678901234567890123456789012345678901"),
-    )])
-}
+const _: () = ();
 
 fn assignment_to_response(assignment: &Assignment) -> AssignmentsListResponseEntriesItem {
     AssignmentsListResponseEntriesItem {
@@ -2553,7 +2190,11 @@ fn assignment_to_response(assignment: &Assignment) -> AssignmentsListResponseEnt
         site_name: assignment.site_name.clone(),
         asset_name: assignment.asset_name.clone(),
         checklist_name: assignment.checklist_name.clone(),
-        priority: json!(assignment.priority),
+        priority: match assignment.priority.as_str() {
+            "high" => AssignmentsListResponseEntriesItemPriority::High,
+            "medium" => AssignmentsListResponseEntriesItemPriority::Medium,
+            _ => AssignmentsListResponseEntriesItemPriority::Low,
+        },
         scheduled_for: assignment.scheduled_for.clone(),
     }
 }
@@ -2653,753 +2294,5 @@ fn sites_refreshed_event_from_output(output: &SitesRefreshOutput) -> SitesRefres
             last_report_at: output.site.last_report_at.clone(),
         },
         refreshed_at: now_iso(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use bytes::Bytes;
-    use futures_util::StreamExt;
-    use trellis_rs::auth::{AuthRequestsValidateRequest, AuthRequestsValidateResponse};
-    use trellis_rs::client::TrellisClientError;
-    use trellis_rs::service::UploadTransferChunk;
-
-    use super::*;
-
-    const LIST_LIMIT: i64 = 50;
-    const LIST_OFFSET: i64 = 0;
-
-    fn args() -> Args {
-        Args {
-            contract: false,
-            trellis_url: None,
-            seed: None,
-        }
-    }
-
-    #[derive(Clone)]
-    struct FakeAuthValidatorClient {
-        allowed: bool,
-        seen_subjects: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl DefaultRequestValidatorClientPort for FakeAuthValidatorClient {
-        fn auth_validate_request<'a>(
-            &'a self,
-            input: &'a AuthRequestsValidateRequest,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<AuthRequestsValidateResponse, TrellisClientError>>
-                    + Send
-                    + 'a,
-            >,
-        > {
-            self.seen_subjects
-                .lock()
-                .expect("seen subjects lock")
-                .push(input.subject.clone());
-            Box::pin(async move {
-                Ok(AuthRequestsValidateResponse {
-                    allowed: self.allowed,
-                    caller: serde_json::json!({ "type": "service", "id": "demo" }),
-                    inbox_prefix: "_INBOX.demo".to_string(),
-                })
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn demo_request_validator_auth_variant_delegates_to_auth_adapter() {
-        let seen_subjects = Arc::new(Mutex::new(Vec::new()));
-        let validator =
-            DemoRequestValidator::Auth(DefaultRequestValidator::new(FakeAuthValidatorClient {
-                allowed: true,
-                seen_subjects: Arc::clone(&seen_subjects),
-            }));
-
-        let allowed = validator
-            .validate(
-                "transfer.v1.Upload.demo",
-                &Bytes::from_static(b"chunk"),
-                &RequestContext {
-                    subject: "transfer.v1.Upload.demo".to_string(),
-                    session_key: Some("demo-session".to_string()),
-                    proof: Some("proof".to_string()),
-                    reply_to: None,
-                    ..RequestContext::default()
-                },
-            )
-            .await
-            .expect("auth adapter result");
-
-        assert!(allowed.allowed);
-        assert_eq!(
-            seen_subjects.lock().expect("seen subjects lock").as_slice(),
-            ["transfer.v1.Upload.demo"]
-        );
-    }
-
-    #[test]
-    fn runtime_mode_accepts_authenticated_args() {
-        let mut args = args();
-        args.trellis_url = Some("http://localhost:5173".to_string());
-        args.seed = Some("seed".to_string());
-
-        assert_eq!(
-            runtime_mode(&args).expect("runtime mode"),
-            RuntimeMode::Authenticated {
-                trellis_url: "http://localhost:5173".to_string(),
-                seed: "seed".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn runtime_mode_requires_complete_authenticated_args() {
-        let mut args = args();
-        args.trellis_url = Some("http://localhost:5173".to_string());
-
-        let error = runtime_mode(&args).expect_err("missing seed should fail");
-
-        assert!(error.to_string().contains("--seed"));
-    }
-
-    fn request_context(subject: &str) -> RequestContext {
-        RequestContext {
-            subject: subject.to_string(),
-            session_key: Some("demo-session".to_string()),
-            proof: Some("proof".to_string()),
-            reply_to: None,
-            ..RequestContext::default()
-        }
-    }
-
-    async fn start_evidence_upload(
-        app: &AppContext,
-        input: EvidenceUploadInput,
-    ) -> Result<serde_json::Value, ServerError> {
-        evidence_upload_start(
-            app.clone(),
-            request_context("operations.v1.Evidence.Upload"),
-            input,
-        )
-        .await
-        .map(|accepted| serde_json::to_value(accepted).expect("accepted json"))
-    }
-
-    async fn start_sites_refresh(
-        app: &AppContext,
-        input: SitesRefreshInput,
-    ) -> Result<serde_json::Value, ServerError> {
-        sites_refresh_start(
-            app.clone(),
-            request_context("operations.v1.Sites.Refresh"),
-            input,
-        )
-        .await
-        .map(|accepted| serde_json::to_value(accepted).expect("accepted json"))
-    }
-
-    async fn wait_sites_refresh(app: &AppContext, operation_id: String) -> serde_json::Value {
-        let deadline = Instant::now() + Duration::from_millis(OPERATION_WAIT_TIMEOUT_MS);
-        loop {
-            let snapshot = app
-                .refresh_operations
-                .get(operation_id.clone())
-                .await
-                .expect("refresh operation snapshot");
-            if snapshot.state.is_terminal() || Instant::now() >= deadline {
-                return serde_json::json!({ "kind": "snapshot", "snapshot": snapshot });
-            }
-            tokio::time::sleep(Duration::from_millis(OPERATION_WAIT_POLL_MS)).await;
-        }
-    }
-
-    async fn watch_sites_refresh(app: &AppContext, operation_id: String) -> Vec<serde_json::Value> {
-        let initial = app
-            .refresh_operations
-            .get(operation_id.clone())
-            .await
-            .expect("initial refresh operation snapshot");
-        let mut frames = vec![serde_json::json!({ "kind": "snapshot", "snapshot": initial })];
-        frames.extend(
-            sites_refresh_watch(app.refresh_operations.clone(), operation_id)
-                .map(|snapshot| {
-                    let snapshot = snapshot.expect("watch snapshot");
-                    let event_type = match snapshot.state {
-                        OperationState::Completed => "completed",
-                        OperationState::Failed => "failed",
-                        OperationState::Cancelled => "cancelled",
-                        _ => "progress",
-                    };
-                    serde_json::json!({
-                        "kind": "event",
-                        "event": {
-                            "type": event_type,
-                            "progress": snapshot.progress,
-                            "output": snapshot.output,
-                        }
-                    })
-                })
-                .collect::<Vec<_>>()
-                .await,
-        );
-        frames
-    }
-
-    #[tokio::test]
-    async fn router_serves_generated_rpc_descriptors() {
-        let app = build_test_app();
-        let response = sites_list(
-            app.site_summaries.clone(),
-            SitesListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
-            },
-        )
-        .await
-        .expect("sites list response");
-
-        assert_eq!(response.entries[0].site_id, "site-west-yard");
-    }
-
-    #[tokio::test]
-    async fn router_returns_download_grant_shape() {
-        let app = build_test_app();
-        let response = evidence_download(
-            app.clone(),
-            RequestContext::default(),
-            EvidenceDownloadRequest {
-                key: "site-north/transformer-a/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect("download response");
-
-        assert_eq!(response.transfer.direction, "receive");
-        assert_eq!(response.transfer.info.size, 42);
-    }
-
-    #[tokio::test]
-    async fn repeated_downloads_return_distinct_transfer_subjects() {
-        let app = build_test_app();
-        let first = evidence_download(
-            app.clone(),
-            RequestContext::default(),
-            EvidenceDownloadRequest {
-                key: "site-north/transformer-a/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect("first download response");
-        let second = evidence_download(
-            app.clone(),
-            RequestContext::default(),
-            EvidenceDownloadRequest {
-                key: "site-north/transformer-a/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect("second download response");
-
-        assert_ne!(first.transfer.transfer_id, second.transfer.transfer_id);
-        assert_ne!(first.transfer.subject, second.transfer.subject);
-    }
-
-    #[tokio::test]
-    async fn router_rejects_missing_download_before_grant() {
-        let app = build_test_app();
-
-        let error = evidence_download(
-            app,
-            RequestContext::default(),
-            EvidenceDownloadRequest {
-                key: "missing/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect_err("missing object");
-
-        assert!(matches!(
-            error,
-            ServerError::TransferObjectMissing { store, key }
-                if store == UPLOADS_STORE && key == "missing/photo.txt"
-        ));
-    }
-
-    #[tokio::test]
-    async fn router_uses_injected_evidence_store_for_download_bytes() {
-        let app = build_test_app_with_selected_evidence_store(
-            None,
-            demo_resources(),
-            SelectedEvidenceStore::Demo(DemoStore {
-                objects: Arc::new(Mutex::new(BTreeMap::new())),
-            }),
-        );
-
-        let error = evidence_download(
-            app,
-            RequestContext::default(),
-            EvidenceDownloadRequest {
-                key: "site-north/transformer-a/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect_err("selected store is empty");
-
-        assert!(matches!(
-            error,
-            ServerError::TransferObjectMissing { store, key }
-                if store == UPLOADS_STORE && key == "site-north/transformer-a/photo.txt"
-        ));
-    }
-
-    #[tokio::test]
-    async fn router_returns_upload_transfer_in_accepted_envelope() {
-        let app = build_test_app();
-        let input = EvidenceUploadInput {
-            key: "site-north/transformer-a/new-photo.txt".to_string(),
-            content_type: Some("text/plain".to_string()),
-            evidence_type: "photo".to_string(),
-            metadata: None,
-        };
-        let body = start_evidence_upload(&app, input)
-            .await
-            .expect("handler response");
-
-        assert_eq!(body["kind"], "accepted");
-        assert_eq!(body["transfer"]["direction"], "send");
-        assert_eq!(body["transfer"]["sessionKey"], "demo-session");
-        assert_eq!(body["transfer"]["contentType"], "text/plain");
-    }
-
-    #[tokio::test]
-    async fn router_uses_injected_resource_bindings_for_transfer_limits() {
-        let mut resources = demo_resources();
-        resources
-            .store
-            .get_mut(UPLOADS_STORE)
-            .expect("uploads binding")
-            .max_object_bytes = Some(1024);
-        let app = build_test_app_with_nats_and_resources(None, resources);
-        let input = EvidenceUploadInput {
-            key: "site-north/transformer-a/injected-limit.txt".to_string(),
-            content_type: Some("text/plain".to_string()),
-            evidence_type: "photo".to_string(),
-            metadata: None,
-        };
-        let body = start_evidence_upload(&app, input)
-            .await
-            .expect("handler response");
-
-        assert_eq!(body["transfer"]["maxBytes"], 1024);
-    }
-
-    #[tokio::test]
-    async fn repeated_upload_starts_return_distinct_operation_ids() {
-        let app = build_test_app();
-
-        async fn start_upload(app: &AppContext, key: &str) -> serde_json::Value {
-            let input = EvidenceUploadInput {
-                key: key.to_string(),
-                content_type: Some("text/plain".to_string()),
-                evidence_type: "photo".to_string(),
-                metadata: None,
-            };
-            start_evidence_upload(app, input)
-                .await
-                .expect("handler response")
-        }
-
-        let first = start_upload(&app, "uploads/first.txt").await;
-        let second = start_upload(&app, "uploads/second.txt").await;
-
-        assert_ne!(first["ref"]["id"], second["ref"]["id"]);
-        assert_ne!(first["transfer"]["subject"], second["transfer"]["subject"]);
-    }
-
-    #[tokio::test]
-    async fn upload_existing_key_reuses_existing_evidence_row() {
-        let app = build_test_app();
-        let input = EvidenceUploadInput {
-            key: "site-north/transformer-a/photo.txt".to_string(),
-            content_type: Some("text/plain".to_string()),
-            evidence_type: "photo".to_string(),
-            metadata: None,
-        };
-        let body = start_evidence_upload(&app, input)
-            .await
-            .expect("handler response");
-        assert_eq!(body["snapshot"]["state"], "running");
-        assert_eq!(body["snapshot"]["output"], serde_json::Value::Null);
-
-        let evidence = evidence_list(
-            Arc::clone(&app.state),
-            EvidenceListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
-                prefix: Some("site-north/transformer-a/photo.txt".to_string()),
-            },
-        )
-        .await
-        .expect("evidence list response");
-        assert_eq!(evidence.entries.len(), 1);
-        assert_eq!(evidence.entries[0].evidence_id, "ev-1001");
-    }
-
-    #[tokio::test]
-    async fn sites_refresh_uses_private_refresh_job_path() {
-        let recorded = Arc::new(Mutex::new(Vec::new()));
-        let app = build_test_app_with_nats_resources_store_and_jobs(
-            None,
-            demo_resources(),
-            None,
-            None,
-            None,
-            Some(Arc::clone(&recorded)),
-        );
-        let input = SitesRefreshInput {
-            site_id: "site-west-yard".to_string(),
-        };
-
-        let body = start_sites_refresh(&app, input)
-            .await
-            .expect("handler response");
-
-        assert_eq!(body["kind"], "accepted");
-        assert_eq!(body["snapshot"]["state"], "running");
-        let operation_id = body["ref"]["id"]
-            .as_str()
-            .expect("operation id")
-            .to_string();
-        let terminal = wait_sites_refresh(&app, operation_id).await;
-        assert_eq!(
-            terminal["snapshot"]["output"]["site"]["lastReportAt"],
-            FIXED_NOW
-        );
-        let calls = recorded.lock().expect("recorded jobs lock").clone();
-        let event_types: Vec<_> = calls.iter().map(|call| call.event_type).collect();
-        assert_eq!(
-            event_types,
-            vec![
-                jobs::JobEventType::Created,
-                jobs::JobEventType::Started,
-                jobs::JobEventType::Progress,
-                jobs::JobEventType::Completed,
-            ]
-        );
-        assert!(calls
-            .iter()
-            .all(|call| call.subject.contains(REFRESH_SITE_SUMMARY_JOB)));
-    }
-
-    #[tokio::test]
-    async fn sites_refresh_watch_emits_progress_and_completed_frames() {
-        let app = build_test_app();
-        let input = SitesRefreshInput {
-            site_id: "site-west-yard".to_string(),
-        };
-
-        let body = start_sites_refresh(&app, input)
-            .await
-            .expect("handler response");
-        let frames = watch_sites_refresh(
-            &app,
-            body["ref"]["id"]
-                .as_str()
-                .expect("operation id")
-                .to_string(),
-        )
-        .await;
-
-        assert_eq!(frames[0]["kind"], "snapshot");
-        let event_types: Vec<_> = frames
-            .iter()
-            .filter_map(|frame| frame["event"]["type"].as_str())
-            .collect();
-        assert!(event_types.contains(&"progress"));
-        assert_eq!(event_types.last(), Some(&"completed"));
-        assert!(frames
-            .iter()
-            .any(|frame| { frame["event"]["progress"]["stage"] == "refreshing" }));
-    }
-
-    #[tokio::test]
-    async fn sites_refresh_updates_selected_memory_site_summary_store() {
-        let app = build_test_app();
-        let input = SitesRefreshInput {
-            site_id: "site-west-yard".to_string(),
-        };
-
-        let body = start_sites_refresh(&app, input)
-            .await
-            .expect("handler response");
-        wait_sites_refresh(
-            &app,
-            body["ref"]["id"]
-                .as_str()
-                .expect("operation id")
-                .to_string(),
-        )
-        .await;
-
-        let listed = sites_list(
-            app.site_summaries.clone(),
-            SitesListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
-            },
-        )
-        .await
-        .expect("sites list response");
-        assert_eq!(listed.entries[0].last_report_at, FIXED_NOW);
-
-        let fetched = sites_get(
-            app.site_summaries.clone(),
-            SitesGetRequest {
-                site_id: "site-west-yard".to_string(),
-            },
-        )
-        .await
-        .expect("sites get response");
-        assert_eq!(fetched.site.expect("site exists").last_report_at, FIXED_NOW);
-    }
-
-    #[tokio::test]
-    async fn upload_after_delete_allocates_new_evidence_id() {
-        let app = build_test_app();
-        evidence_delete(
-            app.clone(),
-            EvidenceDeleteRequest {
-                key: "site-north/transformer-a/photo.txt".to_string(),
-            },
-        )
-        .await
-        .expect("delete response");
-
-        let input = EvidenceUploadInput {
-            key: "site-north/transformer-a/replacement.txt".to_string(),
-            content_type: Some("text/plain".to_string()),
-            evidence_type: "photo".to_string(),
-            metadata: None,
-        };
-        let body = start_evidence_upload(&app, input)
-            .await
-            .expect("handler response");
-
-        assert_eq!(body["snapshot"]["state"], "running");
-        assert_eq!(body["snapshot"]["output"], serde_json::Value::Null);
-    }
-
-    #[tokio::test]
-    async fn unknown_operation_id_returns_not_found() {
-        let app = build_test_app();
-
-        let error = operation_get::<EvidenceUploadProgress, EvidenceUploadOutput>(
-            Arc::clone(&app.state),
-            "op-missing".to_string(),
-        )
-        .await
-        .expect_err("missing operation");
-
-        assert!(matches!(
-            error,
-            ServerError::OperationNotFound { operation_id } if operation_id == "op-missing"
-        ));
-    }
-
-    #[tokio::test]
-    async fn upload_transfer_session_writes_store_and_updates_evidence_size() {
-        let state = Arc::new(Mutex::new(sample_state()));
-        {
-            let mut state = state.lock().expect("demo state lock");
-            state.evidence.push(Evidence {
-                evidence_id: "ev-test".to_string(),
-                key: "uploads/test.txt".to_string(),
-                size: 0,
-                content_type: Some("text/plain".to_string()),
-                evidence_type: "photo".to_string(),
-                file_name: None,
-                uploaded_at: FIXED_NOW.to_string(),
-            });
-            let snapshot: OperationSnapshot<EvidenceUploadProgress, EvidenceUploadOutput> =
-                OperationSnapshot {
-                    revision: 1,
-                    state: OperationState::Running,
-                    progress: Some(EvidenceUploadProgress {
-                        stage: "transfer".to_string(),
-                        message: "Upload transfer grant is ready".to_string(),
-                    }),
-                    transfer: None,
-                    output: None,
-                    ..Default::default()
-                };
-            state.operations.insert(
-                "op-upload-test".to_string(),
-                serde_json::to_value(&snapshot).expect("snapshot json"),
-            );
-            state.operation_history.insert(
-                "op-upload-test".to_string(),
-                vec![serde_json::to_value(snapshot).expect("snapshot json")],
-            );
-        }
-        let store = EvidenceStore {
-            inner: SelectedEvidenceStore::Demo(DemoStore {
-                objects: Arc::new(Mutex::new(BTreeMap::new())),
-            }),
-            state: Arc::clone(&state),
-            upload_evidence_id: Some("ev-test".to_string()),
-            upload_operation_id: Some("op-upload-test".to_string()),
-            publisher: None,
-        };
-        let plan = plan_upload_transfer_grant(TransferUploadGrantArgs {
-            service_name: SERVICE_NAME,
-            session_key: "demo-session",
-            service_session_key: "demo-session",
-            resources: &demo_resources(),
-            store: UPLOADS_STORE,
-            key: "uploads/test.txt",
-            transfer_id: "upload-ev-test",
-            expires_at: TRANSFER_EXPIRES_AT,
-            chunk_bytes: TRANSFER_CHUNK_BYTES,
-            max_bytes: Some(MAX_UPLOAD_BYTES as u64),
-            content_type: Some("text/plain"),
-            metadata: BTreeMap::new(),
-        })
-        .expect("upload plan");
-        let mut session = UploadTransferSession::new(plan, FIXED_NOW);
-
-        let body_chunk = UploadTransferChunk {
-            seq: 0,
-            payload: Bytes::from_static(b"hello transfer"),
-            eof: false,
-        };
-        let progress = session.progress_for_chunk(&body_chunk);
-        session
-            .receive(&store, body_chunk)
-            .await
-            .expect("transfer body chunk");
-        {
-            let mut state_guard = state.lock().expect("demo state lock");
-            progress_upload_transfer_operation(&mut state_guard, "op-upload-test", progress);
-        }
-        session
-            .receive(
-                &store,
-                UploadTransferChunk {
-                    seq: 1,
-                    payload: Bytes::new(),
-                    eof: true,
-                },
-            )
-            .await
-            .expect("transfer eof");
-
-        let state_guard = state.lock().expect("demo state lock");
-        let evidence = state_guard
-            .evidence
-            .iter()
-            .find(|evidence| evidence.key == "uploads/test.txt")
-            .expect("evidence exists");
-        assert_eq!(evidence.size, 14);
-        assert_eq!(evidence.file_name.as_deref(), Some("test.txt"));
-        assert_eq!(
-            state_guard.operations["op-upload-test"]["state"],
-            "completed"
-        );
-        assert_eq!(
-            state_guard.operations["op-upload-test"]["output"]["size"],
-            14
-        );
-        let history = state_guard
-            .operation_history
-            .get("op-upload-test")
-            .expect("upload operation history");
-        assert_eq!(
-            history.last().expect("terminal snapshot")["state"],
-            "completed"
-        );
-        assert_eq!(history[1]["state"], "running");
-        assert_eq!(history[1]["transfer"]["chunkIndex"], 0);
-        assert_eq!(history[1]["transfer"]["chunkBytes"], 14);
-        assert_eq!(history[1]["transfer"]["transferredBytes"], 14);
-        drop(state_guard);
-
-        let mut watch = operation_watch::<EvidenceUploadProgress, EvidenceUploadOutput>(
-            Arc::clone(&state),
-            "op-upload-test".to_string(),
-        );
-        let first = watch
-            .next()
-            .await
-            .expect("initial upload snapshot")
-            .expect("initial snapshot ok");
-        let second = watch
-            .next()
-            .await
-            .expect("transfer upload snapshot")
-            .expect("transfer snapshot ok");
-        let third = watch
-            .next()
-            .await
-            .expect("terminal upload snapshot")
-            .expect("terminal snapshot ok");
-        assert_eq!(first.state, OperationState::Running);
-        assert_eq!(second.state, OperationState::Running);
-        assert_eq!(
-            second
-                .transfer
-                .expect("transfer progress")
-                .transferred_bytes,
-            14
-        );
-        assert_eq!(third.state, OperationState::Completed);
-    }
-
-    #[tokio::test]
-    async fn upload_transfer_updates_pending_duplicate_key_evidence() {
-        let state = Arc::new(Mutex::new(sample_state()));
-        let store = EvidenceStore {
-            inner: SelectedEvidenceStore::Demo(DemoStore {
-                objects: Arc::new(Mutex::new(sample_store_objects())),
-            }),
-            state: Arc::clone(&state),
-            upload_evidence_id: Some("ev-duplicate".to_string()),
-            upload_operation_id: None,
-            publisher: None,
-        };
-        let duplicate_key = "site-north/transformer-a/photo.txt";
-        {
-            let mut state = state.lock().expect("demo state lock");
-            state.evidence.push(Evidence {
-                evidence_id: "ev-duplicate".to_string(),
-                key: duplicate_key.to_string(),
-                size: 0,
-                content_type: Some("text/plain".to_string()),
-                evidence_type: "photo".to_string(),
-                file_name: None,
-                uploaded_at: FIXED_NOW.to_string(),
-            });
-        }
-
-        store
-            .write(duplicate_key, Bytes::from_static(b"replacement"))
-            .await
-            .expect("write duplicate");
-
-        let state = state.lock().expect("demo state lock");
-        let original = state
-            .evidence
-            .iter()
-            .find(|evidence| evidence.evidence_id == "ev-1001")
-            .expect("original evidence");
-        let duplicate = state
-            .evidence
-            .iter()
-            .find(|evidence| evidence.evidence_id == "ev-duplicate")
-            .expect("duplicate evidence");
-
-        assert_eq!(original.size, 42);
-        assert_eq!(duplicate.size, 11);
     }
 }

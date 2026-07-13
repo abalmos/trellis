@@ -6,9 +6,9 @@ import {
 import { TrellisTestRuntime } from "../runtime.ts";
 import {
   startTrellisTestEventCapture,
+  type TrellisTestEventAction,
   type TrellisTestEventCapture,
   type TrellisTestEventCaptureOptions,
-  type TrellisTestEventAction,
   type TrellisTestEventSourceContract,
 } from "../event_capture.ts";
 import type {

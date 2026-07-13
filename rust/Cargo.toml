@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "crates/auth",
   "crates/trellis",
   "crates/auth-adapters",
   "crates/core-bootstrap",
@@ -9,19 +8,15 @@ members = [
   "crates/bootstrap",
   "crates/service-jobs",
   "crates/service-eventlog",
-  "crates/service-runtime",
-  "crates/service",
   "crates/trellis-test",
   "crates/contracts",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/generate-runner",
-  "crates/client",
   "crates/cli",
   "crates/runtime",
 ]
 default-members = [
-  "crates/auth",
   "crates/trellis",
   "crates/auth-adapters",
   "crates/core-bootstrap",
@@ -30,14 +25,11 @@ default-members = [
   "crates/bootstrap",
   "crates/service-jobs",
   "crates/service-eventlog",
-  "crates/service-runtime",
-  "crates/service",
   "crates/trellis-test",
   "crates/contracts",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/generate-runner",
-  "crates/client",
   "crates/cli",
   "crates/runtime",
 ]
@@ -46,6 +38,7 @@ resolver = "2"
 [workspace.package]
 version = "0.11.0"
 edition = "2021"
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/qlever-llc/trellis"
 
@@ -58,6 +51,7 @@ ed25519-dalek = "2.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
+ryu-js = "1.0.3"
 rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }
 refinery = { version = "0.9.1", default-features = false, features = ["rusqlite"] }
 sha2 = "0.11.0"

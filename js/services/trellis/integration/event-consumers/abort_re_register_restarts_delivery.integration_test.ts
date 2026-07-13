@@ -35,8 +35,10 @@ liveTrellisTest({
 
     try {
       await service.onSelfPinged(
-        ({ event }) => { observed.push(`first:${event.id}`);
-        return Result.ok(undefined); },
+        ({ event }) => {
+          observed.push(`first:${event.id}`);
+          return Result.ok(undefined);
+        },
         {},
         { group: "ingest", signal: firstController.signal },
       ).orThrow();
@@ -69,8 +71,10 @@ liveTrellisTest({
       assertEquals(observed.includes(`first:${fixture.secondEventId}`), false);
 
       await service.onSelfPinged(
-        ({ event }) => { observed.push(`second:${event.id}`);
-        return Result.ok(undefined); },
+        ({ event }) => {
+          observed.push(`second:${event.id}`);
+          return Result.ok(undefined);
+        },
         {},
         { group: "ingest", signal: secondController.signal },
       ).orThrow();

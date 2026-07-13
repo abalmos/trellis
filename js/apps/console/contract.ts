@@ -24,15 +24,15 @@ import {
   AuthDeploymentsEnable,
   AuthDeploymentsList,
   AuthDeploymentsRemove,
-  AuthDeviceUserAuthoritiesList,
-  AuthDeviceUserAuthoritiesReviewsDecide,
-  AuthDeviceUserAuthoritiesReviewsList,
-  AuthDeviceUserAuthoritiesRevoke,
   AuthDevicesDisable,
   AuthDevicesEnable,
   AuthDevicesList,
   AuthDevicesProvision,
   AuthDevicesRemove,
+  AuthDeviceUserAuthoritiesList,
+  AuthDeviceUserAuthoritiesReviewsDecide,
+  AuthDeviceUserAuthoritiesReviewsList,
+  AuthDeviceUserAuthoritiesRevoke,
   AuthIdentityGrantsList,
   AuthIdentityGrantsRevoke,
   AuthPortalsGet,
@@ -60,7 +60,10 @@ import {
   AuthUsersPasswordResetCreate,
   AuthUsersUpdate,
 } from "@qlever-llc/trellis/sdk/auth";
-import { TrellisCatalog, TrellisContractGet } from "@qlever-llc/trellis/sdk/core";
+import {
+  TrellisCatalog,
+  TrellisContractGet,
+} from "@qlever-llc/trellis/sdk/core";
 import {
   HealthInspect,
   HealthMetrics,

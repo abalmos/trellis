@@ -32,12 +32,14 @@ fn write_private_file(path: &Path, contents: &str) -> Result<(), TrellisAuthErro
 }
 
 /// Persist an admin session to the CLI config directory.
+#[doc = concat!("Trellis API operation `", stringify!(save_admin_session), "`.")]
 pub fn save_admin_session(state: &AdminSessionState) -> Result<(), TrellisAuthError> {
     let state_json = serde_json::to_string_pretty(state)?;
     write_private_file(&admin_session_state_path(), &state_json)
 }
 
 /// Load the current admin session from disk.
+#[doc = concat!("Trellis API operation `", stringify!(load_admin_session), "`.")]
 pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
     let path = admin_session_state_path();
     if !path.exists() {
@@ -50,6 +52,7 @@ pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
 }
 
 /// Remove the stored admin session and related local credential files.
+#[doc = concat!("Trellis API operation `", stringify!(clear_admin_session), "`.")]
 pub fn clear_admin_session() -> Result<bool, TrellisAuthError> {
     let mut removed = false;
     for path in [

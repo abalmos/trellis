@@ -8,6 +8,9 @@ pub struct RpcErrorPayload {
     value: Option<Value>,
 }
 
+/// Structured payload returned by an undeclared remote Trellis error.
+pub type RemoteErrorPayload = RpcErrorPayload;
+
 impl RpcErrorPayload {
     /// Builds a payload from a raw JSON RPC error body.
     pub fn from_json_slice(raw: &[u8]) -> Result<Self, serde_json::Error> {
@@ -125,7 +128,7 @@ pub struct ValidationErrorPayload {
     pub issues: Vec<ValidationIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "traceId", skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
 
@@ -139,8 +142,185 @@ pub struct SchemaValidationErrorPayload {
     pub issues: Vec<SchemaValidationIssue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<serde_json::Map<String, serde_json::Value>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "traceId", skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+}
+
+/// Standard fields available on a declared error without a data schema.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeclaredErrorPayload {
+    /// Error instance identifier.
+    pub id: String,
+    /// Contract error discriminator.
+    #[serde(rename = "type")]
+    pub error_type: String,
+    /// Human-facing error message.
+    pub message: String,
+    /// Optional structured context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Optional distributed trace identifier.
+    #[serde(default, rename = "traceId", skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+}
+
+/// Standard fields returned for the built-in `AuthError` declaration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthErrorPayload {
+    /// Error instance identifier.
+    pub id: String,
+    /// Contract error discriminator.
+    #[serde(rename = "type")]
+    pub error_type: String,
+    /// Human-facing error message.
+    pub message: String,
+    /// Stable machine-readable authentication or authorization reason.
+    pub reason: String,
+    /// Optional structured context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Optional distributed trace identifier.
+    #[serde(default, rename = "traceId", skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+}
+
+/// Decoder implemented by generated declared-error enums.
+pub trait DeclaredError: Sized + std::fmt::Debug {
+    /// Decode a matching declared error, or return `None` for an unknown discriminator.
+    fn decode(payload: &RemoteErrorPayload) -> Result<Option<Self>, serde_json::Error>;
+
+    /// Return the reason carried by a built-in `AuthError`, when declared.
+    fn auth_error_reason(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Marker used by calls that declare no contract-specific errors.
+#[derive(Debug)]
+pub enum NoDeclaredError {}
+
+impl DeclaredError for NoDeclaredError {
+    fn decode(_payload: &RemoteErrorPayload) -> Result<Option<Self>, serde_json::Error> {
+        Ok(None)
+    }
+}
+
+/// Standard validation failures detected locally or returned by a remote provider.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ValidationFailure {
+    /// Structural validation failure.
+    Validation(ValidationErrorPayload),
+    /// Annotated schema validation failure.
+    Schema(SchemaValidationErrorPayload),
+}
+
+/// Authentication failure returned while making a connected call.
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct AuthenticationError {
+    message: String,
+}
+
+impl AuthenticationError {
+    /// Build an authentication error from a runtime message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Remote protocol failure, including malformed contract payloads.
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct ProtocolError {
+    message: String,
+}
+
+impl ProtocolError {
+    /// Build a protocol error from a runtime message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Connected transport failure.
+#[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
+#[error("{message}")]
+pub struct TransportError {
+    message: String,
+}
+
+impl TransportError {
+    /// Build a transport error from a runtime message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+/// Errors returned by generated caller methods.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum CallError<E>
+where
+    E: std::fmt::Debug,
+{
+    /// Contract-declared error.
+    #[error("declared remote error: {0:?}")]
+    Declared(E),
+    /// Well-formed remote error not declared by this action.
+    #[error("remote error: {}", .0.format_human())]
+    Remote(RemoteErrorPayload),
+    /// Standard validation failure.
+    #[error("validation failed")]
+    Validation(ValidationFailure),
+    /// Request timeout.
+    #[error("request timeout")]
+    Timeout,
+    /// Authentication failure.
+    #[error(transparent)]
+    Authentication(AuthenticationError),
+    /// Invalid protocol frame or contract payload.
+    #[error(transparent)]
+    Protocol(ProtocolError),
+    /// NATS or other connected transport failure.
+    #[error(transparent)]
+    Transport(TransportError),
+}
+
+impl<E> CallError<E>
+where
+    E: DeclaredError,
+{
+    pub(crate) fn from_client(error: TrellisClientError) -> Self {
+        match error {
+            TrellisClientError::RpcError(payload) => match E::decode(&payload) {
+                Ok(Some(error)) => Self::Declared(error),
+                Ok(None) => match payload.decode_schema_validation() {
+                    Ok(Some(error)) => Self::Validation(ValidationFailure::Schema(error)),
+                    Ok(None) => match payload.decode_validation() {
+                        Ok(Some(error)) => Self::Validation(ValidationFailure::Validation(error)),
+                        Ok(None) if payload.error_type().is_some() => Self::Remote(payload),
+                        Ok(None) => Self::Protocol(ProtocolError::new(
+                            "remote error payload has no string type discriminator",
+                        )),
+                        Err(error) => Self::Protocol(ProtocolError::new(error.to_string())),
+                    },
+                    Err(error) => Self::Protocol(ProtocolError::new(error.to_string())),
+                },
+                Err(error) => Self::Protocol(ProtocolError::new(error.to_string())),
+            },
+            TrellisClientError::Timeout => Self::Timeout,
+            TrellisClientError::Json(error) => {
+                Self::Protocol(ProtocolError::new(error.to_string()))
+            }
+            error => Self::Transport(TransportError::new(error.to_string())),
+        }
+    }
 }
 
 fn format_json_value(value: &Value) -> String {
@@ -292,6 +472,9 @@ pub enum TrellisClientError {
     #[error("invalid json: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error(transparent)]
+    Subject(#[from] super::subject::SubjectError),
+
     #[error("rpc returned error: {}", .0.format_human())]
     RpcError(RpcErrorPayload),
 
@@ -303,6 +486,9 @@ pub enum TrellisClientError {
 
     #[error("event subscription protocol error: {0}")]
     EventSubscriptionProtocol(String),
+
+    #[error("feed protocol error: {0}")]
+    FeedProtocol(String),
 }
 
 #[cfg(test)]

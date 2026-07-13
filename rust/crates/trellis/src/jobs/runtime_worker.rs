@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer, stream, AckKind};
 use futures_util::future::BoxFuture;
+use futures_util::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
@@ -308,6 +309,65 @@ impl WorkerHostHandle {
             return Err(error);
         }
         Ok(())
+    }
+
+    /// Supervise worker tasks until one exits, then stop the complete host.
+    pub async fn join(self) -> Result<(), WorkerHostError> {
+        let cancellation = self.cancellation;
+        let _cancel_on_drop = CancelWorkersOnDrop(cancellation.clone());
+        let mut workers: FuturesUnordered<
+            BoxFuture<
+                'static,
+                (
+                    String,
+                    u32,
+                    Result<Result<(), RuntimeWorkerError>, tokio::task::JoinError>,
+                ),
+            >,
+        > = self
+            .workers
+            .into_iter()
+            .map(|worker| {
+                Box::pin(async move { (worker.queue_type, worker.worker_index, worker.task.await) })
+                    as BoxFuture<'static, _>
+            })
+            .collect::<FuturesUnordered<_>>();
+
+        let first_error = match workers.next().await {
+            Some((queue_type, worker_index, Ok(Ok(())))) => WorkerHostError::WorkerTask {
+                queue_type,
+                worker_index,
+                details: "worker exited unexpectedly".to_string(),
+            },
+            Some((queue_type, worker_index, Ok(Err(error)))) => WorkerHostError::WorkerTask {
+                queue_type,
+                worker_index,
+                details: error.to_string(),
+            },
+            Some((queue_type, worker_index, Err(error))) => WorkerHostError::WorkerTask {
+                queue_type,
+                worker_index,
+                details: error.to_string(),
+            },
+            None => WorkerHostError::WorkerStartup {
+                queue_type: "*".to_string(),
+                details: "worker host has no tasks".to_string(),
+            },
+        };
+        cancellation.cancel_for_shutdown();
+        while workers.next().await.is_some() {}
+        for heartbeat in self.heartbeats {
+            heartbeat.stop().await.map_err(WorkerHostError::Heartbeat)?;
+        }
+        Err(first_error)
+    }
+}
+
+struct CancelWorkersOnDrop(JobCancellationToken);
+
+impl Drop for CancelWorkersOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel_for_shutdown();
     }
 }
 

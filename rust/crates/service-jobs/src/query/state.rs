@@ -4,8 +4,8 @@ use trellis_rs::jobs::types::JobState;
 
 use super::JobsQueryError;
 
-pub(super) fn parse_state_filter(
-    state: Option<&Vec<String>>,
+pub(super) fn parse_state_filter<T: serde::Serialize>(
+    state: Option<&Vec<T>>,
 ) -> Result<Option<Vec<JobState>>, JobsQueryError> {
     let Some(state) = state else {
         return Ok(None);

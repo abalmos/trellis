@@ -213,10 +213,6 @@ impl_job_to_wire!(
     "job dismiss dlq response tries"
 );
 
-trait WireLogItem {
-    fn from_log(log: &JobLogEntry, level: String) -> Self;
-}
-
 trait WireProgressItem {
     fn from_progress(progress: &JobProgress, current: Option<i64>, total: Option<i64>) -> Self;
 }
@@ -238,20 +234,6 @@ trait WireQueuePolicyMetadata {
         reason: Option<String>,
         replaced_job_id: Option<String>,
     ) -> Self;
-}
-
-macro_rules! impl_wire_log_item {
-    ($type_name:ty) => {
-        impl WireLogItem for $type_name {
-            fn from_log(log: &JobLogEntry, level: String) -> Self {
-                Self {
-                    level,
-                    message: log.message.clone(),
-                    timestamp: log.timestamp.clone(),
-                }
-            }
-        }
-    };
 }
 
 macro_rules! impl_wire_progress_item {
@@ -315,13 +297,6 @@ macro_rules! impl_wire_queue_policy_metadata {
     };
 }
 
-impl_wire_log_item!(JobsCancelResponseJobLogsItem);
-impl_wire_log_item!(JobsDismissDLQResponseJobLogsItem);
-impl_wire_log_item!(JobsReplayDLQResponseJobLogsItem);
-impl_wire_log_item!(JobsListDLQResponseEntriesItemLogsItem);
-impl_wire_log_item!(JobsInspectResponseJobLogsItem);
-impl_wire_log_item!(JobsRetryResponseJobLogsItem);
-
 impl_wire_progress_item!(JobsCancelResponseJobProgress);
 impl_wire_progress_item!(JobsDismissDLQResponseJobProgress);
 impl_wire_progress_item!(JobsReplayDLQResponseJobProgress);
@@ -345,20 +320,9 @@ impl_wire_queue_policy_metadata!(JobsRetryResponseJobQueuePolicy);
 
 fn map_logs<T>(logs: &Option<Vec<JobLogEntry>>) -> Result<Option<Vec<T>>, JobsQueryError>
 where
-    T: WireLogItem,
+    T: DeserializeOwned,
 {
-    logs.as_ref()
-        .map(|logs| {
-            logs.iter()
-                .map(|log| {
-                    Ok(T::from_log(
-                        log,
-                        map_string_value(&log.level, "job log level")?,
-                    ))
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()
+    map_optional_wire(logs, "job logs")
 }
 
 fn map_progress<T>(progress: &Option<JobProgress>) -> Result<Option<T>, JobsQueryError>
@@ -421,9 +385,10 @@ where
     })
 }
 
-fn map_string_value<T>(input: &T, model: &'static str) -> Result<String, JobsQueryError>
+fn map_string_value<T, U>(input: &T, model: &'static str) -> Result<U, JobsQueryError>
 where
     T: serde::Serialize,
+    U: DeserializeOwned,
 {
     serde_json::from_value(map_json_value(input, model)?).map_err(|error| {
         JobsQueryError::ConvertWireModel {

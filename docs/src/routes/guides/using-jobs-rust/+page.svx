@@ -1,314 +1,141 @@
-This guide adds background job processing to the Rust `orders-service` from [Tutorial: Write a service](/guides/write-a-service). By the end the service will enqueue fulfillment jobs when an order is created and process them with retry, progress tracking, and event emission on completion.
+This guide adds service-private background jobs to the Rust `orders-service` from
+[Tutorial: Write a service](/guides/write-a-service). For caller-visible async
+workflows, use [Operations: Rust](/guides/using-operations-rust).
 
-Before starting, complete the Rust path in [Tutorial: Write a service](/guides/write-a-service).
+## 1. Declare queues
 
-## What are jobs?
-
-Jobs are **service-private** background work units. For caller-visible async workflows, see [Operations: Rust](/guides/using-operations-rust).
-
-## 1. Add top-level `jobs` to the contract manifest
-
-Update `contracts/orders_service.manifest.json` to add a top-level `jobs` map with the three fulfillment queue types:
+Declare each queue in the service contract. Payload, result, and optional update
+schemas are part of the generated Rust API:
 
 ```json
-"resources": {
-  "kv": {
-    "orders": { "purpose": "Store order records", "history": 1, "ttlMs": 0 }
-  }
-},
-"jobs": {
-  "reserve-inventory": {
-    "payload": { "schema": "ReserveInventoryPayload" },
-    "update": { "schema": "ReserveInventoryUpdate" },
-    "result": { "schema": "ReserveInventoryResult" },
-    "maxDeliver": 5,
-    "backoffMs": [5000, 30000, 120000]
-  },
-  "charge-payment": {
-    "payload": { "schema": "ChargePaymentPayload" },
-    "result": { "schema": "ChargePaymentResult" },
-    "maxDeliver": 5,
-    "ackWaitMs": 600000
-  },
-  "notify-warehouse": {
-    "payload": { "schema": "NotifyWarehousePayload" },
-    "result": { "schema": "NotifyWarehouseResult" },
-    "maxDeliver": 3
-  }
-}
-```
-
-Regenerate the participant facade after updating the manifest.
-
-## 2. Create jobs from the `Orders.Create` handler
-
-The participant facade exposes `service.jobs()` returning a `JobsFacade` with one typed `JobQueue` per declared queue. The facade converts kebab-case manifest queue names to snake_case Rust method names: `"reserve-inventory"` → `reserve_inventory()`, `"charge-payment"` → `charge_payment()`, etc.
-
-Update the `Orders.Create` handler:
-
-```rust
-service
-    .handle()
-    .rpc()
-    .orders()
-    .create(|_ctx, req| async move {
-        let order_id = ulid::Ulid::new().to_string();
-        // save order...
-
-        service
-            .jobs()
-            .reserve_inventory()
-            .create(ReserveInventoryPayload {
-                order_id: order_id.clone(),
-                items: req.items,
-            })
-            .await?;
-
-        Ok(CreateOrderResponse { order_id, status: "pending".into() })
-    });
-```
-
-## 3. Register job workers
-
-Use `handle(handler)` on each `JobQueue` to register a worker. Call all registrations before `start_workers()`:
-
-```rust
-service
-    .jobs()
-    .reserve_inventory()
-    .handle(|job: ActiveJob<ReserveInventoryPayload, ReserveInventoryResult>| async move {
-        tracing::info!(
-            request_id = %job.context().request_id,
-            trace_id = %job.context().trace_id,
-            "reserve inventory job started",
-        );
-        job.progress(JobProgress {
-            step: Some("reserving".into()),
-            message: Some("Checking inventory".into()),
-            ..Default::default()
-        })
-        .await?;
-        if job.is_cancelled() {
-            return Err(Err(JobsError::Message { message: "cancelled".to_string() }));
-        }
-
-        // reserve inventory...
-
-        service
-            .jobs()
-            .charge_payment()
-            .create(ChargePaymentPayload {
-                order_id: job.payload().order_id.clone(),
-                customer_id: "cust_placeholder".into(),
-                amount_cents: 1000,
-            })
-            .await?;
-
-        Ok(ReserveInventoryResult { reserved: true })
-    })
-    .await?;
-
-service
-    .jobs()
-    .charge_payment()
-    .handle(|job: ActiveJob<ChargePaymentPayload, ChargePaymentResult>| async move {
-        job.progress(JobProgress {
-            step: Some("charging".into()),
-            message: Some("Processing payment".into()),
-            ..Default::default()
-        })
-        .await?;
-
-        if job.is_cancelled() {
-            return Err(Err(JobsError::Message { message: "cancelled".to_string() }));
-        }
-
-        let charge_id = format!("ch_{}", ulid::Ulid::new());
-
-        service
-            .jobs()
-            .notify_warehouse()
-            .create(NotifyWarehousePayload {
-                order_id: job.payload().order_id.clone(),
-                items: vec![],
-            })
-            .await?;
-
-        Ok(ChargePaymentResult { charge_id })
-    })
-    .await?;
-
-service
-    .jobs()
-    .notify_warehouse()
-    .handle(|job: ActiveJob<NotifyWarehousePayload, NotifyWarehouseResult>| async move {
-        job.progress(JobProgress {
-            step: Some("notifying".into()),
-            message: Some("Notifying warehouse".into()),
-            ..Default::default()
-        })
-        .await?;
-
-        if job.is_cancelled() {
-            return Err(Err(JobsError::Message { message: "cancelled".to_string() }));
-        }
-
-        service
-            .events()
-            .publish::<orders_participant::events::OrdersShipped>(OrderShippedEvent {
-                order_id: job.payload().order_id.clone(),
-                customer_id: "cust_placeholder".into(),
-                shipped_at: chrono::Utc::now().to_rfc3339(),
-            })
-            .await?;
-
-        Ok(NotifyWarehouseResult { notified: true })
-    })
-    .await?;
-```
-
-Every active job exposes immutable `job.context()` with `request_id`, `trace_id`,
-`traceparent`, and optional `tracestate`. The runtime copies this context to all
-job lifecycle events and NATS headers, so include `request_id` or `trace_id` in
-service logs when you need to follow work across RPCs, events, operations, and
-jobs.
-
-Use `job.wait_for(...)` around long external async calls so operators can see
-what an active job is waiting on. The job remains `active`; `Jobs.Inspect` and
-Console show the current `waitingOn` edge until the future completes.
-
-```rust
-let charge = job
-    .wait_for(
-        JobWaitEdge {
-            id: format!("stripe:{payment_intent_id}"),
-            target: JobWaitTarget {
-                kind: JobWaitTargetKind::External,
-                id: None,
-                operation_id: None,
-                label: Some("Stripe payment authorization".into()),
-                service: None,
-                target_type: None,
-                system: Some("stripe".into()),
-                operation: Some("POST /payment_intents".into()),
-                key: Some(payment_intent_id.clone()),
-            },
-            started_at: chrono::Utc::now().to_rfc3339(),
-            label: None,
-        },
-        confirm_payment(payment_intent_id.clone()),
-    )
-    .await?;
-```
-
-Use safe correlation keys only; never put secrets, full credentials, or private
-payloads in wait metadata. Short local awaits do not need annotation.
-
-### Live typed updates
-
-`job.progress(...)` is low-frequency durable telemetry for operators. The jobs
-worker runtime's `ActiveJob::emit_update::<D>(...)` sends typed live-only content
-from the active attempt. Given the queue's `NatsJobWaiter`, subscribe before work
-starts when early frames matter:
-
-```rust
-active_job
-    .emit_update::<orders_participant::jobs::ReserveInventoryJob>(
-        ReserveInventoryJobUpdate {
-            processed_items: 0,
-            total_items: 10,
-        },
-    )
-    .await?;
-
-let mut updates = waiter
-    .updates::<orders_participant::jobs::ReserveInventoryJob>(&job_id)
-    .await?;
-
-while let Some(frame) = updates.next().await {
-    let frame = frame?;
-    println!("{} / {}", frame.update.processed_items, frame.update.total_items);
-}
-```
-
-Updates are at most once and are not persisted, replayed, shown in jobs admin,
-or sent to Event Log. Late subscribers may miss frames, so prefer cumulative
-payloads and treat the terminal job result as authoritative. The stream filters
-stale attempts and duplicate or out-of-order attempt-local sequences, then ends
-at terminal lifecycle state or when dropped.
-
-## 4. Start workers
-
-Call `start_workers()` **after** all `handle()` registrations:
-
-```rust
-let worker_host = service.jobs().start_workers().await?;
-```
-
-Hold the `worker_host` handle for the lifetime of the service. Stop it during shutdown:
-
-```rust
-worker_host.stop().await?;
-```
-
-## 5. Long-running jobs
-
-Call `job.heartbeat().await` periodically to extend the ack deadline for jobs that may run longer than `ackWaitMs`:
-
-```rust
-job.heartbeat().await?;
-```
-
-## 6. Retry and failure
-
-Returning `Err(...)` from a handler triggers JetStream NAK and redelivery per the `backoffMs` schedule. After `maxDeliver` attempts the job moves to the `dead` queue. Use `job.is_redelivery()` and `job.redelivery_count()` to adjust behavior on redelivery.
-
-## 7. Keyed concurrency and queue depth
-
-Use keyed concurrency when one logical unit of work must have at most one active
-job across all service instances. Queues without `keyConcurrency` keep normal
-work-queue behavior. `keyConcurrency` is a contract invariant for a derived
-logical key. Worker count belongs to the service implementation's
-`WorkerHostOptions`.
-
-```json
-"jobs": {
-  "sync-tickets": {
-    "payload": { "schema": "SyncTicketsPayload" },
-    "result": { "schema": "SyncTicketsResult" },
-    "keyConcurrency": {
-      "key": ["zendesk", "/origin", "tickets"],
-      "maxActive": 1,
-      "stalePolicy": "fail-stale"
-    },
-    "queue": {
-      "maxQueuedPerKey": 1,
-      "whenFull": "reject"
+{
+  "jobs": {
+    "reserveInventory": {
+      "payload": { "schema": "ReserveInventoryPayload" },
+      "result": { "schema": "ReserveInventoryResult" },
+      "maxDeliver": 3,
+      "backoffMs": [1000, 5000, 15000]
     }
   }
 }
 ```
 
+Run `cargo xtask prepare`. The participant facade now contains a typed queue
+registration method and a cloneable submission client.
+
+## 2. Keep a submission client
+
+Clone submission clients before registering handlers. They can be moved into RPC
+handlers, operation providers, or background tasks without borrowing the
+connected service:
+
 ```rust
-let options = WorkerHostOptions {
-    queue_concurrency: BTreeMap::from([("sync-tickets".to_string(), 4)]),
-    ..WorkerHostOptions::default()
-};
+let reserve_inventory = service.jobs_client().reserve_inventory();
+let reserve_inventory_for_create = reserve_inventory.clone();
+
+service.handle().rpc().orders().create(move |_context, request| {
+    let reserve_inventory = reserve_inventory_for_create.clone();
+    async move {
+        let order_id = ulid::Ulid::new().to_string();
+
+        let job = reserve_inventory
+            .submit(orders_sdk::ReserveInventoryJobPayload {
+                order_id: order_id.clone(),
+                items: request.items,
+            })
+            .await?;
+
+        Ok(orders_sdk::OrdersCreateResponse {
+            order_id,
+            job_id: job.identity().id.clone(),
+        })
+    }
+});
 ```
 
-The default keyed policy is conservative: `maxActive: 1`,
-`stalePolicy: "fail-stale"`, `maxQueuedPerKey: 0`, and `whenFull: "reject"`.
-That means Trellis fails a duplicate create by default instead of silently
-coalescing or replacing work. Use the generated strict `create(...)` method when
-you need a new job or a typed failure; use the generated policy-aware
-`submit(...)` method when the service needs to inspect `accepted`, `rejected`,
-`coalesced`, or `replaced` outcomes.
+`submit(...)` returns a typed `JobRef`. Use `get()`, `wait()`, or `cancel()` on
+that reference; do not query private job subjects.
 
-Even with keyed concurrency, keep service-owned checkpoint commits idempotent.
-Trellis prevents duplicate active work; your service database should still guard
-durable state and external side effects.
+## 3. Register workers
 
-## Next steps
+Register one handler for each queue before `service.run()`:
 
-- [Operations: Rust](/guides/using-operations-rust) — expose a caller-visible `Orders.Process` operation backed by these jobs
-- [Administer Jobs](/guides/administering-jobs) — query and manage these jobs as an operator
+```rust
+use trellis_rs::jobs::JobProgress;
+
+service
+    .jobs()
+    .reserve_inventory()
+    .handle(|job| async move {
+        tracing::info!(
+            request_id = %job.context().request_id,
+            attempt = job.tries(),
+            "reserving inventory",
+        );
+
+        job.progress(JobProgress {
+            step: Some("reserving".into()),
+            message: Some("Checking inventory".into()),
+            ..Default::default()
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+
+        if job.is_cancelled() {
+            return Err("job cancelled".to_string());
+        }
+
+        reserve_items(&job.payload().items).await
+            .map_err(|error| error.to_string())?;
+
+        Ok(orders_sdk::ReserveInventoryJobResult { reserved: true })
+    })
+    .await?;
+```
+
+The payload and result types are inferred from the generated queue descriptor.
+Handler errors implement `ToString`; returning an error requests redelivery until
+the queue reaches `maxDeliver`, after which the job becomes dead.
+
+## 4. Run and supervise workers
+
+`service.run().await` starts the authenticated request host and every registered
+worker. There is no separate worker host to retain. Unexpected worker exit fails
+the service and cancels sibling runtime tasks.
+
+For work that can exceed the queue's ack wait, call `job.heartbeat().await?`
+periodically. Heartbeats extend delivery ownership; worker-presence heartbeats
+are separate Trellis runtime traffic and require no application code.
+
+## 5. Cancellation and redelivery
+
+Cancellation is cooperative. Check `job.is_cancelled()` at safe interruption
+points. Use `job.is_redelivery()` and `job.redelivery_count()` when behavior must
+change on a retry.
+
+Per-job processing failures NAK the message and keep the queue worker alive.
+Keyed queues release their active slot on a best-effort basis before redelivery.
+
+## 6. Progress, logs, and updates
+
+Use `job.progress(...)` for durable, low-frequency lifecycle progress and
+`job.log(...)` for operator-visible log entries. If the queue declares an update
+schema, typed live updates are at most once: they are not persisted, replayed,
+shown in Jobs admin, or delivered to late subscribers. Prefer cumulative update
+payloads and treat the terminal result as authoritative.
+
+## 7. Keyed queues
+
+Use `keyConcurrency` when only one job for a logical business key may run at a
+time. Keyed queues default to clear failure (`fail-stale`, `reject`); choose
+coalescing or replacement explicitly when that is the domain behavior.
+
+The generated facade initializes the Trellis key coordinator automatically from
+the resolved queue binding. Service code does not construct a `JobManager` or
+coordinator.
+
+## Next
+
+- [Operations: Rust](/guides/using-operations-rust) for caller-visible async work
+- [Administering Jobs](/guides/administering-jobs) for query, inspection,
+  metrics, cancellation, retry, and dead-letter workflows

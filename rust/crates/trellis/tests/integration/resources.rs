@@ -587,7 +587,7 @@ async fn resources_service_kv_stale_revision_rejected() {
 }
 
 async fn call_resources_exercise_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     key: &str,
     message: &str,
 ) -> ResourceExerciseOutput {
@@ -611,12 +611,12 @@ async fn call_resources_exercise_with_retry(
     }
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }

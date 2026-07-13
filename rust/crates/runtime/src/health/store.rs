@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -169,8 +170,8 @@ impl HealthStore {
                     &transaction,
                     identity,
                     observed_at_ns,
-                    &sample.reported_status,
-                    &sample.reported_status,
+                    sample.reported_status.as_str(),
+                    sample.reported_status.as_str(),
                     &checks_json,
                     "heartbeat-resumed",
                 )?;
@@ -179,8 +180,8 @@ impl HealthStore {
                     identity,
                     &sample.participant.name,
                     "offline",
-                    &sample.reported_status,
-                    &sample.reported_status,
+                    sample.reported_status.as_str(),
+                    sample.reported_status.as_str(),
                     "heartbeat-resumed",
                     observed_at_ns,
                     observed_at_ns,
@@ -192,8 +193,8 @@ impl HealthStore {
                     &transaction,
                     identity,
                     observed_at_ns,
-                    &sample.reported_status,
-                    &sample.reported_status,
+                    sample.reported_status.as_str(),
+                    sample.reported_status.as_str(),
                     &checks_json,
                     "heartbeat-resumed",
                 )?;
@@ -202,14 +203,14 @@ impl HealthStore {
                     identity,
                     &sample.participant.name,
                     "offline",
-                    &sample.reported_status,
-                    &sample.reported_status,
+                    sample.reported_status.as_str(),
+                    sample.reported_status.as_str(),
                     "heartbeat-resumed",
                     observed_at_ns,
                     observed_at_ns,
                     sample.summary.as_deref(),
                 )?;
-            } else if current.effective_status != sample.reported_status
+            } else if current.effective_status != sample.reported_status.as_str()
                 || current.checks_json != checks_json
             {
                 close_interval(&transaction, identity, observed_at_ns)?;
@@ -217,19 +218,19 @@ impl HealthStore {
                     &transaction,
                     identity,
                     observed_at_ns,
-                    &sample.reported_status,
-                    &sample.reported_status,
+                    sample.reported_status.as_str(),
+                    sample.reported_status.as_str(),
                     &checks_json,
                     "heartbeat-change",
                 )?;
-                if current.effective_status != sample.reported_status {
+                if current.effective_status != sample.reported_status.as_str() {
                     insert_transition(
                         &transaction,
                         identity,
                         &sample.participant.name,
                         &current.effective_status,
-                        &sample.reported_status,
-                        &sample.reported_status,
+                        sample.reported_status.as_str(),
+                        sample.reported_status.as_str(),
                         "heartbeat-change",
                         observed_at_ns,
                         observed_at_ns,
@@ -242,8 +243,8 @@ impl HealthStore {
                 &transaction,
                 identity,
                 observed_at_ns,
-                &sample.reported_status,
-                &sample.reported_status,
+                sample.reported_status.as_str(),
+                sample.reported_status.as_str(),
                 &checks_json,
                 "first-sample",
             )?;
@@ -283,13 +284,13 @@ impl HealthStore {
                 identity.session_key,
                 sample.participant.name,
                 identity.contract_digest,
-                sample.reported_status,
+                sample.reported_status.as_str(),
                 observed_at_ns,
                 projected_at_ns,
                 deadline_ns,
                 sample.participant.started_at,
                 sample.participant.publish_interval_ms,
-                sample.participant.runtime,
+                sample.participant.runtime.as_str(),
                 sample.participant.runtime_version,
                 sample.participant.version,
                 sample_json,
@@ -709,16 +710,16 @@ fn insert_transition(
             time: changed_at.clone(),
         },
         participant: HealthStatusChangedEventParticipant {
-            kind: identity.participant_kind.clone(),
+            kind: wire(&identity.participant_kind)?,
             contract_id: identity.contract_id.clone(),
             deployment_id: identity.deployment_id.clone(),
             instance_id: identity.instance_id.clone(),
             name: participant_name.to_string(),
         },
-        previous_status: previous_status.to_string(),
-        status: status.to_string(),
-        reported_status: reported_status.to_string(),
-        reason: reason.to_string(),
+        previous_status: wire(previous_status)?,
+        status: wire(status)?,
+        reported_status: wire(reported_status)?,
+        reason: wire(reason)?,
         changed_at,
         last_seen_at: rfc3339(last_seen_at_ns)?,
         summary: summary.map(ToString::to_string),
@@ -737,6 +738,10 @@ fn insert_transition(
         ],
     )?;
     Ok(())
+}
+
+fn wire<T: DeserializeOwned, S: Serialize>(value: S) -> Result<T, HealthStoreError> {
+    Ok(serde_json::from_value(serde_json::to_value(value)?)?)
 }
 
 fn update_metric_buckets(
@@ -870,22 +875,22 @@ mod tests {
                 contract_id: "example.worker@v1".to_string(),
                 info: Some(BTreeMap::new()),
                 instance_id: "worker-1".to_string(),
-                kind: "service".to_string(),
+                kind: wire("service").unwrap(),
                 name: "Worker".to_string(),
                 publish_interval_ms: 30_000,
-                runtime: "rust".to_string(),
+                runtime: wire("rust").unwrap(),
                 runtime_version: None,
                 started_at: "2026-01-01T00:00:00Z".to_string(),
                 version: None,
             },
-            reported_status: "healthy".to_string(),
+            reported_status: wire("healthy").unwrap(),
             summary: None,
             checks: vec![HealthHeartbeatSampleChecksItem {
                 error: None,
                 info: None,
                 latency_ms: 1.0,
                 name: "nats".to_string(),
-                status: "ok".to_string(),
+                status: wire("ok").unwrap(),
                 summary: None,
             }],
         }
@@ -950,7 +955,7 @@ mod tests {
                     history_limit: None,
                     history_since: None,
                     instance_id: None,
-                    participant_kind: "service".to_string(),
+                    participant_kind: wire("service").unwrap(),
                 },
                 observed + 62_000_000_000,
             )
@@ -965,7 +970,7 @@ mod tests {
                     contract_id: "example.worker@v1".to_string(),
                     end: rfc3339(observed + 120_000_000_000).expect("format end"),
                     instance_ids: None,
-                    participant_kind: "service".to_string(),
+                    participant_kind: wire("service").unwrap(),
                     start: rfc3339(observed).expect("format start"),
                     step_ms: 300_000,
                 },

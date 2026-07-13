@@ -3,7 +3,8 @@ use super::{
     AuthenticatedUser, IdentityGrantEntryRecord, ListIdentityGrantsRequest,
     RevokeIdentityGrantRequest, TrellisAuthError,
 };
-use crate::client::{RpcDescriptor, TrellisClient, UserConnectOptions};
+use crate::client::{RpcDescriptor, SessionAuth, UserConnectOptions};
+use crate::generated::Caller;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -19,16 +20,20 @@ use crate::sdk::auth::{
     types::{
         AuthCapabilitiesListRequest, AuthCapabilitiesListResponseEntriesItem,
         AuthCapabilityGroupsListRequest, AuthCapabilityGroupsListResponseEntriesItem,
-        AuthDeploymentsCreateRequest, AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest,
-        AuthDeploymentsListRequest, AuthDeploymentsRemoveRequest, AuthSessionsListRequest,
-        AuthUsersCreateRequest, AuthUsersCreateResponseUser, AuthUsersGetRequest,
-        AuthUsersGetResponseUser, AuthUsersListRequest, AuthUsersListResponseEntriesItem,
+        AuthDeploymentsDisableRequest, AuthDeploymentsEnableRequest, AuthDeploymentsListRequest,
+        AuthDeploymentsRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
+        AuthUsersCreateResponseUser, AuthUsersGetRequest, AuthUsersGetResponseUser,
+        AuthUsersListRequest, AuthUsersListResponseEntriesItem,
         AuthUsersPasswordResetCreateRequest, AuthUsersPasswordResetCreateResponse,
         AuthUsersUpdateRequest,
     },
 };
 
 const AUTH_CLIENT_LIST_LIMIT: i64 = 500;
+
+fn convert<T: DeserializeOwned, S: Serialize>(value: S) -> Result<T, TrellisAuthError> {
+    Ok(serde_json::from_value(serde_json::to_value(value)?)?)
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -61,21 +66,26 @@ struct DeviceDeploymentCreateRequest<'a> {
 /// Connect an authenticated admin client from the stored session state.
 pub async fn connect_admin_client_async(
     state: &AdminSessionState,
-) -> Result<TrellisClient, TrellisAuthError> {
-    Ok(TrellisClient::connect_user(UserConnectOptions {
-        servers: &state.servers,
-        sentinel_jwt: &state.sentinel_jwt,
-        sentinel_seed: &state.sentinel_seed,
-        session_key_seed_base64url: &state.session_seed,
-        contract_digest: &state.contract_digest,
-        timeout_ms: 5_000,
-    })
+) -> Result<Caller, TrellisAuthError> {
+    Ok(Caller::connect_user(UserConnectOptions::new(
+        &state.servers,
+        &state.sentinel_jwt,
+        &state.sentinel_seed,
+        &state.session_seed,
+        &state.contract_digest,
+        5_000,
+    ))
     .await?)
+}
+
+/// Derive the public session key for a base64url-encoded session seed.
+pub fn session_public_key(seed_base64url: &str) -> Result<String, TrellisAuthError> {
+    Ok(SessionAuth::from_seed_base64url(seed_base64url)?.session_key)
 }
 
 /// Thin typed client for Trellis auth/admin RPCs used by the CLI.
 pub struct AuthClient<'a> {
-    inner: &'a TrellisClient,
+    inner: &'a Caller,
 }
 
 /// Options for removing a device deployment.
@@ -97,8 +107,8 @@ pub struct RemoveServiceDeploymentOptions {
 }
 
 impl<'a> AuthClient<'a> {
-    /// Wrap an already-connected low-level Trellis client.
-    pub fn new(inner: &'a TrellisClient) -> Self {
+    /// Wrap an authenticated generated caller.
+    pub fn new(inner: &'a Caller) -> Self {
         Self { inner }
     }
 
@@ -113,7 +123,7 @@ impl<'a> AuthClient<'a> {
     {
         let request = serde_json::to_value(input)?;
         let response = self.inner.request_json_value(subject, &request).await?;
-        Ok(serde_json::from_value(response)?)
+        Ok(convert(response)?)
     }
 
     async fn call_rpc<R>(&self, input: &R::Input) -> Result<R::Output, TrellisAuthError>
@@ -126,16 +136,10 @@ impl<'a> AuthClient<'a> {
     /// Return the currently authenticated user.
     pub async fn me(&self) -> Result<AuthenticatedUser, TrellisAuthError> {
         let response = self.call_rpc::<AuthSessionsMeRpc>(&Empty {}).await?;
-        let participant_kind = response
-            .participant_kind
-            .as_str()
-            .unwrap_or("none")
-            .to_string();
+        let participant_kind = response.participant_kind.as_str().to_string();
 
         match participant_kind.as_str() {
-            "app" | "agent" if !response.user.is_null() => {
-                Ok(serde_json::from_value(response.user)?)
-            }
+            "app" | "agent" if response.user.is_some() => Ok(convert(response.user.unwrap())?),
             _ => Err(TrellisAuthError::NotUserSession(participant_kind)),
         }
     }
@@ -228,14 +232,15 @@ impl<'a> AuthClient<'a> {
         offset: Option<i64>,
         user: Option<&str>,
     ) -> Result<Vec<serde_json::Value>, TrellisAuthError> {
-        Ok(self
-            .call_rpc::<AuthSessionsListRpc>(&AuthSessionsListRequest {
+        convert(
+            self.call_rpc::<AuthSessionsListRpc>(&AuthSessionsListRequest {
                 limit,
                 offset,
                 user: user.map(ToOwned::to_owned),
             })
             .await?
-            .entries)
+            .entries,
+        )
     }
 
     /// List available auth capabilities.
@@ -282,7 +287,7 @@ impl<'a> AuthClient<'a> {
         let deployments = self
             .call_rpc::<AuthDeploymentsListRpc>(&AuthDeploymentsListRequest {
                 disabled: if disabled { Some(true) } else { None },
-                kind: Some("device".to_string()),
+                kind: Some(convert("device")?),
                 limit: AUTH_CLIENT_LIST_LIMIT,
                 offset: None,
             })
@@ -291,7 +296,7 @@ impl<'a> AuthClient<'a> {
 
         deployments
             .into_iter()
-            .map(serde_json::from_value)
+            .map(convert)
             .collect::<Result<Vec<_>, _>>()
             .map_err(Into::into)
     }
@@ -302,17 +307,14 @@ impl<'a> AuthClient<'a> {
         deployment_id: &str,
         review_mode: Option<&str>,
     ) -> Result<DeviceDeploymentRecord, TrellisAuthError> {
-        let response = self
-            .call_rpc::<AuthDeploymentsCreateRpc>(&AuthDeploymentsCreateRequest(
-                serde_json::to_value(DeviceDeploymentCreateRequest {
-                    kind: "device",
-                    deployment_id,
-                    review_mode,
-                })?,
-            ))
-            .await?;
+        let request = convert(DeviceDeploymentCreateRequest {
+            kind: "device",
+            deployment_id,
+            review_mode,
+        })?;
+        let response = self.call_rpc::<AuthDeploymentsCreateRpc>(&request).await?;
 
-        Ok(serde_json::from_value(response.deployment)?)
+        Ok(convert(response.deployment)?)
     }
 
     /// Disable a device deployment.
@@ -323,10 +325,10 @@ impl<'a> AuthClient<'a> {
         let response = self
             .call_rpc::<AuthDeploymentsDisableRpc>(&AuthDeploymentsDisableRequest {
                 deployment_id: deployment_id.to_string(),
-                kind: "device".to_string(),
+                kind: convert("device")?,
             })
             .await?;
-        let deployment: DeviceDeploymentRecord = serde_json::from_value(response.deployment)?;
+        let deployment: DeviceDeploymentRecord = convert(response.deployment)?;
         Ok(deployment.disabled)
     }
 
@@ -338,10 +340,10 @@ impl<'a> AuthClient<'a> {
         let response = self
             .call_rpc::<AuthDeploymentsEnableRpc>(&AuthDeploymentsEnableRequest {
                 deployment_id: deployment_id.to_string(),
-                kind: "device".to_string(),
+                kind: convert("device")?,
             })
             .await?;
-        let deployment: DeviceDeploymentRecord = serde_json::from_value(response.deployment)?;
+        let deployment: DeviceDeploymentRecord = convert(response.deployment)?;
         Ok(!deployment.disabled)
     }
 
@@ -380,7 +382,7 @@ impl<'a> AuthClient<'a> {
             .call_rpc::<AuthDeploymentsRemoveRpc>(&AuthDeploymentsRemoveRequest {
                 cascade: options.cascade,
                 deployment_id: deployment_id.to_string(),
-                kind: "device".to_string(),
+                kind: convert("device")?,
                 purge_unused_contracts: options.purge_unused_contracts,
             })
             .await?;
@@ -422,7 +424,7 @@ impl<'a> AuthClient<'a> {
                     deployment_id: deployment_id.map(ToOwned::to_owned),
                     limit: AUTH_CLIENT_LIST_LIMIT,
                     offset: None,
-                    state: state.map(ToOwned::to_owned),
+                    state: state.map(convert).transpose()?,
                 },
             )
             .await?
@@ -442,7 +444,7 @@ impl<'a> AuthClient<'a> {
                 },
             )
             .await?;
-        Ok(response.instance.state == "disabled")
+        Ok(response.instance.state.as_str() == "disabled")
     }
 
     /// Enable a device instance.
@@ -458,7 +460,7 @@ impl<'a> AuthClient<'a> {
                 },
             )
             .await?;
-        Ok(response.instance.state != "disabled")
+        Ok(response.instance.state.as_str() != "disabled")
     }
 
     /// Remove a device instance.
@@ -495,7 +497,7 @@ impl<'a> AuthClient<'a> {
                     deployment_id: deployment_id.map(ToOwned::to_owned),
                     limit: AUTH_CLIENT_LIST_LIMIT,
                     offset: None,
-                    state: state.map(ToOwned::to_owned),
+                    state: state.map(convert).transpose()?,
                 },
             )
             .await?
@@ -536,7 +538,7 @@ impl<'a> AuthClient<'a> {
                     deployment_id: deployment_id.map(ToOwned::to_owned),
                     limit: AUTH_CLIENT_LIST_LIMIT,
                     offset: None,
-                    state: state.map(ToOwned::to_owned),
+                    state: state.map(convert).transpose()?,
                 },
             )
             .await?
@@ -555,7 +557,7 @@ impl<'a> AuthClient<'a> {
             "rpc.v1.Auth.DeviceUserAuthorities.Reviews.Decide",
             &crate::sdk::auth::AuthDeviceUserAuthoritiesReviewsDecideRequest {
                 review_id: review_id.to_string(),
-                decision: decision.to_string(),
+                decision: convert(decision)?,
                 reason: reason.map(ToOwned::to_owned),
             },
         )
@@ -568,16 +570,13 @@ impl<'a> AuthClient<'a> {
         deployment_id: &str,
         namespaces: Vec<String>,
     ) -> Result<ServiceDeploymentRecord, TrellisAuthError> {
-        let response = self
-            .call_rpc::<AuthDeploymentsCreateRpc>(&AuthDeploymentsCreateRequest(
-                serde_json::json!({
-                    "kind": "service",
-                    "deploymentId": deployment_id,
-                    "namespaces": namespaces,
-                }),
-            ))
-            .await?;
-        Ok(serde_json::from_value(response.deployment)?)
+        let request = convert(serde_json::json!({
+            "kind": "service",
+            "deploymentId": deployment_id,
+            "namespaces": namespaces,
+        }))?;
+        let response = self.call_rpc::<AuthDeploymentsCreateRpc>(&request).await?;
+        Ok(convert(response.deployment)?)
     }
 
     /// List service deployments.
@@ -587,14 +586,14 @@ impl<'a> AuthClient<'a> {
     ) -> Result<Vec<ServiceDeploymentRecord>, TrellisAuthError> {
         self.call_rpc::<AuthDeploymentsListRpc>(&AuthDeploymentsListRequest {
             disabled: if disabled { Some(true) } else { None },
-            kind: Some("service".to_string()),
+            kind: Some(convert("service")?),
             limit: AUTH_CLIENT_LIST_LIMIT,
             offset: None,
         })
         .await?
         .entries
         .into_iter()
-        .map(serde_json::from_value)
+        .map(convert)
         .collect::<Result<Vec<_>, _>>()
         .map_err(Into::into)
     }
@@ -607,10 +606,10 @@ impl<'a> AuthClient<'a> {
         let response = self
             .call_rpc::<AuthDeploymentsDisableRpc>(&AuthDeploymentsDisableRequest {
                 deployment_id: deployment_id.to_string(),
-                kind: "service".to_string(),
+                kind: convert("service")?,
             })
             .await?;
-        Ok(serde_json::from_value(response.deployment)?)
+        Ok(convert(response.deployment)?)
     }
 
     /// Enable one service deployment.
@@ -621,10 +620,10 @@ impl<'a> AuthClient<'a> {
         let response = self
             .call_rpc::<AuthDeploymentsEnableRpc>(&AuthDeploymentsEnableRequest {
                 deployment_id: deployment_id.to_string(),
-                kind: "service".to_string(),
+                kind: convert("service")?,
             })
             .await?;
-        Ok(serde_json::from_value(response.deployment)?)
+        Ok(convert(response.deployment)?)
     }
 
     /// Remove one service deployment.
@@ -662,7 +661,7 @@ impl<'a> AuthClient<'a> {
             .call_rpc::<AuthDeploymentsRemoveRpc>(&AuthDeploymentsRemoveRequest {
                 cascade: options.cascade,
                 deployment_id: deployment_id.to_string(),
-                kind: "service".to_string(),
+                kind: convert("service")?,
                 purge_unused_contracts: options.purge_unused_contracts,
             })
             .await?
@@ -782,7 +781,9 @@ mod tests {
     use crate::sdk::auth::types::AuthSessionsMeResponse;
     use serde_json::json;
 
-    use super::{AuthenticatedUser, DeviceDeploymentCreateRequest, DeviceDeploymentRecord};
+    use super::{
+        convert, AuthenticatedUser, DeviceDeploymentCreateRequest, DeviceDeploymentRecord,
+    };
 
     #[test]
     fn sessions_me_response_user_value_deserializes_account_first_shape() {
@@ -805,9 +806,9 @@ mod tests {
         }))
         .expect("deserialize generated response");
 
-        assert_eq!(response.participant_kind.as_str(), Some("agent"));
+        assert_eq!(response.participant_kind.as_str(), "agent");
         let user: AuthenticatedUser =
-            serde_json::from_value(response.user).expect("deserialize authenticated user");
+            convert(response.user.unwrap()).expect("deserialize authenticated user");
         assert_eq!(user.user_id, "usr_123");
         assert_eq!(user.identity.identity_id, "idn_github_123");
         assert_eq!(user.identity.provider, "github");
@@ -869,7 +870,7 @@ mod tests {
             serde_json::to_value(crate::sdk::auth::AuthDeploymentsRemoveRequest {
                 cascade: None,
                 deployment_id: "api".to_string(),
-                kind: "service".to_string(),
+                kind: crate::sdk::auth::types::AuthDeploymentsRemoveRequestKind::Service,
                 purge_unused_contracts: None,
             })
             .expect("serialize service remove request");
@@ -882,7 +883,7 @@ mod tests {
             serde_json::to_value(crate::sdk::auth::AuthDeploymentsRemoveRequest {
                 cascade: Some(true),
                 deployment_id: "api".to_string(),
-                kind: "service".to_string(),
+                kind: crate::sdk::auth::types::AuthDeploymentsRemoveRequestKind::Service,
                 purge_unused_contracts: None,
             })
             .expect("serialize service cascade remove request");
@@ -895,7 +896,7 @@ mod tests {
             serde_json::to_value(crate::sdk::auth::AuthDeploymentsRemoveRequest {
                 cascade: Some(true),
                 deployment_id: "reader".to_string(),
-                kind: "device".to_string(),
+                kind: crate::sdk::auth::types::AuthDeploymentsRemoveRequestKind::Device,
                 purge_unused_contracts: None,
             })
             .expect("serialize device cascade remove request");
@@ -908,7 +909,7 @@ mod tests {
             serde_json::to_value(crate::sdk::auth::AuthDeploymentsRemoveRequest {
                 cascade: Some(true),
                 deployment_id: "api".to_string(),
-                kind: "service".to_string(),
+                kind: crate::sdk::auth::types::AuthDeploymentsRemoveRequestKind::Service,
                 purge_unused_contracts: Some(true),
             })
             .expect("serialize service purge remove request");
@@ -926,7 +927,7 @@ mod tests {
             serde_json::to_value(crate::sdk::auth::AuthDeploymentsRemoveRequest {
                 cascade: Some(true),
                 deployment_id: "reader".to_string(),
-                kind: "device".to_string(),
+                kind: crate::sdk::auth::types::AuthDeploymentsRemoveRequestKind::Device,
                 purge_unused_contracts: Some(true),
             })
             .expect("serialize device purge remove request");

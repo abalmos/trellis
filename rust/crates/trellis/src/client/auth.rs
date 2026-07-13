@@ -17,14 +17,17 @@ struct NatsConnectToken<'a> {
 }
 
 /// Session-scoped signing material used for Trellis auth and RPC proofs.
+#[doc = concat!("Public Trellis data type `", stringify!(SessionAuth), "`.")]
 pub struct SessionAuth {
     /// Public session key in base64url form.
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: String,
     signing_key: SigningKey,
 }
 
 impl SessionAuth {
     /// Construct a session authenticator from a base64url-encoded Ed25519 seed.
+    #[doc = concat!("Trellis API operation `", stringify!(from_seed_base64url), "`.")]
     pub fn from_seed_base64url(seed_b64url: &str) -> Result<Self, TrellisClientError> {
         let seed = base64url_decode(seed_b64url)?;
         if seed.len() != 32 {
@@ -42,20 +45,23 @@ impl SessionAuth {
     }
 
     /// Sign a domain-separated string value with `SHA-256(prefix:value)`.
+    #[doc = concat!("Trellis API operation `", stringify!(sign_sha256_domain), "`.")]
     pub fn sign_sha256_domain(&self, prefix: &str, value: &str) -> String {
         let digest = sha256(format!("{prefix}:{value}").as_bytes());
         let signature: Signature = self.signing_key.sign(&digest);
         base64url_encode(&signature.to_bytes())
     }
 
-    pub(crate) fn sign_sha256_bytes(&self, bytes: &[u8]) -> String {
+    #[doc = concat!("Trellis API operation `", stringify!(sign_sha256_bytes), "`.")]
+    pub fn sign_sha256_bytes(&self, bytes: &[u8]) -> String {
         let digest = sha256(bytes);
         let signature: Signature = self.signing_key.sign(&digest);
         base64url_encode(&signature.to_bytes())
     }
 
     /// Create a service auth-callout token using an `iat` timestamp and contract digest.
-    pub(crate) fn nats_connect_token(&self, iat: u64, contract_digest: &str) -> String {
+    #[doc = concat!("Trellis API operation `", stringify!(nats_connect_token), "`.")]
+    pub fn nats_connect_token(&self, iat: u64, contract_digest: &str) -> String {
         let signature =
             self.sign_sha256_domain("nats-connect", &format!("{iat}:{contract_digest}"));
         serde_json::to_string(&NatsConnectToken {
@@ -69,11 +75,13 @@ impl SessionAuth {
     }
 
     /// Create a user auth-callout token using an `iat` timestamp and contract digest.
-    pub(crate) fn nats_connect_user_token(&self, iat: u64, contract_digest: &str) -> String {
+    #[doc = concat!("Trellis API operation `", stringify!(nats_connect_user_token), "`.")]
+    pub fn nats_connect_user_token(&self, iat: u64, contract_digest: &str) -> String {
         self.nats_connect_token(iat, contract_digest)
     }
 
     /// Return the inbox prefix derived from the session key.
+    #[doc = concat!("Trellis API operation `", stringify!(inbox_prefix), "`.")]
     pub fn inbox_prefix(&self) -> String {
         format!(
             "_INBOX.{}",
@@ -82,6 +90,7 @@ impl SessionAuth {
     }
 
     /// Create the `proof` header for a signed RPC request payload.
+    #[doc = concat!("Trellis API operation `", stringify!(create_proof), "`.")]
     pub fn create_proof(
         &self,
         subject: &str,
@@ -97,6 +106,7 @@ impl SessionAuth {
     }
 
     /// Create the `proof` header for a signed event payload.
+    #[doc = concat!("Trellis API operation `", stringify!(create_event_proof), "`.")]
     pub fn create_event_proof(
         &self,
         subject: &str,

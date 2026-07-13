@@ -76,6 +76,17 @@ impl NatsJobWaiter {
             .map_err(|_| jobs_message(format!("job '{timeout_job_id}' timed out")))?
     }
 
+    /// Read the latest lifecycle snapshot for one service-local job.
+    pub async fn get(&self, seed: Job) -> Result<Job, JobsError> {
+        let subject = format!("{}.{}.*", self.queue.publish_prefix, seed.id);
+        let jetstream = jetstream::new(self.nats.clone());
+        let lifecycle_stream = jetstream
+            .get_stream_no_info(JOBS_STREAM)
+            .await
+            .map_err(|error| jobs_message(format!("open jobs lifecycle stream failed: {error}")))?;
+        latest_job_from_lifecycle(&lifecycle_stream, &subject, seed).await
+    }
+
     /// Subscribe to validated live-only updates until terminal lifecycle state.
     pub async fn updates<D>(
         &self,

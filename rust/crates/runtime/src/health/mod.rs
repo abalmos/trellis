@@ -4,6 +4,7 @@ mod query;
 mod store;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer, stream, AckKind};
@@ -20,7 +21,9 @@ use trellis_rs::client::SessionAuth;
 use trellis_rs::sdk::health::feeds::HealthWatchFeedDescriptor;
 use trellis_rs::sdk::health::rpc::{HealthInspectRpc, HealthMetricsRpc, HealthQueryRpc};
 use trellis_rs::sdk::health::types::{HealthHeartbeatSample, HealthWatchEvent, HealthWatchInput};
-use trellis_rs::service::{run_router_service, DeclaredRpcError, Router, ServerError};
+use trellis_rs::service::{
+    internal::run_builtin_authenticated_router, DeclaredRpcError, Router, ServerError,
+};
 use ulid::Ulid;
 
 use crate::leases::{LeaseError, LeaseKey, LeaseManager};
@@ -38,6 +41,7 @@ const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
 const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
 const DEFAULT_TRANSPORT_MAX_BYTES: i64 = 1_073_741_824;
 const DEFAULT_HISTORY_RETENTION_DAYS: i64 = 30;
+const AUTH_VALIDATE_TIMEOUT_MS: u64 = 5_000;
 const RPC_SUBJECTS: &[&str] = &[
     "rpc.v1.Health.Query",
     "rpc.v1.Health.Inspect",
@@ -107,8 +111,9 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .and_then(|health| health.history_retention_days)
         .map(i64::from)
         .unwrap_or(DEFAULT_HISTORY_RETENTION_DAYS);
-    let event_auth = load_event_auth(&context.config)?;
+    let event_auth = Arc::new(load_event_auth(&context.config)?);
     let join = tokio::spawn(async move {
+        let request_auth = event_auth.clone();
         let invalidation_loop = run_invalidation_subscriber(
             nats.clone(),
             invalidation_subject.clone(),
@@ -125,7 +130,13 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             event_auth,
             task_stop.clone(),
         );
-        let api_loop = run_router_service(nats, RPC_SUBJECTS, router);
+        let api_loop = run_builtin_authenticated_router(
+            nats,
+            request_auth,
+            AUTH_VALIDATE_TIMEOUT_MS,
+            RPC_SUBJECTS,
+            router,
+        );
         tokio::pin!(invalidation_loop, owner_loop, api_loop);
         tokio::select! {
             result = &mut invalidation_loop => result,
@@ -233,10 +244,9 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
     router.register_feed::<HealthWatchFeedDescriptor, _, _>(move |_context, input| {
         let store = feed_store.clone();
         let receiver = invalidations.subscribe();
-        let ready = HealthWatchEvent(json!({
-            "type": "ready",
-            "projectionRevision": current_revision(&store).unwrap_or_default(),
-        }));
+        let ready = HealthWatchEvent::Ready {
+            projection_revision: current_revision(&store).unwrap_or_default(),
+        };
         futures_stream::once(async move { Ok(ready) }).chain(futures_stream::unfold(
             (receiver, input, store),
             |(mut receiver, input, store)| async move {
@@ -251,21 +261,21 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
                                 .collect::<Vec<_>>();
                             if !changes.is_empty() || invalidation.changes.is_empty() {
                                 return Some((
-                                    Ok(HealthWatchEvent(json!({
-                                        "type": "healthInvalidated",
-                                        "projectionRevision": invalidation.projection_revision,
-                                        "changes": changes,
-                                    }))),
+                                    health_invalidated_event(
+                                        invalidation.projection_revision,
+                                        Some(changes),
+                                    ),
                                     (receiver, input, store),
                                 ));
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             return Some((
-                                Ok(HealthWatchEvent(json!({
-                                    "type": "healthInvalidated",
-                                    "projectionRevision": current_revision(&store).unwrap_or_default(),
-                                }))),
+                                Ok(HealthWatchEvent::HealthInvalidated {
+                                    changes: None,
+                                    projection_revision: current_revision(&store)
+                                        .unwrap_or_default(),
+                                }),
                                 (receiver, input, store),
                             ));
                         }
@@ -309,7 +319,7 @@ async fn run_owner(
     projection_id: String,
     invalidation_subject: String,
     history_days: i64,
-    event_auth: SessionAuth,
+    event_auth: Arc<SessionAuth>,
     stop: StopHandle,
 ) -> Result<(), RuntimeError> {
     let lease_key = LeaseKey::new(format!("health.owner.{projection_id}"));
@@ -478,7 +488,7 @@ fn validate_sample(
     identity: &HeartbeatIdentity,
     sample: &HealthHeartbeatSample,
 ) -> Result<(), String> {
-    if sample.participant.kind != identity.participant_kind
+    if sample.participant.kind.as_str() != identity.participant_kind
         || sample.participant.contract_id != identity.contract_id
         || sample.participant.contract_digest != identity.contract_digest
         || sample.participant.instance_id != identity.instance_id
@@ -611,8 +621,21 @@ fn watch_matches(input: &HealthWatchInput, change: &InvalidationChange) -> bool 
         && matches_filter(input.instance_ids.as_ref(), &change.instance_id)
 }
 
-fn matches_filter(filter: Option<&Vec<String>>, value: &String) -> bool {
-    filter.is_none_or(|filter| filter.is_empty() || filter.contains(value))
+fn matches_filter<T: AsRef<str>>(filter: Option<&Vec<T>>, value: &str) -> bool {
+    filter.is_none_or(|filter| {
+        filter.is_empty() || filter.iter().any(|candidate| candidate.as_ref() == value)
+    })
+}
+
+fn health_invalidated_event(
+    projection_revision: i64,
+    changes: Option<Vec<InvalidationChange>>,
+) -> Result<HealthWatchEvent, ServerError> {
+    Ok(serde_json::from_value(json!({
+        "type": "healthInvalidated",
+        "projectionRevision": projection_revision,
+        "changes": changes,
+    }))?)
 }
 
 fn decode_token(token: &str) -> Result<String, String> {

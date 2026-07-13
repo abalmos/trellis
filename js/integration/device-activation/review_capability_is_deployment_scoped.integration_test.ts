@@ -58,8 +58,12 @@ liveTrellisTest({
       otherDevice.identity,
     );
 
-    const ownResolve = await admin.authDeviceUserAuthoritiesResolve({ flowId: ownActivation.flowId }).start().orThrow();
-    const otherResolve = await admin.authDeviceUserAuthoritiesResolve({ flowId: otherActivation.flowId }).start().orThrow();
+    const ownResolve = await admin.authDeviceUserAuthoritiesResolve({
+      flowId: ownActivation.flowId,
+    }).start().orThrow();
+    const otherResolve = await admin.authDeviceUserAuthoritiesResolve({
+      flowId: otherActivation.flowId,
+    }).start().orThrow();
     const waitForReview = async (
       deploymentId: string,
       instanceId: string,
@@ -147,7 +151,9 @@ liveTrellisTest({
         }),
     }).orThrow();
     try {
-      const scopedReviews = await reviewer.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 20 })
+      const scopedReviews = await reviewer.authDeviceUserAuthoritiesReviewsList(
+        { state: "pending", limit: 20 },
+      )
         .orThrow();
       assert(
         scopedReviews.entries.some((entry) =>
@@ -165,7 +171,7 @@ liveTrellisTest({
       const denied = await reviewer.authDeviceUserAuthoritiesReviewsDecide({
         reviewId: otherReview.reviewId,
         decision: "approve",
-      },);
+      });
       assert(
         denied.isErr(),
         "scoped reviewer must not decide other deployment",

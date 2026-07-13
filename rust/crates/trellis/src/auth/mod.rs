@@ -37,8 +37,8 @@ pub use browser_login::{
     contract_digest, generate_session_keypair, start_admin_reauth, start_agent_login,
 };
 pub use client::{
-    connect_admin_client_async, AuthClient, DeviceDeploymentRecord, RemoveDeviceDeploymentOptions,
-    RemoveServiceDeploymentOptions, ServiceDeploymentRecord,
+    connect_admin_client_async, session_public_key, AuthClient, DeviceDeploymentRecord,
+    RemoveDeviceDeploymentOptions, RemoveServiceDeploymentOptions, ServiceDeploymentRecord,
 };
 pub use device_activation::{
     build_device_activation_payload, build_device_wait_proof_input,

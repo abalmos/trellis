@@ -1,5 +1,5 @@
 //! Typed feed descriptors for `trellis.eventlog@v1`.
-use crate::client::FeedDescriptor;
+use crate::generated::FeedDescriptor;
 /// Descriptor for `EventLog.Watch`.
 pub struct EventLogWatchFeedDescriptor;
 impl FeedDescriptor for EventLogWatchFeedDescriptor {

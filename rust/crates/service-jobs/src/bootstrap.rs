@@ -3,8 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use trellis_rs::client::TrellisClientError;
-use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
+use trellis_rs::generated::TrellisClientError;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServerError, ServiceConnectOptions, ServiceRuntimeError,
 };
@@ -14,7 +13,7 @@ use crate::contract::JobsContract;
 use crate::janitor::{start_janitor_loop, JanitorHandle};
 use crate::paths::jobs_db_path_from_env;
 use crate::projector::{start_jobs_projector, JobsProjectorHandle};
-use crate::query::{jobs_admin_resources_from_binding, JobsAdminResources, JobsQuery};
+use crate::query::{jobs_admin_resources, JobsAdminResources, JobsQuery};
 use crate::router::register_jobs_rpc_handlers;
 use crate::storage::SqliteJobsStore;
 use crate::watch::{expire_obsolete_watch_consumers, register_jobs_watch_feed};
@@ -171,17 +170,12 @@ pub struct ConnectedJobsService {
 impl ConnectedJobsService {
     /// Construct a connected Jobs service wrapper from a high-level Trellis service runtime.
     pub fn new(runtime: ConnectedServiceRuntime<JobsContract>) -> Result<Self, ServerError> {
-        let jobs_runtime = trellis_rs::jobs::JobsRuntime::from_client(runtime.client());
+        let jobs_runtime = runtime.jobs_runtime();
         Ok(Self {
             runtime,
             jobs_runtime,
             jobs_store: open_jobs_store_from_env()?,
         })
-    }
-
-    /// Return the resolved bindings snapshot for this service.
-    pub fn binding(&self) -> &TrellisBindingsGetResponseBinding {
-        self.runtime.binding().as_ref()
     }
 
     /// Run the Jobs admin service loops and request handler until shutdown.
@@ -193,13 +187,9 @@ impl ConnectedJobsService {
     pub async fn run_with_mode(mut self, mode: JobsServiceMode) -> Result<(), ServerError> {
         tracing::info!(?mode, "registering jobs admin runtime surfaces");
         let jobs_runtime = self.jobs_runtime.clone();
-        let nats = self.runtime.client().internal_nats().clone();
-        let (resources, query, store) = build_jobs_runtime(
-            jobs_runtime.clone(),
-            self.binding(),
-            self.jobs_store.clone(),
-        )?;
-        match expire_obsolete_watch_consumers(&nats, &resources.jobs_stream).await {
+        let (resources, query, store) =
+            build_jobs_runtime(jobs_runtime.clone(), self.jobs_store.clone())?;
+        match expire_obsolete_watch_consumers(&jobs_runtime, &resources.jobs_stream).await {
             Ok(count) if count > 0 => {
                 tracing::info!(count, "scheduled obsolete Jobs.Watch consumers for expiry");
             }
@@ -209,7 +199,11 @@ impl ConnectedJobsService {
             }
         }
         register_jobs_rpc_handlers(&mut self.runtime, query);
-        register_jobs_watch_feed(&mut self.runtime, nats, resources.jobs_stream.clone());
+        register_jobs_watch_feed(
+            &mut self.runtime,
+            jobs_runtime.clone(),
+            resources.jobs_stream.clone(),
+        );
         tracing::debug!(?mode, "jobs admin RPC handlers and watch feed registered");
         run_jobs_service_runtime(jobs_runtime, resources, store, mode, async move {
             self.runtime
@@ -223,10 +217,9 @@ impl ConnectedJobsService {
 
 fn build_jobs_runtime(
     jobs_runtime: trellis_rs::jobs::JobsRuntime,
-    binding: &TrellisBindingsGetResponseBinding,
     store: SqliteJobsStore,
 ) -> Result<(JobsAdminResources, JobsQuery, SqliteJobsStore), ServerError> {
-    let resources = jobs_admin_resources_from_binding(binding);
+    let resources = jobs_admin_resources();
     tracing::debug!(
         jobs_stream = %resources.jobs_stream,
         advisories_stream = %resources.jobs_advisories_stream,
@@ -346,7 +339,7 @@ pub async fn connect_and_run(opts: ServiceConnectOptions<'_>) -> Result<(), Jobs
 
 #[cfg(test)]
 mod tests {
-    use trellis_rs::client::TrellisClientError;
+    use trellis_rs::generated::TrellisClientError;
     use trellis_rs::service::ServiceConnectOptions;
 
     use super::{
@@ -358,12 +351,12 @@ mod tests {
 
     #[tokio::test]
     async fn connect_service_rejects_invalid_session_seed_before_network() {
-        let mut options = ServiceConnectOptions::new(
+        let options = ServiceConnectOptions::new(
             "http://127.0.0.1:1",
             "trellis-service-jobs",
             "not-base64url",
-        );
-        options.timeout_ms = 1_000;
+        )
+        .with_timeout_ms(1_000);
         let result = connect_service(options).await;
 
         assert!(matches!(
@@ -378,9 +371,9 @@ mod tests {
 
     #[tokio::test]
     async fn connect_service_returns_bootstrap_error_for_invalid_trellis_url() {
-        let mut options =
-            ServiceConnectOptions::new("not a url", "trellis-service-jobs", VALID_SEED_BASE64URL);
-        options.timeout_ms = 1_000;
+        let options =
+            ServiceConnectOptions::new("not a url", "trellis-service-jobs", VALID_SEED_BASE64URL)
+                .with_timeout_ms(1_000);
         let result = connect_service(options).await;
 
         assert!(matches!(
@@ -393,12 +386,12 @@ mod tests {
 
     #[tokio::test]
     async fn connect_and_run_propagates_connect_error() {
-        let mut options = ServiceConnectOptions::new(
+        let options = ServiceConnectOptions::new(
             "http://127.0.0.1:1",
             "trellis-service-jobs",
             "not-base64url",
-        );
-        options.timeout_ms = 1_000;
+        )
+        .with_timeout_ms(1_000);
         let result = connect_and_run(options).await;
 
         assert!(matches!(

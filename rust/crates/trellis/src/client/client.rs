@@ -18,20 +18,18 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
-use crate::client::operations::{OperationDescriptor, OperationInvoker, OperationTransport};
+use crate::client::operations::OperationTransport;
 use crate::client::proof::{new_request_id, now_iat_seconds};
-use crate::client::transfer::{
-    get_download_grant, put_upload_grant, DownloadTransferGrant, FileInfo, UploadTransferGrant,
-};
+use crate::client::transfer::{get_download_grant, DownloadTransferGrant};
+use crate::client::transfer::{put_upload_grant, FileInfo, UploadTransferGrant};
 use crate::client::{
-    prepare_event, prepare_event_value, EventDescriptor, FeedDescriptor, PreparedTrellisEvent,
-    RpcDescriptor, RpcErrorPayload, SessionAuth, TrellisClientError,
+    prepare_event, CallError, EventDescriptor, FeedDescriptor, PreparedTrellisEvent, RpcDescriptor,
+    RpcErrorPayload, SessionAuth, TrellisClientError,
 };
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
 const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
-const DEFAULT_AUTHORITY_RETRY_DELAY_MS: u64 = 1_000;
 static FEED_INBOX_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 struct FeedCancelGuard {
@@ -71,35 +69,45 @@ pub(crate) fn signed_headers(auth: &SessionAuth, subject: &str, payload: &[u8]) 
     headers
 }
 
-/// Connection options for a Trellis service/session-key principal.
-pub struct ServiceConnectOptions<'a> {
-    pub trellis_url: &'a str,
-    pub contract_id: &'a str,
-    pub contract_digest: &'a str,
-    pub session_key_seed_base64url: &'a str,
-    pub timeout_ms: u64,
-}
-
 /// Connection options for a Trellis service that can present its contract manifest during bootstrap.
-pub struct ServiceConnectWithContractOptions<'a> {
-    pub trellis_url: &'a str,
-    pub contract_id: &'a str,
-    pub contract_digest: &'a str,
-    pub contract_json: &'a str,
-    pub session_key_seed_base64url: &'a str,
-    pub timeout_ms: u64,
-    pub retry_delay_ms: u64,
+pub(crate) struct ServiceConnectWithContractOptions<'a> {
+    pub(crate) trellis_url: &'a str,
+    pub(crate) contract_id: &'a str,
+    pub(crate) contract_digest: &'a str,
+    pub(crate) contract_json: &'a str,
+    pub(crate) session_key_seed_base64url: &'a str,
+    pub(crate) timeout_ms: u64,
+    pub(crate) retry_delay_ms: u64,
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
-    pub authority_pending_timeout_ms: Option<u64>,
+    pub(crate) authority_pending_timeout_ms: Option<u64>,
 }
 
 /// Connection options for an activated device principal.
 pub struct DeviceConnectOptions<'a> {
-    pub trellis_url: &'a str,
-    pub contract_digest: &'a str,
-    pub public_identity_key: &'a str,
-    pub identity_seed_base64url: &'a str,
-    pub timeout_ms: u64,
+    trellis_url: &'a str,
+    contract_digest: &'a str,
+    public_identity_key: &'a str,
+    identity_seed_base64url: &'a str,
+    timeout_ms: u64,
+}
+
+impl<'a> DeviceConnectOptions<'a> {
+    /// Create activated-device connection options.
+    pub fn new(
+        trellis_url: &'a str,
+        contract_digest: &'a str,
+        public_identity_key: &'a str,
+        identity_seed_base64url: &'a str,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            trellis_url,
+            contract_digest,
+            public_identity_key,
+            identity_seed_base64url,
+            timeout_ms,
+        }
+    }
 }
 
 /// Whether an event subscription uses a durable or ephemeral JetStream consumer.
@@ -411,25 +419,6 @@ fn build_service_bootstrap_request<'a>(
         iat,
         sig: auth.sign_sha256_domain("nats-connect", &format!("{iat}:{contract_digest}")),
     }
-}
-
-async fn fetch_service_bootstrap(
-    auth: &SessionAuth,
-    opts: &ServiceConnectOptions<'_>,
-) -> Result<ServiceBootstrapResult, TrellisClientError> {
-    fetch_service_bootstrap_inner(
-        auth,
-        &ServiceBootstrapFetchOptions {
-            trellis_url: opts.trellis_url,
-            contract_id: opts.contract_id,
-            contract_digest: opts.contract_digest,
-            contract: None,
-            timeout_ms: opts.timeout_ms,
-            retry_delay_ms: Some(DEFAULT_AUTHORITY_RETRY_DELAY_MS),
-            authority_pending_timeout_ms: None,
-        },
-    )
-    .await
 }
 
 async fn fetch_service_bootstrap_with_contract(
@@ -980,16 +969,37 @@ async fn connect_bootstrapped_service(
 
 /// Connection options for a user/session-key principal.
 pub struct UserConnectOptions<'a> {
-    pub servers: &'a str,
-    pub sentinel_jwt: &'a str,
-    pub sentinel_seed: &'a str,
-    pub session_key_seed_base64url: &'a str,
-    pub contract_digest: &'a str,
-    pub timeout_ms: u64,
+    servers: &'a str,
+    sentinel_jwt: &'a str,
+    sentinel_seed: &'a str,
+    session_key_seed_base64url: &'a str,
+    contract_digest: &'a str,
+    timeout_ms: u64,
 }
 
-/// A low-level Trellis client over NATS request/reply and publish primitives.
-pub struct TrellisClient {
+impl<'a> UserConnectOptions<'a> {
+    /// Create user-authenticated connection options.
+    pub fn new(
+        servers: &'a str,
+        sentinel_jwt: &'a str,
+        sentinel_seed: &'a str,
+        session_key_seed_base64url: &'a str,
+        contract_digest: &'a str,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            servers,
+            sentinel_jwt,
+            sentinel_seed,
+            session_key_seed_base64url,
+            contract_digest,
+            timeout_ms,
+        }
+    }
+}
+
+/// Internal authenticated Trellis transport.
+pub(crate) struct TrellisClient {
     nats: async_nats::Client,
     auth: Arc<SessionAuth>,
     timeout_ms: u64,
@@ -998,13 +1008,22 @@ pub struct TrellisClient {
 }
 
 impl TrellisClient {
-    pub(crate) fn nats(&self) -> &async_nats::Client {
-        &self.nats
+    pub(crate) fn from_internal_parts(
+        nats: async_nats::Client,
+        auth: Arc<SessionAuth>,
+        timeout_ms: u64,
+    ) -> Self {
+        Self {
+            nats,
+            auth,
+            timeout_ms,
+            service_bootstrap_binding: None,
+            health_heartbeat_task: None,
+        }
     }
 
-    #[doc(hidden)]
-    pub fn internal_nats(&self) -> &async_nats::Client {
-        self.nats()
+    pub(crate) fn nats(&self) -> &async_nats::Client {
+        &self.nats
     }
 
     /// Return the session auth helper used by this client.
@@ -1031,23 +1050,6 @@ impl TrellisClient {
     /// Return the resource binding supplied by service HTTP bootstrap, if this is a service client.
     pub fn service_bootstrap_binding(&self) -> Option<&Value> {
         self.service_bootstrap_binding.as_ref()
-    }
-
-    /// Connect using Trellis service bootstrap and reconnect-safe runtime auth.
-    pub async fn connect_service(
-        opts: ServiceConnectOptions<'_>,
-    ) -> Result<Self, TrellisClientError> {
-        let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
-        let bootstrap_result = fetch_service_bootstrap(&auth, &opts).await?;
-        connect_bootstrapped_service(
-            auth,
-            opts.session_key_seed_base64url,
-            opts.contract_id,
-            opts.contract_digest,
-            opts.timeout_ms,
-            bootstrap_result,
-        )
-        .await
     }
 
     /// Connect using service bootstrap, presenting the contract manifest and waiting while authority is pending.
@@ -1260,6 +1262,31 @@ impl TrellisClient {
         Ok(serde_json::from_value(response)?)
     }
 
+    /// Call one descriptor-backed RPC and decode contract-declared errors.
+    pub async fn call_typed<D, E>(&self, input: &D::Input) -> Result<D::Output, CallError<E>>
+    where
+        D: RpcDescriptor,
+        E: crate::client::DeclaredError,
+    {
+        let input = serde_json::to_value(input).map_err(|error| {
+            CallError::Protocol(crate::client::ProtocolError::new(error.to_string()))
+        })?;
+        validate_caller_input::<E>(D::INPUT_SCHEMA_JSON, &input)?;
+        let output = self
+            .request_json(D::SUBJECT, input)
+            .await
+            .map_err(CallError::from_client)?;
+        crate::service::validate_input_schema(D::OUTPUT_SCHEMA_JSON, &output).map_err(|error| {
+            CallError::Protocol(crate::client::ProtocolError::new(format!(
+                "remote response violated `{}` output schema: {error}",
+                D::KEY
+            )))
+        })?;
+        serde_json::from_value(output).map_err(|error| {
+            CallError::Protocol(crate::client::ProtocolError::new(error.to_string()))
+        })
+    }
+
     /// Publish one descriptor-backed event.
     pub async fn publish<D>(&self, event: &D::Event) -> Result<(), TrellisClientError>
     where
@@ -1267,29 +1294,6 @@ impl TrellisClient {
     {
         let prepared = prepare_event::<D>(event)?;
         self.publish_prepared(&prepared).await
-    }
-
-    /// Prepare one descriptor-backed event without publishing it.
-    pub fn prepare_event<D>(
-        &self,
-        event: &D::Event,
-    ) -> Result<PreparedTrellisEvent, TrellisClientError>
-    where
-        D: EventDescriptor,
-    {
-        Ok(prepare_event::<D>(event)?)
-    }
-
-    /// Prepare one generic JSON-serializable event for a concrete subject.
-    pub fn prepare_event_value<T>(
-        &self,
-        subject: &str,
-        event: &T,
-    ) -> Result<PreparedTrellisEvent, TrellisClientError>
-    where
-        T: Serialize + ?Sized,
-    {
-        Ok(prepare_event_value(subject, event)?)
     }
 
     /// Publish an event that was already prepared, preserving its subject, payload, and message id.
@@ -1350,7 +1354,7 @@ impl TrellisClient {
     {
         let subscriber = timeout(
             std::time::Duration::from_millis(self.timeout_ms),
-            self.nats.subscribe(D::SUBJECT.to_string()),
+            self.nats.subscribe(D::SUBSCRIBE_SUBJECT.to_string()),
         )
         .await
         .map_err(|_| TrellisClientError::Timeout)?
@@ -1359,7 +1363,16 @@ impl TrellisClient {
         let stream = stream::try_unfold(subscriber, |mut subscriber| async move {
             match subscriber.next().await {
                 Some(message) => {
-                    let event: D::Event = serde_json::from_slice(&message.payload)?;
+                    let value: Value = serde_json::from_slice(&message.payload)?;
+                    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value).map_err(
+                        |error| {
+                            TrellisClientError::EventSubscriptionProtocol(format!(
+                                "event `{}` violated its contract schema: {error}",
+                                D::KEY
+                            ))
+                        },
+                    )?;
+                    let event: D::Event = serde_json::from_value(value)?;
                     Ok(Some((event, subscriber)))
                 }
                 None => Ok(None),
@@ -1454,7 +1467,14 @@ impl TrellisClient {
         D: FeedDescriptor,
         D::Event: Send + 'static,
     {
-        let payload = Bytes::from(serde_json::to_vec(input)?);
+        let input = serde_json::to_value(input)?;
+        crate::service::validate_input_schema(D::INPUT_SCHEMA_JSON, &input).map_err(|error| {
+            TrellisClientError::FeedProtocol(format!(
+                "feed `{}` input violated its contract schema: {error}",
+                D::KEY
+            ))
+        })?;
+        let payload = Bytes::from(serde_json::to_vec(&input)?);
         let headers = self.signed_headers(D::SUBJECT, &payload);
 
         let inbox = format!(
@@ -1542,14 +1562,6 @@ impl TrellisClient {
     ) -> Result<Vec<u8>, TrellisClientError> {
         get_download_grant(self, grant).await
     }
-
-    /// Start or control one descriptor-backed operation.
-    pub fn operation<D>(&self) -> OperationInvoker<'_, Self, D>
-    where
-        D: OperationDescriptor,
-    {
-        OperationInvoker::new(self)
-    }
 }
 
 impl Drop for TrellisClient {
@@ -1622,6 +1634,60 @@ impl OperationTransport for TrellisClient {
     }
 }
 
+fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
+where
+    E: crate::client::DeclaredError,
+{
+    match crate::service::validate_input_schema(schema_json, value) {
+        Ok(()) => Ok(()),
+        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(
+            crate::client::ValidationFailure::Validation(crate::client::ValidationErrorPayload {
+                id: "local".to_string(),
+                error_type: "ValidationError".to_string(),
+                message: "Input validation failed".to_string(),
+                issues: issues
+                    .into_iter()
+                    .map(|issue| crate::client::ValidationIssue {
+                        path: issue.path,
+                        message: issue.message,
+                    })
+                    .collect(),
+                context: None,
+                trace_id: None,
+            }),
+        )),
+        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(
+            CallError::Validation(crate::client::ValidationFailure::Schema(
+                crate::client::SchemaValidationErrorPayload {
+                    id: "local".to_string(),
+                    error_type: "SchemaValidationError".to_string(),
+                    message: "Input validation failed".to_string(),
+                    issues: issues
+                        .into_iter()
+                        .map(|issue| crate::client::SchemaValidationIssue {
+                            path: issue.path,
+                            schema_path: issue.schema_path,
+                            keyword: issue.keyword,
+                            code: issue.code,
+                            message: issue.message,
+                            label: issue.label,
+                            note: issue.note,
+                            i18n_key: issue.i18n_key,
+                            severity: issue.severity,
+                            params: issue.params,
+                        })
+                        .collect(),
+                    context: None,
+                    trace_id: None,
+                },
+            )),
+        ),
+        Err(error) => Err(CallError::Protocol(crate::client::ProtocolError::new(
+            error.to_string(),
+        ))),
+    }
+}
+
 fn decode_json_message(message: async_nats::Message) -> Result<Value, TrellisClientError> {
     if let Some(headers) = &message.headers {
         if headers
@@ -1674,7 +1740,14 @@ where
         }
     }
 
-    Ok(Some(serde_json::from_slice(payload)?))
+    let value: Value = serde_json::from_slice(payload)?;
+    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value).map_err(|error| {
+        TrellisClientError::FeedProtocol(format!(
+            "feed `{}` emitted an invalid event: {error}",
+            D::KEY
+        ))
+    })?;
+    Ok(Some(serde_json::from_value(value)?))
 }
 
 fn is_terminal_event(event: &Value) -> bool {
@@ -1698,7 +1771,7 @@ where
             EventReplayPolicy::New => consumer::DeliverPolicy::New,
         },
         ack_policy: consumer::AckPolicy::Explicit,
-        filter_subject: D::SUBJECT.to_string(),
+        filter_subject: D::SUBSCRIBE_SUBJECT.to_string(),
         ..Default::default()
     }
 }
@@ -2028,13 +2101,13 @@ mod tests {
         });
         let auth = SessionAuth::from_seed_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
             .expect("session auth");
-        let opts = DeviceConnectOptions {
-            trellis_url: &url,
-            contract_digest: "digest-alpha",
-            public_identity_key: &auth.session_key,
-            identity_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-            timeout_ms: 2_000,
-        };
+        let opts = DeviceConnectOptions::new(
+            &url,
+            "digest-alpha",
+            &auth.session_key,
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            2_000,
+        );
 
         let response = fetch_device_connect_info(&auth, &opts)
             .await
@@ -2161,13 +2234,13 @@ mod tests {
         });
         let auth = SessionAuth::from_seed_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
             .expect("session auth");
-        let opts = DeviceConnectOptions {
-            trellis_url: &url,
-            contract_digest: "digest-alpha",
-            public_identity_key: &auth.session_key,
-            identity_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-            timeout_ms: 2_000,
-        };
+        let opts = DeviceConnectOptions::new(
+            &url,
+            "digest-alpha",
+            &auth.session_key,
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            2_000,
+        );
 
         let error = fetch_device_connect_info(&auth, &opts)
             .await
@@ -2316,15 +2389,19 @@ mod tests {
         });
         let auth = SessionAuth::from_seed_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
             .expect("session auth");
-        let opts = ServiceConnectOptions {
+        let opts = ServiceConnectWithContractOptions {
             trellis_url: &url,
             contract_id: "trellis.jobs@v1",
             contract_digest: "digest-alpha",
+            contract_json: r#"{"id":"trellis.jobs@v1"}"#,
             session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
             timeout_ms: 2_000,
+            retry_delay_ms: 1,
+            authority_pending_timeout_ms: Some(2_000),
         };
+        let contract: Value = serde_json::from_str(opts.contract_json).expect("contract json");
 
-        let result = fetch_service_bootstrap(&auth, &opts)
+        let result = fetch_service_bootstrap_with_contract(&auth, &opts, &contract)
             .await
             .expect("bootstrap retry succeeds");
         let (first_request, second_request) = server_task.await.expect("server task");
@@ -2429,46 +2506,6 @@ mod tests {
             TrellisClientError::BootstrapHttp { status, body } => {
                 assert_eq!(status, 409);
                 assert!(body.contains("manifest_required"));
-            }
-            other => panic!("unexpected error: {other}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn service_bootstrap_without_contract_reports_pending_response() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind bootstrap server");
-        let url = format!("http://{}", listener.local_addr().expect("local addr"));
-        let server_task = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("bootstrap request");
-            let _request = read_json_http_request(&mut stream).await;
-            write_json_http_response(
-                &mut stream,
-                "202 Accepted",
-                json!({ "reason": "authority_update_required" }),
-            )
-            .await;
-        });
-        let auth = SessionAuth::from_seed_base64url("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8")
-            .expect("session auth");
-        let opts = ServiceConnectOptions {
-            trellis_url: &url,
-            contract_id: "trellis.jobs@v1",
-            contract_digest: "digest-alpha",
-            session_key_seed_base64url: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
-            timeout_ms: 2_000,
-        };
-
-        let error = fetch_service_bootstrap(&auth, &opts)
-            .await
-            .expect_err("pending bootstrap should not parse as ready");
-        server_task.await.expect("server task");
-
-        match error {
-            TrellisClientError::BootstrapHttp { status, body } => {
-                assert_eq!(status, 202);
-                assert!(body.contains("authority_update_required"));
             }
             other => panic!("unexpected error: {other}"),
         }

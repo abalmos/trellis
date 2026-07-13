@@ -14,7 +14,10 @@ Deno.test("schema pointers", async (t) => {
     }),
     foo: Type.String(),
     num: Type.Number(),
-    int: Type.Integer(),
+    int: Type.Integer({
+      minimum: Number.MIN_SAFE_INTEGER,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
     nested: Type.Object({ id: Type.String() }),
     arr: Type.Array(Type.String()),
     bool: Type.Boolean(),
@@ -142,6 +145,21 @@ Deno.test("schema pointers", async (t) => {
   );
 
   await t.step(
+    "assertDataPointersExistAndAreTokenable rejects unbounded integer",
+    () => {
+      assertThrows(
+        () =>
+          assertDataPointersExistAndAreTokenable("Test.Event", {
+            type: "object",
+            properties: { value: Type.Integer() },
+          }, ["/value"]),
+        Error,
+        "must resolve to string/number",
+      );
+    },
+  );
+
+  await t.step(
     "assertDataPointersExistAndAreTokenable accepts top-level anyOf when all variants contain tokenable pointer",
     () => {
       assertDataPointersExistAndAreTokenable("Test.Event", {
@@ -159,7 +177,12 @@ Deno.test("schema pointers", async (t) => {
       assertDataPointersExistAndAreTokenable("Test.Event", {
         oneOf: [
           Type.Object({ origin: Type.String() }),
-          Type.Object({ origin: Type.Integer() }),
+          Type.Object({
+            origin: Type.Integer({
+              minimum: Number.MIN_SAFE_INTEGER,
+              maximum: Number.MAX_SAFE_INTEGER,
+            }),
+          }),
         ],
       }, ["/origin"]);
     },

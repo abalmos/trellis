@@ -19,23 +19,33 @@ static ERROR_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Decoded request message consumed by the host dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(InboundRequest), "`.")]
 pub struct InboundRequest {
+    #[doc = concat!("The `", stringify!(subject), "` value.")]
     pub subject: String,
+    #[doc = concat!("The `", stringify!(payload), "` value.")]
     pub payload: Bytes,
+    #[doc = concat!("The `", stringify!(reply_to), "` value.")]
     pub reply_to: Option<String>,
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: RequestContext,
 }
 
 /// Outbound response message emitted by the host dispatcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(OutboundReply), "`.")]
 pub struct OutboundReply {
+    #[doc = concat!("The `", stringify!(reply_to), "` value.")]
     pub reply_to: String,
+    #[doc = concat!("The `", stringify!(payload), "` value.")]
     pub payload: Bytes,
+    #[doc = concat!("The `", stringify!(is_error), "` value.")]
     pub is_error: bool,
 }
 
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, ServerError>> + Send>>;
 
+#[doc = concat!("Public Trellis value set `", stringify!(HandlerResponse), "`.")]
 pub enum HandlerResponse {
     Frames(Vec<Bytes>),
     Error(Bytes),
@@ -44,7 +54,8 @@ pub enum HandlerResponse {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ErrorAnnotationContext {
+#[doc = concat!("Public Trellis data type `", stringify!(ErrorAnnotationContext), "`.")]
+pub struct ErrorAnnotationContext {
     request_id: Option<String>,
     trace_id: Option<String>,
     service: Option<String>,
@@ -243,7 +254,8 @@ where
 }
 
 /// Decode one inbound NATS message into host request fields.
-pub(crate) fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
+#[doc = concat!("Trellis API operation `", stringify!(decode_nats_request), "`.")]
+pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
     let subject = message.subject.to_string();
     let reply_to = message.reply.as_ref().map(ToString::to_string);
     let session_key = message
@@ -297,6 +309,7 @@ pub(crate) fn decode_nats_request(message: &async_nats::Message) -> InboundReque
 }
 
 /// Encode one successful handler payload for reply publishing.
+#[doc = concat!("Trellis API operation `", stringify!(encode_success_reply), "`.")]
 pub fn encode_success_reply(reply_to: String, payload: Bytes) -> OutboundReply {
     OutboundReply {
         reply_to,
@@ -306,11 +319,13 @@ pub fn encode_success_reply(reply_to: String, payload: Bytes) -> OutboundReply {
 }
 
 /// Encode one failed handler result for reply publishing.
+#[doc = concat!("Trellis API operation `", stringify!(encode_error_reply), "`.")]
 pub fn encode_error_reply(reply_to: String, error: &ServerError) -> OutboundReply {
     encode_error_reply_with_context(reply_to, error, &ErrorAnnotationContext::default())
 }
 
-pub(crate) fn encode_error_reply_with_context(
+#[doc = concat!("Trellis API operation `", stringify!(encode_error_reply_with_context), "`.")]
+pub fn encode_error_reply_with_context(
     reply_to: String,
     error: &ServerError,
     annotations: &ErrorAnnotationContext,
@@ -318,13 +333,13 @@ pub(crate) fn encode_error_reply_with_context(
     match error {
         ServerError::DeclaredRpc(error) => {
             let payload = serde_json::to_vec(&error.to_payload_with_context(
-                error_id(),
-                annotations.context_map(),
-                annotations.trace_id(),
-            ))
-            .unwrap_or_else(|_| {
-                br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
-            });
+            error_id(),
+            annotations.context_map(),
+            annotations.trace_id(),
+        ))
+        .unwrap_or_else(|_| {
+            br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
+        });
             return OutboundReply {
                 reply_to,
                 payload: Bytes::from(payload),
@@ -352,8 +367,8 @@ pub(crate) fn encode_error_reply_with_context(
                 payload.insert("traceId".to_string(), Value::String(trace_id.to_string()));
             }
             let payload_bytes = serde_json::to_vec(&payload).unwrap_or_else(|_| {
-                br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
-            });
+            br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
+        });
             return OutboundReply {
                 reply_to,
                 payload: Bytes::from(payload_bytes),
@@ -381,8 +396,8 @@ pub(crate) fn encode_error_reply_with_context(
                 payload.insert("traceId".to_string(), Value::String(trace_id.to_string()));
             }
             let payload_bytes = serde_json::to_vec(&payload).unwrap_or_else(|_| {
-                br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
-            });
+            br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#.to_vec()
+        });
             return OutboundReply {
                 reply_to,
                 payload: Bytes::from(payload_bytes),
@@ -424,26 +439,26 @@ pub(crate) fn encode_error_reply_with_context(
 
     let error_message = error.to_string();
     let payload = match serde_json::to_vec(&ErrorPayload {
-        id: error_id(),
-        r#type: "UnexpectedError",
-        message: "An unexpected error has occurred",
-        trace_id: annotations.trace_id(),
-        context: ErrorContext {
-            cause_message: &error_message,
-            request_id: annotations.request_id.as_deref(),
-            service: annotations.service.as_deref(),
-            contract_id: annotations.contract_id.as_deref(),
-            contract_digest: annotations.contract_digest.as_deref(),
-            method: annotations.method.as_deref(),
-            feed: annotations.feed.as_deref(),
-            operation: annotations.operation.as_deref(),
-        },
-    }) {
-        Ok(value) => Bytes::from(value),
-        Err(_) => Bytes::from_static(
-            br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#,
-        ),
-    };
+    id: error_id(),
+    r#type: "UnexpectedError",
+    message: "An unexpected error has occurred",
+    trace_id: annotations.trace_id(),
+    context: ErrorContext {
+        cause_message: &error_message,
+        request_id: annotations.request_id.as_deref(),
+        service: annotations.service.as_deref(),
+        contract_id: annotations.contract_id.as_deref(),
+        contract_digest: annotations.contract_digest.as_deref(),
+        method: annotations.method.as_deref(),
+        feed: annotations.feed.as_deref(),
+        operation: annotations.operation.as_deref(),
+    },
+}) {
+    Ok(value) => Bytes::from(value),
+    Err(_) => Bytes::from_static(
+        br#"{"id":"rust-server-error","type":"UnexpectedError","message":"An unexpected error has occurred"}"#,
+    ),
+};
 
     OutboundReply {
         reply_to,

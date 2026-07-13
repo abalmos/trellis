@@ -111,11 +111,11 @@ const migrationContractV1 = defineServiceContract(
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
     uses: [kv({
-        cache: {
-          purpose: "Store cached entity values.",
-          schema: ref.schema("EntityChanged"),
-          history: 1,
-        },
+      cache: {
+        purpose: "Store cached entity values.",
+        schema: ref.schema("EntityChanged"),
+        history: 1,
+      },
     })],
   }),
 );
@@ -127,11 +127,11 @@ const migrationContractV2 = defineServiceContract(
     displayName: "Trellis Test Mutable Resource",
     description: "Exercises explicit migration-plan approval in tests.",
     uses: [kv({
-        cache: {
-          purpose: "Store cached entity values.",
-          schema: ref.schema("EntityChanged"),
-          history: 2,
-        },
+      cache: {
+        purpose: "Store cached entity values.",
+        schema: ref.schema("EntityChanged"),
+        history: 2,
+      },
     })],
   }),
 );
@@ -386,8 +386,10 @@ Deno.test({
       let observedId: string | undefined;
 
       try {
-        await subscriber.onEntityChanged(({ event }) => { observedId = event.id;
-        return Result.ok(undefined); }, { group: "ingest", signal: controller.signal }).orThrow();
+        await subscriber.onEntityChanged(({ event }) => {
+          observedId = event.id;
+          return Result.ok(undefined);
+        }, { group: "ingest", signal: controller.signal }).orThrow();
         await entity.publishEntityChanged({
           id: "entity-durable-1",
           value: "changed",

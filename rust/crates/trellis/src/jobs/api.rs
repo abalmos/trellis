@@ -16,6 +16,7 @@ type LogFn = Arc<dyn Fn(JobLogEntry) -> BoxFuture<'static, Result<(), JobsError>
 
 /// Errors returned by the typed jobs API.
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobsError), "`.")]
 pub enum JobsError {
     #[error("{message}")]
     Message { message: String },
@@ -33,6 +34,7 @@ pub enum JobsError {
 
 /// Reason a keyed job submission did not enqueue new work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobNotEnqueuedReason), "`.")]
 pub enum JobNotEnqueuedReason {
     ActiveLimit,
     QueueDepth,
@@ -43,12 +45,19 @@ pub enum JobNotEnqueuedReason {
 /// Typed expected failure returned by strict keyed job creation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("job was not enqueued: {reason:?}")]
+#[doc = concat!("Public Trellis data type `", stringify!(JobNotEnqueued), "`.")]
 pub struct JobNotEnqueued {
+    #[doc = concat!("The `", stringify!(reason), "` value.")]
     pub reason: JobNotEnqueuedReason,
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(active), "` value.")]
     pub active: usize,
+    #[doc = concat!("The `", stringify!(queued), "` value.")]
     pub queued: usize,
+    #[doc = concat!("The `", stringify!(limit), "` value.")]
     pub limit: usize,
+    #[doc = concat!("The `", stringify!(existing_job_id), "` value.")]
     pub existing_job_id: Option<String>,
 }
 
@@ -149,6 +158,7 @@ where
     TPayload: Clone + Send + Sync + 'static,
     TResult: Clone + Send + Sync + 'static,
 {
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(
         identity: JobIdentity,
         get: impl Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>>
@@ -172,18 +182,22 @@ where
         }
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(identity), "`.")]
     pub fn identity(&self) -> &JobIdentity {
         &self.identity
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(&self) -> Result<JobSnapshot<TPayload, TResult>, JobsError> {
         (self.get)().await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait), "`.")]
     pub async fn wait(&self) -> Result<TerminalJob<TPayload, TResult>, JobsError> {
         (self.wait)().await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(cancel), "`.")]
     pub async fn cancel(&self) -> Result<JobSnapshot<TPayload, TResult>, JobsError> {
         (self.cancel)().await
     }
@@ -192,21 +206,37 @@ where
 /// Typed snapshot of one job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobSnapshot<TPayload, TResult> {
+    #[doc = concat!("The `", stringify!(id), "` value.")]
     pub id: String,
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: JobContext,
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
+    #[doc = concat!("The `", stringify!(r#type), "` value.")]
     pub r#type: String,
+    #[doc = concat!("The `", stringify!(state), "` value.")]
     pub state: JobState,
+    #[doc = concat!("The `", stringify!(payload), "` value.")]
     pub payload: TPayload,
+    #[doc = concat!("The `", stringify!(result), "` value.")]
     pub result: Option<TResult>,
+    #[doc = concat!("The `", stringify!(created_at), "` value.")]
     pub created_at: String,
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
+    #[doc = concat!("The `", stringify!(started_at), "` value.")]
     pub started_at: Option<String>,
+    #[doc = concat!("The `", stringify!(completed_at), "` value.")]
     pub completed_at: Option<String>,
+    #[doc = concat!("The `", stringify!(tries), "` value.")]
     pub tries: u64,
+    #[doc = concat!("The `", stringify!(max_tries), "` value.")]
     pub max_tries: u64,
+    #[doc = concat!("The `", stringify!(last_error), "` value.")]
     pub last_error: Option<String>,
+    #[doc = concat!("The `", stringify!(progress), "` value.")]
     pub progress: Option<JobProgress>,
+    #[doc = concat!("The `", stringify!(logs), "` value.")]
     pub logs: Vec<JobLogEntry>,
 }
 
@@ -277,6 +307,7 @@ where
     TPayload: Send + Sync + 'static,
     TResult: Send + Sync + 'static,
 {
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(
         context: JobContext,
         payload: TPayload,
@@ -303,42 +334,52 @@ where
         }
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(payload), "`.")]
     pub fn payload(&self) -> &TPayload {
         &self.payload
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(context), "`.")]
     pub fn context(&self) -> &JobContext {
         &self.context
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(state), "`.")]
     pub fn state(&self) -> JobState {
         self.state
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(tries), "`.")]
     pub fn tries(&self) -> u64 {
         self.tries
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(redelivery_count), "`.")]
     pub fn redelivery_count(&self) -> u64 {
         self.tries.saturating_sub(1)
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(is_redelivery), "`.")]
     pub fn is_redelivery(&self) -> bool {
         self.redelivery_count() > 0
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(is_cancelled), "`.")]
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(heartbeat), "`.")]
     pub async fn heartbeat(&self) -> Result<(), JobsError> {
         (self.heartbeat)().await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(progress), "`.")]
     pub async fn progress(&self, value: JobProgress) -> Result<(), JobsError> {
         (self.progress)(value).await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(log), "`.")]
     pub async fn log(&self, entry: JobLogEntry) -> Result<(), JobsError> {
         (self.log)(entry).await
     }
@@ -346,17 +387,25 @@ where
 
 /// Job identity fields used by service-local and admin APIs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobIdentity), "`.")]
 pub struct JobIdentity {
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
+    #[doc = concat!("The `", stringify!(job_type), "` value.")]
     pub job_type: String,
+    #[doc = concat!("The `", stringify!(id), "` value.")]
     pub id: String,
 }
 
 /// Filter used by admin query helpers.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobFilter), "`.")]
 pub struct JobFilter {
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: Option<String>,
+    #[doc = concat!("The `", stringify!(job_type), "` value.")]
     pub job_type: Option<String>,
+    #[doc = concat!("The `", stringify!(state), "` value.")]
     pub state: Option<JobState>,
 }
 

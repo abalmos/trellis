@@ -80,6 +80,7 @@ fn normalize_crockford(value: &str) -> String {
         .replace(['I', 'L'], "1")
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(derive_device_identity), "`.")]
 pub fn derive_device_identity(
     device_root_secret: &[u8],
 ) -> Result<DeviceIdentity, TrellisAuthError> {
@@ -114,6 +115,7 @@ pub fn derive_device_identity(
     })
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(derive_device_qr_mac), "`.")]
 pub fn derive_device_qr_mac(
     activation_key_base64url: &str,
     public_identity_key: &str,
@@ -131,6 +133,7 @@ pub fn derive_device_qr_mac(
     Ok(base64url_encode(&mac[..8]))
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(build_device_activation_payload), "`.")]
 pub fn build_device_activation_payload(
     activation_key_base64url: &str,
     public_identity_key: &str,
@@ -144,6 +147,7 @@ pub fn build_device_activation_payload(
     })
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(encode_device_activation_payload), "`.")]
 pub fn encode_device_activation_payload(
     payload: &DeviceActivationPayload,
 ) -> Result<String, TrellisAuthError> {
@@ -154,6 +158,7 @@ pub fn encode_device_activation_payload(
         })
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(parse_device_activation_payload), "`.")]
 pub fn parse_device_activation_payload(
     payload_base64url: &str,
 ) -> Result<DeviceActivationPayload, TrellisAuthError> {
@@ -169,20 +174,26 @@ struct DeviceActivationStartRequest<'a> {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationStartResponse), "`.")]
 pub struct DeviceActivationStartResponse {
     #[serde(rename = "flowId")]
+    #[doc = concat!("The `", stringify!(flow_id), "` value.")]
     pub flow_id: String,
     #[serde(rename = "instanceId")]
+    #[doc = concat!("The `", stringify!(instance_id), "` value.")]
     pub instance_id: String,
     #[serde(rename = "deploymentId")]
+    #[doc = concat!("The `", stringify!(deployment_id), "` value.")]
     pub deployment_id: String,
     #[serde(rename = "activationUrl")]
+    #[doc = concat!("The `", stringify!(activation_url), "` value.")]
     pub activation_url: String,
 }
 
 /// Local activation status tracked by the Rust convenience facade.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[doc = concat!("Public Trellis value set `", stringify!(DeviceActivationStatus), "`.")]
 pub enum DeviceActivationStatus {
     /// The device has started activation but has not observed approval yet.
     Pending,
@@ -192,33 +203,43 @@ pub enum DeviceActivationStatus {
 
 /// Serializable local activation state owned by the application.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationLocalState), "`.")]
 pub struct DeviceActivationLocalState {
     /// Current local activation status.
+    #[doc = concat!("The `", stringify!(status), "` value.")]
     pub status: DeviceActivationStatus,
     /// Contract digest this activation state belongs to.
     #[serde(rename = "contractDigest")]
+    #[doc = concat!("The `", stringify!(contract_digest), "` value.")]
     pub contract_digest: String,
     /// Public device identity key derived from the root secret.
     #[serde(rename = "publicIdentityKey")]
+    #[doc = concat!("The `", stringify!(public_identity_key), "` value.")]
     pub public_identity_key: String,
     /// Auth activation flow id returned by activation start.
     #[serde(rename = "flowId")]
+    #[doc = concat!("The `", stringify!(flow_id), "` value.")]
     pub flow_id: String,
     /// Auth-owned device instance id returned by activation start.
     #[serde(rename = "instanceId")]
+    #[doc = concat!("The `", stringify!(instance_id), "` value.")]
     pub instance_id: String,
     /// Device deployment id returned by activation start.
     #[serde(rename = "deploymentId")]
+    #[doc = concat!("The `", stringify!(deployment_id), "` value.")]
     pub deployment_id: String,
     /// Activation nonce included in the outbound payload.
+    #[doc = concat!("The `", stringify!(nonce), "` value.")]
     pub nonce: String,
     /// Browser URL the device should display for activation.
     #[serde(rename = "activationUrl")]
+    #[doc = concat!("The `", stringify!(activation_url), "` value.")]
     pub activation_url: String,
 }
 
 /// Request-free activation builder for deriving identity and outbound payload data.
 #[derive(Debug, Clone)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationSessionBuilder), "`.")]
 pub struct DeviceActivationSessionBuilder {
     identity: DeviceIdentity,
     nonce: String,
@@ -229,6 +250,7 @@ pub struct DeviceActivationSessionBuilder {
 
 impl DeviceActivationSessionBuilder {
     /// Derive device identity and build the activation payload from a root secret.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(
         device_root_secret: &[u8],
         nonce: impl Into<String>,
@@ -257,26 +279,31 @@ impl DeviceActivationSessionBuilder {
     }
 
     /// Return the derived public identity key for preregistration and display context.
+    #[doc = concat!("Trellis API operation `", stringify!(public_identity_key), "`.")]
     pub fn public_identity_key(&self) -> &str {
         &self.identity.public_identity_key
     }
 
     /// Return the activation payload to send to the auth start endpoint.
+    #[doc = concat!("Trellis API operation `", stringify!(payload), "`.")]
     pub fn payload(&self) -> &DeviceActivationPayload {
         &self.payload
     }
 
     /// Return the base64url-encoded activation payload for QR or URL embedding.
+    #[doc = concat!("Trellis API operation `", stringify!(encoded_payload), "`.")]
     pub fn encoded_payload(&self) -> &str {
         &self.encoded_payload
     }
 
     /// Return the local confirmation code for offline approval checks.
+    #[doc = concat!("Trellis API operation `", stringify!(confirmation_code), "`.")]
     pub fn confirmation_code(&self) -> &str {
         &self.confirmation_code
     }
 
     /// Build a pending local activation session from an injected start response.
+    #[doc = concat!("Trellis API operation `", stringify!(pending_session), "`.")]
     pub fn pending_session(
         self,
         trellis_url: impl Into<String>,
@@ -313,6 +340,7 @@ impl DeviceActivationSessionBuilder {
 
 /// Local device activation session facade for status, confirmation, and wait signing.
 #[derive(Debug, Clone)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationSession), "`.")]
 pub struct DeviceActivationSession {
     trellis_url: String,
     identity: DeviceIdentity,
@@ -323,6 +351,7 @@ pub struct DeviceActivationSession {
 
 impl DeviceActivationSession {
     /// Rebuild a local activation session from caller-persisted state.
+    #[doc = concat!("Trellis API operation `", stringify!(from_local_state), "`.")]
     pub fn from_local_state(
         trellis_url: impl Into<String>,
         device_root_secret: &[u8],
@@ -358,31 +387,37 @@ impl DeviceActivationSession {
     }
 
     /// Return the Trellis deployment URL this activation session belongs to.
+    #[doc = concat!("Trellis API operation `", stringify!(trellis_url), "`.")]
     pub fn trellis_url(&self) -> &str {
         &self.trellis_url
     }
 
     /// Return the browser URL the user should open to approve activation.
+    #[doc = concat!("Trellis API operation `", stringify!(activation_url), "`.")]
     pub fn activation_url(&self) -> &str {
         &self.local_state.activation_url
     }
 
     /// Return the public identity key derived from the device root secret.
+    #[doc = concat!("Trellis API operation `", stringify!(public_identity_key), "`.")]
     pub fn public_identity_key(&self) -> &str {
         &self.identity.public_identity_key
     }
 
     /// Return the local confirmation code for offline approval.
+    #[doc = concat!("Trellis API operation `", stringify!(confirmation_code), "`.")]
     pub fn confirmation_code(&self) -> &str {
         &self.confirmation_code
     }
 
     /// Return the serializable local activation state for caller-owned persistence.
+    #[doc = concat!("Trellis API operation `", stringify!(local_state), "`.")]
     pub fn local_state(&self) -> &DeviceActivationLocalState {
         &self.local_state
     }
 
     /// Build a signed wait request for the auth activation wait endpoint.
+    #[doc = concat!("Trellis API operation `", stringify!(build_wait_request), "`.")]
     pub fn build_wait_request(
         &self,
         iat: u64,
@@ -398,6 +433,7 @@ impl DeviceActivationSession {
     }
 
     /// Verify an offline confirmation code and mark the pending local state activated.
+    #[doc = concat!("Trellis API operation `", stringify!(accept_confirmation_code), "`.")]
     pub fn accept_confirmation_code(
         &mut self,
         confirmation_code: &str,
@@ -425,6 +461,7 @@ impl DeviceActivationSession {
     }
 }
 
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_device_activation_request), "`.")]
 pub async fn start_device_activation_request(
     trellis_url: &str,
     payload: &DeviceActivationPayload,
@@ -445,6 +482,7 @@ pub async fn start_device_activation_request(
 }
 
 /// Build the length-prefixed byte input signed by device activation wait requests.
+#[doc = concat!("Trellis API operation `", stringify!(build_device_wait_proof_input), "`.")]
 pub fn build_device_wait_proof_input(
     flow_id: &str,
     public_identity_key: &str,
@@ -484,6 +522,7 @@ pub fn build_device_wait_proof_input(
 }
 
 /// Build and sign a pre-auth device activation wait request.
+#[doc = concat!("Trellis API operation `", stringify!(sign_device_wait_request), "`.")]
 pub fn sign_device_wait_request(
     flow_id: &str,
     public_identity_key: &str,
@@ -521,6 +560,7 @@ pub fn sign_device_wait_request(
     })
 }
 
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for_device_activation_response), "`.")]
 pub async fn wait_for_device_activation_response(
     trellis_url: &str,
     request: &DeviceActivationWaitRequest,
@@ -537,6 +577,7 @@ pub async fn wait_for_device_activation_response(
 }
 
 /// Fetch current runtime connect info for an already activated device.
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(get_device_connect_info), "`.")]
 pub async fn get_device_connect_info(
     opts: GetDeviceConnectInfoOpts<'_>,
 ) -> Result<DeviceConnectInfoResponse, TrellisAuthError> {
@@ -606,6 +647,7 @@ fn validate_device_connect_info_response(
     Ok(())
 }
 
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for_device_activation), "`.")]
 pub async fn wait_for_device_activation(
     opts: WaitForDeviceActivationOpts<'_>,
 ) -> Result<serde_json::Value, TrellisAuthError> {
@@ -642,6 +684,7 @@ pub async fn wait_for_device_activation(
     }
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(derive_device_confirmation_code), "`.")]
 pub fn derive_device_confirmation_code(
     activation_key_base64url: &str,
     public_identity_key: &str,
@@ -659,6 +702,7 @@ pub fn derive_device_confirmation_code(
     Ok(crockford_encode(&mac[..5]))
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(verify_device_confirmation_code), "`.")]
 pub fn verify_device_confirmation_code(
     activation_key_base64url: &str,
     public_identity_key: &str,

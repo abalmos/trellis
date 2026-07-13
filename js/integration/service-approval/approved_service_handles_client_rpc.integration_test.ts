@@ -35,7 +35,8 @@ liveTrellisTest({
     const connectedService = await connectPromise;
     try {
       await connectedService.handleStartupPing(({ input }) =>
-        Result.ok({ message: input.message, approved: true }));
+        Result.ok({ message: input.message, approved: true })
+      );
 
       const client = await runtime.connectClient({
         name: fixture.clientName,

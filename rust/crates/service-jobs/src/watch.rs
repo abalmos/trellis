@@ -1,37 +1,32 @@
 //! `Jobs.Watch` feed implementation.
 
-use std::collections::HashMap;
-use std::time::Duration;
-
-use async_nats::jetstream::consumer::FromConsumer;
-use async_nats::jetstream::{self, consumer};
-use futures_util::{stream, stream::BoxStream, Stream, StreamExt};
-use serde_json::json;
+use futures_util::{stream, Stream, StreamExt};
 use trellis_rs::jobs::types::{JobEvent, JobState, JobTriggerKind};
+use trellis_rs::jobs::{JobsRuntime, JobsRuntimeMessageStream};
 use trellis_rs::sdk::jobs::feeds::JobsWatchFeedDescriptor;
-use trellis_rs::sdk::jobs::types::{JobsWatchEvent, JobsWatchInput, JobsWatchInputQuery};
+use trellis_rs::sdk::jobs::types::{
+    JobsWatchEvent, JobsWatchEventQueryInvalidatedReason, JobsWatchInput, JobsWatchInputQuery,
+};
 use trellis_rs::service::{ConnectedServiceRuntime, ServerError};
 
 use crate::contract::JobsContract;
 
 const JOBS_EVENTS_SUBJECT_WILDCARD: &str = "trellis.jobs.>";
-const LIVE_WATCH_INACTIVE_THRESHOLD: Duration = Duration::from_secs(5);
-const OBSOLETE_WATCH_INACTIVE_THRESHOLD: Duration = Duration::from_secs(5 * 60);
 
 /// Register the `Jobs.Watch` feed on the Jobs service runtime.
 pub fn register_jobs_watch_feed(
     runtime: &mut ConnectedServiceRuntime<JobsContract>,
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     jobs_stream: String,
 ) {
     runtime.register_feed::<JobsWatchFeedDescriptor, _, _>(move |_ctx, input| {
-        watch_jobs(input, nats.clone(), jobs_stream.clone())
+        watch_jobs(input, jobs_runtime.clone(), jobs_stream.clone())
     });
 }
 
 fn watch_jobs(
     input: JobsWatchInput,
-    nats: async_nats::Client,
+    jobs_runtime: JobsRuntime,
     jobs_stream: String,
 ) -> impl Stream<Item = Result<JobsWatchEvent, ServerError>> + Send + 'static {
     let filter_subject = input
@@ -41,7 +36,7 @@ fn watch_jobs(
         .unwrap_or_else(|| JOBS_EVENTS_SUBJECT_WILDCARD.to_string());
     stream::unfold(
         WatchState::Init {
-            nats,
+            jobs_runtime,
             jobs_stream,
             filter_subject,
             input,
@@ -52,13 +47,13 @@ fn watch_jobs(
 
 enum WatchState {
     Init {
-        nats: async_nats::Client,
+        jobs_runtime: JobsRuntime,
         jobs_stream: String,
         filter_subject: String,
         input: JobsWatchInput,
     },
     Open {
-        messages: BoxStream<'static, Result<jetstream::Message, String>>,
+        messages: JobsRuntimeMessageStream,
         input: JobsWatchInput,
     },
     Done,
@@ -69,12 +64,15 @@ async fn next_watch_frame(
 ) -> Option<(Result<JobsWatchEvent, ServerError>, WatchState)> {
     match state {
         WatchState::Init {
-            nats,
+            jobs_runtime,
             jobs_stream,
             filter_subject,
             input,
         } => {
-            let messages = match live_watch_messages(&nats, &jobs_stream, &filter_subject).await {
+            let messages = match jobs_runtime
+                .watch_messages(&jobs_stream, &filter_subject)
+                .await
+            {
                 Ok(messages) => messages,
                 Err(error) => {
                     return Some((
@@ -104,7 +102,7 @@ async fn next_watch_frame(
                 }
                 None => return None,
             };
-            let event = serde_json::from_slice::<JobEvent>(&message.payload).ok();
+            let event = serde_json::from_slice::<JobEvent>(message.payload()).ok();
             let _ = message.ack().await;
             let Some(event) = event else {
                 continue;
@@ -117,135 +115,38 @@ async fn next_watch_frame(
     }
 }
 
-async fn live_watch_messages(
-    nats: &async_nats::Client,
-    stream_name: &str,
-    filter_subject: &str,
-) -> Result<BoxStream<'static, Result<jetstream::Message, String>>, String> {
-    let jetstream = jetstream::new(nats.clone());
-    let stream = jetstream
-        .get_stream(stream_name)
-        .await
-        .map_err(|error| error.to_string())?;
-    let consumer = stream
-        .create_consumer(live_watch_consumer_config(filter_subject))
-        .await
-        .map_err(|error| error.to_string())?;
-    consumer
-        .messages()
-        .await
-        .map(|messages| {
-            messages
-                .map(|message| message.map_err(|error| error.to_string()))
-                .boxed()
-        })
-        .map_err(|error| error.to_string())
-}
-
-fn live_watch_consumer_config(filter_subject: &str) -> consumer::pull::Config {
-    consumer::pull::Config {
-        filter_subject: filter_subject.to_string(),
-        deliver_policy: consumer::DeliverPolicy::New,
-        ack_policy: consumer::AckPolicy::Explicit,
-        inactive_threshold: LIVE_WATCH_INACTIVE_THRESHOLD,
-        metadata: platform_watch_metadata(),
-        ..Default::default()
-    }
-}
-
-fn platform_watch_metadata() -> HashMap<String, String> {
-    HashMap::from([
-        ("trellis.managed_by".to_string(), "platform".to_string()),
-        (
-            "trellis.contract_id".to_string(),
-            "trellis.jobs@v1".to_string(),
-        ),
-        ("trellis.group".to_string(), "watch".to_string()),
-    ])
-}
-
 pub(crate) async fn expire_obsolete_watch_consumers(
-    nats: &async_nats::Client,
+    jobs_runtime: &JobsRuntime,
     stream_name: &str,
 ) -> Result<usize, String> {
-    let jetstream = jetstream::new(nats.clone());
-    let stream = jetstream
-        .get_stream(stream_name)
+    jobs_runtime
+        .expire_obsolete_watch_consumers(stream_name)
         .await
-        .map_err(|error| error.to_string())?;
-    let mut consumers = stream.consumers();
-    let mut configs = Vec::new();
-    while let Some(info) = consumers.next().await {
-        let info = info.map_err(|error| error.to_string())?;
-        if is_obsolete_jobs_watch_consumer(&info.name, &info.config) {
-            let mut config = consumer::pull::Config::try_from_consumer_config(info.config)
-                .map_err(|error| error.to_string())?;
-            config.inactive_threshold = OBSOLETE_WATCH_INACTIVE_THRESHOLD;
-            config.metadata.extend(platform_watch_metadata());
-            configs.push(config);
-        }
-    }
-    for config in configs.iter().cloned() {
-        stream
-            .update_consumer(config)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(configs.len())
-}
-
-fn is_obsolete_jobs_watch_consumer(name: &str, config: &consumer::Config) -> bool {
-    let Some((seed, counter)) = name
-        .strip_prefix("jobs-watch-")
-        .and_then(|suffix| suffix.rsplit_once('-'))
-    else {
-        return false;
-    };
-    let watch_filter = config.filter_subject == JOBS_EVENTS_SUBJECT_WILDCARD
-        || (config.filter_subject.starts_with("trellis.jobs.*.*.")
-            && config.filter_subject.ends_with(".>"));
-    !seed.is_empty()
-        && seed.len() <= 48
-        && seed
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-        && counter.parse::<u64>().is_ok()
-        && config.durable_name.as_deref() == Some(name)
-        && watch_filter
-        && config.filter_subjects.is_empty()
-        && config.deliver_policy == consumer::DeliverPolicy::All
-        && config.ack_policy == consumer::AckPolicy::Explicit
-        && config.metadata.keys().all(|key| key.starts_with("_nats."))
 }
 
 fn ready_frame(timestamp: String) -> JobsWatchEvent {
-    JobsWatchEvent(json!({
-        "kind": "ready",
-        "timestamp": timestamp,
-    }))
+    JobsWatchEvent::Ready { timestamp }
 }
 
 fn watch_frame_for_event(input: &JobsWatchInput, event: &JobEvent) -> Option<JobsWatchEvent> {
     if input.job_id.as_deref() == Some(event.job_id.as_str()) {
-        return Some(JobsWatchEvent(json!({
-            "kind": "jobInspectChanged",
-            "id": event.job_id,
-            "timestamp": event.timestamp,
-        })));
+        return Some(JobsWatchEvent::JobInspectChanged {
+            id: event.job_id.clone(),
+            timestamp: event.timestamp.clone(),
+        });
     }
 
     input.query.as_ref().and_then(|query| {
         match query_invalidation_reason(query, event) {
             QueryInvalidation::No => None,
-            QueryInvalidation::Matched => Some("matched-job-changed"),
-            QueryInvalidation::Unknown => Some("unknown-match"),
+            QueryInvalidation::Matched => {
+                Some(JobsWatchEventQueryInvalidatedReason::MatchedJobChanged)
+            }
+            QueryInvalidation::Unknown => Some(JobsWatchEventQueryInvalidatedReason::UnknownMatch),
         }
-        .map(|reason| {
-            JobsWatchEvent(json!({
-                "kind": "queryInvalidated",
-                "reason": reason,
-                "timestamp": event.timestamp,
-            }))
+        .map(|reason| JobsWatchEvent::QueryInvalidated {
+            reason,
+            timestamp: event.timestamp.clone(),
         })
     })
 }
@@ -347,51 +248,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_watch_consumer_is_ephemeral_and_new_only() {
-        let config = live_watch_consumer_config("trellis.jobs.>");
-
-        assert!(config.durable_name.is_none());
-        assert_eq!(config.deliver_policy, consumer::DeliverPolicy::New);
-        assert_eq!(config.inactive_threshold, Duration::from_secs(5));
-        assert_eq!(
-            config
-                .metadata
-                .get("trellis.managed_by")
-                .map(String::as_str),
-            Some("platform")
-        );
-    }
-
-    #[test]
-    fn obsolete_watch_requires_the_legacy_name_and_config_shape() {
-        let mut config = consumer::Config {
-            durable_name: Some("jobs-watch-session_1-7".to_string()),
-            filter_subject: JOBS_EVENTS_SUBJECT_WILDCARD.to_string(),
-            ack_policy: consumer::AckPolicy::Explicit,
-            ..Default::default()
-        };
-        assert!(is_obsolete_jobs_watch_consumer(
-            "jobs-watch-session_1-7",
-            &config
-        ));
-
-        config.filter_subject = "external.jobs.>".to_string();
-        assert!(!is_obsolete_jobs_watch_consumer(
-            "jobs-watch-session_1-7",
-            &config
-        ));
-
-        config.filter_subject = JOBS_EVENTS_SUBJECT_WILDCARD.to_string();
-        config
-            .metadata
-            .insert("owner".to_string(), "external".to_string());
-        assert!(!is_obsolete_jobs_watch_consumer(
-            "jobs-watch-session_1-7",
-            &config
-        ));
-    }
-
-    #[test]
     fn query_invalidation_matches_scalar_filters() {
         let event = created_event(
             "documents",
@@ -412,7 +268,7 @@ mod tests {
             search: None,
             service: Some("documents".to_string()),
             sort: None,
-            state: Some(vec!["pending".to_string()]),
+            state: Some(vec![serde_json::from_value(json!("pending")).unwrap()]),
             trigger: None,
             r#type: Some("document-process".to_string()),
             window: None,
@@ -446,7 +302,7 @@ mod tests {
             search: None,
             service: Some("documents".to_string()),
             sort: None,
-            state: Some(vec!["pending".to_string()]),
+            state: Some(vec![serde_json::from_value(json!("pending")).unwrap()]),
             trigger: None,
             r#type: None,
             window: None,

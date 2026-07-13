@@ -35,7 +35,8 @@ liveTrellisTest({
 
     try {
       await service.handlePlanPing(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
+      );
 
       const result = await fixture.connectClientAndPing(runtime, "preapproved");
       assertEquals(result, { message: "preapproved", variant: "base" });

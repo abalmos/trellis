@@ -63,7 +63,7 @@ Create `src/main.rs`:
 
 ```rust
 use clap::Parser;
-use trellis_sdk_orders_service::{connect_service, ServiceConnectOptions};
+use orders_participant::{connect, ServiceConnectOptions};
 
 const SERVICE_NAME: &str = "orders-service";
 
@@ -84,7 +84,7 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let mut service = connect_service(ServiceConnectOptions::new(
+    let mut service = connect(ServiceConnectOptions::new(
         &args.trellis_url,
         SERVICE_NAME,
         &args.seed,
@@ -97,7 +97,13 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-The generated `connect_service(...)` helper authenticates the service instance through the public Trellis service facade, presents the generated contract manifest, resolves deployment bindings, prepares authenticated request validation, and polls until pending deployment authority becomes ready. Rust service connections wait indefinitely by default; set `authority_pending_timeout_ms` to `Some(milliseconds)` only when startup needs an overall deadline. `service.run()` owns the NATS service loop for the handlers you register.
+The generated participant `connect(...)` helper authenticates the service
+instance, presents the embedded contract manifest, resolves deployment bindings,
+prepares authenticated request validation, and polls until pending deployment
+authority becomes ready. Rust service connections wait indefinitely by default;
+use `with_authority_pending_timeout_ms(Some(milliseconds))` only when startup
+needs an overall deadline. `service.run()` owns and supervises the request,
+durable-consumer, and job-worker lifecycle.
 
 {/snippet}
 </LanguageTabs>

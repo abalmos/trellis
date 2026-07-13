@@ -1,5 +1,5 @@
 //! Typed RPC descriptors for `trellis.core@v1`.
-use crate::client::RpcDescriptor;
+use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,6 +17,29 @@ impl RpcDescriptor for TrellisBindingsGetRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["service"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `Trellis.Bindings.Get`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrellisBindingsGetError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for TrellisBindingsGetError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Trellis.Catalog`.
 pub struct TrellisCatalogRpc;
 impl RpcDescriptor for TrellisCatalogRpc {
@@ -28,6 +51,29 @@ impl RpcDescriptor for TrellisCatalogRpc {
     const SUBJECT: &'static str = "rpc.v1.Trellis.Catalog";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.core::catalog.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Trellis.Catalog`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrellisCatalogError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for TrellisCatalogError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
 }
 /// Descriptor for `Trellis.Contract.Get`.
 pub struct TrellisContractGetRpc;
@@ -42,6 +88,29 @@ impl RpcDescriptor for TrellisContractGetRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.core::contract.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `Trellis.Contract.Get`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrellisContractGetError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for TrellisContractGetError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Trellis.Surface.Status`.
 pub struct TrellisSurfaceStatusRpc;
 impl RpcDescriptor for TrellisSurfaceStatusRpc {
@@ -55,4 +124,27 @@ impl RpcDescriptor for TrellisSurfaceStatusRpc {
     const SUBJECT: &'static str = "rpc.v1.Trellis.Surface.Status";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.core::catalog.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Trellis.Surface.Status`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrellisSurfaceStatusError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for TrellisSurfaceStatusError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
 }

@@ -23,6 +23,7 @@ use tokio::task::{AbortHandle, JoinError, JoinHandle};
 pub use super::core_bootstrap::CoreBootstrapBinding;
 use super::request_loop::RequestHandler;
 use super::resources::{validate_kv_binding, validate_store_binding, ResourceRuntimeClient};
+use super::resources::{KvHandle, KvResourceHandle, StoreHandle, StoreResourceHandle};
 use super::runtime::run_multi_subject_service;
 use super::transfer::{
     spawn_download_transfer_endpoint, spawn_upload_transfer_endpoint_with_completion,
@@ -31,21 +32,26 @@ use super::transfer::{
 use super::{
     bootstrap_service_host, control_subject, AcceptedOperation, BootstrapBindingInfo,
     DownloadTransferGrantPlan, EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding,
-    KvResourceBinding, KvResourceClient, OperationDescriptor, OperationLiveEvent,
-    OperationProvider, OperationSignalAccepted, OperationSnapshot, OperationTransferProgress,
-    RequestContext, RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
+    KvResourceBinding, OperationDescriptor, OperationLiveEvent, OperationProvider,
+    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext,
+    RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
     ServiceResourceBindings, StoreResourceBinding, StoreResourceClient, UploadTransferCompletion,
-    UploadTransferSession,
+    UploadTransferGrantPlan, UploadTransferSession,
 };
 use crate::client::{
     verify_event_proof, EventMessage, EventReplayPolicy, EventSubscribeOptions,
     EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
+use crate::jobs::{
+    start_worker_host_from_client, JobDescriptor, JobIdentity, JobManager, JobProcessError, JobRef,
+    JobSnapshot, JobsError, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle,
+    WorkerHostOptions,
+};
+use crate::sdk::auth::rpc::{AuthEventsValidateRpc, AuthRequestsValidateRpc};
 use crate::sdk::auth::types::{
     AuthEventsValidateRequest, AuthEventsValidateResponse, AuthEventsValidateResponsePublisher,
     AuthRequestsValidateRequest, AuthRequestsValidateResponse,
 };
-use crate::sdk::auth::AuthClient;
 use crate::sdk::core::types::TrellisBindingsGetResponseBinding;
 
 const AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS: usize = 3;
@@ -160,7 +166,9 @@ impl RequestValidator for LocalAuthRequestValidatorAdapter<Arc<TrellisClient>> {
                 .await
                 .map_err(|error| map_validate_request_error(subject, error))?;
             if response.allowed {
-                Ok(RequestValidation::allowed_caller(response.caller))
+                Ok(RequestValidation::allowed_caller(serde_json::to_value(
+                    response.caller,
+                )?))
             } else {
                 Ok(RequestValidation::denied())
             }
@@ -173,12 +181,7 @@ async fn validate_request_with_session_retry(
     request: &AuthRequestsValidateRequest,
 ) -> Result<AuthRequestsValidateResponse, TrellisClientError> {
     for attempt in 0..AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS {
-        match AuthClient::new(client.as_ref())
-            .rpc()
-            .auth()
-            .requests_validate(request)
-            .await
-        {
+        match client.call::<AuthRequestsValidateRpc>(request).await {
             Ok(response) => return Ok(response),
             Err(error)
                 if is_transient_event_validate_error(&error)
@@ -214,12 +217,7 @@ async fn validate_event_with_session_retry(
     request: &AuthEventsValidateRequest,
 ) -> Result<AuthEventsValidateResponse, TrellisClientError> {
     for attempt in 0..AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS {
-        match AuthClient::new(client.as_ref())
-            .rpc()
-            .auth()
-            .events_validate(request)
-            .await
-        {
+        match client.call::<AuthEventsValidateRpc>(request).await {
             Ok(response) => return Ok(response),
             Err(error)
                 if is_transient_session_not_found(&error)
@@ -296,7 +294,7 @@ async fn validate_event_message(
     if !response.allowed {
         return Err(EventProofValidationError::permanent(format!(
             "Auth.Events.Validate rejected event with status {}",
-            response.status
+            response.status.as_str()
         )));
     }
 
@@ -404,17 +402,17 @@ pub trait GeneratedServiceContract {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServiceConnectOptions<'a> {
     /// Base Trellis runtime URL used for HTTP bootstrap.
-    pub trellis_url: &'a str,
+    trellis_url: &'a str,
     /// Service instance name reported to the runtime.
-    pub name: &'a str,
+    name: &'a str,
     /// Base64url-encoded service session seed.
-    pub session_key_seed_base64url: &'a str,
+    session_key_seed_base64url: &'a str,
     /// Request/connect timeout in milliseconds.
-    pub timeout_ms: u64,
+    timeout_ms: u64,
     /// Retry delay in milliseconds while bootstrap is pending authority readiness.
-    pub retry_delay_ms: u64,
+    retry_delay_ms: u64,
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
-    pub authority_pending_timeout_ms: Option<u64>,
+    authority_pending_timeout_ms: Option<u64>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
@@ -428,6 +426,24 @@ impl<'a> ServiceConnectOptions<'a> {
             retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
         }
+    }
+
+    /// Set the request/connect timeout in milliseconds.
+    pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+        self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Set the delay between authority-pending bootstrap retries.
+    pub const fn with_retry_delay_ms(mut self, retry_delay_ms: u64) -> Self {
+        self.retry_delay_ms = retry_delay_ms;
+        self
+    }
+
+    /// Limit authority-pending bootstrap wait time, or use `None` to wait indefinitely.
+    pub const fn with_authority_pending_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        self.authority_pending_timeout_ms = timeout_ms;
+        self
     }
 }
 
@@ -458,6 +474,21 @@ pub enum ServiceRuntimeError {
     /// The service bootstrap binding could not be parsed as a core binding.
     #[error("invalid service bootstrap binding: {0}")]
     InvalidBootstrapBinding(#[source] serde_json::Error),
+
+    /// Service-private jobs bindings were missing or invalid.
+    #[error(transparent)]
+    JobsBinding(#[from] crate::jobs::bindings::JobsBindingError),
+
+    /// A service-private jobs worker host failed.
+    #[error(transparent)]
+    JobWorker(#[from] crate::jobs::internal::WorkerHostError),
+
+    /// A generated jobs queue was not present in the resolved binding.
+    #[error("jobs queue '{queue_type}' was not found in service bootstrap bindings")]
+    MissingJobQueue {
+        /// Declared queue type absent from the binding.
+        queue_type: String,
+    },
 
     /// The runtime was built without a client and cannot use the default runner.
     #[error("service runtime is missing a Trellis client")]
@@ -509,21 +540,32 @@ pub enum ServiceRuntimeError {
 
     /// A durable listener count must be at least one.
     #[error("event consumer group '{group}' has invalid listener concurrency {concurrency}; expected >= 1")]
-    InvalidEventListenerConcurrency { group: String, concurrency: u32 },
+    InvalidEventListenerConcurrency {
+        /// Event consumer group name.
+        group: String,
+        /// Invalid requested listener count.
+        concurrency: u32,
+    },
 
     /// Strict ordering permits only one pull loop per service instance.
     #[error(
         "event consumer group '{group}' uses strict ordering and requires listener concurrency 1"
     )]
-    StrictEventListenerConcurrency { group: String },
+    StrictEventListenerConcurrency {
+        /// Strictly ordered event consumer group name.
+        group: String,
+    },
 
     /// Registrations sharing one durable consumer must use the same local count.
     #[error(
         "event consumer group '{group}' already uses listener concurrency {existing}; requested {requested}"
     )]
     EventListenerConcurrencyMismatch {
+        /// Event consumer group name.
         group: String,
+        /// Listener count already registered locally.
         existing: u32,
+        /// Conflicting requested listener count.
         requested: u32,
     },
 }
@@ -591,12 +633,12 @@ pub struct ServiceEventPublisherContext {
 impl From<AuthEventsValidateResponsePublisher> for ServiceEventPublisherContext {
     fn from(publisher: AuthEventsValidateResponsePublisher) -> Self {
         Self {
-            kind: publisher.kind,
+            kind: publisher.kind.as_str().to_string(),
             deployment_id: publisher.deployment_id,
             instance_id: publisher.instance_id,
             contract_id: publisher.contract_id,
             contract_digest: publisher.contract_digest,
-            session_status: publisher.session_status,
+            session_status: publisher.session_status.as_str().to_string(),
         }
     }
 }
@@ -697,8 +739,26 @@ impl std::fmt::Debug for ServiceHandle {
 }
 
 impl ServiceHandle {
-    /// Return the raw Trellis client for advanced outbound calls.
-    pub fn client(&self) -> &Arc<TrellisClient> {
+    /// Return the opaque caller used for generated outbound calls.
+    pub fn caller(&self) -> crate::generated::Caller {
+        crate::generated::Caller::from_client(Arc::clone(
+            self.client
+                .as_ref()
+                .expect("connected service handles always include a Trellis client"),
+        ))
+    }
+
+    /// Return the authenticated service session's public key.
+    pub fn session_key(&self) -> &str {
+        &self
+            .client
+            .as_ref()
+            .expect("connected service handles always include a Trellis client")
+            .auth()
+            .session_key
+    }
+
+    fn client(&self) -> &Arc<TrellisClient> {
         self.client
             .as_ref()
             .expect("connected service handles always include a Trellis client")
@@ -760,6 +820,106 @@ impl ServiceHandle {
         EventPublisher::new(Arc::clone(self.client()))
     }
 
+    /// Submit a typed service-private job for generated participant code.
+    #[doc(hidden)]
+    pub async fn generated_submit_job<D>(
+        &self,
+        payload: D::Payload,
+    ) -> Result<JobRef<D::Payload, D::Result>, JobsError>
+    where
+        D: JobDescriptor,
+    {
+        let binding = self
+            .binding
+            .jobs_runtime_binding()
+            .map_err(|error| JobsError::Message {
+                message: error.to_string(),
+            })?;
+        let key_coordinator = crate::jobs::keys::NatsKeyCoordinator::open_for_service(
+            self.client().nats().clone(),
+            &binding.jobs.namespace,
+        )
+        .await
+        .map_err(|error| JobsError::Message {
+            message: error.to_string(),
+        })?;
+        let manager = JobManager::new_with_key_coordinator(
+            TrellisJobEventPublisher::new(self.client().nats().clone()),
+            binding.jobs,
+            TrellisJobMetaSource,
+            Arc::new(key_coordinator),
+        );
+        let job = manager
+            .create(D::QUEUE_TYPE, payload)
+            .await
+            .map_err(|error| JobsError::Message {
+                message: error.to_string(),
+            })?;
+        let queue = manager
+            .bindings()
+            .queues
+            .get(D::QUEUE_TYPE)
+            .cloned()
+            .ok_or_else(|| JobsError::Message {
+                message: format!("missing jobs queue binding '{}'", D::QUEUE_TYPE),
+            })?;
+        let waiter = crate::jobs::runtime_ref::NatsJobWaiter::new(
+            self.client().nats().clone(),
+            queue,
+            Duration::from_secs(30),
+        );
+        let state = Arc::new(Mutex::new(job.clone()));
+        let identity = JobIdentity::from(&job);
+
+        let get_state = Arc::clone(&state);
+        let get_waiter = waiter.clone();
+        let wait_state = Arc::clone(&state);
+        let wait_waiter = waiter.clone();
+        let cancel_state = Arc::clone(&state);
+        let cancel_waiter = waiter;
+        let cancel_manager = manager;
+        Ok(JobRef::new(
+            identity,
+            move || {
+                let state = Arc::clone(&get_state);
+                let waiter = get_waiter.clone();
+                Box::pin(async move {
+                    let current = state.lock().await.clone();
+                    let current = waiter.get(current).await?;
+                    *state.lock().await = current.clone();
+                    JobSnapshot::try_from(current)
+                })
+            },
+            move || {
+                let state = Arc::clone(&wait_state);
+                let waiter = wait_waiter.clone();
+                Box::pin(async move {
+                    let current = state.lock().await.clone();
+                    let current = waiter.wait_for_terminal(current).await?;
+                    *state.lock().await = current.clone();
+                    JobSnapshot::try_from(current)
+                })
+            },
+            move || {
+                let state = Arc::clone(&cancel_state);
+                let waiter = cancel_waiter.clone();
+                let manager = cancel_manager.clone();
+                Box::pin(async move {
+                    let current = state.lock().await.clone();
+                    manager
+                        .cancel(&current)
+                        .await
+                        .map_err(|error| JobsError::Message {
+                            message: error.to_string(),
+                        })?;
+                    let current = waiter.get(current).await?;
+                    *state.lock().await = current.clone();
+                    JobSnapshot::try_from(current)
+                })
+            },
+        ))
+    }
+
     /// Start a descriptor-backed event listener.
     pub async fn listen_event<D, F, Fut>(
         &self,
@@ -783,74 +943,81 @@ impl ServiceHandle {
     }
 
     /// Open a bound KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<impl KvResourceClient, ServerError> {
+    pub async fn kv_client(&self, name: &str) -> Result<KvHandle, ServerError> {
         let binding = self.kv_binding(name)?;
         validate_kv_binding(self.service_name(), name, binding)?;
-        self.client().nats().open_kv(binding).await
+        let client = self.client().nats().open_kv(binding).await?;
+        Ok(KvResourceHandle::new(name, binding.clone(), client))
     }
 
     /// Open a bound object-store resource client by contract-local resource name.
-    pub async fn store_client(&self, name: &str) -> Result<impl StoreResourceClient, ServerError> {
+    pub async fn store_client(&self, name: &str) -> Result<StoreHandle, ServerError> {
         let binding = self.store_binding(name)?;
         validate_store_binding(self.service_name(), name, binding)?;
-        self.client().nats().open_store(binding).await
+        let client = self.client().nats().open_store(binding).await?;
+        Ok(StoreResourceHandle::new(
+            self.service_name(),
+            name,
+            binding.clone(),
+            client,
+        ))
     }
 
     /// Subscribe and run an upload transfer endpoint backed by the connected NATS client.
-    pub async fn spawn_upload_transfer_endpoint_with_progress<C, V, F>(
+    pub async fn spawn_upload_transfer_endpoint_with_progress<C, F>(
         &self,
         session: UploadTransferSession,
         store: C,
-        validator: V,
         on_progress: F,
     ) -> Result<(), ServerError>
     where
         C: StoreResourceClient,
-        V: RequestValidator + 'static,
         F: Fn(OperationTransferProgress) + Send + Sync + 'static,
     {
         spawn_upload_transfer_endpoint_with_progress(
             self.client().nats().clone(),
             session,
             store,
-            validator,
+            super::DefaultRequestValidator::new(Arc::clone(self.client())),
             on_progress,
         )
         .await
     }
 
     /// Subscribe and run an upload transfer endpoint that can be awaited until durable storage.
-    pub async fn spawn_upload_transfer_endpoint_with_completion<C, V>(
+    pub async fn spawn_upload_transfer_endpoint_with_completion<C>(
         &self,
         session: UploadTransferSession,
         store: C,
-        validator: V,
     ) -> Result<UploadTransferCompletion, ServerError>
     where
         C: StoreResourceClient,
-        V: RequestValidator + 'static,
     {
         spawn_upload_transfer_endpoint_with_completion(
             self.client().nats().clone(),
             session,
             store,
-            validator,
+            super::DefaultRequestValidator::new(Arc::clone(self.client())),
         )
         .await
     }
 
     /// Subscribe and run a download transfer endpoint backed by the connected NATS client.
-    pub async fn spawn_download_transfer_endpoint<C, V>(
+    pub async fn spawn_download_transfer_endpoint<C>(
         &self,
         plan: DownloadTransferGrantPlan,
         store: C,
-        validator: V,
     ) -> Result<(), ServerError>
     where
         C: StoreResourceClient,
-        V: RequestValidator + 'static,
     {
-        spawn_download_transfer_endpoint(self.client().nats().clone(), plan, store, validator).await
+        spawn_download_transfer_endpoint(
+            self.client().nats().clone(),
+            plan,
+            store,
+            super::DefaultRequestValidator::new(Arc::clone(self.client())),
+        )
+        .await
     }
 }
 
@@ -877,6 +1044,71 @@ impl ServiceHandlerContext {
         &self.handle
     }
 
+    /// Plan an upload transfer using this request's authenticated caller and service bindings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn plan_upload_transfer(
+        &self,
+        store: &str,
+        key: &str,
+        transfer_id: &str,
+        expires_at: &str,
+        chunk_bytes: u64,
+        max_bytes: Option<u64>,
+        content_type: Option<&str>,
+        metadata: BTreeMap<String, String>,
+    ) -> Result<UploadTransferGrantPlan, ServerError> {
+        let session_key =
+            self.request
+                .session_key
+                .as_deref()
+                .ok_or_else(|| ServerError::MissingSessionKey {
+                    subject: self.request.subject.clone(),
+                })?;
+        super::plan_upload_transfer_grant(super::TransferUploadGrantArgs {
+            service_name: self.handle.service_name(),
+            session_key,
+            service_session_key: self.handle.session_key(),
+            resources: self.handle.resources(),
+            store,
+            key,
+            transfer_id,
+            expires_at,
+            chunk_bytes,
+            max_bytes,
+            content_type,
+            metadata,
+        })
+    }
+
+    /// Plan a download transfer using this request's authenticated caller and service bindings.
+    pub fn plan_download_transfer(
+        &self,
+        store: &str,
+        transfer_id: &str,
+        expires_at: &str,
+        chunk_bytes: u64,
+        info: super::FileTransferInfo,
+    ) -> Result<DownloadTransferGrantPlan, ServerError> {
+        let session_key =
+            self.request
+                .session_key
+                .as_deref()
+                .ok_or_else(|| ServerError::MissingSessionKey {
+                    subject: self.request.subject.clone(),
+                })?;
+        super::plan_download_transfer_grant(super::TransferDownloadGrantArgs {
+            service_name: self.handle.service_name(),
+            session_key,
+            service_session_key: self.handle.session_key(),
+            resources: self.handle.resources(),
+            store,
+            transfer_id,
+            expires_at,
+            chunk_bytes,
+            info,
+        })
+    }
+
     /// Consume this context into the low-level request metadata.
     pub fn into_request_context(self) -> RequestContext {
         self.request
@@ -886,6 +1118,7 @@ impl ServiceHandlerContext {
 /// Connected high-level service runtime for one generated service contract.
 pub struct ConnectedServiceRuntime<C> {
     client: Option<Arc<TrellisClient>>,
+    caller: Option<crate::generated::Caller>,
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
@@ -893,6 +1126,7 @@ pub struct ConnectedServiceRuntime<C> {
     router: Router,
     service_name: String,
     registered_subjects: BTreeSet<String>,
+    job_hosts: Vec<WorkerHostHandle>,
     _contract: PhantomData<C>,
 }
 
@@ -908,15 +1142,17 @@ impl<C> std::fmt::Debug for ConnectedServiceRuntime<C> {
 
 impl<C> ConnectedServiceRuntime<C> {
     /// Build a connected runtime from an injected client and bootstrap binding.
-    pub fn from_parts(
+    pub(crate) fn from_parts(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
         binding: CoreBootstrapBinding,
     ) -> Self {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
+        let caller = crate::generated::Caller::new(Arc::clone(&client));
         Self {
             client: Some(client),
+            caller: Some(caller),
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
@@ -924,12 +1160,14 @@ impl<C> ConnectedServiceRuntime<C> {
             router: Router::new(),
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
+            job_hosts: Vec::new(),
             _contract: PhantomData,
         }
     }
 
     /// Build a connected runtime from a service client that already completed bootstrap.
-    pub fn from_connected_client(
+    #[cfg(feature = "test-support")]
+    pub(crate) fn from_connected_client(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
     ) -> Result<Self, ServiceRuntimeError> {
@@ -937,11 +1175,19 @@ impl<C> ConnectedServiceRuntime<C> {
         Ok(Self::from_parts(service_name, client, binding))
     }
 
-    /// Return the raw Trellis client owned by this runtime.
-    pub fn client(&self) -> &Arc<TrellisClient> {
+    /// Return the internal Trellis client owned by this runtime.
+    pub(crate) fn client(&self) -> &Arc<TrellisClient> {
         self.client
             .as_ref()
             .expect("connected service runtimes always include a Trellis client")
+    }
+
+    /// Return the opaque caller handle consumed by generated facades.
+    #[doc(hidden)]
+    pub fn caller(&self) -> &crate::generated::Caller {
+        self.caller
+            .as_ref()
+            .expect("connected service runtimes always include a caller handle")
     }
 
     /// Return the parsed core bootstrap binding supplied by service bootstrap.
@@ -990,6 +1236,88 @@ impl<C> ConnectedServiceRuntime<C> {
             })
     }
 
+    /// Return the Jobs-domain transport used by Trellis infrastructure services.
+    pub fn jobs_runtime(&self) -> crate::jobs::JobsRuntime {
+        crate::jobs::JobsRuntime::from_client(self.client())
+    }
+
+    /// Return Jobs-only worker host access for Trellis integration tests.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn test_jobs_worker_runtime(
+        &self,
+    ) -> Result<crate::jobs::TestJobsWorkerRuntime, ServiceRuntimeError> {
+        Ok(crate::jobs::TestJobsWorkerRuntime::new(
+            Arc::clone(self.client()),
+            self.binding.jobs_runtime_binding()?,
+        ))
+    }
+
+    /// Return the Event Log domain transport used by Trellis infrastructure.
+    pub fn eventlog_runtime(&self) -> super::EventLogRuntime {
+        super::EventLogRuntime::from_client(Arc::clone(self.client()))
+    }
+
+    /// Submit a typed service-private job for generated participant code.
+    #[doc(hidden)]
+    pub async fn generated_submit_job<D>(
+        &self,
+        payload: D::Payload,
+    ) -> Result<JobRef<D::Payload, D::Result>, JobsError>
+    where
+        D: JobDescriptor,
+    {
+        self.generated_handle()
+            .generated_submit_job::<D>(payload)
+            .await
+    }
+
+    /// Start one generated service-private job worker and retain its lifecycle.
+    #[doc(hidden)]
+    pub async fn register_generated_job_worker<D, H, Fut, E>(
+        &mut self,
+        handler: H,
+    ) -> Result<(), ServiceRuntimeError>
+    where
+        D: JobDescriptor + 'static,
+        H: Fn(crate::jobs::ActiveJob<D::Payload, D::Result>) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = Result<D::Result, E>> + Send + 'static,
+        E: ToString + Send + 'static,
+    {
+        let mut binding = self.binding.jobs_runtime_binding()?;
+        binding
+            .jobs
+            .queues
+            .retain(|queue, _| queue == D::QUEUE_TYPE);
+        if binding.jobs.queues.is_empty() {
+            return Err(ServiceRuntimeError::MissingJobQueue {
+                queue_type: D::QUEUE_TYPE.to_string(),
+            });
+        }
+        let host = start_worker_host_from_client(
+            self.client(),
+            binding,
+            ulid::Ulid::new().to_string(),
+            |_, _| TrellisJobMetaSource,
+            move |active| {
+                let handler = handler.clone();
+                async move {
+                    let active = crate::jobs::internal::typed_active_job::<D>(active)
+                        .map_err(|error| JobProcessError::Failed(error.to_string()))?;
+                    let result = handler(active)
+                        .await
+                        .map_err(|error| JobProcessError::Failed(error.to_string()))?;
+                    serde_json::to_value(result)
+                        .map_err(|error| JobProcessError::Failed(error.to_string()))
+                }
+            },
+            WorkerHostOptions::default(),
+        )
+        .await?;
+        self.job_hosts.push(host);
+        Ok(())
+    }
+
     /// Return an event publisher backed by the connected NATS client.
     pub fn event_publisher(&self) -> EventPublisher {
         EventPublisher::new(Arc::clone(self.client()))
@@ -1018,17 +1346,24 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     /// Open a bound KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<impl KvResourceClient, ServerError> {
+    pub async fn kv_client(&self, name: &str) -> Result<KvHandle, ServerError> {
         let binding = self.kv_binding(name)?;
         validate_kv_binding(self.service_name(), name, binding)?;
-        self.client().nats().open_kv(binding).await
+        let client = self.client().nats().open_kv(binding).await?;
+        Ok(KvResourceHandle::new(name, binding.clone(), client))
     }
 
     /// Open a bound object-store resource client by contract-local resource name.
-    pub async fn store_client(&self, name: &str) -> Result<impl StoreResourceClient, ServerError> {
+    pub async fn store_client(&self, name: &str) -> Result<StoreHandle, ServerError> {
         let binding = self.store_binding(name)?;
         validate_store_binding(self.service_name(), name, binding)?;
-        self.client().nats().open_store(binding).await
+        let client = self.client().nats().open_store(binding).await?;
+        Ok(StoreResourceHandle::new(
+            self.service_name(),
+            name,
+            binding.clone(),
+            client,
+        ))
     }
 
     /// Return the service instance name used during bootstrap.
@@ -1051,7 +1386,7 @@ impl<C> ConnectedServiceRuntime<C> {
         F: Fn(ServiceHandlerContext, D::Input) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HandlerResult<D::Output>> + Send + 'static,
     {
-        let handle = self.handle();
+        let handle = self.generated_handle();
         self.router.register_rpc::<D, _, _>(move |request, input| {
             handler(ServiceHandlerContext::new(request, handle.clone()), input)
         });
@@ -1065,7 +1400,7 @@ impl<C> ConnectedServiceRuntime<C> {
         F: Fn(ServiceHandlerContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
-        let handle = self.handle();
+        let handle = self.generated_handle();
         self.router.register_feed::<D, _, _>(move |request, input| {
             handler(ServiceHandlerContext::new(request, handle.clone()), input)
         });
@@ -1080,7 +1415,7 @@ impl<C> ConnectedServiceRuntime<C> {
     {
         self.router
             .register_operation_provider::<D, _>(OperationProviderAdapter {
-                handle: self.handle(),
+                handle: self.generated_handle(),
                 provider,
                 _descriptor: PhantomData,
             });
@@ -1123,10 +1458,10 @@ impl<C> ConnectedServiceRuntime<C> {
             + Send
             + 'static,
     {
-        let start_handle = self.handle();
-        let get_handle = self.handle();
-        let watch_handle = self.handle();
-        let cancel_handle = self.handle();
+        let start_handle = self.generated_handle();
+        let get_handle = self.generated_handle();
+        let watch_handle = self.generated_handle();
+        let cancel_handle = self.generated_handle();
         self.router
             .register_operation_with_watch::<D, _, _, _, _, _, _, _>(
                 move |request, input| {
@@ -1194,10 +1529,10 @@ impl<C> ConnectedServiceRuntime<C> {
             + Send
             + 'static,
     {
-        let start_handle = self.handle();
-        let get_handle = self.handle();
-        let wait_handle = self.handle();
-        let cancel_handle = self.handle();
+        let start_handle = self.generated_handle();
+        let get_handle = self.generated_handle();
+        let wait_handle = self.generated_handle();
+        let cancel_handle = self.generated_handle();
         self.router.register_operation::<D, _, _, _, _, _, _, _, _>(
             move |request, input| {
                 start(
@@ -1273,11 +1608,11 @@ impl<C> ConnectedServiceRuntime<C> {
             + Send
             + 'static,
     {
-        let start_handle = self.handle();
-        let get_handle = self.handle();
-        let watch_handle = self.handle();
-        let cancel_handle = self.handle();
-        let signal_handle = self.handle();
+        let start_handle = self.generated_handle();
+        let get_handle = self.generated_handle();
+        let watch_handle = self.generated_handle();
+        let cancel_handle = self.generated_handle();
+        let signal_handle = self.generated_handle();
         self.router
             .register_operation_with_watch_and_signal::<D, _, _, _, _, _, _, _, _, _>(
                 move |request, input| {
@@ -1366,11 +1701,11 @@ impl<C> ConnectedServiceRuntime<C> {
             + Send
             + 'static,
     {
-        let start_handle = self.handle();
-        let get_handle = self.handle();
-        let watch_handle = self.handle();
-        let cancel_handle = self.handle();
-        let signal_handle = self.handle();
+        let start_handle = self.generated_handle();
+        let get_handle = self.generated_handle();
+        let watch_handle = self.generated_handle();
+        let cancel_handle = self.generated_handle();
+        let signal_handle = self.generated_handle();
         self.router
             .register_operation_with_updates_and_signal::<D, _, _, _, _, _, _, _, _, _>(
                 move |request, input| {
@@ -1416,11 +1751,12 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     /// Run registered subjects using an injected runner seam.
-    pub async fn run_with_runner<R>(self, runner: R) -> Result<(), ServiceRuntimeError>
+    pub(crate) async fn run_with_runner<R>(self, runner: R) -> Result<(), ServiceRuntimeError>
     where
         R: ServiceRuntimeRunner,
     {
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
+        let job_hosts = self.job_hosts;
         if let Some(client) = self.client {
             let host = bootstrap_service_host(
                 &self.service_name,
@@ -1428,10 +1764,28 @@ impl<C> ConnectedServiceRuntime<C> {
                 self.router,
                 LocalAuthRequestValidatorAdapter::new(Arc::clone(&client)),
             );
-            return runner
-                .run(Some(client), subjects, host)
+            if job_hosts.is_empty() {
+                return runner
+                    .run(Some(client), subjects, host)
+                    .await
+                    .map_err(ServiceRuntimeError::Server);
+            }
+            let serve = async {
+                runner
+                    .run(Some(client), subjects, host)
+                    .await
+                    .map_err(ServiceRuntimeError::Server)
+            };
+            let workers = async {
+                futures_util::future::try_join_all(
+                    job_hosts.into_iter().map(WorkerHostHandle::join),
+                )
                 .await
-                .map_err(ServiceRuntimeError::Server);
+                .map_err(ServiceRuntimeError::JobWorker)?;
+                Ok(())
+            };
+            tokio::try_join!(serve, workers)?;
+            return Ok(());
         }
 
         #[cfg(test)]
@@ -1448,7 +1802,9 @@ impl<C> ConnectedServiceRuntime<C> {
         }
     }
 
-    fn handle(&self) -> ServiceHandle {
+    /// Return a cloneable service handle for generated participant code.
+    #[doc(hidden)]
+    pub fn generated_handle(&self) -> ServiceHandle {
         ServiceHandle {
             client: self.client.as_ref().map(Arc::clone),
             service_name: Arc::from(self.service_name.as_str()),
@@ -1464,6 +1820,7 @@ impl<C> ConnectedServiceRuntime<C> {
         let event_listeners = SharedDurableEventListeners::default();
         Self {
             client: None,
+            caller: None,
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
@@ -1471,6 +1828,7 @@ impl<C> ConnectedServiceRuntime<C> {
             router: Router::new(),
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
+            job_hosts: Vec::new(),
             _contract: PhantomData,
         }
     }
@@ -1590,7 +1948,7 @@ where
 }
 
 /// Runner seam for tests and alternate service loop implementations.
-pub trait ServiceRuntimeRunner {
+pub(crate) trait ServiceRuntimeRunner {
     /// Future returned by the runner.
     type RunFuture: Future<Output = Result<(), ServerError>>;
 
@@ -1607,7 +1965,7 @@ pub trait ServiceRuntimeRunner {
 
 /// Default runner backed by the local multi-subject NATS loop.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct DefaultServiceRunner;
+pub(crate) struct DefaultServiceRunner;
 
 impl ServiceRuntimeRunner for DefaultServiceRunner {
     type RunFuture = BoxFuture<'static, Result<(), ServerError>>;
@@ -2265,8 +2623,8 @@ mod tests {
                         stream: "trellis".to_string(),
                         consumer_name: "svc-projection".to_string(),
                         filter_subjects: vec!["events.v1.Billing.Paid".to_string()],
-                        replay: "new".to_string(),
-                        ordering: "strict".to_string(),
+                        replay: serde_json::from_value(serde_json::json!("new")).unwrap(),
+                        ordering: serde_json::from_value(serde_json::json!("strict")).unwrap(),
                         ack_wait_ms: 30_000,
                         max_deliver: 5,
                         backoff_ms: vec![1_000, 5_000],
@@ -2340,7 +2698,7 @@ mod tests {
             .expect("event consumer bindings")
             .get_mut("projection")
             .expect("projection event consumer binding")
-            .ordering = "parallel".to_string();
+            .ordering = serde_json::from_value(serde_json::json!("parallel")).unwrap();
 
         let resources = CoreBootstrapBinding::new(core).resource_bindings();
         assert_eq!(
@@ -2574,7 +2932,7 @@ mod tests {
                 if resource_kind == "kv" && resource_name == "missing"
         ));
 
-        let handle = runtime.handle();
+        let handle = runtime.generated_handle();
         assert_eq!(handle.resources().store.len(), 1);
         assert_eq!(
             handle

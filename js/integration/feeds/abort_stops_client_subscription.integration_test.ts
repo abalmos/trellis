@@ -30,8 +30,9 @@ liveTrellisTest({
       });
       const controller = new AbortController();
 
-      const stream = await client.entityLive({ topic: fixture.topic },
-      { signal: controller.signal },).orThrow();
+      const stream = await client.entityLive({ topic: fixture.topic }, {
+        signal: controller.signal,
+      }).orThrow();
 
       controller.abort();
 
@@ -70,8 +71,9 @@ liveTrellisTest({
 
       const alreadyAborted = new AbortController();
       alreadyAborted.abort();
-      const abortedResult = await client.entityLive({ topic: fixture.topic },
-      { signal: alreadyAborted.signal },);
+      const abortedResult = await client.entityLive({ topic: fixture.topic }, {
+        signal: alreadyAborted.signal,
+      });
       assert(
         abortedResult.isErr(),
         "an already-aborted feed should be rejected",

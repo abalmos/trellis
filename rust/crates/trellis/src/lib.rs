@@ -5,14 +5,10 @@
 //! bootstrap hosts, or generated artifact internals.
 //!
 //! Generated SDK crates and participant facades include a package-local
-//! `TRELLIS.md` for AI-agent use. Prefer descriptor and generated facade APIs:
-//! `TrellisClient::call::<RpcDescriptor>(...)`,
-//! `TrellisClient::publish::<EventDescriptor>(...)`,
-//! `TrellisClient::subscribe::<EventDescriptor>()`,
-//! `TrellisClient::feed::<FeedDescriptor>(input)`,
-//! `TrellisClient::operation::<Operation>().start(...)`, generated wrappers
-//! like `.rpc().group().method(...)`, and service registration through
-//! `handle().rpc().group().method(handler)` where generated.
+//! `TRELLIS.md` for AI-agent use. Participant facades are the connection
+//! boundary and expose generated caller methods through `.client()`, service
+//! resources through `.service()`, and provider registration through
+//! `.handle()`.
 //!
 //! Prepared event and outbox/inbox support lives under [`client`]:
 //! `PreparedTrellisEvent`, `prepare_event::<Descriptor>(...)`,
@@ -20,8 +16,11 @@
 //! `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and
 //! `PostgresInboxStore`.
 
-/// Authenticated outbound client runtime types for generated SDKs and normal clients.
+#[doc(hidden)]
 pub mod client;
+
+#[doc(hidden)]
+pub mod generated;
 
 /// High-level service runtime and service-authoring support types.
 pub mod service;
@@ -47,10 +46,10 @@ pub mod contracts {
     };
 }
 
-/// Public authentication flows, session helpers, and auth protocol types.
+#[doc(hidden)]
 pub mod auth;
 
-/// Service-local jobs runtime types for service authors.
+#[doc(hidden)]
 pub mod jobs;
 
 /// Public facades for Trellis-owned generated contract SDKs.
@@ -96,9 +95,7 @@ mod tests {
             .parent()
             .expect("trellis crate should live under rust/crates");
         for manifest in [
-            "auth/Cargo.toml",
             "auth-adapters/Cargo.toml",
-            "client/Cargo.toml",
             "cli/Cargo.toml",
             "codegen-rust/Cargo.toml",
             "codegen-ts/Cargo.toml",
@@ -108,10 +105,8 @@ mod tests {
             "jobs/Cargo.toml",
             "local-bootstrap/Cargo.toml",
             "runtime/Cargo.toml",
-            "service/Cargo.toml",
             "service-eventlog/Cargo.toml",
             "service-jobs/Cargo.toml",
-            "service-runtime/Cargo.toml",
             "trellis-test/Cargo.toml",
         ] {
             let contents = fs::read_to_string(crates_dir.join(manifest))

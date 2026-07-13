@@ -1,5 +1,6 @@
 use crate::jobs::types::{Job, JobErrorDetail, JobEvent, JobEventType, JobState};
 
+#[doc = concat!("Trellis API operation `", stringify!(is_terminal), "`.")]
 pub fn is_terminal(state: JobState) -> bool {
     matches!(
         state,
@@ -14,6 +15,7 @@ pub fn is_terminal(state: JobState) -> bool {
     )
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(job_from_work_event), "`.")]
 pub fn job_from_work_event(event: &JobEvent) -> Option<Job> {
     match event.event_type {
         JobEventType::Created | JobEventType::Retried => seed_job_from_event(event),
@@ -21,6 +23,7 @@ pub fn job_from_work_event(event: &JobEvent) -> Option<Job> {
     }
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(reduce_job_event), "`.")]
 pub fn reduce_job_event(current: Option<&Job>, event: &JobEvent) -> Option<Job> {
     let current = match current {
         Some(value) => value,

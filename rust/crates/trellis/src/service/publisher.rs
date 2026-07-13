@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use super::{EventDescriptor, ServerError};
-use crate::client::{PreparedTrellisEvent, TrellisClient};
+use super::ServerError;
+use crate::client::{EventDescriptor, TrellisClient};
 
 /// A descriptor-backed event publisher using the connected Trellis client.
 #[derive(Clone)]
@@ -19,12 +19,22 @@ impl EventPublisher {
     where
         D: EventDescriptor,
     {
-        let prepared =
-            PreparedTrellisEvent::new(D::SUBJECT, bytes::Bytes::from(serde_json::to_vec(event)?));
+        let prepared = crate::client::prepare_event::<D>(event)?;
         self.client
             .publish_prepared(&prepared)
             .await
             .map_err(|error| ServerError::Nats(error.to_string()))?;
         Ok(())
+    }
+
+    /// Publish an event prepared before the current transaction completed.
+    pub async fn publish_prepared(
+        &self,
+        event: &crate::client::PreparedTrellisEvent,
+    ) -> Result<(), ServerError> {
+        self.client
+            .publish_prepared(event)
+            .await
+            .map_err(|error| ServerError::Nats(error.to_string()))
     }
 }

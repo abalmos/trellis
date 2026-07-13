@@ -1,9 +1,9 @@
 import type {
+  CallerContract,
+  CallerRuntime,
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
-  CallerContract,
-  CallerRuntime,
 } from "@qlever-llc/trellis";
 
 import type { TrellisControlPlaneOAuthProvider } from "./control_plane_config.ts";

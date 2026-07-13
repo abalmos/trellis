@@ -150,7 +150,8 @@ export type ContractUseDependencySurface =
 export type ContractUseDependencyErrorReason =
   | "inactive"
   | "unknown"
-  | "missing";
+  | "missing"
+  | "owner-only";
 
 export type ContractUseDependencyErrorOptions = {
   alias: string;
@@ -171,6 +172,8 @@ export class ContractUseDependencyError extends Error {
   constructor(options: ContractUseDependencyErrorOptions) {
     const subject = options.surface === "contract"
       ? `${options.reason} contract '${options.contractId}'`
+      : options.reason === "owner-only"
+      ? `${options.surface} '${options.key}' on '${options.contractId}' that does not permit delegated publication`
       : `missing ${options.surface} '${options.key}' on '${options.contractId}'`;
     super(`Dependency '${options.alias}' references ${subject}`);
     this.name = "ContractUseDependencyError";
@@ -962,6 +965,15 @@ export function resolveContractUses(
           contractId: use.contract,
           surface: "event",
           reason: "missing",
+          key,
+        });
+      }
+      if (event.capabilities?.publish === undefined) {
+        throw new ContractUseDependencyError({
+          alias,
+          contractId: use.contract,
+          surface: "event",
+          reason: "owner-only",
           key,
         });
       }

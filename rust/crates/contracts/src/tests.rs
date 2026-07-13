@@ -1774,6 +1774,79 @@ fn manifest_validation_rejects_raw_subjects() {
 }
 
 #[test]
+fn manifest_validates_templated_event_subject_fields() {
+    let manifest = parse_manifest(json!({
+        "format": "trellis.contract.v1",
+        "id": "example.events@v1",
+        "displayName": "Example Events",
+        "description": "Example event contract",
+        "kind": "service",
+        "schemas": {
+            "Changed": {
+                "type": "object",
+                "properties": {
+                    "tenantId": { "type": "string" },
+                    "sequence": {
+                        "type": "integer",
+                        "minimum": -9007199254740991_i64,
+                        "maximum": 9007199254740991_i64
+                    }
+                },
+                "required": ["tenantId", "sequence"]
+            }
+        },
+        "events": {
+            "Example.Changed": {
+                "version": "v1",
+                "subject": "events.v1.Example.Changed.{/tenantId}.{/sequence}",
+                "params": ["/tenantId", "/sequence"],
+                "event": { "schema": "Changed" }
+            }
+        }
+    }))
+    .expect("string and safely bounded integer subject fields should validate");
+
+    assert_eq!(manifest.events.len(), 1);
+}
+
+#[test]
+fn manifest_rejects_non_tokenable_event_subject_fields() {
+    for (schema, expected) in [
+        (json!({ "type": "boolean" }), "string/number schema"),
+        (json!({ "type": "integer" }), "safe integer bounds"),
+    ] {
+        let error = parse_manifest(json!({
+            "format": "trellis.contract.v1",
+            "id": "example.events@v1",
+            "displayName": "Example Events",
+            "description": "Example event contract",
+            "kind": "service",
+            "schemas": {
+                "Changed": {
+                    "type": "object",
+                    "properties": { "value": schema },
+                    "required": ["value"]
+                }
+            },
+            "events": {
+                "Example.Changed": {
+                    "version": "v1",
+                    "subject": "events.v1.Example.Changed.{/value}",
+                    "params": ["/value"],
+                    "event": { "schema": "Changed" }
+                }
+            }
+        }))
+        .expect_err("invalid subject field schema should fail");
+
+        let ContractsError::SchemaValidation { details, .. } = error else {
+            panic!("expected schema validation error");
+        };
+        assert!(details.contains(expected), "unexpected error: {details}");
+    }
+}
+
+#[test]
 fn manifest_operation_errors_normalize_and_affect_digest() {
     let manifest = json!({
         "format": "trellis.contract.v1",

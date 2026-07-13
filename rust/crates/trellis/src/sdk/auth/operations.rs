@@ -1,5 +1,5 @@
 //! Typed operation descriptors for `trellis.auth@v1`.
-use crate::client::OperationDescriptor;
+use crate::generated::OperationDescriptor;
 use crate::service::OperationFailureLike;
 /// Descriptor for `Auth.DeviceUserAuthorities.Resolve`.
 pub struct AuthDeviceUserAuthoritiesResolveOperation;
@@ -26,44 +26,62 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
     const CANCELABLE: bool = false;
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Resolve`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AuthDeviceUserAuthoritiesResolveOperationError {
     /// `AuthError` failure.
-    AuthError {
-        /// Human-facing error message.
-        message: String,
-    },
+    AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` failure.
-    UnexpectedError {
-        /// Human-facing error message.
-        message: String,
-    },
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
     /// `ValidationError` failure.
-    ValidationError {
-        /// Human-facing error message.
-        message: String,
-    },
-    /// Catch-all for unexpected operation failures.
-    Other { message: String },
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesResolveOperationError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("AuthError") => payload
+                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
+                .map(|value| value.map(Self::AuthError)),
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+    fn auth_error_reason(&self) -> Option<&str> {
+        match self {
+            Self::AuthError(payload) => Some(payload.reason.as_str()),
+            _ => None,
+        }
+    }
 }
 impl OperationFailureLike for AuthDeviceUserAuthoritiesResolveOperationError {
     fn error_type(&self) -> &str {
         match self {
-            Self::AuthError { .. } => "AuthError",
-            Self::UnexpectedError { .. } => "UnexpectedError",
-            Self::ValidationError { .. } => "ValidationError",
-            Self::Other { .. } => "UnexpectedError",
+            Self::AuthError(..) => "AuthError",
+            Self::UnexpectedError(..) => "UnexpectedError",
+            Self::ValidationError(..) => "ValidationError",
         }
     }
     fn message(&self) -> String {
-        match self {
-            Self::AuthError { message } => message.clone(),
-            Self::UnexpectedError { message } => message.clone(),
-            Self::ValidationError { message } => message.clone(),
-            Self::Other { message } => message.clone(),
-        }
+        self.fields()
+            .remove("message")
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .unwrap_or_else(|| self.error_type().to_string())
     }
     fn fields(&self) -> serde_json::Map<String, serde_json::Value> {
-        serde_json::Map::new()
+        let value = match self {
+            Self::AuthError(payload) => serde_json::to_value(payload),
+            Self::UnexpectedError(payload) => serde_json::to_value(payload),
+            Self::ValidationError(payload) => serde_json::to_value(payload),
+        };
+        value
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default()
     }
 }

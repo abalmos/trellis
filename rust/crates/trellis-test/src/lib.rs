@@ -28,7 +28,8 @@ use trellis_local_bootstrap::{
     render_trellis_config, ContainerRuntime as BootstrapContainerRuntime, LocalBootstrapError,
     LocalTrellisBootstrapManifest, LocalTrellisBootstrapOptions,
 };
-use trellis_rs::client::{SessionAuth, TrellisClient, TrellisClientError, UserConnectOptions};
+use trellis_rs::client::{SessionAuth, TrellisClientError, UserConnectOptions};
+use trellis_rs::generated::Caller;
 use trellis_rs::sdk::auth::{self as auth_sdk, AuthClient as GeneratedAuthClient};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -88,6 +89,10 @@ pub enum TrellisTestError {
     /// Public Trellis client operation failed.
     #[error(transparent)]
     TrellisClient(#[from] TrellisClientError),
+
+    /// A generated SDK call failed.
+    #[error("generated SDK call failed: {0}")]
+    GeneratedCall(String),
 
     /// Control-plane SQLite access failed.
     #[error(transparent)]
@@ -219,6 +224,55 @@ pub enum TrellisTestError {
         /// Cleanup error.
         cleanup: Box<TrellisTestError>,
     },
+}
+
+/// Send deliberately malformed RPC input through an authenticated test caller.
+pub async fn call_malformed_rpc(
+    caller: &Caller,
+    subject: &str,
+    input: &Value,
+) -> Result<Value, TrellisClientError> {
+    caller.test_request_json_value(subject, input).await
+}
+
+/// Download transfer bytes through an authenticated test caller.
+pub async fn download_transfer(
+    caller: &Caller,
+    grant: &trellis_rs::generated::DownloadTransferGrant,
+) -> Result<Vec<u8>, TrellisClientError> {
+    caller.download_transfer(grant).await
+}
+
+/// Flush an authenticated test caller's connection.
+pub async fn flush(caller: &Caller) -> Result<(), TrellisClientError> {
+    caller.test_flush().await
+}
+
+/// Connect an ad hoc service runtime through the normal authenticated bootstrap flow.
+pub async fn connect_service_runtime<C>(
+    trellis_url: &str,
+    contract_id: &str,
+    contract_digest: &str,
+    contract_json: &str,
+    session_seed: &str,
+) -> Result<trellis_rs::service::ConnectedServiceRuntime<C>, trellis_rs::service::ServiceRuntimeError>
+where
+    C: trellis_rs::service::GeneratedServiceContract,
+{
+    trellis_rs::generated::test_connect_service_runtime(
+        trellis_url,
+        contract_id,
+        contract_digest,
+        contract_json,
+        session_seed,
+    )
+    .await
+}
+
+impl<E: std::fmt::Debug> From<trellis_rs::client::CallError<E>> for TrellisTestError {
+    fn from(error: trellis_rs::client::CallError<E>) -> Self {
+        Self::GeneratedCall(format!("{error:?}"))
+    }
 }
 
 /// Container runtime used for isolated NATS test containers.
@@ -1100,7 +1154,7 @@ pub struct TrellisTestAdmin {
     default_mutable_dev: bool,
     reconciliation_timeout: Duration,
     bootstrap_complete: bool,
-    client: Option<TrellisClient>,
+    client: Option<trellis_rs::generated::Caller>,
     created_deployments: HashSet<String>,
 }
 
@@ -1153,7 +1207,7 @@ impl TrellisTestAdmin {
     pub async fn connect_admin(
         &mut self,
         bootstrap_url: &str,
-    ) -> Result<&TrellisClient, TrellisTestError> {
+    ) -> Result<&trellis_rs::generated::Caller, TrellisTestError> {
         if self.client.is_none() {
             self.complete_bootstrap(bootstrap_url).await?;
             let contract = admin_contract()?;
@@ -1187,7 +1241,7 @@ impl TrellisTestAdmin {
             .deployments_create(&auth_deployments_create_request_shape(
                 &deployment,
                 mutable_dev,
-            ))
+            )?)
             .await?;
         self.created_deployments.insert(deployment);
         Ok(())
@@ -1215,7 +1269,7 @@ impl TrellisTestAdmin {
                 expected_digest: contract.digest.clone(),
             })
             .await?;
-        let plan = AuthorityPlanSummary::from_value(&planned.plan)?;
+        let plan = AuthorityPlanSummary::from_value(&serde_json::to_value(&planned.plan)?)?;
         let allowed = if allow_plan_classifications.is_empty() {
             vec![AuthorityPlanClassification::Update]
         } else {
@@ -1303,13 +1357,14 @@ impl TrellisTestAdmin {
                     deployment_id: deployment.to_string(),
                 })
                 .await?;
+            let materialized_authority = serde_json::to_value(&result.materialized_authority)?;
             if materialized_authority_is_current(
-                &result.materialized_authority,
+                &materialized_authority,
                 &result.authority.version,
             )? {
                 return Ok(());
             }
-            if let Some(message) = materialized_authority_failure(&result.materialized_authority) {
+            if let Some(message) = materialized_authority_failure(&materialized_authority) {
                 return Err(TrellisTestError::ReconciliationFailed {
                     deployment: deployment.to_string(),
                     message,
@@ -1376,7 +1431,7 @@ impl TrellisTestAdmin {
         &mut self,
         bootstrap_url: &str,
         contract: &TrellisTestContract,
-    ) -> Result<TrellisClient, TrellisTestError> {
+    ) -> Result<Caller, TrellisTestError> {
         self.connect_client_with_session_seed(bootstrap_url, contract, random_session_seed())
             .await
     }
@@ -1387,7 +1442,7 @@ impl TrellisTestAdmin {
         bootstrap_url: &str,
         contract: &TrellisTestContract,
         session_seed: impl Into<String>,
-    ) -> Result<TrellisClient, TrellisTestError> {
+    ) -> Result<Caller, TrellisTestError> {
         let (client, _) = self
             .connect_client_with_session_seed_reconnectable(bootstrap_url, contract, session_seed)
             .await?;
@@ -1400,7 +1455,7 @@ impl TrellisTestAdmin {
         bootstrap_url: &str,
         contract: &TrellisTestContract,
         session_seed: impl Into<String>,
-    ) -> Result<(TrellisClient, TrellisTestClientReconnect), TrellisTestError> {
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
         self.complete_bootstrap(bootstrap_url).await?;
         let session_seed = session_seed.into();
         let auth = SessionAuth::from_seed_base64url(&session_seed)?;
@@ -1434,7 +1489,7 @@ impl TrellisTestAdmin {
         &self,
         contract: &TrellisTestContract,
         session_seed: impl Into<String>,
-    ) -> Result<TrellisClient, TrellisTestError> {
+    ) -> Result<Caller, TrellisTestError> {
         let session_seed = session_seed.into();
         let auth = SessionAuth::from_seed_base64url(&session_seed)?;
         let redirect_to = format!("{}/_trellis/test/client-auth", self.trellis_url);
@@ -1467,7 +1522,7 @@ pub struct TrellisTestClientReconnect {
 
 impl TrellisTestClientReconnect {
     /// Reconnect the already-bound session without starting or completing a fresh auth flow.
-    pub async fn connect_bound_only(&self) -> Result<TrellisClient, TrellisTestError> {
+    pub async fn connect_bound_only(&self) -> Result<Caller, TrellisTestError> {
         connect_bound_user(&self.bound, &self.session_seed, &self.contract_digest).await
     }
 }
@@ -1722,7 +1777,7 @@ async fn connect_user_with_local_admin(
     trellis_url: &str,
     password: &str,
     contract: &TrellisTestContract,
-) -> Result<TrellisClient, TrellisTestError> {
+) -> Result<Caller, TrellisTestError> {
     let session_seed = random_session_seed();
     let auth = SessionAuth::from_seed_base64url(&session_seed)?;
     let redirect_to = format!("{}/_trellis/test/admin-auth", trim_url(trellis_url));
@@ -1874,7 +1929,7 @@ async fn grant_client_capabilities(
     let client = admin.connect_admin(bootstrap_url).await?;
     let auth = GeneratedAuthClient::new(client);
     let me = auth.rpc().auth().sessions_me().await?;
-    let user = me.user.as_object().ok_or_else(|| {
+    let user = me.user.as_ref().ok_or_else(|| {
         TrellisTestError::UnexpectedResponse("admin session did not resolve to a user".to_string())
     })?;
     let user_id = user.get("userId").and_then(Value::as_str).ok_or_else(|| {
@@ -1964,16 +2019,16 @@ async fn connect_bound_user(
     bound: &BoundFlowSession,
     session_seed: &str,
     contract_digest: &str,
-) -> Result<TrellisClient, TrellisTestError> {
+) -> Result<Caller, TrellisTestError> {
     let _ = &bound.expires;
-    Ok(TrellisClient::connect_user(UserConnectOptions {
-        servers: &bound.nats_servers,
-        sentinel_jwt: &bound.sentinel_jwt,
-        sentinel_seed: &bound.sentinel_seed,
-        session_key_seed_base64url: session_seed,
+    Ok(Caller::connect_user(UserConnectOptions::new(
+        &bound.nats_servers,
+        &bound.sentinel_jwt,
+        &bound.sentinel_seed,
+        session_seed,
         contract_digest,
-        timeout_ms: DEFAULT_ADMIN_RPC_TIMEOUT_MS,
-    })
+        DEFAULT_ADMIN_RPC_TIMEOUT_MS,
+    ))
     .await?)
 }
 
@@ -2049,13 +2104,13 @@ async fn wait_for_bootstrap_url(
 fn auth_deployments_create_request_shape(
     deployment: &str,
     mutable_dev: bool,
-) -> auth_sdk::types::AuthDeploymentsCreateRequest {
-    auth_sdk::types::AuthDeploymentsCreateRequest(json!({
+) -> Result<auth_sdk::types::AuthDeploymentsCreateRequest, TrellisTestError> {
+    Ok(serde_json::from_value(json!({
         "deploymentId": deployment,
         "kind": "service",
         "namespaces": [],
         "contractCompatibilityMode": if mutable_dev { "mutable-dev" } else { "strict" },
-    }))
+    }))?)
 }
 
 fn first_admin_bootstrap_body(password: &str) -> Map<String, Value> {
@@ -3076,7 +3131,8 @@ mod tests {
     #[test]
     fn deployment_create_request_includes_mutable_dev_mode() {
         assert_eq!(
-            serde_json::to_value(auth_deployments_create_request_shape("test", true)).unwrap(),
+            serde_json::to_value(auth_deployments_create_request_shape("test", true).unwrap())
+                .unwrap(),
             json!({
                 "deploymentId": "test",
                 "kind": "service",
@@ -3085,8 +3141,8 @@ mod tests {
             })
         );
         assert_eq!(
-            serde_json::to_value(auth_deployments_create_request_shape("prod", false)).unwrap()
-                ["contractCompatibilityMode"],
+            serde_json::to_value(auth_deployments_create_request_shape("prod", false).unwrap())
+                .unwrap()["contractCompatibilityMode"],
             json!("strict")
         );
     }

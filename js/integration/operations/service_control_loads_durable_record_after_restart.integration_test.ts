@@ -54,7 +54,8 @@ liveTrellisTest({
         server: {},
       }).orThrow();
 
-      const controlled = await service.handleEntityProcess.control(ref.id,).orThrow();
+      const controlled = await service.handleEntityProcess.control(ref.id)
+        .orThrow();
       await controlled.complete({
         message: `${fixture.message}:restart`,
         done: true,

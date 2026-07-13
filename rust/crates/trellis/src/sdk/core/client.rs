@@ -1,16 +1,15 @@
 //! Thin typed client helpers for `trellis.core@v1`.
-use crate::client::TrellisClientError;
 /// Typed API wrapper for the `trellis.core@v1` contract.
 pub struct CoreClient<'a> {
-    inner: &'a crate::client::TrellisClient,
+    inner: &'a crate::generated::Caller,
 }
 impl<'a> CoreClient<'a> {
     /// Wrap an already connected low-level Trellis client.
-    pub fn new(inner: &'a crate::client::TrellisClient) -> Self {
+    pub fn new(inner: &'a crate::generated::Caller) -> Self {
         Self { inner }
     }
     #[allow(dead_code)]
-    pub(crate) fn inner(&self) -> &'a crate::client::TrellisClient {
+    pub(crate) fn inner(&self) -> &'a crate::generated::Caller {
         self.inner
     }
     /// Access typed RPC calls.
@@ -32,56 +31,74 @@ impl<'a> CoreClient<'a> {
 }
 /// Typed RPC surface.
 pub struct Rpc<'a> {
-    pub(crate) _inner: &'a crate::client::TrellisClient,
+    pub(crate) _inner: &'a crate::generated::Caller,
 }
 impl<'a> Rpc<'a> {
+    /// Access the `trellis` RPC group.
     pub fn trellis(&self) -> TrellisRpc<'a> {
         TrellisRpc { inner: self._inner }
     }
 }
+/// Typed RPC methods in the `trellis` group.
 pub struct TrellisRpc<'a> {
-    inner: &'a crate::client::TrellisClient,
+    inner: &'a crate::generated::Caller,
 }
 impl<'a> TrellisRpc<'a> {
     /// Call `Trellis.Catalog`.
     pub async fn catalog(
         &self,
-    ) -> Result<super::types::TrellisCatalogResponse, TrellisClientError> {
+    ) -> Result<
+        super::types::TrellisCatalogResponse,
+        crate::generated::CallError<super::rpc::TrellisCatalogError>,
+    > {
         self.inner
-            .call::<super::rpc::TrellisCatalogRpc>(&super::rpc::Empty {})
+            .call_typed::<super::rpc::TrellisCatalogRpc, super::rpc::TrellisCatalogError>(
+                &super::rpc::Empty {},
+            )
             .await
     }
     /// Call `Trellis.Contract.Get`.
     pub async fn contract_get(
         &self,
         input: &super::types::TrellisContractGetRequest,
-    ) -> Result<super::types::TrellisContractGetResponse, TrellisClientError> {
+    ) -> Result<
+        super::types::TrellisContractGetResponse,
+        crate::generated::CallError<super::rpc::TrellisContractGetError>,
+    > {
         self.inner
-            .call::<super::rpc::TrellisContractGetRpc>(input)
+            .call_typed::<super::rpc::TrellisContractGetRpc, super::rpc::TrellisContractGetError>(
+                input,
+            )
             .await
     }
     /// Call `Trellis.Surface.Status`.
     pub async fn surface_status(
         &self,
         input: &super::types::TrellisSurfaceStatusRequest,
-    ) -> Result<super::types::TrellisSurfaceStatusResponse, TrellisClientError> {
+    ) -> Result<
+        super::types::TrellisSurfaceStatusResponse,
+        crate::generated::CallError<super::rpc::TrellisSurfaceStatusError>,
+    > {
         self.inner
-            .call::<super::rpc::TrellisSurfaceStatusRpc>(input)
+            .call_typed::<
+                super::rpc::TrellisSurfaceStatusRpc,
+                super::rpc::TrellisSurfaceStatusError,
+            >(input)
             .await
     }
 }
 /// Typed event surface.
 pub struct Event<'a> {
-    pub(crate) _inner: &'a crate::client::TrellisClient,
+    pub(crate) _inner: &'a crate::generated::Caller,
 }
 impl<'a> Event<'a> {}
 /// Typed feed surface.
 pub struct Feed<'a> {
-    pub(crate) _inner: &'a crate::client::TrellisClient,
+    pub(crate) _inner: &'a crate::generated::Caller,
 }
 impl<'a> Feed<'a> {}
 /// Typed operation surface.
 pub struct Operation<'a> {
-    pub(crate) _inner: &'a crate::client::TrellisClient,
+    pub(crate) _inner: &'a crate::generated::Caller,
 }
 impl<'a> Operation<'a> {}

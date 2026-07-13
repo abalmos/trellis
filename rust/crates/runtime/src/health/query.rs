@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
+use serde::{de::DeserializeOwned, Serialize};
 use trellis_rs::sdk::health::types::{
     HealthHeartbeatSampleChecksItem, HealthInspectRequest, HealthInspectResponse,
     HealthInspectResponseHistoryItem, HealthInspectResponseHistoryItemChecksItem,
@@ -142,10 +143,10 @@ impl HealthStore {
             .map(|group| {
                 let effective_status = group.effective_status().to_string();
                 Ok(HealthQueryResponseEntriesItem {
-                    participant_kind: group.participant_kind,
+                    participant_kind: wire(group.participant_kind)?,
                     contract_id: group.contract_id,
                     participant_name: group.participant_name,
-                    effective_status,
+                    effective_status: wire(effective_status)?,
                     deployment_ids: group.deployment_ids.into_iter().collect(),
                     contract_digests: group.contract_digests.into_iter().collect(),
                     online_instances: group.online_instances,
@@ -158,7 +159,8 @@ impl HealthStore {
             .collect::<Result<Vec<_>, HealthStoreError>>()?;
         entries.sort_by(|left, right| {
             left.participant_kind
-                .cmp(&right.participant_kind)
+                .as_str()
+                .cmp(right.participant_kind.as_str())
                 .then_with(|| left.contract_id.cmp(&right.contract_id))
         });
         let count = i64::try_from(entries.len()).unwrap_or(i64::MAX);
@@ -198,7 +200,7 @@ impl HealthStore {
         let mut rows = load_latest(&connection)?
             .into_iter()
             .filter(|row| {
-                row.participant_kind == request.participant_kind
+                row.participant_kind == request.participant_kind.as_str()
                     && row.contract_id == request.contract_id
                     && request
                         .instance_id
@@ -242,8 +244,8 @@ impl HealthStore {
                 instance_id: row.instance_id.clone(),
                 deployment_id: row.deployment_id.clone(),
                 contract_digest: row.contract_digest.clone(),
-                reported_status: row.reported_status.clone(),
-                effective_status: effective_status.to_string(),
+                reported_status: wire(row.reported_status.clone())?,
+                effective_status: wire(effective_status)?,
                 observed_at: rfc3339(row.observed_at_ns)?,
                 heartbeat_deadline: rfc3339(row.heartbeat_deadline_ns)?,
                 age_ms: now_ns.saturating_sub(row.observed_at_ns) / 1_000_000,
@@ -280,7 +282,7 @@ impl HealthStore {
         let history = statement
             .query_map(
                 params![
-                    request.participant_kind,
+                    request.participant_kind.as_str(),
                     request.contract_id,
                     request.instance_id,
                     now_ns,
@@ -307,16 +309,18 @@ impl HealthStore {
                             .map(rfc3339)
                             .transpose()
                             .map_err(to_from_sql_error)?,
-                        reported_status: row.get(4)?,
-                        effective_status: row.get(5)?,
+                        reported_status: wire_from_sql(row.get(4)?)?,
+                        effective_status: wire_from_sql(row.get(5)?)?,
                         checks: checks
                             .into_iter()
-                            .map(|check| HealthInspectResponseHistoryItemChecksItem {
-                                name: check.name,
-                                status: check.status,
+                            .map(|check| {
+                                Ok(HealthInspectResponseHistoryItemChecksItem {
+                                    name: check.name,
+                                    status: wire_from_sql(check.status.as_str().to_string())?,
+                                })
                             })
-                            .collect(),
-                        reason: row.get(7)?,
+                            .collect::<Result<Vec<_>, rusqlite::Error>>()?,
+                        reason: wire_from_sql(row.get(7)?)?,
                     })
                 },
             )?
@@ -326,10 +330,10 @@ impl HealthStore {
         let projection = projection_meta(&connection)?;
         Ok(Some(HealthInspectResponse {
             participant: HealthInspectResponseParticipant {
-                participant_kind: request.participant_kind.clone(),
+                participant_kind: wire(&request.participant_kind)?,
                 contract_id: request.contract_id.clone(),
                 participant_name,
-                effective_status: effective_status.to_string(),
+                effective_status: wire(effective_status)?,
                 online_instances,
                 offline_instances,
             },
@@ -367,7 +371,7 @@ impl HealthStore {
         let mut instance_ids = load_latest(&connection)?
             .into_iter()
             .filter(|row| {
-                row.participant_kind == request.participant_kind
+                row.participant_kind == request.participant_kind.as_str()
                     && row.contract_id == request.contract_id
                     && matches_filter(request.instance_ids.as_ref(), &row.instance_id)
             })
@@ -405,7 +409,7 @@ impl HealthStore {
             let intervals = interval_statement
                 .query_map(
                     params![
-                        request.participant_kind,
+                        request.participant_kind.as_str(),
                         request.contract_id,
                         instance_id,
                         end_ns,
@@ -442,7 +446,7 @@ impl HealthStore {
             let sample_rows = sample_statement
                 .query_map(
                     params![
-                        request.participant_kind,
+                        request.participant_kind.as_str(),
                         request.contract_id,
                         instance_id,
                         metric_start,
@@ -469,7 +473,7 @@ impl HealthStore {
             let check_rows = check_statement
                 .query_map(
                     params![
-                        request.participant_kind,
+                        request.participant_kind.as_str(),
                         request.contract_id,
                         instance_id,
                         metric_start,
@@ -540,7 +544,7 @@ impl HealthStore {
                 })
                 .collect::<Result<Vec<_>, HealthStoreError>>()?;
             series.push(HealthMetricsResponseSeriesItem {
-                participant_kind: request.participant_kind.clone(),
+                participant_kind: wire(&request.participant_kind)?,
                 contract_id: request.contract_id.clone(),
                 instance_id,
                 buckets: response_buckets,
@@ -625,8 +629,19 @@ fn metric_bucket_mut(buckets: &mut [MetricBucket], timestamp_ns: i64) -> Option<
         .find(|bucket| timestamp_ns >= bucket.start_ns && timestamp_ns < bucket.end_ns)
 }
 
-fn matches_filter(filter: Option<&Vec<String>>, value: &String) -> bool {
-    filter.is_none_or(|filter| filter.is_empty() || filter.contains(value))
+fn matches_filter<T: AsRef<str>>(filter: Option<&Vec<T>>, value: &str) -> bool {
+    filter.is_none_or(|filter| {
+        filter.is_empty() || filter.iter().any(|candidate| candidate.as_ref() == value)
+    })
+}
+
+fn wire<T: DeserializeOwned, S: Serialize>(value: S) -> Result<T, HealthStoreError> {
+    Ok(serde_json::from_value(serde_json::to_value(value)?)?)
+}
+
+fn wire_from_sql<T: DeserializeOwned>(value: String) -> Result<T, rusqlite::Error> {
+    serde_json::from_value(serde_json::Value::String(value))
+        .map_err(|error| to_from_sql_error(error.into()))
 }
 
 fn load_latest(connection: &rusqlite::Connection) -> Result<Vec<LatestRow>, rusqlite::Error> {

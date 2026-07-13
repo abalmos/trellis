@@ -7,13 +7,17 @@ use super::{RequestContext, Router, ServerError};
 
 /// Result returned by request validators after checking caller authorization.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[doc = concat!("Public Trellis data type `", stringify!(RequestValidation), "`.")]
 pub struct RequestValidation {
+    #[doc = concat!("The `", stringify!(allowed), "` value.")]
     pub allowed: bool,
+    #[doc = concat!("The `", stringify!(caller), "` value.")]
     pub caller: Option<Value>,
 }
 
 impl RequestValidation {
     /// Construct an allowed validation result with no caller metadata.
+    #[doc = concat!("Trellis API operation `", stringify!(allowed), "`.")]
     pub fn allowed() -> Self {
         Self {
             allowed: true,
@@ -22,6 +26,7 @@ impl RequestValidation {
     }
 
     /// Construct an allowed validation result with caller metadata.
+    #[doc = concat!("Trellis API operation `", stringify!(allowed_caller), "`.")]
     pub fn allowed_caller(caller: Value) -> Self {
         Self {
             allowed: true,
@@ -30,6 +35,7 @@ impl RequestValidation {
     }
 
     /// Construct a denied validation result.
+    #[doc = concat!("Trellis API operation `", stringify!(denied), "`.")]
     pub fn denied() -> Self {
         Self {
             allowed: false,
@@ -61,14 +67,17 @@ impl<V> AuthenticatedRouter<V>
 where
     V: RequestValidator,
 {
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(router: Router, validator: V) -> Self {
         Self { router, validator }
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(inner), "`.")]
     pub fn inner(&self) -> &Router {
         &self.router
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(handle_request), "`.")]
     pub async fn handle_request(
         &self,
         subject: &str,
@@ -112,6 +121,7 @@ where
         self.router.handle_request(subject, payload, context).await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(handle_request_frames), "`.")]
     pub async fn handle_request_frames(
         &self,
         subject: &str,
@@ -157,6 +167,7 @@ where
             .await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(handle_request_response), "`.")]
     pub async fn handle_request_response(
         &self,
         subject: &str,

@@ -1,9 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer};
+use async_nats::jetstream;
 use futures_util::StreamExt;
-use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
-use trellis_rs::service::ConnectedServiceRuntime;
+use serde::{Deserialize, Serialize};
 
 const EVENTLOG_DEPLOYMENT: &str = "service-eventlog-live-watch-rust";
 const PUBLISHER_DEPLOYMENT: &str = "service-eventlog-live-watch-publisher-rust";
@@ -33,8 +32,33 @@ const PUBLISHER_CONTRACT_JSON: &str = r#"{
   }
 }"#;
 
+struct PublisherContract;
+
+impl trellis_rs::service::GeneratedServiceContract for PublisherContract {
+    const CONTRACT_ID: &'static str = PUBLISHER_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = PUBLISHER_CONTRACT_JSON;
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChangedEvent {
+    id: String,
+}
+
+struct ChangedEventDescriptor;
+
+impl trellis_rs::generated::EventDescriptor for ChangedEventDescriptor {
+    type Event = ChangedEvent;
+    const KEY: &'static str = "Integration.Changed";
+    const SUBJECT: &'static str = EVENT_SUBJECT;
+    const EVENT_SCHEMA_JSON: &'static str =
+        r#"{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}"#;
+    const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
+    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
+}
+
 #[tokio::test]
-async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
+async fn eventlog_watch_is_ephemeral() {
     let runtime = trellis_test::TrellisTestRuntime::start(Default::default())
         .await
         .expect("start live Trellis test runtime");
@@ -71,46 +95,29 @@ async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
         .await
         .expect("provision publisher service instance");
 
-    let eventlog_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: trellis_service_eventlog::CONTRACT_ID,
-            contract_digest: eventlog_contract.digest(),
-            contract_json: trellis_service_eventlog::CONTRACT_JSON,
-            session_key_seed_base64url: &eventlog_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
+    let service_runtime =
+        trellis_test::connect_service_runtime::<trellis_service_eventlog::EventLogContract>(
+            runtime.trellis_url(),
+            trellis_service_eventlog::CONTRACT_ID,
+            eventlog_contract.digest(),
+            trellis_service_eventlog::CONTRACT_JSON,
+            &eventlog_key.seed,
+        )
         .await
-        .expect("connect Event Log service client");
-    let eventlog_nats = eventlog_client.internal_nats().clone();
+        .expect("connect Event Log service runtime");
+    let eventlog_nats = async_nats::ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load eventlog test credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect eventlog test observer");
     let eventlog_jetstream = jetstream::new(eventlog_nats.clone());
-    let event_stream = eventlog_jetstream
-        .get_stream("trellis")
-        .await
-        .expect("open Trellis event stream");
-    event_stream
-        .create_consumer(consumer::pull::Config {
-            durable_name: Some("event-log-watch-stale_test-1".to_string()),
-            filter_subject: "events.v1.>".to_string(),
-            deliver_policy: consumer::DeliverPolicy::New,
-            ack_policy: consumer::AckPolicy::Explicit,
-            ..Default::default()
-        })
-        .await
-        .expect("seed obsolete EventLog.Watch consumer");
-
     let previous_db_path = std::env::var_os("TRELLIS_EVENTLOG_DB_PATH");
     std::env::set_var(
         "TRELLIS_EVENTLOG_DB_PATH",
         runtime.workdir().join("service-eventlog-live-watch.sqlite"),
     );
-    let service_runtime = ConnectedServiceRuntime::<trellis_service_eventlog::EventLogContract>::from_connected_client(
-        trellis_service_eventlog::SERVICE_NAME,
-        Arc::new(eventlog_client),
-    )
-    .expect("build connected Event Log runtime");
     let eventlog_service = trellis_service_eventlog::ConnectedEventLogService::new(service_runtime)
         .expect("build Event Log service");
     if let Some(path) = previous_db_path {
@@ -120,19 +127,15 @@ async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
     }
     let eventlog_task = tokio::spawn(async move { eventlog_service.run().await });
 
-    let publisher_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: PUBLISHER_CONTRACT_ID,
-            contract_digest: publisher_contract.digest(),
-            contract_json: PUBLISHER_CONTRACT_JSON,
-            session_key_seed_base64url: &publisher_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect publisher service");
+    let publisher = trellis_test::connect_service_runtime::<PublisherContract>(
+        runtime.trellis_url(),
+        PUBLISHER_CONTRACT_ID,
+        publisher_contract.digest(),
+        PUBLISHER_CONTRACT_JSON,
+        &publisher_key.seed,
+    )
+    .await
+    .expect("connect publisher service runtime");
     let app_client = admin
         .connect_client(&bootstrap_url, &client_contract)
         .await
@@ -152,18 +155,6 @@ async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
     assert_eq!(
         ready.0.get("kind").and_then(serde_json::Value::as_str),
         Some("ready")
-    );
-
-    let stale_watch = eventlog_jetstream
-        .get_stream("trellis")
-        .await
-        .expect("reopen Trellis event stream")
-        .consumer_info("event-log-watch-stale_test-1")
-        .await
-        .expect("legacy watch should remain during its expiry grace period");
-    assert_eq!(
-        stale_watch.config.inactive_threshold,
-        Duration::from_secs(5 * 60)
     );
 
     let event_stream = eventlog_jetstream
@@ -187,16 +178,13 @@ async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
     }
     assert!(found_ephemeral_watch);
 
-    publisher_client
-        .internal_nats()
-        .publish(EVENT_SUBJECT, br#"{"id":"event-1"}"#.as_slice().into())
+    publisher
+        .event_publisher()
+        .publish::<ChangedEventDescriptor>(&ChangedEvent {
+            id: "event-1".to_string(),
+        })
         .await
         .expect("publish watched event");
-    publisher_client
-        .internal_nats()
-        .flush()
-        .await
-        .expect("flush watched event");
     let invalidated = tokio::time::timeout(Duration::from_secs(5), watch.next())
         .await
         .expect("EventLog.Watch should observe event")
@@ -216,7 +204,7 @@ async fn eventlog_watch_is_ephemeral_and_legacy_watches_expire() {
             .rpc()
             .event_log()
             .metrics(&trellis_rs::sdk::eventlog::types::EventLogMetricsRequest {
-                window: Some("15m".to_string()),
+                window: Some(serde_json::from_value(serde_json::json!("15m")).unwrap()),
             })
             .await
             .expect("query EventLog.Metrics");

@@ -35,8 +35,10 @@ liveTrellisTest({
 
     try {
       await service.onSelfPinged(
-        ({ event }) => { observedPing = event.id;
-        return Result.ok(undefined); },
+        ({ event }) => {
+          observedPing = event.id;
+          return Result.ok(undefined);
+        },
         {},
         { group: "paired", signal: controller.signal },
       ).orThrow();

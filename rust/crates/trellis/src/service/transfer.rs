@@ -29,20 +29,27 @@ pub const TRANSFER_EOF_HEADER: &str = "trellis-transfer-eof";
 /// File metadata carried by receive transfer grants.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(FileTransferInfo), "`.")]
 pub struct FileTransferInfo {
     /// Object key within the bound store.
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
     /// Object size in bytes.
+    #[doc = concat!("The `", stringify!(size), "` value.")]
     pub size: u64,
     /// Last update timestamp encoded as an ISO-8601 string.
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
     /// Optional object digest supplied by the store.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(digest), "` value.")]
     pub digest: Option<String>,
     /// Optional object content type.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(content_type), "` value.")]
     pub content_type: Option<String>,
     /// Store metadata associated with the object.
+    #[doc = concat!("The `", stringify!(metadata), "` value.")]
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -50,28 +57,40 @@ pub struct FileTransferInfo {
 #[derive(Debug)]
 pub struct TransferUploadGrantArgs<'a> {
     /// Service name exposed in the transfer grant.
+    #[doc = concat!("The `", stringify!(service_name), "` value.")]
     pub service_name: &'a str,
     /// Caller session key that owns this transfer grant.
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: &'a str,
     /// Service session key used to scope the NATS transfer subject.
+    #[doc = concat!("The `", stringify!(service_session_key), "` value.")]
     pub service_session_key: &'a str,
     /// Resolved service resource bindings from bootstrap.
+    #[doc = concat!("The `", stringify!(resources), "` value.")]
     pub resources: &'a ServiceResourceBindings,
     /// Contract-local store alias used by the transfer declaration.
+    #[doc = concat!("The `", stringify!(store), "` value.")]
     pub store: &'a str,
     /// Object key that will receive uploaded bytes.
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: &'a str,
     /// Preallocated transfer id supplied by the caller.
+    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
     pub transfer_id: &'a str,
     /// Grant expiration timestamp encoded as an ISO-8601 string.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: &'a str,
     /// Maximum transfer frame size advertised to clients.
+    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Optional operation-level upload size cap.
+    #[doc = concat!("The `", stringify!(max_bytes), "` value.")]
     pub max_bytes: Option<u64>,
     /// Optional content type for the stored object.
+    #[doc = concat!("The `", stringify!(content_type), "` value.")]
     pub content_type: Option<&'a str>,
     /// Optional object metadata to store with uploaded bytes.
+    #[doc = concat!("The `", stringify!(metadata), "` value.")]
     pub metadata: BTreeMap<String, String>,
 }
 
@@ -79,121 +98,167 @@ pub struct TransferUploadGrantArgs<'a> {
 #[derive(Debug)]
 pub struct TransferDownloadGrantArgs<'a> {
     /// Service name exposed in the transfer grant.
+    #[doc = concat!("The `", stringify!(service_name), "` value.")]
     pub service_name: &'a str,
     /// Caller session key that owns this transfer grant.
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: &'a str,
     /// Service session key used to scope the NATS transfer subject.
+    #[doc = concat!("The `", stringify!(service_session_key), "` value.")]
     pub service_session_key: &'a str,
     /// Resolved service resource bindings from bootstrap.
+    #[doc = concat!("The `", stringify!(resources), "` value.")]
     pub resources: &'a ServiceResourceBindings,
     /// Contract-local store alias used by the transfer declaration.
+    #[doc = concat!("The `", stringify!(store), "` value.")]
     pub store: &'a str,
     /// Preallocated transfer id supplied by the caller.
+    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
     pub transfer_id: &'a str,
     /// Grant expiration timestamp encoded as an ISO-8601 string.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: &'a str,
     /// Maximum transfer frame size advertised to clients.
+    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Object metadata for the file that will be streamed later.
+    #[doc = concat!("The `", stringify!(info), "` value.")]
     pub info: FileTransferInfo,
 }
 
 /// Public wire DTO for an upload transfer grant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferGrant), "`.")]
 pub struct UploadTransferGrant {
     #[serde(rename = "type")]
     /// Discriminator matching Trellis transfer grant wire DTOs.
+    #[doc = concat!("The `", stringify!(type_name), "` value.")]
     pub type_name: String,
     /// Transfer direction, always `send` for upload grants.
+    #[doc = concat!("The `", stringify!(direction), "` value.")]
     pub direction: String,
     /// Service name exposed in the transfer grant.
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
     /// Caller session key that owns this transfer grant.
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: String,
     /// Unique transfer id for the planned session.
+    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
     pub transfer_id: String,
     /// NATS subject that the follow-up upload session should bind.
+    #[doc = concat!("The `", stringify!(subject), "` value.")]
     pub subject: String,
     /// Grant expiration timestamp encoded as an ISO-8601 string.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: String,
     /// Maximum transfer frame size advertised to clients.
+    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Effective upload cap after applying the bound store limit.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(max_bytes), "` value.")]
     pub max_bytes: Option<u64>,
     /// Optional content type for the stored object.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(content_type), "` value.")]
     pub content_type: Option<String>,
     /// Optional object metadata to store with uploaded bytes.
+    #[doc = concat!("The `", stringify!(metadata), "` value.")]
     pub metadata: BTreeMap<String, String>,
 }
 
 /// Planned upload transfer grant plus binding metadata needed by follow-up streaming.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferGrantPlan), "`.")]
 pub struct UploadTransferGrantPlan {
     /// Public transfer grant that is safe to serialize and return to callers.
+    #[doc = concat!("The `", stringify!(grant), "` value.")]
     pub grant: UploadTransferGrant,
     /// Contract-local store alias selected by the transfer declaration.
+    #[doc = concat!("The `", stringify!(store_alias), "` value.")]
     pub store_alias: String,
     /// Concrete object-store bucket name resolved from bindings.
+    #[doc = concat!("The `", stringify!(store), "` value.")]
     pub store: String,
     /// Object key that will receive uploaded bytes.
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
 }
 
 /// Public wire DTO for a download transfer grant.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferGrant), "`.")]
 pub struct DownloadTransferGrant {
     #[serde(rename = "type")]
     /// Discriminator matching Trellis transfer grant wire DTOs.
+    #[doc = concat!("The `", stringify!(type_name), "` value.")]
     pub type_name: String,
     /// Transfer direction, always `receive` for download grants.
+    #[doc = concat!("The `", stringify!(direction), "` value.")]
     pub direction: String,
     /// Service name exposed in the transfer grant.
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
     /// Caller session key that owns this transfer grant.
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: String,
     /// Unique transfer id for the planned session.
+    #[doc = concat!("The `", stringify!(transfer_id), "` value.")]
     pub transfer_id: String,
     /// NATS subject that the follow-up download session should bind.
+    #[doc = concat!("The `", stringify!(subject), "` value.")]
     pub subject: String,
     /// Grant expiration timestamp encoded as an ISO-8601 string.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: String,
     /// Maximum transfer frame size advertised to clients.
+    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Object metadata for the file that will be streamed later.
+    #[doc = concat!("The `", stringify!(info), "` value.")]
     pub info: FileTransferInfo,
 }
 
 /// Planned download transfer grant plus binding metadata needed by follow-up streaming.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferGrantPlan), "`.")]
 pub struct DownloadTransferGrantPlan {
     /// Public transfer grant that is safe to serialize and return to callers.
+    #[doc = concat!("The `", stringify!(grant), "` value.")]
     pub grant: DownloadTransferGrant,
     /// Contract-local store alias selected by the transfer declaration.
+    #[doc = concat!("The `", stringify!(store_alias), "` value.")]
     pub store_alias: String,
     /// Concrete object-store bucket name resolved from bindings.
+    #[doc = concat!("The `", stringify!(store), "` value.")]
     pub store: String,
     /// Effective object size limit from the store binding, when configured.
-    pub(crate) max_object_bytes: Option<u64>,
+    #[doc = concat!("The `", stringify!(max_object_bytes), "` value.")]
+    pub max_object_bytes: Option<u64>,
 }
 
 /// One upload frame decoded from the transfer chunk protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferChunk), "`.")]
 pub struct UploadTransferChunk {
     /// Zero-based chunk sequence number from `trellis-transfer-seq`.
+    #[doc = concat!("The `", stringify!(seq), "` value.")]
     pub seq: u64,
     /// Raw chunk payload bytes.
+    #[doc = concat!("The `", stringify!(payload), "` value.")]
     pub payload: Bytes,
     /// Whether this chunk carries `trellis-transfer-eof: true`.
+    #[doc = concat!("The `", stringify!(eof), "` value.")]
     pub eof: bool,
 }
 
 /// Service reply payload for an upload chunk request.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "lowercase")]
+#[doc = concat!("Public Trellis value set `", stringify!(UploadTransferAck), "`.")]
 pub enum UploadTransferAck {
     /// More chunks are expected.
     Continue,
@@ -206,12 +271,14 @@ pub enum UploadTransferAck {
 
 /// Awaitable provider-side notification that an upload transfer reached durable storage.
 #[derive(Debug)]
+#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferCompletion), "`.")]
 pub struct UploadTransferCompletion {
     receiver: oneshot::Receiver<Result<FileTransferInfo, ServerError>>,
 }
 
 impl UploadTransferCompletion {
     /// Wait until the upload endpoint has durably stored the object or observed a transfer error.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(completed), "`.")]
     pub async fn completed(self) -> Result<FileTransferInfo, ServerError> {
         self.receiver.await.map_err(|_| {
             ServerError::Nats("upload transfer completion channel closed".to_string())
@@ -221,6 +288,7 @@ impl UploadTransferCompletion {
 
 /// Store-backed upload transfer executor for a single planned grant.
 #[derive(Debug, Clone)]
+#[doc = concat!("Public Trellis data type `", stringify!(UploadTransferSession), "`.")]
 pub struct UploadTransferSession {
     plan: UploadTransferGrantPlan,
     bytes: BytesMut,
@@ -231,6 +299,7 @@ pub struct UploadTransferSession {
 
 impl UploadTransferSession {
     /// Create an upload transfer session with the timestamp to report on completion.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(plan: UploadTransferGrantPlan, updated_at: impl Into<String>) -> Self {
         Self {
             plan,
@@ -242,16 +311,19 @@ impl UploadTransferSession {
     }
 
     /// NATS subject that this planned upload session accepts chunks on.
+    #[doc = concat!("Trellis API operation `", stringify!(subject), "`.")]
     pub fn subject(&self) -> &str {
         &self.plan.grant.subject
     }
 
     /// Caller session key that owns this planned upload session.
+    #[doc = concat!("Trellis API operation `", stringify!(session_key), "`.")]
     pub fn session_key(&self) -> &str {
         &self.plan.grant.session_key
     }
 
     /// Build the operation transfer progress snapshot that would result from this chunk.
+    #[doc = concat!("Trellis API operation `", stringify!(progress_for_chunk), "`.")]
     pub fn progress_for_chunk(&self, chunk: &UploadTransferChunk) -> OperationTransferProgress {
         OperationTransferProgress {
             chunk_index: chunk.seq,
@@ -343,6 +415,7 @@ impl UploadTransferSession {
     }
 
     /// Fail if the session has not received an EOF completion frame.
+    #[doc = concat!("Trellis API operation `", stringify!(ensure_complete), "`.")]
     pub fn ensure_complete(&self) -> Result<(), ServerError> {
         if self.complete {
             Ok(())
@@ -355,6 +428,7 @@ impl UploadTransferSession {
 }
 
 /// Decode one upload transfer request frame from NATS headers and payload.
+#[doc = concat!("Trellis API operation `", stringify!(decode_upload_transfer_chunk), "`.")]
 pub fn decode_upload_transfer_chunk(
     headers: Option<&HeaderMap>,
     payload: Bytes,
@@ -960,16 +1034,21 @@ fn optional_header<'a>(headers: Option<&'a HeaderMap>, header: &str) -> Option<&
 
 /// One encoded download frame ready to publish to the transfer reply inbox.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DownloadTransferChunk), "`.")]
 pub struct DownloadTransferChunk {
     /// Zero-based chunk sequence number.
+    #[doc = concat!("The `", stringify!(seq), "` value.")]
     pub seq: u64,
     /// Raw chunk payload bytes.
+    #[doc = concat!("The `", stringify!(payload), "` value.")]
     pub payload: Bytes,
     /// Whether this chunk should carry `trellis-transfer-eof: true`.
+    #[doc = concat!("The `", stringify!(eof), "` value.")]
     pub eof: bool,
 }
 
 /// Build upload transfer grant metadata from resolved service resource bindings.
+#[doc = concat!("Trellis API operation `", stringify!(plan_upload_transfer_grant), "`.")]
 pub fn plan_upload_transfer_grant(
     args: TransferUploadGrantArgs<'_>,
 ) -> Result<UploadTransferGrantPlan, ServerError> {
@@ -1003,6 +1082,7 @@ pub fn plan_upload_transfer_grant(
 }
 
 /// Build download transfer grant metadata from resolved service resource bindings.
+#[doc = concat!("Trellis API operation `", stringify!(plan_download_transfer_grant), "`.")]
 pub fn plan_download_transfer_grant(
     args: TransferDownloadGrantArgs<'_>,
 ) -> Result<DownloadTransferGrantPlan, ServerError> {

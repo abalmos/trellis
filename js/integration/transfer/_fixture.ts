@@ -134,13 +134,13 @@ export function createTransferFixture(
       displayName: `Trellis Integration Transfer Service (${slug})`,
       description: "Exercises generated operation and RPC transfer surfaces.",
       uses: [store({
-          uploads: {
-            purpose: "Temporary integration transfer files",
-            required: true,
-            ttlMs: 0,
-            maxObjectBytes,
-            maxTotalBytes: 4194304,
-          },
+        uploads: {
+          purpose: "Temporary integration transfer files",
+          required: true,
+          ttlMs: 0,
+          maxObjectBytes,
+          maxTotalBytes: 4194304,
+        },
       })],
       operations: {
         "Files.Upload": {
@@ -193,7 +193,9 @@ export function createTransferFixture(
   const serviceName = caseScopedName("transfer-fixture-service", caseId);
   type ConnectedTransferService = Awaited<
     ReturnType<
-      ReturnType<typeof TrellisService.connect<typeof serviceContract>>["orThrow"]
+      ReturnType<
+        typeof TrellisService.connect<typeof serviceContract>
+      >["orThrow"]
     >
   >;
 

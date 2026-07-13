@@ -9,6 +9,7 @@ use super::error::{SchemaValidationIssue, ServerError, ValidationIssue};
 /// Returns `Ok(())` on success.
 /// Returns `ServerError::SchemaValidation` when all failures have `x-trellis-validation` metadata.
 /// Returns `ServerError::Validation` when any failure lacks annotations.
+#[doc = concat!("Trellis API operation `", stringify!(validate_input_schema), "`.")]
 pub fn validate_input_schema(schema_json: &str, value: &Value) -> Result<(), ServerError> {
     let schema: Value = serde_json::from_str(schema_json)
         .map_err(|e| ServerError::Nats(format!("failed to parse input schema: {e}")))?;

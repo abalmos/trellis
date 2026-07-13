@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeMap,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -125,7 +124,8 @@ struct AppIdentityFixture {
     admin: trellis_test::TrellisTestAdmin,
     bootstrap_url: String,
     client_contract: trellis_test::TrellisTestContract,
-    service_client: Arc<trellis_rs::client::TrellisClient>,
+    service_caller: trellis_rs::generated::Caller,
+    service_session_key: String,
     #[allow(dead_code)]
     service_task: AbortOnDrop<Result<(), ServiceRuntimeError>>,
 }
@@ -173,7 +173,8 @@ async fn setup_app_identity_environment_with_options(
             approved: true,
         })
     });
-    let service_client = Arc::clone(service.client());
+    let service_caller = service.caller().clone();
+    let service_session_key = service_key.session_key;
 
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 
@@ -182,7 +183,8 @@ async fn setup_app_identity_environment_with_options(
         admin,
         bootstrap_url,
         client_contract,
-        service_client,
+        service_caller,
+        service_session_key,
         service_task,
     }
 }
@@ -220,10 +222,7 @@ async fn app_identity_approval_approved_client_connects() {
         .await
         .expect("connect live Rust app identity approval client");
 
-    client
-        .flush()
-        .await
-        .expect("connected client should flush without error");
+    drop(client);
 }
 
 #[tokio::test]
@@ -270,7 +269,7 @@ async fn auth_local_login_binds_approved_client() {
         .await
         .expect("connect live Rust auth local-login client");
 
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let me = auth
         .rpc()
         .auth()
@@ -278,10 +277,10 @@ async fn auth_local_login_binds_approved_client() {
         .await
         .expect("call Auth.Sessions.Me as approved app client");
 
-    assert_eq!(me.participant_kind.as_str(), Some("app"));
+    assert_eq!(me.participant_kind.as_str(), "app");
     let user = me
         .user
-        .as_object()
+        .as_ref()
         .expect("approved app session should have a user");
     assert_eq!(
         user.get("active").and_then(serde_json::Value::as_bool),
@@ -342,7 +341,7 @@ async fn auth_portal_route_selection_and_policy_drive_browser_flow() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth portal admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let trellis_url = fixture.runtime.trellis_url();
     let app_origin = reqwest::Url::parse(trellis_url)
         .expect("parse runtime URL")
@@ -366,9 +365,9 @@ async fn auth_portal_route_selection_and_policy_drive_browser_flow() {
     auth.rpc()
         .auth()
         .portals_routes_put(&trellis_rs::sdk::auth::types::AuthPortalsRoutesPutRequest {
-            contract_id: Some(Value::Null),
+            contract_id: Some(None),
             disabled: None,
-            origin: Some(Value::Null),
+            origin: Some(None),
             portal_id: default_portal_id.to_string(),
         })
         .await
@@ -387,7 +386,7 @@ async fn auth_portal_route_selection_and_policy_drive_browser_flow() {
         .auth()
         .portals_login_settings_update(
             &trellis_rs::sdk::auth::types::AuthPortalsLoginSettingsUpdateRequest {
-                allowed_federated_providers: json!(["github"]),
+                allowed_federated_providers: Some(vec!["github".to_string()]),
                 default_capabilities: vec![],
                 default_capability_groups: vec![],
                 federated_registration_enabled: true,
@@ -461,8 +460,8 @@ async fn auth_portal_route_selection_and_policy_drive_browser_flow() {
         .auth()
         .portals_routes_remove(
             &trellis_rs::sdk::auth::types::AuthPortalsRoutesRemoveRequest {
-                contract_id: Some(json!(client_contract_id)),
-                origin: Some(json!(app_origin)),
+                contract_id: Some(Some(client_contract_id.to_string())),
+                origin: Some(Some(app_origin.clone())),
                 portal_id: portal_id.to_string(),
             },
         )
@@ -506,7 +505,7 @@ async fn auth_portal_admin_protects_built_in_and_route_conflicts() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth portal admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let app_origin = reqwest::Url::parse(fixture.runtime.trellis_url())
         .expect("parse runtime URL")
         .origin()
@@ -569,9 +568,9 @@ async fn auth_portal_admin_protects_built_in_and_route_conflicts() {
         auth.rpc()
             .auth()
             .portals_routes_put(&trellis_rs::sdk::auth::types::AuthPortalsRoutesPutRequest {
-                contract_id: Some(json!(client_contract_id)),
+                contract_id: Some(Some(client_contract_id.to_string())),
                 disabled: None,
-                origin: Some(json!(app_origin)),
+                origin: Some(Some(app_origin.clone())),
                 portal_id: conflict_portal_id.to_string(),
             })
             .await,
@@ -590,8 +589,8 @@ async fn auth_portal_admin_protects_built_in_and_route_conflicts() {
         .auth()
         .portals_routes_remove(
             &trellis_rs::sdk::auth::types::AuthPortalsRoutesRemoveRequest {
-                contract_id: Some(json!(client_contract_id)),
-                origin: Some(json!(app_origin)),
+                contract_id: Some(Some(client_contract_id.to_string())),
+                origin: Some(Some(app_origin.clone())),
                 portal_id: portal_id.to_string(),
             },
         )
@@ -621,7 +620,7 @@ async fn auth_grant_overrides_bind_without_user_capability() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth grant override admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let user = admin_auth
         .rpc()
         .auth()
@@ -703,7 +702,7 @@ async fn auth_grant_overrides_bind_without_user_capability() {
         ),
     )
     .await;
-    let me = trellis_rs::sdk::auth::AuthClient::new(&web_client)
+    let me = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&web_client))
         .rpc()
         .auth()
         .sessions_me()
@@ -711,7 +710,7 @@ async fn auth_grant_overrides_bind_without_user_capability() {
         .expect("grant override app can call Auth.Sessions.Me");
     assert_eq!(
         me.user
-            .as_object()
+            .as_ref()
             .and_then(|user| user.get("capabilities"))
             .and_then(Value::as_array)
             .expect("grant override user should include capabilities")
@@ -727,9 +726,8 @@ async fn auth_grant_overrides_bind_without_user_capability() {
     );
 
     let session_seed = trellis_rs::auth::generate_session_keypair().0;
-    let session_key = trellis_rs::client::SessionAuth::from_seed_base64url(&session_seed)
-        .expect("derive grant override session key")
-        .session_key;
+    let session_key = trellis_rs::auth::session_public_key(&session_seed)
+        .expect("derive grant override session key");
     let session_row = json!({
         "deploymentId": deployment_id,
         "identityKind": "session",
@@ -777,12 +775,21 @@ async fn auth_grant_overrides_bind_without_user_capability() {
         .deployment_authority_grant_overrides_remove(
             &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequest {
                 deployment_id: deployment_id.to_string(),
-                overrides: vec![session_row],
+                overrides: vec![trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequestOverridesItem::CapabilitySession {
+                    capability: APPROVED_PING_CAPABILITY.to_string(),
+                    capability_group_key: Value::Null,
+                    contract_id: "trellis.integration.auth-local-login-client@v1".to_string(),
+                    deployment_id: deployment_id.to_string(),
+                    grant_kind: trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequestOverridesItemCapabilitySessionGrantKind::Capability,
+                    identity_kind: trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequestOverridesItemCapabilitySessionIdentityKind::Session,
+                    origin: Value::Null,
+                    session_public_key: session_key,
+                }],
             },
         )
         .await
         .expect("remove exact grant override row");
-    assert_eq!(removed.grant_overrides, Vec::<Value>::new());
+    assert!(removed.grant_overrides.is_empty());
     assert_listed_grant_override(&admin_auth, deployment_id, None).await;
 }
 
@@ -811,7 +818,7 @@ async fn auth_session_revoke_denies_reconnect() {
         .await
         .expect("connect live Rust auth session revoke admin client");
 
-    let client_auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let client_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     client_auth
         .rpc()
         .auth()
@@ -819,7 +826,7 @@ async fn auth_session_revoke_denies_reconnect() {
         .await
         .expect("call Auth.Sessions.Me before revocation");
 
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let session_key = find_session_key_for_contract(
         &admin_auth
             .rpc()
@@ -874,11 +881,11 @@ async fn auth_sessions_logout_deletes_session_and_connections() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth sessions logout admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     app_session_for_key(&admin_auth, &session_key).await;
     wait_for_single_connection(&admin_auth, &session_key).await;
 
-    let client_auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let client_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let logout = client_auth
         .rpc()
         .auth()
@@ -925,11 +932,11 @@ async fn auth_sessions_logout_cleans_connections_after_kick_failure() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth sessions logout kick failure admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     app_session_for_key(&admin_auth, &session_key).await;
     wait_for_single_connection(&admin_auth, &session_key).await;
 
-    let logout = trellis_rs::sdk::auth::AuthClient::new(&client)
+    let logout = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client))
         .rpc()
         .auth()
         .sessions_logout()
@@ -957,18 +964,15 @@ async fn auth_sessions_me_reports_app_envelope() {
         .connect_client(&fixture.bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust auth sessions me client");
-    let me = trellis_rs::sdk::auth::AuthClient::new(&client)
+    let me = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client))
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as app");
 
-    assert_eq!(me.participant_kind.as_str(), Some("app"));
-    let user = me
-        .user
-        .as_object()
-        .expect("app session should include user");
+    assert_eq!(me.participant_kind.as_str(), "app");
+    let user = me.user.as_ref().expect("app session should include user");
     assert_eq!(user.get("active").and_then(Value::as_bool), Some(true));
     assert!(user
         .get("capabilities")
@@ -976,8 +980,8 @@ async fn auth_sessions_me_reports_app_envelope() {
         .expect("user should include capabilities")
         .iter()
         .any(|capability| capability.as_str() == Some("admin")));
-    assert!(me.device.is_null());
-    assert!(me.service.is_null());
+    assert!(me.device.is_none());
+    assert!(me.service.is_none());
 }
 
 #[tokio::test]
@@ -1000,7 +1004,7 @@ async fn auth_sessions_me_reports_service_envelope_and_current_user_state() {
         .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, client_seed)
         .await
         .expect("connect live Rust auth sessions me current client");
-    let client_auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let client_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     let first = client_auth
         .rpc()
         .auth()
@@ -1009,7 +1013,7 @@ async fn auth_sessions_me_reports_service_envelope_and_current_user_state() {
         .expect("call Auth.Sessions.Me before current user mutations");
     let user = first
         .user
-        .as_object()
+        .as_ref()
         .expect("app session should include user");
     assert_eq!(user.get("active").and_then(Value::as_bool), Some(true));
     assert!(user
@@ -1051,13 +1055,15 @@ async fn auth_sessions_me_reports_service_envelope_and_current_user_state() {
         .expect("call Auth.Sessions.Me after group capability mutation");
     assert!(grouped
         .user
+        .as_ref()
+        .expect("grouped session should include user")
         .get("capabilities")
         .and_then(Value::as_array)
         .expect("grouped user should include capabilities")
         .iter()
         .any(|capability| capability.as_str() == Some("trellis.auth::device.review")));
 
-    let service_session_key = fixture.service_client.auth().session_key.clone();
+    let service_session_key = fixture.service_session_key.clone();
     let session_rows = sqlite
         .query(
             "SELECT session FROM sessions WHERE session_key = ?",
@@ -1100,17 +1106,17 @@ async fn auth_sessions_me_reports_service_envelope_and_current_user_state() {
         )
         .expect("update current service instance capabilities");
 
-    let service_auth = trellis_rs::sdk::auth::AuthClient::new(fixture.service_client.as_ref());
+    let service_auth = trellis_rs::sdk::auth::AuthClient::new(&fixture.service_caller);
     let service_me = service_auth
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as service");
-    assert_eq!(service_me.participant_kind.as_str(), Some("service"));
+    assert_eq!(service_me.participant_kind.as_str(), "service");
     let service = service_me
         .service
-        .as_object()
+        .as_ref()
         .expect("service session should include service envelope");
     assert_eq!(service.get("active").and_then(Value::as_bool), Some(true));
     assert!(service
@@ -1119,8 +1125,8 @@ async fn auth_sessions_me_reports_service_envelope_and_current_user_state() {
         .expect("service should include capabilities")
         .iter()
         .any(|capability| capability.as_str() == Some("service.current")));
-    assert!(service_me.user.is_null());
-    assert!(service_me.device.is_null());
+    assert!(service_me.user.is_none());
+    assert!(service_me.device.is_none());
 
     let mut inactive_capabilities = original_capabilities.clone();
     inactive_capabilities.push("users.write".to_string());
@@ -1178,7 +1184,7 @@ async fn auth_sessions_list_and_connections_list_report_participant_metadata() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth sessions list metadata admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     let sessions = admin_auth
         .rpc()
@@ -1189,52 +1195,68 @@ async fn auth_sessions_list_and_connections_list_report_participant_metadata() {
     let app_session = sessions
         .entries
         .iter()
-        .find(|entry| {
-            entry.get("participantKind").and_then(Value::as_str) == Some("app")
-                && entry.get("sessionKey").and_then(Value::as_str) == Some(&session_key)
+        .find_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::App {
+                contract_display_name,
+                contract_id,
+                principal,
+                session_key: entry_session_key,
+                ..
+            } if entry_session_key == &session_key => {
+                Some((contract_display_name, contract_id, principal))
+            }
+            _ => None,
         })
         .expect("Auth.Sessions.List should include app metadata row");
-    assert_eq!(string_path(app_session, &["principal", "type"]), "user");
-    assert!(!string_path(app_session, &["principal", "userId"]).is_empty());
+    assert_eq!(app_session.2.r#type.as_str(), "user");
+    assert!(!app_session.2.user_id.is_empty());
     assert_eq!(
-        string_field(app_session, "contractId"),
+        app_session.1,
         "trellis.integration.auth-local-login-client@v1"
     );
-    assert_eq!(
-        string_field(app_session, "contractDisplayName"),
-        "Trellis Integration Auth Local Login Client",
-    );
+    assert_eq!(app_session.0, "Trellis Integration Auth Local Login Client");
 
     let agent_session = sessions
         .entries
         .iter()
-        .find(|entry| {
-            entry.get("participantKind").and_then(Value::as_str) == Some("agent")
-                && entry.get("sessionKey").and_then(Value::as_str) == Some(&agent_session_key)
+        .find_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Agent {
+                contract_display_name,
+                contract_id,
+                principal,
+                session_key: entry_session_key,
+                ..
+            } if entry_session_key == &agent_session_key => {
+                Some((contract_display_name, contract_id, principal))
+            }
+            _ => None,
         })
         .expect("Auth.Sessions.List should include agent metadata row");
-    assert_eq!(string_path(agent_session, &["principal", "type"]), "user");
-    assert!(!string_path(agent_session, &["principal", "userId"]).is_empty());
+    assert_eq!(agent_session.2.r#type.as_str(), "user");
+    assert!(!agent_session.2.user_id.is_empty());
     assert_eq!(
-        string_field(agent_session, "contractId"),
+        agent_session.1,
         "trellis.integration.auth-local-login-agent@v1"
     );
     assert_eq!(
-        string_field(agent_session, "contractDisplayName"),
-        "Trellis Integration Auth Local Login Agent",
+        agent_session.0,
+        "Trellis Integration Auth Local Login Agent"
     );
 
     let service_session = sessions
         .entries
         .iter()
-        .find(|entry| entry.get("participantKind").and_then(Value::as_str) == Some("service"))
+        .find_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Service {
+                principal,
+                ..
+            } => Some(principal),
+            _ => None,
+        })
         .expect("Auth.Sessions.List should include service metadata row");
-    assert_eq!(
-        string_path(service_session, &["principal", "type"]),
-        "service"
-    );
-    assert!(!string_path(service_session, &["principal", "instanceId"]).is_empty());
-    assert!(!string_path(service_session, &["principal", "deploymentId"]).is_empty());
+    assert_eq!(service_session.r#type.as_str(), "service");
+    assert!(!service_session.instance_id.is_empty());
+    assert!(!service_session.deployment_id.is_empty());
 
     let connection = wait_for_single_connection(&admin_auth, &session_key).await;
     assert_eq!(string_path(&connection, &["principal", "type"]), "user");
@@ -1296,7 +1318,7 @@ async fn auth_connections_list_skips_malformed_connection_entries() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth connections malformed admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let valid = wait_for_single_connection(&admin_auth, &session_key).await;
     let user_nkey = string_field(&valid, "userNkey");
     let user_id = string_path(&valid, &["principal", "userId"]);
@@ -1321,7 +1343,14 @@ async fn auth_connections_list_skips_malformed_connection_entries() {
         .expect("list auth connections with malformed presence");
     assert_eq!(listed.count, 1);
     assert_eq!(listed.entries.len(), 1);
-    assert_eq!(string_field(&listed.entries[0], "userNkey"), user_nkey);
+    let trellis_rs::sdk::auth::types::AuthConnectionsListResponseEntriesItem::App {
+        user_nkey: listed_user_nkey,
+        ..
+    } = &listed.entries[0]
+    else {
+        panic!("expected app connection");
+    };
+    assert_eq!(listed_user_nkey, &user_nkey);
 }
 
 #[tokio::test]
@@ -1344,7 +1373,7 @@ async fn auth_sessions_me_rejects_stale_user_principals() {
         .connect_client_with_session_seed(&fixture.bootstrap_url, &client_contract, session_seed)
         .await
         .expect("connect live Rust auth sessions me stale user client");
-    let client_auth = trellis_rs::sdk::auth::AuthClient::new(&client);
+    let client_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&client));
     client_auth
         .rpc()
         .auth()
@@ -1402,7 +1431,7 @@ async fn auth_local_login_rebinds_existing_session_with_updated_authority() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth local-login rebind admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let before_session = app_session_for_key(&admin_auth, &session_key).await;
     let before_created_at = string_field(&before_session, "createdAt");
     let before_user_id = string_path(&before_session, &["principal", "userId"]);
@@ -1426,7 +1455,8 @@ async fn auth_local_login_rebinds_existing_session_with_updated_authority() {
         "Trellis Integration Auth Local Login Client Updated",
     );
 
-    let rebound_auth = trellis_rs::sdk::auth::AuthClient::new(&rebound_client);
+    let rebound_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&rebound_client));
     let allowed = rebound_auth
         .rpc()
         .auth()
@@ -1457,7 +1487,7 @@ async fn auth_local_login_replaces_session_when_identity_changes() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth local-login replacement admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let replacement = admin_auth
         .rpc()
         .auth()
@@ -1530,14 +1560,21 @@ async fn auth_local_login_replaces_session_when_identity_changes() {
         "Trellis Integration Auth Local Login Client Updated",
     );
 
-    let replacement_auth = trellis_rs::sdk::auth::AuthClient::new(&replacement_client);
+    let replacement_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&replacement_client));
     let me = replacement_auth
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as replacement client");
-    assert_eq!(string_path(&me.user, &["userId"]), replacement.user.user_id);
+    assert_eq!(
+        me.user
+            .as_ref()
+            .and_then(|user| user.get("userId"))
+            .and_then(Value::as_str),
+        Some(replacement.user.user_id.as_str())
+    );
 }
 
 #[tokio::test]
@@ -1569,7 +1606,7 @@ async fn auth_session_revoke_cleans_runtime_connection_presence() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth session revoke connection admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     app_session_for_key(&admin_auth, &session_key).await;
     wait_for_single_connection(&admin_auth, &session_key).await;
 
@@ -1585,7 +1622,10 @@ async fn auth_session_revoke_cleans_runtime_connection_presence() {
 
     wait_for_session_absent(&admin_auth, &session_key).await;
     wait_for_connections_absent(&admin_auth, &session_key).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&client),
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -1628,7 +1668,7 @@ async fn auth_sessions_revoke_cascades_app_grants() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth sessions revoke cascade admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     app_session_for_key(&admin_auth, &first_session_key).await;
     app_session_for_key(&admin_auth, &second_session_key).await;
     wait_for_single_connection(&admin_auth, &first_session_key).await;
@@ -1654,8 +1694,14 @@ async fn auth_sessions_revoke_cascades_app_grants() {
     wait_for_connections_absent(&admin_auth, &first_session_key).await;
     wait_for_connections_absent(&admin_auth, &second_session_key).await;
     assert!(!identity_grant_exists(&sqlite, &identity_grant_id));
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_client)).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&second_client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&first_client),
+    ))
+    .await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&second_client),
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -1722,7 +1768,7 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth identity grant revoke admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     app_session_for_key(&admin_auth, &first_app_session_key).await;
     app_session_for_key(&admin_auth, &second_app_session_key).await;
     user_session_for_key(&admin_auth, &first_agent_session_key, "agent").await;
@@ -1784,7 +1830,8 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
         &non_owner.user.user_id,
     )
     .await;
-    let non_owner_auth = trellis_rs::sdk::auth::AuthClient::new(&non_owner_client);
+    let non_owner_auth =
+        trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&non_owner_client));
     assert!(non_owner_auth
         .rpc()
         .auth()
@@ -1834,11 +1881,20 @@ async fn auth_identity_grants_revoke_removes_authority_and_live_sessions() {
     wait_for_identity_grant_absent(&admin_auth, &agent_identity_grant_id).await;
     assert!(!identity_grant_exists(&sqlite, &app_identity_grant_id));
     assert!(!identity_grant_exists(&sqlite, &agent_identity_grant_id));
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_app_client)).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&second_app_client)).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_agent_client)).await;
     wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
-        &second_agent_client,
+        crate::generated_caller(&first_app_client),
+    ))
+    .await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&second_app_client),
+    ))
+    .await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&first_agent_client),
+    ))
+    .await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&second_agent_client),
     ))
     .await;
 }
@@ -1853,7 +1909,7 @@ async fn auth_capability_groups_and_last_admin_guard_are_enforced() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth capability group guard admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     let group_key = "rust-auth-capability-group-guard";
     let me = auth
         .rpc()
@@ -1861,7 +1917,13 @@ async fn auth_capability_groups_and_last_admin_guard_are_enforced() {
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me for admin user");
-    let admin_user_id = string_path(&me.user, &["userId"]);
+    let admin_user_id = me
+        .user
+        .as_ref()
+        .and_then(|user| user.get("userId"))
+        .and_then(Value::as_str)
+        .expect("admin session should include userId")
+        .to_string();
 
     let put = auth
         .rpc()
@@ -1931,6 +1993,8 @@ async fn auth_capability_groups_and_last_admin_guard_are_enforced() {
         .expect("call Auth.Sessions.Me after group assignment");
     assert!(grouped_me
         .user
+        .as_ref()
+        .expect("grouped session should include user")
         .get("capabilities")
         .and_then(Value::as_array)
         .expect("grouped user should include capabilities")
@@ -2074,7 +2138,7 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth users identities admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
 
     let target = auth
         .rpc()
@@ -2316,7 +2380,7 @@ async fn auth_sessions_revoke_cascades_agent_grants() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust auth sessions revoke agent cascade admin client");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(&admin_client);
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
     user_session_for_key(&admin_auth, &first_session_key, "agent").await;
     user_session_for_key(&admin_auth, &second_session_key, "agent").await;
     wait_for_single_connection_for_kind(&admin_auth, &first_session_key, "agent").await;
@@ -2342,12 +2406,18 @@ async fn auth_sessions_revoke_cascades_agent_grants() {
     wait_for_connections_absent(&admin_auth, &first_session_key).await;
     wait_for_connections_absent(&admin_auth, &second_session_key).await;
     assert!(!identity_grant_exists(&sqlite, &identity_grant_id));
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&first_client)).await;
-    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(&second_client)).await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&first_client),
+    ))
+    .await;
+    wait_for_sessions_me_denied(&trellis_rs::sdk::auth::AuthClient::new(
+        crate::generated_caller(&second_client),
+    ))
+    .await;
 }
 
 async fn call_grant_ping_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     message: &str,
 ) -> GrantPingOutput {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -2369,12 +2439,12 @@ async fn call_grant_ping_with_retry(
     }
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }
@@ -2536,12 +2606,15 @@ async fn put_grant_override(
         .deployment_authority_grant_overrides_put(
             &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesPutRequest {
                 deployment_id: deployment_id.to_string(),
-                overrides: vec![row.clone()],
+                overrides: vec![crate::wire(row)],
             },
         )
         .await
         .expect("put exact grant override row");
-    assert_eq!(put.grant_overrides, vec![row.clone()]);
+    assert_eq!(
+        crate::wire::<Vec<Value>, _>(put.grant_overrides),
+        vec![row.clone()]
+    );
 }
 
 async fn assert_listed_grant_override(
@@ -2560,9 +2633,10 @@ async fn assert_listed_grant_override(
         )
         .await
         .expect("list grant override rows");
-    let rows = listed
+    let rows: Vec<Value> = listed
         .entries
         .into_iter()
+        .map(crate::wire::<Value, _>)
         .filter(|entry| entry.get("deploymentId").and_then(Value::as_str) == Some(deployment_id))
         .collect::<Vec<_>>();
     assert_eq!(
@@ -2597,6 +2671,7 @@ async fn user_session_for_key(
         .expect("list app sessions")
         .entries
         .into_iter()
+        .map(crate::wire::<Value, _>)
         .find(|entry| {
             entry.get("participantKind").and_then(Value::as_str) == Some(participant_kind)
                 && entry.get("sessionKey").and_then(Value::as_str) == Some(session_key)
@@ -2627,10 +2702,11 @@ async fn wait_for_single_connection_for_kind(
             .await
             .expect("list app connections");
         if connections.entries.len() == 1 {
-            let connection = connections
+            let connection: Value = connections
                 .entries
                 .into_iter()
                 .next()
+                .map(crate::wire)
                 .expect("one connection");
             assert_eq!(
                 connection.get("participantKind").and_then(Value::as_str),
@@ -2718,15 +2794,13 @@ fn find_session_key_for_contract(
     sessions: &trellis_rs::sdk::auth::types::AuthSessionsListResponse,
     contract_id: &str,
 ) -> Option<String> {
-    sessions.entries.iter().find_map(|entry| {
-        let object = entry.as_object()?;
-        if object.get("participantKind")?.as_str()? != "app" {
-            return None;
-        }
-        if object.get("contractId")?.as_str()? != contract_id {
-            return None;
-        }
-        object.get("sessionKey")?.as_str().map(str::to_string)
+    sessions.entries.iter().find_map(|entry| match entry {
+        trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::App {
+            contract_id: entry_contract_id,
+            session_key,
+            ..
+        } if entry_contract_id == contract_id => Some(session_key.clone()),
+        _ => None,
     })
 }
 
@@ -2776,19 +2850,15 @@ fn identity_grant_exists(
         .is_empty()
 }
 
-fn expect_auth_client_reason<T>(
-    result: Result<T, trellis_rs::client::TrellisClientError>,
+fn expect_auth_client_reason<T, E: trellis_rs::client::DeclaredError>(
+    result: Result<T, trellis_rs::client::CallError<E>>,
     expected_reason: &str,
 ) {
-    let Err(trellis_rs::client::TrellisClientError::RpcError(payload)) = result else {
+    let Err(trellis_rs::client::CallError::Declared(error)) = result else {
         panic!("expected AuthError reason {expected_reason}");
     };
-    assert_eq!(payload.error_type(), Some("AuthError"));
     assert_eq!(
-        payload
-            .value()
-            .and_then(|value| value.get("reason"))
-            .and_then(Value::as_str),
+        trellis_rs::client::DeclaredError::auth_error_reason(&error),
         Some(expected_reason)
     );
 }
@@ -2839,6 +2909,7 @@ async fn wait_for_session_absent(auth: &trellis_rs::sdk::auth::AuthClient<'_>, s
             .await
             .expect("list sessions after revocation");
         let still_present = sessions.entries.iter().any(|entry| {
+            let entry: Value = crate::wire(entry);
             entry
                 .as_object()
                 .and_then(|object| object.get("sessionKey"))
@@ -2909,7 +2980,7 @@ async fn connect_with_local_password(
     password: &str,
     admin_auth: &trellis_rs::sdk::auth::AuthClient<'_>,
     user_id: &str,
-) -> trellis_rs::client::TrellisClient {
+) -> trellis_rs::generated::Caller {
     let auth = trellis_rs::client::SessionAuth::from_seed_base64url(session_seed)
         .expect("build session auth for local password login");
     let redirect_to = format!(
@@ -2933,14 +3004,14 @@ async fn connect_with_local_password(
     let native = transports
         .native
         .expect("bind response should include native transport");
-    trellis_rs::client::TrellisClient::connect_user(trellis_rs::client::UserConnectOptions {
-        servers: &native.servers.join(","),
-        sentinel_jwt: &sentinel.jwt,
-        sentinel_seed: &sentinel.seed,
-        session_key_seed_base64url: session_seed,
-        contract_digest: contract.digest(),
-        timeout_ms: 5_000,
-    })
+    trellis_rs::generated::Caller::connect_user(trellis_rs::generated::UserConnectOptions::new(
+        &native.servers.join(","),
+        &sentinel.jwt,
+        &sentinel.seed,
+        session_seed,
+        contract.digest(),
+        5_000,
+    ))
     .await
     .expect("connect bound local password client")
 }
@@ -2951,7 +3022,7 @@ async fn connect_local_password_without_grant(
     session_seed: &str,
     username: &str,
     password: &str,
-) -> Result<trellis_rs::client::TrellisClient, Vec<String>> {
+) -> Result<trellis_rs::generated::Caller, Vec<String>> {
     let auth = trellis_rs::client::SessionAuth::from_seed_base64url(session_seed)
         .expect("build session auth for observer local password login");
     let redirect_to = format!(
@@ -3000,14 +3071,14 @@ async fn connect_local_password_without_grant(
     let native = transports
         .native
         .expect("bind response should include native transport");
-    trellis_rs::client::TrellisClient::connect_user(trellis_rs::client::UserConnectOptions {
-        servers: &native.servers.join(","),
-        sentinel_jwt: &sentinel.jwt,
-        sentinel_seed: &sentinel.seed,
-        session_key_seed_base64url: session_seed,
-        contract_digest: contract.digest(),
-        timeout_ms: 5_000,
-    })
+    trellis_rs::generated::Caller::connect_user(trellis_rs::generated::UserConnectOptions::new(
+        &native.servers.join(","),
+        &sentinel.jwt,
+        &sentinel.seed,
+        session_seed,
+        contract.digest(),
+        5_000,
+    ))
     .await
     .map_err(|error| vec![error.to_string()])
 }
@@ -3034,7 +3105,7 @@ async fn connect_plain_local_password(
     username: &str,
     password: &str,
     redirect_to: &str,
-) -> trellis_rs::client::TrellisClient {
+) -> trellis_rs::generated::Caller {
     let BindFlowResponse::Bound {
         sentinel,
         transports,
@@ -3053,14 +3124,14 @@ async fn connect_plain_local_password(
     let native = transports
         .native
         .expect("bind response should include native transport");
-    trellis_rs::client::TrellisClient::connect_user(trellis_rs::client::UserConnectOptions {
-        servers: &native.servers.join(","),
-        sentinel_jwt: &sentinel.jwt,
-        sentinel_seed: &sentinel.seed,
-        session_key_seed_base64url: session_seed,
-        contract_digest: contract.digest(),
-        timeout_ms: 5_000,
-    })
+    trellis_rs::generated::Caller::connect_user(trellis_rs::generated::UserConnectOptions::new(
+        &native.servers.join(","),
+        &sentinel.jwt,
+        &sentinel.seed,
+        session_seed,
+        contract.digest(),
+        5_000,
+    ))
     .await
     .expect("connect grant override local password client")
 }
@@ -3161,24 +3232,23 @@ async fn put_custom_portal_route(
     auth.rpc()
         .auth()
         .portals_routes_put(&trellis_rs::sdk::auth::types::AuthPortalsRoutesPutRequest {
-            contract_id: Some(json!(contract_id)),
+            contract_id: Some(Some(contract_id.to_string())),
             disabled: Some(disabled),
-            origin: Some(json!(origin)),
+            origin: Some(Some(origin.to_string())),
             portal_id: portal_id.to_string(),
         })
         .await
         .expect("put custom login portal route");
 }
 
-fn assert_validation_rpc_error<T>(result: Result<T, trellis_rs::client::TrellisClientError>) {
+fn assert_validation_rpc_error<T, E: std::fmt::Debug>(
+    result: Result<T, trellis_rs::client::CallError<E>>,
+) {
     match result {
-        Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => {
-            let error = payload
-                .decode_validation()
-                .expect("decode ValidationError payload")
-                .expect("expected ValidationError payload");
-            assert_eq!(error.error_type, "ValidationError");
-        }
+        Err(
+            trellis_rs::client::CallError::Validation(_)
+            | trellis_rs::client::CallError::Declared(_),
+        ) => {}
         Ok(_) => panic!("expected auth portal ValidationError"),
         Err(error) => panic!("expected auth portal ValidationError, got {error}"),
     }

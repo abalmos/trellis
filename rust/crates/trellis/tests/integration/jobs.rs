@@ -8,20 +8,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::{format_description::well_known::Rfc3339, Duration as TimeDuration, OffsetDateTime};
 use tokio::task::JoinHandle;
-use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
 use trellis_rs::jobs::keys::NatsKeyCoordinator;
 use trellis_rs::jobs::manager::{JobNotEnqueuedReason, JobSubmitOutcome};
 use trellis_rs::jobs::{
-    publish_worker_heartbeat, runtime_ref::NatsJobWaiter, start_worker_host_from_client,
-    JobDescriptor, JobLogLevel, JobManager, JobProcessError, JobState, JobUpdateDescriptor,
-    JobsRuntimeBinding, NatsJobEventPublisher, TrellisJobMetaSource, WorkerActiveJob,
-    WorkerHeartbeat, WorkerHostOptions,
+    publish_worker_heartbeat, runtime_ref::NatsJobWaiter, JobDescriptor, JobLogLevel, JobManager,
+    JobProcessError, JobState, JobUpdateDescriptor, NatsJobEventPublisher, TrellisJobMetaSource,
+    WorkerActiveJob, WorkerHeartbeat, WorkerHostOptions,
 };
-use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
     JobsListServicesRequest, JobsListServicesResponse, JobsQueryRequest,
 };
-use trellis_rs::service::{ConnectedServiceRuntime, ServerError};
+use trellis_rs::service::ServerError;
 
 use crate::support::assertions::assert_case_registered;
 use crate::support::jobs_admin::start_rust_jobs_admin;
@@ -186,6 +183,14 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
     }
   }
 }"#;
+
+struct JobsFixtureContract;
+
+impl trellis_rs::service::GeneratedServiceContract for JobsFixtureContract {
+    const CONTRACT_ID: &'static str = JOBS_SERVICE_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = JOBS_SERVICE_CONTRACT_JSON;
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct JobPayload {
@@ -357,13 +362,12 @@ struct JobsFixture {
     bootstrap_url: String,
     worker_host: trellis_rs::jobs::WorkerHostHandle,
     service_task: AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>>,
-    client: Arc<trellis_rs::client::TrellisClient>,
+    client: Arc<trellis_rs::generated::Caller>,
     manager: JobManager<NatsJobEventPublisher, TrellisJobMetaSource>,
     keyed_waiter: NatsJobWaiter,
     update_waiter: NatsJobWaiter,
     update_release: Arc<tokio::sync::Notify>,
-    service_client: Arc<TrellisClient>,
-    jobs_runtime: JobsRuntimeBinding,
+    jobs_worker_runtime: trellis_rs::jobs::TestJobsWorkerRuntime,
     keyed_run_state: Arc<KeyedJobRunState>,
     failing_attempts: Arc<tokio::sync::Mutex<Vec<u64>>>,
 }
@@ -405,30 +409,27 @@ async fn setup_jobs_fixture() -> JobsFixture {
         .await
         .expect("provision live jobs service instance");
 
-    let trellis_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: JOBS_SERVICE_ID,
-            contract_digest: service_contract.digest(),
-            contract_json: JOBS_SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: 5000,
-            retry_delay_ms: 1000,
-            authority_pending_timeout_ms: Some(60000),
-        })
-        .await
-        .expect("connect live Rust jobs service");
-
-    let mut service = ConnectedServiceRuntime::<()>::from_connected_client(
-        "jobs-fixture-service",
-        Arc::new(trellis_client),
+    let mut service = trellis_test::connect_service_runtime::<JobsFixtureContract>(
+        runtime.trellis_url(),
+        JOBS_SERVICE_ID,
+        service_contract.digest(),
+        JOBS_SERVICE_CONTRACT_JSON,
+        &service_key.seed,
     )
-    .expect("build connected service runtime");
+    .await
+    .expect("connect live Rust jobs service runtime");
 
-    let nats = service.client().internal_nats().clone();
-    let trellis_binding: &TrellisBindingsGetResponseBinding = service.binding().as_ref();
-    let jobs_runtime =
-        JobsRuntimeBinding::try_from(trellis_binding).expect("parse jobs runtime binding");
+    let nats = async_nats::ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load jobs test credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect jobs test transport");
+    let jobs_worker_runtime = service
+        .test_jobs_worker_runtime()
+        .expect("build jobs worker runtime");
+    let jobs_runtime = jobs_worker_runtime.binding().clone();
     let queue_binding = jobs_runtime
         .jobs
         .queues
@@ -446,7 +447,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
         TrellisJobMetaSource,
         Arc::new(key_coordinator),
     );
-    let waiter = NatsJobWaiter::new(nats, queue_binding, Duration::from_secs(5));
+    let waiter = NatsJobWaiter::new(nats.clone(), queue_binding, Duration::from_secs(5));
     let keyed_queue_binding = jobs_runtime
         .jobs
         .queues
@@ -459,22 +460,13 @@ async fn setup_jobs_fixture() -> JobsFixture {
         .get("longProcessDocument")
         .expect("longProcessDocument queue binding")
         .clone();
-    let keyed_waiter = NatsJobWaiter::new(
-        service.client().internal_nats().clone(),
-        keyed_queue_binding,
-        Duration::from_secs(5),
-    );
-    let long_waiter = NatsJobWaiter::new(
-        service.client().internal_nats().clone(),
-        long_queue_binding,
-        Duration::from_secs(5),
-    );
+    let keyed_waiter =
+        NatsJobWaiter::new(nats.clone(), keyed_queue_binding, Duration::from_secs(5));
+    let long_waiter = NatsJobWaiter::new(nats.clone(), long_queue_binding, Duration::from_secs(5));
     let keyed_run_state = Arc::new(KeyedJobRunState::default());
     let long_started = Arc::new(tokio::sync::Notify::new());
     let update_release = Arc::new(tokio::sync::Notify::new());
     let failing_attempts = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-
-    let svc_client: Arc<TrellisClient> = service.client().clone();
 
     let process_manager = manager.clone();
     let update_waiter = waiter.clone();
@@ -589,122 +581,122 @@ async fn setup_jobs_fixture() -> JobsFixture {
     let worker_long_started = Arc::clone(&long_started);
     let worker_failing_attempts = Arc::clone(&failing_attempts);
     let worker_update_release = Arc::clone(&update_release);
-    let worker_host = start_worker_host_from_client(
-        &*svc_client,
-        jobs_runtime.clone(),
-        "jobs-fixture-service".to_string(),
-        |_, _| TrellisJobMetaSource,
-        move |active_job: WorkerActiveJob<_, _>| {
-            let keyed_run_state = Arc::clone(&worker_keyed_run_state);
-            let long_started = Arc::clone(&worker_long_started);
-            let failing_attempts = Arc::clone(&worker_failing_attempts);
-            let update_release = Arc::clone(&worker_update_release);
-            async move {
-                if active_job.job().job_type == "keyedProcessDocument" {
-                    let payload: KeyedJobPayload =
-                        serde_json::from_value(active_job.job().payload.clone())
-                            .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                    {
-                        let mut started = keyed_run_state.started.lock().await;
-                        started.push(payload.sequence);
+    let worker_host = jobs_worker_runtime
+        .start(
+            "jobs-fixture-service".to_string(),
+            |_, _| TrellisJobMetaSource,
+            move |active_job: WorkerActiveJob<_, _>| {
+                let keyed_run_state = Arc::clone(&worker_keyed_run_state);
+                let long_started = Arc::clone(&worker_long_started);
+                let failing_attempts = Arc::clone(&worker_failing_attempts);
+                let update_release = Arc::clone(&worker_update_release);
+                async move {
+                    if active_job.job().job_type == "keyedProcessDocument" {
+                        let payload: KeyedJobPayload =
+                            serde_json::from_value(active_job.job().payload.clone())
+                                .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        {
+                            let mut started = keyed_run_state.started.lock().await;
+                            started.push(payload.sequence);
+                        }
+                        if payload.sequence == 1 {
+                            keyed_run_state.first_started.notify_one();
+                            keyed_run_state.release_first.notified().await;
+                        } else if payload.sequence == 99 {
+                            keyed_run_state.first_started.notify_one();
+                            while !active_job.is_cancelled() {
+                                tokio::time::sleep(Duration::from_millis(25)).await;
+                            }
+                            return Err(JobProcessError::failed("worker stopped".to_string()));
+                        } else if !keyed_run_state
+                            .released
+                            .load(std::sync::atomic::Ordering::SeqCst)
+                        {
+                            keyed_run_state
+                                .second_started_before_release
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        {
+                            let mut completed = keyed_run_state.completed.lock().await;
+                            completed.push(payload.sequence);
+                        }
+                        let result = serde_json::to_value(KeyedJobResult {
+                            document_id: payload.document_id,
+                            group_key: payload.group_key,
+                            sequence: payload.sequence,
+                            processed_by: "rust-service-keyed-job".to_string(),
+                            request_id: active_job.context().request_id.clone(),
+                            trace_id: active_job.context().trace_id.clone(),
+                        })
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        return Ok(result);
                     }
-                    if payload.sequence == 1 {
-                        keyed_run_state.first_started.notify_one();
-                        keyed_run_state.release_first.notified().await;
-                    } else if payload.sequence == 99 {
-                        keyed_run_state.first_started.notify_one();
+
+                    if active_job.job().job_type == "longProcessDocument" {
+                        let payload: JobPayload =
+                            serde_json::from_value(active_job.job().payload.clone())
+                                .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        long_started.notify_one();
                         while !active_job.is_cancelled() {
+                            active_job
+                                .heartbeat()
+                                .await
+                                .map_err(|error| JobProcessError::failed(error.to_string()))?;
                             tokio::time::sleep(Duration::from_millis(25)).await;
                         }
-                        return Err(JobProcessError::failed("worker stopped".to_string()));
-                    } else if !keyed_run_state
-                        .released
-                        .load(std::sync::atomic::Ordering::SeqCst)
-                    {
-                        keyed_run_state
-                            .second_started_before_release
-                            .store(true, std::sync::atomic::Ordering::SeqCst);
+                        let result = serde_json::to_value(JobResult {
+                            document_id: payload.document_id,
+                            processed_by: "rust-service-long-job".to_string(),
+                            request_id: active_job.context().request_id.clone(),
+                            trace_id: active_job.context().trace_id.clone(),
+                        })
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        return Ok(result);
                     }
-                    {
-                        let mut completed = keyed_run_state.completed.lock().await;
-                        completed.push(payload.sequence);
-                    }
-                    let result = serde_json::to_value(KeyedJobResult {
-                        document_id: payload.document_id,
-                        group_key: payload.group_key,
-                        sequence: payload.sequence,
-                        processed_by: "rust-service-keyed-job".to_string(),
-                        request_id: active_job.context().request_id.clone(),
-                        trace_id: active_job.context().trace_id.clone(),
-                    })
-                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                    return Ok(result);
-                }
 
-                if active_job.job().job_type == "longProcessDocument" {
+                    if active_job.job().job_type == "failingProcessDocument" {
+                        failing_attempts.lock().await.push(active_job.job().tries);
+                        return Err(JobProcessError::retryable("retry requested".to_string()));
+                    }
+
                     let payload: JobPayload =
                         serde_json::from_value(active_job.job().payload.clone())
                             .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                    long_started.notify_one();
-                    while !active_job.is_cancelled() {
-                        active_job
-                            .heartbeat()
-                            .await
-                            .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    if payload.document_id == "doc-update" {
+                        update_release.notified().await;
                     }
+                    active_job
+                        .emit_update::<ProcessDocumentJob>(JobUpdatePayload { processed: 1 })
+                        .await
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                    active_job
+                        .update_progress(1, 1, Some(format!("processed {}", payload.document_id)))
+                        .await
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                    active_job
+                        .log(
+                            JobLogLevel::Info,
+                            format!("processed {}", payload.document_id),
+                        )
+                        .await
+                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
                     let result = serde_json::to_value(JobResult {
                         document_id: payload.document_id,
-                        processed_by: "rust-service-long-job".to_string(),
+                        processed_by: "rust-service-job".to_string(),
                         request_id: active_job.context().request_id.clone(),
                         trace_id: active_job.context().trace_id.clone(),
                     })
                     .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                    return Ok(result);
+                    Ok(result)
                 }
-
-                if active_job.job().job_type == "failingProcessDocument" {
-                    failing_attempts.lock().await.push(active_job.job().tries);
-                    return Err(JobProcessError::retryable("retry requested".to_string()));
-                }
-
-                let payload: JobPayload = serde_json::from_value(active_job.job().payload.clone())
-                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                if payload.document_id == "doc-update" {
-                    update_release.notified().await;
-                }
-                active_job
-                    .emit_update::<ProcessDocumentJob>(JobUpdatePayload { processed: 1 })
-                    .await
-                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                active_job
-                    .update_progress(1, 1, Some(format!("processed {}", payload.document_id)))
-                    .await
-                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                active_job
-                    .log(
-                        JobLogLevel::Info,
-                        format!("processed {}", payload.document_id),
-                    )
-                    .await
-                    .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                let result = serde_json::to_value(JobResult {
-                    document_id: payload.document_id,
-                    processed_by: "rust-service-job".to_string(),
-                    request_id: active_job.context().request_id.clone(),
-                    trace_id: active_job.context().trace_id.clone(),
-                })
-                .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                Ok(result)
-            }
-        },
-        WorkerHostOptions {
-            queue_concurrency: BTreeMap::from([("keyedProcessDocument".to_string(), 2)]),
-            ..WorkerHostOptions::default()
-        },
-    )
-    .await
-    .expect("start jobs worker host");
+            },
+            WorkerHostOptions {
+                queue_concurrency: BTreeMap::from([("keyedProcessDocument".to_string(), 2)]),
+                ..WorkerHostOptions::default()
+            },
+        )
+        .await
+        .expect("start jobs worker host");
 
     let client = Arc::new(
         admin
@@ -724,8 +716,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
         keyed_waiter: fixture_keyed_waiter,
         update_waiter,
         update_release,
-        service_client: svc_client,
-        jobs_runtime,
+        jobs_worker_runtime,
         keyed_run_state,
         failing_attempts,
     }
@@ -870,33 +861,33 @@ async fn jobs_keyed_active_redelivery_after_restart() {
 
     let replacement_started = Arc::new(tokio::sync::Notify::new());
     let replacement_signal = Arc::clone(&replacement_started);
-    let replacement = start_worker_host_from_client(
-        &*fixture.service_client,
-        fixture.jobs_runtime.clone(),
-        "jobs-fixture-service-replacement".to_string(),
-        |_, _| TrellisJobMetaSource,
-        move |active_job: WorkerActiveJob<_, _>| {
-            let replacement_signal = Arc::clone(&replacement_signal);
-            async move {
-                let payload: KeyedJobPayload =
-                    serde_json::from_value(active_job.job().payload.clone())
-                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
-                replacement_signal.notify_one();
-                serde_json::to_value(KeyedJobResult {
-                    document_id: payload.document_id,
-                    group_key: payload.group_key,
-                    sequence: payload.sequence,
-                    processed_by: "rust-replacement-worker".to_string(),
-                    request_id: active_job.context().request_id.clone(),
-                    trace_id: active_job.context().trace_id.clone(),
-                })
-                .map_err(|error| JobProcessError::failed(error.to_string()))
-            }
-        },
-        WorkerHostOptions::default(),
-    )
-    .await
-    .expect("start replacement jobs worker host");
+    let replacement = fixture
+        .jobs_worker_runtime
+        .start(
+            "jobs-fixture-service-replacement".to_string(),
+            |_, _| TrellisJobMetaSource,
+            move |active_job: WorkerActiveJob<_, _>| {
+                let replacement_signal = Arc::clone(&replacement_signal);
+                async move {
+                    let payload: KeyedJobPayload =
+                        serde_json::from_value(active_job.job().payload.clone())
+                            .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                    replacement_signal.notify_one();
+                    serde_json::to_value(KeyedJobResult {
+                        document_id: payload.document_id,
+                        group_key: payload.group_key,
+                        sequence: payload.sequence,
+                        processed_by: "rust-replacement-worker".to_string(),
+                        request_id: active_job.context().request_id.clone(),
+                        trace_id: active_job.context().trace_id.clone(),
+                    })
+                    .map_err(|error| JobProcessError::failed(error.to_string()))
+                }
+            },
+            WorkerHostOptions::default(),
+        )
+        .await
+        .expect("start replacement jobs worker host");
 
     tokio::time::timeout(Duration::from_secs(45), replacement_started.notified())
         .await
@@ -1030,7 +1021,7 @@ async fn jobs_failed_job_retries_then_dead() {
         .connect_client(&fixture.bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust jobs admin client");
-    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(&admin_client);
+    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(crate::generated_caller(&admin_client));
     let job = fixture
         .manager
         .create(
@@ -1128,7 +1119,7 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
         .connect_client(&bootstrap_url, &admin_contract)
         .await
         .expect("connect live Rust jobs admin client");
-    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(&admin_client);
+    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(crate::generated_caller(&admin_client));
     let nc = connect_trellis_nats(runtime.nats_url(), runtime.workdir()).await;
 
     let fresh_service = "jobs-fixture-service-rust-admin-a";
@@ -1219,7 +1210,7 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
 }
 
 async fn call_documents_process_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     document_id: &str,
 ) -> WorkflowOutput {
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -1242,7 +1233,7 @@ async fn call_documents_process_with_retry(
 }
 
 async fn call_documents_keyed_process_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     document_id: &str,
     group_key: &str,
     sequence: u64,
@@ -1269,7 +1260,7 @@ async fn call_documents_keyed_process_with_retry(
 }
 
 async fn call_documents_submit_long_process_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     document_id: &str,
 ) -> WorkflowOutput {
     let deadline = Instant::now() + Duration::from_secs(60);
@@ -1308,12 +1299,12 @@ fn job_state_name(state: JobState) -> String {
     .to_string()
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }
@@ -1389,7 +1380,7 @@ async fn wait_for_admin_dlq_job(
                 search: None,
                 service: None,
                 sort: None,
-                state: Some(vec!["dead".to_string()]),
+                state: Some(vec![crate::wire("dead")]),
                 trigger: None,
                 r#type: None,
                 offset: None,
@@ -1425,12 +1416,15 @@ fn timestamp_seconds_ago(seconds: i64) -> String {
         .expect("format worker heartbeat timestamp")
 }
 
-fn is_retryable_jobs_admin_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_jobs_admin_error<E: std::fmt::Debug>(
+    error: &trellis_rs::client::CallError<E>,
+) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::client::CallError::Transport(error) => {
+            let message = error.to_string();
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::client::CallError::Timeout => true,
         _ => false,
     }
 }

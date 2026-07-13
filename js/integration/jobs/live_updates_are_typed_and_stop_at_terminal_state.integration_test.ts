@@ -63,7 +63,7 @@ liveTrellisTest({
       await service.handleDocumentsProcessWithUpdates(async ({ op }) => {
         await op.started().orThrow();
         return op.defer();
-      },);
+      });
       serviceWait = service.wait();
 
       const client = await runtime.connectClient({
@@ -72,7 +72,9 @@ liveTrellisTest({
       });
       const received: number[] = [];
       const observedByBuilder: number[] = [];
-      const operation = await client.documentsProcessWithUpdates({ documentId: fixture.documentId })
+      const operation = await client.documentsProcessWithUpdates({
+        documentId: fixture.documentId,
+      })
         .onUpdate((event) => {
           observedByBuilder.push(event.update.processed);
         })
@@ -87,7 +89,8 @@ liveTrellisTest({
         }
       })();
 
-      const controlled = await service.handleDocumentsProcessWithUpdates.control(operation.id).orThrow();
+      const controlled = await service.handleDocumentsProcessWithUpdates
+        .control(operation.id).orThrow();
       const job = await service.jobs.processDocument.create({
         documentId: fixture.documentId,
       }).orThrow();

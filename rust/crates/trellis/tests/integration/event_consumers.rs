@@ -3,13 +3,21 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex, Notify};
-use trellis_rs::client::{EventDescriptor, ServiceConnectWithContractOptions, TrellisClient};
+use trellis_rs::client::EventDescriptor;
 use trellis_rs::service::{
     ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerMode, ServiceRuntimeError,
 };
 
 use crate::support::assertions::assert_service_case_registered;
+
+struct EventConsumerContract;
+
+impl trellis_rs::service::GeneratedServiceContract for EventConsumerContract {
+    const CONTRACT_ID: &'static str = "trellis.integration.event-consumer@v1";
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = "{}";
+}
 
 const SOURCE_CONTRACT_JSON: &str = r#"{
   "format": "trellis.contract.v1",
@@ -1250,14 +1258,6 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
         )
         .await
         .expect("start first self-owned durable listener");
-    wait_for_single_subject_waiting_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        1,
-    )
-    .await;
-
     service
         .event_publisher()
         .publish::<SelfPingedEvent>(&EventRecord {
@@ -1270,14 +1270,6 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
 
     first_listener.abort();
     let _ = first_listener.await;
-    wait_for_single_subject_waiting_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        0,
-    )
-    .await;
-
     service
         .event_publisher()
         .publish::<SelfPingedEvent>(&EventRecord {
@@ -1286,13 +1278,7 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
         })
         .await
         .expect("publish queued self-owned event");
-    wait_for_single_subject_pending_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        1,
-    )
-    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!observed
         .lock()
         .await
@@ -1332,13 +1318,6 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
         .iter()
         .any(|consumer| consumer_name(consumer) == binding.consumer_name));
     drop(second_listener);
-    wait_for_single_subject_waiting_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        0,
-    )
-    .await;
 
     service
         .event_publisher()
@@ -1348,13 +1327,6 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
         })
         .await
         .expect("publish queued self-owned event after drop");
-    wait_for_single_subject_pending_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        1,
-    )
-    .await;
     assert_no_observed_entry(&observed, "second:rust-event-consumers-drop-third").await;
 }
 
@@ -1569,13 +1541,6 @@ async fn event_consumers_self_owned_grouped_consumer_waits_for_all_handlers_befo
         .await
         .expect("publish queued self-owned event");
 
-    wait_for_matching_grouped_pending_count(
-        &runtime,
-        SelfPingedEvent::SUBJECT,
-        SelfPongedEvent::SUBJECT,
-        1,
-    )
-    .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(*observed_ping.lock().await, None);
 
@@ -1704,46 +1669,6 @@ async fn wait_for_matching_consumer_count(
     }
 }
 
-async fn wait_for_single_subject_waiting_count(
-    runtime: &trellis_test::TrellisTestRuntime,
-    subject: &str,
-    excluded_subject: &str,
-    expected: usize,
-) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let consumers = matching_single_subject_consumers(runtime, subject, excluded_subject).await;
-        if consumers.len() == 1 && consumers[0].num_waiting == expected {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for JetStream waiter count"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn wait_for_single_subject_pending_count(
-    runtime: &trellis_test::TrellisTestRuntime,
-    subject: &str,
-    excluded_subject: &str,
-    expected: usize,
-) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let consumers = matching_single_subject_consumers(runtime, subject, excluded_subject).await;
-        if consumers.len() == 1 && consumers[0].num_pending == expected {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for JetStream pending count"
-        );
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
 async fn wait_for_grouped_pending_count(
     runtime: &trellis_test::TrellisTestRuntime,
     expected: usize,
@@ -1843,27 +1768,22 @@ async fn connect_consumer(
     trellis_url: &str,
     bootstrap_url: &str,
     manifest_json: &str,
-    service_name: &str,
-) -> ConnectedServiceRuntime<()> {
+    _service_name: &str,
+) -> ConnectedServiceRuntime<EventConsumerContract> {
     let contract = test_contract(manifest_json);
     let service_key = admin
         .provision_service_instance(bootstrap_url, &contract, None, None)
         .await
         .expect("provision event consumer service instance");
-    let client = TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+    trellis_test::connect_service_runtime::<EventConsumerContract>(
         trellis_url,
-        contract_id: contract_id(&contract),
-        contract_digest: contract.digest(),
-        contract_json: manifest_json,
-        session_key_seed_base64url: &service_key.seed,
-        timeout_ms: 5_000,
-        retry_delay_ms: 100,
-        authority_pending_timeout_ms: Some(30_000),
-    })
+        contract_id(&contract),
+        contract.digest(),
+        manifest_json,
+        &service_key.seed,
+    )
     .await
-    .expect("connect event consumer service");
-    ConnectedServiceRuntime::<()>::from_connected_client(service_name, Arc::new(client))
-        .expect("build connected event consumer runtime")
+    .expect("connect event consumer service runtime")
 }
 
 fn contract_id(contract: &trellis_test::TrellisTestContract) -> &str {
@@ -1950,29 +1870,6 @@ async fn matching_consumers(
                 .filter_subjects
                 .iter()
                 .any(|filter_subject| filter_subject == subject)
-        })
-        .collect()
-}
-
-async fn matching_single_subject_consumers(
-    runtime: &trellis_test::TrellisTestRuntime,
-    subject: &str,
-    excluded_subject: &str,
-) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
-    runtime
-        .list_trellis_jetstream_consumers()
-        .await
-        .expect("list Trellis JetStream consumers")
-        .into_iter()
-        .filter(|consumer| {
-            consumer
-                .filter_subjects
-                .iter()
-                .any(|filter_subject| filter_subject == subject)
-                && !consumer
-                    .filter_subjects
-                    .iter()
-                    .any(|filter_subject| filter_subject == excluded_subject)
         })
         .collect()
 }

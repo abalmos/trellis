@@ -392,12 +392,14 @@ export function createAuthorityPlanFixture(caseId: string) {
     | typeof incompatibleSchemaContract
     | typeof resourceBaseContract
     | typeof resourceChangedContract;
-  async function connectService<const TContract extends FixtureServiceContract>(args: {
-    readonly runtime: LiveTrellisRuntime;
-    readonly contract: TContract;
-    readonly name: string;
-    readonly seed: string;
-  }): Promise<ConnectedTrellisService<TContract>> {
+  async function connectService<const TContract extends FixtureServiceContract>(
+    args: {
+      readonly runtime: LiveTrellisRuntime;
+      readonly contract: TContract;
+      readonly name: string;
+      readonly seed: string;
+    },
+  ): Promise<ConnectedTrellisService<TContract>> {
     return await TrellisService.connect<TContract>({
       trellisUrl: args.runtime.trellisUrl,
       contract: args.contract,
@@ -408,7 +410,9 @@ export function createAuthorityPlanFixture(caseId: string) {
     }).orThrow();
   }
 
-  function connectServicePending<const TContract extends FixtureServiceContract>(args: {
+  function connectServicePending<
+    const TContract extends FixtureServiceContract,
+  >(args: {
     readonly runtime: LiveTrellisRuntime;
     readonly contract: TContract;
     readonly name: string;

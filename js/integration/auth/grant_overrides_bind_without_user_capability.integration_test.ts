@@ -112,8 +112,8 @@ liveTrellisTest({
       }
 
       const removed = await admin.authDeploymentAuthorityGrantOverridesRemove({
-          deploymentId: fixture.deploymentId,
-          overrides: [sessionRow],
+        deploymentId: fixture.deploymentId,
+        overrides: [sessionRow],
       }).orThrow();
       assertEquals(removed.grantOverrides, []);
       await assertListed(admin);

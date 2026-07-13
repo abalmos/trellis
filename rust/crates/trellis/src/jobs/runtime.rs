@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::time::Duration;
 
+use async_nats::jetstream::consumer::FromConsumer;
 use async_nats::jetstream::{self, consumer};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -20,10 +22,72 @@ pub struct JobsRuntime {
 
 impl JobsRuntime {
     /// Create a Jobs runtime facade from a connected Trellis client.
-    pub fn from_client(client: &TrellisClient) -> Self {
+    pub(crate) fn from_client(client: &TrellisClient) -> Self {
         Self {
             nats: client.nats().clone(),
         }
+    }
+
+    /// Open a new-only ephemeral consumer for `Jobs.Watch`.
+    pub async fn watch_messages(
+        &self,
+        stream_name: &str,
+        filter_subject: &str,
+    ) -> Result<JobsRuntimeMessageStream, String> {
+        let stream = jetstream::new(self.nats.clone())
+            .get_stream(stream_name)
+            .await
+            .map_err(|error| error.to_string())?;
+        let consumer = stream
+            .create_consumer(consumer::pull::Config {
+                filter_subject: filter_subject.to_string(),
+                deliver_policy: consumer::DeliverPolicy::New,
+                ack_policy: consumer::AckPolicy::Explicit,
+                inactive_threshold: Duration::from_secs(5),
+                metadata: jobs_watch_metadata(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        let messages = consumer
+            .messages()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(Box::pin(messages.map(|message| {
+            message
+                .map(JobsRuntimeMessage::new)
+                .map_err(|error| error.to_string())
+        })))
+    }
+
+    /// Mark shape-matched legacy Jobs watch durables for bounded expiry.
+    pub async fn expire_obsolete_watch_consumers(
+        &self,
+        stream_name: &str,
+    ) -> Result<usize, String> {
+        let stream = jetstream::new(self.nats.clone())
+            .get_stream(stream_name)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut consumers = stream.consumers();
+        let mut configs = Vec::new();
+        while let Some(info) = consumers.next().await {
+            let info = info.map_err(|error| error.to_string())?;
+            if obsolete_jobs_watch_consumer(&info.name, &info.config) {
+                let mut config = consumer::pull::Config::try_from_consumer_config(info.config)
+                    .map_err(|error| error.to_string())?;
+                config.inactive_threshold = Duration::from_secs(5 * 60);
+                config.metadata.extend(jobs_watch_metadata());
+                configs.push(config);
+            }
+        }
+        for config in configs.iter().cloned() {
+            stream
+                .update_consumer(config)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(configs.len())
     }
 
     /// Publish one encoded job lifecycle event to its subject.
@@ -108,6 +172,38 @@ impl JobsRuntime {
             .map(|message| message.payload)
             .map_err(|error| error.to_string())
     }
+}
+
+fn jobs_watch_metadata() -> HashMap<String, String> {
+    HashMap::from([
+        ("trellis.managed_by".to_string(), "platform".to_string()),
+        (
+            "trellis.contract_id".to_string(),
+            "trellis.jobs@v1".to_string(),
+        ),
+        ("trellis.group".to_string(), "watch".to_string()),
+    ])
+}
+
+fn obsolete_jobs_watch_consumer(name: &str, config: &consumer::Config) -> bool {
+    let Some((seed, counter)) = name
+        .strip_prefix("jobs-watch-")
+        .and_then(|suffix| suffix.rsplit_once('-'))
+    else {
+        return false;
+    };
+    let watch_filter = config.filter_subject == "trellis.jobs.>"
+        || (config.filter_subject.starts_with("trellis.jobs.*.*.")
+            && config.filter_subject.ends_with(".>"));
+    !seed.is_empty()
+        && seed.len() <= 48
+        && seed
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        && counter.len() <= 20
+        && counter.chars().all(|character| character.is_ascii_digit())
+        && watch_filter
+        && config.durable_name.as_deref() == Some(name)
 }
 
 /// Stream of Jobs runtime messages.

@@ -1,18 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use serde::{Deserialize, Serialize};
-use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
-use trellis_rs::jobs::keys::NatsKeyCoordinator;
-use trellis_rs::jobs::{
-    runtime_ref::NatsJobWaiter, start_worker_host_from_client, JobManager, JobProcessError,
-    JobsRuntimeBinding, NatsJobEventPublisher, TrellisJobMetaSource, WorkerActiveJob,
-    WorkerHostOptions,
-};
-use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsListServicesRequest, JobsListServicesResponseEntriesItem,
 };
-use trellis_rs::service::ConnectedServiceRuntime;
 
 use crate::support::assertions::assert_service_case_registered;
 use crate::support::jobs_admin::start_rust_jobs_admin;
@@ -22,7 +13,6 @@ const SERVICE_CONTRACT_ID: &str =
     "trellis.integration.control-plane.jobs-admin-lists-and-cancels-job.service@v1";
 const ADMIN_CLIENT_CONTRACT_ID: &str =
     "trellis.integration.control-plane.jobs-admin-lists-and-cancels-job.client@v1";
-const SERVICE_NAME: &str = "jobs-admin-probe-service-rust";
 const JOB_TYPE: &str = "holdOpen";
 const MARKER: &str = "jobs-admin-probe-marker-rust";
 
@@ -62,6 +52,27 @@ struct HoldResult {
     cancelled: bool,
 }
 
+struct JobsAdminProbeContract;
+
+impl trellis_rs::service::GeneratedServiceContract for JobsAdminProbeContract {
+    const CONTRACT_ID: &'static str = SERVICE_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
+}
+
+struct HoldOpenJob;
+
+impl trellis_rs::jobs::JobDescriptor for HoldOpenJob {
+    type Payload = HoldPayload;
+    type Result = HoldResult;
+    const QUEUE_TYPE: &'static str = JOB_TYPE;
+    const PAYLOAD_SCHEMA_JSON: &'static str =
+        r#"{"type":"object","required":["marker"],"properties":{"marker":{"type":"string"}}}"#;
+    const RESULT_SCHEMA_JSON: Option<&'static str> = Some(
+        r#"{"type":"object","required":["cancelled"],"properties":{"cancelled":{"type":"boolean"}}}"#,
+    );
+}
+
 #[tokio::test]
 async fn control_plane_jobs_admin_lists_and_cancels_job() {
     assert_service_case_registered(CASE_ID, "control-plane", "control_plane_jobs_admin");
@@ -89,55 +100,20 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
         .await
         .expect("provision live jobs admin probe service instance");
 
-    let service_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: SERVICE_CONTRACT_ID,
-            contract_digest: service_contract.digest(),
-            contract_json: SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect live Rust jobs admin probe service");
-    let service = ConnectedServiceRuntime::<()>::from_connected_client(
-        SERVICE_NAME,
-        Arc::new(service_client),
+    let mut service = trellis_test::connect_service_runtime::<JobsAdminProbeContract>(
+        runtime.trellis_url(),
+        SERVICE_CONTRACT_ID,
+        service_contract.digest(),
+        SERVICE_CONTRACT_JSON,
+        &service_key.seed,
     )
-    .expect("build connected jobs admin probe service runtime");
-    let nats = service.client().internal_nats().clone();
-    let trellis_binding: &TrellisBindingsGetResponseBinding = service.binding().as_ref();
-    let jobs_runtime = JobsRuntimeBinding::try_from(trellis_binding)
-        .expect("parse jobs admin probe runtime binding");
-    let queue_binding = jobs_runtime
-        .jobs
-        .queues
-        .get(JOB_TYPE)
-        .expect("holdOpen queue binding")
-        .clone();
-    let publisher = NatsJobEventPublisher::new(nats.clone());
-    let key_coordinator =
-        NatsKeyCoordinator::open_for_service(nats.clone(), jobs_runtime.jobs.namespace.as_str())
-            .await
-            .expect("open jobs admin probe key coordinator");
-    let manager = JobManager::new_with_key_coordinator(
-        publisher,
-        jobs_runtime.jobs.clone(),
-        TrellisJobMetaSource,
-        Arc::new(key_coordinator),
-    );
-    let waiter = NatsJobWaiter::new(nats, queue_binding, Duration::from_secs(15));
+    .await
+    .expect("connect live Rust jobs admin probe service runtime");
     let started = Arc::new(tokio::sync::Notify::new());
     let worker_started = Arc::clone(&started);
 
-    let worker_host = start_worker_host_from_client(
-        &*service.client(),
-        jobs_runtime,
-        SERVICE_NAME.to_string(),
-        |_, _| TrellisJobMetaSource,
-        move |active_job: WorkerActiveJob<_, _>| {
+    service
+        .register_generated_job_worker::<HoldOpenJob, _, _, String>(move |active_job| {
             let worker_started = Arc::clone(&worker_started);
             async move {
                 worker_started.notify_one();
@@ -145,69 +121,62 @@ async fn control_plane_jobs_admin_lists_and_cancels_job() {
                     active_job
                         .heartbeat()
                         .await
-                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        .map_err(|error| error.to_string())?;
                     tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-                serde_json::to_value(HoldResult { cancelled: true })
-                    .map_err(|error| JobProcessError::failed(error.to_string()))
+                Ok(HoldResult { cancelled: true })
             }
-        },
-        WorkerHostOptions::default(),
-    )
-    .await
-    .expect("start jobs admin probe worker host");
+        })
+        .await
+        .expect("start jobs admin probe worker host");
 
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_client_contract)
         .await
         .expect("connect live Rust jobs admin probe client");
-    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(&admin_client);
+    let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(crate::generated_caller(&admin_client));
 
-    let job = manager
-        .create(
-            JOB_TYPE,
-            HoldPayload {
-                marker: MARKER.to_string(),
-            },
-        )
+    let job = service
+        .generated_submit_job::<HoldOpenJob>(HoldPayload {
+            marker: MARKER.to_string(),
+        })
         .await
         .expect("create service-local holdOpen job");
+    let identity = job.identity().clone();
     tokio::time::timeout(Duration::from_secs(15), started.notified())
         .await
         .expect("worker should start the holdOpen job");
 
-    let listed_service = wait_for_listed_service(&jobs_admin, &job.service, &job.job_type).await;
+    let listed_service =
+        wait_for_listed_service(&jobs_admin, &identity.service, &identity.job_type).await;
     assert!(
         listed_service
             .workers
             .iter()
-            .any(|worker| worker.job_type == job.job_type),
+            .any(|worker| worker.job_type == identity.job_type),
         "expected Jobs.ListServices to include a worker for {}",
-        job.job_type
+        identity.job_type
     );
 
     let cancelled = jobs_admin
         .rpc()
         .jobs()
         .cancel(&JobsCancelRequest {
-            id: job.id.clone(),
+            id: identity.id.clone(),
             reason: None,
         })
         .await
         .expect("call generated Jobs.Cancel");
-    assert_eq!(cancelled.job.id, job.id);
+    assert_eq!(cancelled.job.id, identity.id);
 
     assert_eq!(cancelled.job.state, "cancelled");
-    let local_terminal = waiter
-        .wait_for_terminal(job)
+    let local_terminal = job
+        .wait()
         .await
         .expect("service-local wait observes terminal cancelled");
     assert_eq!(local_terminal.state, trellis_rs::jobs::JobState::Cancelled);
 
-    worker_host
-        .stop()
-        .await
-        .expect("stop jobs admin probe worker host");
+    drop(service);
 }
 
 fn jobs_admin_client_contract(
@@ -254,29 +223,33 @@ async fn wait_for_listed_service(
             }
             Err(error) => panic!("call generated Jobs.ListServices: {error}"),
         };
-        if let Some(entry) = page.entries.into_iter().find(|entry| {
+        if let Some(entry) = page.entries.iter().find(|entry| {
             entry.name == service
                 && entry
                     .workers
                     .iter()
                     .any(|worker| worker.job_type == job_type)
         }) {
-            return entry;
+            return entry.clone();
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Jobs.ListServices did not return service worker before timeout"
+            "Jobs.ListServices did not return service worker before timeout; expected {service}/{job_type}, got {:?}",
+            page.entries,
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-fn is_retryable_jobs_admin_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_jobs_admin_error<E: std::fmt::Debug>(
+    error: &trellis_rs::client::CallError<E>,
+) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::client::CallError::Transport(error) => {
+            let message = error.to_string();
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::client::CallError::Timeout => true,
         _ => false,
     }
 }

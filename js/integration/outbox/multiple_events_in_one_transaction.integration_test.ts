@@ -32,7 +32,7 @@ liveTrellisTest({
           documentId: input.documentId,
           processedBy: "outbox-multi",
         });
-      },);
+      });
       serviceWait = service.wait();
 
       const capture = await runtime.captureEvents({

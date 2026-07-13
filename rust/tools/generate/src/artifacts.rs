@@ -174,9 +174,6 @@ pub fn write_contract_outputs(
                 artifact_version.clone(),
                 runtime_repo_root.clone(),
             ),
-            emit_service_runtime_facade: should_emit_service_runtime_facade(
-                &resolved.loaded.manifest.id,
-            ),
         })
         .into_diagnostic()?;
         copy_embedded_trellis_owned_rust_sdk(
@@ -334,7 +331,6 @@ fn write_rust_sdk_shell(
         crate_name: crate_name.to_string(),
         crate_version: artifact_version.to_string(),
         runtime_deps: deps,
-        emit_service_runtime_facade: false,
     };
 
     write_if_changed(
@@ -378,9 +374,8 @@ fn is_trellis_owned_sdk_contract(contract_id: &str) -> bool {
 fn rust_runtime_deps_lines(deps: &RustRuntimeDeps) -> Vec<String> {
     match deps.source {
         CodegenRustRuntimeSource::Registry => vec![
-            format!("trellis-client = \"{}\"", deps.version),
             format!("trellis-contracts = \"{}\"", deps.version),
-            format!("trellis-service = \"{}\"", deps.version),
+            format!("trellis-rs = \"{}\"", deps.version),
         ],
         CodegenRustRuntimeSource::Local => {
             let repo_root = deps
@@ -388,10 +383,6 @@ fn rust_runtime_deps_lines(deps: &RustRuntimeDeps) -> Vec<String> {
                 .as_ref()
                 .expect("local Rust SDK shell requires repo root");
             vec![
-                format!(
-                    "trellis-client = {{ path = {} }}",
-                    string_literal(&repo_root.join("rust/crates/client").display().to_string())
-                ),
                 format!(
                     "trellis-contracts = {{ path = {} }}",
                     string_literal(
@@ -402,8 +393,8 @@ fn rust_runtime_deps_lines(deps: &RustRuntimeDeps) -> Vec<String> {
                     )
                 ),
                 format!(
-                    "trellis-service = {{ path = {} }}",
-                    string_literal(&repo_root.join("rust/crates/service").display().to_string())
+                    "trellis-rs = {{ path = {} }}",
+                    string_literal(&repo_root.join("rust/crates/trellis").display().to_string())
                 ),
             ]
         }
@@ -512,6 +503,8 @@ pub fn write_participant_facade_outputs(
     crate_version: &str,
     runtime_source: RuntimeSource,
     runtime_repo_root: Option<PathBuf>,
+    owned_sdk_crate_name: Option<String>,
+    owned_sdk_path: Option<PathBuf>,
     alias_mappings: Vec<ParticipantAliasMapping>,
 ) -> miette::Result<()> {
     trellis_codegen_rust::generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
@@ -524,8 +517,8 @@ pub fn write_participant_facade_outputs(
             crate_version.to_string(),
             runtime_repo_root,
         ),
-        owned_sdk_crate_name: None,
-        owned_sdk_path: None,
+        owned_sdk_crate_name,
+        owned_sdk_path,
         alias_mappings,
     })
     .into_diagnostic()?;
@@ -1016,8 +1009,7 @@ fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool) -> String {
         contents.replace("crate::", "super::")
     };
     rewritten
-        .replace("trellis_rs::client::", "crate::client::")
-        .replace("trellis_rs::service::", "crate::service::")
+        .replace("trellis_rs::", "crate::")
         .replace("trellis_client::", "crate::client::")
         .replace("trellis_contracts::", "crate::contracts::")
 }
@@ -1239,10 +1231,6 @@ pub fn ts_package_name_from_id(contract_id: &str, prefix: &str) -> String {
 
 pub fn default_rust_crate_name_from_id(contract_id: &str) -> String {
     trellis_codegen_rust::default_sdk_crate_name(contract_id)
-}
-
-pub(crate) fn should_emit_service_runtime_facade(contract_id: &str) -> bool {
-    embedded_trellis_owned_rust_sdk_module(contract_id).is_none()
 }
 
 fn embedded_trellis_owned_rust_sdk_module(contract_id: &str) -> Option<&'static str> {

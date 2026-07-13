@@ -22,9 +22,9 @@ liveTrellisTest({
           .orThrow();
         const kvEntry = await client.kv.records.get(kvKey).orThrow();
         const kvMessage = kvEntry.value.message;
-      
+
         await kvEntry.delete(true).orThrow();
-      
+
         return Result.ok({ provider: "ts", storeText: "", kvMessage });
       });
 

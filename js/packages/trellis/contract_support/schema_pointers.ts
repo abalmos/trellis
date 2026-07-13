@@ -185,14 +185,24 @@ function isTokenableSchema(schema: unknown): boolean {
   }
 
   const type = s.type;
-  if (type === "string" || type === "number" || type === "integer") return true;
+  if (type === "string" || type === "number") return true;
+  if (type === "integer") return hasSafeIntegerBounds(s);
   if (Array.isArray(type)) {
     return type.every(
-      (t) => t === "string" || t === "number" || t === "integer",
+      (t) =>
+        t === "string" || t === "number" ||
+        (t === "integer" && hasSafeIntegerBounds(s)),
     );
   }
 
   return false;
+}
+
+function hasSafeIntegerBounds(schema: Record<string, unknown>): boolean {
+  return typeof schema.minimum === "number" &&
+    schema.minimum >= Number.MIN_SAFE_INTEGER &&
+    typeof schema.maximum === "number" &&
+    schema.maximum <= Number.MAX_SAFE_INTEGER;
 }
 
 /**

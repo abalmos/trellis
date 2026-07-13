@@ -347,10 +347,12 @@ where
         input: &D::Input,
     ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
         let body = serde_json::to_value(input)?;
+        validate_operation_schema(D::INPUT_SCHEMA_JSON, &body, "operation input")?;
         let response = self
             .transport
             .request_json_value(D::SUBJECT.to_string(), body)
             .await?;
+        validate_snapshot_at::<D>(&response, "/snapshot")?;
         let accepted: AcceptedEnvelope<D::Progress, D::Output> = serde_json::from_value(response)?;
         if accepted.kind != "accepted" {
             return Err(TrellisClientError::OperationProtocol(format!(
@@ -495,7 +497,7 @@ where
             .transport
             .request_json_value(control_subject(D::SUBJECT), body)
             .await?;
-        decode_snapshot_response(response)
+        decode_snapshot_response::<D>(response)
     }
 
     pub async fn wait(
@@ -509,7 +511,7 @@ where
             .transport
             .request_json_value(control_subject(D::SUBJECT), body)
             .await?;
-        let snapshot = decode_snapshot_response(response)?;
+        let snapshot = decode_snapshot_response::<D>(response)?;
         if !is_terminal_state(&snapshot.state) {
             return Err(TrellisClientError::OperationProtocol(
                 "wait returned non-terminal snapshot".to_string(),
@@ -529,7 +531,7 @@ where
             .transport
             .request_json_value(control_subject(D::SUBJECT), body)
             .await?;
-        decode_snapshot_response(response)
+        decode_snapshot_response::<D>(response)
     }
 
     /// Send a control signal to the running operation.
@@ -538,10 +540,21 @@ where
         signal: impl Into<String>,
         input: Option<Value>,
     ) -> Result<OperationSignalAccepted<D::Progress, D::Output>, TrellisClientError> {
+        let signal = signal.into();
+        let signal_schemas: serde_json::Map<String, Value> =
+            serde_json::from_str(D::SIGNAL_INPUT_SCHEMAS_JSON)?;
+        let schema = signal_schemas.get(&signal).ok_or_else(|| {
+            TrellisClientError::OperationProtocol(format!("undeclared operation signal '{signal}'"))
+        })?;
+        validate_operation_schema(
+            &serde_json::to_string(schema)?,
+            input.as_ref().unwrap_or(&Value::Null),
+            "operation signal input",
+        )?;
         let mut body = json!({
             "action": "signal",
             "operationId": self.id(),
-            "signal": signal.into(),
+            "signal": signal,
         });
         if let Some(input) = input {
             body["input"] = input;
@@ -550,7 +563,7 @@ where
             .transport
             .request_json_value(control_subject(D::SUBJECT), body)
             .await?;
-        decode_signal_response(response)
+        decode_signal_response::<D>(response)
     }
 
     pub async fn watch(
@@ -578,7 +591,10 @@ where
                             let event = match frame {
                                 Ok(value) => {
                                     match decode_watch_frame::<D::Progress, Value, D::Output>(
-                                        value, None,
+                                        value,
+                                        D::PROGRESS_SCHEMA_JSON,
+                                        None,
+                                        D::OUTPUT_SCHEMA_JSON,
                                     ) {
                                         Ok(Some(event)) => event,
                                         Ok(None) => continue,
@@ -634,7 +650,9 @@ where
                     };
                     let Some(event) = decode_watch_frame::<D::Progress, D::Update, D::Output>(
                         frame?,
+                        D::PROGRESS_SCHEMA_JSON,
                         Some(D::UPDATE_SCHEMA_JSON),
+                        D::OUTPUT_SCHEMA_JSON,
                     )?
                     else {
                         continue;
@@ -686,7 +704,9 @@ fn decode_watch_frame<
     TOutput: DeserializeOwned,
 >(
     value: Value,
+    progress_schema_json: Option<&str>,
     update_schema_json: Option<&str>,
+    output_schema_json: &str,
 ) -> Result<Option<OperationEvent<TProgress, TOutput, TUpdate>>, TrellisClientError> {
     if value.get("kind").and_then(Value::as_str) == Some("keepalive") {
         return Ok(None);
@@ -698,10 +718,20 @@ fn decode_watch_frame<
 
     match kind {
         "snapshot" => {
+            validate_snapshot_value(
+                value.pointer("/snapshot"),
+                progress_schema_json,
+                output_schema_json,
+            )?;
             let frame: SnapshotFrame<TProgress, TOutput> = serde_json::from_value(value)?;
             Ok(Some(snapshot_to_event(frame.snapshot)))
         }
         "event" => {
+            validate_snapshot_value(
+                value.pointer("/event/snapshot"),
+                progress_schema_json,
+                output_schema_json,
+            )?;
             if value.pointer("/event/type").and_then(Value::as_str) == Some("update") {
                 let update = value.pointer("/event/update").ok_or_else(|| {
                     TrellisClientError::OperationProtocol(
@@ -725,16 +755,17 @@ fn decode_watch_frame<
     }
 }
 
-fn decode_snapshot_response<TProgress: DeserializeOwned, TOutput: DeserializeOwned>(
+fn decode_snapshot_response<D: OperationDescriptor>(
     value: Value,
-) -> Result<OperationSnapshot<TProgress, TOutput>, TrellisClientError> {
+) -> Result<OperationSnapshot<D::Progress, D::Output>, TrellisClientError> {
     let kind = value.get("kind").and_then(Value::as_str).ok_or_else(|| {
         TrellisClientError::OperationProtocol("expected control frame kind".to_string())
     })?;
 
     match kind {
         "snapshot" => {
-            let frame: SnapshotFrame<TProgress, TOutput> = serde_json::from_value(value)?;
+            validate_snapshot_at::<D>(&value, "/snapshot")?;
+            let frame: SnapshotFrame<D::Progress, D::Output> = serde_json::from_value(value)?;
             Ok(frame.snapshot)
         }
         "error" => Err(operation_error_frame(value)),
@@ -744,15 +775,18 @@ fn decode_snapshot_response<TProgress: DeserializeOwned, TOutput: DeserializeOwn
     }
 }
 
-fn decode_signal_response<TProgress: DeserializeOwned, TOutput: DeserializeOwned>(
+fn decode_signal_response<D: OperationDescriptor>(
     value: Value,
-) -> Result<OperationSignalAccepted<TProgress, TOutput>, TrellisClientError> {
+) -> Result<OperationSignalAccepted<D::Progress, D::Output>, TrellisClientError> {
     let kind = value.get("kind").and_then(Value::as_str).ok_or_else(|| {
         TrellisClientError::OperationProtocol("expected signal frame kind".to_string())
     })?;
 
     match kind {
-        "signal-accepted" => Ok(serde_json::from_value(value)?),
+        "signal-accepted" => {
+            validate_snapshot_at::<D>(&value, "/snapshot")?;
+            Ok(serde_json::from_value(value)?)
+        }
         "error" => Err(operation_error_frame(value)),
         _ => Err(TrellisClientError::OperationProtocol(format!(
             "expected signal-accepted frame, got '{kind}'"
@@ -808,6 +842,48 @@ fn validate_update_schema(schema_json: &str, update: &Value) -> Result<(), Trell
     Ok(())
 }
 
+fn validate_snapshot_at<D: OperationDescriptor>(
+    value: &Value,
+    pointer: &str,
+) -> Result<(), TrellisClientError> {
+    validate_snapshot_value(
+        value.pointer(pointer),
+        D::PROGRESS_SCHEMA_JSON,
+        D::OUTPUT_SCHEMA_JSON,
+    )
+}
+
+fn validate_snapshot_value(
+    snapshot: Option<&Value>,
+    progress_schema_json: Option<&str>,
+    output_schema_json: &str,
+) -> Result<(), TrellisClientError> {
+    let Some(snapshot) = snapshot else {
+        return Ok(());
+    };
+    if let (Some(schema), Some(progress)) = (progress_schema_json, snapshot.get("progress")) {
+        if !progress.is_null() {
+            validate_operation_schema(schema, progress, "operation progress")?;
+        }
+    }
+    if let Some(output) = snapshot.get("output") {
+        if !output.is_null() {
+            validate_operation_schema(output_schema_json, output, "operation output")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_operation_schema(
+    schema_json: &str,
+    value: &Value,
+    label: &str,
+) -> Result<(), TrellisClientError> {
+    crate::service::validate_input_schema(schema_json, value).map_err(|error| {
+        TrellisClientError::OperationProtocol(format!("{label} failed schema validation: {error}"))
+    })
+}
+
 #[cfg(test)]
 mod update_tests {
     use super::*;
@@ -831,7 +907,9 @@ mod update_tests {
                     "update": { "processed": 3 }
                 }
             }),
+            None,
             Some(r#"{"type":"object","required":["processed"],"properties":{"processed":{"type":"integer"}}}"#),
+            "{}",
         )
         .expect("decode update frame")
         .expect("event frame");
@@ -898,7 +976,7 @@ mod tests {
         const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;
         const OUTPUT_SCHEMA_JSON: &'static str =
             r#"{"type":"object","properties":{},"required":[]}"#;
-        const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
+        const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = r#"{"selectWorkspace":{"type":"object","required":["workspaceId"],"properties":{"workspaceId":{"type":"string"}}}}"#;
     }
 
     impl TransferOperationDescriptor for RefundOperation {}

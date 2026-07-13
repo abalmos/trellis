@@ -8,7 +8,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use ulid::Ulid;
 
-use crate::client::EventDescriptor;
+use crate::client::{subject::SubjectError, EventDescriptor};
 
 const OUTBOX_STATUS_PENDING: &str = "pending";
 const OUTBOX_STATUS_IN_FLIGHT: &str = "in_flight";
@@ -117,11 +117,18 @@ fn now_rfc3339() -> String {
 }
 
 /// Prepare one descriptor-backed typed event without publishing it.
-pub fn prepare_event<D>(event: &D::Event) -> Result<PreparedTrellisEvent, serde_json::Error>
+pub fn prepare_event<D>(event: &D::Event) -> Result<PreparedTrellisEvent, SubjectError>
 where
     D: EventDescriptor,
 {
-    prepare_event_value(D::SUBJECT, event)
+    let value = serde_json::to_value(event)?;
+    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value)
+        .map_err(|error| SubjectError::InvalidPayload(error.to_string()))?;
+    let subject = D::publish_subject(event)?;
+    Ok(PreparedTrellisEvent::new(
+        subject,
+        Bytes::from(serde_json::to_vec(event)?),
+    ))
 }
 
 /// Prepare one generic JSON-serializable event for a concrete subject.

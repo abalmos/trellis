@@ -1,10 +1,17 @@
 [workspace]
 members = ["device", "service"]
-exclude = ["generated/packages/cargo-participants/demo-device", "generated/packages/cargo/demo-service"]
+exclude = [
+  "generated/packages/cargo-participants/demo-device",
+  "generated/packages/cargo-participants/demo-service",
+  "generated/packages/cargo/demo-device",
+  "generated/packages/cargo/demo-service",
+]
 resolver = "2"
 
 [workspace.package]
+version = "0.11.0"
 edition = "2021"
+rust-version = "1.88"
 publish = false
 
 [workspace.dependencies]
@@ -22,4 +29,5 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 trellis-rs = { path = "../../rust/crates/trellis" }
 trellis-participant-demo-device = { path = "generated/packages/cargo-participants/demo-device" }
+trellis-participant-demo-service = { path = "generated/packages/cargo-participants/demo-service" }
 trellis-sdk-demo-service = { path = "generated/packages/cargo/demo-service" }

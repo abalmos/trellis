@@ -27,7 +27,9 @@ liveTrellisTest({
       identity,
     );
 
-    const activationRef = await admin.authDeviceUserAuthoritiesResolve({ flowId })
+    const activationRef = await admin.authDeviceUserAuthoritiesResolve({
+      flowId,
+    })
       .start()
       .orThrow();
 

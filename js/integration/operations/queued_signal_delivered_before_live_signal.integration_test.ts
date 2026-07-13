@@ -23,7 +23,7 @@ liveTrellisTest({
       await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         await consumptionGate;
-      
+
         const queued = await op.nextSignal().orThrow();
         assertEquals(queued.signal, "updateMessage");
         assert(
@@ -31,7 +31,7 @@ liveTrellisTest({
           "queued signal input should be an object",
         );
         consumed.push(String(Reflect.get(queued.input, "suffix")));
-      
+
         const live = await op.nextSignal("appendMessage").orThrow();
         assertEquals(live.signal, "appendMessage");
         assert(
@@ -40,7 +40,7 @@ liveTrellisTest({
         );
         consumed.push(String(Reflect.get(live.input, "suffix")));
         assertEquals(consumed, ["queued", "live"]);
-      
+
         return Result.ok({
           message: `${input.message}:${consumed.join(":")}`,
           done: true,

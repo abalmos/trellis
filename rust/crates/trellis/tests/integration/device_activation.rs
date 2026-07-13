@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use rusqlite::params;
 use serde_json::{json, Value};
-use trellis_rs::client::{OperationState, ServiceConnectWithContractOptions};
+use trellis_rs::client::OperationState;
 use trellis_rs::sdk::auth::types::{
-    AuthDeploymentAuthorityPlanRequest, AuthDeploymentsCreateRequest,
-    AuthDeviceUserAuthoritiesListRequest, AuthDeviceUserAuthoritiesResolveInput,
-    AuthDeviceUserAuthoritiesReviewsDecideRequest, AuthDeviceUserAuthoritiesReviewsListRequest,
-    AuthDeviceUserAuthoritiesRevokeRequest, AuthDevicesProvisionRequest,
-    AuthServiceInstancesListRequest, AuthSessionsListRequest, AuthSessionsRevokeRequest,
+    AuthDeploymentAuthorityPlanRequest, AuthDeviceUserAuthoritiesListRequest,
+    AuthDeviceUserAuthoritiesResolveInput, AuthDeviceUserAuthoritiesReviewsDecideRequest,
+    AuthDeviceUserAuthoritiesReviewsListRequest, AuthDeviceUserAuthoritiesRevokeRequest,
+    AuthDevicesProvisionRequest, AuthServiceInstancesListRequest, AuthSessionsListRequest,
+    AuthSessionsRevokeRequest,
 };
 use trellis_rs::sdk::auth::AuthClient as GeneratedAuthClient;
 
@@ -56,6 +56,14 @@ const SERVICE_CONTRACT_JSON: &str = r#"{
     }
   }
 }"#;
+
+struct ActivationServiceContract;
+
+impl trellis_rs::service::GeneratedServiceContract for ActivationServiceContract {
+    const CONTRACT_ID: &'static str = SERVICE_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
+}
 
 fn device_contract() -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
     let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
@@ -129,7 +137,7 @@ async fn create_device_deployment_with_review_mode(
 ) {
     auth.rpc()
         .auth()
-        .deployments_create(&AuthDeploymentsCreateRequest(json!({
+        .deployments_create(&crate::wire(json!({
             "deploymentId": deployment_id,
             "kind": "device",
             "reviewMode": review_mode,
@@ -154,7 +162,7 @@ async fn wait_for_pending_review(
                 instance_id: Some(instance_id.to_string()),
                 limit: 20,
                 offset: None,
-                state: Some("pending".to_string()),
+                state: Some(crate::wire("pending")),
             })
             .await
             .expect("list device activation reviews");
@@ -197,40 +205,39 @@ async fn approve_device_contract(
         })
         .await
         .expect("plan device contract authority");
-
-    if planned.plan.get("classification").and_then(Value::as_str) == Some("update") {
-        auth.rpc()
-            .auth()
-            .deployment_authority_accept_update(
-                &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
-                    plan_id: planned
-                        .plan
-                        .get("planId")
-                        .and_then(Value::as_str)
-                        .expect("planId")
-                        .to_string(),
-                    expected_desired_version: None,
-                },
-            )
-            .await
-            .expect("accept device contract update");
-    } else {
-        auth.rpc()
-            .auth()
-            .deployment_authority_accept_migration(
-                &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
-                    plan_id: planned
-                        .plan
-                        .get("planId")
-                        .and_then(Value::as_str)
-                        .expect("planId")
-                        .to_string(),
-                    expected_desired_version: None,
-                    acknowledgement: "Approved by device activation integration test.".to_string(),
-                },
-            )
-            .await
-            .expect("accept device contract migration");
+    match planned.plan {
+        trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanResponsePlan::Update {
+            plan_id,
+            ..
+        } => {
+            auth.rpc()
+                .auth()
+                .deployment_authority_accept_update(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
+                        plan_id,
+                        expected_desired_version: None,
+                    },
+                )
+                .await
+                .expect("accept device contract update");
+        }
+        trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanResponsePlan::Migration {
+            plan_id,
+            ..
+        } => {
+            auth.rpc()
+                .auth()
+                .deployment_authority_accept_migration(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
+                        plan_id,
+                        expected_desired_version: None,
+                        acknowledgement: "Approved by device activation integration test."
+                            .to_string(),
+                    },
+                )
+                .await
+                .expect("accept device contract migration");
+        }
     }
 
     auth.rpc()
@@ -294,26 +301,43 @@ async fn session_key_for(auth: &GeneratedAuthClient<'_>, kind: &str, id: &str) -
         .entries
         .into_iter()
         .find(|entry| {
-            entry.get("sessionKey").and_then(Value::as_str) == Some(id)
-                || (entry.get("participantKind").and_then(Value::as_str) == Some(kind)
-                    && principal_matches(entry, id))
+            session_entry_key(entry) == id || match entry {
+                trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Device {
+                    principal,
+                    ..
+                } if kind == "device" => principal.device_id == id,
+                trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Service {
+                    principal,
+                    ..
+                } if kind == "service" => principal.id == id || principal.instance_id == id,
+                _ => false,
+            }
         })
-        .and_then(|entry| {
-            entry
-                .get("sessionKey")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
+        .map(|entry| session_entry_key(&entry).to_string())
         .unwrap_or_else(|| panic!("expected {kind} session"))
 }
 
-fn principal_matches(entry: &Value, id: &str) -> bool {
-    let Some(principal) = entry.get("principal") else {
-        return false;
-    };
-    ["deviceId", "id", "instanceId"]
-        .into_iter()
-        .any(|field| principal.get(field).and_then(Value::as_str) == Some(id))
+fn session_entry_key(
+    entry: &trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem,
+) -> &str {
+    match entry {
+        trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::App {
+            session_key,
+            ..
+        }
+        | trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Agent {
+            session_key,
+            ..
+        }
+        | trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Device {
+            session_key,
+            ..
+        }
+        | trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Service {
+            session_key,
+            ..
+        } => session_key,
+    }
 }
 
 async fn wait_for_session_absent(auth: &GeneratedAuthClient<'_>, session_key: &str) {
@@ -332,7 +356,7 @@ async fn wait_for_session_absent(auth: &GeneratedAuthClient<'_>, session_key: &s
         if sessions
             .entries
             .iter()
-            .all(|entry| entry.get("sessionKey").and_then(Value::as_str) != Some(session_key))
+            .all(|entry| session_entry_key(entry) != session_key)
         {
             return;
         }
@@ -375,7 +399,7 @@ async fn wait_for_device_authority_state(
                 instance_id: Some(instance_id.to_string()),
                 limit: 20,
                 offset: None,
-                state: Some(state.to_string()),
+                state: Some(crate::wire(state)),
             })
             .await
             .expect("list device user authorities");
@@ -496,19 +520,17 @@ async fn wait_for_deployment_authority_ready(auth: &GeneratedAuthClient<'_>, dep
             )
             .await
             .expect("get deployment authority");
-        let materialized = &result.materialized_authority;
-        if materialized.is_null() {
+        let Some(materialized) = result.materialized_authority.as_ref() else {
             tokio::time::sleep(Duration::from_millis(25)).await;
             continue;
-        }
-        let obj = materialized
-            .as_object()
-            .expect("materialized authority should be object");
-        match obj.get("status").and_then(Value::as_str) {
+        };
+        match materialized.get("status").and_then(Value::as_str) {
             Some("current") => {
-                if obj.get("desiredVersion").and_then(Value::as_str)
+                if materialized.get("desiredVersion").and_then(Value::as_str)
                     == Some(&result.authority.version as &str)
-                    && obj.get("reconciledAt").is_some_and(|v| !v.is_null())
+                    && materialized
+                        .get("reconciledAt")
+                        .is_some_and(|v| !v.is_null())
                 {
                     return;
                 }
@@ -516,7 +538,8 @@ async fn wait_for_deployment_authority_ready(auth: &GeneratedAuthClient<'_>, dep
             Some("failed") => {
                 panic!(
                     "deployment authority reconciliation failed: {}",
-                    obj.get("error")
+                    materialized
+                        .get("error")
                         .and_then(Value::as_str)
                         .unwrap_or("unknown")
                 );
@@ -614,7 +637,7 @@ async fn device_activation_admin_provisions_known_device() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -650,7 +673,7 @@ async fn device_activation_device_starts_activation_request() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -704,7 +727,7 @@ async fn device_activation_admin_resolves_activation_operation() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -754,10 +777,10 @@ async fn device_activation_admin_resolves_activation_operation() {
     let output = terminal
         .output
         .expect("resolve operation completed with output");
-    assert_eq!(
-        output.0.get("status").and_then(Value::as_str),
-        Some("activated")
-    );
+    assert!(matches!(
+        output,
+        trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesResolveOutput::Activated { .. }
+    ));
 }
 
 #[tokio::test]
@@ -782,7 +805,7 @@ async fn device_activation_review_reject_denies_connect() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -838,7 +861,7 @@ async fn device_activation_review_reject_denies_connect() {
         .auth()
         .device_user_authorities_reviews_decide(&AuthDeviceUserAuthoritiesReviewsDecideRequest {
             review_id: review.review_id,
-            decision: "reject".to_string(),
+            decision: crate::wire("reject"),
             reason: Some(rejection_reason.to_string()),
         })
         .await
@@ -854,14 +877,12 @@ async fn device_activation_review_reject_denies_connect() {
     let output = terminal
         .output
         .expect("resolve operation completed with output");
-    assert_eq!(
-        output.0.get("status").and_then(Value::as_str),
-        Some("rejected")
-    );
-    assert_eq!(
-        output.0.get("reason").and_then(Value::as_str),
-        Some(rejection_reason)
-    );
+    assert!(matches!(
+        output,
+        trellis_rs::sdk::auth::types::AuthDeviceUserAuthoritiesResolveOutput::Rejected {
+            reason: Some(reason)
+        } if reason == rejection_reason
+    ));
 
     let wait_error = trellis_rs::auth::wait_for_device_activation(
         trellis_rs::auth::WaitForDeviceActivationOpts {
@@ -881,14 +902,14 @@ async fn device_activation_review_reject_denies_connect() {
         "unexpected device activation wait error: {wait_error:?}"
     );
 
-    let connect = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let connect = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await;
     assert!(connect.is_err(), "rejected device should not connect");
@@ -910,7 +931,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let own_deployment_id = generate_deployment_id();
     let other_deployment_id = generate_deployment_id();
@@ -1001,7 +1022,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
             instance_id: None,
             limit: 20,
             offset: None,
-            state: Some("pending".to_string()),
+            state: Some(crate::wire("pending")),
         })
         .await
         .expect("admin list pending reviews");
@@ -1029,7 +1050,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
         &reviewer_session_key,
         &format!("trellis.auth::device.review.{own_deployment_id}"),
     );
-    let reviewer_auth = GeneratedAuthClient::new(&reviewer_client);
+    let reviewer_auth = GeneratedAuthClient::new(crate::generated_caller(&reviewer_client));
     let scoped_reviews = reviewer_auth
         .rpc()
         .auth()
@@ -1038,7 +1059,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
             instance_id: None,
             limit: 20,
             offset: None,
-            state: Some("pending".to_string()),
+            state: Some(crate::wire("pending")),
         })
         .await
         .expect("scoped reviewer list pending reviews");
@@ -1056,7 +1077,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
         .auth()
         .device_user_authorities_reviews_decide(&AuthDeviceUserAuthoritiesReviewsDecideRequest {
             review_id: other_review.review_id,
-            decision: "approve".to_string(),
+            decision: crate::wire("approve"),
             reason: None,
         })
         .await;
@@ -1070,7 +1091,7 @@ async fn device_activation_review_capability_is_deployment_scoped() {
         .auth()
         .device_user_authorities_reviews_decide(&AuthDeviceUserAuthoritiesReviewsDecideRequest {
             review_id: own_review.review_id,
-            decision: "approve".to_string(),
+            decision: crate::wire("approve"),
             reason: None,
         })
         .await
@@ -1107,7 +1128,7 @@ async fn device_activation_revoked_device_cannot_reconnect() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -1169,30 +1190,29 @@ async fn device_activation_revoked_device_cannot_reconnect() {
     .await
     .expect("wait for device activation");
 
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
 
-    let device_auth = GeneratedAuthClient::new(&device);
+    let device_auth = GeneratedAuthClient::new(crate::generated_caller(&device));
     let me = device_auth
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as device");
-    assert_eq!(me.participant_kind.as_str(), Some("device"));
+    assert_eq!(me.participant_kind.as_str(), "device");
 
     let revoked = auth
         .rpc()
@@ -1214,7 +1234,7 @@ async fn device_activation_revoked_device_cannot_reconnect() {
                 instance_id: Some(provisioned.instance.instance_id.clone()),
                 limit: 20,
                 offset: None,
-                state: Some("revoked".to_string()),
+                state: Some(crate::wire("revoked")),
             })
             .await
             .expect("list revoked device user authorities");
@@ -1246,14 +1266,14 @@ async fn device_activation_revoked_device_cannot_reconnect() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let reconnect = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let reconnect = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await;
     assert!(reconnect.is_err(), "revoked device should not reconnect");
@@ -1289,7 +1309,7 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -1342,22 +1362,21 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
     .await
     .expect("wait for device activation");
 
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
-    let device_auth = GeneratedAuthClient::new(&device);
+    let device_auth = GeneratedAuthClient::new(crate::generated_caller(&device));
     device_auth
         .rpc()
         .auth()
@@ -1387,14 +1406,14 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
     wait_for_session_absent(&auth, &device_session_key).await;
     wait_for_sessions_me_denied(&device_auth).await;
 
-    let reconnect_device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let reconnect_device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await;
     assert!(
@@ -1402,22 +1421,16 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
         "revoked device should not reconnect"
     );
 
-    let service = trellis_rs::client::TrellisClient::connect_service_with_contract(
-        ServiceConnectWithContractOptions {
-            trellis_url: &trellis_url,
-            contract_id: SERVICE_CONTRACT_ID,
-            contract_digest: &service_digest,
-            contract_json: SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: 15_000,
-            retry_delay_ms: 100,
-            authority_pending_timeout_ms: Some(1_000),
-        },
+    let service = trellis_test::connect_service_runtime::<ActivationServiceContract>(
+        &trellis_url,
+        SERVICE_CONTRACT_ID,
+        &service_digest,
+        SERVICE_CONTRACT_JSON,
+        &service_key.seed,
     )
     .await
     .expect("connect service client");
-    service
-        .flush()
+    trellis_test::flush(service.caller())
         .await
         .expect("service NATS flush should succeed");
 
@@ -1434,17 +1447,12 @@ async fn auth_sessions_revoke_revokes_device_and_service_access() {
     wait_for_session_absent(&auth, &service_session_key).await;
     wait_for_disabled_service_instance(&auth, &service_key.session_key).await;
 
-    let reconnect_service = trellis_rs::client::TrellisClient::connect_service_with_contract(
-        ServiceConnectWithContractOptions {
-            trellis_url: &trellis_url,
-            contract_id: SERVICE_CONTRACT_ID,
-            contract_digest: &service_digest,
-            contract_json: SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: 2_000,
-            retry_delay_ms: 100,
-            authority_pending_timeout_ms: Some(500),
-        },
+    let reconnect_service = trellis_test::connect_service_runtime::<ActivationServiceContract>(
+        &trellis_url,
+        SERVICE_CONTRACT_ID,
+        &service_digest,
+        SERVICE_CONTRACT_JSON,
+        &service_key.seed,
     )
     .await;
     assert!(
@@ -1469,7 +1477,7 @@ async fn device_activation_connect_info_admin_reviewed_before_activation() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -1539,32 +1547,31 @@ async fn device_activation_connect_info_admin_reviewed_before_activation() {
         .expect("list device activation reviews");
     assert!(reviews.entries.is_empty());
 
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: response
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            response
                 .pointer("/connectInfo/contractDigest")
                 .and_then(Value::as_str)
                 .expect("connect info contract digest"),
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
 
-    let me = GeneratedAuthClient::new(&device)
+    let me = GeneratedAuthClient::new(crate::generated_caller(&device))
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as device");
-    assert_eq!(me.participant_kind.as_str(), Some("device"));
+    assert_eq!(me.participant_kind.as_str(), "device");
 }
 
 #[tokio::test]
@@ -1589,7 +1596,7 @@ async fn device_activation_wait_and_connect_info_reject_bad_proofs_and_stale_iat
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -1877,7 +1884,7 @@ async fn device_activation_device_receives_connect_info() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -1971,7 +1978,7 @@ async fn device_activation_activated_device_connects_and_authenticates() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -2033,23 +2040,22 @@ async fn device_activation_activated_device_connects_and_authenticates() {
     .await
     .expect("wait for device activation");
 
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
 
-    let device_auth = GeneratedAuthClient::new(&device);
+    let device_auth = GeneratedAuthClient::new(crate::generated_caller(&device));
     let me = device_auth
         .rpc()
         .auth()
@@ -2059,12 +2065,12 @@ async fn device_activation_activated_device_connects_and_authenticates() {
 
     assert_eq!(
         me.participant_kind.as_str(),
-        Some("device"),
+        "device",
         "session should identify as device"
     );
     let device_info = me
         .device
-        .as_object()
+        .as_ref()
         .expect("device session should have device info");
     assert_eq!(
         device_info.get("deploymentId").and_then(Value::as_str),
@@ -2098,7 +2104,7 @@ async fn device_activation_activated_device_authority_is_listed() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
 
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
@@ -2160,23 +2166,22 @@ async fn device_activation_activated_device_authority_is_listed() {
     .await
     .expect("wait for device activation");
 
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
 
-    let device_auth = GeneratedAuthClient::new(&device);
+    let device_auth = GeneratedAuthClient::new(crate::generated_caller(&device));
     let me = device_auth
         .rpc()
         .auth()
@@ -2186,7 +2191,7 @@ async fn device_activation_activated_device_authority_is_listed() {
 
     assert_eq!(
         me.participant_kind.as_str(),
-        Some("device"),
+        "device",
         "session should identify as device"
     );
 
@@ -2198,7 +2203,7 @@ async fn device_activation_activated_device_authority_is_listed() {
             instance_id: Some(provisioned.instance.instance_id.clone()),
             limit: 20,
             offset: None,
-            state: Some("activated".to_string()),
+            state: Some(crate::wire("activated")),
         })
         .await
         .expect("list device user authorities");
@@ -2225,18 +2230,18 @@ async fn auth_sessions_me_reports_device_envelope() {
 
     let (_runtime, mut admin, bootstrap_url, deployment_id, identity, provisioned, device) =
         connect_activated_device_for_auth_case().await;
-    let me = GeneratedAuthClient::new(&device)
+    let me = GeneratedAuthClient::new(crate::generated_caller(&device))
         .rpc()
         .auth()
         .sessions_me()
         .await
         .expect("call Auth.Sessions.Me as activated device");
 
-    assert_eq!(me.participant_kind.as_str(), Some("device"));
-    assert!(!me.user.is_null(), "activated device should include user");
+    assert_eq!(me.participant_kind.as_str(), "device");
+    assert!(me.user.is_some(), "activated device should include user");
     let device = me
         .device
-        .as_object()
+        .as_ref()
         .expect("device session should include device envelope");
     assert_eq!(
         device.get("deploymentId").and_then(Value::as_str),
@@ -2247,13 +2252,13 @@ async fn auth_sessions_me_reports_device_envelope() {
         Some(identity.public_identity_key.as_str())
     );
     assert_eq!(device.get("active").and_then(Value::as_bool), Some(true));
-    assert!(me.service.is_null());
+    assert!(me.service.is_none());
 
     let admin_client = admin
         .connect_admin(&bootstrap_url)
         .await
         .expect("reuse admin client");
-    let sessions = GeneratedAuthClient::new(admin_client)
+    let sessions = GeneratedAuthClient::new(crate::generated_caller(admin_client))
         .rpc()
         .auth()
         .sessions_list(&AuthSessionsListRequest {
@@ -2266,44 +2271,23 @@ async fn auth_sessions_me_reports_device_envelope() {
     let device_session = sessions
         .entries
         .iter()
-        .find(|entry| {
-            entry.get("participantKind").and_then(Value::as_str) == Some("device")
-                && entry.get("sessionKey").and_then(Value::as_str)
-                    == Some(identity.public_identity_key.as_str())
+        .find_map(|entry| match entry {
+            trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::Device {
+                contract_id,
+                principal,
+                session_key,
+                ..
+            } if session_key == &identity.public_identity_key => Some((contract_id, principal)),
+            _ => None,
         })
         .expect("Auth.Sessions.List should include activated device metadata row");
+    assert_eq!(device_session.1.device_id, provisioned.instance.instance_id);
+    assert_eq!(device_session.1.deployment_id, deployment_id);
     assert_eq!(
-        device_session
-            .get("principal")
-            .and_then(|principal| principal.get("type"))
-            .and_then(Value::as_str),
-        Some("device")
+        device_session.1.runtime_public_key,
+        identity.public_identity_key
     );
-    assert_eq!(
-        device_session
-            .get("principal")
-            .and_then(|principal| principal.get("deviceId"))
-            .and_then(Value::as_str),
-        Some(provisioned.instance.instance_id.as_str())
-    );
-    assert_eq!(
-        device_session
-            .get("principal")
-            .and_then(|principal| principal.get("deploymentId"))
-            .and_then(Value::as_str),
-        Some(deployment_id.as_str())
-    );
-    assert_eq!(
-        device_session
-            .get("principal")
-            .and_then(|principal| principal.get("runtimePublicKey"))
-            .and_then(Value::as_str),
-        Some(identity.public_identity_key.as_str())
-    );
-    assert_eq!(
-        device_session.get("contractId").and_then(Value::as_str),
-        Some(DEVICE_CONTRACT_ID)
-    );
+    assert_eq!(device_session.0, DEVICE_CONTRACT_ID);
 }
 
 #[tokio::test]
@@ -2316,7 +2300,7 @@ async fn auth_sessions_me_rejects_stale_device_principals() {
 
     let (runtime, _admin, _bootstrap_url, deployment_id, identity, provisioned, device) =
         connect_activated_device_for_auth_case().await;
-    let device_auth = GeneratedAuthClient::new(&device);
+    let device_auth = GeneratedAuthClient::new(crate::generated_caller(&device));
     device_auth
         .rpc()
         .auth()
@@ -2368,7 +2352,7 @@ async fn connect_activated_device_for_auth_case() -> (
     String,
     trellis_rs::auth::DeviceIdentity,
     trellis_rs::sdk::auth::types::AuthDevicesProvisionResponse,
-    trellis_rs::client::TrellisClient,
+    trellis_rs::generated::Caller,
 ) {
     let runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
@@ -2384,7 +2368,7 @@ async fn connect_activated_device_for_auth_case() -> (
         .connect_admin(&bootstrap_url)
         .await
         .expect("connect admin client");
-    let auth = GeneratedAuthClient::new(admin_client);
+    let auth = GeneratedAuthClient::new(crate::generated_caller(admin_client));
     let deployment_id = generate_deployment_id();
     let device_contract = device_contract().expect("build device contract");
 
@@ -2435,19 +2419,18 @@ async fn connect_activated_device_for_auth_case() -> (
     })
     .await
     .expect("wait for device activation");
-    let device = trellis_rs::client::TrellisClient::connect_device(
-        trellis_rs::client::DeviceConnectOptions {
-            trellis_url: &trellis_url,
-            contract_digest: &device_contract_digest,
-            public_identity_key: &identity.public_identity_key,
-            identity_seed_base64url: &identity.identity_seed_base64url,
-            timeout_ms: 15_000,
-        },
+    let device = trellis_rs::generated::Caller::connect_device(
+        trellis_rs::generated::DeviceConnectOptions::new(
+            &trellis_url,
+            &device_contract_digest,
+            &identity.public_identity_key,
+            &identity.identity_seed_base64url,
+            15_000,
+        ),
     )
     .await
     .expect("connect device client");
-    device
-        .flush()
+    trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
     drop(auth);

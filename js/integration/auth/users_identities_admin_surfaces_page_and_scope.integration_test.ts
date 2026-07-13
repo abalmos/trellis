@@ -1,9 +1,9 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   AuthError,
+  type CallerRuntime,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { isErr } from "@qlever-llc/result";

@@ -2,27 +2,18 @@ use std::{sync::Arc, time::Duration};
 
 use async_nats::jetstream::{self, consumer};
 use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient};
-use trellis_rs::jobs::keys::NatsKeyCoordinator;
-use trellis_rs::jobs::{
-    start_worker_host_from_client, JobManager, JobProcessError, JobsRuntimeBinding,
-    NatsJobEventPublisher, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerActiveJob,
-    WorkerHostOptions,
-};
-use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
 use trellis_rs::sdk::jobs::types::{
     JobsCancelRequest, JobsInspectRequest, JobsQueryRequest, JobsQueryResponseEntriesItem,
     JobsWatchInput,
 };
-use trellis_rs::service::ConnectedServiceRuntime;
 
 const PROBE_SERVICE_CONTRACT_ID: &str =
     "trellis.integration.service-jobs-live-admin.probe-service@v1";
 const ADMIN_CLIENT_CONTRACT_ID: &str = "trellis.integration.service-jobs-live-admin.client@v1";
 const JOBS_SERVICE_DEPLOYMENT: &str = "service-jobs-live-admin-jobs-rust";
 const PROBE_SERVICE_DEPLOYMENT: &str = "service-jobs-live-admin-probe-rust";
-const PROBE_SERVICE_NAME: &str = "service-jobs-live-admin-probe-rust";
 const JOB_TYPE: &str = "holdOpen";
 const MARKER: &str = "service-jobs-live-admin-marker-rust";
 
@@ -51,6 +42,37 @@ const PROBE_SERVICE_CONTRACT_JSON: &str = r#"{
     }
   }
 }"#;
+
+struct ProbeContract;
+
+impl trellis_rs::service::GeneratedServiceContract for ProbeContract {
+    const CONTRACT_ID: &'static str = PROBE_SERVICE_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = PROBE_SERVICE_CONTRACT_JSON;
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HoldPayload {
+    marker: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct HoldResult {
+    cancelled: bool,
+}
+
+struct HoldOpenJob;
+
+impl trellis_rs::jobs::JobDescriptor for HoldOpenJob {
+    type Payload = HoldPayload;
+    type Result = HoldResult;
+    const QUEUE_TYPE: &'static str = JOB_TYPE;
+    const PAYLOAD_SCHEMA_JSON: &'static str =
+        r#"{"type":"object","required":["marker"],"properties":{"marker":{"type":"string"}}}"#;
+    const RESULT_SCHEMA_JSON: Option<&'static str> = Some(
+        r#"{"type":"object","required":["cancelled"],"properties":{"cancelled":{"type":"boolean"}}}"#,
+    );
+}
 
 #[tokio::test]
 async fn rust_service_jobs_hosts_generated_admin_rpcs() {
@@ -99,20 +121,22 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         "TRELLIS_JOBS_DB_PATH",
         runtime.workdir().join("service-jobs-live-admin.sqlite"),
     );
-    let jobs_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: trellis_service_jobs::CONTRACT_ID,
-            contract_digest: jobs_contract.digest(),
-            contract_json: trellis_service_jobs::CONTRACT_JSON,
-            session_key_seed_base64url: &jobs_service_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
+    let jobs_runtime = trellis_test::connect_service_runtime::<trellis_service_jobs::JobsContract>(
+        runtime.trellis_url(),
+        trellis_service_jobs::CONTRACT_ID,
+        jobs_contract.digest(),
+        trellis_service_jobs::CONTRACT_JSON,
+        &jobs_service_key.seed,
+    )
+    .await
+    .expect("connect Rust Jobs admin service runtime");
+    let jobs_nats = async_nats::ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
         .await
-        .expect("connect Rust Jobs admin service client");
-    let jobs_nats = jobs_client.internal_nats().clone();
+        .expect("load jobs test credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect jobs test transport");
     let jobs_jetstream = jetstream::new(jobs_nats.clone());
     let jobs_stream = jobs_jetstream
         .get_stream("JOBS")
@@ -120,19 +144,13 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .expect("open Jobs lifecycle stream");
     jobs_stream
         .create_consumer(consumer::pull::Config {
-            durable_name: Some("jobs-watch-stale_test-1".to_string()),
+            durable_name: Some("jobs-watch-stale-test-1".to_string()),
             filter_subject: "trellis.jobs.>".to_string(),
             ack_policy: consumer::AckPolicy::Explicit,
             ..Default::default()
         })
         .await
         .expect("seed obsolete Jobs.Watch consumer");
-    let jobs_runtime =
-        ConnectedServiceRuntime::<trellis_service_jobs::JobsContract>::from_connected_client(
-            trellis_service_jobs::SERVICE_NAME,
-            Arc::new(jobs_client),
-        )
-        .expect("build connected Rust Jobs admin service runtime");
     let jobs_service = trellis_service_jobs::ConnectedJobsService::new(jobs_runtime)
         .expect("build Rust Jobs admin service");
     if let Some(path) = previous_db_path {
@@ -146,49 +164,19 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
             .await
     });
 
-    let probe_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: runtime.trellis_url(),
-            contract_id: PROBE_SERVICE_CONTRACT_ID,
-            contract_digest: probe_contract.digest(),
-            contract_json: PROBE_SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &probe_service_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect probe service");
-    let probe_service = ConnectedServiceRuntime::<()>::from_connected_client(
-        PROBE_SERVICE_NAME,
-        Arc::new(probe_client),
-    )
-    .expect("build connected probe service runtime");
-    let nats = probe_service.client().internal_nats().clone();
-    let trellis_binding: &TrellisBindingsGetResponseBinding = probe_service.binding().as_ref();
-    let jobs_runtime_binding = JobsRuntimeBinding::try_from(trellis_binding)
-        .expect("parse probe service jobs runtime binding");
-    let publisher = NatsJobEventPublisher::new(nats.clone());
-    let key_coordinator = NatsKeyCoordinator::open_for_service(
-        nats.clone(),
-        jobs_runtime_binding.jobs.namespace.as_str(),
+    let mut probe_service = trellis_test::connect_service_runtime::<ProbeContract>(
+        runtime.trellis_url(),
+        PROBE_SERVICE_CONTRACT_ID,
+        probe_contract.digest(),
+        PROBE_SERVICE_CONTRACT_JSON,
+        &probe_service_key.seed,
     )
     .await
-    .expect("open probe key coordinator");
-    let manager = JobManager::new_with_key_coordinator(
-        publisher,
-        jobs_runtime_binding.jobs.clone(),
-        TrellisJobMetaSource,
-        Arc::new(key_coordinator),
-    );
+    .expect("connect probe service runtime");
     let started = Arc::new(tokio::sync::Notify::new());
     let worker_started = Arc::clone(&started);
-    let worker_host = start_worker_host_from_client(
-        &*probe_service.client(),
-        jobs_runtime_binding,
-        PROBE_SERVICE_NAME.to_string(),
-        |_, _| TrellisJobMetaSource,
-        move |active_job: WorkerActiveJob<TrellisJobEventPublisher, TrellisJobMetaSource>| {
+    probe_service
+        .register_generated_job_worker::<HoldOpenJob, _, _, String>(move |active_job| {
             let worker_started = Arc::clone(&worker_started);
             async move {
                 worker_started.notify_one();
@@ -196,16 +184,14 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
                     active_job
                         .heartbeat()
                         .await
-                        .map_err(|error| JobProcessError::failed(error.to_string()))?;
+                        .map_err(|error| error.to_string())?;
                     tokio::time::sleep(Duration::from_millis(25)).await;
                 }
-                Ok(json!({ "cancelled": true }))
+                Ok(HoldResult { cancelled: true })
             }
-        },
-        WorkerHostOptions::default(),
-    )
-    .await
-    .expect("start probe worker host");
+        })
+        .await
+        .expect("start probe worker host");
 
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_client_contract)
@@ -213,10 +199,13 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .expect("connect Jobs admin client");
     let jobs_admin = trellis_rs::sdk::jobs::JobsClient::new(&admin_client);
 
-    let job = manager
-        .create(JOB_TYPE, json!({ "marker": MARKER }))
+    let job = probe_service
+        .generated_submit_job::<HoldOpenJob>(HoldPayload {
+            marker: MARKER.to_string(),
+        })
         .await
         .expect("create service-local holdOpen job");
+    let job = job.identity().clone();
     tokio::time::timeout(Duration::from_secs(15), started.notified())
         .await
         .expect("worker should start the holdOpen job");
@@ -228,7 +217,7 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .get_stream("JOBS")
         .await
         .expect("reopen Jobs lifecycle stream")
-        .consumer_info("jobs-watch-stale_test-1")
+        .consumer_info("jobs-watch-stale-test-1")
         .await
         .expect("obsolete Jobs.Watch consumer should remain during its expiry grace period");
     assert_eq!(
@@ -274,7 +263,10 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .expect("Jobs.Watch should become ready")
         .expect("Jobs.Watch should emit ready")
         .expect("Jobs.Watch ready frame should decode");
-    assert_eq!(ready.0["kind"], "ready");
+    assert!(matches!(
+        ready,
+        trellis_rs::sdk::jobs::types::JobsWatchEvent::Ready { .. }
+    ));
     let jobs_stream = jobs_jetstream
         .get_stream("JOBS")
         .await
@@ -322,8 +314,11 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .expect("Jobs.Watch should observe cancellation")
         .expect("Jobs.Watch should emit cancellation invalidation")
         .expect("Jobs.Watch cancellation frame should decode");
-    assert_eq!(changed.0["kind"], "jobInspectChanged");
-    assert_eq!(changed.0["id"], job.id);
+    assert!(matches!(
+        changed,
+        trellis_rs::sdk::jobs::types::JobsWatchEvent::JobInspectChanged { id, .. }
+            if id == job.id
+    ));
     drop(watch);
     let expiry_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
@@ -351,7 +346,7 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
     let terminal = wait_for_job_state(&jobs_admin, &job.id, "cancelled").await;
     assert_eq!(terminal.state, "cancelled");
 
-    worker_host.stop().await.expect("stop probe worker host");
+    drop(probe_service);
 
     jobs_service_task.abort();
     let _ = jobs_service_task.await;

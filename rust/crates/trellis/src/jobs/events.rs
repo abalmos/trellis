@@ -49,6 +49,7 @@ fn base_event(
     }
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(created_event), "`.")]
 pub fn created_event(
     service: &str,
     job_type: &str,
@@ -77,6 +78,7 @@ pub fn created_event(
 }
 
 /// Construct a `created` lifecycle event with keyed concurrency policy metadata.
+#[doc = concat!("Trellis API operation `", stringify!(created_event_with_policy), "`.")]
 pub fn created_event_with_policy(
     service: &str,
     job_type: &str,
@@ -97,6 +99,7 @@ pub fn created_event_with_policy(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(started_event), "`.")]
 pub fn started_event(
     service: &str,
     job_type: &str,
@@ -120,6 +123,7 @@ pub fn started_event(
 }
 
 /// Construct a `started` lifecycle event with active key ownership metadata.
+#[doc = concat!("Trellis API operation `", stringify!(started_event_with_concurrency), "`.")]
 pub fn started_event_with_concurrency(
     service: &str,
     job_type: &str,
@@ -143,6 +147,7 @@ pub fn started_event_with_concurrency(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(retry_event), "`.")]
 pub fn retry_event(
     service: &str,
     job_type: &str,
@@ -170,6 +175,7 @@ pub fn retry_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(progress_event), "`.")]
 pub fn progress_event(
     service: &str,
     job_type: &str,
@@ -194,6 +200,7 @@ pub fn progress_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(logged_event), "`.")]
 pub fn logged_event(
     service: &str,
     job_type: &str,
@@ -219,6 +226,7 @@ pub fn logged_event(
 }
 
 /// Construct a `waiting` lifecycle evidence event without changing job state.
+#[doc = concat!("Trellis API operation `", stringify!(waiting_event), "`.")]
 pub fn waiting_event(
     service: &str,
     job_type: &str,
@@ -244,6 +252,7 @@ pub fn waiting_event(
 }
 
 /// Construct a `resumed` lifecycle evidence event without changing job state.
+#[doc = concat!("Trellis API operation `", stringify!(resumed_event), "`.")]
 pub fn resumed_event(
     service: &str,
     job_type: &str,
@@ -268,6 +277,7 @@ pub fn resumed_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(completed_event), "`.")]
 pub fn completed_event(
     service: &str,
     job_type: &str,
@@ -292,6 +302,7 @@ pub fn completed_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(failed_event), "`.")]
 pub fn failed_event(
     service: &str,
     job_type: &str,
@@ -318,6 +329,7 @@ pub fn failed_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(cancelled_event), "`.")]
 pub fn cancelled_event(
     service: &str,
     job_type: &str,
@@ -339,6 +351,7 @@ pub fn cancelled_event(
     )
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(cancelled_event_with_admin_reason), "`.")]
 pub fn cancelled_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -364,6 +377,7 @@ pub fn cancelled_event_with_admin_reason(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(expired_event), "`.")]
 pub fn expired_event(
     service: &str,
     job_type: &str,
@@ -391,6 +405,7 @@ pub fn expired_event(
 }
 
 /// Construct a `skipped` terminal lifecycle event for queued work replaced by policy.
+#[doc = concat!("Trellis API operation `", stringify!(skipped_event), "`.")]
 pub fn skipped_event(
     service: &str,
     job_type: &str,
@@ -419,6 +434,7 @@ pub fn skipped_event(
 }
 
 /// Construct a `stale` terminal lifecycle event for active work that lost its key lease.
+#[doc = concat!("Trellis API operation `", stringify!(stale_event), "`.")]
 pub fn stale_event(
     service: &str,
     job_type: &str,
@@ -448,6 +464,7 @@ pub fn stale_event(
 }
 
 /// Construct a keyed active-job heartbeat lifecycle event.
+#[doc = concat!("Trellis API operation `", stringify!(heartbeat_event), "`.")]
 pub fn heartbeat_event(
     service: &str,
     job_type: &str,
@@ -473,6 +490,7 @@ pub fn heartbeat_event(
 }
 
 /// Construct an observability event for a stale worker completion that was ignored.
+#[doc = concat!("Trellis API operation `", stringify!(stale_completion_ignored_event), "`.")]
 pub fn stale_completion_ignored_event(
     service: &str,
     job_type: &str,
@@ -501,6 +519,7 @@ pub fn stale_completion_ignored_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(retried_event), "`.")]
 pub fn retried_event(
     service: &str,
     job_type: &str,
@@ -526,6 +545,7 @@ pub fn retried_event(
     )
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(retried_event_with_admin_reason), "`.")]
 pub fn retried_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -556,6 +576,7 @@ pub fn retried_event_with_admin_reason(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(dead_event), "`.")]
 pub fn dead_event(
     service: &str,
     job_type: &str,
@@ -582,6 +603,7 @@ pub fn dead_event(
     event
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(dismissed_event), "`.")]
 pub fn dismissed_event(
     service: &str,
     job_type: &str,

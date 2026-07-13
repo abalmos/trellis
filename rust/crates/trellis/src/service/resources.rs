@@ -72,6 +72,7 @@ pub trait KvResourceClient: Clone + fmt::Debug + Send + Sync + 'static {
 
 /// Operation that produced a KV entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(KvResourceOperation), "`.")]
 pub enum KvResourceOperation {
     /// Value bytes were written for the key.
     Update,
@@ -81,16 +82,22 @@ pub enum KvResourceOperation {
 
 /// Latest KV entry metadata and bytes for a service-bound key.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(KvResourceEntry), "`.")]
 pub struct KvResourceEntry {
     /// Key for this entry.
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
     /// Raw value bytes for this revision.
+    #[doc = concat!("The `", stringify!(value), "` value.")]
     pub value: Bytes,
     /// Monotonic bucket revision for this entry.
+    #[doc = concat!("The `", stringify!(revision), "` value.")]
     pub revision: u64,
     /// Timestamp assigned by the KV backend.
+    #[doc = concat!("The `", stringify!(timestamp), "` value.")]
     pub timestamp: OffsetDateTime,
     /// Operation that produced this entry.
+    #[doc = concat!("The `", stringify!(operation), "` value.")]
     pub operation: KvResourceOperation,
 }
 
@@ -126,6 +133,7 @@ where
     C: KvResourceClient,
 {
     /// Create a KV resource handle from a validated binding and opened client.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(resource_name: impl Into<String>, binding: KvResourceBinding, client: C) -> Self {
         Self {
             resource_name: resource_name.into(),
@@ -135,31 +143,37 @@ where
     }
 
     /// Contract-local resource alias used to open this handle.
+    #[doc = concat!("Trellis API operation `", stringify!(resource_name), "`.")]
     pub fn resource_name(&self) -> &str {
         &self.resource_name
     }
 
     /// Concrete resource binding resolved during bootstrap.
+    #[doc = concat!("Trellis API operation `", stringify!(binding), "`.")]
     pub fn binding(&self) -> &KvResourceBinding {
         &self.binding
     }
 
     /// Read the latest bytes for `key`, or `None` when the key is absent.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         self.client.get(key).await
     }
 
     /// Read the latest entry metadata for `key`, including delete markers.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get_entry), "`.")]
     pub async fn get_entry(&self, key: &str) -> Result<Option<KvResourceEntry>, ServerError> {
         self.client.get_entry(key).await
     }
 
     /// Persist `value` at `key`.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(put), "`.")]
     pub async fn put(&self, key: &str, value: impl Into<Bytes>) -> Result<(), ServerError> {
         self.client.put(key, value.into()).await
     }
 
     /// Persist `value` at `key` only if `key` is still at `revision`.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(update_revision), "`.")]
     pub async fn update_revision(
         &self,
         key: &str,
@@ -172,21 +186,25 @@ where
     }
 
     /// List active keys in this bucket.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(list), "`.")]
     pub async fn list(&self) -> Result<Vec<String>, ServerError> {
         self.client.list().await
     }
 
     /// Delete `key` from this bucket.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(&self, key: &str) -> Result<(), ServerError> {
         self.client.delete(key).await
     }
 
     /// Delete `key` only if `key` is still at `revision`.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete_revision), "`.")]
     pub async fn delete_revision(&self, key: &str, revision: u64) -> Result<(), ServerError> {
         self.client.delete_revision(key, revision).await
     }
 
     /// Watch updates and deletes for one key.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(watch), "`.")]
     pub async fn watch(&self, key: &str) -> Result<C::Watch, ServerError> {
         self.client.watch(key).await
     }
@@ -203,10 +221,13 @@ pub struct StoreResourceHandle<C> {
 
 /// Options for waiting until an object appears in a bound object store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(StoreWaitOptions), "`.")]
 pub struct StoreWaitOptions {
     /// Maximum time to wait before returning [`ServerError::StoreWaitTimeout`].
+    #[doc = concat!("The `", stringify!(timeout), "` value.")]
     pub timeout: Option<Duration>,
     /// Delay between object existence checks. Defaults to 250ms.
+    #[doc = concat!("The `", stringify!(poll_interval), "` value.")]
     pub poll_interval: Duration,
 }
 
@@ -224,6 +245,7 @@ where
     C: StoreResourceClient,
 {
     /// Create a store resource handle from a validated binding and opened client.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(
         service_name: impl Into<String>,
         resource_name: impl Into<String>,
@@ -239,16 +261,19 @@ where
     }
 
     /// Contract-local resource alias used to open this handle.
+    #[doc = concat!("Trellis API operation `", stringify!(resource_name), "`.")]
     pub fn resource_name(&self) -> &str {
         &self.resource_name
     }
 
     /// Concrete resource binding resolved during bootstrap.
+    #[doc = concat!("Trellis API operation `", stringify!(binding), "`.")]
     pub fn binding(&self) -> &StoreResourceBinding {
         &self.binding
     }
 
     /// Read all bytes for `key`, or `None` when the object is absent.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(read), "`.")]
     pub async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
         self.client.read(key).await
     }
@@ -258,6 +283,7 @@ where
     /// The handle checks immediately, then polls according to `options`. When
     /// `options.timeout` elapses before the object appears, this returns
     /// [`ServerError::StoreWaitTimeout`].
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for), "`.")]
     pub async fn wait_for(
         &self,
         key: &str,
@@ -356,6 +382,7 @@ where
     }
 
     /// Persist `value` at `key`.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(write), "`.")]
     pub async fn write(&self, key: &str, value: impl Into<Bytes>) -> Result<(), ServerError> {
         let value = value.into();
         if let Some(max_bytes) = self
@@ -378,24 +405,49 @@ where
     }
 
     /// List active object names in this store.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(list), "`.")]
     pub async fn list(&self) -> Result<Vec<String>, ServerError> {
         self.client.list().await
     }
 
     /// Delete `key` from this store.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
     pub async fn delete(&self, key: &str) -> Result<(), ServerError> {
+        self.client.delete(key).await
+    }
+}
+
+impl<C> StoreResourceClient for StoreResourceHandle<C>
+where
+    C: StoreResourceClient,
+{
+    async fn read(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
+        self.client.read(key).await
+    }
+
+    async fn write(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
+        self.client.write(key, value).await
+    }
+
+    async fn list(&self) -> Result<Vec<String>, ServerError> {
+        self.client.list().await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), ServerError> {
         self.client.delete(key).await
     }
 }
 
 /// Concrete KV client used by connected service resources.
 #[derive(Debug, Clone)]
-pub(crate) struct BoundKvResourceClient {
+#[doc = concat!("Public Trellis data type `", stringify!(BoundKvResourceClient), "`.")]
+pub struct BoundKvResourceClient {
     store: async_nats::jetstream::kv::Store,
 }
 
 /// Watch stream for connected KV resources.
-pub(crate) struct BoundKvWatch {
+#[doc = concat!("Public Trellis data type `", stringify!(BoundKvWatch), "`.")]
+pub struct BoundKvWatch {
     inner: async_nats::jetstream::kv::Watch,
 }
 
@@ -526,9 +578,16 @@ fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> KvResourceEntr
 
 /// Concrete object-store client used by connected service resources.
 #[derive(Clone)]
-pub(crate) struct BoundStoreResourceClient {
+#[doc = concat!("Public Trellis data type `", stringify!(BoundStoreResourceClient), "`.")]
+pub struct BoundStoreResourceClient {
     store: async_nats::jetstream::object_store::ObjectStore,
 }
+
+/// Connected handle for one contract-declared KV resource.
+pub type KvHandle = KvResourceHandle<BoundKvResourceClient>;
+
+/// Connected handle for one contract-declared object-store resource.
+pub type StoreHandle = StoreResourceHandle<BoundStoreResourceClient>;
 
 impl fmt::Debug for BoundStoreResourceClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -595,7 +654,8 @@ impl ResourceRuntimeClient for async_nats::Client {
     }
 }
 
-pub(crate) fn validate_kv_binding(
+#[doc = concat!("Trellis API operation `", stringify!(validate_kv_binding), "`.")]
+pub fn validate_kv_binding(
     service_name: &str,
     resource_name: &str,
     binding: &KvResourceBinding,
@@ -643,7 +703,8 @@ pub(crate) fn validate_kv_binding(
     Ok(())
 }
 
-pub(crate) fn validate_store_binding(
+#[doc = concat!("Trellis API operation `", stringify!(validate_store_binding), "`.")]
+pub fn validate_store_binding(
     service_name: &str,
     resource_name: &str,
     binding: &StoreResourceBinding,

@@ -6,9 +6,9 @@ use serde_json::Value;
 /// Contract-generated descriptor for one jobs queue.
 pub trait JobDescriptor {
     /// Queued payload type.
-    type Payload: Serialize + DeserializeOwned + Send + 'static;
+    type Payload: Serialize + DeserializeOwned + Clone + Send + Sync + 'static;
     /// Successful result type.
-    type Result: Serialize + DeserializeOwned + Send + 'static;
+    type Result: Serialize + DeserializeOwned + Clone + Send + Sync + 'static;
 
     /// Contract-local queue type.
     const QUEUE_TYPE: &'static str;

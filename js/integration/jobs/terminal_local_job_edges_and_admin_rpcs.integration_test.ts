@@ -17,7 +17,11 @@ const adminContract = defineAppContract(() => ({
   displayName: "Trellis Integration Jobs Admin Client",
   description:
     "Observes and cancels jobs through the generated Jobs admin SDK.",
-  uses: [trellisJobs.JobsQuery, trellisJobs.JobsInspect, trellisJobs.JobsCancel],
+  uses: [
+    trellisJobs.JobsQuery,
+    trellisJobs.JobsInspect,
+    trellisJobs.JobsCancel,
+  ],
 }));
 
 liveTrellisTest({

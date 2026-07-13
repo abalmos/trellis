@@ -237,7 +237,9 @@ service.handle().rpc().orders().get({
 });
 ```
 
-Callers see `NotFoundError` as a structured RPC error payload. Rust client code can branch on `RpcErrorPayload::error_type()` when a typed call returns `TrellisClientError::RpcError(...)`.
+Callers see `NotFoundError` as a generated variant of the RPC's declared error
+enum. Rust client code should match that typed variant directly; it does not
+decode `RpcErrorPayload` or reconstruct the error from JSON.
 
 Upgrade and restart as before.
 

@@ -54,7 +54,8 @@ fn canonicalize_json_value(value: &Value) -> Result<String, TrellisAuthError> {
     }
 }
 
-pub(crate) fn build_auth_start_signature_payload(
+#[doc = concat!("Trellis API operation `", stringify!(build_auth_start_signature_payload), "`.")]
+pub fn build_auth_start_signature_payload(
     redirect_to: &str,
     provider: Option<&str>,
     contract: &Value,
@@ -89,11 +90,13 @@ fn base64url_encode(bytes: &[u8]) -> String {
 }
 
 /// Compute the canonical Trellis contract digest for a JSON contract document.
+#[doc = concat!("Trellis API operation `", stringify!(contract_digest), "`.")]
 pub fn contract_digest(contract_json: &str) -> Result<String, TrellisAuthError> {
     Ok(trellis_contracts::digest_contract_json(contract_json)?)
 }
 
 /// Generate a new base64url-encoded Ed25519 session seed and public key.
+#[doc = concat!("Trellis API operation `", stringify!(generate_session_keypair), "`.")]
 pub fn generate_session_keypair() -> (String, String) {
     let seed: [u8; 32] = rand::random();
     let signing_key = SigningKey::from_bytes(&seed);
@@ -101,7 +104,8 @@ pub fn generate_session_keypair() -> (String, String) {
     (base64url_encode(&seed), base64url_encode(&public_key))
 }
 
-pub(crate) fn detached_login_redirect_to() -> Result<String, TrellisAuthError> {
+#[doc = concat!("Trellis API operation `", stringify!(detached_login_redirect_to), "`.")]
+pub fn detached_login_redirect_to() -> Result<String, TrellisAuthError> {
     Ok("/_trellis/portal/users/login".to_string())
 }
 
@@ -186,7 +190,8 @@ async fn fetch_agent_flow_status(
     Ok(serde_json::from_str::<AgentFlowStatusResponse>(&text)?)
 }
 
-pub(crate) async fn poll_agent_flow_until_ready(
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(poll_agent_flow_until_ready), "`.")]
+pub async fn poll_agent_flow_until_ready(
     trellis_url: &str,
     flow_id: &str,
     poll_interval: Duration,
@@ -278,11 +283,13 @@ async fn bind_session(
 
 impl AgentLoginChallenge {
     /// Return the URL the user should open to complete login.
+    #[doc = concat!("Trellis API operation `", stringify!(login_url), "`.")]
     pub fn login_url(&self) -> &str {
         &self.login_url
     }
 
     /// Wait for detached portal completion, then bind the session.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(complete), "`.")]
     pub async fn complete(self, trellis_url: &str) -> Result<AdminLoginOutcome, TrellisAuthError> {
         let AgentLoginChallenge {
             flow_id,
@@ -326,6 +333,7 @@ impl AgentLoginChallenge {
 }
 
 /// Start the agent login flow against the detached Trellis portal.
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_agent_login), "`.")]
 pub async fn start_agent_login(
     opts: &StartAgentLoginOpts<'_>,
 ) -> Result<AgentLoginChallenge, TrellisAuthError> {
@@ -358,6 +366,7 @@ pub async fn start_agent_login(
 }
 
 /// Start admin reauthentication for a changed contract using the stored session key.
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_admin_reauth), "`.")]
 pub async fn start_admin_reauth(
     state: &AdminSessionState,
     contract_json: &str,

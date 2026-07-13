@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  type CallerRuntime,
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
-  type CallerRuntime,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import type { AuthIdentityGrantsListOutput } from "@qlever-llc/trellis/sdk/auth";

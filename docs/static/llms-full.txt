@@ -21,10 +21,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `self: ["Event"]`. Dependency durable consumption remains authority-backed by
   top-level `uses`; runtime listeners consume only reconciled Trellis bindings,
   and runtime durable consumers are Trellis-provisioned only.
-- Rust services use descriptor-backed `listen_event(...)` on the connected
-  service runtime for durable event consumers. Specify `group` when a declared
-  event appears in multiple groups, and never provide a JetStream durable name
-  from application code. The returned handle supports `abort()`; aborting a
+- Rust services use generated handlers under `service.event_consumers()` for
+  durable event consumers. Select the declared group accessor and never provide
+  a JetStream durable name from application code. The returned handle supports
+  `abort()`; aborting a
   durable listener removes that handler from the shared registry so re-registering
   can resume delivery from the same Trellis-provisioned durable consumer.
 - Runtime authority comes from deployment authority and identity authority.
@@ -43,9 +43,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   grants and new resource aliases require update approval; strict-mode
   migrations require approval; `mutable-dev` records and auto-accepts migrations.
 - Service bootstrap polls pending deployment authority until it becomes ready by
-  default. Rust callers set `authority_pending_timeout_ms` to
-  `Some(milliseconds)` only when startup needs an overall deadline; per-request
-  timeouts remain bounded.
+  default. Rust services use
+  `ServiceConnectOptions::with_authority_pending_timeout_ms(Some(...))` only when
+  startup needs an overall deadline; per-request timeouts remain bounded.
 - The runtime `contracts` store is a digest-keyed manifest cache, not durable
   authority. Invalid cached manifests may be pruned without changing
   implementation offers, sessions, identity grants, deployment authority,
@@ -55,8 +55,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   Trellis storage upgrade and reconciliation. Service repositories should update
   contracts through the normal generation and authority-review flow, not patch
   Trellis authority tables or projection records by hand.
-- NATS is the transport boundary. Application code should use generated Trellis
-  APIs rather than hand-built subjects or raw NATS connection handles.
+- NATS is the private transport boundary. Application code uses generated
+  participant facades rather than hand-built subjects, raw NATS connection
+  handles, `trellis_rs::client`, or `trellis_rs::generated`.
 - Feed subscriptions are connection-scoped. Closing or aborting a client feed
   propagates cancellation to the provider; watch feeds must not create a durable
   consumer per viewer.
@@ -183,7 +184,9 @@ Rules:
   declare `Auth.Users.Resolve` to render minimal display labels. It is not a
   directory; do not request `Auth.Users.List` or denormalize user profile tables
   just to show labels.
-- Rust service repos should expose Trellis generation as `cargo xtask prepare`
+- Rust service repos should expose Trellis generation as `cargo xtask prepare`.
+  Owner SDKs are vocabulary-only; services, apps, agents, and devices connect
+  only through their materialized generated participant facade.
 - Deno-first TypeScript service repos can use
   `@qlever-llc/trellis-test/integration` and
   `@qlever-llc/trellis-test/integration/runner` for out-of-tree integration

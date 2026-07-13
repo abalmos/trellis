@@ -26,10 +26,18 @@ liveTrellisTest({
     });
 
     let additiveService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.compatibleAdditiveContract>>>
+      | Awaited<
+        ReturnType<
+          typeof fixture.connectService<
+            typeof fixture.compatibleAdditiveContract
+          >
+        >
+      >
       | undefined;
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.baseContract>>>
+      | Awaited<
+        ReturnType<typeof fixture.connectService<typeof fixture.baseContract>>
+      >
       | undefined;
     const connectPromise = fixture.connectServicePending({
       runtime,
@@ -70,7 +78,8 @@ liveTrellisTest({
         seed: baseKey.seed,
       });
       await baseService.handlePlanPing(({ input }) =>
-        Result.ok({ message: fixture.pingMessage(input), variant: "base" }));
+        Result.ok({ message: fixture.pingMessage(input), variant: "base" })
+      );
       const result = await fixture.connectClientAndPing(
         runtime,
         "old-authority",

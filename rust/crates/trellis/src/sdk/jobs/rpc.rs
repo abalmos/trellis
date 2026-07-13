@@ -1,5 +1,5 @@
 //! Typed RPC descriptors for `trellis.jobs@v1`.
-use crate::client::RpcDescriptor;
+use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,6 +17,34 @@ impl RpcDescriptor for JobsCancelRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `Jobs.Cancel`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsCancelError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsCancelError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.DismissDLQ`.
 pub struct JobsDismissDLQRpc;
 impl RpcDescriptor for JobsDismissDLQRpc {
@@ -29,6 +57,34 @@ impl RpcDescriptor for JobsDismissDLQRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
+}
+/// Errors declared by `Jobs.DismissDLQ`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsDismissDLQError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsDismissDLQError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
 }
 /// Descriptor for `Jobs.GetKey`.
 pub struct JobsGetKeyRpc;
@@ -43,6 +99,34 @@ impl RpcDescriptor for JobsGetKeyRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `Jobs.GetKey`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsGetKeyError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsGetKeyError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.Inspect`.
 pub struct JobsInspectRpc;
 impl RpcDescriptor for JobsInspectRpc {
@@ -56,6 +140,34 @@ impl RpcDescriptor for JobsInspectRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `Jobs.Inspect`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsInspectError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsInspectError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.ListDLQ`.
 pub struct JobsListDLQRpc;
 impl RpcDescriptor for JobsListDLQRpc {
@@ -67,6 +179,29 @@ impl RpcDescriptor for JobsListDLQRpc {
     const SUBJECT: &'static str = "rpc.v1.Jobs.ListDLQ";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Jobs.ListDLQ`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsListDLQError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for JobsListDLQError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
 }
 /// Descriptor for `Jobs.ListServices`.
 pub struct JobsListServicesRpc;
@@ -80,6 +215,29 @@ impl RpcDescriptor for JobsListServicesRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `Jobs.ListServices`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsListServicesError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for JobsListServicesError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.Metrics`.
 pub struct JobsMetricsRpc;
 impl RpcDescriptor for JobsMetricsRpc {
@@ -92,6 +250,29 @@ impl RpcDescriptor for JobsMetricsRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `Jobs.Metrics`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsMetricsError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for JobsMetricsError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.Query`.
 pub struct JobsQueryRpc;
 impl RpcDescriptor for JobsQueryRpc {
@@ -103,6 +284,29 @@ impl RpcDescriptor for JobsQueryRpc {
     const SUBJECT: &'static str = "rpc.v1.Jobs.Query";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `Jobs.Query`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsQueryError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for JobsQueryError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
 }
 /// Descriptor for `Jobs.ReplayDLQ`.
 pub struct JobsReplayDLQRpc;
@@ -117,6 +321,34 @@ impl RpcDescriptor for JobsReplayDLQRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `Jobs.ReplayDLQ`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsReplayDLQError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsReplayDLQError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `Jobs.Retry`.
 pub struct JobsRetryRpc;
 impl RpcDescriptor for JobsRetryRpc {
@@ -129,4 +361,32 @@ impl RpcDescriptor for JobsRetryRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.jobs::admin.mutate"];
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
+}
+/// Errors declared by `Jobs.Retry`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobsRetryError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for JobsRetryError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
 }

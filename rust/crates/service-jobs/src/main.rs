@@ -45,9 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting jobs service"
     );
 
-    let mut options =
-        ServiceConnectOptions::new(&trellis_url, SERVICE_NAME, &session_key_seed_base64url);
-    options.timeout_ms = timeout_ms;
+    let options =
+        ServiceConnectOptions::new(&trellis_url, SERVICE_NAME, &session_key_seed_base64url)
+            .with_timeout_ms(timeout_ms);
 
     let service = connect_service(options).await?;
     tracing::info!(service = SERVICE_NAME, "jobs service connected");

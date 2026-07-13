@@ -83,9 +83,7 @@ liveTrellisTest({
         );
       });
       await waitForSessionAbsent(admin, sessionKey);
-      await waitFor(async () =>
-        (await device.authSessionsMe({})).isErr()
-      );
+      await waitFor(async () => (await device.authSessionsMe({})).isErr());
       assertEquals(me.participantKind, "device");
     } finally {
       await device.connection.close().catch(() => undefined);

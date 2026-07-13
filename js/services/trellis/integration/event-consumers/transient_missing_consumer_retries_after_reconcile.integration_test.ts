@@ -54,8 +54,10 @@ liveTrellisTest({
 
     try {
       await consumer.onSourcePinged(
-        ({ event }) => { observed = event.id;
-        return Result.ok(undefined); },
+        ({ event }) => {
+          observed = event.id;
+          return Result.ok(undefined);
+        },
         {},
         { group: "ingest", signal: controller.signal },
       ).orThrow();

@@ -29,7 +29,7 @@ liveTrellisTest({
           documentId: input.documentId,
           processedBy: "should-not-reach",
         });
-      },);
+      });
       serviceWait = service.wait();
 
       const capture = await runtime.captureEvents({

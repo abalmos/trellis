@@ -22,11 +22,11 @@ liveTrellisTest({
       await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
         markWaitingForSignal();
-      
+
         const signal = await op.nextSignal("updateMessage").orThrow();
         consumed.push(signal.input);
         assertEquals(signal.input, { suffix: "valid" });
-      
+
         return Result.ok({
           message: `${input.message}:valid`,
           done: true,

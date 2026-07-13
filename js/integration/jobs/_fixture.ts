@@ -437,7 +437,7 @@ export function createJobsFixture(caseId: string) {
         requestId: terminal.result.requestId,
         traceId: terminal.result.traceId,
       });
-    },);
+    });
 
     return {
       firstStarted,
@@ -473,21 +473,23 @@ export function createJobsFixture(caseId: string) {
       });
     });
 
-    await service.handleDocumentsSubmitLongProcess(async ({ input, client }) => {
-      const ref = await client.jobs.longProcessDocument.create({
-        documentId: input.documentId,
-      }).orThrow();
-      await started;
-      const cancelled = await ref.cancel().orThrow();
-      const terminal = await ref.wait().orThrow();
-      return Result.ok({
-        documentId: input.documentId,
-        jobId: ref.id,
-        processedBy: terminal.state,
-        requestId: cancelled.context.requestId,
-        traceId: cancelled.context.traceId,
-      });
-    },);
+    await service.handleDocumentsSubmitLongProcess(
+      async ({ input, client }) => {
+        const ref = await client.jobs.longProcessDocument.create({
+          documentId: input.documentId,
+        }).orThrow();
+        await started;
+        const cancelled = await ref.cancel().orThrow();
+        const terminal = await ref.wait().orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          jobId: ref.id,
+          processedBy: terminal.state,
+          requestId: cancelled.context.requestId,
+          traceId: cancelled.context.traceId,
+        });
+      },
+    );
 
     return { started };
   }
@@ -522,21 +524,23 @@ export function createJobsFixture(caseId: string) {
       });
     });
 
-    await service.handleDocumentsTerminalLocalEdges(async ({ input, client }) => {
-      const ref = await client.jobs.processDocument.create({
-        documentId: input.documentId,
-      }).orThrow();
-      const terminal = await ref.wait().orThrow();
-      const snapshot = await ref.get().orThrow();
-      const cancelAfterTerminal = await ref.cancel().orThrow();
-      return Result.ok({
-        documentId: input.documentId,
-        jobId: ref.id,
-        waitState: terminal.state,
-        getState: snapshot.state,
-        cancelState: cancelAfterTerminal.state,
-      });
-    },);
+    await service.handleDocumentsTerminalLocalEdges(
+      async ({ input, client }) => {
+        const ref = await client.jobs.processDocument.create({
+          documentId: input.documentId,
+        }).orThrow();
+        const terminal = await ref.wait().orThrow();
+        const snapshot = await ref.get().orThrow();
+        const cancelAfterTerminal = await ref.cancel().orThrow();
+        return Result.ok({
+          documentId: input.documentId,
+          jobId: ref.id,
+          waitState: terminal.state,
+          getState: snapshot.state,
+          cancelState: cancelAfterTerminal.state,
+        });
+      },
+    );
   }
 
   return {

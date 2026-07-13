@@ -5,9 +5,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinHandle;
-use trellis_rs::client::{
-    RpcDescriptor, ServiceConnectWithContractOptions, SessionAuth, TrellisClient,
-};
+use trellis_rs::client::{RpcDescriptor, SessionAuth};
 use trellis_rs::service::{
     ConnectedServiceRuntime, DeclaredRpcError, GeneratedServiceContract, ServerError,
 };
@@ -281,6 +279,22 @@ impl<T> Drop for AbortOnDrop<T> {
 
 type RpcServiceRuntime = ConnectedServiceRuntime<RpcServiceContract>;
 
+async fn connect_rpc_service(
+    trellis_url: &str,
+    contract_digest: &str,
+    seed: &str,
+) -> RpcServiceRuntime {
+    trellis_test::connect_service_runtime::<RpcServiceContract>(
+        trellis_url,
+        RPC_SERVICE_ID,
+        contract_digest,
+        RPC_SERVICE_CONTRACT_JSON,
+        seed,
+    )
+    .await
+    .expect("connect live Rust RPC service runtime")
+}
+
 fn service_name() -> &'static str {
     "rpc-fixture-service"
 }
@@ -312,25 +326,8 @@ async fn rpc_client_calls_service_success() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     let observed_requests = Arc::new(tokio::sync::Mutex::new(Vec::<ObservedRpcRequest>::new()));
     let handler_observed_requests = Arc::clone(&observed_requests);
@@ -404,25 +401,8 @@ async fn rpc_service_receives_caller_context() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     let observed_requests = Arc::new(tokio::sync::Mutex::new(Vec::<ObservedRpcRequest>::new()));
     let handler_observed_requests = Arc::clone(&observed_requests);
@@ -499,25 +479,8 @@ async fn rpc_client_receives_declared_error() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     service.register_rpc::<EntityGetRpc, _, _>(move |_context, input| async move {
         Err(ServerError::DeclaredRpc(DeclaredRpcError::new(
@@ -546,7 +509,7 @@ async fn rpc_client_receives_declared_error() {
     );
     assert_eq!(
         context.get("service").and_then(Value::as_str),
-        Some(service_name())
+        Some(RPC_SERVICE_ID)
     );
     assert_eq!(
         context.get("contractId").and_then(Value::as_str),
@@ -593,25 +556,8 @@ async fn rpc_denies_client_without_call_authority() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     service.register_rpc::<EntityGetRpc, _, _>(move |_context, input| async move {
         Ok(EntityGetOutput {
@@ -670,25 +616,8 @@ async fn rpc_invalid_annotated_input_schema_validation() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -750,25 +679,8 @@ async fn rpc_invalid_mixed_input_validation() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -843,25 +755,8 @@ async fn rpc_auth_validation_retries_transient_session_not_found() {
 
     let trellis_url = runtime.trellis_url().to_string();
     let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime = ConnectedServiceRuntime::from_connected_client(
-        service_name(),
-        Arc::new(
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &trellis_url,
-                contract_id: RPC_SERVICE_ID,
-                contract_digest: &contract_digest,
-                contract_json: RPC_SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("connect live Rust RPC service"),
-        ),
-    )
-    .expect("build connected service runtime");
+    let mut service: RpcServiceRuntime =
+        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -973,20 +868,9 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
         .expect("provision live RPC service instance");
     let contract_digest = service_contract.digest().to_string();
     let trellis_url = runtime.trellis_url().to_string();
-    let service_client =
-        TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-            trellis_url: &trellis_url,
-            contract_id: RPC_SERVICE_ID,
-            contract_digest: &contract_digest,
-            contract_json: RPC_SERVICE_CONTRACT_JSON,
-            session_key_seed_base64url: &service_key.seed,
-            timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-            retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-            authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-        })
-        .await
-        .expect("connect live Rust service client");
-    let auth_client = trellis_rs::auth::AuthClient::new(&service_client);
+    let service = connect_rpc_service(&trellis_url, &contract_digest, &service_key.seed).await;
+    let service_caller = service.caller().clone();
+    let auth_client = trellis_rs::auth::AuthClient::new(&service_caller);
 
     let (target_seed, target_session_key) = trellis_rs::auth::generate_session_keypair();
     let _target_client = admin
@@ -1029,10 +913,10 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
         .await
         .expect("validate allowed app request");
     assert!(allowed.allowed);
-    assert_eq!(
-        allowed.caller.get("type").and_then(Value::as_str),
-        Some("user")
-    );
+    assert!(matches!(
+        allowed.caller,
+        trellis_rs::sdk::auth::types::AuthRequestsValidateResponseCaller::User { .. }
+    ));
 
     let denied_subject = auth_client
         .validate_request(&request(
@@ -1142,24 +1026,20 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
         .await
         .expect("validate current service permissions");
     assert!(service_validation.allowed);
-    assert_eq!(
-        service_validation
-            .caller
-            .get("type")
-            .and_then(Value::as_str),
-        Some("service")
-    );
-    assert!(service_validation
-        .caller
-        .get("capabilities")
-        .and_then(Value::as_array)
-        .is_some_and(|capabilities| capabilities
-            .iter()
-            .any(|capability| capability.as_str() == Some("worker.run"))));
+    let trellis_rs::sdk::auth::types::AuthRequestsValidateResponseCaller::Service {
+        capabilities,
+        ..
+    } = service_validation.caller
+    else {
+        panic!("expected service caller");
+    };
+    assert!(capabilities
+        .iter()
+        .any(|capability| capability == "worker.run"));
 }
 
 async fn call_entity_get_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     id: &str,
 ) -> EntityGetOutput {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1180,7 +1060,7 @@ async fn call_entity_get_with_retry(
 }
 
 async fn call_entity_get_expecting_error(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     id: &str,
 ) -> trellis_rs::client::RpcErrorPayload {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -1197,14 +1077,14 @@ async fn call_entity_get_expecting_error(
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => return payload,
+            Err(trellis_rs::generated::TrellisClientError::RpcError(payload)) => return payload,
             Err(error) => panic!("expected declared RPC error, got: {error}"),
         }
     }
 }
 
 async fn call_rpc_expecting_error_with_retry<D>(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     input: &D::Input,
 ) -> trellis_rs::client::RpcErrorPayload
 where
@@ -1219,18 +1099,18 @@ where
             {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(trellis_rs::client::TrellisClientError::RpcError(payload)) => return payload,
+            Err(trellis_rs::generated::TrellisClientError::RpcError(payload)) => return payload,
             Err(error) => panic!("expected RPC validation error, got: {error}"),
         }
     }
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }
@@ -1240,7 +1120,7 @@ fn expect_auth_reason<T>(
     expected_reason: &str,
 ) {
     let Err(trellis_rs::auth::TrellisAuthError::TrellisClient(
-        trellis_rs::client::TrellisClientError::RpcError(payload),
+        trellis_rs::generated::TrellisClientError::RpcError(payload),
     )) = result
     else {
         panic!("expected AuthError reason {expected_reason}");

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use serde_json::json;
 use trellis_contracts::{
     schema_ref, state, store, use_contract, ContractCapabilityMetadata, ContractKind,

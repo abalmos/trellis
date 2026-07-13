@@ -34,7 +34,8 @@ liveTrellisTest({
           sessionKey: context.sessionKey,
           requestId: context.requestId,
           traceId: context.traceId,
-        }));
+        })
+      );
 
       const client = await runtime.connectClient({
         name: fixture.clientName,

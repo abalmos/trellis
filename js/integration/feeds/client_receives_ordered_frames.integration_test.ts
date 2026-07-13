@@ -37,8 +37,9 @@ liveTrellisTest({
       const controller = new AbortController();
 
       try {
-        const stream = await client.entityLive({ topic: fixture.topic },
-        { signal: controller.signal },).orThrow();
+        const stream = await client.entityLive({ topic: fixture.topic }, {
+          signal: controller.signal,
+        }).orThrow();
         const frames = await withTimeout(
           collectFeedFrames(stream, 2),
           "feeds.client-receives-ordered-frames frames",

@@ -13,6 +13,7 @@ use crate::jobs::types::WorkerHeartbeat;
 
 /// Errors returned while publishing or maintaining worker heartbeats.
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(ServiceRegistryError), "`.")]
 pub enum ServiceRegistryError {
     #[error("worker heartbeat task failed: {details}")]
     HeartbeatTask { details: String },
@@ -23,12 +24,14 @@ pub enum ServiceRegistryError {
 }
 
 /// Handle for a background worker heartbeat loop.
+#[doc = concat!("Public Trellis data type `", stringify!(WorkerHeartbeatHandle), "`.")]
 pub struct WorkerHeartbeatHandle {
     task: tokio::task::JoinHandle<Result<(), ServiceRegistryError>>,
 }
 
 impl WorkerHeartbeatHandle {
     /// Stop the heartbeat task and swallow expected cancellation shutdown.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(stop), "`.")]
     pub async fn stop(self) -> Result<(), ServiceRegistryError> {
         self.task.abort();
         match self.task.await {
@@ -42,6 +45,7 @@ impl WorkerHeartbeatHandle {
 }
 
 #[derive(Clone, Default)]
+#[doc = concat!("Public Trellis data type `", stringify!(ActiveJobCancellationRegistry), "`.")]
 pub struct ActiveJobCancellationRegistry {
     inner: Arc<Mutex<ActiveJobCancellationRegistryInner>>,
 }
@@ -52,6 +56,7 @@ struct ActiveJobCancellationRegistryInner {
     pending: HashSet<String>,
 }
 
+#[doc = concat!("Public Trellis data type `", stringify!(ActiveJobCancellationGuard), "`.")]
 pub struct ActiveJobCancellationGuard {
     key: String,
     token: JobCancellationToken,
@@ -59,10 +64,12 @@ pub struct ActiveJobCancellationGuard {
 }
 
 impl ActiveJobCancellationRegistry {
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(register), "`.")]
     pub fn register(
         &self,
         key: impl Into<String>,
@@ -85,6 +92,7 @@ impl ActiveJobCancellationRegistry {
         }
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(cancel), "`.")]
     pub fn cancel(&self, key: &str) -> bool {
         let mut found = false;
         let mut inner = self.inner.lock().expect("lock cancellation registry");
@@ -124,6 +132,7 @@ impl Drop for ActiveJobCancellationGuard {
 }
 
 /// Build a fresh worker heartbeat payload.
+#[doc = concat!("Trellis API operation `", stringify!(new_worker_heartbeat), "`.")]
 pub fn new_worker_heartbeat(
     service: &str,
     job_type: &str,
@@ -143,6 +152,7 @@ pub fn new_worker_heartbeat(
 }
 
 /// Publish one worker heartbeat immediately.
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(publish_worker_heartbeat), "`.")]
 pub async fn publish_worker_heartbeat(
     nats: async_nats::Client,
     heartbeat: &WorkerHeartbeat,
@@ -173,6 +183,7 @@ async fn publish_worker_heartbeat_for_subject(
 }
 
 /// Start a background heartbeat loop for one worker-host queue type.
+#[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_worker_heartbeat_loop), "`.")]
 pub async fn start_worker_heartbeat_loop(
     nats: async_nats::Client,
     service: String,

@@ -5,94 +5,132 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Registry bucket metadata for a jobs binding.
+#[doc = concat!("Public Trellis data type `", stringify!(JobsRegistry), "`.")]
 pub struct JobsRegistry {
+    #[doc = concat!("The `", stringify!(bucket), "` value.")]
     pub bucket: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Jobs resource bindings attached to materialized deployment authority.
+#[doc = concat!("Public Trellis data type `", stringify!(JobsBindings), "`.")]
 pub struct JobsBindings {
+    #[doc = concat!("The `", stringify!(namespace), "` value.")]
     pub namespace: String,
+    #[doc = concat!("The `", stringify!(queues), "` value.")]
     pub queues: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(registry), "` value.")]
     pub registry: Option<JobsRegistry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Resource bindings granted through materialized deployment authority.
+#[doc = concat!("Public Trellis data type `", stringify!(ResourceBindings), "`.")]
 pub struct ResourceBindings {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(jobs), "` value.")]
     pub jobs: Option<JobsBindings>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(kv), "` value.")]
     pub kv: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 /// Identity bound to the authenticated user session.
+#[doc = concat!("Public Trellis data type `", stringify!(AuthenticatedIdentity), "`.")]
 pub struct AuthenticatedIdentity {
+    #[doc = concat!("The `", stringify!(identity_id), "` value.")]
     pub identity_id: String,
+    #[doc = concat!("The `", stringify!(provider), "` value.")]
     pub provider: String,
+    #[doc = concat!("The `", stringify!(subject), "` value.")]
     pub subject: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// User record returned by `Auth.Sessions.Me`.
+#[doc = concat!("Public Trellis data type `", stringify!(AuthenticatedUser), "`.")]
 pub struct AuthenticatedUser {
+    #[doc = concat!("The `", stringify!(active), "` value.")]
     pub active: bool,
+    #[doc = concat!("The `", stringify!(capabilities), "` value.")]
     pub capabilities: Vec<String>,
+    #[doc = concat!("The `", stringify!(email), "` value.")]
     pub email: String,
+    #[doc = concat!("The `", stringify!(identity), "` value.")]
     pub identity: AuthenticatedIdentity,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(image), "` value.")]
     pub image: Option<String>,
     #[serde(rename = "lastLogin")]
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(last_login), "` value.")]
     pub last_login: Option<String>,
+    #[doc = concat!("The `", stringify!(name), "` value.")]
     pub name: String,
     #[serde(rename = "userId")]
+    #[doc = concat!("The `", stringify!(user_id), "` value.")]
     pub user_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Sentinel credentials returned alongside a successful bind.
+#[doc = concat!("Public Trellis data type `", stringify!(SentinelCredsRecord), "`.")]
 pub struct SentinelCredsRecord {
+    #[doc = concat!("The `", stringify!(jwt), "` value.")]
     pub jwt: String,
+    #[doc = concat!("The `", stringify!(seed), "` value.")]
     pub seed: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// One named transport endpoint family returned alongside a successful bind.
+#[doc = concat!("Public Trellis data type `", stringify!(ClientTransportRecord), "`.")]
 pub struct ClientTransportRecord {
     #[serde(rename = "natsServers")]
+    #[doc = concat!("The `", stringify!(servers), "` value.")]
     pub servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Transport variants returned alongside a successful bind.
+#[doc = concat!("Public Trellis data type `", stringify!(ClientTransportsRecord), "`.")]
 pub struct ClientTransportsRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(native), "` value.")]
     pub native: Option<ClientTransportRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(websocket), "` value.")]
     pub websocket: Option<ClientTransportRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 /// Request payload for `POST /auth/requests`.
+#[doc = concat!("Public Trellis data type `", stringify!(AuthStartRequest), "`.")]
 pub struct AuthStartRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(provider), "` value.")]
     pub provider: Option<String>,
+    #[doc = concat!("The `", stringify!(redirect_to), "` value.")]
     pub redirect_to: String,
+    #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: String,
+    #[doc = concat!("The `", stringify!(sig), "` value.")]
     pub sig: String,
+    #[doc = concat!("The `", stringify!(contract), "` value.")]
     pub contract: BTreeMap<String, Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 /// Response payload for `POST /auth/requests`.
+#[doc = concat!("Public Trellis value set `", stringify!(AuthStartResponse), "`.")]
 pub enum AuthStartResponse {
     Bound {
         expires: String,
@@ -130,7 +168,9 @@ pub type AuthRequestsValidateRequest = crate::sdk::auth::types::AuthRequestsVali
 pub type AuthRequestsValidateResponse = crate::sdk::auth::types::AuthRequestsValidateResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct LogoutResponse {
+#[doc = concat!("Public Trellis data type `", stringify!(LogoutResponse), "`.")]
+pub struct LogoutResponse {
+    #[doc = concat!("The `", stringify!(success), "` value.")]
     pub success: bool,
 }
 

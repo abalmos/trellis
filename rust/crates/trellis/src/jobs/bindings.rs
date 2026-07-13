@@ -8,74 +8,103 @@ use serde_json::Value;
 
 /// Resolved service-local jobs binding derived from Trellis resource bindings.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobsBinding), "`.")]
 pub struct JobsBinding {
     /// Logical registered service name projected in job admin views.
+    #[doc = concat!("The `", stringify!(service_name), "` value.")]
     pub service_name: String,
     /// Service namespace used in job subjects.
+    #[doc = concat!("The `", stringify!(namespace), "` value.")]
     pub namespace: String,
     /// Queue bindings keyed by logical queue type.
+    #[doc = concat!("The `", stringify!(queues), "` value.")]
     pub queues: BTreeMap<String, JobsQueueBinding>,
 }
 
 /// Full worker runtime binding including the work stream name.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobsRuntimeBinding), "`.")]
 pub struct JobsRuntimeBinding {
     /// Service-local queue binding data.
+    #[doc = concat!("The `", stringify!(jobs), "` value.")]
     pub jobs: JobsBinding,
     /// Bound work stream name used for consumer creation.
+    #[doc = concat!("The `", stringify!(work_stream), "` value.")]
     pub work_stream: String,
 }
 
 /// Resolved runtime settings for one jobs queue type.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobsQueueBinding), "`.")]
 pub struct JobsQueueBinding {
     /// Logical queue type from the contract binding.
+    #[doc = concat!("The `", stringify!(queue_type), "` value.")]
     pub queue_type: String,
     /// Publish prefix for lifecycle events in the jobs stream.
+    #[doc = concat!("The `", stringify!(publish_prefix), "` value.")]
     pub publish_prefix: String,
     /// Publish prefix for live-only updates, when declared.
+    #[doc = concat!("The `", stringify!(updates_prefix), "` value.")]
     pub updates_prefix: Option<String>,
     /// Work subject consumed by the worker.
+    #[doc = concat!("The `", stringify!(work_subject), "` value.")]
     pub work_subject: String,
     /// Durable consumer name for the queue.
+    #[doc = concat!("The `", stringify!(consumer_name), "` value.")]
     pub consumer_name: String,
     /// Maximum delivery attempts before advisory-based dead-letter handling.
+    #[doc = concat!("The `", stringify!(max_deliver), "` value.")]
     pub max_deliver: u64,
     /// Redelivery backoff schedule in milliseconds.
+    #[doc = concat!("The `", stringify!(backoff_ms), "` value.")]
     pub backoff_ms: Vec<u64>,
     /// Ack wait in milliseconds for the durable consumer.
+    #[doc = concat!("The `", stringify!(ack_wait_ms), "` value.")]
     pub ack_wait_ms: u64,
     /// Optional business deadline applied to newly created jobs.
+    #[doc = concat!("The `", stringify!(default_deadline_ms), "` value.")]
     pub default_deadline_ms: Option<u64>,
     /// Declared update schema name, when live updates are enabled.
+    #[doc = concat!("The `", stringify!(update), "` value.")]
     pub update: Option<String>,
     /// Whether progress events are enabled for the queue.
+    #[doc = concat!("The `", stringify!(progress), "` value.")]
     pub progress: bool,
     /// Whether log events are enabled for the queue.
+    #[doc = concat!("The `", stringify!(logs), "` value.")]
     pub logs: bool,
     /// Optional normalized keyed concurrency policy.
+    #[doc = concat!("The `", stringify!(key_concurrency), "` value.")]
     pub key_concurrency: Option<JobKeyConcurrencyBinding>,
     /// Optional normalized queue-depth policy for keyed queues.
+    #[doc = concat!("The `", stringify!(queue), "` value.")]
     pub queue: Option<JobQueueDepthBinding>,
 }
 
 /// Normalized keyed concurrency policy for one jobs queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobKeyConcurrencyBinding), "`.")]
 pub struct JobKeyConcurrencyBinding {
     /// Ordered key template segments.
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: Vec<String>,
     /// Maximum active jobs for one derived key.
+    #[doc = concat!("The `", stringify!(max_active), "` value.")]
     pub max_active: u32,
     /// Key lease heartbeat interval in milliseconds.
+    #[doc = concat!("The `", stringify!(heartbeat_interval_ms), "` value.")]
     pub heartbeat_interval_ms: u64,
     /// Key lease TTL in milliseconds.
+    #[doc = concat!("The `", stringify!(heartbeat_ttl_ms), "` value.")]
     pub heartbeat_ttl_ms: u64,
     /// Behavior for expired active slots.
+    #[doc = concat!("The `", stringify!(stale_policy), "` value.")]
     pub stale_policy: JobKeyStalePolicy,
 }
 
 /// Stale active-key policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobKeyStalePolicy), "`.")]
 pub enum JobKeyStalePolicy {
     /// Mark stale jobs before acquiring their expired slot.
     FailStale,
@@ -85,15 +114,19 @@ pub enum JobKeyStalePolicy {
 
 /// Normalized queue-depth policy for one keyed jobs queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobQueueDepthBinding), "`.")]
 pub struct JobQueueDepthBinding {
     /// Maximum queued jobs allowed for one derived key.
+    #[doc = concat!("The `", stringify!(max_queued_per_key), "` value.")]
     pub max_queued_per_key: u64,
     /// Behavior when the per-key queue is full.
+    #[doc = concat!("The `", stringify!(when_full), "` value.")]
     pub when_full: JobQueueWhenFull,
 }
 
 /// Queue-full policy for keyed jobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobQueueWhenFull), "`.")]
 pub enum JobQueueWhenFull {
     /// Reject the new job.
     Reject,
@@ -105,6 +138,7 @@ pub enum JobQueueWhenFull {
 
 /// Errors returned while decoding jobs bindings from core bootstrap data.
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobsBindingError), "`.")]
 pub enum JobsBindingError {
     #[error("bindings response is missing resources.jobs")]
     MissingJobsResource,
@@ -188,6 +222,7 @@ struct NormalizedJobsQueueBinding {
 }
 
 /// Parse a raw jobs binding map into the handwritten runtime binding type.
+#[doc = concat!("Trellis API operation `", stringify!(parse_jobs_binding), "`.")]
 pub fn parse_jobs_binding(
     service_name: &str,
     namespace: &str,

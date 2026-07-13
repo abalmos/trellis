@@ -21,7 +21,7 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 use trellis_rs::auth as authlib;
-use trellis_rs::client::{TrellisClient, TrellisClientError};
+use trellis_rs::generated::{Caller, TrellisClientError};
 
 mod auth;
 mod bootstrap;
@@ -124,7 +124,7 @@ pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
 
 pub(crate) async fn connect_authenticated_cli_client(
     format: OutputFormat,
-) -> miette::Result<(authlib::AdminSessionState, TrellisClient)> {
+) -> miette::Result<(authlib::AdminSessionState, Caller)> {
     let mut state = authlib::load_admin_session().into_diagnostic()?;
     let agent_contract_json = agent_contract_json();
     let agent_contract_digest = authlib::contract_digest(agent_contract_json).into_diagnostic()?;
@@ -241,7 +241,8 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
     use trellis_rs::auth::{save_admin_session, AdminSessionState, TrellisAuthError};
-    use trellis_rs::client::{RpcErrorPayload, TrellisClientError};
+    use trellis_rs::client::RpcErrorPayload;
+    use trellis_rs::generated::TrellisClientError;
 
     fn config_env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

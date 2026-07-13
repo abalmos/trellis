@@ -897,7 +897,7 @@ struct ControlOperationFixture {
     runtime: trellis_test::TrellisTestRuntime,
     service_key: trellis_test::TrellisTestServiceKey,
     service_task: AbortOnDrop<Result<(), trellis_rs::service::ServiceRuntimeError>>,
-    client: trellis_rs::client::TrellisClient,
+    client: trellis_rs::generated::Caller,
     operations: trellis_rs::service::ServiceOperation<EntityProcessOp>,
 }
 
@@ -1065,7 +1065,7 @@ async fn operations_client_watches_progress() {
     let events: Vec<
         Result<
             OperationEvent<EntityProcessProgress, EntityProcessOutput>,
-            trellis_rs::client::TrellisClientError,
+            trellis_rs::generated::TrellisClientError,
         >,
     > = operation_ref
         .watch()
@@ -1278,7 +1278,7 @@ async fn operations_client_waits_for_completion() {
     let events: Vec<
         Result<
             OperationEvent<EntityProcessProgress, EntityProcessOutput>,
-            trellis_rs::client::TrellisClientError,
+            trellis_rs::generated::TrellisClientError,
         >,
     > = operation_ref
         .watch()
@@ -2625,9 +2625,9 @@ async fn operations_denies_start_without_call_authority() {
 }
 
 async fn start_operation_with_retry<'a>(
-    client: &'a trellis_rs::client::TrellisClient,
+    client: &'a trellis_rs::generated::Caller,
     message: &str,
-) -> trellis_rs::client::OperationRef<'a, trellis_rs::client::TrellisClient, EntityProcessOp> {
+) -> trellis_rs::generated::OperationRef<'a, trellis_rs::generated::Caller, EntityProcessOp> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match client
@@ -2649,9 +2649,9 @@ async fn start_operation_with_retry<'a>(
 }
 
 async fn start_status_operation_with_retry<'a>(
-    client: &'a trellis_rs::client::TrellisClient,
+    client: &'a trellis_rs::generated::Caller,
     message: &str,
-) -> trellis_rs::client::OperationRef<'a, trellis_rs::client::TrellisClient, EntityStatusOp> {
+) -> trellis_rs::generated::OperationRef<'a, trellis_rs::generated::Caller, EntityStatusOp> {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match client
@@ -2714,12 +2714,12 @@ fn observed_auth_capability_sets(
         .collect()
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }

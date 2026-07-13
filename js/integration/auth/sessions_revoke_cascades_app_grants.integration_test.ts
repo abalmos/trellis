@@ -1,8 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import {
-  type CallerRuntime,
-  TrellisClient,
-} from "@qlever-llc/trellis";
+import { type CallerRuntime, TrellisClient } from "@qlever-llc/trellis";
 import { waitFor } from "@qlever-llc/trellis-test";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";

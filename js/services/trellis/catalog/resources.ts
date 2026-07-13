@@ -335,18 +335,32 @@ export function createNatsResourcePurgeManager(
 ): ResourcePurgeManager {
   return {
     async deleteKvBucket(bucket) {
-      const kv = await new Kvm(nats).open(bucket);
-      await kv.destroy();
+      try {
+        const kv = await new Kvm(nats).open(bucket);
+        await kv.destroy();
+      } catch (error) {
+        if (!isPhysicalResourceNotFoundError(error)) throw error;
+      }
     },
     async deleteObjectStore(name) {
-      const store = await new Objm(nats).open(name);
-      await store.destroy();
+      try {
+        const store = await new Objm(nats).open(name);
+        await store.destroy();
+      } catch (error) {
+        if (!isPhysicalResourceNotFoundError(error)) throw error;
+      }
     },
     async deleteEventConsumer(stream, consumerName) {
       const jsm = await jetstreamManager(nats);
       const consumers: EventConsumerManager = jsm.consumers;
       if (!consumers.delete) return;
-      await consumers.delete(stream, consumerName);
+      try {
+        await consumers.delete(stream, consumerName);
+      } catch (error) {
+        if (!isConsumerNotFoundError(error) && !isStreamNotFoundError(error)) {
+          throw error;
+        }
+      }
     },
   };
 }
@@ -838,6 +852,13 @@ function isStreamNotFoundError(error: unknown): boolean {
     error.name === "StreamNotFoundError" ||
     error.message.includes("stream not found")
   );
+}
+
+function isPhysicalResourceNotFoundError(error: unknown): boolean {
+  return isStreamNotFoundError(error) || error instanceof Error && (
+        error.message.includes("object store not found") ||
+        error.message.includes("bucket not found")
+      );
 }
 
 function isConsumerNotFoundError(error: unknown): boolean {

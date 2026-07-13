@@ -1,6 +1,4 @@
 use serde_json::{json, Value};
-use std::sync::Arc;
-use trellis_rs::client::TrellisClient;
 
 use crate::consumers::{inspect_consumer, query_consumers};
 use crate::projector::EventLogRuntime;
@@ -11,7 +9,6 @@ use crate::storage::{EventLogFilter, EventLogStore, EventLogStoreError, EventTyp
 pub struct EventLogQuery {
     store: EventLogStore,
     runtime: EventLogRuntime,
-    auth_client: Arc<TrellisClient>,
 }
 
 /// Errors returned by Event Log RPC query handlers.
@@ -41,16 +38,8 @@ pub enum EventLogQueryError {
 
 impl EventLogQuery {
     /// Construct an Event Log query adapter.
-    pub fn new(
-        store: EventLogStore,
-        runtime: EventLogRuntime,
-        auth_client: Arc<TrellisClient>,
-    ) -> Self {
-        Self {
-            store,
-            runtime,
-            auth_client,
-        }
+    pub fn new(store: EventLogStore, runtime: EventLogRuntime) -> Self {
+        Self { store, runtime }
     }
 
     /// Run `EventLog.Query`.
@@ -104,14 +93,14 @@ impl EventLogQuery {
 
     /// Run `EventLog.Consumers.Query`.
     pub async fn query_consumers(&self, input: &Value) -> Result<Value, EventLogQueryError> {
-        query_consumers(&self.runtime, &self.auth_client, input)
+        query_consumers(&self.runtime, input)
             .await
             .map_err(EventLogQueryError::Consumer)
     }
 
     /// Run `EventLog.Consumers.Inspect`.
     pub async fn inspect_consumer(&self, input: &Value) -> Result<Value, EventLogQueryError> {
-        inspect_consumer(&self.runtime, &self.auth_client, input)
+        inspect_consumer(&self.runtime, input)
             .await
             .map_err(|error| {
                 if error.contains("consumer not found") || error.contains("404") {

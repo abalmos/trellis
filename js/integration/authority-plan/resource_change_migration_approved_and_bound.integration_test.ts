@@ -23,7 +23,11 @@ liveTrellisTest({
       contract: fixture.resourceBaseContract,
     });
     let baseService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.resourceBaseContract>>>
+      | Awaited<
+        ReturnType<
+          typeof fixture.connectService<typeof fixture.resourceBaseContract>
+        >
+      >
       | undefined = await fixture.connectService({
         runtime,
         contract: fixture.resourceBaseContract,
@@ -31,7 +35,11 @@ liveTrellisTest({
         seed: baseKey.seed,
       });
     let changedService:
-      | Awaited<ReturnType<typeof fixture.connectService<typeof fixture.resourceChangedContract>>>
+      | Awaited<
+        ReturnType<
+          typeof fixture.connectService<typeof fixture.resourceChangedContract>
+        >
+      >
       | undefined;
 
     try {
@@ -82,7 +90,7 @@ liveTrellisTest({
           message: fixture.resourceRecordMessage(entry.value),
           history: 2,
         });
-      },);
+      });
 
       const client = await runtime.connectClient({
         name: fixture.resourceClientName,

@@ -2,10 +2,15 @@
 name = "trellis-contracts"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Contract manifest types, validation, and digest utilities for Trellis."
+readme = "../../README.md"
 build = "build.rs"
+
+[lints]
+workspace = true
 
 [dependencies]
 base64.workspace = true

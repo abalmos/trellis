@@ -1,5 +1,5 @@
-import { assertEquals } from "@std/assert";
-import { decodeSubject, escapeNats } from "../helpers.ts";
+import { assertEquals, assertThrows } from "@std/assert";
+import { decodeSubject, escapeNats, template } from "../helpers.ts";
 
 Deno.test("Helpers", async (t) => {
   await t.step("Subject Token Escaping", async (t) => {
@@ -65,5 +65,18 @@ Deno.test("Helpers", async (t) => {
       input = "$startsWithDollar";
       assertEquals(decodeSubject(escapeNats(input)), input);
     });
+  });
+
+  await t.step("Subject templates preserve canonical scalar values", () => {
+    assertEquals(
+      template("events.v1.Test.{/id}.{/attempt}", { id: "a.b", attempt: 0 }),
+      "events.v1.Test.a~2E~b.0",
+    );
+    assertThrows(
+      () =>
+        template("events.v1.Test.{/value}", { value: 9_007_199_254_740_992 }),
+      Error,
+      "safe integers",
+    );
   });
 });

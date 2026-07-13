@@ -7,7 +7,7 @@ use base64::Engine as _;
 use miette::IntoDiagnostic;
 use serde_json::{json, Value};
 use trellis_rs::auth as authlib;
-use trellis_rs::client::{SessionAuth, TrellisClient};
+use trellis_rs::generated::Caller;
 
 use crate::app::{connect_authenticated_cli_client, generate_session_keypair, json_value_label};
 use crate::cli::*;
@@ -225,17 +225,22 @@ async fn apply_contract(
         contract_input::default_image_contract_path(),
     )?;
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let response = connected
-        .request_json_value(
-            "rpc.v1.Auth.DeploymentAuthority.Plan",
-            &json!({
-                "deploymentId": deployment_id,
-                "contract": resolved.loaded.value,
-                "expectedDigest": resolved.loaded.digest,
-            }),
+    let Value::Object(contract) = resolved.loaded.value else {
+        return Err(miette::miette!("contract manifest must be an object"));
+    };
+    let response = trellis_rs::sdk::auth::AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .deployment_authority_plan(
+            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanRequest {
+                deployment_id: deployment_id.to_string(),
+                contract: contract.into_iter().collect(),
+                expected_digest: resolved.loaded.digest.clone(),
+            },
         )
         .await
         .into_diagnostic()?;
+    let response = serde_json::to_value(response).into_diagnostic()?;
     if output::is_json(format) {
         output::print_json(&response)?;
     } else {
@@ -368,8 +373,8 @@ async fn provision_service(
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let (instance_seed, instance_key, generated_seed) = if let Some(seed) = &args.instance_seed {
-        let auth = SessionAuth::from_seed_base64url(seed).into_diagnostic()?;
-        (seed.clone(), auth.session_key, false)
+        let session_key = authlib::session_public_key(seed).into_diagnostic()?;
+        (seed.clone(), session_key, false)
     } else {
         let (seed, key) = generate_session_keypair();
         (seed, key, true)
@@ -493,29 +498,38 @@ async fn deployment_authority(
     command: DeploymentAuthorityCommand,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
+    let auth = trellis_rs::sdk::auth::AuthClient::new(&connected);
     match command {
         DeploymentAuthorityCommand::Show => {
-            let response = connected
-                .request_json_value(
-                    "rpc.v1.Auth.DeploymentAuthority.Get",
-                    &json!({ "deploymentId": deployment_id }),
+            let response = auth
+                .rpc()
+                .auth()
+                .deployment_authority_get(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGetRequest {
+                        deployment_id: deployment_id.to_string(),
+                    },
                 )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_deployment_authority_result(format, &response)
         }
         DeploymentAuthorityCommand::Plan(command) => {
             deployment_authority_plan(format, &connected, deployment_id, command).await
         }
         DeploymentAuthorityCommand::AcceptUpdate(args) => {
-            let mut body = json!({ "planId": args.plan_id });
-            if let Some(version) = args.expected_desired_version.as_deref() {
-                body["expectedDesiredVersion"] = json!(version);
-            }
-            let response = connected
-                .request_json_value("rpc.v1.Auth.DeploymentAuthority.AcceptUpdate", &body)
+            let response = auth
+                .rpc()
+                .auth()
+                .deployment_authority_accept_update(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
+                        plan_id: args.plan_id,
+                        expected_desired_version: args.expected_desired_version,
+                    },
+                )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_authority_decision_result(
                 format,
                 &response,
@@ -524,17 +538,19 @@ async fn deployment_authority(
             )
         }
         DeploymentAuthorityCommand::AcceptMigration(args) => {
-            let mut body = json!({
-                "planId": args.plan_id,
-                "acknowledgement": args.acknowledgement,
-            });
-            if let Some(version) = args.expected_desired_version.as_deref() {
-                body["expectedDesiredVersion"] = json!(version);
-            }
-            let response = connected
-                .request_json_value("rpc.v1.Auth.DeploymentAuthority.AcceptMigration", &body)
+            let response = auth
+                .rpc()
+                .auth()
+                .deployment_authority_accept_migration(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
+                        plan_id: args.plan_id,
+                        acknowledgement: args.acknowledgement,
+                        expected_desired_version: args.expected_desired_version,
+                    },
+                )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_authority_decision_result(
                 format,
                 &response,
@@ -543,25 +559,33 @@ async fn deployment_authority(
             )
         }
         DeploymentAuthorityCommand::Reject(args) => {
-            let mut body = json!({ "planId": args.plan_id });
-            if let Some(reason) = args.reason.as_deref() {
-                body["reason"] = json!(reason);
-            }
-            let response = connected
-                .request_json_value("rpc.v1.Auth.DeploymentAuthority.Reject", &body)
+            let response = auth
+                .rpc()
+                .auth()
+                .deployment_authority_reject(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityRejectRequest {
+                        plan_id: args.plan_id,
+                        reason: args.reason,
+                    },
+                )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_authority_decision_result(format, &response, "rejected authority plan", false)
         }
         DeploymentAuthorityCommand::Reconcile(args) => {
-            let mut body = json!({ "deploymentId": deployment_id });
-            if let Some(version) = args.desired_version.as_deref() {
-                body["desiredVersion"] = json!(version);
-            }
-            let response = connected
-                .request_json_value("rpc.v1.Auth.DeploymentAuthority.Reconcile", &body)
+            let response = auth
+                .rpc()
+                .auth()
+                .deployment_authority_reconcile(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityReconcileRequest {
+                        deployment_id: deployment_id.to_string(),
+                        desired_version: args.desired_version,
+                    },
+                )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_authority_decision_result(
                 format,
                 &response,
@@ -574,37 +598,48 @@ async fn deployment_authority(
 
 async fn deployment_authority_plan(
     format: OutputFormat,
-    connected: &TrellisClient,
+    connected: &Caller,
     deployment_id: &str,
     command: AuthorityPlanCommand,
 ) -> miette::Result<()> {
     match command {
         AuthorityPlanCommand::List(args) => {
-            let mut body = json!({
-                "deploymentId": deployment_id,
-                "limit": 500,
-                "offset": 0,
-            });
-            if let Some(state) = args.state {
-                body["state"] = json!(state.as_wire_value());
-            }
-            if let Some(classification) = args.classification {
-                body["classification"] = json!(classification.as_wire_value());
-            }
-            let response = connected
-                .request_json_value("rpc.v1.Auth.DeploymentAuthority.Plans.List", &body)
+            let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+                .rpc()
+                .auth()
+                .deployment_authority_plans_list(&trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequest {
+                    deployment_id: Some(deployment_id.to_string()),
+                    limit: 500,
+                    offset: Some(0),
+                    kind: None,
+                    state: args.state.map(|state| match state {
+                        DeploymentAuthorityPlanState::Pending => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Pending,
+                        DeploymentAuthorityPlanState::Accepted => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Accepted,
+                        DeploymentAuthorityPlanState::Rejected => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Rejected,
+                        DeploymentAuthorityPlanState::Expired => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestState::Expired,
+                    }),
+                    classification: args.classification.map(|classification| match classification {
+                        DeploymentAuthorityPlanClassification::Update => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestClassification::Update,
+                        DeploymentAuthorityPlanClassification::Migration => trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansListRequestClassification::Migration,
+                    }),
+                })
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_deployment_authority_plans_result(format, &response)
         }
         AuthorityPlanCommand::Show(args) => {
-            let response = connected
-                .request_json_value(
-                    "rpc.v1.Auth.DeploymentAuthority.Plans.Get",
-                    &json!({ "planId": args.plan_id }),
+            let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+                .rpc()
+                .auth()
+                .deployment_authority_plans_get(
+                    &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlansGetRequest {
+                        plan_id: args.plan_id,
+                    },
                 )
                 .await
                 .into_diagnostic()?;
+            let response = serde_json::to_value(response).into_diagnostic()?;
             print_deployment_authority_result(format, &response)
         }
     }
@@ -687,41 +722,45 @@ fn authority_desired_version(response: &Value) -> Option<&str> {
 
 async fn deployment_grants_list(
     format: OutputFormat,
-    connected: &TrellisClient,
+    connected: &Caller,
     deployment_id: &str,
 ) -> miette::Result<()> {
-    let response = connected
-        .request_json_value(
-            "rpc.v1.Auth.DeploymentAuthority.Get",
-            &json!({ "deploymentId": deployment_id }),
+    let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+        .rpc()
+        .auth()
+        .deployment_authority_get(
+            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGetRequest {
+                deployment_id: deployment_id.to_string(),
+            },
         )
         .await
         .into_diagnostic()?;
+    let response = serde_json::to_value(response).into_diagnostic()?;
     print_deployment_grants_result(format, deployment_id, &response)
 }
 
 async fn deployment_grants_list_all(
     format: OutputFormat,
-    connected: &TrellisClient,
+    connected: &Caller,
 ) -> miette::Result<()> {
-    let list_response = connected
-        .request_json_value(
-            "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.List",
-            &json!({ "limit": 500, "offset": 0 }),
+    let list_response = trellis_rs::sdk::auth::AuthClient::new(connected)
+        .rpc()
+        .auth()
+        .deployment_authority_grant_overrides_list(
+            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesListRequest {
+                limit: 500,
+                offset: Some(0),
+            },
         )
         .await
         .into_diagnostic()?;
-    let grant_overrides = list_response
-        .get("entries")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    print_grants_result(format, &Value::Array(grant_overrides))
+    let grant_overrides = serde_json::to_value(list_response.entries).into_diagnostic()?;
+    print_grants_result(format, &grant_overrides)
 }
 
 async fn deployment_grants_mutate(
     format: OutputFormat,
-    connected: &TrellisClient,
+    connected: &Caller,
     deployment_id: &str,
     args: &DeploymentGrantMutationArgs,
     add: bool,
@@ -799,16 +838,19 @@ async fn deployment_grants_mutate(
         },
     ));
     let request_overrides = if add {
-        let response = connected
-            .request_json_value(
-                "rpc.v1.Auth.DeploymentAuthority.Get",
-                &json!({ "deploymentId": deployment_id }),
+        let response = trellis_rs::sdk::auth::AuthClient::new(connected)
+            .rpc()
+            .auth()
+            .deployment_authority_get(
+                &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGetRequest {
+                    deployment_id: deployment_id.to_string(),
+                },
             )
             .await
             .into_diagnostic()?;
-        let mut existing = response
-            .get("grantOverrides")
-            .and_then(Value::as_array)
+        let mut existing = serde_json::to_value(response.grant_overrides)
+            .into_diagnostic()?
+            .as_array()
             .cloned()
             .unwrap_or_default();
         for override_row in grant_overrides {
@@ -823,21 +865,44 @@ async fn deployment_grants_mutate(
     } else {
         grant_overrides
     };
-    let subject = if add {
-        "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.Put"
+    let auth = trellis_rs::sdk::auth::AuthClient::new(connected);
+    let response = if add {
+        let overrides = request_overrides
+            .into_iter()
+            .map(serde_json::from_value)
+            .collect::<Result<Vec<trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesPutRequestOverridesItem>, _>>()
+            .into_diagnostic()?;
+        let response = auth
+            .rpc()
+            .auth()
+            .deployment_authority_grant_overrides_put(
+                &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesPutRequest {
+                    deployment_id: deployment_id.to_string(),
+                    overrides,
+                },
+            )
+            .await
+            .into_diagnostic()?;
+        serde_json::to_value(response).into_diagnostic()?
     } else {
-        "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.Remove"
+        let overrides = request_overrides
+            .into_iter()
+            .map(serde_json::from_value)
+            .collect::<Result<Vec<trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequestOverridesItem>, _>>()
+            .into_diagnostic()?;
+        let response = auth
+            .rpc()
+            .auth()
+            .deployment_authority_grant_overrides_remove(
+                &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGrantOverridesRemoveRequest {
+                    deployment_id: deployment_id.to_string(),
+                    overrides,
+                },
+            )
+            .await
+            .into_diagnostic()?;
+        serde_json::to_value(response).into_diagnostic()?
     };
-    let response = connected
-        .request_json_value(
-            subject,
-            &json!({
-                "deploymentId": deployment_id,
-                "overrides": request_overrides,
-            }),
-        )
-        .await
-        .into_diagnostic()?;
     print_deployment_grant_mutation_result(
         format,
         deployment_id,

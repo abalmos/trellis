@@ -1,289 +1,185 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-10).
+Last verified against Trellis main (2026-07-12).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
 
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
 
-## Service repository setup
+## Repository setup
 
-Rules:
+- Expose contract/artifact generation through `cargo xtask prepare`.
+- Commit the generated SDKs, participant facades, manifests, and package outputs
+  expected by the repository. Never edit generated files by hand.
+- Public contract object schemas are open by default. Omit
+  `additionalProperties`; use `false` only for a documented proof/security
+  boundary that must reject unknown fields.
+- Run prepare after contract/schema changes. Generated owner and participant
+  Cargo crates are materialized source with relative local dependencies and no
+  generator `build.rs`.
 
-- Rust service repos should expose Trellis generation through
-  `cargo xtask prepare`
-- generated SDKs, manifests, and package outputs belong under the service repo's
-  generated output locations; do not edit generated files by hand
-- public contract object schemas are open by default; omit `additionalProperties`
-  from raw JSON Schema unless a security-sensitive proof boundary or another
-  documented requirement must reject unknown fields
-- Trellis caches manifests by digest at runtime. If auth/bootstrap reports a
-  missing digest after the cache is pruned, regenerate from source and present the
-  full manifest; do not patch deployment authority or implementation offers by
-  hand.
-- Deployment authority proposal/desired `needs` are grouped by `contracts`,
-  `surfaces`, `capabilities`, and `resources`. Materialized authority is a
-  projection with runtime `grants` grouped by `capabilities`, `surfaces`, and
-  `nats`; service permissions require current materialization for the accepted
-  desired authority version. Stale or obsolete persisted projections are repaired
-  by Trellis storage upgrade and reconciliation.
-- Safe deployment authority updates auto-apply during bootstrap. New capability
-  grants and new resource aliases require update approval; strict-mode
-  migrations require approval; `mutable-dev` records and auto-accepts migrations.
-- Rust service bootstrap polls pending deployment authority until it becomes
-  ready by default. Set `authority_pending_timeout_ms` to `Some(milliseconds)`
-  only when startup needs an overall deadline; `timeout_ms` still bounds each
+## Rust architecture
+
+- Connect only through the generated participant facade's `connect(...)`.
+- Owner SDK crates contain typed vocabulary and thin adapters. They do not expose
+  connection bootstrap, `ConnectedService`, or generic runtime clients.
+- Service participants expose service bootstrap only. Apps and agents expose
+  user-session bootstrap only. Devices expose activated-device bootstrap only.
+- The participant facade embeds its contract id, digest, and canonical manifest.
+- Dependency aliases become generated accessors. Absent aliases and unselected
+  surfaces do not exist at compile time.
+- Register owned RPC, feed, and operation providers through
+  `service.handle()`. Used remote surfaces never appear under `handle()`.
+- Use generated resource, state, Jobs, event-consumer, and publisher handles.
+- Do not import `trellis_rs::client` or `trellis_rs::generated` from application
+  code. Do not extract NATS, credentials, bindings, subjects, or generic
+  request/publish/subscribe methods.
+- If a facade lacks a declared capability, fix the contract or generator. Do not
+  add a transport shim in the service repository.
+
+## Connection and authority
+
+- Rust service bootstrap waits for pending deployment authority indefinitely by
+  default. Use `ServiceConnectOptions::with_authority_pending_timeout_ms(...)`
+  only when startup needs an overall deadline; `with_timeout_ms(...)` bounds each
   request.
-- Deployment authority plans can be `superseded`; only `pending` plans targeting
-  the current desired authority version are actionable.
-- Deployment authority plans expose `breakingChanges` as structured per-target
-  compatibility failures for operator UI.
-- prefer generated descriptors and generated client/facade methods
-- prefer generated provider facades for service handler registration when they
-  are available
-- event subject params must point at string, number, or integer-compatible schema
-  fields; for `anyOf` or `oneOf` event payload schemas, every variant must expose
-  each routed pointer
-- durable event processing is a Trellis-provisioned `eventConsumers` resource;
-  `eventConsumers.<group>.uses` selects dependency events by top-level `uses`
-  alias, and `eventConsumers.<group>.self` selects events owned by the same
-  contract. Dependency durable consumption remains authority-backed by top-level
-  `uses`; runtime durable consumers are Trellis-provisioned only.
-- Rust services register durable event listeners from the connected service
-  runtime with descriptor-backed `listen_event(...)`. Pass `group` when more
-  than one declared event-consumer group matches the event. Do not pass or invent
-  durable consumer names; Trellis resolves the provisioned durable binding from
-  service bootstrap. The returned listener handle supports `abort()`; aborting a
-  durable listener removes that handler from the shared listener registry so a
-  later registration can restart delivery from the same Trellis-provisioned
-  durable consumer.
-- Deno-first service-boundary tests that use `@qlever-llc/trellis-test` can use
-  `runtime.captureEvents(...)` and the exported captured-event, job, operation,
-  and Result assertion helpers without raw NATS subjects or production-only event
-  consumer groups. Generated TypeScript event captures and service job refs can
-  be passed directly to those helpers; Rust-native code should still use
-  generated descriptors/facades.
-- In the Trellis repo, Rust client-library integration coverage lives in the
-  public `trellis-rs` facade integration target and runs with
-  `cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`.
-  It is a peer of the JS integration runners and must register every applicable
-  case from `integration/test-matrix.json`; there are no Rust-only skips or
-  per-language matrix opt-ins outside explicit blocked rows.
-- Test Trellis runtime behavior through live integration tests. Do not use fake
-  NATS, fake Trellis runtimes, fake auth, fake generated clients, or hand-built
-  bootstrap/control-plane responders to prove Trellis behavior. If a live test
-  needs a missing failure or inspection surface, add the smallest named test
-  helper instead of enriching a fake.
-- service-private jobs that must be singleton per logical key should declare
-  `keyConcurrency`. Configure per-queue worker counts in
-  `WorkerHostOptions.queue_concurrency`; they are not contract or binding fields.
-  Keyed queues default to clear failure
-  (`stalePolicy: "fail-stale"`, `whenFull: "reject"`); coalescing or replacing
-  queued jobs should be explicit policy.
-- Rust job handlers classify failures with `JobProcessError::retryable(...)` for
-  JetStream redelivery or `JobProcessError::failed(...)` for terminal failure.
-- Jobs admin clients use `Jobs.Query` for server-side search/sort/group/stats,
-  `Jobs.Metrics` for grouped operational summaries and time buckets, and
-  `Jobs.Inspect` for one-job detail, timeline, attempts, related jobs,
-  errors, trigger, lineage, and current `waitingOn` edges. Jobs remain `active`
-  while waiting. Use active-job wait helpers such as `job.wait_for(...)` to
-  annotate long external async work with safe metadata. `Jobs.List` and
-  `Jobs.Get` are removed. `Jobs.Watch` is an invalidation feed only; rerun query,
-  metrics, or inspection reads after invalidation frames. Admin mutations accept
-  optional `reason`, and active cancellation remains cooperative through
-  `Jobs.Cancel`.
-- Event Log admin clients use read-only `EventLog.Query`, `EventLog.Inspect`,
-  `EventLog.Metrics`, `EventLog.Consumers.Query`, and `EventLog.Watch` surfaces.
-  Declare it as an optional dependency unless the app cannot operate without
-  historical event data. Publisher deployment attribution comes from verified
-  event session proof; owner contract/event comes from subject/catalog matching.
-  `EventLog.Query` accepts `include_event_types` and `exclude_event_types`
-  vectors of owner contract/event pairs and `integrity_exception_only` for events
-  whose owner resolution or proof verification failed. `EventLog.Metrics` returns
-  exact `summary.integrity_exceptions`, resolved event-type counts, and typed
-  `buckets` with volume, payload size, resolution, and verification counts.
+- Safe resource definition updates and additive provided surfaces auto-apply.
+  New requested capabilities, new resource aliases, and strict migrations
+  require approval. Mutable-dev records auto-accept migrations.
+- Only `pending` plans for the current desired authority version are actionable;
+  older plans become `superseded`.
+- Deployment authority acceptance commits desired state and returns while
+  physical reconciliation continues in the background.
+- Deployment authority `needs` group contracts, surfaces, capabilities, and
+  resources. Materialized grants group capabilities, surfaces, and NATS rules.
 
-## Use generated descriptors and facades
+## Typed calls
 
-Prefer generated client wrappers and participant facades when available:
+Call through the local participant alias:
 
 ```rust
-let order = orders_client
-    .rpc()
+let order = connected
+    .client()
     .orders()
-    .get(&orders_sdk::OrdersGetRequest {
+    .orders_get(&orders_sdk::OrdersGetRequest {
         order_id: "ord_123".into(),
     })
     .await?;
 ```
 
-Descriptor APIs are the lower-level typed surface:
+Match generated declared RPC and operation error variants directly. Do not
+decode typed responses or errors back through JSON.
+
+Start operations through generated invokers:
 
 ```rust
-use orders_sdk::events::OrdersShippedEventDescriptor;
-use orders_sdk::OrdersShippedEvent;
-
-trellis_client
-    .publish::<OrdersShippedEventDescriptor>(&OrdersShippedEvent {
-        order_id: "ord_123".into(),
-        customer_id: "cust_456".into(),
-        shipped_at: now_iso(),
-    })
-    .await?;
-
-let mut events = trellis_client
-    .subscribe::<OrdersShippedEventDescriptor>()
-    .await?;
-```
-
-Operations use generated operation descriptors:
-
-```rust
-let op = trellis_client
-    .operation::<orders_sdk::operations::OrdersProcessOperation>()
+let operation = connected
+    .client()
+    .orders()
+    .orders_process()
     .start(&orders_sdk::OrdersProcessInput {
         order_id: "ord_123".into(),
     })
     .await?;
 
-let terminal = op.wait().await?;
+let terminal = operation.wait().await?;
 ```
 
-An operation or job queue may declare one optional `update` schema. Keep
-progress for low-frequency durable telemetry/snapshots. Updates are typed
-live-only, at-most-once content: they are not persisted, replayed, exposed in
-admin/Event Log, or delivered to late subscribers. Prefer cumulative payloads
-and treat terminal output/result as authoritative.
+Operations are caller-visible workflows; Jobs are service-private execution.
+An operation or queue may declare one typed live update schema. Updates are
+at-most-once, not persisted or replayed, and may be missed by late subscribers.
+Prefer cumulative updates and treat terminal output/result as authoritative.
+
+## Events
+
+- Publish owned events through `service.publisher()` and generated
+  `publish_<event>(...)` methods.
+- Event subject params must resolve to string, number, or bounded safe-integer
+  fields in every `anyOf`/`oneOf` branch. The runtime derives and escapes subject
+  tokens from the payload; application code never builds subjects.
+- Durable event processing is a declared `eventConsumers` resource. Register
+  generated group handlers through `service.event_consumers()`.
+- Trellis resolves durable names, filters, replay, and permissions from bootstrap
+  bindings. Do not create JetStream consumers or inspect `num_waiting` as a
+  readiness gate.
+- Returned listener handles support abort/re-registration while retaining the
+  Trellis-provisioned durable.
+- Event handlers receive verified publisher metadata when proof validation
+  succeeds. Event Log may validate retained historical session windows after an
+  ordinary publisher session expires.
+
+## Prepared events and inboxes
+
+Direct typed publish is the default. Use a prepared event plus an outbox only
+when event enqueue must commit atomically with service-local durable state:
 
 ```rust
-// From a provider registered with register_operation_with_updates_and_signal:
-control.emit_update(ProcessOrderUpdate { completed: 3, total: 10 }).await?;
-let mut events = op.watch_with_updates().await?;
-let mut updates_only = op.updates().await?;
+use trellis_rs::service::{dispatch_outbox_once, OutboxStore, SqliteOutboxStore};
 
-active_job
-    .emit_update::<orders_sdk::jobs::SyncOrderJob>(SyncOrderJobUpdate {
-        completed: 3,
-        total: 10,
-    })
-    .await?;
-let mut job_updates = waiter
-    .updates::<orders_sdk::jobs::SyncOrderJob>(&job_id)
-    .await?;
-```
-
-Job update streams filter stale attempts and duplicate or out-of-order
-attempt-local sequences and clean up when dropped or terminal lifecycle is
-observed. Subscribe by a known/preallocated job id before work starts when early
-frames matter. Job update subjects are private Core NATS outside `JOBS`;
-application code must not build them.
-
-Register service handlers through generated provider facades where they exist:
-
-```rust
-service.handle().rpc().orders().get(get_order_handler);
-service.handle().feed().orders().live(orders_live_stream);
-service.handle().operation().orders().process(orders_process_provider);
-```
-
-Dropping a client feed stream propagates cancellation to the provider and drops
-the provider response stream. Keep connection-scoped resources owned by that
-stream so they are released on cancellation.
-
-Apps or services that already received Trellis user ids on authorized records can
-call generated `Auth.Users.Resolve` to render minimal labels. Do not use admin
-directory RPCs such as `Auth.Users.List` or keep service-local profile tables for
-basic labels.
-
-Do not hand-build NATS subjects or JSON envelopes in application service code.
-Use generated descriptors and runtime helpers.
-
-Rust Trellis clients and service facades do not expose `async_nats::Client` as
-application API. Use generated descriptors/facades for communication and
-Trellis-owned lifecycle/resource helpers instead of extracting or constructing
-raw transport handles through Trellis.
-
-## Prepared events and outbox/inbox
-
-Trellis signs event publishes at publish time and consumers validate event proofs
-before invoking handlers. Prepared events intentionally store subject, payload,
-event id, and event time without deployment or contract metadata; runtime publish
-adds proof headers from the current session.
-
-Direct descriptor publish is the default. Use `prepare_event::<Descriptor>(...)`
-only when event enqueue must be coupled to local durable state:
-
-```rust
-use orders_sdk::events::OrdersShippedEventDescriptor;
-use orders_sdk::OrdersShippedEvent;
-use trellis_rs::client::{dispatch_outbox_once, OutboxStore, SqliteOutboxStore};
-
-let prepared = trellis_client.prepare_event::<OrdersShippedEventDescriptor>(
-    &OrdersShippedEvent {
+let publisher = service.publisher();
+let prepared = publisher.prepare_orders_shipped(
+    &orders_sdk::OrdersShippedEvent {
         order_id: "ord_123".into(),
-        customer_id: "cust_456".into(),
         shipped_at: now_iso(),
     },
 )?;
 
 let tx = sqlite.transaction()?;
 mark_order_shipped(&tx, "ord_123")?;
-
-{
-    let mut outbox = SqliteOutboxStore::new(&tx);
-    outbox.enqueue("outbox:ord_123:shipped", &prepared).await?;
-}
-
+SqliteOutboxStore::new(&tx)
+    .enqueue("outbox:ord_123:shipped", &prepared)
+    .await?;
 tx.commit()?;
 
 let mut outbox = SqliteOutboxStore::new(&sqlite);
-dispatch_outbox_once(&mut outbox, |event| async {
-    trellis_client.publish_prepared(&event).await
+dispatch_outbox_once(&mut outbox, |event| {
+    let publisher = publisher.clone();
+    async move { publisher.publish_prepared(&event).await }
 })
 .await?;
 ```
 
-Generated event structs are event bodies only. `PreparedTrellisEvent` stores the
-subject, encoded payload, and message metadata needed for later publishing. It
-intentionally carries no contract id or contract digest. Metadata-aware
-subscribers should use `subscribe_messages` and `EventMessage::event_id()` /
-`event_time()`.
+Prepared events store subject, encoded payload, event id, and event time, but no
+contract/deployment identity. Publish-time proof uses the current service
+session. Use an inbox only when replaying a handler would not be naturally
+idempotent.
 
-Use an inbox store only for non-idempotent handlers:
+## Jobs
 
-```rust
-use trellis_rs::client::{InboxReceipt, InboxStore, SqliteInboxStore};
+- Clone submission queues through `service.jobs_client()` for RPC handlers,
+  operations, and background tasks.
+- Register workers through `service.jobs().<queue>().handle(...)` before
+  `service.run()`.
+- `service.run()` supervises workers and the authenticated request host. Any
+  worker task exit fails the service.
+- `JobRef` provides typed get, wait, and cancel behavior backed by lifecycle
+  events.
+- Per-message processing failures NAK and continue the queue loop. Keyed active
+  slots are released best-effort before redelivery.
+- Use `job.heartbeat()` for long processing, `job.progress(...)` for durable
+  lifecycle progress, and `job.is_cancelled()` for cooperative cancellation.
+- Keyed queues default to `fail-stale` and `reject`; coalescing/replacement must
+  be explicit.
+- Jobs admin uses `Jobs.Query`, `Jobs.Metrics`, `Jobs.Inspect`, and invalidation
+  `Jobs.Watch`. `Jobs.List` and `Jobs.Get` are removed.
 
-let mut inbox = SqliteInboxStore::new(&sqlite);
-let Some(event_id) = message.event_id() else {
-    return Err(anyhow::anyhow!("event message missing id"));
-};
+## Resources and transfers
 
-match inbox.record_received(event_id).await? {
-    InboxReceipt::Accepted => apply_non_idempotent_side_effect(message.payload()).await?,
-    InboxReceipt::Duplicate => return Ok(()),
-}
-```
+- Access KV, store, state, and Jobs through generated named handles. They already
+  contain resolved bootstrap bindings.
+- Services must not call `Trellis.Bindings.Get` or construct resource clients.
+- Transfer-capable operations expose transfer methods on the typed operation
+  reference. Providers plan grants through `ServiceHandlerContext`, which owns
+  caller identity, service session material, and resolved stores.
 
-Use `PostgresOutboxStore` and `PostgresInboxStore` for Postgres-backed services.
+## Testing and verification
 
-## Schema validation UX
-
-The TypeScript Trellis runtime supports `SchemaValidationError` for
-contract-authored, UI-facing validation metadata through the
-`x-trellis-validation` JSON Schema vendor extension. Rust uses a different
-validation architecture; the Rust equivalent of `SchemaValidationError` is
-pending design exploration.
-
-## Operation Typed Errors
-- `OperationDescriptor` requires `type Error: OperationFailureLike + Send + 'static`
-- `OperationDescriptor` carries `const ERRORS: &'static [&'static str]`
-- Generated operation descriptors emit `{Base}OperationError` enums with `OperationFailureLike` impl
-- Operations without declared errors use `type Error = OperationFailure`
-
-## Verification
-
-Use the format, clippy, test, run, and migration commands configured by the
-service repository. If contract artifacts or generated SDKs changed, run
-`cargo xtask prepare` and commit the generated outputs expected by that repo.
+- Test runtime-observable behavior with live integration tests. Do not use fake
+  NATS, fake Trellis runtimes, fake auth, or fake generated clients.
+- In the Trellis repository, Rust integration cases run with:
+  `cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --test-threads=1`.
+- Register applicable integration cases in `integration/test-matrix.json`; do not
+  add language-only skips outside explicit blocked rows.
+- Format changed Rust files, run Clippy, Rustdoc, MSRV checks, focused tests, and
+  `cargo xtask prepare` when generated artifacts change.

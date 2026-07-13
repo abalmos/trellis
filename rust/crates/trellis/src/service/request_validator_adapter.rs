@@ -38,7 +38,8 @@ impl AuthRequestValidatorClientPort for Arc<TrellisClient> {
         input: &'a AuthRequestsValidateRequest,
     ) -> BoxFuture<'a, Result<AuthRequestsValidateResponse, TrellisClientError>> {
         Box::pin(async move {
-            AuthClient::new(self.as_ref())
+            let caller = crate::generated::Caller::from_client(Arc::clone(self));
+            AuthClient::new(&caller)
                 .validate_request(input)
                 .await
                 .map_err(map_auth_error)
@@ -80,7 +81,9 @@ where
                 .await
                 .map_err(|error| map_validate_request_error(subject, error))?;
             if response.allowed {
-                Ok(RequestValidation::allowed_caller(response.caller))
+                Ok(RequestValidation::allowed_caller(serde_json::to_value(
+                    response.caller,
+                )?))
             } else {
                 Ok(RequestValidation::denied())
             }

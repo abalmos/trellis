@@ -390,7 +390,7 @@ async fn feeds_denies_subscribe_without_authority() {
 }
 
 async fn subscribe_entity_feed_n(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     topic: &str,
     count: usize,
 ) -> Vec<EntityFeedFrame> {
@@ -434,12 +434,12 @@ async fn subscribe_entity_feed_n(
     }
 }
 
-fn is_retryable_feed_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_feed_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }

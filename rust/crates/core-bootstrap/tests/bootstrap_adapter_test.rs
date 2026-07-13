@@ -6,7 +6,7 @@ use trellis_core_bootstrap::bootstrap::{
     make_bindings_get_request, map_binding_response, map_catalog_to_contract_refs,
     CoreBootstrapAdapter, CoreBootstrapBinding, CoreBootstrapClientPort,
 };
-use trellis_rs::client::TrellisClientError;
+use trellis_rs::generated::TrellisClientError;
 use trellis_rs::sdk::core::types::{
     TrellisBindingsGetRequest, TrellisBindingsGetResponse, TrellisBindingsGetResponseBinding,
     TrellisBindingsGetResponseBindingResources, TrellisBindingsGetResponseEventConsumersValue,
@@ -71,7 +71,7 @@ fn sample_catalog() -> TrellisCatalogResponse {
                 display_name: "Jobs".to_string(),
                 id: "trellis.jobs@v1".to_string(),
             }],
-            format: "trellis.catalog.v1".to_string(),
+            format: serde_json::from_value(serde_json::json!("trellis.catalog.v1")).unwrap(),
             issues: None,
         },
     }
@@ -167,8 +167,8 @@ fn bindings_get_response_deserializes_top_level_event_consumers() {
                 stream: "EVENTS".to_string(),
                 consumer_name: "svc_projection".to_string(),
                 filter_subjects: vec!["events.v1.Auth.Connections.Opened".to_string()],
-                replay: "new".to_string(),
-                ordering: "strict".to_string(),
+                replay: serde_json::from_value(serde_json::json!("new")).unwrap(),
+                ordering: serde_json::from_value(serde_json::json!("strict")).unwrap(),
                 ack_wait_ms: 30000,
                 max_deliver: 5,
                 backoff_ms: vec![1000, 5000],

@@ -42,6 +42,25 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  rust-msrv:
+    name: Rust 1.88 public API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust 1.88
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+
+      - name: Check public crates
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-contracts -p trellis-rs --lib
+
+      - name: Check generated participant facade
+        run: cargo check --manifest-path generated/packages/cargo-participants/jobs/Cargo.toml
+
   resolve-release:
     name: Resolve release marker
     if: github.event_name != 'push' || github.event.deleted != true

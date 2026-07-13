@@ -16,16 +16,23 @@ use super::{RequestContext, ServerError, UploadTransferGrant};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[doc = concat!("Public Trellis value set `", stringify!(OperationState), "`.")]
 pub enum OperationState {
+    /// Accepted but not yet running.
     Pending,
+    /// Currently executing.
     Running,
+    /// Completed successfully.
     Completed,
+    /// Terminated with an error.
     Failed,
+    /// Canceled before successful completion.
     Cancelled,
 }
 
 impl OperationState {
     /// Return whether this state ends an operation lifecycle.
+    #[doc = concat!("Trellis API operation `", stringify!(is_terminal), "`.")]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -35,36 +42,53 @@ impl OperationState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationRefData), "`.")]
 pub struct OperationRefData {
+    #[doc = concat!("The `", stringify!(id), "` value.")]
     pub id: String,
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
+    #[doc = concat!("The `", stringify!(operation), "` value.")]
     pub operation: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+/// Current persisted state of an operation.
 pub struct OperationSnapshot<TProgress = Value, TOutput = Value> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(id), "` value.")]
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(operation), "` value.")]
     pub operation: Option<String>,
+    #[doc = concat!("The `", stringify!(revision), "` value.")]
     pub revision: u64,
+    #[doc = concat!("The `", stringify!(state), "` value.")]
     pub state: OperationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(created_at), "` value.")]
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(completed_at), "` value.")]
     pub completed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(progress), "` value.")]
     pub progress: Option<TProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(transfer), "` value.")]
     pub transfer: Option<OperationTransferProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(output), "` value.")]
     pub output: Option<TOutput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(error), "` value.")]
     pub error: Option<OperationError>,
 }
 
@@ -89,9 +113,12 @@ impl<TProgress, TOutput> Default for OperationSnapshot<TProgress, TOutput> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationError), "`.")]
 pub struct OperationError {
     #[serde(rename = "type")]
+    #[doc = concat!("The `", stringify!(error_type), "` value.")]
     pub error_type: String,
+    #[doc = concat!("The `", stringify!(message), "` value.")]
     pub message: String,
 }
 
@@ -107,7 +134,9 @@ pub trait OperationFailureLike: Send + 'static {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationFailure), "`.")]
 pub struct OperationFailure {
+    #[doc = concat!("The `", stringify!(message), "` value.")]
     pub message: String,
 }
 
@@ -125,42 +154,60 @@ impl OperationFailureLike for OperationFailure {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationTransferProgress), "`.")]
 pub struct OperationTransferProgress {
     /// Zero-based transfer chunk index.
+    #[doc = concat!("The `", stringify!(chunk_index), "` value.")]
     pub chunk_index: u64,
     /// Number of bytes carried by this chunk.
+    #[doc = concat!("The `", stringify!(chunk_bytes), "` value.")]
     pub chunk_bytes: u64,
     /// Total number of bytes transferred after this chunk.
+    #[doc = concat!("The `", stringify!(transferred_bytes), "` value.")]
     pub transferred_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[doc(hidden)]
 pub struct AcceptedOperation<TProgress = Value, TOutput = Value> {
+    #[doc = concat!("The `", stringify!(kind), "` value.")]
     pub kind: String,
     #[serde(rename = "ref")]
+    #[doc = concat!("The `", stringify!(operation_ref), "` value.")]
     pub operation_ref: OperationRefData,
+    #[doc = concat!("The `", stringify!(snapshot), "` value.")]
     pub snapshot: OperationSnapshot<TProgress, TOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(transfer), "` value.")]
     pub transfer: Option<UploadTransferGrant>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[doc(hidden)]
 pub struct OperationSnapshotFrame<TProgress = Value, TOutput = Value> {
+    #[doc = concat!("The `", stringify!(kind), "` value.")]
     pub kind: String,
+    #[doc = concat!("The `", stringify!(snapshot), "` value.")]
     pub snapshot: OperationSnapshot<TProgress, TOutput>,
 }
 
 /// Signal accepted for delivery to an operation provider.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationSignal), "`.")]
 pub struct OperationSignal {
+    #[doc = concat!("The `", stringify!(operation_id), "` value.")]
     pub operation_id: String,
+    #[doc = concat!("The `", stringify!(signal), "` value.")]
     pub signal: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(input), "` value.")]
     pub input: Option<Value>,
+    #[doc = concat!("The `", stringify!(signal_sequence), "` value.")]
     pub signal_sequence: u64,
+    #[doc = concat!("The `", stringify!(accepted_at), "` value.")]
     pub accepted_at: String,
 }
 
@@ -168,25 +215,37 @@ pub struct OperationSignal {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationSignalAccepted<TProgress = Value, TOutput = Value> {
+    #[doc = concat!("The `", stringify!(kind), "` value.")]
     pub kind: String,
+    #[doc = concat!("The `", stringify!(operation_id), "` value.")]
     pub operation_id: String,
+    #[doc = concat!("The `", stringify!(signal), "` value.")]
     pub signal: String,
+    #[doc = concat!("The `", stringify!(signal_sequence), "` value.")]
     pub signal_sequence: u64,
+    #[doc = concat!("The `", stringify!(accepted_at), "` value.")]
     pub accepted_at: String,
+    #[doc = concat!("The `", stringify!(snapshot), "` value.")]
     pub snapshot: OperationSnapshot<TProgress, TOutput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(OperationControlRequest), "`.")]
 pub struct OperationControlRequest {
+    #[doc = concat!("The `", stringify!(action), "` value.")]
     pub action: String,
+    #[doc = concat!("The `", stringify!(operation_id), "` value.")]
     pub operation_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(signal), "` value.")]
     pub signal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(input), "` value.")]
     pub input: Option<Value>,
     /// Whether this watch request opts in to live-only updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(include_updates), "` value.")]
     pub include_updates: Option<bool>,
 }
 
@@ -199,6 +258,7 @@ pub enum OperationLiveEvent<TProgress = Value, TUpdate = Value, TOutput = Value>
     Update(crate::client::OperationUpdateEvent<TUpdate>),
 }
 
+#[doc(hidden)]
 pub trait OperationDescriptor {
     type Input: DeserializeOwned + Send + 'static;
     type Progress: Serialize + Send + 'static;
@@ -289,6 +349,7 @@ where
     ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(control_subject), "`.")]
 pub fn control_subject(subject: &str) -> String {
     format!("{subject}.control")
 }
@@ -331,6 +392,7 @@ struct OperationRuntimeInner {
 /// services that need restart durability should replace this in-memory store with a host storage
 /// implementation that preserves the same lifecycle semantics.
 #[derive(Debug, Clone)]
+#[doc = concat!("Public Trellis data type `", stringify!(InMemoryOperationRuntime), "`.")]
 pub struct InMemoryOperationRuntime {
     service: String,
     inner: Arc<OperationRuntimeInner>,
@@ -338,6 +400,7 @@ pub struct InMemoryOperationRuntime {
 
 impl InMemoryOperationRuntime {
     /// Create an in-memory operation runtime for one owning service name.
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
@@ -389,6 +452,7 @@ where
     D::Output: Serialize + DeserializeOwned + Send + 'static,
 {
     /// Accept an operation id and create its initial pending snapshot.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(accept), "`.")]
     pub async fn accept(
         &self,
         operation_id: impl Into<String>,
@@ -446,6 +510,7 @@ where
     }
 
     /// Return a control handle for an operation id.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(control), "`.")]
     pub async fn control(
         &self,
         operation_id: impl Into<String>,
@@ -463,6 +528,7 @@ where
     }
 
     /// Return a control handle for an operation reference and validate service/name on update.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(control_ref), "`.")]
     pub async fn control_ref(
         &self,
         operation_ref: OperationRefData,
@@ -491,6 +557,7 @@ where
     }
 
     /// Return the current durable-style snapshot for an operation id.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get), "`.")]
     pub async fn get(
         &self,
         operation_id: impl Into<String>,
@@ -512,6 +579,7 @@ where
     /// This is intended for host-backed operation stores that reload durable records after a
     /// service reconnect. The restored record is available to `get`, `wait`, and follow-up control
     /// calls, but active signal waiters are not restored.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(restore_snapshot), "`.")]
     pub async fn restore_snapshot(
         &self,
         snapshot: OperationSnapshot<Value, Value>,
@@ -577,6 +645,7 @@ where
     }
 
     /// Wait for the current or next terminal snapshot for an operation id.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait), "`.")]
     pub async fn wait(
         &self,
         operation_id: impl Into<String>,
@@ -609,6 +678,7 @@ where
     }
 
     /// Watch operation snapshots from the current snapshot through future updates.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(watch), "`.")]
     pub async fn watch(
         &self,
         operation_id: impl Into<String>,
@@ -718,6 +788,7 @@ where
     }
 
     /// Cancel an operation id and return its resulting snapshot.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(cancel), "`.")]
     pub async fn cancel(
         &self,
         operation_id: impl Into<String>,
@@ -726,6 +797,7 @@ where
     }
 
     /// Accept a caller signal for an operation id and return its acknowledgement frame.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(signal), "`.")]
     pub async fn signal(
         &self,
         operation_id: impl Into<String>,
@@ -813,11 +885,13 @@ where
     D::Output: Serialize + DeserializeOwned + Send + 'static,
 {
     /// Mark the operation as started/running.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(started), "`.")]
     pub async fn started(&self) -> Result<OperationSnapshot<D::Progress, D::Output>, ServerError> {
         self.update(OperationState::Running, None, None, None).await
     }
 
     /// Publish typed operation progress and mark the operation as running.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(progress), "`.")]
     pub async fn progress(
         &self,
         progress: D::Progress,
@@ -875,6 +949,7 @@ where
     }
 
     /// Complete the operation with typed output.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(complete), "`.")]
     pub async fn complete(
         &self,
         output: D::Output,
@@ -935,6 +1010,7 @@ where
     }
 
     /// Cancel the operation.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(cancel), "`.")]
     pub async fn cancel(&self) -> Result<OperationSnapshot<D::Progress, D::Output>, ServerError> {
         if !D::CANCELABLE {
             return Err(ServerError::OperationUnsupportedControl {
@@ -947,6 +1023,7 @@ where
     }
 
     /// Iterate accepted signals for this operation from this subscription onward.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(signals), "`.")]
     pub async fn signals(
         &self,
     ) -> Result<BoxStream<'static, Result<OperationSignal, ServerError>>, ServerError> {

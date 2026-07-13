@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use miette::IntoDiagnostic;
 use serde_json::Value;
@@ -106,9 +107,7 @@ pub fn build_auto_plan_with_targets(
                     None
                 };
                 let cargo_participant_out =
-                    if matches!(contract_kind, ContractKind::Device | ContractKind::Agent)
-                        && matches!(contract.language, crate::discovery::SourceLanguage::Rust)
-                    {
+                    if matches!(contract.language, crate::discovery::SourceLanguage::Rust) {
                         Some(
                             output_root
                                 .join("generated/packages/cargo-participants")
@@ -168,14 +167,16 @@ fn targets_for_entry(
             PackageTarget::Npm,
             PackageTarget::Cargo,
         ]
-    } else if matches!(kind, ContractKind::App) {
+    } else if matches!(kind, ContractKind::App)
+        && !matches!(contract.language, crate::discovery::SourceLanguage::Rust)
+    {
         vec![
             PackageTarget::Manifest,
             PackageTarget::Jsr,
             PackageTarget::Npm,
         ]
     } else if matches!(contract.language, crate::discovery::SourceLanguage::Rust) {
-        vec![PackageTarget::Manifest]
+        vec![PackageTarget::Manifest, PackageTarget::Cargo]
     } else {
         Vec::new()
     };
@@ -404,8 +405,8 @@ pub fn execute_auto_plan(
                     "generated contract artifacts",
                 )?;
                 if let Some(cargo_participant_out) = &entry.cargo_participant_out {
-                    if let Some(mappings) = participant_alias_mappings(entry, plan) {
-                        write_participant_facade_outputs(
+                    match participant_alias_mappings(entry, plan) {
+                        Ok(mappings) => write_participant_facade_outputs(
                             out_manifest,
                             cargo_participant_out,
                             &format!(
@@ -415,14 +416,14 @@ pub fn execute_auto_plan(
                             &artifact_version,
                             entry.runtime_source,
                             entry.runtime_repo_root.clone(),
+                            Some(crate_name.clone()),
+                            entry.cargo_out.clone(),
                             mappings,
-                        )?;
-                    } else {
-                        remove_stale_participant_facade_outputs(cargo_participant_out)?;
-                        output::print_info(&format!(
-                            "skipped Rust participant facade for {} because no uses aliases have local Rust SDK mappings",
-                            resolved.loaded.manifest.id
-                        ));
+                        )?,
+                        Err(error) => {
+                            remove_stale_participant_facade_outputs(cargo_participant_out)?;
+                            return Err(error);
+                        }
                     }
                 }
                 summary.generated += 1;
@@ -564,20 +565,30 @@ fn action_for_discovered_kind(
 fn participant_alias_mappings(
     entry: &AutoPlanEntry,
     plan: &[AutoPlanEntry],
-) -> Option<Vec<trellis_codegen_rust::ParticipantAliasMapping>> {
-    let local_manifest = entry.out_manifest.as_ref()?;
-    let loaded = trellis_contracts::load_manifest(local_manifest).ok()?;
+) -> miette::Result<Vec<trellis_codegen_rust::ParticipantAliasMapping>> {
+    let local_manifest = entry
+        .out_manifest
+        .as_ref()
+        .ok_or_else(|| miette::miette!("missing participant manifest output"))?;
+    let loaded = trellis_contracts::load_manifest(local_manifest).into_diagnostic()?;
     let mut mappings = Vec::new();
     for (alias, use_ref) in loaded.manifest.uses.iter() {
         if let Some(mapped) = plan.iter().find(|candidate| {
             candidate.contract_id == use_ref.contract && candidate.cargo_out.is_some()
         }) {
-            let manifest_path = mapped.out_manifest.as_ref()?.clone();
+            let manifest_path = mapped
+                .out_manifest
+                .as_ref()
+                .ok_or_else(|| {
+                    miette::miette!("missing mapped manifest for {}", mapped.contract_id)
+                })?
+                .clone();
             mappings.push(trellis_codegen_rust::ParticipantAliasMapping {
                 alias: alias.clone(),
                 crate_name: default_rust_crate_name_from_id(&mapped.contract_id),
                 manifest_path,
                 crate_path: mapped.cargo_out.clone(),
+                cargo_dependency: None,
             });
             continue;
         }
@@ -591,12 +602,148 @@ fn participant_alias_mappings(
             continue;
         }
 
-        return None;
+        if let Some(mapping) = external_rust_alias_mapping(entry, alias, &use_ref.contract)? {
+            mappings.push(mapping);
+            continue;
+        }
+
+        return Err(miette::miette!(
+            "Rust participant alias '{}' requires an explicit SDK mapping for contract '{}'",
+            alias,
+            use_ref.contract
+        ));
     }
-    if mappings.is_empty() {
-        return None;
+    Ok(mappings)
+}
+
+fn external_rust_alias_mapping(
+    entry: &AutoPlanEntry,
+    alias: &str,
+    contract_id: &str,
+) -> miette::Result<Option<trellis_codegen_rust::ParticipantAliasMapping>> {
+    let Some(cargo_manifest) = nearest_cargo_manifest(&entry.discovered.source_path) else {
+        return Ok(None);
+    };
+    let contents = fs::read_to_string(&cargo_manifest).into_diagnostic()?;
+    let mut manifest = contents.parse::<toml::Table>().into_diagnostic()?;
+    let Some(dependency_key) = manifest
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|package| package.get("metadata"))
+        .and_then(toml::Value::as_table)
+        .and_then(|metadata| metadata.get("trellis"))
+        .and_then(toml::Value::as_table)
+        .and_then(|trellis| trellis.get("sdk-mappings"))
+        .and_then(toml::Value::as_table)
+        .and_then(|mappings| mappings.get(alias))
+        .and_then(toml::Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let dependency_key = dependency_key.to_string();
+    let dependency = manifest
+        .get_mut("dependencies")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|dependencies| dependencies.get_mut(&dependency_key))
+        .ok_or_else(|| {
+            miette::miette!(
+                "Rust SDK mapping '{}' names missing Cargo dependency '{}'",
+                alias,
+                dependency_key
+            )
+        })?;
+
+    let package_name = dependency
+        .as_table()
+        .and_then(|table| table.get("package"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or(&dependency_key)
+        .to_string();
+    if let Some(path) = dependency
+        .as_table_mut()
+        .and_then(|table| table.get_mut("path"))
+        .and_then(|path| path.as_str().map(ToOwned::to_owned))
+    {
+        let package_root = cargo_manifest.parent().unwrap_or(Path::new(".")).join(path);
+        let package_root = fs::canonicalize(&package_root).unwrap_or(package_root);
+        if let Some(table) = dependency.as_table_mut() {
+            table.insert(
+                "path".to_string(),
+                toml::Value::String(package_root.display().to_string()),
+            );
+        }
     }
-    Some(mappings)
+    let dependency_spec = dependency.to_string();
+
+    let metadata = Command::new("cargo")
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--manifest-path",
+            cargo_manifest.to_string_lossy().as_ref(),
+        ])
+        .output()
+        .into_diagnostic()?;
+    if !metadata.status.success() {
+        return Err(miette::miette!(
+            "cargo metadata failed while resolving Rust SDK mapping '{}': {}",
+            alias,
+            String::from_utf8_lossy(&metadata.stderr).trim()
+        ));
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).into_diagnostic()?;
+    let package = metadata
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|packages| {
+            packages.iter().find(|package| {
+                package.get("name").and_then(serde_json::Value::as_str)
+                    == Some(package_name.as_str())
+                    && package
+                        .pointer("/metadata/trellis/contract-id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(contract_id)
+            })
+        })
+        .ok_or_else(|| {
+            miette::miette!(
+                "Cargo dependency '{}' does not expose Trellis SDK metadata for contract '{}'",
+                dependency_key,
+                contract_id
+            )
+        })?;
+    let package_manifest = PathBuf::from(
+        package
+            .get("manifest_path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| miette::miette!("resolved SDK package is missing manifest_path"))?,
+    );
+    let contract_manifest = package
+        .pointer("/metadata/trellis/contract-manifest")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("contract.json");
+    let manifest_path = package_manifest
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(contract_manifest);
+
+    Ok(Some(trellis_codegen_rust::ParticipantAliasMapping {
+        alias: alias.to_string(),
+        crate_name: dependency_key,
+        manifest_path,
+        crate_path: None,
+        cargo_dependency: Some(dependency_spec),
+    }))
+}
+
+fn nearest_cargo_manifest(source_path: &Path) -> Option<PathBuf> {
+    source_path
+        .parent()
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .map(|directory| directory.join("Cargo.toml"))
+        .find(|manifest| manifest.exists())
 }
 
 fn built_in_rust_alias_mapping(
@@ -624,6 +771,7 @@ fn built_in_rust_alias_mapping(
         crate_name: default_rust_crate_name_from_id(contract_id),
         manifest_path,
         crate_path: Some(sdk_root),
+        cargo_dependency: None,
     })
 }
 

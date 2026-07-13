@@ -3090,6 +3090,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
+
+[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3928,13 +3934,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-auth"
-version = "0.11.0"
-dependencies = [
- "trellis-rs",
-]
-
-[[package]]
 name = "trellis-auth-adapters"
 version = "0.11.0"
 dependencies = [
@@ -4000,17 +3999,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-client"
-version = "0.11.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "trellis-rs",
-]
-
-[[package]]
 name = "trellis-codegen-rust"
 version = "0.11.0"
 dependencies = [
@@ -4070,6 +4058,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "trellis-codegen-rust",
  "trellis-codegen-ts",
  "trellis-contracts",
@@ -4130,6 +4119,7 @@ dependencies = [
  "rand 0.10.1",
  "reqwest",
  "rusqlite",
+ "ryu-js",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4166,20 +4156,6 @@ dependencies = [
  "tracing",
  "trellis-rs",
  "ulid",
-]
-
-[[package]]
-name = "trellis-service"
-version = "0.11.0"
-dependencies = [
- "async-nats",
- "bytes",
- "futures-util",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "trellis-rs",
 ]
 
 [[package]]
@@ -4222,13 +4198,6 @@ dependencies = [
  "trellis-contracts",
  "trellis-rs",
  "trellis-test",
-]
-
-[[package]]
-name = "trellis-service-runtime"
-version = "0.11.0"
-dependencies = [
- "trellis-rs",
 ]
 
 [[package]]

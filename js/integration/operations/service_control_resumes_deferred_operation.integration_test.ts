@@ -30,7 +30,8 @@ liveTrellisTest({
       }).start().orThrow();
 
       await runtime.waitFor(() => handlerRuns === 1);
-      const controlled = await service.handleEntityProcess.control(ref.id,).orThrow();
+      const controlled = await service.handleEntityProcess.control(ref.id)
+        .orThrow();
       await controlled.progress({ message: "approved", step: 2 }).orThrow();
       await controlled.complete({
         message: `${fixture.message}:done`,

@@ -11,20 +11,24 @@ const JOBS_KEYS_BUCKET_PREFIX: &str = "JOBS_KEYS";
 const KEY_STATE_VERSION: u32 = 1;
 const CAS_RETRIES: usize = 8;
 
+#[doc = concat!("Trellis API operation `", stringify!(job_key), "`.")]
 pub fn job_key(service: &str, job_type: &str, job_id: &str) -> String {
     format!("{service}.{job_type}.{job_id}")
 }
 
+#[doc = concat!("Trellis API operation `", stringify!(worker_presence_key), "`.")]
 pub fn worker_presence_key(service: &str, job_type: &str, instance_id: &str) -> String {
     format!("{service}.{job_type}.{instance_id}")
 }
 
 /// Derive a human-readable keyed-concurrency key from a validated JSON payload.
+#[doc = concat!("Trellis API operation `", stringify!(derive_key), "`.")]
 pub fn derive_key(payload: &Value, template: &[String]) -> Result<String, KeyDerivationError> {
     derive_job_key(payload, template).map(|derived| derived.key)
 }
 
 /// Derive the display key and canonical cross-runtime hash for a keyed job payload.
+#[doc = concat!("Trellis API operation `", stringify!(derive_job_key), "`.")]
 pub fn derive_job_key(
     payload: &Value,
     template: &[String],
@@ -48,12 +52,14 @@ pub fn derive_job_key(
 }
 
 /// Return a stable SHA-256 hex hash for an already-canonicalized string.
+#[doc = concat!("Trellis API operation `", stringify!(key_hash), "`.")]
 pub fn key_hash(key: &str) -> String {
     let digest = Sha256::digest(key.as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Return the TS-compatible stable SHA-256 hash for structured key segments.
+#[doc = concat!("Trellis API operation `", stringify!(key_hash_for_segments), "`.")]
 pub fn key_hash_for_segments(segments: &[Value]) -> String {
     #[derive(Serialize)]
     struct CanonicalKeyHashPayload<'a> {
@@ -69,6 +75,7 @@ pub fn key_hash_for_segments(segments: &[Value]) -> String {
 }
 
 /// Build the NATS KV key for one service/job-type/key-hash tuple.
+#[doc = concat!("Trellis API operation `", stringify!(coordination_key), "`.")]
 pub fn coordination_key(service: &str, job_type: &str, key_hash: &str) -> String {
     format!("{service}.{job_type}.{key_hash}")
 }
@@ -101,13 +108,17 @@ fn display_key_segment(segment: &Value) -> String {
 
 /// Derived display key and stable runtime hash for keyed concurrency.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DerivedJobKey), "`.")]
 pub struct DerivedJobKey {
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(key_hash), "` value.")]
     pub key_hash: String,
 }
 
 /// Errors returned when deriving a keyed-concurrency key from a payload.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(KeyDerivationError), "`.")]
 pub enum KeyDerivationError {
     #[error("key template must contain at least one segment")]
     EmptyTemplate,
@@ -120,62 +131,98 @@ pub enum KeyDerivationError {
 /// Serialized keyed-concurrency coordination state stored in `JOBS_KEYS`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(JobKeyState), "`.")]
 pub struct JobKeyState {
+    #[doc = concat!("The `", stringify!(version), "` value.")]
     pub version: u32,
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
+    #[doc = concat!("The `", stringify!(job_type), "` value.")]
     pub job_type: String,
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(key_hash), "` value.")]
     pub key_hash: String,
+    #[doc = concat!("The `", stringify!(max_active), "` value.")]
     pub max_active: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(max_queued_per_key), "` value.")]
     pub max_queued_per_key: Option<u64>,
+    #[doc = concat!("The `", stringify!(active), "` value.")]
     pub active: Vec<JobKeyActiveSlot>,
+    #[doc = concat!("The `", stringify!(queued), "` value.")]
     pub queued: Vec<JobKeyQueuedEntry>,
+    #[doc = concat!("The `", stringify!(stale_takeover_count), "` value.")]
     pub stale_takeover_count: u64,
+    #[doc = concat!("The `", stringify!(updated_at), "` value.")]
     pub updated_at: String,
 }
 
 /// Active key slot owned by a running worker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(JobKeyActiveSlot), "`.")]
 pub struct JobKeyActiveSlot {
+    #[doc = concat!("The `", stringify!(job_id), "` value.")]
     pub job_id: String,
+    #[doc = concat!("The `", stringify!(slot_token), "` value.")]
     pub slot_token: String,
+    #[doc = concat!("The `", stringify!(instance_id), "` value.")]
     pub instance_id: String,
+    #[doc = concat!("The `", stringify!(started_at), "` value.")]
     pub started_at: String,
+    #[doc = concat!("The `", stringify!(heartbeat_at), "` value.")]
     pub heartbeat_at: String,
+    #[doc = concat!("The `", stringify!(lease_expires_at), "` value.")]
     pub lease_expires_at: String,
+    #[doc = concat!("The `", stringify!(tries), "` value.")]
     pub tries: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: Option<JobContext>,
 }
 
 /// Queued job reservation for one keyed-concurrency key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(JobKeyQueuedEntry), "`.")]
 pub struct JobKeyQueuedEntry {
+    #[doc = concat!("The `", stringify!(job_id), "` value.")]
     pub job_id: String,
+    #[doc = concat!("The `", stringify!(created_at), "` value.")]
     pub created_at: String,
+    #[doc = concat!("The `", stringify!(request_id), "` value.")]
     pub request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: Option<JobContext>,
 }
 
 /// Normalized keyed-concurrency policy used by reducer functions.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(JobKeyPolicy), "`.")]
 pub struct JobKeyPolicy {
+    #[doc = concat!("The `", stringify!(service), "` value.")]
     pub service: String,
+    #[doc = concat!("The `", stringify!(job_type), "` value.")]
     pub job_type: String,
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(key_hash), "` value.")]
     pub key_hash: String,
+    #[doc = concat!("The `", stringify!(max_active), "` value.")]
     pub max_active: u32,
+    #[doc = concat!("The `", stringify!(max_queued_per_key), "` value.")]
     pub max_queued_per_key: u64,
+    #[doc = concat!("The `", stringify!(when_full), "` value.")]
     pub when_full: JobQueueWhenFull,
+    #[doc = concat!("The `", stringify!(stale_policy), "` value.")]
     pub stale_policy: JobKeyStalePolicy,
 }
 
 impl JobKeyPolicy {
     /// Return the stable hash for this policy's human-readable key.
+    #[doc = concat!("Trellis API operation `", stringify!(key_hash), "`.")]
     pub fn key_hash(&self) -> String {
         self.key_hash.clone()
     }
@@ -183,15 +230,21 @@ impl JobKeyPolicy {
 
 /// Input for admitting a new job into a per-key queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(AdmitJobInput), "`.")]
 pub struct AdmitJobInput {
+    #[doc = concat!("The `", stringify!(job_id), "` value.")]
     pub job_id: String,
+    #[doc = concat!("The `", stringify!(request_id), "` value.")]
     pub request_id: String,
+    #[doc = concat!("The `", stringify!(created_at), "` value.")]
     pub created_at: String,
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: JobContext,
 }
 
 /// Outcome of keyed admission before lifecycle creation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(AdmitJobOutcome), "`.")]
 pub enum AdmitJobOutcome {
     Accepted {
         state: JobKeyState,
@@ -213,6 +266,7 @@ pub enum AdmitJobOutcome {
 
 /// Reason keyed admission or acquisition could not proceed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[doc = concat!("Public Trellis value set `", stringify!(KeyRejectReason), "`.")]
 pub enum KeyRejectReason {
     ActiveLimit,
     QueueDepth,
@@ -221,18 +275,27 @@ pub enum KeyRejectReason {
 
 /// Input for acquiring an active keyed slot before handler execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(AcquireSlotInput), "`.")]
 pub struct AcquireSlotInput {
+    #[doc = concat!("The `", stringify!(job_id), "` value.")]
     pub job_id: String,
+    #[doc = concat!("The `", stringify!(slot_token), "` value.")]
     pub slot_token: String,
+    #[doc = concat!("The `", stringify!(instance_id), "` value.")]
     pub instance_id: String,
+    #[doc = concat!("The `", stringify!(started_at), "` value.")]
     pub started_at: String,
+    #[doc = concat!("The `", stringify!(lease_expires_at), "` value.")]
     pub lease_expires_at: String,
+    #[doc = concat!("The `", stringify!(tries), "` value.")]
     pub tries: u64,
+    #[doc = concat!("The `", stringify!(context), "` value.")]
     pub context: JobContext,
 }
 
 /// Outcome of attempting to acquire an active keyed slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(AcquireSlotOutcome), "`.")]
 pub enum AcquireSlotOutcome {
     Acquired {
         state: JobKeyState,
@@ -247,6 +310,7 @@ pub enum AcquireSlotOutcome {
 
 /// Outcome of renewing or releasing an active keyed slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(LeaseMutationOutcome), "`.")]
 pub enum LeaseMutationOutcome {
     Renewed { state: JobKeyState },
     Released { state: JobKeyState },
@@ -255,6 +319,7 @@ pub enum LeaseMutationOutcome {
 
 /// Outcome of removing a queued keyed reservation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(QueueMutationOutcome), "`.")]
 pub enum QueueMutationOutcome {
     Removed { state: JobKeyState },
     Restored { state: JobKeyState },
@@ -262,6 +327,7 @@ pub enum QueueMutationOutcome {
 }
 
 /// Apply keyed admission policy to a candidate job and return the next state.
+#[doc = concat!("Trellis API operation `", stringify!(admit_job), "`.")]
 pub fn admit_job(
     current: Option<JobKeyState>,
     policy: &JobKeyPolicy,
@@ -346,6 +412,7 @@ fn admission_reject_limit(state: &JobKeyState, policy: &JobKeyPolicy, queue_limi
 }
 
 /// Acquire an active keyed slot from existing key state.
+#[doc = concat!("Trellis API operation `", stringify!(acquire_active_slot), "`.")]
 pub fn acquire_active_slot(
     mut state: JobKeyState,
     policy: &JobKeyPolicy,
@@ -413,6 +480,7 @@ pub fn acquire_active_slot(
 }
 
 /// Acquire an active keyed slot, creating empty key state when needed.
+#[doc = concat!("Trellis API operation `", stringify!(acquire_active_slot_from_state), "`.")]
 pub fn acquire_active_slot_from_state(
     current: Option<JobKeyState>,
     policy: &JobKeyPolicy,
@@ -423,6 +491,7 @@ pub fn acquire_active_slot_from_state(
 }
 
 /// Renew the heartbeat and lease expiry for a matching active slot token.
+#[doc = concat!("Trellis API operation `", stringify!(renew_active_slot), "`.")]
 pub fn renew_active_slot(
     mut state: JobKeyState,
     job_id: &str,
@@ -444,6 +513,7 @@ pub fn renew_active_slot(
 }
 
 /// Release a matching active slot token from key state.
+#[doc = concat!("Trellis API operation `", stringify!(release_active_slot), "`.")]
 pub fn release_active_slot(
     mut state: JobKeyState,
     job_id: &str,
@@ -463,6 +533,7 @@ pub fn release_active_slot(
 }
 
 /// Remove a queued keyed reservation for work that became terminal before acquisition.
+#[doc = concat!("Trellis API operation `", stringify!(remove_queued_entry), "`.")]
 pub fn remove_queued_entry(
     mut state: JobKeyState,
     job_id: &str,
@@ -477,6 +548,7 @@ pub fn remove_queued_entry(
 }
 
 /// Restore a queued job that was replaced before the replacement lifecycle publish succeeded.
+#[doc = concat!("Trellis API operation `", stringify!(restore_replaced_queued_entry), "`.")]
 pub fn restore_replaced_queued_entry(
     mut state: JobKeyState,
     replaced: JobKeyQueuedEntry,
@@ -492,6 +564,7 @@ pub fn restore_replaced_queued_entry(
 }
 
 /// Create an empty key state value for a policy at the given timestamp.
+#[doc = concat!("Trellis API operation `", stringify!(new_key_state), "`.")]
 pub fn new_key_state(policy: &JobKeyPolicy, timestamp: &str) -> JobKeyState {
     JobKeyState {
         version: KEY_STATE_VERSION,
@@ -511,6 +584,7 @@ pub fn new_key_state(policy: &JobKeyPolicy, timestamp: &str) -> JobKeyState {
 /// Errors returned by the NATS KV-backed keyed coordinator.
 #[doc(hidden)]
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(NatsKeyCoordinatorError), "`.")]
 pub enum NatsKeyCoordinatorError {
     #[error("failed to open keyed jobs KV bucket: {0}")]
     Open(String),
@@ -528,6 +602,7 @@ pub enum NatsKeyCoordinatorError {
 
 /// NATS KV-backed keyed-concurrency coordinator using compare-and-set writes.
 #[derive(Clone)]
+#[doc = concat!("Public Trellis data type `", stringify!(NatsKeyCoordinator), "`.")]
 pub struct NatsKeyCoordinator {
     store: async_nats::jetstream::kv::Store,
 }
@@ -699,6 +774,7 @@ impl JobKeyCoordinator for NatsKeyCoordinator {
 
 impl NatsKeyCoordinator {
     /// Open the service-scoped Trellis keyed jobs KV bucket.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(open_for_service), "`.")]
     pub async fn open_for_service(
         nats: async_nats::Client,
         service: &str,

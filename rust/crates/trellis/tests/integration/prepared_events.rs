@@ -5,10 +5,10 @@ use async_nats::HeaderMap;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use trellis_rs::client::{EventDescriptor, ServiceConnectWithContractOptions, TrellisClient};
+use trellis_rs::client::EventDescriptor;
 use trellis_rs::service::{
-    ConnectedServiceRuntime, ServerError, ServiceEventListenOptions, ServiceEventListenerContext,
-    ServiceEventListenerMode, ServiceRuntimeError,
+    ServerError, ServiceEventListenOptions, ServiceEventListenerContext, ServiceEventListenerMode,
+    ServiceRuntimeError,
 };
 
 use crate::support::assertions::assert_service_case_registered;
@@ -67,6 +67,14 @@ struct EntityChangedEvent {
 
 struct EntityChanged;
 
+struct PreparedEventsContract;
+
+impl trellis_rs::service::GeneratedServiceContract for PreparedEventsContract {
+    const CONTRACT_ID: &'static str = "trellis.integration.prepared-events-rust@v1";
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = PREPARED_EVENTS_CONTRACT_JSON;
+}
+
 impl EventDescriptor for EntityChanged {
     type Event = EntityChangedEvent;
 
@@ -96,27 +104,23 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .provision_service_instance(&bootstrap_url, &contract, None, None)
         .await
         .expect("provision prepared-events service instance");
-    let client = TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-        trellis_url: runtime.trellis_url(),
-        contract_id: contract_id(&contract),
-        contract_digest: contract.digest(),
-        contract_json: PREPARED_EVENTS_CONTRACT_JSON,
-        session_key_seed_base64url: &service_key.seed,
-        timeout_ms: 5_000,
-        retry_delay_ms: 100,
-        authority_pending_timeout_ms: Some(30_000),
-    })
-    .await
-    .expect("connect prepared-events service");
-    let service = ConnectedServiceRuntime::<()>::from_connected_client(
-        "prepared-events-rust-service",
-        Arc::new(client),
+    let service = trellis_test::connect_service_runtime::<PreparedEventsContract>(
+        runtime.trellis_url(),
+        contract_id(&contract),
+        contract.digest(),
+        PREPARED_EVENTS_CONTRACT_JSON,
+        &service_key.seed,
     )
-    .expect("build connected prepared-events runtime");
+    .await
+    .expect("connect prepared-events service runtime");
 
-    let mut raw_observer = service
-        .client()
-        .internal_nats()
+    let mut raw_observer = async_nats::ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load prepared-event observer credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect prepared-event observer")
         .subscribe(EntityChanged::SUBJECT.to_string())
         .await
         .expect("subscribe raw observer");
@@ -151,14 +155,12 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     let mut headers = HeaderMap::new();
     headers.insert("status", STATUS);
     headers.insert("traceparent", TRACEPARENT);
-    let prepared = service
-        .client()
-        .prepare_event::<EntityChanged>(&payload)
+    let prepared = trellis_rs::client::prepare_event::<EntityChanged>(&payload)
         .expect("prepare event")
         .with_headers(headers);
 
     service
-        .client()
+        .event_publisher()
         .publish_prepared(&prepared)
         .await
         .expect("publish prepared event");

@@ -1,22 +1,16 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
 use serde_json::{json, Value};
-use trellis_rs::client::TrellisClient;
-use trellis_rs::sdk::auth::rpc::AuthEventConsumersListRpc;
+use std::collections::BTreeMap;
 use trellis_rs::sdk::auth::types::{
     AuthEventConsumersListRequest, AuthEventConsumersListResponseEntriesItem,
 };
 
 use crate::projector::{
-    is_eventlog_projector_consumer, is_obsolete_eventlog_watch_consumer, EventLogRuntime,
-    CONSUMER_METADATA_CONTRACT_ID, CONSUMER_METADATA_DEPLOYMENT_ID, CONSUMER_METADATA_GROUP,
-    CONSUMER_METADATA_MANAGED_BY,
+    is_eventlog_projector_consumer, EventLogRuntime, CONSUMER_METADATA_CONTRACT_ID,
+    CONSUMER_METADATA_DEPLOYMENT_ID, CONSUMER_METADATA_GROUP, CONSUMER_METADATA_MANAGED_BY,
 };
 
 pub(crate) async fn query_consumers(
     runtime: &EventLogRuntime,
-    auth_client: &Arc<TrellisClient>,
     input: &Value,
 ) -> Result<Value, String> {
     let offset = input.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -32,7 +26,7 @@ pub(crate) async fn query_consumers(
         .unwrap_or_default();
     let subject = input.get("subject").and_then(Value::as_str);
     let deployment_id = input.get("deploymentId").and_then(Value::as_str);
-    let expected = expected_consumers(auth_client).await?;
+    let expected = expected_consumers(runtime).await?;
     let mut live = runtime
         .consumers()
         .await?
@@ -86,7 +80,6 @@ pub(crate) async fn query_consumers(
 
 pub(crate) async fn inspect_consumer(
     runtime: &EventLogRuntime,
-    auth_client: &Arc<TrellisClient>,
     input: &Value,
 ) -> Result<Value, String> {
     let name = input
@@ -94,7 +87,7 @@ pub(crate) async fn inspect_consumer(
         .or_else(|| input.get("name"))
         .and_then(Value::as_str)
         .ok_or_else(|| "consumerName is required".to_string())?;
-    let expected = expected_consumers(auth_client)
+    let expected = expected_consumers(runtime)
         .await?
         .into_iter()
         .find(|consumer| consumer.consumer_name == name);
@@ -129,13 +122,13 @@ pub(crate) async fn inspect_consumer(
 }
 
 async fn expected_consumers(
-    auth_client: &Arc<TrellisClient>,
+    runtime: &EventLogRuntime,
 ) -> Result<Vec<AuthEventConsumersListResponseEntriesItem>, String> {
     let mut offset = Some(0);
     let mut entries = Vec::new();
     while let Some(current_offset) = offset {
-        let response = auth_client
-            .call::<AuthEventConsumersListRpc>(&AuthEventConsumersListRequest {
+        let response = runtime
+            .event_consumers(&AuthEventConsumersListRequest {
                 deployment_id: None,
                 limit: 500,
                 offset: Some(current_offset),
@@ -208,8 +201,6 @@ fn unmatched_consumer_row(info: async_nats::jetstream::consumer::Info) -> Value 
         row["contractId"] = json!("trellis.eventlog@v1");
         row["group"] = json!("projector");
         row
-    } else if is_obsolete_eventlog_watch_consumer(&info.name, &info.config) {
-        consumer_row(info, Some("orphaned"), "platform")
     } else {
         consumer_row(info, None, "external")
     }

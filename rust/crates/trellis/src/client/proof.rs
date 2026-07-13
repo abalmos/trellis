@@ -11,29 +11,34 @@ use crate::client::{RpcErrorPayload, TrellisClientError};
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 const EVENT_PROOF_DOMAIN: &[u8] = b"trellis-event-proof-v1";
 
-pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
+#[doc = concat!("Trellis API operation `", stringify!(sha256), "`.")]
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     let digest = hasher.finalize();
     digest.into()
 }
 
-pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
+#[doc = concat!("Trellis API operation `", stringify!(base64url_encode), "`.")]
+pub fn base64url_encode(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-pub(crate) fn base64url_decode(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
+#[doc = concat!("Trellis API operation `", stringify!(base64url_decode), "`.")]
+pub fn base64url_decode(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
     URL_SAFE_NO_PAD.decode(value)
 }
 
-pub(crate) fn now_iat_seconds() -> u64 {
+#[doc = concat!("Trellis API operation `", stringify!(now_iat_seconds), "`.")]
+pub fn now_iat_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
 }
 
-pub(crate) fn new_request_id() -> String {
+#[doc = concat!("Trellis API operation `", stringify!(new_request_id), "`.")]
+pub fn new_request_id() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -42,7 +47,8 @@ pub(crate) fn new_request_id() -> String {
     format!("req_{nanos:x}_{sequence:x}")
 }
 
-pub(crate) fn build_proof_input(
+#[doc = concat!("Trellis API operation `", stringify!(build_proof_input), "`.")]
+pub fn build_proof_input(
     session_key: &str,
     subject: &str,
     payload_hash: &[u8],
@@ -85,6 +91,7 @@ fn append_length_prefixed(out: &mut Vec<u8>, value: &[u8]) {
 }
 
 /// Build the canonical bytes signed by Trellis event proofs.
+#[doc = concat!("Trellis API operation `", stringify!(build_event_proof_input), "`.")]
 pub fn build_event_proof_input(
     session_key: &str,
     subject: &str,
@@ -120,6 +127,7 @@ pub fn build_event_proof_input(
 }
 
 /// Verify the `proof` header for a signed Trellis event payload.
+#[doc = concat!("Trellis API operation `", stringify!(verify_event_proof), "`.")]
 pub fn verify_event_proof(
     public_session_key: &str,
     subject: &str,
@@ -160,6 +168,7 @@ pub fn verify_event_proof(
 }
 
 /// Verify the `proof` header for a signed Trellis RPC payload.
+#[doc = concat!("Trellis API operation `", stringify!(verify_proof), "`.")]
 pub fn verify_proof(
     public_session_key: &str,
     subject: &str,

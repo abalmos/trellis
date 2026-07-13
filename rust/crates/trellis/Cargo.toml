@@ -2,9 +2,14 @@
 name = "trellis-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Curated public Rust facade for Trellis clients and services."
+readme = "../../README.md"
+
+[features]
+test-support = []
 
 [dependencies]
 async-nats.workspace = true
@@ -19,6 +24,7 @@ postgres = "0.19.12"
 rand = "0.10.0"
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls-no-provider"] }
 rusqlite.workspace = true
+ryu-js.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sha2.workspace = true
@@ -32,4 +38,7 @@ ulid = "1.2.1"
 url = "2.5.8"
 
 [dev-dependencies]
-trellis-test = { path = "../trellis-test", version = "0.11.0" }
+trellis-test = { path = "../trellis-test" }
+
+[lints]
+workspace = true

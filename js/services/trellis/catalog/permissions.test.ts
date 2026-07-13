@@ -934,6 +934,62 @@ Deno.test("service dependency event publishes still require event publish capabi
   });
 });
 
+Deno.test("service dependency cannot publish owner-only event", () => {
+  const owner = {
+    digest: "owner-digest",
+    contract: {
+      format: "trellis.contract.v1",
+      id: "owner@v1",
+      displayName: "Owner",
+      description: "Owns a private event.",
+      kind: "service",
+      schemas: {
+        Changed: { type: "object", properties: {}, required: [] },
+      },
+      events: {
+        "Owner.Changed": {
+          version: "v1",
+          subject: "events.v1.Owner.Changed",
+          event: { schema: "Changed" },
+        },
+      },
+    },
+  } satisfies { digest: string; contract: TrellisContractV1 };
+  const worker = {
+    digest: "worker-owner-only-digest",
+    contract: {
+      format: "trellis.contract.v1",
+      id: "worker-owner-only@v1",
+      displayName: "Worker",
+      description: "Attempts delegated publication.",
+      kind: "service",
+      uses: {
+        required: {
+          owner: {
+            contract: "owner@v1",
+            events: { publish: ["Owner.Changed"] },
+          },
+        },
+      },
+    },
+  } satisfies { digest: string; contract: TrellisContractV1 };
+
+  assertThrows(
+    () =>
+      getServicePublishSubjectsForContracts(
+        ["service"],
+        {
+          sessionKey: "worker-key",
+          contractDigest: worker.digest,
+          authorityNeeds: { surfaces: [] },
+        },
+        [owner, worker],
+      ),
+    Error,
+    "does not permit delegated publication",
+  );
+});
+
 Deno.test("operation control publish uses observe, call-defaulted observe, and cancel capabilities", () => {
   withContracts(TEST_CONTRACTS, () => {
     const caller = { contractDigest: "portal-digest" };

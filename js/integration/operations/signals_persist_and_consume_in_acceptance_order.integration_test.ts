@@ -18,7 +18,7 @@ liveTrellisTest({
     try {
       await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
-      
+
         for await (const signal of op.signals()) {
           assert(
             typeof signal.input === "object" && signal.input !== null,
@@ -27,7 +27,7 @@ liveTrellisTest({
           const suffix = Reflect.get(signal.input, "suffix");
           assertEquals(typeof suffix, "string");
           consumed.push(`${signal.signal}:${suffix}`);
-      
+
           if (consumed.length === 2) {
             assertEquals(consumed, ["updateMessage:one", "appendMessage:two"]);
             return Result.ok({
@@ -36,7 +36,7 @@ liveTrellisTest({
             });
           }
         }
-      
+
         throw new Error("signal stream ended before two accepted signals");
       });
 

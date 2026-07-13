@@ -1,5 +1,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 
+use super::subject::{resolve_subject, SubjectError};
+
 /// Metadata required to call one typed Trellis RPC.
 pub trait RpcDescriptor {
     /// Request payload type.
@@ -35,14 +37,29 @@ pub trait EventDescriptor {
     /// Logical contract key for the event.
     const KEY: &'static str;
 
-    /// Concrete NATS subject for the event.
+    /// Canonical NATS subject template for the event.
     const SUBJECT: &'static str;
+
+    /// NATS wildcard subject used to subscribe to every concrete event subject.
+    const SUBSCRIBE_SUBJECT: &'static str = Self::SUBJECT;
+
+    /// JSON Schema for the event payload.
+    const EVENT_SCHEMA_JSON: &'static str = "{}";
 
     /// Capability requirements declared for publishers.
     const PUBLISH_CAPABILITIES: &'static [&'static str];
 
+    /// Whether the contract explicitly permits publication by dependencies.
+    const DELEGATED_PUBLISH: bool = false;
+
     /// Capability requirements declared for subscribers.
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str];
+
+    /// Resolve the concrete publish subject from the typed event payload.
+    fn publish_subject(event: &Self::Event) -> Result<String, SubjectError> {
+        let value = serde_json::to_value(event)?;
+        resolve_subject(Self::SUBJECT, &value)
+    }
 }
 
 /// Metadata required to subscribe to one typed Trellis feed.

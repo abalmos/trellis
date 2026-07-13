@@ -97,13 +97,14 @@ fn auth_error(reason: &str) -> TrellisClientError {
 fn allowed_response(allowed: bool) -> AuthRequestsValidateResponse {
     AuthRequestsValidateResponse {
         allowed,
-        caller: json!({
+        caller: serde_json::from_value(json!({
             "type": "service",
             "id": "svc-user",
             "name": "Service",
             "active": true,
             "capabilities": ["service"],
-        }),
+        }))
+        .unwrap(),
         inbox_prefix: "_INBOX.test".to_string(),
     }
 }
@@ -134,7 +135,10 @@ async fn adapter_validate_calls_auth_and_returns_allowed() {
         .expect("validation request should succeed");
 
     assert!(validation.allowed);
-    assert_eq!(validation.caller, Some(allowed_response(true).caller));
+    assert_eq!(
+        validation.caller,
+        Some(serde_json::to_value(allowed_response(true).caller).unwrap())
+    );
 
     let seen = seen_requests.lock().expect("lock seen requests");
     assert_eq!(seen.len(), 1);

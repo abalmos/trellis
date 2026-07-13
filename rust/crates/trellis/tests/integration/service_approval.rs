@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::params;
@@ -6,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient, TrellisClientError};
+use trellis_rs::generated::TrellisClientError;
 
 use crate::support::assertions::assert_case_registered;
 
@@ -79,6 +78,12 @@ impl trellis_rs::client::RpcDescriptor for StartupPingRpc {
 
 struct ServiceApprovalContract;
 
+impl trellis_rs::service::GeneratedServiceContract for ServiceApprovalContract {
+    const CONTRACT_ID: &'static str = SERVICE_CONTRACT_ID;
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
+}
+
 struct AbortOnDrop {
     handle: Option<JoinHandle<()>>,
 }
@@ -146,7 +151,7 @@ async fn service_approval_startup_blocks_before_authority_approval() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
     auth.rpc()
         .auth()
         .service_instances_provision(
@@ -166,26 +171,15 @@ async fn service_approval_startup_blocks_before_authority_approval() {
     let connect_handle: JoinHandle<
         trellis_rs::service::ConnectedServiceRuntime<ServiceApprovalContract>,
     > = tokio::spawn(async move {
-        let client =
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &connect_trellis_url,
-                contract_id: SERVICE_CONTRACT_ID,
-                contract_digest: &contract_digest,
-                contract_json: SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &connect_seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("service connect should succeed after approval");
-        let service =
-            trellis_rs::service::ConnectedServiceRuntime::<ServiceApprovalContract>::from_connected_client(
-                "service-approval-fixture-service",
-                Arc::new(client),
-            )
-            .expect("build connected service runtime from client");
+        let service = trellis_test::connect_service_runtime::<ServiceApprovalContract>(
+            &connect_trellis_url,
+            SERVICE_CONTRACT_ID,
+            &contract_digest,
+            SERVICE_CONTRACT_JSON,
+            &connect_seed,
+        )
+        .await
+        .expect("build connected service runtime from client");
         let _ = connected_tx.send(());
         service
     });
@@ -245,7 +239,7 @@ async fn service_approval_startup_completes_after_authority_approval() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
     auth.rpc()
         .auth()
         .service_instances_provision(
@@ -265,26 +259,15 @@ async fn service_approval_startup_completes_after_authority_approval() {
     let connect_handle: JoinHandle<
         trellis_rs::service::ConnectedServiceRuntime<ServiceApprovalContract>,
     > = tokio::spawn(async move {
-        let client =
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &connect_trellis_url,
-                contract_id: SERVICE_CONTRACT_ID,
-                contract_digest: &contract_digest,
-                contract_json: SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &connect_seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("service connect should succeed after approval");
-        let service =
-            trellis_rs::service::ConnectedServiceRuntime::<ServiceApprovalContract>::from_connected_client(
-                "service-approval-fixture-service",
-                Arc::new(client),
-            )
-            .expect("build connected service runtime from client");
+        let service = trellis_test::connect_service_runtime::<ServiceApprovalContract>(
+            &connect_trellis_url,
+            SERVICE_CONTRACT_ID,
+            &contract_digest,
+            SERVICE_CONTRACT_JSON,
+            &connect_seed,
+        )
+        .await
+        .expect("build connected service runtime from client");
         let _ = connected_tx.send(());
         service
     });
@@ -357,7 +340,7 @@ async fn service_approval_approved_service_handles_client_rpc() {
         .connect_admin(&bootstrap_url)
         .await
         .expect("get admin client");
-    let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+    let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
     auth.rpc()
         .auth()
         .service_instances_provision(
@@ -377,26 +360,15 @@ async fn service_approval_approved_service_handles_client_rpc() {
     let connect_handle: JoinHandle<
         trellis_rs::service::ConnectedServiceRuntime<ServiceApprovalContract>,
     > = tokio::spawn(async move {
-        let client =
-            TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
-                trellis_url: &connect_trellis_url,
-                contract_id: SERVICE_CONTRACT_ID,
-                contract_digest: &contract_digest,
-                contract_json: SERVICE_CONTRACT_JSON,
-                session_key_seed_base64url: &connect_seed,
-                timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-                retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-                authority_pending_timeout_ms:
-                    trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-            })
-            .await
-            .expect("service connect should succeed after approval");
-        let service =
-            trellis_rs::service::ConnectedServiceRuntime::<ServiceApprovalContract>::from_connected_client(
-                "service-approval-fixture-service",
-                Arc::new(client),
-            )
-            .expect("build connected service runtime from client");
+        let service = trellis_test::connect_service_runtime::<ServiceApprovalContract>(
+            &connect_trellis_url,
+            SERVICE_CONTRACT_ID,
+            &contract_digest,
+            SERVICE_CONTRACT_JSON,
+            &connect_seed,
+        )
+        .await
+        .expect("build connected service runtime from client");
         let _ = connected_tx.send(());
         service
     });
@@ -513,7 +485,7 @@ async fn service_approval_service_bootstrap_denies_missing_disabled_and_digest_d
             .connect_admin(&bootstrap_url)
             .await
             .expect("get admin client");
-        let auth = trellis_rs::sdk::auth::AuthClient::new(admin_client);
+        let auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
         auth.rpc()
             .auth()
             .service_instances_provision(
@@ -688,7 +660,7 @@ async fn service_approval_service_bootstrap_denies_missing_disabled_and_digest_d
 }
 
 async fn call_startup_ping_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     message: &str,
 ) -> StartupPingOutput {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -823,16 +795,13 @@ async fn service_bootstrap(
 }
 
 async fn connect_service_client(trellis_url: &str, contract_digest: &str, seed: &str) {
-    TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
+    trellis_test::connect_service_runtime::<ServiceApprovalContract>(
         trellis_url,
-        contract_id: SERVICE_CONTRACT_ID,
+        SERVICE_CONTRACT_ID,
         contract_digest,
-        contract_json: SERVICE_CONTRACT_JSON,
-        session_key_seed_base64url: seed,
-        timeout_ms: trellis_rs::service::DEFAULT_TIMEOUT_MS,
-        retry_delay_ms: trellis_rs::service::DEFAULT_RETRY_DELAY_MS,
-        authority_pending_timeout_ms: trellis_rs::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
-    })
+        SERVICE_CONTRACT_JSON,
+        seed,
+    )
     .await
     .expect("service reconnect should succeed after state is restored");
 }

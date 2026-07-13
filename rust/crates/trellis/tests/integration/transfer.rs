@@ -11,9 +11,9 @@ use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
 use trellis_rs::service::StoreResourceClient;
 use trellis_rs::service::{
-    AcceptedOperation, DefaultRequestValidator, FileTransferInfo, GeneratedServiceContract,
-    OperationRefData, OperationSnapshot, OperationState as ServiceOpState, ServerError,
-    ServiceHandlerContext, ServiceRuntimeError, TransferDownloadGrantArgs, TransferUploadGrantArgs,
+    AcceptedOperation, FileTransferInfo, GeneratedServiceContract, OperationRefData,
+    OperationSnapshot, OperationState as ServiceOpState, ServerError, ServiceHandlerContext,
+    ServiceRuntimeError, TransferDownloadGrantArgs, TransferUploadGrantArgs,
     UploadTransferCompletion, UploadTransferSession,
 };
 
@@ -277,7 +277,7 @@ impl TransferFixture {
         }
     }
 
-    async fn connect_client(&mut self) -> trellis_rs::client::TrellisClient {
+    async fn connect_client(&mut self) -> trellis_rs::generated::Caller {
         self.admin
             .connect_client(&self.bootstrap_url, &self.client_contract)
             .await
@@ -309,8 +309,7 @@ fn register_upload_handler(
                     let caller_session_key =
                         context.request().session_key.clone().unwrap_or_default();
                     let handle = context.handle();
-                    let client = Arc::clone(handle.client());
-                    let service_session_key = client.auth().session_key.clone();
+                    let service_session_key = handle.session_key().to_string();
                     let service_name = handle.service_name().to_string();
                     let resources = handle.resources().clone();
 
@@ -340,13 +339,8 @@ fn register_upload_handler(
 
                     let session = UploadTransferSession::new(plan.clone(), &updated_at);
                     let store = handle.store_client("uploads").await?;
-                    let validator = DefaultRequestValidator::new(Arc::clone(&client));
                     let completion: UploadTransferCompletion = handle
-                        .spawn_upload_transfer_endpoint_with_completion(
-                            session,
-                            store.clone(),
-                            validator,
-                        )
+                        .spawn_upload_transfer_endpoint_with_completion(session, store.clone())
                         .await?;
 
                     let initial_snapshot = OperationSnapshot {
@@ -490,8 +484,7 @@ fn register_download_handler(
 ) {
     service.register_rpc::<FilesDownloadRpc, _, _>(move |context, input| async move {
         let handle = context.handle();
-        let client = Arc::clone(handle.client());
-        let service_session_key = client.auth().session_key.clone();
+        let service_session_key = handle.session_key().to_string();
         let service_name = handle.service_name().to_string();
         let resources = handle.resources().clone();
         let caller_session_key = context.request().session_key.clone().unwrap_or_default();
@@ -526,9 +519,8 @@ fn register_download_handler(
         })
         .map_err(|e| ServerError::Nats(e.to_string()))?;
 
-        let validator = DefaultRequestValidator::new(Arc::clone(&client));
         handle
-            .spawn_download_transfer_endpoint(plan.clone(), store, validator)
+            .spawn_download_transfer_endpoint(plan.clone(), store)
             .await?;
 
         let grant_value = serde_json::to_value(&plan.grant).map_err(ServerError::Json)?;
@@ -593,7 +585,7 @@ async fn transfer_upload_rejects_over_max_bytes() {
 
     let error = result.expect_err("oversized upload should be rejected");
     match error.source() {
-        trellis_rs::client::TrellisClientError::TransferProtocol(message) => {
+        trellis_rs::generated::TrellisClientError::TransferProtocol(message) => {
             assert!(message.contains("attempted 2048"));
             assert!(message.contains("max 1024"));
         }
@@ -663,8 +655,7 @@ async fn transfer_client_downloads_file_via_receive_grant() {
         Some("text/plain")
     );
 
-    let downloaded = client
-        .download_transfer(&download_grant)
+    let downloaded = trellis_test::download_transfer(&client, &download_grant)
         .await
         .expect("download transfer bytes");
     assert_eq!(
@@ -697,7 +688,7 @@ async fn transfer_download_grant_is_session_bound() {
 
     // Client B attempts to use client A's grant
     let client_b = fixture.connect_client().await;
-    let result = client_b.download_transfer(&download_grant).await;
+    let result = trellis_test::download_transfer(&client_b, &download_grant).await;
     assert!(
         result.is_err(),
         "cross-session grant usage should be rejected"
@@ -707,14 +698,11 @@ async fn transfer_download_grant_is_session_bound() {
 }
 
 async fn start_upload_with_retry<'a>(
-    client: &'a trellis_rs::client::TrellisClient,
+    client: &'a trellis_rs::generated::Caller,
     input: &UploadInput,
     body: &[u8],
-) -> trellis_rs::client::StartedOperationTransfer<
-    'a,
-    trellis_rs::client::TrellisClient,
-    FilesUploadOp,
-> {
+) -> trellis_rs::generated::StartedOperationTransfer<'a, trellis_rs::generated::Caller, FilesUploadOp>
+{
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match client
@@ -736,18 +724,18 @@ async fn start_upload_with_retry<'a>(
 }
 
 async fn start_upload_result_with_retry<'a>(
-    client: &'a trellis_rs::client::TrellisClient,
+    client: &'a trellis_rs::generated::Caller,
     input: &UploadInput,
     body: &[u8],
 ) -> Result<
-    trellis_rs::client::StartedOperationTransfer<
+    trellis_rs::generated::StartedOperationTransfer<
         'a,
-        trellis_rs::client::TrellisClient,
+        trellis_rs::generated::Caller,
         FilesUploadOp,
     >,
-    trellis_rs::client::OperationTransferStartError<
+    trellis_rs::generated::OperationTransferStartError<
         'a,
-        trellis_rs::client::TrellisClient,
+        trellis_rs::generated::Caller,
         FilesUploadOp,
     >,
 > {
@@ -771,7 +759,7 @@ async fn start_upload_result_with_retry<'a>(
 }
 
 async fn call_download_with_retry(
-    client: &trellis_rs::client::TrellisClient,
+    client: &trellis_rs::generated::Caller,
     input: &DownloadInput,
 ) -> Value {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -789,21 +777,21 @@ async fn call_download_with_retry(
 }
 
 fn is_retryable_transfer_start_error(
-    error: &trellis_rs::client::OperationTransferStartError<
+    error: &trellis_rs::generated::OperationTransferStartError<
         '_,
-        trellis_rs::client::TrellisClient,
+        trellis_rs::generated::Caller,
         FilesUploadOp,
     >,
 ) -> bool {
     is_retryable_service_startup_error(error.source())
 }
 
-fn is_retryable_service_startup_error(error: &trellis_rs::client::TrellisClientError) -> bool {
+fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClientError) -> bool {
     match error {
-        trellis_rs::client::TrellisClientError::NatsRequest(message) => {
+        trellis_rs::generated::TrellisClientError::NatsRequest(message) => {
             message.contains("no responders") || message.contains("NoResponders")
         }
-        trellis_rs::client::TrellisClientError::Timeout => true,
+        trellis_rs::generated::TrellisClientError::Timeout => true,
         _ => false,
     }
 }

@@ -1,5 +1,5 @@
 //! Typed RPC descriptors for `trellis.eventlog@v1`.
-use crate::client::RpcDescriptor;
+use crate::generated::RpcDescriptor;
 use serde::{Deserialize, Serialize};
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -19,6 +19,34 @@ impl RpcDescriptor for EventLogConsumersInspectRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `EventLog.Consumers.Inspect`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventLogConsumersInspectError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for EventLogConsumersInspectError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `EventLog.Consumers.Query`.
 pub struct EventLogConsumersQueryRpc;
 impl RpcDescriptor for EventLogConsumersQueryRpc {
@@ -33,6 +61,29 @@ impl RpcDescriptor for EventLogConsumersQueryRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `EventLog.Consumers.Query`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventLogConsumersQueryError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for EventLogConsumersQueryError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `EventLog.Inspect`.
 pub struct EventLogInspectRpc;
 impl RpcDescriptor for EventLogInspectRpc {
@@ -46,6 +97,34 @@ impl RpcDescriptor for EventLogInspectRpc {
     const ERRORS: &'static [&'static str] =
         &["UnexpectedError", "ValidationError", "NotFoundError"];
 }
+/// Errors declared by `EventLog.Inspect`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventLogInspectError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
+}
+impl crate::generated::DeclaredError for EventLogInspectError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `EventLog.Metrics`.
 pub struct EventLogMetricsRpc;
 impl RpcDescriptor for EventLogMetricsRpc {
@@ -58,6 +137,29 @@ impl RpcDescriptor for EventLogMetricsRpc {
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
 }
+/// Errors declared by `EventLog.Metrics`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventLogMetricsError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for EventLogMetricsError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
+}
 /// Descriptor for `EventLog.Query`.
 pub struct EventLogQueryRpc;
 impl RpcDescriptor for EventLogQueryRpc {
@@ -69,4 +171,27 @@ impl RpcDescriptor for EventLogQueryRpc {
     const SUBJECT: &'static str = "rpc.v1.EventLog.Query";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
     const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
+}
+/// Errors declared by `EventLog.Query`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EventLogQueryError {
+    /// `UnexpectedError` error payload.
+    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    /// `ValidationError` error payload.
+    ValidationError(crate::generated::DeclaredErrorPayload),
+}
+impl crate::generated::DeclaredError for EventLogQueryError {
+    fn decode(
+        payload: &crate::generated::RemoteErrorPayload,
+    ) -> Result<Option<Self>, serde_json::Error> {
+        match payload.error_type() {
+            Some("UnexpectedError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
+            _ => Ok(None),
+        }
+    }
 }

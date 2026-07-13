@@ -43,10 +43,12 @@ pub enum JobProcessError<E> {
 }
 
 impl<E> JobProcessError<E> {
+    #[doc = concat!("Trellis API operation `", stringify!(retryable), "`.")]
     pub fn retryable(error: E) -> Self {
         Self::Retryable(error)
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(failed), "`.")]
     pub fn failed(error: E) -> Self {
         Self::Failed(error)
     }
@@ -84,6 +86,7 @@ pub enum JobSubmitOutcome<TJob> {
 
 /// Reason a raw manager-level job submission was not enqueued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[doc = concat!("Public Trellis value set `", stringify!(JobNotEnqueuedReason), "`.")]
 pub enum JobNotEnqueuedReason {
     ActiveLimit,
     QueueDepth,
@@ -94,12 +97,19 @@ pub enum JobNotEnqueuedReason {
 /// Raw manager-level expected not-enqueued outcome details.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("job was not enqueued for key '{key}': {reason:?}")]
+#[doc = concat!("Public Trellis data type `", stringify!(JobNotEnqueued), "`.")]
 pub struct JobNotEnqueued {
+    #[doc = concat!("The `", stringify!(reason), "` value.")]
     pub reason: JobNotEnqueuedReason,
+    #[doc = concat!("The `", stringify!(key), "` value.")]
     pub key: String,
+    #[doc = concat!("The `", stringify!(active), "` value.")]
     pub active: usize,
+    #[doc = concat!("The `", stringify!(queued), "` value.")]
     pub queued: usize,
+    #[doc = concat!("The `", stringify!(limit), "` value.")]
     pub limit: usize,
+    #[doc = concat!("The `", stringify!(existing_job_id), "` value.")]
     pub existing_job_id: Option<String>,
 }
 
@@ -170,6 +180,7 @@ pub enum JobManagerError<E> {
 
 /// Decision returned by keyed terminal guards before lifecycle publication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc = concat!("Public Trellis value set `", stringify!(TerminalPublishDecision), "`.")]
 pub enum TerminalPublishDecision {
     Publish,
     StaleCompletionIgnored,
@@ -195,6 +206,7 @@ impl<P, M> Clone for JobManager<P, M> {
 }
 
 impl<P, M> JobManager<P, M> {
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(publisher: P, bindings: JobsBinding, meta: M) -> Self {
         Self {
             inner: Arc::new(JobManagerInner {
@@ -207,6 +219,7 @@ impl<P, M> JobManager<P, M> {
     }
 
     #[doc(hidden)]
+    #[doc = concat!("Trellis API operation `", stringify!(new_with_key_coordinator), "`.")]
     pub fn new_with_key_coordinator(
         publisher: P,
         bindings: JobsBinding,
@@ -223,16 +236,19 @@ impl<P, M> JobManager<P, M> {
         }
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(publisher), "`.")]
     pub fn publisher(&self) -> &P {
         &self.inner.publisher
     }
 
+    #[doc = concat!("Trellis API operation `", stringify!(bindings), "`.")]
     pub fn bindings(&self) -> &JobsBinding {
         &self.inner.bindings
     }
 
     /// Return the optional keyed-concurrency coordinator used by this manager.
-    pub(crate) fn key_coordinator(&self) -> Option<Arc<dyn JobKeyCoordinator>> {
+    #[doc = concat!("Trellis API operation `", stringify!(key_coordinator), "`.")]
+    pub fn key_coordinator(&self) -> Option<Arc<dyn JobKeyCoordinator>> {
         self.inner.key_coordinator.clone()
     }
 }
@@ -260,7 +276,8 @@ where
         self.queue_binding(&job.job_type)
     }
 
-    pub(crate) fn now_iso(&self) -> String {
+    #[doc = concat!("Trellis API operation `", stringify!(now_iso), "`.")]
+    pub fn now_iso(&self) -> String {
         self.inner.meta.now_iso()
     }
 
@@ -600,6 +617,7 @@ where
     }
 
     /// Publish a `stale` lifecycle event for an expired active key slot.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(emit_stale_slot), "`.")]
     pub async fn emit_stale_slot(
         &self,
         queue_type: &str,
@@ -931,6 +949,7 @@ where
         Ok(decision)
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(emit_progress), "`.")]
     pub async fn emit_progress(
         &self,
         job: &Job,
@@ -1021,6 +1040,7 @@ where
         Ok(envelope)
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(emit_log), "`.")]
     pub async fn emit_log(
         &self,
         job: &Job,
@@ -1055,6 +1075,7 @@ where
     }
 
     /// Publish `waiting` evidence for an active job.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(emit_waiting), "`.")]
     pub async fn emit_waiting(
         &self,
         job: &Job,
@@ -1083,6 +1104,7 @@ where
     }
 
     /// Publish `resumed` evidence for an active job.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(emit_resumed), "`.")]
     pub async fn emit_resumed(
         &self,
         job: &Job,
@@ -1110,6 +1132,7 @@ where
             .await
     }
 
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(cancel), "`.")]
     pub async fn cancel(&self, job: &Job) -> Result<(), JobManagerError<P::Error>> {
         let queue = self.queue_binding_for_job(job)?;
         if !matches!(
@@ -1388,7 +1411,8 @@ fn stable_hash64(value: &impl Hash) -> u64 {
     hasher.finish()
 }
 
-pub(crate) fn trace_id_from_traceparent(traceparent: &str) -> Option<&str> {
+#[doc = concat!("Trellis API operation `", stringify!(trace_id_from_traceparent), "`.")]
+pub fn trace_id_from_traceparent(traceparent: &str) -> Option<&str> {
     let mut parts = traceparent.split('-');
     let version = parts.next()?;
     let trace_id = parts.next()?;

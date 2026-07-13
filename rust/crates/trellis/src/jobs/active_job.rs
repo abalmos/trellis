@@ -16,6 +16,7 @@ type HeartbeatHook = Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Se
 
 /// Errors returned by [`ActiveJob`] runtime operations.
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(ActiveJobRuntimeError), "`.")]
 pub enum ActiveJobRuntimeError {
     #[error("failed to send worker heartbeat: {0}")]
     Heartbeat(String),
@@ -36,7 +37,8 @@ pub struct ActiveJob<P, M> {
 }
 
 impl<P, M> ActiveJob<P, M> {
-    pub(crate) fn new(
+    #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
+    pub fn new(
         manager: JobManager<P, M>,
         job: Job,
         cancellation: JobCancellationToken,
@@ -53,21 +55,25 @@ impl<P, M> ActiveJob<P, M> {
     }
 
     /// Return the current in-memory job snapshot for this handler invocation.
+    #[doc = concat!("Trellis API operation `", stringify!(job), "`.")]
     pub fn job(&self) -> &Job {
         &self.job
     }
 
     /// Return the request and trace context carried by this job.
+    #[doc = concat!("Trellis API operation `", stringify!(context), "`.")]
     pub fn context(&self) -> &JobContext {
         &self.job.context
     }
 
     /// Return whether cooperative cancellation has been requested.
+    #[doc = concat!("Trellis API operation `", stringify!(is_cancelled), "`.")]
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }
 
     /// Clone the underlying cooperative cancellation token.
+    #[doc = concat!("Trellis API operation `", stringify!(cancellation_token), "`.")]
     pub fn cancellation_token(&self) -> JobCancellationToken {
         self.cancellation.clone()
     }
@@ -76,6 +82,7 @@ impl<P, M> ActiveJob<P, M> {
     ///
     /// This is only available when the job is running under a queue-worker path
     /// that provides a runtime heartbeat hook.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(heartbeat), "`.")]
     pub async fn heartbeat(&self) -> Result<(), ActiveJobRuntimeError> {
         (self.heartbeat)()
             .await
@@ -89,6 +96,7 @@ where
     M: JobMetaSource,
 {
     /// Publish a progress update for this active job.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(update_progress), "`.")]
     pub async fn update_progress(
         &self,
         current: u64,
@@ -132,11 +140,13 @@ where
         result
     }
 
-    pub(crate) fn update_gate(&self) -> Arc<tokio::sync::Mutex<bool>> {
+    #[doc = concat!("Trellis API operation `", stringify!(update_gate), "`.")]
+    pub fn update_gate(&self) -> Arc<tokio::sync::Mutex<bool>> {
         Arc::clone(&self.update_gate)
     }
 
     /// Publish a log entry for this active job.
+    #[doc = concat!("Asynchronous Trellis API operation `", stringify!(log), "`.")]
     pub async fn log(
         &self,
         level: JobLogLevel,

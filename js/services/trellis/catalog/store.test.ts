@@ -698,7 +698,16 @@ Deno.test("contract store accepts top-level oneOf event params when all variants
       {
         oneOf: [
           { type: "object", properties: { origin: { type: "string" } } },
-          { type: "object", properties: { origin: { type: "integer" } } },
+          {
+            type: "object",
+            properties: {
+              origin: {
+                type: "integer",
+                minimum: Number.MIN_SAFE_INTEGER,
+                maximum: Number.MAX_SAFE_INTEGER,
+              },
+            },
+          },
         ],
       },
     ),

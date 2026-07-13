@@ -479,7 +479,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     assert!(participant.join("src/lib.rs").exists());
     assert!(participant.join("contracts/orders.json").exists());
     assert!(participant.join("contracts/inventory.json").exists());
-    assert!(!temp
+    assert!(temp
         .path()
         .join("generated/packages/cargo/device/Cargo.toml")
         .exists());
@@ -490,10 +490,9 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     assert!(cargo_toml.contains("trellis-sdk-inventory = { path = "));
     assert!(!cargo_toml.contains("trellis-sdk-auth"));
 
-    let build_rs = fs::read_to_string(participant.join("build.rs")).unwrap();
-    assert!(build_rs.contains("contracts/orders.json"));
-    assert!(build_rs.contains("contracts/inventory.json"));
-    assert!(!build_rs.contains("contracts/auth.json"));
+    assert!(!participant.join("build.rs").exists());
+    assert!(participant.join("src/uses/orders.rs").exists());
+    assert!(participant.join("src/uses/inventory.rs").exists());
 
     fs::write(
         device.join("contracts/device.json"),
@@ -521,11 +520,8 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     .unwrap();
 
     let output = run_prepare(temp.path());
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an explicit SDK mapping"));
     assert!(!participant.exists());
 
     fs::write(
@@ -554,16 +550,13 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     .unwrap();
 
     let output = run_prepare(temp.path());
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an explicit SDK mapping"));
     assert!(!participant.exists());
 }
 
 #[test]
-fn prepare_skips_rust_participant_facade_without_local_uses_mappings() {
+fn prepare_generates_rust_participant_facade_without_uses() {
     let temp = tempfile::tempdir().unwrap();
     let device = temp.path().join("device");
     fs::create_dir_all(device.join("contracts")).unwrap();
@@ -588,9 +581,13 @@ fn prepare_skips_rust_participant_facade_without_local_uses_mappings() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!temp
+    assert!(temp
         .path()
         .join("generated/packages/cargo-participants/device/Cargo.toml")
+        .exists());
+    assert!(temp
+        .path()
+        .join("generated/packages/cargo/device/Cargo.toml")
         .exists());
 }
 

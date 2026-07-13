@@ -27,8 +27,8 @@ type EventName<TAction extends EventSubscribeAction> = TAction["name"];
 type EventPayload<
   TAction extends EventSubscribeAction,
   TName extends EventName<TAction>,
-> = Extract<TAction, { name: TName }> extends infer TSelected extends
-  EventSubscribeAction
+> = Extract<TAction, { name: TName }> extends
+  infer TSelected extends EventSubscribeAction
   ? DescriptorForAction<TSelected> extends EventDesc<infer TSchema>
     ? InferSchemaType<TSchema>
   : never
@@ -274,7 +274,9 @@ export async function startTrellisTestEventCapture<
   });
 
   const appContract = defineAppContract(() => ({
-    id: `trellis.test.event-capture.${captureContractName(args.options.name)}@v1`,
+    id: `trellis.test.event-capture.${
+      captureContractName(args.options.name)
+    }@v1`,
     displayName: `Trellis Test Event Capture: ${args.options.name}`,
     description: "Synthetic app participant for live test event capture.",
     uses: [AuthEventsValidate, ...events],
@@ -297,7 +299,10 @@ export async function startTrellisTestEventCapture<
 
   try {
     for (const event of events) {
-      const listener = Reflect.get(client, event.connectedName) as EventListener<
+      const listener = Reflect.get(
+        client,
+        event.connectedName,
+      ) as EventListener<
         EventPayload<TEvents[number], typeof event.name>
       >;
       await listener((decoded, context) => {

@@ -20,7 +20,7 @@ liveTrellisTest({
         assertEquals(input.message, fixture.message);
         assert(caller.active, "operation caller should be active");
         return Result.ok({ message: caller.type, done: true });
-      },);
+      });
 
       const client = await runtime.connectClient({
         name: fixture.clientName,

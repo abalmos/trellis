@@ -2,6 +2,7 @@ use std::io;
 
 /// Errors returned by Trellis auth and admin-session helpers.
 #[derive(Debug, thiserror::Error)]
+#[doc = concat!("Public Trellis value set `", stringify!(TrellisAuthError), "`.")]
 pub enum TrellisAuthError {
     /// The supplied contract JSON could not be parsed.
     #[error("invalid contract json: {0}")]
