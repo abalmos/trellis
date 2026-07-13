@@ -5,6 +5,10 @@ const decoder = new TextDecoder();
 const trellisSelfImportPattern =
   /(?:from\s+|import\()\s*["']@qlever-llc\/trellis(?:\/[^"']*)?["']/;
 
+function countOccurrences(source: string, value: string): number {
+  return source.split(value).length - 1;
+}
+
 async function* walkPublishableSources(
   dir: URL,
 ): AsyncGenerator<URL> {
@@ -123,15 +127,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
             js/services/trellis \\
             js/packages/trellis-test`,
   );
-  assertStringIncludes(releaseWorkflow, "trellis-svelte-jsr-package");
-  assertStringIncludes(
-    releaseWorkflow,
-    "Upload trellis-svelte JSR package artifact",
-  );
-  assertStringIncludes(
-    releaseWorkflow,
-    "Download trellis-svelte JSR package artifact",
-  );
+  assertEquals(releaseWorkflow.includes("trellis-svelte-jsr-package"), false);
   assertEquals(
     releaseWorkflow.includes(["services/trellis", "jsr"].join("/")),
     false,
@@ -149,6 +145,25 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     releaseWorkflow,
     "deno publish --allow-slow-types --allow-dirty",
   );
+  assertEquals(releaseWorkflow.includes("\n  verify-format:"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-js-integration:"), false);
+  assertEquals(releaseWorkflow.includes("\n  verify-rust-integration:"), false);
+  assertEquals(
+    countOccurrences(releaseWorkflow, "test:integration"),
+    1,
+  );
+  assertEquals(
+    countOccurrences(releaseWorkflow, "--test integration"),
+    1,
+  );
+  assertStringIncludes(
+    releaseWorkflow,
+    "outputs: type=oci,dest=/tmp/${{ matrix.image }}.tar",
+  );
+  assertStringIncludes(releaseWorkflow, "verified-image-${{ matrix.image }}");
+  assertStringIncludes(releaseWorkflow, "skopeo copy --all");
+  assertEquals(releaseWorkflow.includes("Build and push image"), false);
+  assertStringIncludes(releaseWorkflow, "needs.rust-msrv.result == 'success'");
   assertEquals(releaseWorkflow.includes("deno eval --allow-read"), false);
 });
 

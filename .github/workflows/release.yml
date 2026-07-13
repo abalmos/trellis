@@ -44,22 +44,15 @@ env:
 jobs:
   rust-msrv:
     name: Rust 1.88 public API
+    needs: prepare-release
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up current Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
+      - name: Download prepared release workspace
+        uses: actions/download-artifact@v4
         with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Materialize generated participant facades
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
+          name: prepared-release
+          path: .
 
       - name: Set up Rust 1.88
         uses: dtolnay/rust-toolchain@master
@@ -216,6 +209,13 @@ jobs:
       - name: Generate release SDK artifacts
         run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
+      - name: Verify formatting
+        run: |
+          time deno fmt -c js/deno.json --check
+          time cargo fmt --manifest-path rust/Cargo.toml --all --check
+          time cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
+          time cargo fmt --manifest-path rust/xtask/Cargo.toml --check
+
       - name: Write release notes
         if: env.RELEASE_TAG != ''
         run: time cargo run --manifest-path xtask/Cargo.toml -- release write-notes --tag "${RELEASE_TAG}" --output "${{ github.workspace }}/dist/release-notes.md"
@@ -246,7 +246,7 @@ jobs:
           path: dist/release-notes.md
 
   verify-rust:
-    name: Verify Rust packages
+    name: Verify Rust
     needs: prepare-release
     runs-on: ubuntu-latest
     env:
@@ -299,40 +299,11 @@ jobs:
             time cargo test --manifest-path xtask/Cargo.toml --locked
           fi
 
-  verify-format:
-    name: Verify formatting
-    needs: prepare-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run formatter checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          time deno fmt -c js/deno.json --check
-          time cargo fmt --manifest-path rust/Cargo.toml --all --check
-          time cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
-          time cargo fmt --manifest-path rust/xtask/Cargo.toml --check
+      - name: Run Rust integration tests
+        run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
 
   verify-js:
-    name: Verify npm and JSR packages
+    name: Verify JavaScript
     needs: prepare-release
     runs-on: ubuntu-latest
     env:
@@ -420,6 +391,9 @@ jobs:
             (cd "$pkg" && time deno publish --dry-run --allow-slow-types --allow-dirty)
           done
 
+      - name: Run JS integration tests
+        run: time deno task -c js/deno.json test:integration
+
       - name: Upload npm package artifact
         uses: actions/upload-artifact@v4
         with:
@@ -429,12 +403,6 @@ jobs:
             js/packages/trellis/npm
             js/packages/trellis-svelte/npm
             dist/npm
-
-      - name: Upload trellis-svelte JSR package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: trellis-svelte-jsr-package
-          path: js/packages/trellis-svelte/jsr
 
   build-cli:
     name: Build ${{ matrix.target }} CLI
@@ -538,7 +506,7 @@ jobs:
             dist/*.sha256
 
   verify-images:
-    name: Verify ${{ matrix.image }} image
+    name: Build verified ${{ matrix.image }} image
     if: needs.prepare-release.outputs.release-tag != ''
     needs: prepare-release
     runs-on: ubuntu-latest
@@ -576,13 +544,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Dry-run image build
+      - name: Build verified image archive
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.file }}
           platforms: linux/amd64,linux/arm64
-          push: false
+          outputs: type=oci,dest=/tmp/${{ matrix.image }}.tar
           build-args: |
             TRELLIS_VERSION=${{ env.RELEASE_TAG }}
             TRELLIS_REVISION=${{ github.sha }}
@@ -591,92 +559,27 @@ jobs:
             org.opencontainers.image.description=${{ matrix.description }}
             io.trellis.contract.path=${{ matrix.contract-path }}
 
-  verify-js-integration:
-    name: Verify JS integration suite
-    needs: prepare-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
+      - name: Upload verified image archive
+        uses: actions/upload-artifact@v4
         with:
-          name: prepared-release
-          path: .
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Deno dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/deno
-            js/node_modules
-          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('js/deno.lock') }}
-          restore-keys: |
-            deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
-
-      - name: Run JS integration tests
-        run: time deno task -c js/deno.json test:integration
-
-  verify-rust-integration:
-    name: Verify Rust integration suite
-    needs: prepare-release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            xtask -> target
-            rust -> target
-            rust/xtask -> target
-            rust/tools/generate -> target
-
-      - name: Run Rust integration tests
-        run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
+          name: verified-image-${{ matrix.image }}
+          path: /tmp/${{ matrix.image }}.tar
+          compression-level: 0
 
   release-gate:
     name: Release gate
     needs:
       - prepare-release
-      - verify-format
+      - rust-msrv
       - verify-rust
       - verify-js
       - build-cli
       - verify-images
-      - verify-js-integration
-      - verify-rust-integration
     if: >-
       always()
-      && needs.verify-format.result == 'success'
+      && needs.rust-msrv.result == 'success'
       && needs.verify-rust.result == 'success'
       && needs.verify-js.result == 'success'
-      && needs.verify-js-integration.result == 'success'
-      && needs.verify-rust-integration.result == 'success'
       && (
         needs.prepare-release.outputs.release-tag == ''
         || (needs.build-cli.result == 'success' && needs.verify-images.result == 'success')
@@ -1057,12 +960,6 @@ jobs:
           name: prepared-release
           path: .
 
-      - name: Download trellis-svelte JSR package artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: trellis-svelte-jsr-package
-          path: js/packages/trellis-svelte/jsr
-
       - name: Set up Deno
         uses: denoland/setup-deno@v2
         with:
@@ -1171,25 +1068,14 @@ jobs:
       matrix:
         include:
           - image: trellis
-            file: js/services/trellis/Containerfile
-            title: trellis
-            description: Trellis service runtime
-            contract-path: /trellis/contract.json
           - image: console
-            file: js/apps/console/Containerfile
-            title: console
-            description: Trellis administrative web console
-            contract-path: ""
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
+      - name: Download verified image archive
         uses: actions/download-artifact@v4
         with:
-          name: prepared-release
-          path: .
+          name: verified-image-${{ matrix.image }}
+          path: /tmp
 
       - name: Normalize image owner
         id: owner
@@ -1198,18 +1084,10 @@ jobs:
           set -euo pipefail
           echo "value=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up image promotion
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
 
       - name: Extract image metadata
         id: meta
@@ -1222,19 +1100,17 @@ jobs:
             type=raw,value=rc,enable=${{ env.RELEASE_TAG != '' && contains(env.RELEASE_TAG, '-') }}
             type=raw,value=latest,enable=${{ env.RELEASE_TAG != '' && !contains(env.RELEASE_TAG, '-') }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.file }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          build-args: |
-            TRELLIS_VERSION=${{ env.RELEASE_TAG }}
-            TRELLIS_REVISION=${{ github.sha }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            org.opencontainers.image.title=${{ matrix.title }}
-            org.opencontainers.image.description=${{ matrix.description }}
-            io.trellis.contract.path=${{ matrix.contract-path }}
+      - name: Promote verified image
+        shell: bash
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          auth_file="${RUNNER_TEMP}/skopeo-auth.json"
+          printf '%s' "${REGISTRY_PASSWORD}" | skopeo login --authfile "${auth_file}" --username "${REGISTRY_USER}" --password-stdin "${REGISTRY}"
+          while IFS= read -r image_tag; do
+            [ -n "${image_tag}" ] || continue
+            skopeo copy --all --dest-authfile "${auth_file}" "oci-archive:/tmp/${{ matrix.image }}.tar" "docker://${image_tag}"
+          done <<< "${IMAGE_TAGS}"
