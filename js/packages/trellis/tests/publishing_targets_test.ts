@@ -108,8 +108,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertStringIncludes(
     releaseWorkflow,
-    `js/packages/trellis-test \\
-            js/packages/trellis-svelte/jsr
+    `js/packages/trellis-test
           do
             (cd "$pkg" && time deno publish --dry-run --allow-slow-types --allow-dirty)`,
   );
