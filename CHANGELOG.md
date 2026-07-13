@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.8] - 2026-07-13
+
+### Fixed
+
+- Made the published control-plane package consume built-in contract manifests
+  through the Trellis SDK package exports so JSR can build its self-contained
+  module graph.
+- Deferred `trellis-svelte` JSR validation until its matching Trellis runtime
+  version has been published, preserving ordered clean-break publication.
+
 ## [0.11.0-rc.7] - 2026-07-13
 
 ### Public Breaking Changes

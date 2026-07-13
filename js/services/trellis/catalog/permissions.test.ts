@@ -3,19 +3,19 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   CONTRACT as TRELLIS_JOBS_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_JOBS_CONTRACT_DIGEST,
-} from "../../../../generated/packages/jsr/jobs/manifest.ts";
+} from "@qlever-llc/trellis/sdk/jobs/manifest";
 import {
   CONTRACT as TRELLIS_EVENTLOG_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_EVENTLOG_CONTRACT_DIGEST,
-} from "../../../../generated/packages/jsr/eventlog/manifest.ts";
+} from "@qlever-llc/trellis/sdk/eventlog/manifest";
 import {
   CONTRACT as TRELLIS_CORE_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_CORE_CONTRACT_DIGEST,
-} from "../../../../generated/packages/jsr/trellis-core/manifest.ts";
+} from "@qlever-llc/trellis/sdk/core/manifest";
 import {
   CONTRACT as TRELLIS_HEALTH_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_HEALTH_CONTRACT_DIGEST,
-} from "../../../../generated/packages/jsr/health/manifest.ts";
+} from "@qlever-llc/trellis/sdk/health/manifest";
 import {
   CONTRACT as TRELLIS_AUTH_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_AUTH_CONTRACT_DIGEST,

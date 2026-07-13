@@ -3,7 +3,7 @@ import {
   type TrellisContractV1,
 } from "@qlever-llc/trellis/contracts";
 import { assertEquals, assertRejects } from "@std/assert";
-import { CONTRACT as TRELLIS_JOBS_CONTRACT } from "../../../../generated/packages/jsr/jobs/manifest.ts";
+import { CONTRACT as TRELLIS_JOBS_CONTRACT } from "@qlever-llc/trellis/sdk/jobs/manifest";
 
 import {
   existingResourceNamesFromBindings,
