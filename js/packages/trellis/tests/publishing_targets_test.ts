@@ -115,10 +115,6 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertStringIncludes(
     releaseWorkflow,
-    'TRELLIS_SVELTE_JSR_RUNTIME_DEPENDENCY_VERSION: "0.10.18-rc.1"',
-  );
-  assertStringIncludes(
-    releaseWorkflow,
     `TRELLIS_SVELTE_JSR_RUNTIME_DEPENDENCY_VERSION="\${RELEASE_VERSION}" \\
             deno task -c js/packages/trellis-svelte/deno.json build:npm`,
   );

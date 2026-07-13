@@ -337,7 +337,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RELEASE_TAG: ${{ needs.prepare-release.outputs.release-tag }}
-      TRELLIS_SVELTE_JSR_RUNTIME_DEPENDENCY_VERSION: "0.10.18-rc.1"
 
     steps:
       - name: Check out repository

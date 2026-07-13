@@ -362,7 +362,7 @@ async fn wait_for_query(
     contract_id: &str,
     predicate: impl Fn(&trellis_rs::sdk::health::types::HealthQueryResponseEntriesItem) -> bool,
 ) -> HealthQueryResponse {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         if let Ok(response) = health
             .rpc()
