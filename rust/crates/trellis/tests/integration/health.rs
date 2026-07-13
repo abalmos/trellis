@@ -222,7 +222,10 @@ async fn health_projection_lifecycle_and_recovery() {
     assert_eq!(sample["participant"]["runtime"], "rust");
 
     let health = HealthClient::new(crate::generated_caller(&observer));
-    let initial = wait_for_query(&health, SERVICE_ID, |entry| entry.online_instances == 1).await;
+    let initial = wait_for_query(&health, SERVICE_ID, "initial healthy projection", |entry| {
+        entry.online_instances == 1
+    })
+    .await;
     assert_eq!(initial.entries[0].effective_status, "healthy");
     let initial_revision = initial.projection.revision;
 
@@ -263,7 +266,13 @@ async fn health_projection_lifecycle_and_recovery() {
         HealthWatchEvent::HealthInvalidated { .. }
     ));
 
-    let offline = wait_for_query(&health, SERVICE_ID, |entry| entry.offline_instances == 1).await;
+    let offline = wait_for_query(
+        &health,
+        SERVICE_ID,
+        "offline deadline projection",
+        |entry| entry.offline_instances == 1,
+    )
+    .await;
     assert_eq!(offline.entries[0].effective_status, "offline");
     assert!(offline.projection.revision > initial_revision);
     let transition = tokio::time::timeout(Duration::from_secs(5), transitions.next())
@@ -320,9 +329,12 @@ async fn health_projection_lifecycle_and_recovery() {
         .await
         .expect("publish heartbeat while projector is stopped");
     health_runtime.restart();
-    let recovered = wait_for_query(&health, SERVICE_ID, |entry| {
-        entry.effective_status == "degraded"
-    })
+    let recovered = wait_for_query(
+        &health,
+        SERVICE_ID,
+        "degraded projection after projector restart",
+        |entry| entry.effective_status == "degraded",
+    )
     .await;
     assert_eq!(recovered.entries[0].effective_status, "degraded");
     assert!(!recovered.projection.gap_detected);
@@ -360,11 +372,13 @@ fn assert_signed_transition(transition: &async_nats::Message) {
 async fn wait_for_query(
     health: &HealthClient<'_>,
     contract_id: &str,
+    expected: &str,
     predicate: impl Fn(&trellis_rs::sdk::health::types::HealthQueryResponseEntriesItem) -> bool,
 ) -> HealthQueryResponse {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let mut last_observation = "no query response".to_string();
     loop {
-        if let Ok(response) = health
+        match health
             .rpc()
             .health()
             .query(&HealthQueryRequest {
@@ -378,13 +392,17 @@ async fn wait_for_query(
             })
             .await
         {
-            if response.entries.first().is_some_and(&predicate) {
-                return response;
+            Ok(response) => {
+                if response.entries.first().is_some_and(&predicate) {
+                    return response;
+                }
+                last_observation = format!("response: {:?}", response.entries.first());
             }
+            Err(error) => last_observation = format!("query error: {error}"),
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "health query did not reach expected state"
+            "health query did not reach {expected}; last observation: {last_observation}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
