@@ -16,6 +16,8 @@
     "./host/control-plane": "./host/control-plane.ts",
     "./host/node": "./host/node.ts",
     "./internal/contract-runtime": "./contract_support/contract_runtime.ts",
+    "./internal/health-transport": "./health_transport.ts",
+    "./internal/service-runtime": "./internal/service-runtime.ts",
     "./jobs": "./jobs.ts",
     "./sdk/auth": "./sdk/auth.ts",
     "./sdk/auth/manifest": "./sdk/auth_manifest.ts",

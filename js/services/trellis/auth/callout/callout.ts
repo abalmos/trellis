@@ -12,7 +12,7 @@ import type {
 } from "@qlever-llc/trellis/contracts";
 import { AsyncResult, isErr } from "@qlever-llc/result";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
-import { healthHeartbeatSubject } from "../../../../packages/trellis/health_transport.ts";
+import { healthHeartbeatSubject } from "@qlever-llc/trellis/internal/health-transport";
 import type { StaticDecode } from "typebox";
 import { Value } from "typebox/value";
 

@@ -53,6 +53,11 @@ jobs:
       - name: Set up current Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
       - name: Materialize generated participant facades
         run: cargo run --manifest-path rust/xtask/Cargo.toml -- prepare
 

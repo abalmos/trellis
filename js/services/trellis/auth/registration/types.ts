@@ -1,7 +1,7 @@
 import type { ContractsModule } from "../../catalog/runtime.ts";
 import type { trellisControlPlaneApi } from "../../bootstrap/control_plane_api.ts";
 import type { AuthRuntimeDeps } from "../runtime_deps.ts";
-import type { TrellisServiceSession } from "../../../../packages/trellis/server/service.ts";
+import type { TrellisServiceSession } from "@qlever-llc/trellis/internal/service-runtime";
 
 type AuthOwnedApi = typeof trellisControlPlaneApi.owned;
 type ControlPlaneTrellisApi = NonNullable<
