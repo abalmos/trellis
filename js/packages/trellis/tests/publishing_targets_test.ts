@@ -147,7 +147,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertEquals(releaseWorkflow.includes("\n  verify-format:"), false);
   assertEquals(releaseWorkflow.includes("\n  verify-js-integration:"), false);
-  assertEquals(releaseWorkflow.includes("\n  verify-rust-integration:"), false);
+  assertStringIncludes(releaseWorkflow, "\n  verify-rust-integration:");
   assertEquals(
     countOccurrences(releaseWorkflow, "test:integration"),
     1,

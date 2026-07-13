@@ -299,9 +299,6 @@ jobs:
             time cargo test --manifest-path xtask/Cargo.toml --locked
           fi
 
-      - name: Run Rust integration tests
-        run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
-
   verify-js:
     name: Verify JavaScript
     needs: prepare-release
@@ -566,12 +563,48 @@ jobs:
           path: /tmp/${{ matrix.image }}.tar
           compression-level: 0
 
+  verify-rust-integration:
+    name: Verify Rust integration suite
+    needs: prepare-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download prepared release workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-release
+          path: .
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            xtask -> target
+            rust -> target
+            rust/xtask -> target
+            rust/tools/generate -> target
+
+      - name: Run Rust integration tests
+        run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
+
   release-gate:
     name: Release gate
     needs:
       - prepare-release
       - rust-msrv
       - verify-rust
+      - verify-rust-integration
       - verify-js
       - build-cli
       - verify-images
@@ -579,6 +612,7 @@ jobs:
       always()
       && needs.rust-msrv.result == 'success'
       && needs.verify-rust.result == 'success'
+      && needs.verify-rust-integration.result == 'success'
       && needs.verify-js.result == 'success'
       && (
         needs.prepare-release.outputs.release-tag == ''
