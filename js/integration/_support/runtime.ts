@@ -38,6 +38,7 @@ export { runtimeScopeForCase, runtimeScopeIsolated };
 export function trellisRepoRuntimeOptions(
   options: Partial<TrellisTestRuntimeStartOptions> = {},
 ): TrellisIntegrationRuntimeOptions {
+  const jobsServiceBin = Deno.env.get("TRELLIS_TEST_JOBS_SERVICE_BIN");
   return {
     ...options,
     keepWorkdir: options.keepWorkdir ?? keepWorkdirFromEnv(),
@@ -50,17 +51,19 @@ export function trellisRepoRuntimeOptions(
       },
     },
     jobsAdmin: options.jobsAdmin ?? {
-      command: {
-        cmd: "cargo",
-        args: [
-          "run",
-          "--manifest-path",
-          "../rust/Cargo.toml",
-          "-p",
-          "trellis-service-jobs",
-        ],
-        cwd: repoJsRoot,
-      },
+      command: jobsServiceBin
+        ? { cmd: jobsServiceBin, args: [], cwd: repoJsRoot }
+        : {
+          cmd: "cargo",
+          args: [
+            "run",
+            "--manifest-path",
+            "../rust/Cargo.toml",
+            "-p",
+            "trellis-service-jobs",
+          ],
+          cwd: repoJsRoot,
+        },
     },
     timeouts: {
       ...DEFAULT_TIMEOUTS,

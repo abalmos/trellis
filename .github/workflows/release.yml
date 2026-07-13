@@ -299,6 +299,26 @@ jobs:
             time cargo test --manifest-path xtask/Cargo.toml --locked
           fi
 
+      - name: Build integration runtime binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          locked=()
+          if [ -z "${RELEASE_TAG}" ]; then
+            locked=(--locked)
+          fi
+          time cargo build --manifest-path rust/Cargo.toml -p trellis-service-jobs "${locked[@]}"
+          time cargo build --manifest-path rust/Cargo.toml -p trellis-runtime --bin trellis-server "${locked[@]}"
+          mkdir -p dist/integration-runtime
+          cp rust/target/debug/trellis-service-jobs dist/integration-runtime/
+          cp rust/target/debug/trellis-server dist/integration-runtime/
+
+      - name: Upload integration runtime binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-runtime-binaries
+          path: dist/integration-runtime
+
   verify-js:
     name: Verify JavaScript
     needs: prepare-release
@@ -387,9 +407,6 @@ jobs:
           do
             (cd "$pkg" && time deno publish --dry-run --allow-slow-types --allow-dirty)
           done
-
-      - name: Run JS integration tests
-        run: time deno task -c js/deno.json test:integration
 
       - name: Upload npm package artifact
         uses: actions/upload-artifact@v4
@@ -598,6 +615,53 @@ jobs:
       - name: Run Rust integration tests
         run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
 
+  verify-js-integration:
+    name: Verify JS integration suite
+    needs:
+      - prepare-release
+      - verify-rust
+    runs-on: ubuntu-latest
+    env:
+      TRELLIS_TEST_JOBS_SERVICE_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-service-jobs
+      TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download prepared release workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: prepared-release
+          path: .
+
+      - name: Download integration runtime binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-runtime-binaries
+          path: dist/integration-runtime
+
+      - name: Make integration runtime binaries executable
+        run: chmod +x dist/integration-runtime/trellis-service-jobs dist/integration-runtime/trellis-server
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Cache Deno dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/deno
+            js/node_modules
+          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('js/deno.lock') }}
+          restore-keys: |
+            deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
+
+      - name: Run JS integration tests
+        run: time deno task -c js/deno.json test:integration
+
   release-gate:
     name: Release gate
     needs:
@@ -606,6 +670,7 @@ jobs:
       - verify-rust
       - verify-rust-integration
       - verify-js
+      - verify-js-integration
       - build-cli
       - verify-images
     if: >-
@@ -614,6 +679,7 @@ jobs:
       && needs.verify-rust.result == 'success'
       && needs.verify-rust-integration.result == 'success'
       && needs.verify-js.result == 'success'
+      && needs.verify-js-integration.result == 'success'
       && (
         needs.prepare-release.outputs.release-tag == ''
         || (needs.build-cli.result == 'success' && needs.verify-images.result == 'success')

@@ -14,8 +14,11 @@ liveTrellisTest({
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
     const configPath = await writeHealthConfig(runtime);
-    await buildHealthRuntime();
-    let healthProcess = startHealthRuntime(configPath);
+    const configuredHealthRuntime = Deno.env.get("TRELLIS_TEST_SERVER_BIN");
+    if (configuredHealthRuntime === undefined) await buildHealthRuntime();
+    const healthRuntime = configuredHealthRuntime ??
+      join(rustRoot, "target", "debug", "trellis-server");
+    let healthProcess = startHealthRuntime(healthRuntime, configPath);
     const observer = await runtime.connectClient({
       name: "health-projection-observer",
       contract: fixture.observerContract,
@@ -41,7 +44,7 @@ liveTrellisTest({
 
       await stopHealthRuntime(healthProcess);
       await new Promise((resolve) => setTimeout(resolve, 1_500));
-      healthProcess = startHealthRuntime(configPath);
+      healthProcess = startHealthRuntime(healthRuntime, configPath);
       const recovered = await waitForHealth("healthy", initialRevision);
       assertEquals(recovered.projection.gapDetected, false);
 
@@ -97,8 +100,11 @@ async function buildHealthRuntime() {
   assert(result.success, new TextDecoder().decode(result.stderr));
 }
 
-function startHealthRuntime(configPath: string): Deno.ChildProcess {
-  return new Deno.Command(join(rustRoot, "target", "debug", "trellis-server"), {
+function startHealthRuntime(
+  healthRuntime: string,
+  configPath: string,
+): Deno.ChildProcess {
+  return new Deno.Command(healthRuntime, {
     args: ["health", "--config", configPath],
     cwd: rustRoot,
     stdin: "null",

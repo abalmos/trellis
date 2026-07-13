@@ -146,7 +146,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "deno publish --allow-slow-types --allow-dirty",
   );
   assertEquals(releaseWorkflow.includes("\n  verify-format:"), false);
-  assertEquals(releaseWorkflow.includes("\n  verify-js-integration:"), false);
+  assertStringIncludes(releaseWorkflow, "\n  verify-js-integration:");
   assertStringIncludes(releaseWorkflow, "\n  verify-rust-integration:");
   assertEquals(
     countOccurrences(releaseWorkflow, "test:integration"),
@@ -161,6 +161,9 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "outputs: type=oci,dest=/tmp/${{ matrix.image }}.tar",
   );
   assertStringIncludes(releaseWorkflow, "verified-image-${{ matrix.image }}");
+  assertStringIncludes(releaseWorkflow, "integration-runtime-binaries");
+  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_JOBS_SERVICE_BIN");
+  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_SERVER_BIN");
   assertStringIncludes(releaseWorkflow, "skopeo copy --all");
   assertEquals(releaseWorkflow.includes("Build and push image"), false);
   assertStringIncludes(releaseWorkflow, "needs.rust-msrv.result == 'success'");
