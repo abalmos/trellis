@@ -179,8 +179,10 @@ commands.
   contract ids/subjects/names/resource keys, contract approval/provisioning,
   `TrellisService.connect(...)`, and `runtime.connectClient(...)`. Serial runs
   call the runner with `--config`; parallel runs add `--parallel --jobs <n>`,
-  where `--jobs` maps to child `DENO_JOBS`, not a `deno test --jobs` flag. Keep
-  one case per module and do not rely on cleanup or execution order.
+  where `--jobs` maps to child `DENO_JOBS`, not a `deno test --jobs` flag.
+  Parallel cases share one NATS server but have separate NATS accounts, Trellis
+  processes, SQLite databases, and sidecars. Keep one case per module and do not
+  rely on execution order.
 - Test Trellis runtime behavior through live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, fake generated clients, or hand-built
   bootstrap/control-plane responders to prove Trellis behavior. If a live test

@@ -8,7 +8,7 @@ The out-of-tree workflow has two public entrypoints:
 - `@qlever-llc/trellis-test/integration` for test helpers such as
   `trellisIntegrationTest`, `runtimeScopeForCase`, and case-scoped naming.
 - `@qlever-llc/trellis-test/integration/runner` for a generic Deno runner that
-  can run selected cases serially or with one shared runtime for parallel
+  can run selected cases serially or with tenant-isolated runtimes for parallel
   workers.
 
 External service repos provide their own Trellis command. The package does not
@@ -200,12 +200,11 @@ test is the runtime-visible service instance record itself.
 
 ## 3. Run serially
 
-Serial runs invoke `deno test` directly. Without a shared runtime manifest, each
+Serial runs invoke `deno test` directly. Without a shared NATS manifest, each
 test starts its own isolated Trellis runtime from the `runtime` option passed to
 `trellisIntegrationTest(...)`. The usual pattern is to export that runtime object
 from `trellis.integration.ts` and import it into each test module, as shown above.
-The runner config's `runtime` is used directly by the shared runtime host in
-parallel mode.
+Parallel mode uses the same runtime config for every tenant-isolated case.
 
 ```sh
 deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
@@ -223,9 +222,11 @@ deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
 
 ## 4. Run in parallel
 
-Parallel mode starts one shared Trellis runtime host, writes a private manifest,
-and runs selected case files with `deno test --parallel`. Worker tests attach to
-the shared runtime when they use `runtimeScopeForCase(CASE_ID)`.
+Parallel mode starts one NATS server, provisions a separate Auth/Trellis NATS
+account pair for every selected case, and runs selected case files with
+`deno test --parallel`. Each `runtimeScopeForCase(CASE_ID)` test starts and owns
+its own Trellis control plane, SQLite database, and configured service sidecars
+against that case's NATS accounts.
 
 ```sh
 deno run -A jsr:@qlever-llc/trellis-test/integration/runner \
@@ -242,8 +243,9 @@ count.
 
 ## Isolation contract
 
-Parallel tests share one Trellis runtime, so isolation is the test author's
-responsibility:
+Parallel cases share only the NATS server process. Accounts, Trellis processes,
+SQLite databases, resources, streams, and service sidecars are isolated per case.
+Keep case identity deterministic so filtering and diagnostics remain reliable:
 
 - keep one case per test module;
 - use `runtimeScopeForCase(CASE_ID)` for behavior tests;
@@ -252,7 +254,7 @@ responsibility:
 - scope service, client, resource, state, and business keys with
   `caseScopedName(...)` or an equivalent case slug;
 - create the deployment and approve the contracts needed by the case;
-- do not rely on cleanup from earlier tests or on execution order.
+- do not rely on execution order.
 
 Case-scoped data is still useful for serial runs because it keeps reruns and
 debugging predictable.

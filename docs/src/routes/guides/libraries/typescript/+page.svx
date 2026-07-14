@@ -29,7 +29,7 @@ Common packages are:
   repositories that need isolated NATS/JetStream and a real Trellis
   control-plane process. Use its `/integration` helpers and `/integration/runner`
   subpath for out-of-tree service-repo cases that can run serially or with one
-  shared runtime for Deno parallel workers.
+  tenant-isolated runtime per Deno parallel case.
 - `@qlever-llc/trellis-svelte`: Svelte and SvelteKit integration helpers.
 - generated SDK packages under `generated/packages/jsr/` and
   `generated/packages/npm/` for contracts in your project.
@@ -74,9 +74,10 @@ live Trellis boundary test. The service repo supplies its own Trellis command in
 
 Serial runs start an isolated runtime per selected test from the `runtime` option
 passed to `trellisIntegrationTest(...)`, commonly imported from the same
-`trellis.integration.ts` module used by the runner config. Parallel runs start
-one shared runtime from the runner config and pass `DENO_JOBS` from the runner's
-`--jobs` flag to Deno's parallel test workers.
+`trellis.integration.ts` module used by the runner config. Parallel runs share
+one NATS server while giving each selected case its own NATS accounts, Trellis
+process, SQLite database, and service sidecars. The runner passes `DENO_JOBS`
+from its `--jobs` flag to bound concurrent case runtimes.
 
 See [Testing Trellis services](/guides/testing-trellis-services) for a complete
 out-of-tree config, one-case test module, serial and parallel commands, and

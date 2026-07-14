@@ -53,8 +53,10 @@ Rules:
   `TrellisService.connect(...)`, `runtime.connectClient(...)`, and
   `runtime.captureEvents(...)` when needed. Run serially with `--config`; run in
   parallel with `--parallel --jobs <n>`. The runner maps `--jobs` to child
-  `DENO_JOBS`, not `deno test --jobs`. Keep one case per module and avoid relying
-  on cleanup or execution order.
+  `DENO_JOBS`, not `deno test --jobs`. Parallel cases share one NATS server but
+  receive separate NATS accounts, Trellis processes, SQLite databases, and
+  service sidecars. Keep one case per module and avoid relying on execution
+  order.
 - the `prepare` task value should call the Trellis generator, for example
   `deno run -A @qlever-llc/trellis/generate prepare .`
 - generated SDKs, manifests, and package outputs belong under the service repo's
@@ -168,11 +170,16 @@ For integration tests, prefer `@qlever-llc/trellis-test/integration` over raw
 NATS subjects or hand-built bootstrap responses. Serial runs isolate each
 selected test with the `runtime` option passed to `trellisIntegrationTest(...)`,
 usually imported from the same `trellis.integration.ts` module used by the runner
-config. Parallel runs start one shared runtime from the runner config while
-case-scoped deployments, contracts, subjects, participant names, and resource
-keys isolate behavior. Allow migration plans only in tests that intentionally
+config. Parallel runs share one NATS server but start a tenant-isolated Trellis
+runtime, SQLite database, and service sidecars for each selected case. Case-scoped
+deployments, contracts, subjects, participant names, and resource keys keep
+diagnostics deterministic. Allow migration plans only in tests that intentionally
 cover migrations, using per-approval `allowPlanClassifications` or explicit
 authority-plan helpers.
+
+RPC handler `context.afterReply(task)` is only for effects that must run after a
+successful response is published and flushed, such as disconnecting the caller.
+Normal handler effects should complete before returning.
 Use `runtime.connectClient(...)`, `runtime.captureEvents(...)`, and exported
 assertion helpers for captured events, terminal jobs and operations, and
 immediate or eventual `Result` RPC values.
