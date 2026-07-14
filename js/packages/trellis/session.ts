@@ -1529,6 +1529,13 @@ export type RpcHandlerContext = {
   sessionKey: string;
   requestId?: string;
   traceId?: string;
+  /** Schedules work after the successful RPC response has reached NATS. */
+  afterReply(task: () => MaybePromise<void>): void;
+};
+
+type ProcessedRpcResponse = {
+  readonly payload: string;
+  readonly afterReply: readonly (() => MaybePromise<void>)[];
 };
 
 export type HandlerTrellis<
@@ -3573,12 +3580,12 @@ export class Trellis<
           continue;
         }
 
-        const sent = this.#respondWithPayload(msg, result, undefined, {
+        const sent = this.#respondWithPayload(msg, result.payload, undefined, {
           method: String(method),
           responseKind: "success",
         });
         if (sent.isErr()) {
-          const responseBytes = payloadByteLength(result);
+          const responseBytes = payloadByteLength(result.payload);
           const message = causeMessage(sent.error.cause);
           this.#respondWithError(
             msg,
@@ -3599,6 +3606,21 @@ export class Trellis<
             }),
             { method: String(method), responseBytes },
           );
+          continue;
+        }
+
+        if (result.afterReply.length > 0) {
+          await this.#nats.flush();
+          for (const task of result.afterReply) {
+            try {
+              await task();
+            } catch (error) {
+              this.#log.error(
+                { method: String(method), error },
+                "RPC after-reply task failed",
+              );
+            }
+          }
         }
       }
     });
@@ -3610,7 +3632,7 @@ export class Trellis<
     msg: Msg,
     fn: HandlerFn<TA, MethodsOf<TA>, TA, HandlerTrellis<TA, TRequests>>,
     handlerTrellis: HandlerTrellis<TA, TRequests>,
-  ): Promise<Result<string, BaseError>> {
+  ): Promise<Result<ProcessedRpcResponse, BaseError>> {
     this.#log.debug(
       { method: String(method), subject: msg.subject },
       "Processing RPC message",
@@ -3632,7 +3654,10 @@ export class Trellis<
 
     // Execute the handler within the span's context
     return withSpanAsync(span, async () => {
-      const execute = async (): Promise<Result<string, BaseError>> => {
+      const afterReply: (() => MaybePromise<void>)[] = [];
+      const execute = async (): Promise<
+        Result<ProcessedRpcResponse, BaseError>
+      > => {
         const jsonData = safeJson(msg).take();
         if (isErr(jsonData)) {
           this.#log.warn(
@@ -3945,6 +3970,7 @@ export class Trellis<
                 sessionKey: callerSessionKey,
                 requestId: handlerRequestIdFromHeader || undefined,
                 traceId: handlerTraceIdFromHeader || undefined,
+                afterReply: (task) => afterReply.push(task),
               },
               client: handlerTrellis,
             }),
@@ -4041,7 +4067,7 @@ export class Trellis<
         }
 
         span.setStatus({ code: SpanStatusCode.OK });
-        return ok(encoded);
+        return ok({ payload: encoded, afterReply });
       };
 
       const result = await execute();

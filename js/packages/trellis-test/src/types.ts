@@ -7,6 +7,7 @@ import type {
 } from "@qlever-llc/trellis";
 
 import type { TrellisControlPlaneOAuthProvider } from "./control_plane_config.ts";
+import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
 import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 
 /** Serializable contract descriptor accepted by test admin automation. */
@@ -71,7 +72,16 @@ export type TrellisTestRuntimeJobsAdminOptions = {
 
 /** Options for starting an isolated Trellis test runtime. */
 export type TrellisTestRuntimeStartOptions = {
-  nats?: "container";
+  nats?: "container" | {
+    /** Shared NATS bootstrap root containing the tenant credentials. */
+    workdir: string;
+    /** Shared native NATS endpoint. */
+    natsUrl: string;
+    /** Shared websocket NATS endpoint. */
+    websocketUrl: string;
+    /** Credentials and account keys for this runtime's isolated tenant. */
+    manifest: LocalNatsBootstrapManifest;
+  };
   keepWorkdir?: boolean;
   deployment?: string;
   trellis: TrellisTestRuntimeTrellisOptions;

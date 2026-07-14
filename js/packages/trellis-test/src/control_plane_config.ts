@@ -118,6 +118,7 @@ export function reserveLocalPort(): number {
 /** Builds the real Trellis control-plane config for an isolated test runtime. */
 export function buildControlPlaneConfig(args: {
   workdir: string;
+  natsWorkdir?: string;
   natsUrl: string;
   websocketUrl: string;
   manifest: LocalNatsBootstrapManifest;
@@ -125,7 +126,7 @@ export function buildControlPlaneConfig(args: {
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
   failOnceHooks?: readonly string[];
 }): TrellisControlPlaneConfig {
-  const natsDir = join(args.workdir, "nats");
+  const natsDir = join(args.natsWorkdir ?? args.workdir, "nats");
   const publicOrigin = `http://127.0.0.1:${args.port}`;
   return {
     logLevel: "info",

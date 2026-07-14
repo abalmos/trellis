@@ -165,6 +165,7 @@ type SessionContext = {
     deploymentId?: string;
   };
   sessionKey: string;
+  afterReply(task: () => void | Promise<void>): void;
 };
 
 type ValidateRequestInput = {
@@ -1054,11 +1055,12 @@ export function createAuthSessionsLogoutHandler(deps: {
   kick: (serverId: string, clientId: number) => Promise<void>;
 }) {
   return async (
-    { input: _input = {}, context: { caller, sessionKey } }: {
+    { input: _input = {}, context }: {
       input?: AuthSessionsLogoutRequest;
       context: SessionContext;
     },
   ) => {
+    const { caller, sessionKey } = context;
     const user = requireUserCaller(caller);
     deps.logger.trace(
       { rpc: "Auth.Sessions.Logout", sessionKey, userId: user.userId },
@@ -1071,6 +1073,7 @@ export function createAuthSessionsLogoutHandler(deps: {
       sessionStorage: deps.sessionStorage,
       connectionsKV: deps.connectionsKV,
       kick: deps.kick,
+      deferKick: context.afterReply,
     });
 
     return Result.ok({ success: true });

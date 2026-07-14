@@ -623,7 +623,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TRELLIS_TEST_JOBS_SERVICE_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-service-jobs
-      TRELLIS_TEST_SERVER_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
+      TRELLIS_TEST_HEALTH_RUNTIME_BIN: ${{ github.workspace }}/dist/integration-runtime/trellis-server
 
     steps:
       - name: Check out repository
@@ -660,7 +660,7 @@ jobs:
             deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
 
       - name: Run JS integration tests
-        run: time deno task -c js/deno.json test:integration
+        run: time deno task -c js/deno.json test:integration -- --parallel --jobs 4
 
   release-gate:
     name: Release gate

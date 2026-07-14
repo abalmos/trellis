@@ -163,7 +163,11 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   assertStringIncludes(releaseWorkflow, "verified-image-${{ matrix.image }}");
   assertStringIncludes(releaseWorkflow, "integration-runtime-binaries");
   assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_JOBS_SERVICE_BIN");
-  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_SERVER_BIN");
+  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_HEALTH_RUNTIME_BIN");
+  assertStringIncludes(
+    releaseWorkflow,
+    "test:integration -- --parallel --jobs 4",
+  );
   assertStringIncludes(releaseWorkflow, "skopeo copy --all");
   assertEquals(releaseWorkflow.includes("Build and push image"), false);
   assertStringIncludes(releaseWorkflow, "needs.rust-msrv.result == 'success'");

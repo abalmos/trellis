@@ -28,6 +28,11 @@ export type LocalNatsBootstrapManifest = {
   };
 };
 
+/** NATS account manifests keyed by isolated integration-test case id. */
+export type LocalNatsBootstrapPoolManifest = {
+  tenants: Record<string, LocalNatsBootstrapManifest>;
+};
+
 type GeneratedMetadata = {
   systemAccountName: string;
   systemAccountPublicKey: string;
@@ -91,51 +96,34 @@ include ./jwt.conf
 `;
 }
 
-function renderNscScript(): string {
-  return `set -eu
-OPERATOR_NAME='Qlever'
-SYSTEM_ACCOUNT_NAME='SYS'
-AUTH_ACCOUNT_NAME='AUTH'
-TRELLIS_ACCOUNT_NAME='TRELLIS'
-export NSC_HOME=/work/.nsc
-export NKEYS_PATH=/work/.nkeys
-mkdir -p "$NSC_HOME" "$NKEYS_PATH" /work/data/jwt /work/creds /work/secrets /work/generated
-
-nsc add operator --name "$OPERATOR_NAME" --sys
+function renderNscScript(tenantCount: number): string {
+  const tenants = Array.from({ length: tenantCount }, (_, index) => {
+    const suffix = tenantCount === 1 ? "" : `_${index}`;
+    const fileSuffix = tenantCount === 1 ? "" : `-${index}`;
+    return `AUTH_ACCOUNT_NAME='AUTH${suffix}'
+TRELLIS_ACCOUNT_NAME='TRELLIS${suffix}'
 nsc add account --name "$AUTH_ACCOUNT_NAME"
 nsc add account --name "$TRELLIS_ACCOUNT_NAME"
 nsc edit account --name "$AUTH_ACCOUNT_NAME" --sk generate
 nsc edit account --name "$TRELLIS_ACCOUNT_NAME" --sk generate
 nsc edit account --name "$AUTH_ACCOUNT_NAME" --js-mem-storage -1 --js-disk-storage -1 --js-streams -1 --js-consumer -1
 nsc edit account --name "$TRELLIS_ACCOUNT_NAME" --js-mem-storage -1 --js-disk-storage -1 --js-streams -1 --js-consumer -1
-
-nsc add user --account "$SYSTEM_ACCOUNT_NAME" --name system --allow-pubsub ">"
 nsc add user --account "$AUTH_ACCOUNT_NAME" --name auth --allow-pubsub ">"
 nsc add user --account "$TRELLIS_ACCOUNT_NAME" --name auth --allow-pubsub ">"
 nsc add user --account "$AUTH_ACCOUNT_NAME" --name sentinel --deny-pubsub ">"
-
 AUTH_USER=$(nsc describe user --account "$AUTH_ACCOUNT_NAME" --name auth --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
 nsc edit authcallout --account "$AUTH_ACCOUNT_NAME" --auth-user "$AUTH_USER" --allowed-account "$TRELLIS_ACCOUNT" --curve generate
-
-nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name auth > /work/creds/auth-auth.creds
-nsc generate creds --account "$TRELLIS_ACCOUNT_NAME" --name auth > /work/creds/trellis-auth.creds
-nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name sentinel > /work/creds/sentinel.creds
-nsc generate creds --account "$SYSTEM_ACCOUNT_NAME" --name system > /work/creds/system.creds
-
-SYS_ACCOUNT=$(nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --field sub | tr -d '"')
+nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name auth > /work/creds/auth-auth${fileSuffix}.creds
+nsc generate creds --account "$TRELLIS_ACCOUNT_NAME" --name auth > /work/creds/trellis-auth${fileSuffix}.creds
+nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name sentinel > /work/creds/sentinel${fileSuffix}.creds
 AUTH_ACCOUNT=$(nsc describe account --name "$AUTH_ACCOUNT_NAME" --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
-
-nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --raw > "/work/data/jwt/\${SYS_ACCOUNT}.jwt"
 nsc describe account --name "$AUTH_ACCOUNT_NAME" --raw > "/work/data/jwt/\${AUTH_ACCOUNT}.jwt"
 nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --raw > "/work/data/jwt/\${TRELLIS_ACCOUNT}.jwt"
-nsc generate config --nats-resolver --config-file /work/generated/jwt.conf --force --sys-account "$SYSTEM_ACCOUNT_NAME"
-
-nsc list keys --account "$AUTH_ACCOUNT_NAME" --accounts --show-seeds --json > /work/generated/auth-keys.json
-nsc list keys --account "$TRELLIS_ACCOUNT_NAME" --accounts --show-seeds --json > /work/generated/trellis-keys.json
-
-cat > /work/generated/metadata.json <<EOF
+nsc list keys --account "$AUTH_ACCOUNT_NAME" --accounts --show-seeds --json > /work/generated/auth-keys${fileSuffix}.json
+nsc list keys --account "$TRELLIS_ACCOUNT_NAME" --accounts --show-seeds --json > /work/generated/trellis-keys${fileSuffix}.json
+cat > /work/generated/metadata${fileSuffix}.json <<EOF
 {
   "systemAccountName": "\${SYSTEM_ACCOUNT_NAME}",
   "systemAccountPublicKey": "\${SYS_ACCOUNT}",
@@ -144,7 +132,25 @@ cat > /work/generated/metadata.json <<EOF
   "trellisAccountName": "\${TRELLIS_ACCOUNT_NAME}",
   "trellisAccountPublicKey": "\${TRELLIS_ACCOUNT}"
 }
-EOF
+EOF`;
+  }).join("\n\n");
+
+  return `set -eu
+OPERATOR_NAME='Qlever'
+SYSTEM_ACCOUNT_NAME='SYS'
+export NSC_HOME=/work/.nsc
+export NKEYS_PATH=/work/.nkeys
+mkdir -p "$NSC_HOME" "$NKEYS_PATH" /work/data/jwt /work/creds /work/secrets /work/generated
+
+nsc add operator --name "$OPERATOR_NAME" --sys
+nsc add user --account "$SYSTEM_ACCOUNT_NAME" --name system --allow-pubsub ">"
+nsc generate creds --account "$SYSTEM_ACCOUNT_NAME" --name system > /work/creds/system.creds
+SYS_ACCOUNT=$(nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --field sub | tr -d '"')
+nsc describe account --name "$SYSTEM_ACCOUNT_NAME" --raw > "/work/data/jwt/\${SYS_ACCOUNT}.jwt"
+
+${tenants}
+
+nsc generate config --nats-resolver --config-file /work/generated/jwt.conf --force --sys-account "$SYSTEM_ACCOUNT_NAME"
 `;
 }
 
@@ -229,6 +235,25 @@ export async function generateLocalNatsBootstrap(args: {
   outDir: string;
   runtime: ContainerRuntime;
 }): Promise<LocalNatsBootstrapManifest> {
+  const pool = await generateLocalNatsBootstrapPool({
+    ...args,
+    tenantIds: ["default"],
+  });
+  return pool.tenants.default;
+}
+
+/** Generates one NATS server bootstrap with isolated account pairs per tenant. */
+export async function generateLocalNatsBootstrapPool(args: {
+  outDir: string;
+  runtime: ContainerRuntime;
+  tenantIds: readonly string[];
+}): Promise<LocalNatsBootstrapPoolManifest> {
+  if (
+    args.tenantIds.length === 0 ||
+    new Set(args.tenantIds).size !== args.tenantIds.length
+  ) {
+    throw new Error("NATS bootstrap tenant ids must be non-empty and unique");
+  }
   await Deno.mkdir(join(args.outDir, "data", "jwt"), { recursive: true });
   await Deno.mkdir(join(args.outDir, "creds"), { recursive: true });
   await Deno.mkdir(join(args.outDir, "secrets"), { recursive: true });
@@ -239,7 +264,7 @@ export async function generateLocalNatsBootstrap(args: {
   );
   await Deno.writeTextFile(
     join(args.outDir, "bootstrap-nsc.sh"),
-    renderNscScript(),
+    renderNscScript(args.tenantIds.length),
   );
 
   await runChecked(args.runtime, [
@@ -252,36 +277,79 @@ export async function generateLocalNatsBootstrap(args: {
     "/work/bootstrap-nsc.sh",
   ]);
 
-  await Deno.writeTextFile(
-    join(args.outDir, "secrets", "auth-issuer-signing.seed"),
-    await firstSeedMatching(
-      join(args.outDir, "generated", "auth-keys.json"),
-      "SA",
-      true,
-      false,
-      "auth issuer signing seed",
-    ),
-  );
-  await Deno.writeTextFile(
-    join(args.outDir, "secrets", "auth-target-signing.seed"),
-    await firstSeedMatching(
-      join(args.outDir, "generated", "trellis-keys.json"),
-      "SA",
-      true,
-      false,
-      "auth target signing seed",
-    ),
-  );
-  await Deno.writeTextFile(
-    join(args.outDir, "secrets", "auth-sx.seed"),
-    await firstSeedMatching(
-      join(args.outDir, "generated", "auth-keys.json"),
-      "SX",
-      false,
-      true,
-      "auth callout xkey seed",
-    ),
-  );
+  const tenants: Record<string, LocalNatsBootstrapManifest> = {};
+  for (const [index, tenantId] of args.tenantIds.entries()) {
+    const suffix = args.tenantIds.length === 1 ? "" : `-${index}`;
+    const issuerPath = `secrets/auth-issuer-signing${suffix}.seed`;
+    const targetPath = `secrets/auth-target-signing${suffix}.seed`;
+    const xkeyPath = `secrets/auth-sx${suffix}.seed`;
+    await Deno.writeTextFile(
+      join(args.outDir, issuerPath),
+      await firstSeedMatching(
+        join(args.outDir, "generated", `auth-keys${suffix}.json`),
+        "SA",
+        true,
+        false,
+        "auth issuer signing seed",
+      ),
+    );
+    await Deno.writeTextFile(
+      join(args.outDir, targetPath),
+      await firstSeedMatching(
+        join(args.outDir, "generated", `trellis-keys${suffix}.json`),
+        "SA",
+        true,
+        false,
+        "auth target signing seed",
+      ),
+    );
+    await Deno.writeTextFile(
+      join(args.outDir, xkeyPath),
+      await firstSeedMatching(
+        join(args.outDir, "generated", `auth-keys${suffix}.json`),
+        "SX",
+        false,
+        true,
+        "auth callout xkey seed",
+      ),
+    );
+    const metadata = JSON.parse(
+      await Deno.readTextFile(
+        join(args.outDir, "generated", `metadata${suffix}.json`),
+      ),
+    ) as GeneratedMetadata;
+    tenants[tenantId] = {
+      accounts: {
+        system: {
+          name: metadata.systemAccountName,
+          publicKey: metadata.systemAccountPublicKey,
+        },
+        auth: {
+          name: metadata.authAccountName,
+          publicKey: metadata.authAccountPublicKey,
+        },
+        trellis: {
+          name: metadata.trellisAccountName,
+          publicKey: metadata.trellisAccountPublicKey,
+        },
+      },
+      paths: {
+        natsConfig: "nats.conf",
+        jwtConfig: "jwt.conf",
+        creds: {
+          systemService: "creds/system.creds",
+          authService: `creds/auth-auth${suffix}.creds`,
+          trellisService: `creds/trellis-auth${suffix}.creds`,
+          sentinel: `creds/sentinel${suffix}.creds`,
+        },
+        secrets: {
+          authIssuerSigning: issuerPath,
+          authTargetSigning: targetPath,
+          authCalloutXKey: xkeyPath,
+        },
+      },
+    };
+  }
   await Deno.writeTextFile(
     join(args.outDir, "jwt.conf"),
     normalizeJwtConfig(
@@ -289,43 +357,10 @@ export async function generateLocalNatsBootstrap(args: {
     ),
   );
 
-  const metadata = JSON.parse(
-    await Deno.readTextFile(join(args.outDir, "generated", "metadata.json")),
-  ) as GeneratedMetadata;
   await Deno.remove(join(args.outDir, "generated"), { recursive: true });
   await Deno.remove(join(args.outDir, "bootstrap-nsc.sh"));
 
-  return {
-    accounts: {
-      system: {
-        name: metadata.systemAccountName,
-        publicKey: metadata.systemAccountPublicKey,
-      },
-      auth: {
-        name: metadata.authAccountName,
-        publicKey: metadata.authAccountPublicKey,
-      },
-      trellis: {
-        name: metadata.trellisAccountName,
-        publicKey: metadata.trellisAccountPublicKey,
-      },
-    },
-    paths: {
-      natsConfig: "nats.conf",
-      jwtConfig: "jwt.conf",
-      creds: {
-        systemService: "creds/system.creds",
-        authService: "creds/auth-auth.creds",
-        trellisService: "creds/trellis-auth.creds",
-        sentinel: "creds/sentinel.creds",
-      },
-      secrets: {
-        authIssuerSigning: "secrets/auth-issuer-signing.seed",
-        authTargetSigning: "secrets/auth-target-signing.seed",
-        authCalloutXKey: "secrets/auth-sx.seed",
-      },
-    },
-  };
+  return { tenants };
 }
 
 export function quoteForDisplay(value: string): string {

@@ -47,6 +47,7 @@ export async function terminateSession(args: {
   sessionStorage: SessionStore;
   connectionsKV: ConnectionsStore;
   kick: (serverId: string, clientId: number) => Promise<void>;
+  deferKick?: (task: () => Promise<void>) => void;
 }): Promise<Session | null> {
   const session =
     await args.sessionStorage.getOneBySessionKey(args.sessionKey) ??
@@ -79,12 +80,17 @@ export async function terminateSession(args: {
     await args.connectionsKV.delete(key).take();
   }
 
-  for (const connection of connectionsToKick) {
-    setTimeout(() => {
-      void args.kick(connection.serverId, connection.clientId).catch(() => {
+  const kickConnections = async () => {
+    await Promise.all(connectionsToKick.map(async (connection) => {
+      await args.kick(connection.serverId, connection.clientId).catch(() => {
         // Session termination must still remove durable connection records.
       });
-    }, 0);
+    }));
+  };
+  if (args.deferKick !== undefined) {
+    args.deferKick(kickConnections);
+  } else {
+    setTimeout(() => void kickConnections(), 0);
   }
 
   return session;

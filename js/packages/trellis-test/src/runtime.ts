@@ -275,9 +275,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     if (options?.trellis?.command === undefined) {
       throw new Error("TrellisTestRuntime.start requires trellis.command");
     }
-    if (options.nats !== undefined && options.nats !== "container") {
-      throw new Error("TrellisTestRuntime only supports nats: 'container'");
-    }
     const workdir = await Deno.makeTempDir({ prefix: WORKDIR_PREFIX });
     await writeTrellisTestOwnerMarker(workdir, WORKDIR_OWNER_MARKER);
     await removeStaleMarkedDirectories({
@@ -296,16 +293,71 @@ export class TrellisTestRuntime implements AsyncDisposable {
         shutdownMs: options.timeouts?.shutdownMs ?? 5_000,
       };
       await Deno.mkdir(join(workdir, "trellis"), { recursive: true });
-      nats = await NatsTestContainer.start(workdir, {
-        startupMs: timeouts.startupMs,
-      });
+      let sharedManifest = typeof options.nats === "object"
+        ? structuredClone(options.nats.manifest)
+        : undefined;
+      if (typeof options.nats === "object" && sharedManifest !== undefined) {
+        const sharedNatsDir = join(options.nats.workdir, "nats");
+        const localNatsDir = join(workdir, "nats");
+        await Deno.mkdir(join(localNatsDir, "creds"), { recursive: true });
+        await Deno.mkdir(join(localNatsDir, "secrets"), { recursive: true });
+        const copies = [
+          [sharedManifest.paths.creds.systemService, "creds/system.creds"],
+          [sharedManifest.paths.creds.authService, "creds/auth-auth.creds"],
+          [
+            sharedManifest.paths.creds.trellisService,
+            "creds/trellis-auth.creds",
+          ],
+          [sharedManifest.paths.creds.sentinel, "creds/sentinel.creds"],
+          [
+            sharedManifest.paths.secrets.authIssuerSigning,
+            "secrets/auth-issuer-signing.seed",
+          ],
+          [
+            sharedManifest.paths.secrets.authTargetSigning,
+            "secrets/auth-target-signing.seed",
+          ],
+          [
+            sharedManifest.paths.secrets.authCalloutXKey,
+            "secrets/auth-sx.seed",
+          ],
+        ] as const;
+        await Promise.all(
+          copies.map(([source, target]) =>
+            Deno.copyFile(
+              join(sharedNatsDir, source),
+              join(localNatsDir, target),
+            )
+          ),
+        );
+        sharedManifest.paths.creds = {
+          systemService: "creds/system.creds",
+          authService: "creds/auth-auth.creds",
+          trellisService: "creds/trellis-auth.creds",
+          sentinel: "creds/sentinel.creds",
+        };
+        sharedManifest.paths.secrets = {
+          authIssuerSigning: "secrets/auth-issuer-signing.seed",
+          authTargetSigning: "secrets/auth-target-signing.seed",
+          authCalloutXKey: "secrets/auth-sx.seed",
+        };
+      }
+      nats = typeof options.nats === "object"
+        ? await NatsTestContainer.attach({
+          ...options.nats,
+          workdir,
+          manifest: sharedManifest!,
+        })
+        : await NatsTestContainer.start(workdir, {
+          startupMs: timeouts.startupMs,
+        });
       const port = reserveLocalPort();
       const trellisUrl = `http://127.0.0.1:${port}`;
       const config = buildControlPlaneConfig({
         workdir,
         natsUrl: nats.natsUrl,
         websocketUrl: nats.websocketUrl,
-        manifest: nats.manifest,
+        manifest: sharedManifest ?? nats.manifest,
         port,
         oauthProviders: options.oauthProviders,
         failOnceHooks: options.failOnceHooks,

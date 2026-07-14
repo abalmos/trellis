@@ -69,6 +69,8 @@ export type TrellisIntegrationRunnerOptions = {
   readonly sharedRuntimeHostStarter?: (args: {
     /** Runtime options from the loaded runner config. */
     readonly runtime: TrellisIntegrationRuntimeOptions;
+    /** Selected case ids that require isolated NATS tenants. */
+    readonly tenantIds: readonly string[];
   }) => Promise<TrellisIntegrationSharedRuntimeHost>;
   /** Output hook used for help text. Defaults to `console`. */
   readonly output?: {
@@ -96,6 +98,7 @@ type LoadedRunnerConfig = {
 };
 
 type SelectedCases = {
+  readonly caseIds: readonly string[];
   readonly files: readonly string[];
   readonly testNames: readonly string[];
 };
@@ -156,7 +159,10 @@ export async function runTrellisIntegrationTests(
   if (args.parallel) {
     const startHost = options.sharedRuntimeHostStarter ??
       startTrellisIntegrationSharedRuntimeHost;
-    const host = await startHost({ runtime: loaded.config.runtime });
+    const host = await startHost({
+      runtime: loaded.config.runtime,
+      tenantIds: selected.caseIds,
+    });
     const env = { ...host.env };
     if (args.jobs !== undefined) {
       env.DENO_JOBS = String(args.jobs);
@@ -520,6 +526,7 @@ function selectCases(
   const caseFilters = new Set(options.caseFilters);
   const coverageFilters = new Set(options.coverageFilters);
   const files: string[] = [];
+  const caseIds: string[] = [];
   const seenFiles = new Set<string>();
   const testNames: string[] = [];
 
@@ -537,10 +544,11 @@ function selectCases(
       files.push(file);
       seenFiles.add(file);
     }
+    caseIds.push(caseEntry.id);
     testNames.push(caseEntry.testName);
   }
 
-  return { files, testNames };
+  return { caseIds, files, testNames };
 }
 
 function resolveCaseFile(baseDir: string, file: string): string {

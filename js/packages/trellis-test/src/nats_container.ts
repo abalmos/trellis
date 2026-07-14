@@ -6,6 +6,7 @@ import { join } from "@std/path";
 import {
   type ContainerRuntime,
   generateLocalNatsBootstrap,
+  generateLocalNatsBootstrapPool,
   type LocalNatsBootstrapManifest,
   resolveContainerRuntime,
 } from "./nats_bootstrap.ts";
@@ -16,16 +17,18 @@ const TRELLIS_STREAM = "trellis";
 const CONTAINER_PREFIX = "trellis-test-nats-";
 
 type StartedNatsContainer = {
-  runtime: ContainerRuntime;
-  containerName: string;
+  runtime?: ContainerRuntime;
+  containerName?: string;
   natsUrl: string;
   websocketUrl: string;
   manifest: LocalNatsBootstrapManifest;
+  manifests: Record<string, LocalNatsBootstrapManifest>;
   nc: NatsConnection;
 };
 
 type StartNatsTestContainerOptions = {
   startupMs?: number;
+  tenantIds?: readonly string[];
 };
 
 /** A JetStream acknowledgement frame observed on a scratch runtime ACK subject. */
@@ -204,9 +207,10 @@ export class NatsTestContainer implements AsyncDisposable {
   readonly natsUrl: string;
   readonly websocketUrl: string;
   readonly manifest: LocalNatsBootstrapManifest;
+  readonly manifests: Readonly<Record<string, LocalNatsBootstrapManifest>>;
   readonly nc: NatsConnection;
-  readonly runtime: ContainerRuntime;
-  readonly containerName: string;
+  readonly runtime: ContainerRuntime | undefined;
+  readonly containerName: string | undefined;
   #stopped = false;
 
   private constructor(started: StartedNatsContainer) {
@@ -215,6 +219,7 @@ export class NatsTestContainer implements AsyncDisposable {
     this.natsUrl = started.natsUrl;
     this.websocketUrl = started.websocketUrl;
     this.manifest = started.manifest;
+    this.manifests = started.manifests;
     this.nc = started.nc;
   }
 
@@ -228,10 +233,20 @@ export class NatsTestContainer implements AsyncDisposable {
     const natsDir = join(workdir, "nats");
     const dataDir = join(natsDir, "data");
     await Deno.mkdir(dataDir, { recursive: true });
-    const manifest = await generateLocalNatsBootstrap({
-      outDir: natsDir,
-      runtime,
-    });
+    const tenantIds = options.tenantIds ?? ["default"];
+    const manifests = options.tenantIds === undefined
+      ? {
+        default: await generateLocalNatsBootstrap({
+          outDir: natsDir,
+          runtime,
+        }),
+      }
+      : (await generateLocalNatsBootstrapPool({
+        outDir: natsDir,
+        runtime,
+        tenantIds,
+      })).tenants;
+    const manifest = manifests[tenantIds[0]];
     const containerName = `${CONTAINER_PREFIX}${Deno.pid}-${Date.now()}`;
     let nc: NatsConnection | undefined;
 
@@ -297,11 +312,46 @@ export class NatsTestContainer implements AsyncDisposable {
         natsUrl,
         websocketUrl,
         manifest,
+        manifests,
         nc,
       });
     } catch (error) {
       if (nc && !nc.isClosed()) await nc.close().catch(() => undefined);
       await bestEffortRemoveContainer(runtime, containerName);
+      throw error;
+    }
+  }
+
+  /** Attaches test helpers to one tenant on an externally owned NATS server. */
+  static async attach(args: {
+    workdir: string;
+    natsUrl: string;
+    websocketUrl: string;
+    manifest: LocalNatsBootstrapManifest;
+  }): Promise<NatsTestContainer> {
+    const nc = await connect({
+      servers: args.natsUrl,
+      authenticator: credsAuthenticator(
+        await Deno.readFile(
+          join(
+            args.workdir,
+            "nats",
+            args.manifest.paths.creds.trellisService,
+          ),
+        ),
+      ),
+    });
+    try {
+      await ensureSharedStreams(nc);
+      return new NatsTestContainer({
+        natsUrl: args.natsUrl,
+        websocketUrl: args.websocketUrl,
+        manifest: args.manifest,
+        manifests: { default: args.manifest },
+        nc,
+      });
+    } catch (error) {
+      await nc.close().catch(() => undefined);
       throw error;
     }
   }
@@ -318,7 +368,9 @@ export class NatsTestContainer implements AsyncDisposable {
         closeError = error;
       }
     }
-    await bestEffortRemoveContainer(this.runtime, this.containerName);
+    if (this.runtime !== undefined && this.containerName !== undefined) {
+      await bestEffortRemoveContainer(this.runtime, this.containerName);
+    }
     if (closeError) throw closeError;
   }
 

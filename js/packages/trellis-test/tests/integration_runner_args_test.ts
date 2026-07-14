@@ -299,6 +299,7 @@ Deno.test("runner collects Deno coverage only when requested", async () => {
 Deno.test("runner constructs parallel commands with shared host env and DENO_JOBS", async () => {
   const commands: RunnerCommand[] = [];
   const startedRuntime: TrellisIntegrationRunnerConfig["runtime"][] = [];
+  const tenantIds: string[][] = [];
   let stopCalls = 0;
 
   const code = await runTrellisIntegrationTests({
@@ -310,6 +311,7 @@ Deno.test("runner constructs parallel commands with shared host env and DENO_JOB
     },
     async sharedRuntimeHostStarter(args) {
       startedRuntime.push(args.runtime);
+      tenantIds.push([...args.tenantIds]);
       return {
         manifestPath: "/tmp/manifest.json",
         env: { [TRELLIS_TEST_SHARED_RUNTIME_ENV]: "/tmp/manifest.json" },
@@ -322,6 +324,7 @@ Deno.test("runner constructs parallel commands with shared host env and DENO_JOB
 
   assertEquals(code, 7);
   assertEquals(startedRuntime, [runtime]);
+  assertEquals(tenantIds, [["orders.created"]]);
   assertEquals(stopCalls, 1);
   assertEquals(commands.length, 1);
   assertEquals(commands[0].args, [

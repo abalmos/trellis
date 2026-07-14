@@ -14,7 +14,9 @@ liveTrellisTest({
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
     const configPath = await writeHealthConfig(runtime);
-    const configuredHealthRuntime = Deno.env.get("TRELLIS_TEST_SERVER_BIN");
+    const configuredHealthRuntime = Deno.env.get(
+      "TRELLIS_TEST_HEALTH_RUNTIME_BIN",
+    );
     if (configuredHealthRuntime === undefined) await buildHealthRuntime();
     const healthRuntime = configuredHealthRuntime ??
       join(rustRoot, "target", "debug", "trellis-server");
