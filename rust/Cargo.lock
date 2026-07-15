@@ -4027,12 +4027,11 @@ dependencies = [
 name = "trellis-contracts"
 version = "0.11.0"
 dependencies = [
- "base64",
  "jsonschema",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "thiserror 2.0.18",
+ "trellis-protocol",
 ]
 
 [[package]]
@@ -4099,6 +4098,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "trellis-protocol"
+version = "0.11.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
  "thiserror 2.0.18",
 ]
 
