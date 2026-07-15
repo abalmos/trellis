@@ -7,45 +7,7 @@ use crate::ProtocolError;
 
 /// Render JSON into the canonical Trellis form used for digests.
 pub fn canonicalize_json(value: &Value) -> Result<String, ProtocolError> {
-    match value {
-        Value::Null => Ok("null".to_string()),
-        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
-        Value::String(value) => Ok(serde_json::to_string(value).expect("string serialization")),
-        Value::Number(value) => {
-            let rendered = value.to_string();
-            if rendered == "-0" {
-                return Err(ProtocolError::NonCanonicalNumber(rendered));
-            }
-            Ok(rendered)
-        }
-        Value::Array(values) => {
-            let mut out = String::from("[");
-            for (index, item) in values.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                out.push_str(&canonicalize_json(item)?);
-            }
-            out.push(']');
-            Ok(out)
-        }
-        Value::Object(map) => {
-            let mut keys = map.keys().collect::<Vec<_>>();
-            keys.sort();
-
-            let mut out = String::from("{");
-            for (index, key) in keys.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                out.push_str(&serde_json::to_string(*key).expect("key serialization"));
-                out.push(':');
-                out.push_str(&canonicalize_json(&map[*key])?);
-            }
-            out.push('}');
-            Ok(out)
-        }
-    }
+    Ok(serde_json_canonicalizer::to_string(value)?)
 }
 
 /// Compute a base64url-encoded SHA-256 digest for text.
@@ -64,26 +26,59 @@ pub fn digest_json(value: &Value) -> Result<String, ProtocolError> {
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use serde::Deserialize;
     use serde_json::Value;
 
     use super::*;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct Vector {
+        name: String,
+        input: Option<Value>,
+        input_json: Option<String>,
+        canonical: Option<String>,
+        digest: Option<String>,
+        #[serde(default)]
+        error: bool,
+    }
 
     #[test]
     fn matches_shared_canonical_json_vectors() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../conformance/canonical-json/vectors.json");
-        let fixtures: Vec<Value> =
+        let fixtures: Vec<Vector> =
             serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
 
         for fixture in fixtures {
-            let input = fixture.get("input").unwrap();
+            let input = fixture.input.map_or_else(
+                || serde_json::from_str(fixture.input_json.as_deref().unwrap()),
+                Ok,
+            );
+            if fixture.error {
+                match input {
+                    Ok(value) => assert!(
+                        canonicalize_json(&value).is_err(),
+                        "{} unexpectedly canonicalized",
+                        fixture.name
+                    ),
+                    Err(_) => continue,
+                }
+                continue;
+            }
+
+            let input = input.unwrap_or_else(|error| panic!("{}: {error}", fixture.name));
             assert_eq!(
-                canonicalize_json(input).unwrap(),
-                fixture.get("canonical").and_then(Value::as_str).unwrap()
+                canonicalize_json(&input).unwrap(),
+                fixture.canonical.unwrap(),
+                "{}",
+                fixture.name
             );
             assert_eq!(
-                digest_json(input).unwrap(),
-                fixture.get("digest").and_then(Value::as_str).unwrap()
+                digest_json(&input).unwrap(),
+                fixture.digest.unwrap(),
+                "{}",
+                fixture.name
             );
         }
     }

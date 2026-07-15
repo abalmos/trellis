@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 use crate::{canonicalize_json, sha256_base64url, ProtocolError};
@@ -111,7 +113,7 @@ impl PermissionActionV1 {
 }
 
 /// The exact API surface or participant resource targeted by a permission.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum PermissionTargetV1 {
     /// An externally visible surface owned by an API artifact.
@@ -134,6 +136,41 @@ pub enum PermissionTargetV1 {
         /// The participant-local resource name.
         name: String,
     },
+}
+
+impl<'de> Deserialize<'de> for PermissionTargetV1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", deny_unknown_fields)]
+        enum WireTarget {
+            #[serde(rename = "apiSurface")]
+            ApiSurface {
+                api: String,
+                surface: ApiSurfaceKindV1,
+                name: String,
+            },
+            #[serde(rename = "participantResource")]
+            ParticipantResource {
+                participant: String,
+                resource: ParticipantResourceKindV1,
+                name: String,
+            },
+        }
+
+        match WireTarget::deserialize(deserializer)? {
+            WireTarget::ApiSurface { api, surface, name } => {
+                Self::api_surface(api, surface, name).map_err(D::Error::custom)
+            }
+            WireTarget::ParticipantResource {
+                participant,
+                resource,
+                name,
+            } => Self::participant_resource(participant, resource, name).map_err(D::Error::custom),
+        }
+    }
 }
 
 impl PermissionTargetV1 {
@@ -412,10 +449,23 @@ impl<'de> Deserialize<'de> for GrantSetV1 {
 }
 
 fn normalize_permissions(mut permissions: Vec<PermissionAtomV1>) -> Vec<PermissionAtomV1> {
-    // This wire tuple is the cross-language ordering rule; enum declaration order is irrelevant.
-    permissions.sort_by(|left, right| left.ordering_key().cmp(&right.ordering_key()));
+    permissions.sort_by(compare_permission_atoms);
     permissions.dedup();
     permissions
+}
+
+fn compare_permission_atoms(left: &PermissionAtomV1, right: &PermissionAtomV1) -> Ordering {
+    let left = left.ordering_key();
+    let right = right.ordering_key();
+    compare_protocol_strings(left.0, right.0)
+        .then_with(|| compare_protocol_strings(left.1, right.1))
+        .then_with(|| compare_protocol_strings(left.2, right.2))
+        .then_with(|| compare_protocol_strings(left.3, right.3))
+        .then_with(|| compare_protocol_strings(left.4, right.4))
+}
+
+fn compare_protocol_strings(left: &str, right: &str) -> Ordering {
+    left.encode_utf16().cmp(right.encode_utf16())
 }
 
 fn validate_identifier(field: &'static str, value: &str) -> Result<(), ProtocolError> {
@@ -454,14 +504,41 @@ mod tests {
         digest: Option<String>,
     }
 
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct OrderingRule {
+        tuple: Vec<String>,
+        string_comparison: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Fixture {
+        ordering: OrderingRule,
+        vectors: Vec<Vector>,
+    }
+
     #[test]
     fn grant_sets_match_shared_conformance_vectors() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../conformance/grant-set/vectors.json");
-        let vectors: Vec<Vector> =
-            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        let fixture: Fixture = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(
+            fixture.ordering.tuple,
+            [
+                "target.kind",
+                "target.owner",
+                "target.surfaceOrResource",
+                "target.name",
+                "action"
+            ]
+        );
+        assert_eq!(
+            fixture.ordering.string_comparison,
+            "UTF-16 code-unit lexicographic"
+        );
 
-        for vector in vectors {
+        for vector in fixture.vectors {
             let parsed = serde_json::from_value::<GrantSetV1>(vector.input);
             if vector.valid {
                 let grant_set = parsed.unwrap_or_else(|error| panic!("{}: {error}", vector.name));
@@ -507,6 +584,48 @@ mod tests {
             "reindex",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn permission_target_deserialization_validates_direct_values() {
+        for invalid in [
+            serde_json::json!({
+                "kind": "apiSurface",
+                "api": "",
+                "surface": "rpc",
+                "name": "Documents.Get"
+            }),
+            serde_json::json!({
+                "kind": "participantResource",
+                "participant": " documents-worker",
+                "resource": "jobQueue",
+                "name": "reindex"
+            }),
+            serde_json::json!({
+                "kind": "apiSurface",
+                "api": "documents@v1",
+                "surface": "rpc",
+                "name": "Documents.\nGet"
+            }),
+            serde_json::json!({
+                "kind": "apiSurface",
+                "api": "documents@v1",
+                "surface": "rpc",
+                "name": "Documents.Get",
+                "extra": true
+            }),
+        ] {
+            assert!(serde_json::from_value::<PermissionTargetV1>(invalid).is_err());
+        }
+
+        let value = serde_json::json!({
+            "kind": "apiSurface",
+            "api": "trellis.core@v1",
+            "surface": "rpc",
+            "name": "Documents.Get"
+        });
+        let target: PermissionTargetV1 = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(target).unwrap(), value);
     }
 
     #[test]

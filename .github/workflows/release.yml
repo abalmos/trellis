@@ -60,7 +60,7 @@ jobs:
           toolchain: 1.88.0
 
       - name: Check public crates
-        run: cargo check --manifest-path rust/Cargo.toml -p trellis-contracts -p trellis-rs --lib
+        run: cargo check --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-contracts -p trellis-rs --lib
 
       - name: Check generated participant facade
         run: cargo check --manifest-path generated/packages/cargo-participants/jobs/Cargo.toml
@@ -298,6 +298,9 @@ jobs:
             time cargo test --manifest-path rust/xtask/Cargo.toml --locked
             time cargo test --manifest-path xtask/Cargo.toml --locked
           fi
+
+      - name: Package public Rust crates
+        run: cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
 
       - name: Build integration runtime binaries
         shell: bash
@@ -913,6 +916,8 @@ jobs:
             run_publish "$crate" -p "$crate"
           }
 
+          publish_workspace_crate trellis-protocol
+          # run_publish waits for protocol to enter the index before this contracts dry-run.
           publish_workspace_crate trellis-contracts
           publish_workspace_crate trellis-rs
 

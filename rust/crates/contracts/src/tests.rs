@@ -43,6 +43,9 @@ fn canonicalize_matches_shared_conformance_vector() {
         serde_json::from_str(&fs::read_to_string(fixture_path).unwrap()).unwrap();
 
     for fixture in fixtures {
+        if fixture.get("error").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
         let input = fixture.get("input").cloned().unwrap();
         let canonical = fixture.get("canonical").and_then(Value::as_str).unwrap();
         let digest = fixture.get("digest").and_then(Value::as_str).unwrap();
