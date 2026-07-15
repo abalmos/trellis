@@ -613,7 +613,7 @@ jobs:
             rust/tools/generate -> target
 
       - name: Run Rust integration tests
-        run: time cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1
+        run: time deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture
 
   verify-js-integration:
     name: Verify JS integration suite

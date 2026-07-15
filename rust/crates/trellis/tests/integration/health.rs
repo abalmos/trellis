@@ -425,9 +425,11 @@ fn rust_dir() -> &'static Path {
 }
 
 fn health_command(rust_dir: &Path, config_path: &Path) -> Command {
-    let mut command = Command::new("cargo");
-    command
-        .args([
+    let mut command = if let Some(binary) = std::env::var_os("TRELLIS_TEST_SERVER_BIN") {
+        Command::new(binary)
+    } else {
+        let mut command = Command::new("cargo");
+        command.args([
             "run",
             "--quiet",
             "--manifest-path",
@@ -440,6 +442,11 @@ fn health_command(rust_dir: &Path, config_path: &Path) -> Command {
             "--bin",
             "trellis-server",
             "--",
+        ]);
+        command
+    };
+    command
+        .args([
             "health",
             "--config",
             config_path.to_str().expect("UTF-8 health config path"),

@@ -6,7 +6,10 @@
 //! probing, and deterministic cleanup. Admin/client/service automation will be
 //! layered on this foundation as Rust live integration cases migrate.
 
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
+use std::fmt;
 use std::fs::{self, File};
 use std::io;
 use std::net::{TcpListener, TcpStream};
@@ -14,7 +17,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{collections::HashSet, fmt};
 
 use async_nats::jetstream::{self, stream};
 use async_nats::ConnectOptions;
@@ -25,8 +27,10 @@ use serde_json::{json, Map, Number, Value};
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
 use trellis_local_bootstrap::{
-    render_trellis_config, ContainerRuntime as BootstrapContainerRuntime, LocalBootstrapError,
-    LocalTrellisBootstrapManifest, LocalTrellisBootstrapOptions,
+    render_trellis_config, BootstrapAccounts, BootstrapPaths, BootstrapUsers,
+    ContainerRuntime as BootstrapContainerRuntime, LocalBootstrapError, LocalNatsBootstrapManifest,
+    LocalTrellisBootstrapManifest, LocalTrellisBootstrapOptions, LocalTrellisBootstrapPaths,
+    LocalTrellisBootstrapUrls, PublicAccount, PublicUser,
 };
 use trellis_rs::client::{SessionAuth, TrellisClientError, UserConnectOptions};
 use trellis_rs::generated::Caller;
@@ -39,6 +43,7 @@ const DEFAULT_ADMIN_RPC_TIMEOUT_MS: u64 = 5_000;
 const NATS_IMAGE: &str = "docker.io/library/nats:2-alpine";
 const NATS_CONTAINER_PREFIX: &str = "trellis-test-nats-";
 const WORKDIR_OWNER_MARKER: &str = ".trellis-test-owner";
+const SHARED_RUNTIME_ENV: &str = "TRELLIS_TEST_SHARED_RUNTIME";
 const ADMIN_USERNAME: &str = "admin";
 const ADMIN_RPC_CALLS: &[&str] = &[
     "Auth.DeploymentAuthority.AcceptMigration",
@@ -62,6 +67,80 @@ const ADMIN_RPC_CALLS: &[&str] = &[
     "Auth.Sessions.Revoke",
     "Auth.Users.Update",
 ];
+
+thread_local! {
+    static CURRENT_TEST_TENANT: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedRuntimeManifest {
+    nats_url: String,
+    websocket_url: String,
+    workdir: PathBuf,
+    tenants: BTreeMap<String, SharedTenantManifest>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SharedTenantManifest {
+    accounts: SharedAccounts,
+    users: SharedUsers,
+    paths: SharedPaths,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SharedAccounts {
+    system: SharedIdentity,
+    auth: SharedIdentity,
+    trellis: SharedIdentity,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedUsers {
+    system: SharedIdentity,
+    auth_service: SharedIdentity,
+    trellis_service: SharedIdentity,
+    sentinel: SharedIdentity,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedIdentity {
+    name: String,
+    public_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedPaths {
+    nats_config: String,
+    jwt_config: String,
+    creds: SharedCredentialPaths,
+    secrets: SharedSecretPaths,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedCredentialPaths {
+    system_service: String,
+    auth_service: String,
+    trellis_service: String,
+    sentinel: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedSecretPaths {
+    auth_issuer_signing: String,
+    auth_target_signing: String,
+    auth_callout_x_key: String,
+}
+
+/// Select the shared-NATS tenant used by the current Rust integration test.
+pub fn set_current_test_tenant(tenant: impl Into<String>) {
+    CURRENT_TEST_TENANT.with(|current| *current.borrow_mut() = Some(tenant.into()));
+}
 
 /// Error returned by Rust Trellis integration-test runtime helpers.
 #[derive(Debug, thiserror::Error)]
@@ -713,11 +792,164 @@ impl Drop for TrellisNatsMessageObserver {
     }
 }
 
+fn shared_runtime_assignment(
+) -> Result<Option<(SharedRuntimeManifest, SharedTenantManifest)>, TrellisTestError> {
+    let Some(path) = std::env::var_os(SHARED_RUNTIME_ENV) else {
+        return Ok(None);
+    };
+    let tenant_id = CURRENT_TEST_TENANT
+        .with(|current| current.borrow().clone())
+        .or_else(|| std::thread::current().name().map(str::to_string))
+        .ok_or_else(|| {
+            TrellisTestError::UnexpectedResponse(
+                "shared Rust integration runtime requires a registered test tenant".to_string(),
+            )
+        })?;
+    let manifest: SharedRuntimeManifest = serde_json::from_slice(&fs::read(path)?)?;
+    let tenant = manifest.tenants.get(&tenant_id).cloned().ok_or_else(|| {
+        TrellisTestError::UnexpectedResponse(format!(
+            "shared Rust integration runtime has no tenant for {tenant_id}"
+        ))
+    })?;
+    Ok(Some((manifest, tenant)))
+}
+
+fn materialize_shared_runtime(
+    workdir: &Path,
+    shared: &SharedRuntimeManifest,
+    tenant: &SharedTenantManifest,
+    options: &LocalTrellisBootstrapOptions,
+) -> Result<LocalTrellisBootstrapManifest, TrellisTestError> {
+    let shared_nats = shared.workdir.join("nats");
+    let local_nats = workdir.join("nats");
+    fs::create_dir_all(local_nats.join("creds"))?;
+    fs::create_dir_all(local_nats.join("secrets"))?;
+    fs::create_dir_all(workdir.join("trellis/data"))?;
+
+    for (source, target) in [
+        (&tenant.paths.nats_config, "nats.conf"),
+        (&tenant.paths.jwt_config, "jwt.conf"),
+        (&tenant.paths.creds.system_service, "creds/system.creds"),
+        (&tenant.paths.creds.auth_service, "creds/auth-auth.creds"),
+        (
+            &tenant.paths.creds.trellis_service,
+            "creds/trellis-auth.creds",
+        ),
+        (&tenant.paths.creds.sentinel, "creds/sentinel.creds"),
+        (
+            &tenant.paths.secrets.auth_issuer_signing,
+            "secrets/auth-issuer-signing.seed",
+        ),
+        (
+            &tenant.paths.secrets.auth_target_signing,
+            "secrets/auth-target-signing.seed",
+        ),
+        (
+            &tenant.paths.secrets.auth_callout_x_key,
+            "secrets/auth-sx.seed",
+        ),
+    ] {
+        fs::copy(shared_nats.join(source), local_nats.join(target))?;
+    }
+    fs::write(
+        workdir.join("trellis/session.seed"),
+        format!("{}\n", random_session_seed()),
+    )?;
+
+    let manifest = LocalTrellisBootstrapManifest {
+        version: 1,
+        nats: LocalNatsBootstrapManifest {
+            version: 1,
+            nats_box_image: String::new(),
+            operator_name: "Qlever".to_string(),
+            server_name: "trellis-test".to_string(),
+            accounts: BootstrapAccounts {
+                system: shared_account(&tenant.accounts.system),
+                auth: shared_account(&tenant.accounts.auth),
+                trellis: shared_account(&tenant.accounts.trellis),
+            },
+            users: BootstrapUsers {
+                system: shared_user(&tenant.users.system),
+                auth_service: shared_user(&tenant.users.auth_service),
+                trellis_service: shared_user(&tenant.users.trellis_service),
+                sentinel: shared_user(&tenant.users.sentinel),
+            },
+            paths: BootstrapPaths {
+                nats_config: "nats.conf".to_string(),
+                jwt_config: "jwt.conf".to_string(),
+                account_jwts: BTreeMap::new(),
+                creds: BTreeMap::from([
+                    (
+                        "systemService".to_string(),
+                        "creds/system.creds".to_string(),
+                    ),
+                    (
+                        "authService".to_string(),
+                        "creds/auth-auth.creds".to_string(),
+                    ),
+                    (
+                        "trellisService".to_string(),
+                        "creds/trellis-auth.creds".to_string(),
+                    ),
+                    ("sentinel".to_string(), "creds/sentinel.creds".to_string()),
+                ]),
+                secrets: BTreeMap::from([
+                    (
+                        "authIssuerSigning".to_string(),
+                        "secrets/auth-issuer-signing.seed".to_string(),
+                    ),
+                    (
+                        "authTargetSigning".to_string(),
+                        "secrets/auth-target-signing.seed".to_string(),
+                    ),
+                    (
+                        "authCalloutXKey".to_string(),
+                        "secrets/auth-sx.seed".to_string(),
+                    ),
+                ]),
+                auth_callout_env: "auth-callout.env".to_string(),
+            },
+        },
+        paths: LocalTrellisBootstrapPaths {
+            nats_manifest: "nats/manifest.json".to_string(),
+            trellis_config: "trellis/config.jsonc".to_string(),
+            session_seed: "trellis/session.seed".to_string(),
+            trellis_data: "trellis/data".to_string(),
+        },
+        urls: LocalTrellisBootstrapUrls {
+            public_origin: options.public_origin.clone(),
+            nats_server: shared.nats_url.clone(),
+            nats_websocket: shared.websocket_url.clone(),
+            oauth_redirect_base: format!("{}/auth/callback", options.public_origin),
+        },
+    };
+    fs::write(
+        workdir.join(&manifest.paths.nats_manifest),
+        serde_json::to_string_pretty(&manifest.nats)? + "\n",
+    )?;
+    Ok(manifest)
+}
+
+fn shared_account(identity: &SharedIdentity) -> PublicAccount {
+    PublicAccount {
+        name: identity.name.clone(),
+        public_key: identity.public_key.clone(),
+    }
+}
+
+fn shared_user(identity: &SharedIdentity) -> PublicUser {
+    PublicUser {
+        name: identity.name.clone(),
+        public_key: identity.public_key.clone(),
+    }
+}
+
 impl TrellisTestRuntime {
     /// Start an isolated NATS container and repo-local Trellis control plane.
     pub async fn start(options: TrellisTestRuntimeOptions) -> Result<Self, TrellisTestError> {
         let resolved_runtime = options.container_runtime.resolve()?;
         let workdir = IntegrationWorkdir::create(options.keep_workdir)?;
+        let shared_runtime = shared_runtime_assignment()?;
 
         let port = reserve_local_port()?;
         let trellis_url = format!("http://127.0.0.1:{port}");
@@ -726,8 +958,20 @@ impl TrellisTestRuntime {
         bootstrap_options.container_runtime = options.container_runtime.to_bootstrap();
         bootstrap_options.trellis_port = port;
         bootstrap_options.public_origin = trellis_url.clone();
-        let manifest =
-            trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?;
+        if let Some((shared, _)) = &shared_runtime {
+            bootstrap_options
+                .nats_server_url
+                .clone_from(&shared.nats_url);
+            bootstrap_options
+                .nats_websocket_url
+                .clone_from(&shared.websocket_url);
+        }
+        let manifest = match &shared_runtime {
+            Some((shared, tenant)) => {
+                materialize_shared_runtime(workdir.path(), shared, tenant, &bootstrap_options)?
+            }
+            None => trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?,
+        };
         fs::write(
             workdir.path().join(WORKDIR_OWNER_MARKER),
             format!("{}\n", std::process::id()),
@@ -736,12 +980,18 @@ impl TrellisTestRuntime {
         let mut nats = None;
         let mut trellis = None;
         let started = async {
-            let started_nats = NatsContainer::start(resolved_runtime, &workdir)?;
-            bootstrap_options.nats_server_url = started_nats.nats_url();
-            bootstrap_options.nats_websocket_url = started_nats.websocket_url();
+            let started_nats = if shared_runtime.is_some() {
+                None
+            } else {
+                Some(NatsContainer::start(resolved_runtime, &workdir)?)
+            };
+            if let Some(started_nats) = &started_nats {
+                bootstrap_options.nats_server_url = started_nats.nats_url();
+                bootstrap_options.nats_websocket_url = started_nats.websocket_url();
+            }
             rewrite_trellis_config(workdir.path(), &manifest, &bootstrap_options, &options)?;
             ensure_shared_streams(
-                &started_nats.nats_url(),
+                &bootstrap_options.nats_server_url,
                 &trellis_creds_path(workdir.path()),
             )
             .await?;
@@ -756,9 +1006,9 @@ impl TrellisTestRuntime {
                 options.shutdown_timeout,
             )
             .await?;
-            let nats_url = started_nats.nats_url();
-            let nats_websocket_url = started_nats.websocket_url();
-            nats = Some(started_nats);
+            let nats_url = bootstrap_options.nats_server_url.clone();
+            let nats_websocket_url = bootstrap_options.nats_websocket_url.clone();
+            nats = started_nats;
             trellis = Some(started_trellis);
             Ok::<_, TrellisTestError>((nats_url, nats_websocket_url))
         }
@@ -1079,12 +1329,6 @@ impl TrellisTestRuntime {
 
     /// Restart only the Trellis control-plane process, preserving workdir state and NATS.
     pub async fn restart_control_plane(&mut self) -> Result<(), TrellisTestError> {
-        if self.nats.is_none() {
-            return Err(TrellisTestError::UnexpectedResponse(
-                "NATS container is not running".to_string(),
-            ));
-        }
-
         let Some(mut trellis) = self.trellis.take() else {
             return Err(TrellisTestError::UnexpectedResponse(
                 "Trellis process is not running".to_string(),

@@ -30,8 +30,11 @@ pub(crate) async fn start_rust_jobs_admin(
         .ancestors()
         .nth(2)
         .expect("trellis-rs crate should live under rust/crates/trellis");
-    let child = Command::new("cargo")
-        .args([
+    let mut command = if let Some(binary) = std::env::var_os("TRELLIS_TEST_JOBS_SERVICE_BIN") {
+        Command::new(binary)
+    } else {
+        let mut command = Command::new("cargo");
+        command.args([
             "run",
             "--manifest-path",
             rust_dir
@@ -40,7 +43,10 @@ pub(crate) async fn start_rust_jobs_admin(
                 .expect("UTF-8 Cargo path"),
             "-p",
             "trellis-service-jobs",
-        ])
+        ]);
+        command
+    };
+    let child = command
         .env("TRELLIS_URL", runtime.trellis_url())
         .env("SESSION_KEY_SEED_BASE64URL", service_key.seed)
         .env(

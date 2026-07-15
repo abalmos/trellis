@@ -1426,23 +1426,22 @@ fn verify_command_specs(
         }
 
         let mut rust_args = vec![
-            "test".to_string(),
-            "--manifest-path".to_string(),
-            "rust/Cargo.toml".to_string(),
-            "-p".to_string(),
-            "trellis-rs".to_string(),
-            "--test".to_string(),
-            "integration".to_string(),
+            "run".to_string(),
+            "-A".to_string(),
+            "-c".to_string(),
+            "js/deno.json".to_string(),
+            "rust/crates/trellis-test/integration_runner.ts".to_string(),
+            "--jobs".to_string(),
+            "4".to_string(),
             "--".to_string(),
             "--nocapture".to_string(),
-            "--test-threads=1".to_string(),
         ];
         if keep_workdir {
-            rust_args.insert(0, "cargo".to_string());
+            rust_args.insert(0, "deno".to_string());
             rust_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
             specs.push(CommandSpec::new("env", rust_args));
         } else {
-            specs.push(CommandSpec::new("cargo", rust_args));
+            specs.push(CommandSpec::new("deno", rust_args));
         }
     }
 
@@ -1934,7 +1933,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1"
+            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
         );
     }
 
@@ -1951,7 +1950,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture --test-threads=1"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
         );
     }
 
@@ -1967,7 +1966,7 @@ mod tests {
             .any(|command| command.contains("test:integration")));
         assert!(!commands
             .iter()
-            .any(|command| command.contains("--test integration")));
+            .any(|command| command.contains("integration_runner.ts")));
     }
 
     #[test]

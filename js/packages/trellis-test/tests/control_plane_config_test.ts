@@ -13,6 +13,12 @@ function testManifest(): LocalNatsBootstrapManifest {
       auth: { name: "AUTH", publicKey: "AUTH_PUBLIC" },
       trellis: { name: "TRELLIS", publicKey: "TRELLIS_PUBLIC" },
     },
+    users: {
+      system: { name: "system", publicKey: "SYSTEM_USER_PUBLIC" },
+      authService: { name: "auth", publicKey: "AUTH_USER_PUBLIC" },
+      trellisService: { name: "auth", publicKey: "TRELLIS_USER_PUBLIC" },
+      sentinel: { name: "sentinel", publicKey: "SENTINEL_USER_PUBLIC" },
+    },
     paths: {
       natsConfig: "nats.conf",
       jwtConfig: "jwt.conf",
