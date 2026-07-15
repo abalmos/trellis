@@ -1,0 +1,1285 @@
+{
+  "vectors": [
+    {
+      "name": "minimal-api",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      },
+      "digestProjection": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1"
+      },
+      "digest": "amPzTgbHN9oZrcIxT2o2g6bPvR2w3PlP_nRm9t_aIL0",
+      "subjects": {
+        "rpc": {},
+        "operations": {},
+        "events": {},
+        "feeds": {}
+      }
+    },
+    {
+      "name": "explicit-empty-defaults",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {},
+        "exports": { "schemas": [] },
+        "errors": {},
+        "rpc": {},
+        "operations": {},
+        "events": {},
+        "feeds": {},
+        "state": {},
+        "capabilities": {},
+        "consent": {}
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      },
+      "digest": "amPzTgbHN9oZrcIxT2o2g6bPvR2w3PlP_nRm9t_aIL0",
+      "sameNormalizedAs": "minimal-api",
+      "sameDigestAs": "minimal-api"
+    },
+    {
+      "name": "full-api-noncanonical-input",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs and events.",
+        "docs": { "summary": "Documents API", "markdown": "# Documents" },
+        "schemas": {
+          "WatchEvent": true,
+          "SettingsV1": true,
+          "Document": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "docs": { "type": "string" }
+            }
+          },
+          "RefundUpdate": true,
+          "GetInput": true,
+          "RefundResult": true,
+          "Settings": true,
+          "Changed": true,
+          "NotFoundDetails": true,
+          "RefundProgress": true,
+          "Approval": true,
+          "RefundInput": true,
+          "WatchInput": true
+        },
+        "exports": { "schemas": ["GetInput", "Document", "Document"] },
+        "errors": {
+          "NotFound": {
+            "schema": { "schema": "NotFoundDetails" },
+            "docs": { "markdown": "# NotFound" }
+          }
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "GetInput" },
+            "output": { "schema": "Document" },
+            "errors": ["NotFound", "NotFound"],
+            "transfer": { "direction": "receive" },
+            "internal": false,
+            "docs": { "markdown": "# Documents.Get" }
+          }
+        },
+        "operations": {
+          "Billing.Refund": {
+            "version": "v1",
+            "input": { "schema": "RefundInput" },
+            "progress": { "schema": "RefundProgress" },
+            "update": { "schema": "RefundUpdate" },
+            "output": { "schema": "RefundResult" },
+            "errors": ["NotFound", "NotFound"],
+            "transfer": { "direction": "send" },
+            "cancel": true,
+            "signals": {
+              "approve": {
+                "input": { "schema": "Approval" },
+                "docs": { "markdown": "# approve" }
+              }
+            },
+            "docs": { "markdown": "# Billing.Refund" }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" },
+            "params": ["/document/id", "/actor/id"],
+            "class": "audit",
+            "docs": { "markdown": "# Documents.Changed" }
+          }
+        },
+        "feeds": {
+          "Health.Watch": {
+            "version": "v2",
+            "input": { "schema": "WatchInput" },
+            "event": { "schema": "WatchEvent" },
+            "docs": { "markdown": "# Health.Watch" }
+          }
+        },
+        "state": {
+          "Settings": {
+            "kind": "value",
+            "schema": { "schema": "Settings" },
+            "stateVersion": "v2",
+            "acceptedVersions": {
+              "v1": { "schema": "SettingsV1" }
+            },
+            "docs": { "markdown": "# Settings" }
+          }
+        },
+        "capabilities": {
+          "documents.manage": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "state",
+                  "name": "Settings"
+                },
+                "action": "read"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "invoke"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "event",
+                  "name": "Documents.Changed"
+                },
+                "action": "subscribe"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "control"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "cancel"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        },
+        "consent": {
+          "documents.manage": {
+            "title": "Manage documents",
+            "description": "Use document workflows.",
+            "consequence": "This application can manage documents."
+          }
+        }
+      },
+      "digestProjection": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "schemas": {
+          "Approval": true,
+          "Changed": true,
+          "Document": {
+            "type": "object",
+            "properties": {
+              "docs": { "type": "string" },
+              "id": { "type": "string" }
+            }
+          },
+          "GetInput": true,
+          "NotFoundDetails": true,
+          "RefundInput": true,
+          "RefundProgress": true,
+          "RefundResult": true,
+          "RefundUpdate": true,
+          "Settings": true,
+          "SettingsV1": true,
+          "WatchEvent": true,
+          "WatchInput": true
+        },
+        "exports": { "schemas": ["Document", "GetInput"] },
+        "errors": {
+          "NotFound": { "schema": { "schema": "NotFoundDetails" } }
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "GetInput" },
+            "output": { "schema": "Document" },
+            "errors": ["NotFound"],
+            "transfer": { "direction": "receive" }
+          }
+        },
+        "operations": {
+          "Billing.Refund": {
+            "version": "v1",
+            "input": { "schema": "RefundInput" },
+            "progress": { "schema": "RefundProgress" },
+            "update": { "schema": "RefundUpdate" },
+            "output": { "schema": "RefundResult" },
+            "errors": ["NotFound"],
+            "transfer": { "direction": "send" },
+            "cancel": true,
+            "signals": {
+              "approve": { "input": { "schema": "Approval" } }
+            }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" },
+            "params": ["/document/id", "/actor/id"],
+            "class": "audit"
+          }
+        },
+        "feeds": {
+          "Health.Watch": {
+            "version": "v2",
+            "input": { "schema": "WatchInput" },
+            "event": { "schema": "WatchEvent" }
+          }
+        },
+        "state": {
+          "Settings": {
+            "kind": "value",
+            "schema": { "schema": "Settings" },
+            "stateVersion": "v2",
+            "acceptedVersions": {
+              "v1": { "schema": "SettingsV1" }
+            }
+          }
+        },
+        "capabilities": {
+          "documents.manage": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "event",
+                  "name": "Documents.Changed"
+                },
+                "action": "subscribe"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "cancel"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "control"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Billing.Refund"
+                },
+                "action": "invoke"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "state",
+                  "name": "Settings"
+                },
+                "action": "read"
+              }
+            ]
+          }
+        }
+      },
+      "subjects": {
+        "rpc": { "Documents.Get": "rpc.v1.Documents.Get" },
+        "operations": { "Billing.Refund": "operations.v1.Billing.Refund" },
+        "events": {
+          "Documents.Changed": {
+            "base": "events.v1.Documents.Changed",
+            "wildcard": "events.v1.Documents.Changed.*.*"
+          }
+        },
+        "feeds": { "Health.Watch": "feed.v2.Health.Watch" }
+      },
+      "digest": "PTrtVHXJlRN1Za5zVyylXjT-H3Mbr_69GrHeEuh2J58"
+    },
+    {
+      "name": "metadata-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "docs": { "markdown": "# Documents" },
+        "schemas": { "Input": true, "Output": true, "Changed": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" },
+            "docs": { "markdown": "# Get" }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" }
+          }
+        },
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        },
+        "consent": {
+          "documents.read": {
+            "title": "View documents",
+            "description": "Read documents.",
+            "consequence": "Documents can be viewed."
+          }
+        }
+      },
+      "digest": "58JahuyR1ZOCPz1XXYpWnJgVTBtSJ6SBIF5WulsFa0Q"
+    },
+    {
+      "name": "metadata-variant",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Document Center",
+        "description": "Updated human description.",
+        "docs": { "summary": "Updated", "markdown": "# Updated docs" },
+        "schemas": { "Input": true, "Output": true, "Changed": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" },
+            "docs": { "markdown": "# Updated RPC docs" }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" },
+            "docs": { "markdown": "# Updated event docs" }
+          }
+        },
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        },
+        "consent": {
+          "documents.read": {
+            "title": "Review documents",
+            "description": "Updated wording.",
+            "consequence": "Updated consequence."
+          }
+        }
+      },
+      "digest": "58JahuyR1ZOCPz1XXYpWnJgVTBtSJ6SBIF5WulsFa0Q",
+      "sameDigestAs": "metadata-base"
+    },
+    {
+      "name": "explicit-surface-defaults",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "docs": { "markdown": "# Documents" },
+        "schemas": { "Input": true, "Output": true, "Changed": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" },
+            "internal": false,
+            "docs": { "markdown": "# Get" }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" },
+            "class": "domain"
+          }
+        },
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        },
+        "consent": {
+          "documents.read": {
+            "title": "View documents",
+            "description": "Read documents.",
+            "consequence": "Documents can be viewed."
+          }
+        }
+      },
+      "digest": "58JahuyR1ZOCPz1XXYpWnJgVTBtSJ6SBIF5WulsFa0Q",
+      "sameNormalizedAs": "metadata-base",
+      "sameDigestAs": "metadata-base"
+    },
+    {
+      "name": "capability-machine-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true, "Changed": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Changed" }
+          }
+        },
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "event",
+                  "name": "Documents.Changed"
+                },
+                "action": "subscribe"
+              }
+            ]
+          }
+        }
+      },
+      "digest": "ABAkwbiBUboWaiMMlbHS3pMsqSMl7y7sWWjKodquepc",
+      "differentDigestFrom": "metadata-base"
+    },
+    {
+      "name": "schema-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "type": "string" } },
+        "exports": { "schemas": ["Payload"] }
+      },
+      "digest": "8iOxFG5zxPvU239maqJ1eP3wxRWOQ4N_L5LW_VYAc9g"
+    },
+    {
+      "name": "schema-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "type": "number" } },
+        "exports": { "schemas": ["Payload", "Payload"] }
+      },
+      "digest": "qhkJC2EpAOU5WAcyJfX9kjgozkMfzXna1VwaC_pJLWY",
+      "differentDigestFrom": "schema-base"
+    },
+    {
+      "name": "local-defs-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {
+          "Tree": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": { "Node": { "type": "string" } },
+            "$ref": "#/$defs/Node"
+          }
+        }
+      },
+      "digest": "wyrP4o9ENYyYYtX8Ie9o4hw2vCpikW1R29kpRXXoDlM"
+    },
+    {
+      "name": "recursive-local-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {
+          "Node": {
+            "type": "object",
+            "properties": { "next": { "$ref": "#" } }
+          }
+        }
+      },
+      "digest": "GTOWLn8mxoDeMcTguwadK6dROESa6Ce7c9bsvqOE5I8"
+    },
+    {
+      "name": "schema-keyword-like-data",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "schema-data@v1",
+        "displayName": "Schema Data",
+        "description": "Keyword-like property and data values remain ordinary JSON.",
+        "schemas": {
+          "Envelope": {
+            "type": "object",
+            "properties": {
+              "$id": { "type": "string" },
+              "$ref": { "type": "string" },
+              "payload": {
+                "const": {
+                  "$id": "ordinary data",
+                  "$ref": "https://example.com/not-a-schema-reference"
+                }
+              }
+            },
+            "examples": [{ "$id": "ordinary example data" }]
+          }
+        }
+      },
+      "digest": "nOhSPdBJG1eY_csMmTN79tsJFht0GbC44BCgQ_fV2Ew"
+    },
+    {
+      "name": "event-class-domain",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Event": true },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Event" }
+          }
+        }
+      }
+    },
+    {
+      "name": "operation-default-omitted",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true },
+        "operations": {
+          "Documents.Build": { "version": "v1", "input": { "schema": "Input" } }
+        }
+      }
+    },
+    {
+      "name": "operation-default-explicit",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true },
+        "operations": {
+          "Documents.Build": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "cancel": false
+          }
+        }
+      },
+      "sameNormalizedAs": "operation-default-omitted",
+      "sameDigestAs": "operation-default-omitted"
+    },
+    {
+      "name": "event-class-control",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Event": true },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Event" },
+            "class": "control"
+          }
+        }
+      },
+      "differentDigestFrom": "event-class-domain"
+    },
+    {
+      "name": "export-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "A": true, "B": true },
+        "exports": { "schemas": ["A"] }
+      }
+    },
+    {
+      "name": "export-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "A": true, "B": true },
+        "exports": { "schemas": ["A", "B"] }
+      },
+      "differentDigestFrom": "export-base"
+    },
+    {
+      "name": "surface-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true }
+      }
+    },
+    {
+      "name": "surface-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "differentDigestFrom": "surface-base"
+    },
+    {
+      "name": "remote-ref-rejected",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "$ref": "https://example.com/schema.json" } }
+      }
+    },
+    {
+      "name": "remote-dynamic-ref-rejected",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "$dynamicRef": "file:///tmp/schema.json" } }
+      }
+    },
+    {
+      "name": "embedded-id-rejected",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "$id": "urn:payload", "type": "string" } }
+      }
+    },
+    {
+      "name": "wrong-schema-dialect",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {
+          "Payload": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-json-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "type": 7 } }
+      }
+    },
+    {
+      "name": "unresolved-local-schema-ref",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Payload": { "$ref": "#/$defs/Missing" } }
+      }
+    },
+    {
+      "name": "unresolved-schema-reference",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Missing" }
+          }
+        }
+      }
+    },
+    {
+      "name": "unresolved-error-reference",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" },
+            "errors": ["Missing"]
+          }
+        }
+      }
+    },
+    {
+      "name": "capability-target-other-api",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        },
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "other@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "participant-resource-capability-target",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "participantResource",
+                  "participant": "worker",
+                  "resource": "kv",
+                  "name": "cache"
+                },
+                "action": "read"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "capability-target-missing-surface",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "capabilities": {
+          "documents.read": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "rpc",
+                  "name": "Documents.Get"
+                },
+                "action": "call"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel-permission-noncancelable-operation",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true },
+        "operations": {
+          "Documents.Build": { "version": "v1", "input": { "schema": "Input" } }
+        },
+        "capabilities": {
+          "documents.cancel": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Documents.Build"
+                },
+                "action": "cancel"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "control-permission-operation-without-signals",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true },
+        "operations": {
+          "Documents.Build": { "version": "v1", "input": { "schema": "Input" } }
+        },
+        "capabilities": {
+          "documents.control": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "documents@v1",
+                  "surface": "operation",
+                  "name": "Documents.Build"
+                },
+                "action": "control"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "consent-unknown-capability",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "consent": {
+          "documents.read": {
+            "title": "View",
+            "description": "Read.",
+            "consequence": "Visible."
+          }
+        }
+      }
+    },
+    {
+      "name": "participant-top-level-fields-rejected",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "kind": "service",
+        "uses": {},
+        "jobs": {},
+        "jobQueues": {},
+        "eventConsumers": {},
+        "resources": {}
+      }
+    },
+    {
+      "name": "authored-subject-rejected",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "subject": "rpc.v1.override",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      }
+    },
+    {
+      "name": "malformed-event-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Event": true },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Event" },
+            "params": ["/document~2id"]
+          }
+        }
+      }
+    },
+    {
+      "name": "duplicate-event-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Event": true },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Event" },
+            "params": ["/id", "/id"]
+          }
+        }
+      }
+    },
+    {
+      "name": "root-event-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Event": true },
+        "events": {
+          "Documents.Changed": {
+            "version": "v1",
+            "event": { "schema": "Event" },
+            "params": [""]
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-api-id",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      }
+    },
+    {
+      "name": "invalid-surface-version",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v0",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-logical-name",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents..Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-top-level-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "extra": true
+      }
+    },
+    {
+      "name": "unknown-nested-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input", "extra": true },
+            "output": { "schema": "Output" }
+          }
+        }
+      }
+    },
+    {
+      "name": "wrong-format",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+use crate::{
+    identifiers::{validate_logical_name, validate_version},
+    ProtocolError,
+};
+
+/// Subjects derived for every communication surface in one API artifact.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DerivedApiSubjectsV1 {
+    /// RPC subjects keyed by logical name.
+    pub rpc: BTreeMap<String, String>,
+    /// Operation subjects keyed by logical name.
+    pub operations: BTreeMap<String, String>,
+    /// Event base and wildcard subjects keyed by logical name.
+    pub events: BTreeMap<String, DerivedEventSubjectsV1>,
+    /// Feed subjects keyed by logical name.
+    pub feeds: BTreeMap<String, String>,
+}
+
+/// Base and wildcard subscription subjects for one event.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DerivedEventSubjectsV1 {
+    /// Event subject before parameter tokens are appended.
+    pub base: String,
+    /// Subscription subject with one wildcard per event parameter.
+    pub wildcard: String,
+}
+
+/// Derive an RPC subject from its version and logical name.
+pub fn derive_rpc_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
+    derive_subject("rpc", version, logical_name)
+}
+
+/// Derive an operation subject from its version and logical name.
+pub fn derive_operation_subject(
+    version: &str,
+    logical_name: &str,
+) -> Result<String, ProtocolError> {
+    derive_subject("operations", version, logical_name)
+}
+
+/// Derive an event base subject from its version and logical name.
+pub fn derive_event_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
+    derive_subject("events", version, logical_name)
+}
+
+/// Derive an event subscription subject with one wildcard per parameter.
+pub fn derive_event_wildcard_subject(
+    version: &str,
+    logical_name: &str,
+    parameter_count: usize,
+) -> Result<String, ProtocolError> {
+    let mut subject = derive_event_subject(version, logical_name)?;
+    for _ in 0..parameter_count {
+        subject.push_str(".*");
+    }
+    Ok(subject)
+}
+
+/// Derive a feed subject from its version and logical name.
+pub fn derive_feed_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
+    derive_subject("feed", version, logical_name)
+}
+
+fn derive_subject(
+    family: &str,
+    version: &str,
+    logical_name: &str,
+) -> Result<String, ProtocolError> {
+    validate_version("/version", version)?;
+    validate_logical_name("/name", logical_name)?;
+    Ok(format!("{family}.{version}.{logical_name}"))
+}

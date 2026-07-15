@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
-
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
-use crate::{canonicalize_json, sha256_base64url, ProtocolError};
+use crate::{
+    canonicalize_json, identifiers::compare_protocol_strings, sha256_base64url, ProtocolError,
+};
 
 /// The first canonical grant-set wire format.
 pub const GRANT_SET_FORMAT_V1: &str = "trellis.grant-set.v1";
@@ -202,6 +202,14 @@ impl PermissionTargetV1 {
         };
         target.validate()?;
         Ok(target)
+    }
+
+    /// Return the API identifier, surface kind, and local name for an API target.
+    pub fn as_api_surface(&self) -> Option<(&str, ApiSurfaceKindV1, &str)> {
+        match self {
+            Self::ApiSurface { api, surface, name } => Some((api, *surface, name)),
+            Self::ParticipantResource { .. } => None,
+        }
     }
 
     fn validate(&self) -> Result<(), ProtocolError> {
@@ -454,7 +462,10 @@ fn normalize_permissions(mut permissions: Vec<PermissionAtomV1>) -> Vec<Permissi
     permissions
 }
 
-fn compare_permission_atoms(left: &PermissionAtomV1, right: &PermissionAtomV1) -> Ordering {
+fn compare_permission_atoms(
+    left: &PermissionAtomV1,
+    right: &PermissionAtomV1,
+) -> std::cmp::Ordering {
     let left = left.ordering_key();
     let right = right.ordering_key();
     compare_protocol_strings(left.0, right.0)
@@ -462,10 +473,6 @@ fn compare_permission_atoms(left: &PermissionAtomV1, right: &PermissionAtomV1) -
         .then_with(|| compare_protocol_strings(left.2, right.2))
         .then_with(|| compare_protocol_strings(left.3, right.3))
         .then_with(|| compare_protocol_strings(left.4, right.4))
-}
-
-fn compare_protocol_strings(left: &str, right: &str) -> Ordering {
-    left.encode_utf16().cmp(right.encode_utf16())
 }
 
 fn validate_identifier(field: &'static str, value: &str) -> Result<(), ProtocolError> {
