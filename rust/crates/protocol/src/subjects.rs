@@ -76,3 +76,22 @@ fn derive_subject(
     validate_logical_name("/name", logical_name)?;
     Ok(format!("{family}.{version}.{logical_name}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::derive_rpc_subject;
+
+    #[test]
+    fn subject_versions_use_canonical_positive_decimals() {
+        assert_eq!(
+            derive_rpc_subject("v1", "Documents.Get").unwrap(),
+            "rpc.v1.Documents.Get"
+        );
+        assert_eq!(
+            derive_rpc_subject("v10", "Documents.Get").unwrap(),
+            "rpc.v10.Documents.Get"
+        );
+        assert!(derive_rpc_subject("v01", "Documents.Get").is_err());
+        assert!(derive_rpc_subject("v00", "Documents.Get").is_err());
+    }
+}

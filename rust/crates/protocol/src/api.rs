@@ -7,7 +7,7 @@ use crate::{
     canonicalize_json, digest_json,
     identifiers::{
         api_error, sort_deduplicate, validate_api_id, validate_logical_name,
-        validate_protocol_identifier, validate_version,
+        validate_nonempty_text, validate_protocol_identifier, validate_version,
     },
     schema_profile::{validate_api_structure, validate_embedded_schema},
     subjects::{
@@ -165,8 +165,8 @@ impl ApiArtifactV1 {
             ));
         }
         validate_api_id("/id", &wire.id)?;
-        validate_protocol_identifier("/displayName", &wire.display_name)?;
-        validate_protocol_identifier("/description", &wire.description)?;
+        validate_nonempty_text("/displayName", &wire.display_name)?;
+        validate_nonempty_text("/description", &wire.description)?;
         if let Some(docs) = &wire.docs {
             validate_docs("/docs", docs)?;
         }
@@ -405,10 +405,7 @@ impl ApiArtifactV1 {
         let subjects = self.derived_subjects()?;
         validate_unique_subjects("/rpc", subjects.rpc.values())?;
         validate_unique_subjects("/operations", subjects.operations.values())?;
-        validate_unique_subjects(
-            "/events",
-            subjects.events.values().map(|event| &event.wildcard),
-        )?;
+        validate_event_subjects(&subjects.events)?;
         validate_unique_subjects("/feeds", subjects.feeds.values())
     }
 }
@@ -418,7 +415,8 @@ impl<'de> Deserialize<'de> for ApiArtifactV1 {
     where
         D: Deserializer<'de>,
     {
-        Self::from_wire(WireApiArtifactV1::deserialize(deserializer)?).map_err(D::Error::custom)
+        let value = Value::deserialize(deserializer)?;
+        parse_api_v1(&value).map_err(D::Error::custom)
     }
 }
 
@@ -602,9 +600,9 @@ struct StateDefinitionV1 {
 }
 
 fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {
-    validate_protocol_identifier(&format!("{path}/markdown"), &docs.markdown)?;
+    validate_nonempty_text(&format!("{path}/markdown"), &docs.markdown)?;
     if let Some(summary) = &docs.summary {
-        validate_protocol_identifier(&format!("{path}/summary"), summary)?;
+        validate_nonempty_text(&format!("{path}/summary"), summary)?;
     }
     Ok(())
 }
@@ -719,6 +717,36 @@ fn validate_unique_subjects<'a>(
         }
     }
     Ok(())
+}
+
+fn validate_event_subjects(
+    events: &BTreeMap<String, DerivedEventSubjectsV1>,
+) -> Result<(), ProtocolError> {
+    let events = events.iter().collect::<Vec<_>>();
+    for (index, (left_name, left)) in events.iter().enumerate() {
+        for (right_name, right) in &events[index + 1..] {
+            if event_patterns_overlap(&left.wildcard, &right.wildcard) {
+                return Err(api_error(
+                    "/events",
+                    format!(
+                        "event '{left_name}' pattern '{}' overlaps event '{right_name}' pattern '{}'",
+                        left.wildcard, right.wildcard
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn event_patterns_overlap(left: &str, right: &str) -> bool {
+    let left = left.split('.').collect::<Vec<_>>();
+    let right = right.split('.').collect::<Vec<_>>();
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| *left == "*" || right == "*" || *left == right)
 }
 
 fn is_false(value: &bool) -> bool {

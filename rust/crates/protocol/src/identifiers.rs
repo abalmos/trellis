@@ -27,6 +27,13 @@ pub(crate) fn validate_protocol_identifier(path: &str, value: &str) -> Result<()
     Ok(())
 }
 
+pub(crate) fn validate_nonempty_text(path: &str, value: &str) -> Result<(), ProtocolError> {
+    if value.is_empty() {
+        return Err(api_error(path, "must not be empty"));
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_api_id(path: &str, value: &str) -> Result<(), ProtocolError> {
     validate_protocol_identifier(path, value)?;
     let Some((lineage, major)) = value.rsplit_once("@v") else {
@@ -73,11 +80,12 @@ pub(crate) fn api_error(path: impl Into<String>, message: impl Into<String>) -> 
 }
 
 fn validate_positive_decimal(path: &str, value: &str) -> Result<(), ProtocolError> {
-    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+    let bytes = value.as_bytes();
+    if bytes.is_empty()
+        || !matches!(bytes[0], b'1'..=b'9')
+        || !bytes[1..].iter().all(u8::is_ascii_digit)
+    {
         return Err(api_error(path, "must use a positive decimal major version"));
-    }
-    if value.bytes().all(|byte| byte == b'0') {
-        return Err(api_error(path, "major version must be greater than zero"));
     }
     Ok(())
 }
