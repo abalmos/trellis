@@ -9,6 +9,8 @@ use async_nats::ConnectOptions;
 use bytes::Bytes;
 
 const TEST_NAME: &str = "runtime_ownership::runtime_singleton_ownership_lifecycle";
+const INCOMPATIBLE_BUCKET_TEST_NAME: &str =
+    "runtime_ownership::runtime_incompatible_lease_bucket_fails_before_storage_open";
 const LEASE_BUCKET: &str = "trellis_runtime_leases";
 
 struct RuntimeProcess {
@@ -195,6 +197,45 @@ async fn runtime_singleton_ownership_lifecycle() {
         .delete_expect_revision("health.owner", Some(held_health_revision))
         .await
         .expect("release fixture-held Health lease");
+}
+
+#[tokio::test]
+async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
+    trellis_test::set_current_test_tenant(INCOMPATIBLE_BUCKET_TEST_NAME);
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let client = ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load Trellis NATS credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect authenticated lease test client");
+    jetstream::new(client)
+        .create_key_value(kv::Config {
+            bucket: LEASE_BUCKET.to_owned(),
+            history: 1,
+            max_age: Duration::from_secs(1),
+            num_replicas: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("precreate incompatible lease bucket");
+
+    let blocked_storage = runtime.workdir().join("incompatible-jobs.sqlite");
+    std::fs::create_dir(&blocked_storage).expect("create path that SQLite cannot open as a file");
+    let config = runtime.workdir().join("incompatible.toml");
+    let mut process = RuntimeProcess::start(&runtime, "jobs", &config, "incompatible");
+    let status = process.wait_exit().await;
+    let error = process.stderr();
+
+    assert!(!status.success());
+    assert!(error.contains("InfrastructureMismatch"), "{error}");
+    assert!(error.contains("max_age"), "{error}");
+    assert!(!error.contains("runtime storage failed"), "{error}");
+    assert!(blocked_storage.is_dir());
 }
 
 async fn acquire_and_release(leases: &kv::Store, key: &str) {

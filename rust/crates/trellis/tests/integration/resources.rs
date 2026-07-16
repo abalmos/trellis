@@ -3,9 +3,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
-use trellis_rs::service::{
-    GeneratedServiceContract, KvResourceClient, ServerError, StoreResourceClient,
-};
+use trellis_rs::service::{GeneratedServiceContract, ServerError};
 
 use crate::support::assertions::assert_case_registered;
 

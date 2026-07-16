@@ -9,7 +9,6 @@ use serde_json::Value;
 use tokio::task::JoinHandle;
 use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
-use trellis_rs::service::StoreResourceClient;
 use trellis_rs::service::{
     AcceptedOperation, FileTransferInfo, GeneratedServiceContract, OperationRefData,
     OperationSnapshot, OperationState as ServiceOpState, ServerError, ServiceHandlerContext,

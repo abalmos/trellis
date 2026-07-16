@@ -3,7 +3,7 @@
 //! This crate implements the admin-side loops and RPC hosting for the standard
 //! `trellis.jobs@v1` Trellis API: SQLite-backed queries, stream projection, janitor
 //! expiry, and advisory handling. Service-local job execution lives in
-//! [`trellis_jobs`].
+//! `trellis_jobs`.
 
 mod advisory;
 mod bootstrap;

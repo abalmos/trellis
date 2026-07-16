@@ -380,9 +380,8 @@ async fn wait_for_query(
     predicate: impl Fn(&trellis_rs::sdk::health::types::HealthQueryResponseEntriesItem) -> bool,
 ) -> HealthQueryResponse {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    let mut last_observation = "no query response".to_string();
     loop {
-        match health
+        let last_observation = match health
             .rpc()
             .health()
             .query(&HealthQueryRequest {
@@ -400,10 +399,10 @@ async fn wait_for_query(
                 if response.entries.first().is_some_and(&predicate) {
                     return response;
                 }
-                last_observation = format!("response: {:?}", response.entries.first());
+                format!("response: {:?}", response.entries.first())
             }
-            Err(error) => last_observation = format!("query error: {error}"),
-        }
+            Err(error) => format!("query error: {error}"),
+        };
         assert!(
             tokio::time::Instant::now() < deadline,
             "health query did not reach {expected}; last observation: {last_observation}"

@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::leases::{LeaseError, LeaseFence, LeaseGuard, LeaseKey, LeaseManager};
 use crate::shutdown::StopHandle;
-use crate::supervisor::RuntimeError;
+use crate::supervisor::{RuntimeError, OWNERSHIP_SHUTDOWN_TIMEOUT};
 use crate::{ResolvedLeasesConfig, RuntimeMode, SubsystemName};
 
 /// Stable runtime singleton owner group.
@@ -90,7 +90,7 @@ impl RuntimeOwnership {
             .await
             .map_err(|source| RuntimeError::LeaseBucketOpen {
                 owner_id: owner_id.clone(),
-                source,
+                source: Box::new(source),
             })?;
         let mut held = Vec::new();
         let mut owners = BTreeMap::new();
@@ -116,6 +116,23 @@ impl RuntimeOwnership {
                     }
                     return Err(primary);
                 }
+            }
+        }
+
+        for index in 0..held.len() {
+            let verification = {
+                let lease = &mut held[index];
+                manager
+                    .renew(&mut lease.guard)
+                    .await
+                    .map_err(|source| (lease.group, lease.guard.key().clone(), source))
+            };
+            if let Err((group, key, source)) = verification {
+                let primary = map_renewal_error(group, key, &owner_id, source);
+                if let Err(cleanup) = release_held(&manager, &owner_id, &mut held).await {
+                    tracing::error!(error = %cleanup, "failed to clean up ownership after acquisition verification");
+                }
+                return Err(primary);
             }
         }
 
@@ -158,17 +175,24 @@ impl RuntimeOwnership {
         }
     }
 
-    pub(crate) async fn shutdown(self) -> Result<(), RuntimeError> {
+    pub(crate) async fn shutdown(mut self) -> Result<(), RuntimeError> {
         self.renewal_stop.stop();
         let mut first_error = None;
         if !self.renewal_joined {
-            match self.renewal.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => first_error = Some(error),
-                Err(source) => {
+            match tokio::time::timeout(OWNERSHIP_SHUTDOWN_TIMEOUT, &mut self.renewal).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(error))) => first_error = Some(error),
+                Ok(Err(source)) => {
                     first_error = Some(RuntimeError::OwnerRenewalTaskFailed {
                         owner_id: self.owner_id.clone(),
                         source,
+                    });
+                }
+                Err(_) => {
+                    self.renewal.abort();
+                    let _ = (&mut self.renewal).await;
+                    first_error = Some(RuntimeError::OwnerRenewalShutdownTimeout {
+                        owner_id: self.owner_id.clone(),
                     });
                 }
             }
@@ -228,12 +252,22 @@ async fn release_held(
     while let Some(lease) = held.pop() {
         let group = lease.group;
         let key = lease.guard.key().clone();
-        if let Err(source) = manager.release(lease.guard).await {
+        let release =
+            tokio::time::timeout(OWNERSHIP_SHUTDOWN_TIMEOUT, manager.release(lease.guard))
+                .await
+                .unwrap_or_else(|_| {
+                    Err(LeaseError::Backend {
+                        key: Some(key.clone()),
+                        operation: "release",
+                        message: "operation exceeded shutdown bound".to_owned(),
+                    })
+                });
+        if let Err(source) = release {
             let error = RuntimeError::OwnerRelease {
                 subsystem: group.subsystem(),
                 key,
                 owner_id: owner_id.to_owned(),
-                source,
+                source: Box::new(source),
             };
             if first_error.is_some() {
                 tracing::error!(error = %error, "additional runtime owner release failed");
@@ -256,14 +290,14 @@ fn map_acquisition_error(
             subsystem: group.subsystem(),
             key,
             owner_id: owner_id.to_owned(),
-            source,
+            source: Box::new(source),
         }
     } else {
         RuntimeError::OwnerAcquire {
             subsystem: group.subsystem(),
             key,
             owner_id: owner_id.to_owned(),
-            source,
+            source: Box::new(source),
         }
     }
 }
@@ -278,7 +312,7 @@ fn map_renewal_error(
         subsystem: group.subsystem(),
         key,
         owner_id: owner_id.to_owned(),
-        source,
+        source: Box::new(source),
     }
 }
 

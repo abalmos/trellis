@@ -295,10 +295,6 @@ async fn connect_rpc_service(
     .expect("connect live Rust RPC service runtime")
 }
 
-fn service_name() -> &'static str {
-    "rpc-fixture-service"
-}
-
 #[tokio::test]
 async fn rpc_client_calls_service_success() {
     assert_case_registered("rpc.client-calls-service-success", "rpc", "rpc");

@@ -653,10 +653,6 @@ fn close_interval(
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "columns mirror the persisted interval row"
-)]
 fn insert_interval(
     transaction: &Transaction<'_>,
     identity: &HeartbeatIdentity,

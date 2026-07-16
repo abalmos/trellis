@@ -603,6 +603,10 @@ fn matches_filter<T: AsRef<str>>(filter: Option<&Vec<T>>, value: &str) -> bool {
     })
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "the generated watch stream contract requires ServerError"
+)]
 fn health_invalidated_event(
     projection_revision: i64,
     changes: Option<Vec<InvalidationChange>>,

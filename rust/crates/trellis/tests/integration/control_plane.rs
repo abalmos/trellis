@@ -23,9 +23,7 @@ use trellis_rs::sdk::auth::types::{
     AuthServiceInstancesRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
     AuthUsersListRequest, AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
 };
-use trellis_rs::service::{
-    ConnectedServiceRuntime, GeneratedServiceContract, KvResourceClient, StoreResourceClient,
-};
+use trellis_rs::service::{ConnectedServiceRuntime, GeneratedServiceContract};
 
 use crate::support::assertions::assert_service_case_registered;
 
@@ -2811,7 +2809,7 @@ async fn control_plane_catalog_resource_binding_projection() {
         CATALOG_BINDING_PROJECTION_DEPLOYMENT,
     )
     .await;
-    let mut connect_handle = spawn_catalog_binding_projection_removed_connect(
+    let connect_handle = spawn_catalog_binding_projection_removed_connect(
         runtime.trellis_url(),
         removed_contract.digest(),
         removed_key.seed,
@@ -4131,10 +4129,6 @@ fn listed_deployment_disabled(
             ..
         } => *disabled,
     }
-}
-
-fn deployment_field<'a>(deployment: &'a Value, field: &str) -> Option<&'a str> {
-    deployment.get(field).and_then(Value::as_str)
 }
 
 async fn start_runtime_with_fail_once_hook(hook: &str) -> trellis_test::TrellisTestRuntime {

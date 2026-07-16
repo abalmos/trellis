@@ -70,6 +70,7 @@ impl LeaseManager {
             lease_bucket_config(&manager.bucket, manager.ttl, manager.replicas),
         )
         .await?;
+        validate_store_config(&store, manager.ttl, manager.replicas).await?;
         manager.store = Some(store);
         Ok(manager)
     }
@@ -226,6 +227,20 @@ impl LeaseKey {
 /// Lease operation error.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum LeaseError {
+    /// An existing lease bucket does not satisfy runtime lease invariants.
+    #[error(
+        "lease bucket {bucket:?} has incompatible {field}: expected {expected}, actual {actual}"
+    )]
+    InfrastructureMismatch {
+        /// Lease bucket name.
+        bucket: String,
+        /// Incompatible bucket configuration field.
+        field: &'static str,
+        /// Required field value.
+        expected: String,
+        /// Actual field value reported by NATS.
+        actual: String,
+    },
     /// Lease is already held by another owner.
     #[error("lease {key:?} is already held")]
     Held {
@@ -294,6 +309,44 @@ async fn open_or_create_store(
             }),
         },
     }
+}
+
+async fn validate_store_config(
+    store: &kv::Store,
+    ttl: Duration,
+    replicas: usize,
+) -> Result<(), LeaseError> {
+    let status = store.status().await.map_err(|error| LeaseError::Backend {
+        key: None,
+        operation: "inspect bucket",
+        message: error.to_string(),
+    })?;
+    if status.history() != 1 {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "history",
+            expected: "1".to_owned(),
+            actual: status.history().to_string(),
+        });
+    }
+    if status.max_age() != ttl {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "max_age",
+            expected: format!("{}ms", ttl.as_millis()),
+            actual: format!("{}ms", status.max_age().as_millis()),
+        });
+    }
+    let actual_replicas = status.info.config.num_replicas;
+    if replicas != 0 && actual_replicas != replicas {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "replicas",
+            expected: replicas.to_string(),
+            actual: actual_replicas.to_string(),
+        });
+    }
+    Ok(())
 }
 
 async fn classify_revision_error(
