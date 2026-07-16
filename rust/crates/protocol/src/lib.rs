@@ -9,7 +9,10 @@ mod permissions;
 mod schema_profile;
 mod subjects;
 
-pub use api::{parse_api_v1, ApiArtifactV1, API_FORMAT_V1, API_SCHEMA_V1_JSON};
+pub use api::{
+    compare_api_replacement_v1, parse_api_v1, ApiArtifactV1, ApiCompatibilityIssueCodeV1,
+    ApiCompatibilityIssueV1, ApiCompatibilityReportV1, API_FORMAT_V1, API_SCHEMA_V1_JSON,
+};
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::ProtocolError;
 pub use participant::{
