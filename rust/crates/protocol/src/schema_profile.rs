@@ -105,8 +105,11 @@ fn validate_structure_value(
     Ok(())
 }
 
-pub(crate) fn validate_public_schema(name: &str, schema: &Value) -> Result<(), ProtocolError> {
-    validate_public_schema_inner(
+pub(crate) fn validate_wire_schema_additive(
+    name: &str,
+    schema: &Value,
+) -> Result<(), ProtocolError> {
+    validate_wire_schema_additive_inner(
         name,
         schema,
         schema,
@@ -115,7 +118,7 @@ pub(crate) fn validate_public_schema(name: &str, schema: &Value) -> Result<(), P
     )
 }
 
-fn validate_public_schema_inner(
+fn validate_wire_schema_additive_inner(
     name: &str,
     root: &Value,
     schema: &Value,
@@ -126,24 +129,66 @@ fn validate_public_schema_inner(
         return Ok(());
     };
 
-    for keyword in ["maxProperties", "patternProperties", "propertyNames"] {
-        if map.contains_key(keyword) {
+    let object_capable = schema_can_validate_object(root, schema, &mut Default::default());
+
+    for keyword in [
+        "maxProperties",
+        "propertyNames",
+        "patternProperties",
+        "dependentRequired",
+        "dependentSchemas",
+        "dependencies",
+    ] {
+        if object_capable && map.contains_key(keyword) {
             return Err(schema_error(
                 name,
                 child_path(path, keyword),
-                format!("public schemas must not use '{keyword}'"),
+                format!("wire schemas that accept objects must not use '{keyword}'"),
             ));
         }
     }
     for keyword in ["additionalProperties", "unevaluatedProperties"] {
-        if map
-            .get(keyword)
-            .is_some_and(|value| value != &Value::Bool(true))
+        if object_capable
+            && map
+                .get(keyword)
+                .is_some_and(|value| value != &Value::Bool(true))
         {
             return Err(schema_error(
                 name,
                 child_path(path, keyword),
-                format!("public schemas must leave '{keyword}' open"),
+                format!("wire schemas that accept objects must leave '{keyword}' open"),
+            ));
+        }
+    }
+    if object_capable && map.get("const").is_some_and(Value::is_object) {
+        return Err(schema_error(
+            name,
+            child_path(path, "const"),
+            "wire schemas that accept objects must not use an object-valued 'const'",
+        ));
+    }
+    if object_capable
+        && map
+            .get("enum")
+            .and_then(Value::as_array)
+            .is_some_and(|values| values.iter().any(Value::is_object))
+    {
+        return Err(schema_error(
+            name,
+            child_path(path, "enum"),
+            "wire schemas that accept objects must not use object values in 'enum'",
+        ));
+    }
+    for keyword in ["not", "if", "then", "else"] {
+        if object_capable
+            && map.get(keyword).is_some_and(|schema| {
+                schema_can_validate_object(root, schema, &mut Default::default())
+            })
+        {
+            return Err(schema_error(
+                name,
+                child_path(path, keyword),
+                format!("wire schemas that accept objects must not use object-capable '{keyword}'"),
             ));
         }
     }
@@ -151,8 +196,14 @@ fn validate_public_schema_inner(
     for keyword in ["$ref", "$dynamicRef"] {
         if let Some(reference) = map.get(keyword).and_then(Value::as_str) {
             if refs.insert(reference.to_owned()) {
-                if let Some(referenced) = resolve_local_schema(root, reference) {
-                    validate_public_schema_inner(name, root, referenced, reference, refs)?;
+                if let Some((referenced, referenced_path)) = resolve_local_schema(root, reference) {
+                    validate_wire_schema_additive_inner(
+                        name,
+                        root,
+                        referenced,
+                        &referenced_path,
+                        refs,
+                    )?;
                 }
             }
         }
@@ -168,13 +219,19 @@ fn validate_public_schema_inner(
         "unevaluatedItems",
     ] {
         if let Some(schema) = map.get(keyword) {
-            validate_public_schema_inner(name, root, schema, &child_path(path, keyword), refs)?;
+            validate_wire_schema_additive_inner(
+                name,
+                root,
+                schema,
+                &child_path(path, keyword),
+                refs,
+            )?;
         }
     }
     for keyword in ["allOf", "anyOf", "oneOf", "prefixItems"] {
         if let Some(Value::Array(schemas)) = map.get(keyword) {
             for (index, schema) in schemas.iter().enumerate() {
-                validate_public_schema_inner(
+                validate_wire_schema_additive_inner(
                     name,
                     root,
                     schema,
@@ -187,7 +244,7 @@ fn validate_public_schema_inner(
     for keyword in ["dependentSchemas", "properties"] {
         if let Some(Value::Object(schemas)) = map.get(keyword) {
             for (key, schema) in schemas {
-                validate_public_schema_inner(
+                validate_wire_schema_additive_inner(
                     name,
                     root,
                     schema,
@@ -200,26 +257,85 @@ fn validate_public_schema_inner(
     Ok(())
 }
 
-fn resolve_local_schema<'a>(root: &'a Value, reference: &str) -> Option<&'a Value> {
-    let fragment = reference.strip_prefix('#')?;
-    if fragment.is_empty() || fragment.starts_with('/') {
-        return root.pointer(fragment);
+fn schema_can_validate_object(
+    root: &Value,
+    schema: &Value,
+    refs: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    let Value::Object(map) = schema else {
+        return schema == &Value::Bool(true);
+    };
+    if map.get("type").is_some_and(|value| match value {
+        Value::String(value) => value != "object",
+        Value::Array(values) => !values.iter().any(|value| value == "object"),
+        _ => false,
+    }) || map.get("const").is_some_and(|value| !value.is_object())
+        || map
+            .get("enum")
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.iter().any(Value::is_object))
+    {
+        return false;
     }
-    find_anchor(root, fragment)
+    if map
+        .get("allOf")
+        .and_then(Value::as_array)
+        .is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| !schema_can_validate_object(root, schema, &mut refs.clone()))
+        })
+        || ["anyOf", "oneOf"].into_iter().any(|keyword| {
+            map.get(keyword)
+                .and_then(Value::as_array)
+                .is_some_and(|schemas| {
+                    !schemas
+                        .iter()
+                        .any(|schema| schema_can_validate_object(root, schema, &mut refs.clone()))
+                })
+        })
+    {
+        return false;
+    }
+    for keyword in ["$ref", "$dynamicRef"] {
+        if let Some(reference) = map.get(keyword).and_then(Value::as_str) {
+            if !refs.insert(reference.to_owned()) {
+                continue;
+            }
+            if let Some((referenced, _)) = resolve_local_schema(root, reference) {
+                return schema_can_validate_object(root, referenced, refs);
+            }
+        }
+    }
+    true
 }
 
-fn find_anchor<'a>(value: &'a Value, anchor: &str) -> Option<&'a Value> {
+fn resolve_local_schema<'a>(root: &'a Value, reference: &str) -> Option<(&'a Value, String)> {
+    let fragment = reference.strip_prefix('#')?;
+    if fragment.is_empty() || fragment.starts_with('/') {
+        return root
+            .pointer(fragment)
+            .map(|schema| (schema, fragment.to_owned()));
+    }
+    find_anchor(root, fragment, "")
+}
+
+fn find_anchor<'a>(value: &'a Value, anchor: &str, path: &str) -> Option<(&'a Value, String)> {
     match value {
         Value::Object(map) => {
             if ["$anchor", "$dynamicAnchor"]
                 .into_iter()
                 .any(|keyword| map.get(keyword).and_then(Value::as_str) == Some(anchor))
             {
-                return Some(value);
+                return Some((value, path.to_owned()));
             }
-            map.values().find_map(|value| find_anchor(value, anchor))
+            map.iter()
+                .find_map(|(key, value)| find_anchor(value, anchor, &child_path(path, key)))
         }
-        Value::Array(values) => values.iter().find_map(|value| find_anchor(value, anchor)),
+        Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| find_anchor(value, anchor, &format!("{path}/{index}"))),
         _ => None,
     }
 }
@@ -336,5 +452,110 @@ fn schema_error(
         schema: schema.into(),
         path: path.into(),
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    use super::*;
+
+    #[test]
+    fn additive_wire_profile_rejects_field_sensitive_object_schemas() {
+        let cases = [
+            (
+                json!({"additionalProperties": false}),
+                "/additionalProperties",
+            ),
+            (
+                json!({"additionalProperties": {"type": "string"}}),
+                "/additionalProperties",
+            ),
+            (
+                json!({"unevaluatedProperties": false}),
+                "/unevaluatedProperties",
+            ),
+            (
+                json!({"unevaluatedProperties": {"type": "string"}}),
+                "/unevaluatedProperties",
+            ),
+            (json!({"maxProperties": 1}), "/maxProperties"),
+            (json!({"propertyNames": true}), "/propertyNames"),
+            (
+                json!({"patternProperties": {"^x": true}}),
+                "/patternProperties",
+            ),
+            (
+                json!({"dependentRequired": {"x": ["y"]}}),
+                "/dependentRequired",
+            ),
+            (
+                json!({"dependentSchemas": {"x": true}}),
+                "/dependentSchemas",
+            ),
+            (json!({"dependencies": {"x": ["y"]}}), "/dependencies"),
+            (json!({"not": {"required": ["x"]}}), "/not"),
+            (json!({"if": {"required": ["x"]}}), "/if"),
+            (json!({"then": {"required": ["x"]}}), "/then"),
+            (json!({"else": {"required": ["x"]}}), "/else"),
+            (json!({"const": {"x": 1}}), "/const"),
+            (json!({"enum": ["ok", {"x": 1}]}), "/enum"),
+            (
+                json!({"properties": {"a/b~c": {"additionalProperties": false}}}),
+                "/properties/a~1b~0c/additionalProperties",
+            ),
+            (
+                json!({"items": {"additionalProperties": false}}),
+                "/items/additionalProperties",
+            ),
+            (
+                json!({"prefixItems": [{"additionalProperties": false}]}),
+                "/prefixItems/0/additionalProperties",
+            ),
+            (
+                json!({"contains": {"additionalProperties": false}}),
+                "/contains/additionalProperties",
+            ),
+            (
+                json!({"allOf": [{"additionalProperties": false}]}),
+                "/allOf/0/additionalProperties",
+            ),
+            (
+                json!({"anyOf": [{"type": "string"}, {"additionalProperties": false}]}),
+                "/anyOf/1/additionalProperties",
+            ),
+            (
+                json!({"oneOf": [{"type": "string"}, {"additionalProperties": false}]}),
+                "/oneOf/1/additionalProperties",
+            ),
+            (
+                json!({"$defs": {"closed": {"$anchor": "closed", "additionalProperties": false}}, "$ref": "#closed"}),
+                "/$defs/closed/additionalProperties",
+            ),
+        ];
+
+        for (schema, expected_path) in cases {
+            let error = validate_wire_schema_additive("Payload", &schema).unwrap_err();
+            let ProtocolError::SchemaProfile { schema, path, .. } = error else {
+                panic!("expected schema profile error")
+            };
+            assert_eq!(schema, "Payload");
+            assert_eq!(path, expected_path);
+        }
+    }
+
+    #[test]
+    fn additive_wire_profile_preserves_scalar_constraints_and_open_objects() {
+        for schema in [
+            json!({"type": "string", "const": "fixed"}),
+            json!({"type": "string", "enum": ["a", "b"]}),
+            json!({"type": "object"}),
+            json!({"type": "object", "additionalProperties": true}),
+            json!({"type": "object", "unevaluatedProperties": true}),
+            Value::Bool(true),
+        ] {
+            validate_wire_schema_additive("Payload", &schema).unwrap();
+        }
     }
 }

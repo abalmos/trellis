@@ -1689,6 +1689,65 @@
       }
     },
     {
+      "name": "reachable-closed-job-payload-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "closed-worker",
+        "displayName": "Closed Worker",
+        "description": "Uses a closed job payload.",
+        "kind": "service",
+        "schemas": {
+          "Payload": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" } }
+        }
+      }
+    },
+    {
+      "name": "unused-private-closed-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "private-schema-worker",
+        "displayName": "Private Schema Worker",
+        "description": "Keeps an unused private schema closed.",
+        "kind": "service",
+        "schemas": {
+          "Private": { "type": "object", "additionalProperties": false }
+        }
+      }
+    },
+    {
+      "name": "wire-schema-scalar-constraints-and-explicit-open-objects",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Exercises valid additive schemas.",
+        "kind": "service",
+        "schemas": {
+          "Payload": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "mode": { "type": "string", "enum": ["a", "b"] },
+              "fixed": { "type": "string", "const": "fixed" },
+              "nested": { "type": "object", "unevaluatedProperties": true }
+            }
+          }
+        },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" } }
+        }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

@@ -13,7 +13,7 @@ use crate::{
     },
     schema_profile::{
         lint_participant_authoring, validate_embedded_schema,
-        validate_participant_runtime_structure,
+        validate_participant_runtime_structure, validate_wire_schema_additive,
     },
     ProtocolError,
 };
@@ -261,6 +261,35 @@ impl ParticipantArtifactV1 {
             if let Some(docs) = &resource.docs {
                 validate_docs(&format!("{path}/docs"), docs)?;
             }
+        }
+
+        let mut wire_schemas = BTreeSet::new();
+        for state in wire.state.values() {
+            wire_schemas.insert(&state.schema.schema);
+            wire_schemas.extend(
+                state
+                    .accepted_versions
+                    .values()
+                    .map(|reference| &reference.schema),
+            );
+        }
+        for queue in wire.job_queues.values() {
+            wire_schemas.insert(&queue.payload.schema);
+            wire_schemas.extend(
+                [queue.update.as_ref(), queue.result.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|reference| &reference.schema),
+            );
+        }
+        wire_schemas.extend(
+            wire.resources
+                .kv
+                .values()
+                .map(|resource| &resource.schema.schema),
+        );
+        for name in wire_schemas {
+            validate_wire_schema_additive(name, &wire.schemas[name])?;
         }
 
         for (alias, implemented) in &wire.implements {
@@ -1193,6 +1222,52 @@ mod tests {
             }),
             "/jobQueues/ queue",
         );
+    }
+
+    #[test]
+    fn every_participant_wire_schema_reference_requires_additive_objects() {
+        let base = json!({
+            "format": PARTICIPANT_FORMAT_V1,
+            "id": "example-worker",
+            "displayName": "Example Worker",
+            "description": "Example participant.",
+            "kind": "service",
+            "schemas": {
+                "State": true, "StateV1": true, "Payload": true,
+                "Update": true, "Result": true, "KvValue": true,
+                "UnusedPrivate": { "type": "object", "additionalProperties": false }
+            },
+            "state": {
+                "settings": {
+                    "kind": "value", "schema": { "schema": "State" },
+                    "acceptedVersions": { "v1": { "schema": "StateV1" } }
+                }
+            },
+            "jobQueues": {
+                "work": {
+                    "payload": { "schema": "Payload" }, "update": { "schema": "Update" },
+                    "result": { "schema": "Result" }
+                }
+            },
+            "resources": {
+                "kv": {
+                    "cache": { "purpose": "Cache values.", "schema": { "schema": "KvValue" } }
+                }
+            }
+        });
+        assert!(parse_participant_v1(&base).is_ok());
+
+        for name in ["State", "StateV1", "Payload", "Update", "Result", "KvValue"] {
+            let mut value = base.clone();
+            value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
+            assert!(
+                matches!(
+                    parse_participant_v1(&value),
+                    Err(ProtocolError::SchemaProfile { .. })
+                ),
+                "wire schema reference {name}"
+            );
+        }
     }
 
     #[test]

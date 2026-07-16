@@ -1664,6 +1664,29 @@
       }
     },
     {
+      "name": "wire-schema-scalar-constraints-and-explicit-open-objects",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Exercises valid additive schemas.",
+        "schemas": {
+          "ScalarConst": { "type": "string", "const": "fixed" },
+          "ScalarEnum": { "type": "string", "enum": ["a", "b"] },
+          "Open": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "nested": { "type": "object", "unevaluatedProperties": true }
+            }
+          }
+        },
+        "exports": { "schemas": ["ScalarConst", "ScalarEnum", "Open"] }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

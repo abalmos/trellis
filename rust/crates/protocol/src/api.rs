@@ -12,7 +12,7 @@ use crate::{
     },
     schema_profile::{
         lint_api_authoring, validate_api_runtime_structure, validate_embedded_schema,
-        validate_public_schema,
+        validate_wire_schema_additive,
     },
     subjects::{
         derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
@@ -392,7 +392,7 @@ impl ApiArtifactV1 {
             );
         }
         for name in public_schemas {
-            validate_public_schema(name, &wire.schemas[name])?;
+            validate_wire_schema_additive(name, &wire.schemas[name])?;
         }
 
         for (capability_name, capability) in &wire.capabilities {
@@ -1016,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn public_schemas_reject_closed_object_keywords() {
+    fn wire_schemas_reject_closed_object_keywords() {
         for schema in [
             json!({ "type": "object", "additionalProperties": false }),
             json!({ "type": "object", "additionalProperties": { "type": "string" } }),
@@ -1070,6 +1070,83 @@ mod tests {
             }
         });
         assert!(parse_api_v1(&private).is_ok());
+    }
+
+    #[test]
+    fn every_api_wire_schema_reference_requires_additive_objects() {
+        let base = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": {
+                "Export": true, "RpcInput": true, "RpcOutput": true, "RpcError": true,
+                "OpInput": true, "OpProgress": true, "OpUpdate": true, "OpOutput": true,
+                "OpSignal": true, "OpError": true, "Event": true, "FeedInput": true,
+                "FeedEvent": true, "State": true, "StateV1": true
+            },
+            "exports": { "schemas": ["Export"] },
+            "errors": {
+                "RpcFailure": { "schema": { "schema": "RpcError" } },
+                "OpFailure": { "schema": { "schema": "OpError" } }
+            },
+            "rpc": {
+                "Example.Get": {
+                    "version": "v1", "input": { "schema": "RpcInput" },
+                    "output": { "schema": "RpcOutput" }, "errors": ["RpcFailure"]
+                }
+            },
+            "operations": {
+                "Example.Run": {
+                    "version": "v1", "input": { "schema": "OpInput" },
+                    "progress": { "schema": "OpProgress" }, "update": { "schema": "OpUpdate" },
+                    "output": { "schema": "OpOutput" }, "errors": ["OpFailure"],
+                    "signals": { "approve": { "input": { "schema": "OpSignal" } } }
+                }
+            },
+            "events": { "Example.Changed": { "version": "v1", "event": { "schema": "Event" } } },
+            "feeds": {
+                "Example.Watch": {
+                    "version": "v1", "input": { "schema": "FeedInput" },
+                    "event": { "schema": "FeedEvent" }
+                }
+            },
+            "state": {
+                "Settings": {
+                    "kind": "value", "schema": { "schema": "State" },
+                    "acceptedVersions": { "v1": { "schema": "StateV1" } }
+                }
+            }
+        });
+        assert!(parse_api_v1(&base).is_ok());
+
+        for name in [
+            "Export",
+            "RpcInput",
+            "RpcOutput",
+            "RpcError",
+            "OpInput",
+            "OpProgress",
+            "OpUpdate",
+            "OpOutput",
+            "OpSignal",
+            "OpError",
+            "Event",
+            "FeedInput",
+            "FeedEvent",
+            "State",
+            "StateV1",
+        ] {
+            let mut value = base.clone();
+            value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
+            assert!(
+                matches!(
+                    parse_api_v1(&value),
+                    Err(ProtocolError::SchemaProfile { .. })
+                ),
+                "wire schema reference {name}"
+            );
+        }
     }
 
     #[test]
