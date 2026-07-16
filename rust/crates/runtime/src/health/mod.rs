@@ -26,7 +26,7 @@ use trellis_rs::service::{
 };
 use ulid::Ulid;
 
-use crate::leases::{LeaseError, LeaseKey, LeaseManager};
+use crate::ownership::OwnerGroup;
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::SubsystemName;
@@ -91,13 +91,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .map_err(|error| RuntimeError::Health(error.to_string()))?;
     let jetstream = jetstream::new(context.trellis_nats.clone());
     ensure_health_stream(context, &jetstream).await?;
-    let leases = LeaseManager::open(
-        jetstream.clone(),
-        &context.config.resolve_leases()?,
-        context.owner_id.clone(),
-    )
-    .await
-    .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let owner = context.owner(OwnerGroup::Health)?;
     let invalidation_subject = format!("{INVALIDATION_PREFIX}.{projection_id}");
     let (invalidation_tx, _) = broadcast::channel(256);
     let router = build_router(store.clone(), invalidation_tx.clone());
@@ -122,7 +116,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         let owner_loop = run_owner(
             nats.clone(),
             jetstream,
-            leases,
+            owner,
             store,
             projection_id,
             invalidation_subject,
@@ -142,7 +136,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             result = &mut invalidation_loop => result,
             result = &mut owner_loop => result,
             result = &mut api_loop => result.map_err(|error| RuntimeError::Health(error.to_string())),
-            () = wait_for_stop(task_stop) => Ok(()),
+            () = task_stop.stopped() => Ok(()),
         }
     });
 
@@ -314,7 +308,7 @@ async fn run_invalidation_subscriber(
 async fn run_owner(
     nats: async_nats::Client,
     jetstream: jetstream::Context,
-    leases: LeaseManager,
+    owner: crate::ownership::OwnerContext,
     store: HealthStore,
     projection_id: String,
     invalidation_subject: String,
@@ -322,81 +316,63 @@ async fn run_owner(
     event_auth: Arc<SessionAuth>,
     stop: StopHandle,
 ) -> Result<(), RuntimeError> {
-    let lease_key = LeaseKey::new(format!("health.owner.{projection_id}"));
-    while !stop.is_stopped() {
-        let mut guard = match leases.acquire(lease_key.clone()).await {
-            Ok(guard) => guard,
-            Err(LeaseError::Held { .. }) => {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-            Err(error) => return Err(RuntimeError::Health(error.to_string())),
-        };
-        let stream = jetstream
-            .get_stream(HEALTH_STREAM)
-            .await
-            .map_err(|error| RuntimeError::Health(error.to_string()))?;
-        let durable = format!("health-projector-{projection_id}").to_lowercase();
-        let consumer = stream
-            .get_or_create_consumer(
-                &durable,
-                consumer::pull::Config {
-                    durable_name: Some(durable.clone()),
-                    filter_subject: HEALTH_SUBJECT.to_string(),
-                    ack_policy: consumer::AckPolicy::Explicit,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|error| RuntimeError::Health(error.to_string()))?;
-        let mut messages = consumer
-            .messages()
-            .await
-            .map_err(|error| RuntimeError::Health(error.to_string()))?;
-        let mut deadlines = tokio::time::interval(Duration::from_secs(1));
-        let mut outbox = tokio::time::interval(Duration::from_millis(250));
-        let mut retention = tokio::time::interval(Duration::from_secs(60 * 60));
-        let mut renew = tokio::time::interval(leases.renew);
-        let mut stop_poll = tokio::time::interval(Duration::from_millis(100));
+    tracing::debug!(
+        owner_group = ?owner.group,
+        lease_key = owner.key.as_str(),
+        fence = owner.fence.acquisition_revision(),
+        "starting health owner loop"
+    );
+    let stream = jetstream
+        .get_stream(HEALTH_STREAM)
+        .await
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let durable = format!("health-projector-{projection_id}").to_lowercase();
+    let consumer = stream
+        .get_or_create_consumer(
+            &durable,
+            consumer::pull::Config {
+                durable_name: Some(durable.clone()),
+                filter_subject: HEALTH_SUBJECT.to_string(),
+                ack_policy: consumer::AckPolicy::Explicit,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let mut messages = consumer
+        .messages()
+        .await
+        .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    let mut deadlines = tokio::time::interval(Duration::from_secs(1));
+    let mut outbox = tokio::time::interval(Duration::from_millis(250));
+    let mut retention = tokio::time::interval(Duration::from_secs(60 * 60));
 
-        loop {
-            tokio::select! {
-                message = messages.next() => {
-                    let Some(message) = message else {
-                        return Err(RuntimeError::Health("health projector consumer ended".to_string()));
-                    };
-                    let message = message.map_err(|error| RuntimeError::Health(error.to_string()))?;
-                    project_message(&nats, &store, &invalidation_subject, message).await?;
-                }
-                _ = deadlines.tick() => {
-                    if let Some(commit) = store.expire_due(now_ns()).map_err(map_runtime_store_error)? {
-                        publish_invalidation(&nats, &invalidation_subject, commit).await?;
-                    }
-                }
-                _ = outbox.tick() => publish_outbox(&nats, &store, &event_auth).await?,
-                _ = retention.tick() => {
-                    let cutoff = now_ns().saturating_sub(
-                        history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
-                    );
-                    if let Some(commit) = store.cleanup(cutoff).map_err(map_runtime_store_error)? {
-                        publish_invalidation(&nats, &invalidation_subject, commit).await?;
-                    }
-                }
-                _ = renew.tick() => {
-                    if leases.renew(&mut guard).await.is_err() {
-                        break;
-                    }
-                }
-                _ = stop_poll.tick() => {
-                    if stop.is_stopped() {
-                        let _ = leases.release(guard).await;
-                        return Ok(());
-                    }
+    loop {
+        tokio::select! {
+            message = messages.next() => {
+                let Some(message) = message else {
+                    return Err(RuntimeError::Health("health projector consumer ended".to_string()));
+                };
+                let message = message.map_err(|error| RuntimeError::Health(error.to_string()))?;
+                project_message(&nats, &store, &invalidation_subject, message).await?;
+            }
+            _ = deadlines.tick() => {
+                if let Some(commit) = store.expire_due(now_ns()).map_err(map_runtime_store_error)? {
+                    publish_invalidation(&nats, &invalidation_subject, commit).await?;
                 }
             }
+            _ = outbox.tick() => publish_outbox(&nats, &store, &event_auth).await?,
+            _ = retention.tick() => {
+                let cutoff = now_ns().saturating_sub(
+                    history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
+                );
+                if let Some(commit) = store.cleanup(cutoff).map_err(map_runtime_store_error)? {
+                    publish_invalidation(&nats, &invalidation_subject, commit).await?;
+                }
+            }
+            () = stop.stopped() => return Ok(()),
         }
     }
-    Ok(())
 }
 
 async fn project_message(
@@ -673,12 +649,6 @@ fn map_runtime_store_error(error: store::HealthStoreError) -> RuntimeError {
 
 fn now_ns() -> i64 {
     i64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()).unwrap_or(i64::MAX)
-}
-
-async fn wait_for_stop(stop: StopHandle) {
-    while !stop.is_stopped() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
 }
 
 #[cfg(test)]

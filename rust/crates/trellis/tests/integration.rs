@@ -30,6 +30,9 @@ mod jobs;
 #[path = "integration/health.rs"]
 mod health;
 
+#[path = "integration/runtime_ownership.rs"]
+mod runtime_ownership;
+
 #[path = "integration/authority_plan.rs"]
 mod authority_plan;
 

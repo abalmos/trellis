@@ -25,6 +25,8 @@ pub mod jobs;
 /// NATS-backed lease primitives.
 pub mod leases;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
+mod ownership;
+#[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Platform subsystem scaffold and bootstrap services.
 pub mod platform;
 #[cfg(feature = "sqlite-storage")]

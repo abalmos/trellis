@@ -6,19 +6,16 @@ pub mod bootstrap;
 pub mod catalog;
 pub mod state;
 
-use std::time::Duration;
-
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::SubsystemName;
 
-pub(crate) fn start(_context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
+pub(crate) fn start(context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
+    let _owner = context.owner(crate::ownership::OwnerGroup::Platform)?;
     let stop = StopHandle::new();
     let task_stop = stop.clone();
     let join = tokio::spawn(async move {
-        while !task_stop.is_stopped() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        task_stop.stopped().await;
         Ok(())
     });
 

@@ -1,11 +1,14 @@
 #![cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use thiserror::Error;
 use tokio::task::JoinHandle;
 use ulid::Ulid;
 
+use crate::leases::{LeaseError, LeaseKey};
+use crate::ownership::{OwnerContext, OwnerGroup, RuntimeOwnership};
 use crate::shutdown::StopHandle;
 use crate::storage::{RuntimeStores, StoreError};
 use crate::{
@@ -36,6 +39,92 @@ pub enum RuntimeError {
     /// Runtime NATS connection failed.
     #[error("runtime NATS connection failed: {0}")]
     Nats(String),
+    /// The runtime lease KV bucket could not be opened or created.
+    #[error("failed to open runtime lease bucket for owner {owner_id}: {source}")]
+    LeaseBucketOpen {
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Low-level lease failure.
+        #[source]
+        source: LeaseError,
+    },
+    /// A selected singleton owner lease is already held.
+    #[error("runtime owner lease {key:?} for {subsystem} is already held; owner {owner_id} cannot start: {source}")]
+    OwnerHeld {
+        /// Selected subsystem owner group.
+        subsystem: SubsystemName,
+        /// Stable owner lease key.
+        key: LeaseKey,
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Low-level held error.
+        #[source]
+        source: LeaseError,
+    },
+    /// A selected singleton owner lease could not be acquired.
+    #[error(
+        "failed to acquire runtime owner lease {key:?} for {subsystem} as {owner_id}: {source}"
+    )]
+    OwnerAcquire {
+        /// Selected subsystem owner group.
+        subsystem: SubsystemName,
+        /// Stable owner lease key.
+        key: LeaseKey,
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Low-level lease failure.
+        #[source]
+        source: LeaseError,
+    },
+    /// A held owner lease was lost or could not be renewed.
+    #[error("runtime owner lease {key:?} for {subsystem} was lost by {owner_id}: {source}")]
+    OwnerRenewal {
+        /// Selected subsystem owner group.
+        subsystem: SubsystemName,
+        /// Stable owner lease key.
+        key: LeaseKey,
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Low-level lease failure.
+        #[source]
+        source: LeaseError,
+    },
+    /// The critical owner renewal task exited without a stop request.
+    #[error("runtime owner renewal task exited unexpectedly for {owner_id}")]
+    OwnerRenewalTaskExited {
+        /// Process-unique owner identity.
+        owner_id: String,
+    },
+    /// The critical owner renewal task panicked or was cancelled.
+    #[error("runtime owner renewal task failed for {owner_id}: {source}")]
+    OwnerRenewalTaskFailed {
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Tokio task join failure.
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    /// A held owner lease could not be released safely.
+    #[error(
+        "failed to release runtime owner lease {key:?} for {subsystem} as {owner_id}: {source}"
+    )]
+    OwnerRelease {
+        /// Selected subsystem owner group.
+        subsystem: SubsystemName,
+        /// Stable owner lease key.
+        key: LeaseKey,
+        /// Process-unique owner identity.
+        owner_id: String,
+        /// Low-level lease failure.
+        #[source]
+        source: LeaseError,
+    },
+    /// A selected subsystem was not given its acquired owner context.
+    #[error("runtime owner context is missing for {subsystem}")]
+    OwnerContextMissing {
+        /// Selected subsystem owner group.
+        subsystem: SubsystemName,
+    },
     /// Health subsystem setup or runtime failed.
     #[error("health subsystem failed: {0}")]
     Health(String),
@@ -75,8 +164,19 @@ pub(crate) struct RuntimeContext {
     pub(crate) stores: RuntimeStores,
     /// Trellis-account runtime NATS client shared by built-in subsystems.
     pub(crate) trellis_nats: async_nats::Client,
-    /// Process-unique owner identity used for runtime leases.
-    pub(crate) owner_id: String,
+    /// Fixed owner contexts for selected runtime subsystems.
+    owners: BTreeMap<OwnerGroup, OwnerContext>,
+}
+
+impl RuntimeContext {
+    pub(crate) fn owner(&self, group: OwnerGroup) -> Result<OwnerContext, RuntimeError> {
+        self.owners
+            .get(&group)
+            .cloned()
+            .ok_or(RuntimeError::OwnerContextMissing {
+                subsystem: group.subsystem(),
+            })
+    }
 }
 
 /// Handle for a started subsystem scaffold.
@@ -94,9 +194,8 @@ pub(crate) struct SubsystemHandle {
 pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     let config = RuntimeConfig::load_from_path(&options.config_path)?;
     config.validate_for_mode(options.mode)?;
-    let stores = RuntimeStores::from_config(&config, options.mode)?;
-    stores.migrate_all()?;
     let nats = config.resolve_nats_runtime()?;
+    let leases = config.resolve_leases()?;
     let trellis_nats = async_nats::ConnectOptions::new()
         .credentials_file(&nats.trellis_creds_path)
         .await
@@ -109,41 +208,84 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
         config.instance_name.as_deref().unwrap_or("trellis-runtime"),
         Ulid::new()
     );
+    let mut ownership =
+        RuntimeOwnership::acquire(trellis_nats.clone(), &leases, owner_id, options.mode).await?;
+    let result = run_owned(config, options.mode, trellis_nats.clone(), &mut ownership).await;
+    let release_result = ownership.shutdown().await;
+    if let Err(error) = trellis_nats.flush().await {
+        tracing::warn!(error = %error, "failed to flush runtime NATS client during shutdown");
+    }
+    match (result, release_result) {
+        (Err(primary), Err(release)) => {
+            tracing::error!(error = %release, "runtime ownership shutdown also failed");
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), Err(release)) => Err(release),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
 
+async fn run_owned(
+    config: RuntimeConfig,
+    mode: RuntimeMode,
+    trellis_nats: async_nats::Client,
+    ownership: &mut RuntimeOwnership,
+) -> Result<(), RuntimeError> {
+    let stores = RuntimeStores::from_config(&config, mode)?;
+    stores.migrate_all()?;
     let context = RuntimeContext {
         config,
-        mode: options.mode,
+        mode,
         stores,
         trellis_nats,
-        owner_id,
+        owners: ownership.contexts(),
     };
     let mut handles = start_subsystems(&context).await?;
-    let server = crate::run_http_server(
-        &context.config,
-        context.mode,
-        crate::shutdown::shutdown_signal(),
-    );
+    let root_stop = StopHandle::new();
+    let server_stop = root_stop.clone();
+    let server = crate::run_http_server(&context.config, context.mode, async move {
+        tokio::select! {
+            () = crate::shutdown::shutdown_signal() => {}
+            () = server_stop.stopped() => {}
+        }
+    });
     tokio::pin!(server);
-
-    tokio::select! {
+    let (primary, server_finished) = tokio::select! {
         server_result = &mut server => {
-            stop_subsystems(handles).await?;
-            server_result?;
-            Ok(())
+            (server_result.map_err(RuntimeError::from), true)
         }
         (index, task_result) = wait_for_subsystem(&mut handles), if !handles.is_empty() => {
             let failed = handles.swap_remove(index);
-            stop_subsystems(handles).await?;
-            match task_result {
+            let result = match task_result {
                 Ok(Ok(())) => Err(RuntimeError::SubsystemExited { subsystem: failed.name }),
                 Ok(Err(error)) => Err(error),
                 Err(source) => Err(RuntimeError::SubsystemTask {
                     subsystem: failed.name,
                     source,
                 }),
-            }
+            };
+            (result, false)
+        }
+        renewal_error = ownership.wait_for_renewal_failure() => {
+            (Err(renewal_error), false)
+        }
+    };
+
+    root_stop.stop();
+    if !server_finished {
+        if let Err(error) = (&mut server).await {
+            tracing::error!(error = %error, "runtime HTTP shutdown also failed");
         }
     }
+    if let Err(error) = stop_subsystems(handles).await {
+        if primary.is_err() {
+            tracing::error!(error = %error, "runtime subsystem shutdown also failed");
+        } else {
+            return Err(error);
+        }
+    }
+    primary
 }
 
 async fn wait_for_subsystem(
@@ -179,13 +321,22 @@ async fn stop_subsystems(handles: Vec<SubsystemHandle>) -> Result<(), RuntimeErr
 async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandle>, RuntimeError> {
     let mut handles = Vec::new();
     for subsystem in context.mode.subsystems() {
-        let handle = match subsystem {
-            SubsystemName::Platform => platform::start(context)?,
-            SubsystemName::Jobs => jobs::start(context)?,
-            SubsystemName::Health => health::start(context).await?,
-            SubsystemName::Eventlog => eventlog::start(context)?,
+        let result = match subsystem {
+            SubsystemName::Platform => platform::start(context),
+            SubsystemName::Jobs => jobs::start(context),
+            SubsystemName::Health => health::start(context).await,
+            SubsystemName::Eventlog => eventlog::start(context),
         };
-        handles.push(handle);
+        match result {
+            Ok(handle) => handles.push(handle),
+            Err(primary) => {
+                handles.reverse();
+                if let Err(cleanup) = stop_subsystems(handles).await {
+                    tracing::error!(error = %cleanup, "started subsystem cleanup also failed");
+                }
+                return Err(primary);
+            }
+        }
     }
     Ok(handles)
 }
