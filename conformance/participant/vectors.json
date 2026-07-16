@@ -106,7 +106,7 @@
                 "invoke": ["Billing.Refund"],
                 "observe": ["Billing.Refund"],
                 "cancel": ["Billing.Refund"],
-                "control": ["Billing.Refund"]
+                "control": { "Billing.Refund": ["approve"] }
               },
               "events": {
                 "publish": ["Billing.RefundRequested"],
@@ -243,7 +243,7 @@
                 "invoke": ["Billing.Refund"],
                 "observe": ["Billing.Refund"],
                 "cancel": ["Billing.Refund"],
-                "control": ["Billing.Refund"]
+                "control": { "Billing.Refund": ["approve"] }
               },
               "events": {
                 "publish": ["Billing.RefundRequested"],
@@ -322,7 +322,7 @@
           }
         }
       },
-      "digest": "TnzhycMCqE5L8a4yGoD7gLrtPtnpiX_abBJZZNciCNk"
+      "digest": "3LeLUHjR05DOJLQdEepgMZdfdWJRa7edI_DhMtMb8PA"
     },
     {
       "name": "multiline-human-documentation",
@@ -1202,7 +1202,7 @@
     {
       "name": "flat-uses",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-app",
@@ -1215,6 +1215,13 @@
             "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
           }
         }
+      },
+      "normalized": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Flat uses.",
+        "kind": "app"
       }
     },
     {
@@ -1506,7 +1513,7 @@
     {
       "name": "operation-transfer-authored-direction",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1554,7 +1561,7 @@
     {
       "name": "api-owned-top-level-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1567,7 +1574,7 @@
     {
       "name": "old-jobs-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1598,20 +1605,22 @@
     {
       "name": "unknown-top-level-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
-        "id": "invalid-worker",
-        "displayName": "Invalid Worker",
-        "description": "Unknown field.",
-        "kind": "service",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "app",
         "extra": true
-      }
+      },
+      "sameNormalizedAs": "minimal-app",
+      "sameDigestAs": "minimal-app"
     },
     {
       "name": "unknown-nested-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1622,6 +1631,16 @@
           "store": {
             "uploads": { "purpose": "Uploads.", "subject": "STORE.uploads" }
           }
+        }
+      },
+      "normalized": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Unknown field.",
+        "kind": "service",
+        "resources": {
+          "store": { "uploads": { "purpose": "Uploads." } }
         }
       }
     },

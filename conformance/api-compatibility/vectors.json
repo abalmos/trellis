@@ -138,7 +138,7 @@
       ]
     },
     {
-      "name": "rpc-input-optional-field-addition-open",
+      "name": "rpc-input-candidate-constrains-formerly-arbitrary-property",
       "previous": {
         "format": "trellis.api.v1",
         "id": "example@v1",
@@ -184,8 +184,10 @@
           }
         }
       },
-      "compatible": true,
-      "issues": []
+      "compatible": false,
+      "issues": [
+        { "code": "schema-incompatible", "path": "/rpc/Example.Get/input" }
+      ]
     },
     {
       "name": "rpc-input-required-field-addition",
@@ -344,7 +346,7 @@
             "type": "object",
             "properties": { "id": { "type": "string" } },
             "required": ["id"],
-            "additionalProperties": false
+            "additionalProperties": true
           }
         },
         "rpc": {
@@ -369,7 +371,7 @@
               "note": { "type": "string" }
             },
             "required": ["id"],
-            "additionalProperties": false
+            "additionalProperties": true
           }
         },
         "rpc": {
@@ -380,10 +382,8 @@
           }
         }
       },
-      "compatible": false,
-      "issues": [
-        { "code": "schema-incompatible", "path": "/rpc/Example.Get/output" }
-      ]
+      "compatible": true,
+      "issues": []
     },
     {
       "name": "rpc-output-required-field-removal",
@@ -966,6 +966,77 @@
       "issues": [{ "code": "capability-changed", "path": "/capabilities/read" }]
     },
     {
+      "name": "operation-signal-capability-target-change",
+      "previous": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": { "Any": true },
+        "operations": {
+          "Example.Run": {
+            "version": "v1",
+            "input": { "schema": "Any" },
+            "signals": {
+              "approve": { "input": { "schema": "Any" } },
+              "reject": { "input": { "schema": "Any" } }
+            }
+          }
+        },
+        "capabilities": {
+          "control": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "operationSignal",
+                  "api": "example@v1",
+                  "operation": "Example.Run",
+                  "signal": "approve"
+                },
+                "action": "control"
+              }
+            ]
+          }
+        }
+      },
+      "candidate": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": { "Any": true },
+        "operations": {
+          "Example.Run": {
+            "version": "v1",
+            "input": { "schema": "Any" },
+            "signals": {
+              "approve": { "input": { "schema": "Any" } },
+              "reject": { "input": { "schema": "Any" } }
+            }
+          }
+        },
+        "capabilities": {
+          "control": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "operationSignal",
+                  "api": "example@v1",
+                  "operation": "Example.Run",
+                  "signal": "reject"
+                },
+                "action": "control"
+              }
+            ]
+          }
+        }
+      },
+      "compatible": false,
+      "issues": [
+        { "code": "capability-changed", "path": "/capabilities/control" }
+      ]
+    },
+    {
       "name": "new-capability",
       "previous": {
         "format": "trellis.api.v1",
@@ -982,6 +1053,91 @@
       },
       "compatible": true,
       "issues": []
+    },
+    {
+      "name": "rpc-output-candidate-leaves-former-property-arbitrary",
+      "previous": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": {
+          "Input": true,
+          "Output": {
+            "type": "object",
+            "properties": { "id": { "type": "string" } }
+          }
+        },
+        "rpc": {
+          "Example.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "candidate": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": {
+          "Input": true,
+          "Output": { "type": "object" }
+        },
+        "rpc": {
+          "Example.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "compatible": false,
+      "issues": [
+        { "code": "schema-incompatible", "path": "/rpc/Example.Get/output" }
+      ]
+    },
+    {
+      "name": "const-enum-empty-intersection",
+      "previous": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": {
+          "Input": { "const": "a", "enum": ["b"] },
+          "Output": true
+        },
+        "rpc": {
+          "Example.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "candidate": {
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": {
+          "Input": { "enum": ["a", "b"] },
+          "Output": true
+        },
+        "rpc": {
+          "Example.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "compatible": false,
+      "issues": [
+        { "code": "schema-relation-unknown", "path": "/rpc/Example.Get/input" }
+      ]
     },
     {
       "name": "api-id-mismatch",

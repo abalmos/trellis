@@ -116,7 +116,11 @@
         "invoke": { "$ref": "#/$defs/nameList" },
         "observe": { "$ref": "#/$defs/nameList" },
         "cancel": { "$ref": "#/$defs/nameList" },
-        "control": { "$ref": "#/$defs/nameList" }
+        "control": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/logicalName" },
+          "additionalProperties": { "$ref": "#/$defs/nameList" }
+        }
       }
     },
     "eventUses": {

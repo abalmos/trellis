@@ -11,16 +11,28 @@ use crate::{
         participant_error, sort_deduplicate, validate_api_id, validate_logical_name,
         validate_nonempty_text, validate_protocol_identifier,
     },
-    schema_profile::{validate_embedded_schema, validate_participant_structure},
+    schema_profile::{
+        lint_participant_authoring, validate_embedded_schema,
+        validate_participant_runtime_structure,
+    },
     ProtocolError,
 };
 
 /// The first canonical Trellis participant artifact format.
 pub const PARTICIPANT_FORMAT_V1: &str = "trellis.participant.v1";
 
-/// Draft 2020-12 meta-schema for `trellis.participant.v1` artifacts.
-pub const PARTICIPANT_SCHEMA_V1_JSON: &str =
+/// Strict Draft 2020-12 schema for authoring `trellis.participant.v1` artifacts.
+pub const PARTICIPANT_AUTHORING_SCHEMA_V1_JSON: &str =
     include_str!("../schemas/trellis.participant.v1.schema.json");
+
+/// Apply the strict, closed authoring lint to a participant artifact.
+///
+/// Runtime parsing is intentionally tolerant of unknown object members; use
+/// this lint in authoring tools when extensions should be reported.
+pub fn lint_participant_v1_authoring(value: &Value) -> Result<(), ProtocolError> {
+    lint_participant_authoring(value)?;
+    parse_participant_v1(value).map(|_| ())
+}
 
 /// A user-authored participant kind.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -64,8 +76,11 @@ pub struct ParticipantArtifactV1 {
 }
 
 /// Validate and parse one raw `trellis.participant.v1` JSON value.
+///
+/// Unknown object members are ignored and do not affect normalization or the
+/// semantic digest.
 pub fn parse_participant_v1(value: &Value) -> Result<ParticipantArtifactV1, ProtocolError> {
-    validate_participant_structure(value)?;
+    validate_participant_runtime_structure(value)?;
     let wire: WireParticipantArtifactV1 = serde_json::from_value(value.clone())
         .map_err(|error| participant_error("", error.to_string()))?;
     ParticipantArtifactV1::from_wire(wire)
@@ -179,10 +194,10 @@ impl ParticipantArtifactV1 {
         }
 
         for (alias, used) in &mut wire.uses.required {
-            normalize_used_api(&member_path("uses/required", alias), used)?;
+            normalize_used_api("required", alias, used)?;
         }
         for (alias, used) in &mut wire.uses.optional {
-            normalize_used_api(&member_path("uses/optional", alias), used)?;
+            normalize_used_api("optional", alias, used)?;
         }
 
         for (name, state) in &wire.state {
@@ -358,7 +373,7 @@ impl<'de> Deserialize<'de> for ParticipantArtifactV1 {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct WireParticipantArtifactV1 {
     format: String,
     id: String,
@@ -384,7 +399,6 @@ struct WireParticipantArtifactV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct DocumentationV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
@@ -392,13 +406,12 @@ struct DocumentationV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct SchemaReferenceV1 {
     schema: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct ImplementedApiV1 {
     api: String,
     api_digest: String,
@@ -407,7 +420,7 @@ struct ImplementedApiV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct OperationTransferV1 {
     store: String,
     key: String,
@@ -422,7 +435,6 @@ struct OperationTransferV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct UsesV1 {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     required: BTreeMap<String, UsedApiV1>,
@@ -437,7 +449,7 @@ impl UsesV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct UsedApiV1 {
     api: String,
     api_digest: String,
@@ -454,7 +466,6 @@ struct UsedApiV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct RpcUsesV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     call: Vec<String>,
@@ -467,7 +478,6 @@ impl RpcUsesV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct OperationUsesV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     invoke: Vec<String>,
@@ -475,8 +485,8 @@ struct OperationUsesV1 {
     observe: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     cancel: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    control: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    control: BTreeMap<String, Vec<String>>,
 }
 
 impl OperationUsesV1 {
@@ -489,7 +499,6 @@ impl OperationUsesV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct EventUsesV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     publish: Vec<String>,
@@ -504,7 +513,6 @@ impl EventUsesV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct FeedUsesV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     subscribe: Vec<String>,
@@ -517,7 +525,6 @@ impl FeedUsesV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct StateUsesV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     read: Vec<String>,
@@ -539,7 +546,7 @@ enum StateKindV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct ParticipantStateV1 {
     kind: StateKindV1,
     schema: SchemaReferenceV1,
@@ -552,7 +559,7 @@ struct ParticipantStateV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct JobQueueV1 {
     payload: SchemaReferenceV1,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -582,7 +589,7 @@ struct JobQueueV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct KeyConcurrencyV1 {
     key: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -603,7 +610,7 @@ enum StalePolicyV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct QueuePolicyV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     max_queued_per_key: Option<u64>,
@@ -620,7 +627,7 @@ enum WhenFullV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct EventConsumerV1 {
     events: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "is_replay_new")]
@@ -654,7 +661,6 @@ enum OrderingV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct ResourcesV1 {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     kv: BTreeMap<String, KvResourceV1>,
@@ -669,7 +675,7 @@ impl ResourcesV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct KvResourceV1 {
     purpose: String,
     schema: SchemaReferenceV1,
@@ -686,7 +692,7 @@ struct KvResourceV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct StoreResourceV1 {
     purpose: String,
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
@@ -743,13 +749,17 @@ fn validate_api_digest(path: &str, value: &str) -> Result<(), ProtocolError> {
     Ok(())
 }
 
-fn normalize_used_api(path: &str, used: &mut UsedApiV1) -> Result<(), ProtocolError> {
+fn normalize_used_api(
+    requirement: &str,
+    alias: &str,
+    used: &mut UsedApiV1,
+) -> Result<(), ProtocolError> {
+    let path = pointer(["uses", requirement, alias]);
     for (group, values) in [
         ("rpc/call", &mut used.rpc.call),
         ("operations/invoke", &mut used.operations.invoke),
         ("operations/observe", &mut used.operations.observe),
         ("operations/cancel", &mut used.operations.cancel),
-        ("operations/control", &mut used.operations.control),
         ("events/publish", &mut used.events.publish),
         ("events/subscribe", &mut used.events.subscribe),
         ("feeds/subscribe", &mut used.feeds.subscribe),
@@ -761,6 +771,39 @@ fn normalize_used_api(path: &str, used: &mut UsedApiV1) -> Result<(), ProtocolEr
         }
         sort_deduplicate(values);
     }
+    for (operation, signals) in &mut used.operations.control {
+        let operation_path = pointer([
+            "uses",
+            requirement,
+            alias,
+            "operations",
+            "control",
+            operation,
+        ]);
+        validate_logical_name(&operation_path, operation, participant_error)?;
+        for signal in signals.iter() {
+            validate_protocol_identifier(
+                &pointer([
+                    "uses",
+                    requirement,
+                    alias,
+                    "operations",
+                    "control",
+                    operation,
+                    signal,
+                ]),
+                signal,
+                participant_error,
+            )?;
+        }
+        sort_deduplicate(signals);
+        if signals.is_empty() {
+            return Err(participant_error(
+                &operation_path,
+                "must select at least one operation signal",
+            ));
+        }
+    }
     if used.rpc.is_empty()
         && used.operations.is_empty()
         && used.events.is_empty()
@@ -768,7 +811,7 @@ fn normalize_used_api(path: &str, used: &mut UsedApiV1) -> Result<(), ProtocolEr
         && used.state.is_empty()
     {
         return Err(participant_error(
-            path,
+            &path,
             "must select at least one API action",
         ));
     }
@@ -976,7 +1019,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::schema_profile::{validate_participant_meta_schema, validate_participant_structure};
+    use crate::schema_profile::{lint_participant_authoring, validate_participant_meta_schema};
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -1002,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn participant_meta_schema_and_shared_vectors_agree() {
+    fn participant_authoring_schema_and_shared_vectors_agree() {
         validate_participant_meta_schema().unwrap();
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../conformance/participant/vectors.json");
@@ -1012,9 +1055,9 @@ mod tests {
 
         for vector in &fixture.vectors {
             assert_eq!(
-                validate_participant_structure(&vector.input).is_ok(),
+                lint_participant_authoring(&vector.input).is_ok(),
                 vector.schema_valid,
-                "meta-schema result for {}",
+                "authoring lint result for {}",
                 vector.name
             );
             let parsed = parse_participant_v1(&vector.input);
@@ -1185,6 +1228,86 @@ mod tests {
             }),
             "/resources/kv/legacy~0cache/schema",
         );
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Invalid operation selection.",
+                "kind": "app",
+                "uses": {
+                    "required": {
+                        "billing": {
+                            "api": "billing@v1",
+                            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                            "operations": { "control": { "Op/~": [" sig/~"] } }
+                        }
+                    }
+                }
+            }),
+            "/uses/required/billing/operations/control/Op~1~0/ sig~1~0",
+        );
+    }
+
+    #[test]
+    fn operation_signal_selections_sort_and_deduplicate_in_utf16_order() {
+        let value = json!({
+            "format": PARTICIPANT_FORMAT_V1,
+            "id": "example-app",
+            "displayName": "Example",
+            "description": "Example app.",
+            "kind": "app",
+            "uses": {
+                "required": {
+                    "example": {
+                        "api": "example@v1",
+                        "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                        "operations": {
+                            "control": { "Example.Run": ["\u{e000}", "😀", "😀"] }
+                        }
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            parse_participant_v1(&value)
+                .unwrap()
+                .normalized_value()
+                .unwrap()["uses"]["required"]["example"]["operations"]["control"]["Example.Run"],
+            json!(["😀", "\u{e000}"])
+        );
+    }
+
+    #[test]
+    fn runtime_extensions_do_not_change_participant_semantics() {
+        let base = json!({
+            "format": PARTICIPANT_FORMAT_V1,
+            "id": "example-app",
+            "displayName": "Example",
+            "description": "Example app.",
+            "kind": "app",
+            "uses": {
+                "required": {
+                    "example": {
+                        "api": "example@v1",
+                        "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                        "rpc": { "call": ["Example.Get"] }
+                    }
+                }
+            }
+        });
+        let mut extended = base.clone();
+        extended["extension"] = json!(true);
+        extended["uses"]["required"]["example"]["extension"] = json!(true);
+
+        assert!(lint_participant_v1_authoring(&extended).is_err());
+        let base = parse_participant_v1(&base).unwrap();
+        let extended = parse_participant_v1(&extended).unwrap();
+        assert_eq!(
+            extended.normalized_value().unwrap(),
+            base.normalized_value().unwrap()
+        );
+        assert_eq!(extended.digest().unwrap(), base.digest().unwrap());
     }
 
     fn assert_participant_error(value: Value, expected_path: &str) {

@@ -297,10 +297,10 @@
               },
               {
                 "target": {
-                  "kind": "apiSurface",
+                  "kind": "operationSignal",
                   "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Billing.Refund"
+                  "operation": "Billing.Refund",
+                  "signal": "approve"
                 },
                 "action": "control"
               },
@@ -438,15 +438,6 @@
                   "surface": "operation",
                   "name": "Billing.Refund"
                 },
-                "action": "control"
-              },
-              {
-                "target": {
-                  "kind": "apiSurface",
-                  "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Billing.Refund"
-                },
                 "action": "invoke"
               },
               {
@@ -466,6 +457,15 @@
                   "name": "Settings"
                 },
                 "action": "read"
+              },
+              {
+                "target": {
+                  "kind": "operationSignal",
+                  "api": "documents@v1",
+                  "operation": "Billing.Refund",
+                  "signal": "approve"
+                },
+                "action": "control"
               }
             ]
           }
@@ -482,7 +482,7 @@
         },
         "feeds": { "Health.Watch": "feed.v2.Health.Watch" }
       },
-      "digest": "PTrtVHXJlRN1Za5zVyylXjT-H3Mbr_69GrHeEuh2J58"
+      "digest": "5BRrUumj6eB9p2nLKcuZPJZJtDrePl7mZphlUjVx9wc"
     },
     {
       "name": "metadata-base",
@@ -1194,10 +1194,10 @@
             "allows": [
               {
                 "target": {
-                  "kind": "apiSurface",
+                  "kind": "operationSignal",
                   "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Documents.Build"
+                  "operation": "Documents.Build",
+                  "signal": "approve"
                 },
                 "action": "control"
               }
@@ -1225,9 +1225,9 @@
       }
     },
     {
-      "name": "participant-top-level-fields-rejected",
+      "name": "participant-top-level-fields-ignored",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1242,9 +1242,9 @@
       }
     },
     {
-      "name": "authored-subject-rejected",
+      "name": "authored-subject-ignored",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1504,21 +1504,73 @@
       }
     },
     {
-      "name": "unknown-top-level-field",
-      "schemaValid": false,
+      "name": "reachable-closed-schema",
+      "schemaValid": true,
       "valid": false,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
         "displayName": "Documents",
         "description": "Document APIs.",
-        "extra": true
+        "schemas": {
+          "Input": { "type": "object", "additionalProperties": false },
+          "Output": true
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
       }
+    },
+    {
+      "name": "unused-private-closed-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {
+          "Public": true,
+          "Private": { "type": "object", "additionalProperties": false }
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Public" },
+            "output": { "schema": "Public" }
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-top-level-field",
+      "schemaValid": false,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "extra": true
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      },
+      "sameNormalizedAs": "minimal-api",
+      "sameDigestAs": "minimal-api"
     },
     {
       "name": "unknown-nested-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1529,6 +1581,20 @@
           "Documents.Get": {
             "version": "v1",
             "input": { "schema": "Input", "extra": true },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
             "output": { "schema": "Output" }
           }
         }

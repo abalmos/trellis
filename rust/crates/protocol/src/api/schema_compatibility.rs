@@ -159,13 +159,14 @@ fn value_matches_types(value: &Value, types: &BTreeSet<&str>) -> bool {
 }
 
 fn explicit_value_refs(schema: &Map<String, Value>) -> Option<Vec<&Value>> {
-    if let Some(value) = schema.get("const") {
-        Some(vec![value])
-    } else {
-        schema
-            .get("enum")
-            .and_then(Value::as_array)
-            .map(|values| values.iter().collect())
+    match (
+        schema.get("const"),
+        schema.get("enum").and_then(Value::as_array),
+    ) {
+        (Some(value), Some(values)) => Some(values.iter().filter(|item| *item == value).collect()),
+        (Some(value), None) => Some(vec![value]),
+        (None, Some(values)) => Some(values.iter().collect()),
+        (None, None) => None,
     }
 }
 
@@ -187,6 +188,7 @@ fn compare_values(
     match (sub_values, super_values) {
         (_, None) => Ok(SchemaRelation::Subset),
         (None, Some(_)) => Ok(SchemaRelation::Unknown),
+        (Some(sub), Some(_)) if sub.is_empty() => Ok(SchemaRelation::Unknown),
         (Some(sub), Some(super_)) => Ok(if sub.is_subset(&super_) {
             SchemaRelation::Subset
         } else {
@@ -196,14 +198,22 @@ fn compare_values(
 }
 
 fn explicit_values(schema: &Map<String, Value>) -> Result<Option<BTreeSet<String>>, ProtocolError> {
-    if let Some(value) = schema.get("const") {
-        return Ok(Some(BTreeSet::from([canonicalize_json(value)?])));
-    }
-    schema
+    let constant = schema.get("const").map(canonicalize_json).transpose()?;
+    let enumeration = schema
         .get("enum")
         .and_then(Value::as_array)
         .map(|values| values.iter().map(canonicalize_json).collect())
-        .transpose()
+        .transpose()?;
+    Ok(match (constant, enumeration) {
+        (Some(constant), Some(enumeration)) => Some(
+            BTreeSet::from([constant])
+                .intersection(&enumeration)
+                .cloned()
+                .collect(),
+        ),
+        (Some(constant), None) => Some(BTreeSet::from([constant])),
+        (None, enumeration) => enumeration,
+    })
 }
 
 fn compare_object_validation(
@@ -226,34 +236,32 @@ fn compare_object_validation(
     let super_properties = properties(super_).unwrap_or(&empty_super_properties);
     let sub_additional = additional_properties(sub);
     let super_additional = additional_properties(super_);
-    if sub_additional.is_none() || super_additional.is_none() {
-        return Ok(SchemaRelation::Unknown);
-    }
 
     let mut relation = SchemaRelation::Subset;
-    for (name, super_property) in super_properties {
-        if let Some(sub_property) = sub_properties.get(name) {
-            relation = relation.and(compare(
-                sub_root,
-                sub_property,
-                super_root,
-                super_property,
-                &mut sub_refs.clone(),
-                &mut super_refs.clone(),
-            )?);
-        }
+    let property_names = sub_properties
+        .keys()
+        .chain(super_properties.keys())
+        .collect::<BTreeSet<_>>();
+    for name in property_names {
+        let sub_property = sub_properties.get(name).unwrap_or(&sub_additional);
+        let super_property = super_properties.get(name).unwrap_or(&super_additional);
+        relation = relation.and(compare(
+            sub_root,
+            sub_property,
+            super_root,
+            super_property,
+            &mut sub_refs.clone(),
+            &mut super_refs.clone(),
+        )?);
     }
-
-    if super_additional == Some(false) {
-        if sub_additional == Some(true) {
-            return Ok(SchemaRelation::Incompatible);
-        }
-        for (name, schema) in sub_properties {
-            if !super_properties.contains_key(name) && schema != &Value::Bool(false) {
-                return Ok(SchemaRelation::Incompatible);
-            }
-        }
-    }
+    relation = relation.and(compare(
+        sub_root,
+        &sub_additional,
+        super_root,
+        &super_additional,
+        &mut sub_refs.clone(),
+        &mut super_refs.clone(),
+    )?);
     Ok(relation)
 }
 
@@ -270,12 +278,11 @@ fn string_set(value: Option<&Value>) -> BTreeSet<&str> {
         .collect()
 }
 
-fn additional_properties(schema: &Map<String, Value>) -> Option<bool> {
-    match schema.get("additionalProperties") {
-        None => Some(true),
-        Some(Value::Bool(value)) => Some(*value),
-        Some(_) => None,
-    }
+fn additional_properties(schema: &Map<String, Value>) -> Value {
+    schema
+        .get("additionalProperties")
+        .cloned()
+        .unwrap_or(Value::Bool(true))
 }
 
 fn resolve_local_ref<'a>(
@@ -430,7 +437,7 @@ mod tests {
         });
         assert_eq!(
             prove_schema_subset(&open_old, &widened_input).unwrap(),
-            SchemaRelation::Subset
+            SchemaRelation::Incompatible
         );
         assert_eq!(
             prove_schema_subset(&json!({ "type": "integer" }), &json!({ "type": "number" }))
@@ -456,6 +463,22 @@ mod tests {
         );
         assert_eq!(
             prove_schema_subset(&json!({ "const": "x" }), &json!({ "type": "string" })).unwrap(),
+            SchemaRelation::Subset
+        );
+        assert_eq!(
+            prove_schema_subset(
+                &json!({ "const": "a", "enum": ["a", "b"] }),
+                &json!({ "const": "a" })
+            )
+            .unwrap(),
+            SchemaRelation::Subset
+        );
+        assert_ne!(
+            prove_schema_subset(
+                &json!({ "const": "a", "enum": ["b"] }),
+                &json!({ "enum": ["a", "b"] })
+            )
+            .unwrap(),
             SchemaRelation::Subset
         );
     }

@@ -1,4 +1,11 @@
 //! Pure protocol primitives shared by Trellis runtimes and language bindings.
+//!
+//! Runtime parsers ignore unknown object members and expose normalized semantic
+//! projections containing only fields understood by this version. Those
+//! projections are intentionally unsuitable for future cryptographic
+//! signatures: signatures must cover the complete raw canonical object except
+//! for the signature member itself. New required semantics need a negotiated
+//! feature or a new format rather than an ignored critical extension member.
 
 mod api;
 mod canonical;
@@ -10,14 +17,15 @@ mod schema_profile;
 mod subjects;
 
 pub use api::{
-    compare_api_replacement_v1, parse_api_v1, ApiArtifactV1, ApiCompatibilityIssueCodeV1,
-    ApiCompatibilityIssueV1, ApiCompatibilityReportV1, API_FORMAT_V1, API_SCHEMA_V1_JSON,
+    compare_api_replacement_v1, lint_api_v1_authoring, parse_api_v1, ApiArtifactV1,
+    ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1, ApiCompatibilityReportV1,
+    API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
 };
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::ProtocolError;
 pub use participant::{
-    parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1, PARTICIPANT_FORMAT_V1,
-    PARTICIPANT_SCHEMA_V1_JSON,
+    lint_participant_v1_authoring, parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1,
+    PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,
 };
 pub use permissions::{
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, GrantSetV1,
