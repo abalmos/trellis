@@ -450,6 +450,22 @@ pub struct LeasesConfig {
 impl LeasesConfig {
     /// Resolves this raw lease config with defaults applied.
     pub(crate) fn resolve(&self) -> Result<ResolvedLeasesConfig, ConfigError> {
+        let ttl_ms = self.ttl_ms.unwrap_or(15_000);
+        let renew_ms = self.renew_ms.unwrap_or(5_000);
+        if ttl_ms == 0 {
+            return Err(ConfigError::InvalidLeasesConfig {
+                section: "leases",
+                field: "ttl_ms",
+                reason: "must be greater than zero",
+            });
+        }
+        if renew_ms == 0 || renew_ms >= ttl_ms {
+            return Err(ConfigError::InvalidLeasesConfig {
+                section: "leases",
+                field: "renew_ms",
+                reason: "must be greater than zero and less than ttl_ms",
+            });
+        }
         Ok(ResolvedLeasesConfig {
             bucket: self
                 .bucket
@@ -461,8 +477,8 @@ impl LeasesConfig {
                 field: "replicas",
                 reason: "must be configured explicitly",
             })?,
-            ttl_ms: self.ttl_ms.unwrap_or(15_000),
-            renew_ms: self.renew_ms.unwrap_or(5_000),
+            ttl_ms,
+            renew_ms,
         })
     }
 }

@@ -84,7 +84,13 @@ impl LeaseManager {
             )
             .await
         {
-            Ok(revision) => Ok(LeaseGuard { key, revision }),
+            Ok(revision) => Ok(LeaseGuard {
+                key,
+                fence: LeaseFence {
+                    acquisition_revision: revision,
+                },
+                current_revision: revision,
+            }),
             Err(error) if error.kind() == kv::CreateErrorKind::AlreadyExists => {
                 Err(LeaseError::Held { key })
             }
@@ -109,12 +115,12 @@ impl LeaseManager {
             .update(
                 guard.key.value.clone(),
                 Bytes::copy_from_slice(self.owner_id.as_bytes()),
-                guard.revision,
+                guard.current_revision,
             )
             .await
         {
             Ok(revision) => {
-                guard.revision = revision;
+                guard.current_revision = revision;
                 Ok(())
             }
             Err(error) => Err(classify_revision_error(store, key, "renew", error).await),
@@ -126,7 +132,7 @@ impl LeaseManager {
         let store = self.store()?;
         let key = guard.key.clone();
         match store
-            .delete_expect_revision(guard.key.value.clone(), Some(guard.revision))
+            .delete_expect_revision(guard.key.value.clone(), Some(guard.current_revision))
             .await
         {
             Ok(()) => Ok(()),
@@ -145,15 +151,49 @@ impl LeaseManager {
 
 /// Proof that this runtime currently owns a lease key.
 ///
-/// The guard carries the last observed KV revision and must be passed back to
-/// [`LeaseManager::renew`] or [`LeaseManager::release`]. Revision checks make a
-/// stale guard fail instead of renewing or deleting another owner's lease.
+/// The guard carries a fixed acquisition fence and the last observed KV revision.
+/// It must be passed back to [`LeaseManager::renew`] or [`LeaseManager::release`].
+/// Revision checks make a stale guard fail instead of renewing or deleting
+/// another owner's lease.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeaseGuard {
-    /// Acquired lease key.
-    pub key: LeaseKey,
-    /// Last observed NATS KV revision for the lease key.
-    pub revision: u64,
+    key: LeaseKey,
+    fence: LeaseFence,
+    current_revision: u64,
+}
+
+impl LeaseGuard {
+    /// Returns the acquired lease key.
+    #[must_use]
+    pub fn key(&self) -> &LeaseKey {
+        &self.key
+    }
+
+    /// Returns the immutable acquisition fence for this ownership generation.
+    #[must_use]
+    pub(crate) fn fence(&self) -> LeaseFence {
+        self.fence
+    }
+
+    /// Returns the current NATS KV revision used for renewal and release.
+    #[must_use]
+    pub fn current_revision(&self) -> u64 {
+        self.current_revision
+    }
+}
+
+/// Immutable fencing token for one lease ownership generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LeaseFence {
+    acquisition_revision: u64,
+}
+
+impl LeaseFence {
+    /// Returns the NATS KV revision assigned when ownership was acquired.
+    #[must_use]
+    pub(crate) fn acquisition_revision(self) -> u64 {
+        self.acquisition_revision
+    }
 }
 
 /// Canonical key for a runtime lease entry.
@@ -174,6 +214,12 @@ impl LeaseKey {
         Self {
             value: value.into(),
         }
+    }
+
+    /// Returns the canonical lease key string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.value
     }
 }
 

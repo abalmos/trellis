@@ -138,7 +138,11 @@ renew_ms = 5000
             .expect("inspect health runtime")
             .is_none()
         {
-            let _ = self.child.kill();
+            let pid = self.child.id().to_string();
+            let signalled = Command::new("kill").args(["-TERM", &pid]).status();
+            if signalled.is_err() || signalled.is_ok_and(|status| !status.success()) {
+                let _ = self.child.kill();
+            }
             let _ = self.child.wait();
         }
     }
