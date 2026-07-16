@@ -269,7 +269,7 @@
             "kind": { "const": "participantResource" },
             "participant": { "type": "string", "minLength": 1 },
             "resource": {
-              "enum": ["kv", "store", "jobQueue", "eventConsumer"]
+              "enum": ["kv", "store", "jobQueue", "eventConsumer", "state"]
             },
             "name": { "type": "string", "minLength": 1 }
           },

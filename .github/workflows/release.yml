@@ -309,6 +309,8 @@ jobs:
           version="$(grep -m1 '^version = ' rust/Cargo.toml | cut -d '"' -f 2)"
           tar -tzf "rust/target/package/trellis-protocol-${version}.crate" \
             | grep -Fqx "trellis-protocol-${version}/schemas/trellis.api.v1.schema.json"
+          tar -tzf "rust/target/package/trellis-protocol-${version}.crate" \
+            | grep -Fqx "trellis-protocol-${version}/schemas/trellis.participant.v1.schema.json"
 
       - name: Check protocol WASM target
         run: cargo check --manifest-path rust/Cargo.toml --package trellis-protocol --target wasm32-unknown-unknown

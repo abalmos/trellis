@@ -1,7 +1,10 @@
 use jsonschema::Draft;
 use serde_json::Value;
 
-use crate::{identifiers::api_error, ProtocolError, API_SCHEMA_V1_JSON};
+use crate::{
+    identifiers::{api_error, participant_error},
+    ProtocolError, API_SCHEMA_V1_JSON, PARTICIPANT_SCHEMA_V1_JSON,
+};
 
 const DRAFT_2020_12: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -14,15 +17,40 @@ pub(crate) fn validate_api_meta_schema() -> Result<(), ProtocolError> {
 }
 
 pub(crate) fn validate_api_structure(value: &Value) -> Result<(), ProtocolError> {
-    let schema: Value = serde_json::from_str(API_SCHEMA_V1_JSON)?;
+    validate_structure(API_SCHEMA_V1_JSON, value, api_error)
+}
+
+#[cfg(test)]
+pub(crate) fn validate_participant_meta_schema() -> Result<(), ProtocolError> {
+    let schema: Value = serde_json::from_str(PARTICIPANT_SCHEMA_V1_JSON)?;
+    jsonschema::meta::options()
+        .validate(&schema)
+        .map_err(|error| participant_error(error.instance_path().to_string(), error.to_string()))
+}
+
+pub(crate) fn validate_participant_structure(value: &Value) -> Result<(), ProtocolError> {
+    validate_structure(PARTICIPANT_SCHEMA_V1_JSON, value, participant_error)
+}
+
+fn validate_structure(
+    schema_json: &str,
+    value: &Value,
+    error: fn(String, String) -> ProtocolError,
+) -> Result<(), ProtocolError> {
+    let schema: Value = serde_json::from_str(schema_json)?;
     let validator = jsonschema::options()
         .with_draft(Draft::Draft202012)
         .build(&schema)
-        .map_err(|error| api_error(error.instance_path().to_string(), error.to_string()))?;
-    if let Some(error) = validator.iter_errors(value).next() {
-        return Err(api_error(
-            error.instance_path().to_string(),
-            error.to_string(),
+        .map_err(|validation| {
+            error(
+                validation.instance_path().to_string(),
+                validation.to_string(),
+            )
+        })?;
+    if let Some(validation) = validator.iter_errors(value).next() {
+        return Err(error(
+            validation.instance_path().to_string(),
+            validation.to_string(),
         ));
     }
     Ok(())

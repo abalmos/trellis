@@ -40,7 +40,16 @@ pub enum ProtocolError {
         message: String,
     },
 
-    /// An embedded API schema violates the Trellis Draft 2020-12 profile.
+    /// A `trellis.participant.v1` member failed structural or semantic validation.
+    #[error("invalid participant artifact at '{path}': {message}")]
+    ParticipantValidation {
+        /// JSON Pointer-like path to the invalid member.
+        path: String,
+        /// Specific validation failure.
+        message: String,
+    },
+
+    /// An embedded protocol schema violates the Trellis Draft 2020-12 profile.
     #[error("invalid schema '{schema}' at '{path}': {message}")]
     SchemaProfile {
         /// Name of the embedded schema.

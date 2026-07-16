@@ -79,6 +79,16 @@ pub(crate) fn api_error(path: impl Into<String>, message: impl Into<String>) -> 
     }
 }
 
+pub(crate) fn participant_error(
+    path: impl Into<String>,
+    message: impl Into<String>,
+) -> ProtocolError {
+    ProtocolError::ParticipantValidation {
+        path: path.into(),
+        message: message.into(),
+    }
+}
+
 fn validate_positive_decimal(path: &str, value: &str) -> Result<(), ProtocolError> {
     let bytes = value.as_bytes();
     if bytes.is_empty()

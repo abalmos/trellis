@@ -1,0 +1,1697 @@
+{
+  "vectors": [
+    {
+      "name": "minimal-app",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "app"
+      },
+      "normalized": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "app"
+      },
+      "digestProjection": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "kind": "app"
+      },
+      "digest": "giT5kAA0QJWlfWZkfHDI3rRjX5eKRIkNUMQAA8tkzSI"
+    },
+    {
+      "name": "explicit-empty-defaults",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "app",
+        "schemas": {},
+        "implements": {},
+        "uses": { "required": {}, "optional": {} },
+        "state": {},
+        "jobQueues": {},
+        "eventConsumers": {},
+        "resources": { "kv": {}, "store": {} }
+      },
+      "sameNormalizedAs": "minimal-app",
+      "sameDigestAs": "minimal-app"
+    },
+    {
+      "name": "full-service",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents-worker",
+        "displayName": "Documents Worker",
+        "description": "Processes document work and serves the Documents API.",
+        "docs": {
+          "summary": "Documents worker.",
+          "markdown": "# Documents Worker\n\nProcesses documents.\n"
+        },
+        "kind": "service",
+        "schemas": {
+          "ReindexResult": true,
+          "DraftInspectionV1": true,
+          "LockValue": true,
+          "ReindexUpdate": true,
+          "DraftInspection": {
+            "type": "object",
+            "properties": {
+              "docs": { "type": "string" },
+              "purpose": { "type": "string" }
+            }
+          },
+          "ReindexPayload": {
+            "type": "object",
+            "properties": {
+              "tenantId": { "type": "string" },
+              "documentId": { "type": "string" }
+            }
+          }
+        },
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": {
+                "store": "uploads",
+                "key": "/file/key",
+                "contentType": "/file/contentType",
+                "metadata": "/file/metadata",
+                "expiresInMs": 900000,
+                "maxBytes": 10485760
+              }
+            }
+          }
+        },
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "rpc": { "call": ["Billing.Get"] },
+              "operations": {
+                "invoke": ["Billing.Refund"],
+                "observe": ["Billing.Refund"],
+                "cancel": ["Billing.Refund"],
+                "control": ["Billing.Refund"]
+              },
+              "events": {
+                "publish": ["Billing.RefundRequested"],
+                "subscribe": ["Billing.RefundCompleted"]
+              },
+              "feeds": { "subscribe": ["Billing.Watch"] },
+              "state": {
+                "read": ["Billing.Settings"],
+                "write": ["Billing.Settings"]
+              }
+            }
+          },
+          "optional": {
+            "health": {
+              "api": "health@v1",
+              "apiDigest": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+              "feeds": { "subscribe": ["Health.Watch"] }
+            }
+          }
+        },
+        "state": {
+          "draftInspection": {
+            "kind": "value",
+            "schema": { "schema": "DraftInspection" },
+            "stateVersion": "draft-inspection.v2",
+            "acceptedVersions": {
+              "draft-inspection.v1": { "schema": "DraftInspectionV1" }
+            },
+            "docs": { "markdown": "# Draft inspection\n\nPrivate state.\n" }
+          }
+        },
+        "jobQueues": {
+          "reindex": {
+            "payload": { "schema": "ReindexPayload" },
+            "update": { "schema": "ReindexUpdate" },
+            "result": { "schema": "ReindexResult" },
+            "maxDeliver": 5,
+            "backoffMs": [5000, 30000, 120000],
+            "ackWaitMs": 300000,
+            "defaultDeadlineMs": 3600000,
+            "progress": true,
+            "logs": true,
+            "dlq": true,
+            "keyConcurrency": {
+              "key": ["/tenantId", "/documentId"],
+              "maxActive": 1,
+              "heartbeatIntervalMs": 10000,
+              "heartbeatTtlMs": 30000,
+              "stalePolicy": "fail-stale"
+            },
+            "queue": { "maxQueuedPerKey": 10, "whenFull": "reject" },
+            "docs": { "markdown": "# Reindex\n\nReindexes documents.\n" }
+          }
+        },
+        "eventConsumers": {
+          "billing-updates": {
+            "events": {
+              "documents": ["Documents.Changed"],
+              "billing": ["Billing.RefundCompleted"]
+            },
+            "ackWaitMs": 30000,
+            "maxDeliver": 5,
+            "backoffMs": [1000, 5000, 30000],
+            "docs": { "markdown": "# Billing updates\n\nConsumes updates.\n" }
+          }
+        },
+        "resources": {
+          "kv": {
+            "locks": {
+              "purpose": "Coordinate document locks.",
+              "schema": { "schema": "LockValue" },
+              "maxValueBytes": 65536,
+              "docs": { "markdown": "# Locks\n\nDocument locks.\n" }
+            }
+          },
+          "store": {
+            "uploads": {
+              "purpose": "Store uploaded document bodies.",
+              "maxObjectBytes": 10485760,
+              "maxTotalBytes": 1073741824,
+              "docs": { "markdown": "# Uploads\n\nTemporary uploads.\n" }
+            }
+          }
+        }
+      },
+      "normalizedFromInput": true,
+      "digestProjection": {
+        "format": "trellis.participant.v1",
+        "id": "documents-worker",
+        "kind": "service",
+        "schemas": {
+          "ReindexResult": true,
+          "DraftInspectionV1": true,
+          "LockValue": true,
+          "ReindexUpdate": true,
+          "DraftInspection": {
+            "type": "object",
+            "properties": {
+              "docs": { "type": "string" },
+              "purpose": { "type": "string" }
+            }
+          },
+          "ReindexPayload": {
+            "type": "object",
+            "properties": {
+              "tenantId": { "type": "string" },
+              "documentId": { "type": "string" }
+            }
+          }
+        },
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": {
+                "store": "uploads",
+                "key": "/file/key",
+                "contentType": "/file/contentType",
+                "metadata": "/file/metadata",
+                "expiresInMs": 900000,
+                "maxBytes": 10485760
+              }
+            }
+          }
+        },
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "rpc": { "call": ["Billing.Get"] },
+              "operations": {
+                "invoke": ["Billing.Refund"],
+                "observe": ["Billing.Refund"],
+                "cancel": ["Billing.Refund"],
+                "control": ["Billing.Refund"]
+              },
+              "events": {
+                "publish": ["Billing.RefundRequested"],
+                "subscribe": ["Billing.RefundCompleted"]
+              },
+              "feeds": { "subscribe": ["Billing.Watch"] },
+              "state": {
+                "read": ["Billing.Settings"],
+                "write": ["Billing.Settings"]
+              }
+            }
+          },
+          "optional": {
+            "health": {
+              "api": "health@v1",
+              "apiDigest": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+              "feeds": { "subscribe": ["Health.Watch"] }
+            }
+          }
+        },
+        "state": {
+          "draftInspection": {
+            "kind": "value",
+            "schema": { "schema": "DraftInspection" },
+            "stateVersion": "draft-inspection.v2",
+            "acceptedVersions": {
+              "draft-inspection.v1": { "schema": "DraftInspectionV1" }
+            }
+          }
+        },
+        "jobQueues": {
+          "reindex": {
+            "payload": { "schema": "ReindexPayload" },
+            "update": { "schema": "ReindexUpdate" },
+            "result": { "schema": "ReindexResult" },
+            "maxDeliver": 5,
+            "backoffMs": [5000, 30000, 120000],
+            "ackWaitMs": 300000,
+            "defaultDeadlineMs": 3600000,
+            "progress": true,
+            "logs": true,
+            "dlq": true,
+            "keyConcurrency": {
+              "key": ["/tenantId", "/documentId"],
+              "maxActive": 1,
+              "heartbeatIntervalMs": 10000,
+              "heartbeatTtlMs": 30000,
+              "stalePolicy": "fail-stale"
+            },
+            "queue": { "maxQueuedPerKey": 10, "whenFull": "reject" }
+          }
+        },
+        "eventConsumers": {
+          "billing-updates": {
+            "events": {
+              "documents": ["Documents.Changed"],
+              "billing": ["Billing.RefundCompleted"]
+            },
+            "ackWaitMs": 30000,
+            "maxDeliver": 5,
+            "backoffMs": [1000, 5000, 30000]
+          }
+        },
+        "resources": {
+          "kv": {
+            "locks": {
+              "schema": { "schema": "LockValue" },
+              "maxValueBytes": 65536
+            }
+          },
+          "store": {
+            "uploads": {
+              "maxObjectBytes": 10485760,
+              "maxTotalBytes": 1073741824
+            }
+          }
+        }
+      },
+      "digest": "TnzhycMCqE5L8a4yGoD7gLrtPtnpiX_abBJZZNciCNk"
+    },
+    {
+      "name": "multiline-human-documentation",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.\nFor browsers.",
+        "docs": {
+          "summary": "Documents app.",
+          "markdown": "# Documents Web\n\nReads documents.\n"
+        },
+        "kind": "app"
+      },
+      "sameDigestAs": "minimal-app"
+    },
+    {
+      "name": "kind-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "agent"
+      },
+      "differentDigestFrom": "minimal-app"
+    },
+    {
+      "name": "resource-purpose-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource Worker",
+        "description": "Uses a store.",
+        "kind": "service",
+        "resources": {
+          "store": {
+            "uploads": {
+              "purpose": "Store uploads.",
+              "docs": { "markdown": "# Uploads" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "resource-purpose-variant",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource Worker renamed",
+        "description": "Different copy.",
+        "kind": "service",
+        "resources": {
+          "store": {
+            "uploads": {
+              "purpose": "Different purpose copy.",
+              "docs": { "markdown": "# Different uploads docs" }
+            }
+          }
+        }
+      },
+      "sameDigestAs": "resource-purpose-base"
+    },
+    {
+      "name": "resource-default-explicit",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource Worker",
+        "description": "Uses a store.",
+        "kind": "service",
+        "resources": {
+          "store": {
+            "uploads": {
+              "purpose": "Store uploads.",
+              "required": true,
+              "ttlMs": 0,
+              "docs": { "markdown": "# Uploads" }
+            }
+          }
+        }
+      },
+      "sameNormalizedAs": "resource-purpose-base",
+      "sameDigestAs": "resource-purpose-base"
+    },
+    {
+      "name": "resource-machine-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource Worker",
+        "description": "Uses a store.",
+        "kind": "service",
+        "resources": {
+          "store": {
+            "uploads": {
+              "purpose": "Store uploads.",
+              "ttlMs": 1000,
+              "docs": { "markdown": "# Uploads" }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "resource-purpose-base"
+    },
+    {
+      "name": "kv-default-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "kv-worker",
+        "displayName": "KV Worker",
+        "description": "Uses KV.",
+        "kind": "service",
+        "schemas": { "Value": true },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Value" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "kv-default-explicit",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "kv-worker",
+        "displayName": "KV Worker",
+        "description": "Uses KV.",
+        "kind": "service",
+        "schemas": { "Value": true },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Value" },
+              "required": true,
+              "history": 1,
+              "ttlMs": 0
+            }
+          }
+        }
+      },
+      "sameNormalizedAs": "kv-default-base",
+      "sameDigestAs": "kv-default-base"
+    },
+    {
+      "name": "api-reference-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Billing.Get"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "api-digest-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "rpc": { "call": ["Billing.Get"] }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "api-reference-base"
+    },
+    {
+      "name": "alias-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "payments": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Billing.Get"] }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "api-reference-base"
+    },
+    {
+      "name": "required-to-optional",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "optional": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Billing.Get"] }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "api-reference-base"
+    },
+    {
+      "name": "use-action-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Billing.List"] }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "api-reference-base"
+    },
+    {
+      "name": "use-action-order-duplicates",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "billing-app",
+        "displayName": "Billing App",
+        "description": "Uses billing.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": {
+                "call": ["Billing.Get", "Billing.Get"]
+              }
+            }
+          }
+        }
+      },
+      "sameNormalizedAs": "api-reference-base",
+      "sameDigestAs": "api-reference-base"
+    },
+    {
+      "name": "event-consumer-order-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "events-app",
+        "displayName": "Events App",
+        "description": "Consumes events.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "events": {
+                "subscribe": ["Billing.A", "Billing.B"]
+              }
+            }
+          }
+        },
+        "eventConsumers": {
+          "updates": {
+            "events": { "billing": ["Billing.A", "Billing.B"] }
+          }
+        }
+      }
+    },
+    {
+      "name": "event-consumer-order-duplicates",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "events-app",
+        "displayName": "Events App",
+        "description": "Consumes events.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "events": {
+                "subscribe": ["Billing.B", "Billing.A", "Billing.A"]
+              }
+            }
+          }
+        },
+        "eventConsumers": {
+          "updates": {
+            "events": {
+              "billing": ["Billing.B", "Billing.A", "Billing.A"]
+            },
+            "replay": "new",
+            "ordering": "strict"
+          }
+        }
+      },
+      "sameNormalizedAs": "event-consumer-order-base",
+      "sameDigestAs": "event-consumer-order-base"
+    },
+    {
+      "name": "event-consumer-policy-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "events-app",
+        "displayName": "Events App",
+        "description": "Consumes events.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "events": {
+                "subscribe": ["Billing.A", "Billing.B"]
+              }
+            }
+          }
+        },
+        "eventConsumers": {
+          "updates": {
+            "events": { "billing": ["Billing.A", "Billing.B"] },
+            "replay": "all"
+          }
+        }
+      },
+      "differentDigestFrom": "event-consumer-order-base"
+    },
+    {
+      "name": "jobs-ordered-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "jobs-worker",
+        "displayName": "Jobs Worker",
+        "description": "Processes jobs.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "backoffMs": [1000, 5000],
+            "keyConcurrency": { "key": ["/tenant", "/id"] }
+          }
+        }
+      }
+    },
+    {
+      "name": "jobs-backoff-order-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "jobs-worker",
+        "displayName": "Jobs Worker",
+        "description": "Processes jobs.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "backoffMs": [5000, 1000],
+            "keyConcurrency": { "key": ["/tenant", "/id"] }
+          }
+        }
+      },
+      "differentDigestFrom": "jobs-ordered-base"
+    },
+    {
+      "name": "jobs-defaults-explicit",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "jobs-worker",
+        "displayName": "Jobs Worker",
+        "description": "Processes jobs.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "backoffMs": [1000, 5000],
+            "progress": false,
+            "logs": false,
+            "dlq": false,
+            "keyConcurrency": { "key": ["/tenant", "/id"] }
+          }
+        }
+      },
+      "sameNormalizedAs": "jobs-ordered-base",
+      "sameDigestAs": "jobs-ordered-base"
+    },
+    {
+      "name": "jobs-key-order-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "jobs-worker",
+        "displayName": "Jobs Worker",
+        "description": "Processes jobs.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "backoffMs": [1000, 5000],
+            "keyConcurrency": { "key": ["/id", "/tenant"] }
+          }
+        }
+      },
+      "differentDigestFrom": "jobs-ordered-base"
+    },
+    {
+      "name": "state-machine-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "state-app",
+        "displayName": "State App",
+        "description": "Uses private state.",
+        "kind": "app",
+        "schemas": { "Value": true },
+        "state": {
+          "draft": { "kind": "value", "schema": { "schema": "Value" } }
+        }
+      }
+    },
+    {
+      "name": "state-machine-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "state-app",
+        "displayName": "State App",
+        "description": "Uses private state.",
+        "kind": "app",
+        "schemas": { "Value": true },
+        "state": {
+          "draft": { "kind": "map", "schema": { "schema": "Value" } }
+        }
+      },
+      "differentDigestFrom": "state-machine-base"
+    },
+    {
+      "name": "transfer-machine-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "transfer-worker",
+        "displayName": "Transfer Worker",
+        "description": "Accepts uploads.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": { "store": "uploads", "key": "/key" }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      }
+    },
+    {
+      "name": "transfer-machine-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "transfer-worker",
+        "displayName": "Transfer Worker",
+        "description": "Accepts uploads.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": {
+                "store": "uploads",
+                "key": "/otherKey"
+              }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      },
+      "differentDigestFrom": "transfer-machine-base"
+    },
+    {
+      "name": "private-schema-base",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": {
+          "Value": {
+            "type": "object",
+            "properties": {
+              "docs": { "type": "string" },
+              "purpose": { "const": { "docs": "data", "purpose": "data" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "private-schema-change",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": {
+          "Value": {
+            "type": "object",
+            "properties": {
+              "docs": { "type": "number" },
+              "purpose": { "const": { "docs": "data", "purpose": "data" } }
+            }
+          }
+        }
+      },
+      "differentDigestFrom": "private-schema-base"
+    },
+    {
+      "name": "local-private-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "schema-worker-local",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": {
+          "Tree": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": { "Node": { "type": "string" } },
+            "$ref": "#/$defs/Node"
+          }
+        }
+      }
+    },
+    {
+      "name": "recursive-private-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "schema-worker-recursive",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": {
+          "Node": {
+            "type": "object",
+            "properties": { "next": { "$ref": "#" } }
+          }
+        }
+      }
+    },
+    {
+      "name": "remote-private-ref",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": { "Value": { "$ref": "https://example.com/value" } }
+      }
+    },
+    {
+      "name": "embedded-private-id",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": { "Value": { "$id": "https://example.com/value" } }
+      }
+    },
+    {
+      "name": "wrong-private-dialect",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": {
+          "Value": { "$schema": "http://json-schema.org/draft-07/schema#" }
+        }
+      }
+    },
+    {
+      "name": "unresolved-private-ref",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-schema-worker",
+        "displayName": "Schema Worker",
+        "description": "Uses schemas.",
+        "kind": "service",
+        "schemas": { "Value": { "$ref": "#/$defs/Missing" } }
+      }
+    },
+    {
+      "name": "malformed-api-digest",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid digest.",
+        "kind": "app",
+        "implements": {
+          "documents": { "api": "documents@v1", "apiDigest": "not+d1gest" }
+        }
+      }
+    },
+    {
+      "name": "padded-api-digest",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid digest.",
+        "kind": "app",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          }
+        }
+      }
+    },
+    {
+      "name": "wrong-length-api-digest",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid digest.",
+        "kind": "app",
+        "implements": {
+          "documents": { "api": "documents@v1", "apiDigest": "AAAA" }
+        }
+      }
+    },
+    {
+      "name": "noncanonical-api-reference",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid API reference.",
+        "kind": "app",
+        "implements": {
+          "documents": {
+            "api": "documents@v01",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        }
+      }
+    },
+    {
+      "name": "alias-collision",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Alias collision.",
+        "kind": "app",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        },
+        "uses": {
+          "required": {
+            "documents": {
+              "api": "billing@v1",
+              "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "rpc": { "call": ["Billing.Get"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "duplicate-api-id",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Duplicate API.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "documents": {
+              "api": "documents@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Documents.Get"] }
+            }
+          },
+          "optional": {
+            "docs": {
+              "api": "documents@v1",
+              "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+              "rpc": { "call": ["Documents.List"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "empty-use-selection",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Empty use.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "documents": {
+              "api": "documents@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-use-logical-name",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid surface selection.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "documents": {
+              "api": "documents@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Documents..Get"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "named-capability-use",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Capability selection.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "documents": {
+              "api": "documents@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "capabilities": ["documents.read"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "flat-uses",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Flat uses.",
+        "kind": "app",
+        "uses": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        }
+      }
+    },
+    {
+      "name": "missing-state-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Missing schema.",
+        "kind": "service",
+        "state": {
+          "draft": { "kind": "value", "schema": { "schema": "Missing" } }
+        }
+      }
+    },
+    {
+      "name": "missing-job-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Missing schema.",
+        "kind": "service",
+        "jobQueues": {
+          "work": { "payload": { "schema": "Missing" } }
+        }
+      }
+    },
+    {
+      "name": "malformed-job-key-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid pointer.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "keyConcurrency": { "key": ["not-a-pointer"] }
+          }
+        }
+      }
+    },
+    {
+      "name": "root-job-key-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid pointer.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "keyConcurrency": { "key": [""] }
+          }
+        }
+      }
+    },
+    {
+      "name": "duplicate-job-key-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Duplicate pointer.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "keyConcurrency": { "key": ["/id", "/id"] }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-job-positive-number",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid number.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" }, "maxDeliver": 0 }
+        }
+      }
+    },
+    {
+      "name": "empty-job-backoff",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid backoff.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" }, "backoffMs": [] }
+        }
+      }
+    },
+    {
+      "name": "empty-queue-policy",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid queue policy.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" }, "queue": {} }
+        }
+      }
+    },
+    {
+      "name": "when-full-without-bound",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid queue policy.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "queue": { "whenFull": "reject" }
+          }
+        }
+      }
+    },
+    {
+      "name": "event-consumer-no-events",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid consumer.",
+        "kind": "app",
+        "eventConsumers": { "updates": { "events": {} } }
+      }
+    },
+    {
+      "name": "event-consumer-empty-event-list",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid consumer.",
+        "kind": "app",
+        "eventConsumers": {
+          "updates": { "events": { "billing": [] } }
+        }
+      }
+    },
+    {
+      "name": "event-consumer-unknown-alias",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid consumer.",
+        "kind": "app",
+        "eventConsumers": {
+          "updates": { "events": { "billing": ["Billing.Updated"] } }
+        }
+      }
+    },
+    {
+      "name": "event-consumer-without-subscribe",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Invalid consumer.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "billing": {
+              "api": "billing@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "events": { "publish": ["Billing.Updated"] }
+            }
+          }
+        },
+        "eventConsumers": {
+          "updates": { "events": { "billing": ["Billing.Updated"] } }
+        }
+      }
+    },
+    {
+      "name": "operation-transfer-unknown-store",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid transfer.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": { "store": "missing", "key": "/key" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "operation-transfer-malformed-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid transfer.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": { "store": "uploads", "key": "key" }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      }
+    },
+    {
+      "name": "operation-transfer-root-pointer",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid transfer.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": { "store": "uploads", "key": "" }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      }
+    },
+    {
+      "name": "operation-transfer-authored-direction",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid transfer.",
+        "kind": "service",
+        "implements": {
+          "documents": {
+            "api": "documents@v1",
+            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "operationTransfers": {
+              "Documents.Import": {
+                "store": "uploads",
+                "key": "/key",
+                "direction": "send"
+              }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      }
+    },
+    {
+      "name": "invalid-kv-history",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid resource.",
+        "kind": "service",
+        "schemas": { "Value": true },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache.",
+              "schema": { "schema": "Value" },
+              "history": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "api-owned-top-level-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Owns an API surface.",
+        "kind": "service",
+        "rpc": {}
+      }
+    },
+    {
+      "name": "old-jobs-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Uses an old field.",
+        "kind": "service",
+        "jobs": {}
+      }
+    },
+    {
+      "name": "old-event-consumer-self",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Uses an old field.",
+        "kind": "service",
+        "eventConsumers": {
+          "updates": {
+            "events": { "documents": ["Documents.Updated"] },
+            "self": ["Documents.Updated"]
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-top-level-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Unknown field.",
+        "kind": "service",
+        "extra": true
+      }
+    },
+    {
+      "name": "unknown-nested-field",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Unknown field.",
+        "kind": "service",
+        "resources": {
+          "store": {
+            "uploads": { "purpose": "Uploads.", "subject": "STORE.uploads" }
+          }
+        }
+      }
+    },
+    {
+      "name": "null-optional-docs",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Null docs.",
+        "kind": "app",
+        "docs": null
+      }
+    },
+    {
+      "name": "null-nested-job-update",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Null update.",
+        "kind": "service",
+        "schemas": { "Payload": true },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "update": null
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid-participant-id",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": " documents-worker",
+        "displayName": "Invalid Worker",
+        "description": "Invalid identifier.",
+        "kind": "service"
+      }
+    },
+    {
+      "name": "wrong-format",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Wrong format.",
+        "kind": "service"
+      }
+    },
+    {
+      "name": "system-kind-rejected",
+      "schemaValid": false,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-system",
+        "displayName": "Invalid System",
+        "description": "System is not authored.",
+        "kind": "system"
+      }
+    }
+  ]
+}
