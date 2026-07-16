@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use jsonptr::PointerBuf;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -137,15 +138,15 @@ impl ParticipantArtifactV1 {
                 format!("must equal '{PARTICIPANT_FORMAT_V1}'"),
             ));
         }
-        validate_protocol_identifier("/id", &wire.id)?;
-        validate_nonempty_text("/displayName", &wire.display_name)?;
-        validate_nonempty_text("/description", &wire.description)?;
+        validate_protocol_identifier("/id", &wire.id, participant_error)?;
+        validate_nonempty_text("/displayName", &wire.display_name, participant_error)?;
+        validate_nonempty_text("/description", &wire.description, participant_error)?;
         if let Some(docs) = &wire.docs {
             validate_docs("/docs", docs)?;
         }
 
         for (name, schema) in &wire.schemas {
-            validate_protocol_identifier(&member_path("schemas", name), name)?;
+            validate_protocol_identifier(&member_path("schemas", name), name, participant_error)?;
             validate_embedded_schema(name, schema)?;
         }
 
@@ -178,29 +179,27 @@ impl ParticipantArtifactV1 {
         }
 
         for (alias, used) in &mut wire.uses.required {
-            normalize_used_api(&format!("/uses/required/{alias}"), used)?;
+            normalize_used_api(&member_path("uses/required", alias), used)?;
         }
         for (alias, used) in &mut wire.uses.optional {
-            normalize_used_api(&format!("/uses/optional/{alias}"), used)?;
+            normalize_used_api(&member_path("uses/optional", alias), used)?;
         }
 
         for (name, state) in &wire.state {
             let path = member_path("state", name);
-            validate_protocol_identifier(&path, name)?;
+            validate_protocol_identifier(&path, name, participant_error)?;
             require_schema(&wire.schemas, &state.schema, &format!("{path}/schema"))?;
             if let Some(version) = &state.state_version {
-                validate_protocol_identifier(&format!("{path}/stateVersion"), version)?;
+                validate_protocol_identifier(
+                    &format!("{path}/stateVersion"),
+                    version,
+                    participant_error,
+                )?;
             }
             for (version, schema) in &state.accepted_versions {
-                validate_protocol_identifier(
-                    &format!("{path}/acceptedVersions/{version}"),
-                    version,
-                )?;
-                require_schema(
-                    &wire.schemas,
-                    schema,
-                    &format!("{path}/acceptedVersions/{version}"),
-                )?;
+                let version_path = pointer(["state", name, "acceptedVersions", version]);
+                validate_protocol_identifier(&version_path, version, participant_error)?;
+                require_schema(&wire.schemas, schema, &version_path)?;
             }
             if let Some(docs) = &state.docs {
                 validate_docs(&format!("{path}/docs"), docs)?;
@@ -212,9 +211,13 @@ impl ParticipantArtifactV1 {
         }
 
         for (name, resource) in &wire.resources.kv {
-            let path = format!("/resources/kv/{name}");
-            validate_protocol_identifier(&path, name)?;
-            validate_nonempty_text(&format!("{path}/purpose"), &resource.purpose)?;
+            let path = member_path("resources/kv", name);
+            validate_protocol_identifier(&path, name, participant_error)?;
+            validate_nonempty_text(
+                &format!("{path}/purpose"),
+                &resource.purpose,
+                participant_error,
+            )?;
             require_schema(&wire.schemas, &resource.schema, &format!("{path}/schema"))?;
             if resource.history == 0 {
                 return Err(participant_error(
@@ -228,9 +231,13 @@ impl ParticipantArtifactV1 {
             }
         }
         for (name, resource) in &wire.resources.store {
-            let path = format!("/resources/store/{name}");
-            validate_protocol_identifier(&path, name)?;
-            validate_nonempty_text(&format!("{path}/purpose"), &resource.purpose)?;
+            let path = member_path("resources/store", name);
+            validate_protocol_identifier(&path, name, participant_error)?;
+            validate_nonempty_text(
+                &format!("{path}/purpose"),
+                &resource.purpose,
+                participant_error,
+            )?;
             validate_optional_positive(
                 &format!("{path}/maxObjectBytes"),
                 resource.max_object_bytes,
@@ -243,9 +250,13 @@ impl ParticipantArtifactV1 {
 
         for (alias, implemented) in &wire.implements {
             for (operation, transfer) in &implemented.operation_transfers {
-                let path = format!("/implements/{alias}/operationTransfers/{operation}");
-                validate_logical_name(&path, operation)?;
-                validate_protocol_identifier(&format!("{path}/store"), &transfer.store)?;
+                let path = pointer(["implements", alias, "operationTransfers", operation]);
+                validate_logical_name(&path, operation, participant_error)?;
+                validate_protocol_identifier(
+                    &format!("{path}/store"),
+                    &transfer.store,
+                    participant_error,
+                )?;
                 if !wire.resources.store.contains_key(&transfer.store) {
                     return Err(participant_error(
                         format!("{path}/store"),
@@ -268,7 +279,7 @@ impl ParticipantArtifactV1 {
 
         for (name, consumer) in &mut wire.event_consumers {
             let path = member_path("eventConsumers", name);
-            validate_protocol_identifier(&path, name)?;
+            validate_protocol_identifier(&path, name, participant_error)?;
             if consumer.events.is_empty() {
                 return Err(participant_error(
                     format!("{path}/events"),
@@ -276,15 +287,16 @@ impl ParticipantArtifactV1 {
                 ));
             }
             for (alias, events) in &mut consumer.events {
-                validate_protocol_identifier(&format!("{path}/events/{alias}"), alias)?;
+                let alias_path = pointer(["eventConsumers", name, "events", alias]);
+                validate_protocol_identifier(&alias_path, alias, participant_error)?;
                 if events.is_empty() {
                     return Err(participant_error(
-                        format!("{path}/events/{alias}"),
+                        &alias_path,
                         "must contain at least one event",
                     ));
                 }
                 for event in events.iter() {
-                    validate_logical_name(&format!("{path}/events/{alias}"), event)?;
+                    validate_logical_name(&alias_path, event, participant_error)?;
                 }
                 sort_deduplicate(events);
                 if wire.implements.contains_key(alias) {
@@ -296,15 +308,12 @@ impl ParticipantArtifactV1 {
                     .get(alias)
                     .or_else(|| wire.uses.optional.get(alias))
                     .ok_or_else(|| {
-                        participant_error(
-                            format!("{path}/events/{alias}"),
-                            format!("unknown API alias '{alias}'"),
-                        )
+                        participant_error(&alias_path, format!("unknown API alias '{alias}'"))
                     })?;
                 for event in events.iter() {
                     if !used.events.subscribe.contains(event) {
                         return Err(participant_error(
-                            format!("{path}/events/{alias}"),
+                            &alias_path,
                             format!(
                                 "event '{event}' is not selected under uses.{alias}.events.subscribe"
                             ),
@@ -700,9 +709,9 @@ fn validate_api_reference<'a>(
     aliases: &mut BTreeMap<&'a str, &'static str>,
     api_ids: &mut BTreeMap<&'a str, (&'a str, &'static str)>,
 ) -> Result<(), ProtocolError> {
-    let path = format!("/{group}/{alias}");
-    validate_protocol_identifier(&path, alias)?;
-    validate_api_id(&format!("{path}/api"), api)?;
+    let path = member_path(group, alias);
+    validate_protocol_identifier(&path, alias, participant_error)?;
+    validate_api_id(&format!("{path}/api"), api, participant_error)?;
     validate_api_digest(&format!("{path}/apiDigest"), digest)?;
     if let Some(previous) = aliases.insert(alias, group) {
         return Err(participant_error(
@@ -748,7 +757,7 @@ fn normalize_used_api(path: &str, used: &mut UsedApiV1) -> Result<(), ProtocolEr
         ("state/write", &mut used.state.write),
     ] {
         for name in values.iter() {
-            validate_logical_name(&format!("{path}/{group}"), name)?;
+            validate_logical_name(&format!("{path}/{group}"), name, participant_error)?;
         }
         sort_deduplicate(values);
     }
@@ -772,7 +781,7 @@ fn validate_job_queue(
     queue: &JobQueueV1,
 ) -> Result<(), ProtocolError> {
     let path = member_path("jobQueues", name);
-    validate_protocol_identifier(&path, name)?;
+    validate_protocol_identifier(&path, name, participant_error)?;
     require_schema(schemas, &queue.payload, &format!("{path}/payload"))?;
     for (field, schema) in [
         ("update", queue.update.as_ref()),
@@ -837,9 +846,13 @@ fn validate_job_queue(
 }
 
 fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {
-    validate_nonempty_text(&format!("{path}/markdown"), &docs.markdown)?;
+    validate_nonempty_text(
+        &format!("{path}/markdown"),
+        &docs.markdown,
+        participant_error,
+    )?;
     if let Some(summary) = &docs.summary {
-        validate_nonempty_text(&format!("{path}/summary"), summary)?;
+        validate_nonempty_text(&format!("{path}/summary"), summary, participant_error)?;
     }
     Ok(())
 }
@@ -849,7 +862,7 @@ fn require_schema(
     reference: &SchemaReferenceV1,
     path: &str,
 ) -> Result<(), ProtocolError> {
-    validate_protocol_identifier(path, &reference.schema)?;
+    validate_protocol_identifier(path, &reference.schema, participant_error)?;
     if !schemas.contains_key(&reference.schema) {
         return Err(participant_error(
             path,
@@ -883,7 +896,11 @@ fn validate_backoff(path: &str, value: Option<&Vec<u64>>) -> Result<(), Protocol
 }
 
 fn member_path(section: &str, name: &str) -> String {
-    format!("/{section}/{name}")
+    pointer(section.split('/').chain(std::iter::once(name)))
+}
+
+fn pointer<'a>(tokens: impl IntoIterator<Item = &'a str>) -> String {
+    PointerBuf::from_tokens(tokens).to_string()
 }
 
 fn insert_nonempty<T: Serialize>(
@@ -956,6 +973,7 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
     use serde::Deserialize;
+    use serde_json::json;
 
     use super::*;
     use crate::schema_profile::{validate_participant_meta_schema, validate_participant_structure};
@@ -1065,6 +1083,116 @@ mod tests {
             if let Some(other) = &vector.different_digest_from {
                 assert_ne!(digest, &digests[other], "{} and {other}", vector.name);
             }
+        }
+    }
+
+    #[test]
+    fn participant_semantic_errors_use_participant_paths() {
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": " invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Invalid identifier.",
+                "kind": "service"
+            }),
+            "/id",
+        );
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Invalid API reference.",
+                "kind": "app",
+                "uses": {
+                    "required": {
+                        "billing/legacy": {
+                            "api": " billing@v1",
+                            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                            "rpc": { "call": ["Billing.Get"] }
+                        }
+                    }
+                }
+            }),
+            "/uses/required/billing~1legacy/api",
+        );
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Invalid surface.",
+                "kind": "app",
+                "uses": {
+                    "required": {
+                        "billing": {
+                            "api": "billing@v1",
+                            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                            "rpc": { "call": ["Billing..Get"] }
+                        }
+                    }
+                }
+            }),
+            "/uses/required/billing/rpc/call",
+        );
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Invalid queue.",
+                "kind": "service",
+                "schemas": { "Payload": true },
+                "jobQueues": {
+                    " queue": { "payload": { "schema": "Payload" } }
+                }
+            }),
+            "/jobQueues/ queue",
+        );
+    }
+
+    #[test]
+    fn participant_authored_keys_are_json_pointer_encoded() {
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Missing state schema.",
+                "kind": "service",
+                "state": {
+                    "cache/key": { "kind": "value", "schema": { "schema": "Missing" } }
+                }
+            }),
+            "/state/cache~1key/schema",
+        );
+        assert_participant_error(
+            json!({
+                "format": PARTICIPANT_FORMAT_V1,
+                "id": "invalid-participant",
+                "displayName": "Invalid Participant",
+                "description": "Missing KV schema.",
+                "kind": "service",
+                "resources": {
+                    "kv": {
+                        "legacy~cache": {
+                            "purpose": "Legacy cache.",
+                            "schema": { "schema": "Missing" }
+                        }
+                    }
+                }
+            }),
+            "/resources/kv/legacy~0cache/schema",
+        );
+    }
+
+    fn assert_participant_error(value: Value, expected_path: &str) {
+        match parse_participant_v1(&value).unwrap_err() {
+            ProtocolError::ParticipantValidation { path, .. } => {
+                assert_eq!(path, expected_path);
+            }
+            error => panic!("expected participant validation error, received {error:?}"),
         }
     }
 }
