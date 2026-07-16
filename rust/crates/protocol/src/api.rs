@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use jsonptr::PointerBuf;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -15,6 +16,14 @@ use crate::{
         derive_operation_subject, derive_rpc_subject, DerivedApiSubjectsV1, DerivedEventSubjectsV1,
     },
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, PermissionActionV1, ProtocolError,
+};
+
+mod compatibility;
+mod schema_compatibility;
+
+pub use compatibility::{
+    compare_api_replacement_v1, ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1,
+    ApiCompatibilityReportV1,
 };
 
 /// The first canonical Trellis API artifact format.
@@ -246,7 +255,7 @@ impl ApiArtifactV1 {
                 ));
             }
             for (signal, descriptor) in &definition.signals {
-                let signal_path = format!("{path}/signals/{signal}");
+                let signal_path = pointer(["operations", name, "signals", signal]);
                 validate_protocol_identifier(&signal_path, signal, api_error)?;
                 require_schema(
                     &wire.schemas,
@@ -307,16 +316,9 @@ impl ApiArtifactV1 {
                 validate_protocol_identifier(&format!("{path}/stateVersion"), version, api_error)?;
             }
             for (version, reference) in &definition.accepted_versions {
-                validate_protocol_identifier(
-                    &format!("{path}/acceptedVersions/{version}"),
-                    version,
-                    api_error,
-                )?;
-                require_schema(
-                    &wire.schemas,
-                    reference,
-                    &format!("{path}/acceptedVersions/{version}"),
-                )?;
+                let version_path = pointer(["state", name, "acceptedVersions", version]);
+                validate_protocol_identifier(&version_path, version, api_error)?;
+                require_schema(&wire.schemas, reference, &version_path)?;
             }
             if let Some(docs) = &definition.docs {
                 validate_docs(&format!("{path}/docs"), docs)?;
@@ -667,7 +669,11 @@ fn require_key<T>(
 }
 
 fn member_path(section: &str, name: &str) -> String {
-    format!("/{section}/{}", name.replace('~', "~0").replace('/', "~1"))
+    pointer([section, name])
+}
+
+fn pointer<'a>(tokens: impl IntoIterator<Item = &'a str>) -> String {
+    PointerBuf::from_tokens(tokens).to_string()
 }
 
 fn insert_nonempty<T: Serialize>(
@@ -890,6 +896,52 @@ mod tests {
         });
         match parse_api_v1(&value).unwrap_err() {
             ProtocolError::ApiValidation { path, .. } => assert_eq!(path, "/id"),
+            error => panic!("expected API validation error, received {error:?}"),
+        }
+    }
+
+    #[test]
+    fn api_authored_nested_keys_are_json_pointer_encoded() {
+        let signal = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": { "Any": true },
+            "operations": {
+                "Op": {
+                    "version": "v1",
+                    "input": { "schema": "Any" },
+                    "signals": {
+                        "sig/~": { "input": { "schema": "Missing" } }
+                    }
+                }
+            }
+        });
+        assert_api_error(&signal, "/operations/Op/signals/sig~1~0/input");
+
+        let accepted_version = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": { "Any": true },
+            "state": {
+                "S": {
+                    "kind": "value",
+                    "schema": { "schema": "Any" },
+                    "acceptedVersions": {
+                        "v/~": { "schema": "Missing" }
+                    }
+                }
+            }
+        });
+        assert_api_error(&accepted_version, "/state/S/acceptedVersions/v~1~0");
+    }
+
+    fn assert_api_error(value: &Value, expected_path: &str) {
+        match parse_api_v1(value).unwrap_err() {
+            ProtocolError::ApiValidation { path, .. } => assert_eq!(path, expected_path),
             error => panic!("expected API validation error, received {error:?}"),
         }
     }
