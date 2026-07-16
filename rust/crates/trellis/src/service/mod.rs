@@ -24,6 +24,10 @@ mod runtime_facade;
 #[doc(hidden)]
 mod schema_validation;
 #[doc(hidden)]
+#[expect(
+    clippy::module_inception,
+    reason = "the service module preserves its established public layout"
+)]
 mod service;
 mod service_host;
 mod transfer;

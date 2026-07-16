@@ -11,6 +11,10 @@ pub mod request_validator {
     pub use trellis_rs::service::DefaultRequestValidatorClientPort as AuthRequestValidatorClientPort;
 
     /// Builds the auth request-validation payload from an inbound request context.
+    #[expect(
+        clippy::result_large_err,
+        reason = "ServerError preserves structured request validation diagnostics"
+    )]
     pub fn make_validate_request(
         subject: &str,
         payload: &[u8],

@@ -1192,7 +1192,7 @@ fn timeline_event_to_wire(
         wait_edge: raw_event
             .get("waitEdge")
             .cloned()
-            .map(|value| serde_json::from_value::<JobsInspectResponseTimelineItemWaitEdge>(value))
+            .map(serde_json::from_value::<JobsInspectResponseTimelineItemWaitEdge>)
             .transpose()
             .map_err(|error| JobsQueryError::ConvertWireModel {
                 model: "job timeline waitEdge",

@@ -114,23 +114,16 @@ pub enum JobSubmitOutcome<TPayload, TResult> {
 }
 
 /// Handle for a created job.
+type JobSnapshotFn<TPayload, TResult> =
+    dyn Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>> + Send + Sync;
+type TerminalJobFn<TPayload, TResult> =
+    dyn Fn() -> BoxFuture<'static, Result<TerminalJob<TPayload, TResult>, JobsError>> + Send + Sync;
+
 pub struct JobRef<TPayload, TResult> {
     identity: JobIdentity,
-    get: Arc<
-        dyn Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync,
-    >,
-    wait: Arc<
-        dyn Fn() -> BoxFuture<'static, Result<TerminalJob<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync,
-    >,
-    cancel: Arc<
-        dyn Fn() -> BoxFuture<'static, Result<JobSnapshot<TPayload, TResult>, JobsError>>
-            + Send
-            + Sync,
-    >,
+    get: Arc<JobSnapshotFn<TPayload, TResult>>,
+    wait: Arc<TerminalJobFn<TPayload, TResult>>,
+    cancel: Arc<JobSnapshotFn<TPayload, TResult>>,
 }
 
 impl<TPayload, TResult> std::fmt::Debug for JobRef<TPayload, TResult> {
@@ -308,6 +301,10 @@ where
     TResult: Send + Sync + 'static,
 {
     #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "an active job owns each independently callable runtime hook"
+    )]
     pub fn new(
         context: JobContext,
         payload: TPayload,

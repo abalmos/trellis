@@ -2433,8 +2433,6 @@ async fn connect_activated_device_for_auth_case() -> (
     trellis_test::flush(&device)
         .await
         .expect("device NATS flush should succeed");
-    drop(auth);
-
     (
         runtime,
         admin,

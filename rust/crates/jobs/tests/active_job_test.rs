@@ -10,9 +10,11 @@ use trellis_jobs::{
     JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
 };
 
+type PublishedCalls = Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>;
+
 #[derive(Default)]
 struct RecordingPublisher {
-    calls: Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>,
+    calls: PublishedCalls,
 }
 
 impl RecordingPublisher {

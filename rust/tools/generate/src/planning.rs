@@ -339,7 +339,7 @@ pub fn execute_auto_plan(
 
     let generator_fingerprint = current_generator_fingerprint();
     let mut summary = AutoExecutionSummary::default();
-    write_auto_plan_shells(plan, prefix, &generator_fingerprint)?;
+    write_auto_plan_shells(plan, prefix, generator_fingerprint)?;
     for entry in plan {
         let resolved = contract_input::resolve_contract_input(
             None,

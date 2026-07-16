@@ -148,6 +148,10 @@ fn parse_janitor_interval(value: Option<&str>) -> Duration {
         .unwrap_or(DEFAULT_JANITOR_INTERVAL)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed service loop diagnostics"
+)]
 fn map_runtime_loop_result(
     loop_name: &str,
     result: Result<(), ServerError>,
@@ -169,6 +173,10 @@ pub struct ConnectedJobsService {
 
 impl ConnectedJobsService {
     /// Construct a connected Jobs service wrapper from a high-level Trellis service runtime.
+    #[expect(
+        clippy::result_large_err,
+        reason = "ServerError preserves typed service startup diagnostics"
+    )]
     pub fn new(runtime: ConnectedServiceRuntime<JobsContract>) -> Result<Self, ServerError> {
         let jobs_runtime = runtime.jobs_runtime();
         Ok(Self {
@@ -215,6 +223,10 @@ impl ConnectedJobsService {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed Jobs runtime diagnostics"
+)]
 fn build_jobs_runtime(
     jobs_runtime: trellis_rs::jobs::JobsRuntime,
     store: SqliteJobsStore,
@@ -229,11 +241,19 @@ fn build_jobs_runtime(
     Ok((resources, query, store))
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed storage startup diagnostics"
+)]
 fn open_jobs_store_from_env() -> Result<SqliteJobsStore, ServerError> {
     let db_path = jobs_db_path_from_env();
     open_jobs_store(&db_path)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed storage startup diagnostics"
+)]
 fn open_jobs_store(path: &Path) -> Result<SqliteJobsStore, ServerError> {
     tracing::info!(path = %path.display(), "opening jobs SQLite projection");
     if let Some(parent) = path

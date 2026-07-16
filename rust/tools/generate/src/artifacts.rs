@@ -88,6 +88,10 @@ pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedCont
     Ok(resolved)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the output matrix is the generator command boundary"
+)]
 pub fn write_contract_outputs(
     resolved: &ResolvedContractInput,
     artifact_version: String,
@@ -195,6 +199,10 @@ pub fn write_contract_outputs(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shell generation mirrors the optional output matrix"
+)]
 pub fn write_contract_shell_outputs(
     contract_id: &str,
     artifact_version: &str,
@@ -496,6 +504,10 @@ fn string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("serializing a string cannot fail")
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "participant generation receives the resolved CLI output settings"
+)]
 pub fn write_participant_facade_outputs(
     manifest_path: &Path,
     rust_participant_out: &Path,
@@ -529,6 +541,10 @@ pub fn write_participant_facade_outputs(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "npm package assembly receives one value per package manifest field"
+)]
 pub fn build_npm_package_from_ts_sources(
     src_dir: &Path,
     npm_out: &Path,
@@ -754,6 +770,10 @@ fn binary_is_available(binary: &OsString) -> bool {
     Command::new(binary).arg("--version").output().is_ok()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "metadata construction records the complete generated output matrix"
+)]
 pub fn generated_artifacts_metadata(
     resolved: &ResolvedContractInput,
     artifact_version: &str,
@@ -1270,6 +1290,21 @@ pub fn rust_runtime_deps(
     }
 }
 
+pub fn ts_runtime_deps(
+    source: RuntimeSource,
+    version: String,
+    repo_root: Option<PathBuf>,
+) -> TsRuntimeDeps {
+    TsRuntimeDeps {
+        source: match source {
+            RuntimeSource::Registry => CodegenTsRuntimeSource::Registry,
+            RuntimeSource::Local => CodegenTsRuntimeSource::Local,
+        },
+        version,
+        repo_root,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1477,20 +1512,5 @@ mod tests {
 
         let cargo = fs::read_to_string(rust_out.join("Cargo.toml")).expect("read cargo shell");
         assert!(cargo.contains("publish = false"));
-    }
-}
-
-pub fn ts_runtime_deps(
-    source: RuntimeSource,
-    version: String,
-    repo_root: Option<PathBuf>,
-) -> TsRuntimeDeps {
-    TsRuntimeDeps {
-        source: match source {
-            RuntimeSource::Registry => CodegenTsRuntimeSource::Registry,
-            RuntimeSource::Local => CodegenTsRuntimeSource::Local,
-        },
-        version,
-        repo_root,
     }
 }

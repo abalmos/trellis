@@ -83,10 +83,10 @@ async fn next_watch_frame(
                     ));
                 }
             };
-            return Some((
+            Some((
                 Ok(ready_frame(now_timestamp_string())),
                 WatchState::Open { messages, input },
-            ));
+            ))
         }
         WatchState::Open {
             mut messages,

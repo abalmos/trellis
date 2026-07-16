@@ -119,6 +119,10 @@ pub async fn start_eventlog_projector(
     Ok(EventLogProjectorHandle { task: Some(task) })
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed projector diagnostics"
+)]
 fn collect_message(
     message: Result<jetstream::Message, impl std::fmt::Display>,
     batch: &mut Vec<jetstream::Message>,
@@ -355,6 +359,12 @@ fn sanitize_consumer_token(value: &str) -> String {
     }
 }
 
+impl From<EventLogStoreError> for ServerError {
+    fn from(error: EventLogStoreError) -> Self {
+        ServerError::Nats(error.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{is_eventlog_projector_consumer, projector_consumer_name};
@@ -373,11 +383,5 @@ mod tests {
         assert!(!is_eventlog_projector_consumer(
             "event-log-projector-legacy"
         ));
-    }
-}
-
-impl From<EventLogStoreError> for ServerError {
-    fn from(error: EventLogStoreError) -> Self {
-        ServerError::Nats(error.to_string())
     }
 }

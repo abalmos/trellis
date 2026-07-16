@@ -487,7 +487,7 @@ where
         queue_type,
         manager,
         JobCancellationToken::new(),
-        move |job| handler(job),
+        handler,
     )
     .await
 }
@@ -595,6 +595,10 @@ where
     result
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the prepared worker loop receives independently owned runtime resources"
+)]
 async fn run_prepared_queue_worker_loop<P, M, H, Fut, E>(
     consumer: consumer::PullConsumer,
     lifecycle_stream: stream::Stream<()>,
@@ -831,6 +835,10 @@ async fn ack_worker_message(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "worker startup wires independently owned runtime resources"
+)]
 async fn run_prepared_queue_worker_with_cancellation<P, M, H, Fut, E>(
     nats: async_nats::Client,
     consumer: consumer::PullConsumer,
@@ -968,7 +976,7 @@ async fn renew_key_lease_at(
     active_key: &ActiveKeyLease,
     heartbeat_at: &str,
 ) -> Result<LeaseMutationOutcome, RuntimeWorkerError> {
-    let lease_expires_at = add_millis(&heartbeat_at, active_key.heartbeat_ttl_ms)
+    let lease_expires_at = add_millis(heartbeat_at, active_key.heartbeat_ttl_ms)
         .map_err(RuntimeWorkerError::KeyCoordinator)?;
     coordinator
         .update_key(&active_key.policy, {
@@ -1083,6 +1091,10 @@ fn add_millis(timestamp: &str, millis: u64) -> Result<String, String> {
 }
 
 /// Run one queue worker using a previously resolved jobs runtime binding.
+#[expect(
+    dead_code,
+    reason = "binding helper remains available for focused crate-internal runtimes"
+)]
 pub async fn run_single_queue_worker_from_binding<P, M, H, Fut, E>(
     nats: async_nats::Client,
     binding: JobsRuntimeBinding,
@@ -1104,6 +1116,10 @@ where
 }
 
 /// Run one queue worker from a resolved binding with cancellation context.
+#[expect(
+    dead_code,
+    reason = "binding helper remains available for focused crate-internal runtimes"
+)]
 pub async fn run_single_queue_worker_from_binding_with_context<P, M, H, Fut, E>(
     nats: async_nats::Client,
     binding: JobsRuntimeBinding,

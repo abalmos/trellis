@@ -209,6 +209,10 @@ impl SharedOpState {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "test helpers exercise the public structured ServerError"
+)]
 fn now_iso() -> Result<String, ServerError> {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -433,7 +437,7 @@ fn register_upload_handler(
                     snapshots
                         .get(&operation_id)
                         .cloned()
-                        .ok_or_else(|| ServerError::OperationNotFound { operation_id })
+                        .ok_or(ServerError::OperationNotFound { operation_id })
                 }
             }
         },

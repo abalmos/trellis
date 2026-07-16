@@ -2562,9 +2562,10 @@ fn render_rpc_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
             lines.push("    }".to_string());
             if errors.iter().any(|error| error == "AuthError") {
                 lines.push("    fn auth_error_reason(&self) -> Option<&str> {".to_string());
-                lines.push(format!(
-                    "        match self {{ Self::AuthError(payload) => Some(payload.reason.as_str()), _ => None }}"
-                ));
+                lines.push(
+                    "        match self { Self::AuthError(payload) => Some(payload.reason.as_str()), _ => None }"
+                        .to_string(),
+                );
                 lines.push("    }".to_string());
             }
             lines.push("}".to_string());
@@ -2837,9 +2838,7 @@ fn render_operations_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
                 "    const PROGRESS_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_PROGRESS_SCHEMA_JSON);"
             ));
         } else {
-            lines.push(format!(
-                "    const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;"
-            ));
+            lines.push("    const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;".to_string());
         }
         lines.push(format!(
             "    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_OUTPUT_SCHEMA_JSON;"

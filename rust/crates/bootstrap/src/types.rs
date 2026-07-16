@@ -34,18 +34,10 @@ impl Default for NatsBootstrapNames {
 }
 
 /// Shared NATS bootstrap configuration.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct NatsBootstrapConfig {
     /// NATS bootstrap names.
     pub names: NatsBootstrapNames,
-}
-
-impl Default for NatsBootstrapConfig {
-    fn default() -> Self {
-        Self {
-            names: NatsBootstrapNames::default(),
-        }
-    }
 }
 
 /// Options for generating a NATS bootstrap directory.

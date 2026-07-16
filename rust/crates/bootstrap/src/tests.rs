@@ -330,7 +330,7 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(matches!(
         parsed.platform_storage_backend().expect("platform storage"),
         StorageBackend::Sqlite(storage)
-            if storage.path == PathBuf::from("./data/platform.sqlite")
+            if storage.path == std::path::Path::new("./data/platform.sqlite")
                 && storage.journal_mode.as_deref() == Some("wal")
                 && storage.busy_timeout_ms == Some(5000)
                 && storage.single_writer == Some(true)

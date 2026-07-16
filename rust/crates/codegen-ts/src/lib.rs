@@ -623,7 +623,6 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                             .errors
                             .iter()
                             .find(|(_, decl)| decl.error_type == value.error_type)
-                            .map(|(name, decl)| (name, decl))
                     })
                     .collect::<Vec<_>>()
             })
@@ -637,18 +636,11 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                     "      type: {},",
                     js_string(&error_decl.error_type)
                 ));
-                if error_decl.schema.is_some() {
+                if let Some(schema) = &error_decl.schema {
                     lines.push(format!(
                         "      schema: schema<Types.{base}Data>({}),",
                         schema_const_names
-                            .get(
-                                error_decl
-                                    .schema
-                                    .as_ref()
-                                    .expect("checked above")
-                                    .schema
-                                    .as_str(),
-                            )
+                            .get(schema.schema.as_str())
                             .expect("missing public schema export for error schema")
                     ));
                 }
@@ -676,48 +668,27 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                 .get(operation.input.schema.as_str())
                 .expect("missing public schema export for operation input")
         ));
-        if operation.progress.is_some() {
+        if let Some(progress) = &operation.progress {
             lines.push(format!(
                 "  progress: schema<Types.{base}Progress>({}),",
                 schema_const_names
-                    .get(
-                        operation
-                            .progress
-                            .as_ref()
-                            .expect("checked above")
-                            .schema
-                            .as_str(),
-                    )
+                    .get(progress.schema.as_str())
                     .expect("missing public schema export for operation progress")
             ));
         }
-        if operation.update.is_some() {
+        if let Some(update) = &operation.update {
             lines.push(format!(
                 "  update: schema<Types.{base}Update>({}),",
                 schema_const_names
-                    .get(
-                        operation
-                            .update
-                            .as_ref()
-                            .expect("checked above")
-                            .schema
-                            .as_str(),
-                    )
+                    .get(update.schema.as_str())
                     .expect("missing public schema export for operation update")
             ));
         }
-        if operation.output.is_some() {
+        if let Some(output) = &operation.output {
             lines.push(format!(
                 "  output: schema<Types.{base}Output>({}),",
                 schema_const_names
-                    .get(
-                        operation
-                            .output
-                            .as_ref()
-                            .expect("checked above")
-                            .schema
-                            .as_str(),
-                    )
+                    .get(output.schema.as_str())
                     .expect("missing public schema export for operation output")
             ));
         }
@@ -820,7 +791,6 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                             .errors
                             .iter()
                             .find(|(_, decl)| decl.error_type == value.error_type)
-                            .map(|(name, decl)| (name, decl))
                     })
                     .collect::<Vec<_>>()
             })
@@ -834,18 +804,11 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                     "      type: {},",
                     js_string(&error_decl.error_type)
                 ));
-                if error_decl.schema.is_some() {
+                if let Some(schema) = &error_decl.schema {
                     lines.push(format!(
                         "      schema: schema<Types.{base}Data>({}),",
                         schema_const_names
-                            .get(
-                                error_decl
-                                    .schema
-                                    .as_ref()
-                                    .expect("checked above")
-                                    .schema
-                                    .as_str(),
-                            )
+                            .get(schema.schema.as_str())
                             .expect("missing public schema export for error schema")
                     ));
                 }

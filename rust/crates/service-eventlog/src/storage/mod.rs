@@ -781,8 +781,6 @@ fn related_events(
                 "trace"
             } else if publisher.is_some() && row_publisher.as_deref() == publisher {
                 "publisher"
-            } else if subject.is_some() && row_subject == subject.unwrap_or_default() {
-                "subject"
             } else {
                 "subject"
             };

@@ -315,38 +315,39 @@ where
     const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = D::SIGNAL_INPUT_SCHEMAS_JSON;
 }
 
+type AcceptedOperationFuture<D> = BoxFuture<
+    'static,
+    Result<
+        AcceptedOperation<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
+        ServerError,
+    >,
+>;
+type OperationSnapshotFuture<D> = BoxFuture<
+    'static,
+    Result<
+        OperationSnapshot<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
+        ServerError,
+    >,
+>;
+type OperationSnapshotStream<P, O> =
+    BoxStream<'static, Result<OperationSnapshot<P, O>, ServerError>>;
+
 /// Provider-style operation handler for generated service helpers.
 pub trait OperationProvider<D>: Send + Sync + 'static
 where
     D: OperationDescriptor,
 {
     /// Start a new operation instance from the decoded input.
-    fn start(
-        &self,
-        context: RequestContext,
-        input: D::Input,
-    ) -> BoxFuture<'static, Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>;
+    fn start(&self, context: RequestContext, input: D::Input) -> AcceptedOperationFuture<D>;
 
     /// Return the current snapshot for an operation id.
-    fn get(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    fn get(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
 
     /// Wait for a later or terminal snapshot for an operation id.
-    fn wait(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    fn wait(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
 
     /// Cancel an operation id and return the resulting snapshot.
-    fn cancel(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    fn cancel(&self, context: RequestContext, operation_id: String) -> OperationSnapshotFuture<D>;
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(control_subject), "`.")]
@@ -367,6 +368,10 @@ struct StoredOperation {
 }
 
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "operation snapshots are retained inline in the in-memory event log"
+)]
 enum StoredOperationEvent {
     Snapshot(OperationSnapshot<Value, Value>),
     Update(crate::client::OperationUpdateEvent<Value>),
@@ -700,10 +705,8 @@ where
         };
         let initial = typed_snapshot(initial)?;
         if initial.state.is_terminal() {
-            let snapshots: BoxStream<
-                'static,
-                Result<OperationSnapshot<D::Progress, D::Output>, ServerError>,
-            > = Box::pin(stream::once(async move { Ok(initial) }));
+            let snapshots: OperationSnapshotStream<D::Progress, D::Output> =
+                Box::pin(stream::once(async move { Ok(initial) }));
             return Ok(snapshots);
         }
         let updates = stream::unfold((receiver, false), |(mut receiver, done)| async move {
@@ -717,10 +720,8 @@ where
             let done = snapshot.state.is_terminal();
             Some((typed_snapshot(snapshot), (receiver, done)))
         });
-        let snapshots: BoxStream<
-            'static,
-            Result<OperationSnapshot<D::Progress, D::Output>, ServerError>,
-        > = Box::pin(stream::once(async move { Ok(initial) }).chain(updates));
+        let snapshots: OperationSnapshotStream<D::Progress, D::Output> =
+            Box::pin(stream::once(async move { Ok(initial) }).chain(updates));
         Ok(snapshots)
     }
 

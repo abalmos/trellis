@@ -262,6 +262,13 @@ struct WorkerTaskHandle {
     task: tokio::task::JoinHandle<Result<(), RuntimeWorkerError>>,
 }
 
+type WorkerJoinResult = (
+    String,
+    u32,
+    Result<Result<(), RuntimeWorkerError>, tokio::task::JoinError>,
+);
+type WorkerJoinFuture = BoxFuture<'static, WorkerJoinResult>;
+
 /// Handle for a binding-driven worker host.
 pub struct WorkerHostHandle {
     cancellation: JobCancellationToken,
@@ -315,16 +322,7 @@ impl WorkerHostHandle {
     pub async fn join(self) -> Result<(), WorkerHostError> {
         let cancellation = self.cancellation;
         let _cancel_on_drop = CancelWorkersOnDrop(cancellation.clone());
-        let mut workers: FuturesUnordered<
-            BoxFuture<
-                'static,
-                (
-                    String,
-                    u32,
-                    Result<Result<(), RuntimeWorkerError>, tokio::task::JoinError>,
-                ),
-            >,
-        > = self
+        let mut workers: FuturesUnordered<WorkerJoinFuture> = self
             .workers
             .into_iter()
             .map(|worker| {
@@ -553,7 +551,7 @@ where
         queue_type,
         manager,
         JobCancellationToken::new(),
-        move |job| handler(job),
+        handler,
     )
     .await
 }
@@ -661,6 +659,10 @@ where
     result
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the prepared worker loop receives independently owned runtime resources"
+)]
 async fn run_prepared_queue_worker_loop<P, M, H, Fut, E>(
     consumer: consumer::PullConsumer,
     lifecycle_stream: stream::Stream<()>,
@@ -877,6 +879,10 @@ where
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "worker startup wires independently owned runtime resources"
+)]
 async fn run_prepared_queue_worker_with_cancellation<P, M, H, Fut, E>(
     nats: async_nats::Client,
     consumer: consumer::PullConsumer,
@@ -1014,7 +1020,7 @@ async fn renew_key_lease_at(
     active_key: &ActiveKeyLease,
     heartbeat_at: &str,
 ) -> Result<LeaseMutationOutcome, RuntimeWorkerError> {
-    let lease_expires_at = add_millis(&heartbeat_at, active_key.heartbeat_ttl_ms)
+    let lease_expires_at = add_millis(heartbeat_at, active_key.heartbeat_ttl_ms)
         .map_err(RuntimeWorkerError::KeyCoordinator)?;
     coordinator
         .update_key(&active_key.policy, {

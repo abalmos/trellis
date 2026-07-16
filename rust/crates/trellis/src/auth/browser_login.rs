@@ -37,7 +37,7 @@ fn canonicalize_json_value(value: &Value) -> Result<String, TrellisAuthError> {
         }
         Value::Object(values) => {
             let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            entries.sort_by_key(|(key, _)| *key);
 
             let mut canonical = String::from("{");
             for (index, (key, entry)) in entries.into_iter().enumerate() {

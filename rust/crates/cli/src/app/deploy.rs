@@ -1265,38 +1265,6 @@ fn print_deployment_result<T: serde::Serialize>(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn authority_desired_version_prefers_explicit_response_value() {
-        let response = json!({
-            "desiredVersion": "desired-new",
-            "authority": {
-                "version": "authority-version",
-                "desiredVersion": "authority-desired"
-            }
-        });
-
-        assert_eq!(authority_desired_version(&response), Some("desired-new"));
-    }
-
-    #[test]
-    fn authority_desired_version_falls_back_to_authority_version() {
-        let response = json!({
-            "authority": {
-                "version": "authority-version"
-            }
-        });
-
-        assert_eq!(
-            authority_desired_version(&response),
-            Some("authority-version")
-        );
-    }
-}
-
 fn ref_label(kind: DeploymentKind, id: &str) -> String {
     let prefix = match kind {
         DeploymentKind::Service => "svc",
@@ -1339,4 +1307,36 @@ fn build_device_metadata(
         metadata.insert(key.to_string(), value.to_string());
     }
     Ok((!metadata.is_empty()).then_some(metadata))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authority_desired_version_prefers_explicit_response_value() {
+        let response = json!({
+            "desiredVersion": "desired-new",
+            "authority": {
+                "version": "authority-version",
+                "desiredVersion": "authority-desired"
+            }
+        });
+
+        assert_eq!(authority_desired_version(&response), Some("desired-new"));
+    }
+
+    #[test]
+    fn authority_desired_version_falls_back_to_authority_version() {
+        let response = json!({
+            "authority": {
+                "version": "authority-version"
+            }
+        });
+
+        assert_eq!(
+            authority_desired_version(&response),
+            Some("authority-version")
+        );
+    }
 }

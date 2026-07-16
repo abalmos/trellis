@@ -67,6 +67,10 @@ pub struct ConnectedEventLogService {
 
 impl ConnectedEventLogService {
     /// Construct a connected Event Log service wrapper from a Trellis service runtime.
+    #[expect(
+        clippy::result_large_err,
+        reason = "ServerError preserves typed service startup diagnostics"
+    )]
     pub fn new(runtime: ConnectedServiceRuntime<EventLogContract>) -> Result<Self, ServerError> {
         Ok(Self {
             runtime,
@@ -108,11 +112,19 @@ impl ConnectedEventLogService {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed storage startup diagnostics"
+)]
 fn open_eventlog_store_from_env() -> Result<EventLogStore, ServerError> {
     let db_path = eventlog_db_path_from_env();
     open_eventlog_store(&db_path)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServerError preserves typed storage startup diagnostics"
+)]
 fn open_eventlog_store(path: &Path) -> Result<EventLogStore, ServerError> {
     tracing::info!(path = %path.display(), "opening Event Log SQLite projection");
     if let Some(parent) = path

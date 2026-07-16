@@ -7,9 +7,11 @@ use trellis_jobs::manager::{JobManager, JobManagerError, JobMetaSource, TrellisJ
 use trellis_jobs::publisher::{JobEventHeaders, JobEventPublisher};
 use trellis_jobs::types::{JobEvent, JobEventType, JobState, JobTriggerKind};
 
+type PublishedCalls = Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>;
+
 #[derive(Default)]
 struct RecordingPublisher {
-    calls: Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>,
+    calls: PublishedCalls,
 }
 
 impl RecordingPublisher {
@@ -40,13 +42,13 @@ struct FailingPublisher;
 impl JobEventPublisher for FailingPublisher {
     type Error = &'static str;
 
-    fn publish(
+    async fn publish(
         &self,
         _subject: String,
         _headers: JobEventHeaders,
         _payload: Vec<u8>,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
-        async { Err("publish failed") }
+    ) -> Result<(), Self::Error> {
+        Err("publish failed")
     }
 }
 
