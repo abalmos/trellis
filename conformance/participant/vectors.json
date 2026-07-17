@@ -2164,6 +2164,43 @@
       }
     },
     {
+      "name": "reachable-scalar-local-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves ordinary local references.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "$defs": { "value": { "type": "string" } },
+            "$ref": "#/$defs/value"
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "unused-private-non-monotonic-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Leaves unused private schemas outside the wire profile.",
+        "kind": "service",
+        "schemas": {
+          "Private": {
+            "type": "object",
+            "oneOf": [{ "required": ["a"] }, { "required": ["futureField"] }]
+          }
+        }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

@@ -186,7 +186,8 @@ fn validate_wire_schema_additive_inner(
             "wire schemas that can contain objects must not use 'oneOf'",
         ));
     }
-    if map.get("uniqueItems") == Some(&Value::Bool(true))
+    if schema_can_validate_array(root, schema, &mut Default::default())
+        && map.get("uniqueItems") == Some(&Value::Bool(true))
         && array_items_can_contain_object(root, map, &mut Default::default())
     {
         return Err(schema_error(
@@ -195,7 +196,8 @@ fn validate_wire_schema_additive_inner(
             "wire array schemas must not require unique object-containing items",
         ));
     }
-    if map.contains_key("maxContains")
+    if schema_can_validate_array(root, schema, &mut Default::default())
+        && map.contains_key("maxContains")
         && map.get("contains").is_some_and(|contains| {
             schema_can_contain_object_value(root, contains, &mut Default::default())
         })
@@ -207,15 +209,17 @@ fn validate_wire_schema_additive_inner(
         ));
     }
     for keyword in ["not", "if", "then", "else"] {
-        if object_capable
+        if can_contain_object
             && map.get(keyword).is_some_and(|schema| {
-                schema_can_validate_object(root, schema, &mut Default::default())
+                schema_can_contain_object_value(root, schema, &mut Default::default())
             })
         {
             return Err(schema_error(
                 name,
                 child_path(path, keyword),
-                format!("wire schemas that accept objects must not use object-capable '{keyword}'"),
+                format!(
+                    "wire schemas that can contain objects must not use object-capable '{keyword}'"
+                ),
             ));
         }
     }
@@ -376,23 +380,43 @@ fn array_items_can_contain_object(
         .is_none_or(|schema| schema_can_contain_object_value(root, schema, &mut refs.clone()))
 }
 
+fn schema_can_validate_array(
+    root: &Value,
+    schema: &Value,
+    refs: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    schema_can_validate_type(root, schema, "array", Value::is_array, refs)
+}
+
 fn schema_can_validate_object(
     root: &Value,
     schema: &Value,
+    refs: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    schema_can_validate_type(root, schema, "object", Value::is_object, refs)
+}
+
+fn schema_can_validate_type(
+    root: &Value,
+    schema: &Value,
+    expected: &str,
+    literal_matches: fn(&Value) -> bool,
     refs: &mut std::collections::BTreeSet<String>,
 ) -> bool {
     let Value::Object(map) = schema else {
         return schema == &Value::Bool(true);
     };
     if map.get("type").is_some_and(|value| match value {
-        Value::String(value) => value != "object",
-        Value::Array(values) => !values.iter().any(|value| value == "object"),
+        Value::String(value) => value != expected,
+        Value::Array(values) => !values.iter().any(|value| value == expected),
         _ => false,
-    }) || map.get("const").is_some_and(|value| !value.is_object())
+    }) || map
+        .get("const")
+        .is_some_and(|value| !literal_matches(value))
         || map
             .get("enum")
             .and_then(Value::as_array)
-            .is_some_and(|values| !values.iter().any(Value::is_object))
+            .is_some_and(|values| !values.iter().any(literal_matches))
     {
         return false;
     }
@@ -400,17 +424,29 @@ fn schema_can_validate_object(
         .get("allOf")
         .and_then(Value::as_array)
         .is_some_and(|schemas| {
-            schemas
-                .iter()
-                .any(|schema| !schema_can_validate_object(root, schema, &mut refs.clone()))
+            schemas.iter().any(|schema| {
+                !schema_can_validate_type(
+                    root,
+                    schema,
+                    expected,
+                    literal_matches,
+                    &mut refs.clone(),
+                )
+            })
         })
         || ["anyOf", "oneOf"].into_iter().any(|keyword| {
             map.get(keyword)
                 .and_then(Value::as_array)
                 .is_some_and(|schemas| {
-                    !schemas
-                        .iter()
-                        .any(|schema| schema_can_validate_object(root, schema, &mut refs.clone()))
+                    !schemas.iter().any(|schema| {
+                        schema_can_validate_type(
+                            root,
+                            schema,
+                            expected,
+                            literal_matches,
+                            &mut refs.clone(),
+                        )
+                    })
                 })
         })
     {
@@ -422,7 +458,7 @@ fn schema_can_validate_object(
                 continue;
             }
             if let Some((referenced, _)) = resolve_local_schema(root, reference) {
-                return schema_can_validate_object(root, referenced, refs);
+                return schema_can_validate_type(root, referenced, expected, literal_matches, refs);
             }
         }
     }
@@ -639,6 +675,14 @@ mod tests {
                 "/maxContains",
             ),
             (
+                json!({"type": "array", "not": {"contains": {"required": ["futureField"]}}}),
+                "/not",
+            ),
+            (
+                json!({"type": "array", "if": {"contains": {"required": ["futureField"]}}, "then": false}),
+                "/if",
+            ),
+            (
                 json!({"$defs": {"node": {"$dynamicAnchor": "node", "type": "object"}}, "$dynamicRef": "#node"}),
                 "/$dynamicRef",
             ),
@@ -697,6 +741,9 @@ mod tests {
             json!({"type": "array", "prefixItems": [{"type": "string"}], "items": {"type": "number"}, "uniqueItems": true}),
             json!({"type": "array", "contains": {"type": "string"}, "maxContains": 1}),
             json!({"type": "array", "contains": {"required": ["futureField"]}, "minContains": 1}),
+            json!({"type": "array", "items": {"type": "string"}, "not": {"type": "object"}}),
+            json!({"type": "string", "uniqueItems": true}),
+            json!({"type": "string", "contains": {"required": ["futureField"]}, "maxContains": 1}),
             json!({"type": "object"}),
             json!({"type": "object", "additionalProperties": true}),
             json!({"type": "object", "unevaluatedProperties": true}),

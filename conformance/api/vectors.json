@@ -2038,6 +2038,41 @@
       }
     },
     {
+      "name": "reachable-scalar-local-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves ordinary local references.",
+        "schemas": {
+          "Wire": {
+            "$defs": { "value": { "type": "string" } },
+            "$ref": "#/$defs/value"
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "unused-private-non-monotonic-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Leaves unused private schemas outside the wire profile.",
+        "schemas": {
+          "Private": {
+            "type": "object",
+            "oneOf": [{ "required": ["a"] }, { "required": ["futureField"] }]
+          }
+        }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,
