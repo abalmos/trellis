@@ -178,7 +178,7 @@ idempotent.
 - Test runtime-observable behavior with live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
 - In the Trellis repository, Rust integration cases run with:
-  `cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --test-threads=1`.
+  `deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 -- --nocapture`.
 - Register applicable integration cases in `integration/test-matrix.json`; do not
   add language-only skips outside explicit blocked rows.
 - Format changed Rust files, run Clippy, Rustdoc, MSRV checks, focused tests, and

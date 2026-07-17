@@ -78,7 +78,17 @@ integration.
 
 ### Verification Practice
 
-During development, run the smallest live fixture or case that proves the
-change. Before completing a runtime or protocol change, run the matching
-TypeScript and Rust live cases plus matrix conformance. Release verification
-still owns the full unfiltered integration suites.
+Verification has three explicit tiers:
+
+- **Tier 1, inner loop:** format changed files and run the smallest affected
+  package tests, type checks, and live fixture or case that prove the change.
+- **Tier 2, phase gate:** run preparation when generated artifacts may change,
+  workspace formatting, lint and documentation checks, affected package suites,
+  and the matching TypeScript and Rust live cases plus matrix conformance.
+- **Tier 3, release gate:** run `cargo xtask release verify` and the release
+  workflow's full unfiltered TypeScript and Rust integration suites, packaging,
+  MSRV, and platform checks.
+
+Tier 1 and Tier 2 results are scoped evidence, not a full verification claim. Do
+not rerun Tier 3 after every implementation track; run it once from the final
+integrated source state before release.

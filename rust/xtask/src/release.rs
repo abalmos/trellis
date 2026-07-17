@@ -1422,11 +1422,19 @@ fn verify_command_specs(
     ];
 
     if !skip_integration {
+        let js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4)
+            .to_string();
         let mut js_args = vec![
             "task".to_string(),
             "-c".to_string(),
             "js/deno.json".to_string(),
             "test:integration".to_string(),
+            "--".to_string(),
+            "--parallel".to_string(),
+            "--jobs".to_string(),
+            js_jobs,
         ];
         if keep_workdir {
             js_args.insert(0, "deno".to_string());
@@ -1942,9 +1950,14 @@ mod tests {
             &"cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty"
                 .to_string()
         ));
+        let expected_js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4);
         assert_eq!(
             &commands[commands.len() - 2],
-            "deno task -c js/deno.json test:integration"
+            &format!(
+                "deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
+            )
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
@@ -1959,9 +1972,14 @@ mod tests {
             .map(command_text)
             .collect();
 
+        let expected_js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4);
         assert_eq!(
             &commands[commands.len() - 2],
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno task -c js/deno.json test:integration"
+            &format!(
+                "env TRELLIS_TEST_KEEP_WORKDIR=1 deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
+            )
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
