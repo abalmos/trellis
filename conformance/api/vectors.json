@@ -1687,6 +1687,172 @@
       }
     },
     {
+      "name": "reachable-schema-valued-additional-properties",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unevaluated-properties-false",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": { "type": "object", "unevaluatedProperties": false }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-not-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": { "type": "object", "not": { "required": ["futureField"] } }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-conditional-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "if": { "required": ["futureField"] },
+            "then": false
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-dependent-schemas-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentSchemas": { "futureField": false }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-dependent-required",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentRequired": { "futureField": ["other"] }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": { "Wire": { "const": { "fixed": true } } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": { "Wire": { "enum": ["open", { "fixed": true }] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-all-of-closed-branch",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "allOf": [true, { "type": "object", "additionalProperties": false }]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-closed-object",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "properties": {
+              "nested": { "type": "object", "additionalProperties": false }
+            }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

@@ -1748,6 +1748,224 @@
       }
     },
     {
+      "name": "reachable-closed-job-update-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed job updates.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "update": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-job-result-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed job results.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "result": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-participant-state-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed participant state.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "state": {
+          "settings": { "kind": "value", "schema": { "schema": "Wire" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-accepted-state-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed accepted state.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "state": {
+          "settings": {
+            "kind": "value",
+            "schema": { "schema": "Open" },
+            "acceptedVersions": { "v1": { "schema": "Wire" } }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-kv-value-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed KV values.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Wire" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-job-payload-not-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive job payloads.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "not": { "required": ["futureField"] } }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-job-update-conditional-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive job updates.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": {
+            "type": "object",
+            "if": { "required": ["futureField"] },
+            "then": false
+          }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "update": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-state-dependent-schemas-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive participant state.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentSchemas": { "futureField": false }
+          }
+        },
+        "state": {
+          "settings": { "kind": "value", "schema": { "schema": "Wire" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-kv-dependent-required",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive KV values.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentRequired": { "futureField": ["other"] }
+          }
+        },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Wire" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-nested-closed-participant-object",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested closed participant objects.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "properties": {
+              "nested": { "type": "object", "additionalProperties": false }
+            }
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

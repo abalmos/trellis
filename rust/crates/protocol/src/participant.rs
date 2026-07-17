@@ -1257,16 +1257,43 @@ mod tests {
         });
         assert!(parse_participant_v1(&base).is_ok());
 
-        for name in ["State", "StateV1", "Payload", "Update", "Result", "KvValue"] {
-            let mut value = base.clone();
-            value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
-            assert!(
-                matches!(
-                    parse_participant_v1(&value),
-                    Err(ProtocolError::SchemaProfile { .. })
-                ),
-                "wire schema reference {name}"
-            );
+        for (schema, expected_path) in [
+            (
+                json!({ "type": "object", "additionalProperties": false }),
+                "/additionalProperties",
+            ),
+            (
+                json!({ "type": "object", "not": { "required": ["futureField"] } }),
+                "/not",
+            ),
+            (
+                json!({ "type": "object", "if": { "required": ["futureField"] }, "then": false }),
+                "/if",
+            ),
+            (
+                json!({ "type": "object", "dependentSchemas": { "futureField": false } }),
+                "/dependentSchemas",
+            ),
+            (
+                json!({ "type": "object", "dependentRequired": { "futureField": ["other"] } }),
+                "/dependentRequired",
+            ),
+            (
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "nested": { "type": "object", "additionalProperties": false }
+                    }
+                }),
+                "/properties/nested/additionalProperties",
+            ),
+        ] {
+            for name in ["State", "StateV1", "Payload", "Update", "Result", "KvValue"] {
+                let mut value = base.clone();
+                value["schemas"][name] = schema.clone();
+                let error = parse_participant_v1(&value).expect_err("closed wire schema must fail");
+                assert_schema_profile(error, name, expected_path);
+            }
         }
     }
 
@@ -1392,5 +1419,13 @@ mod tests {
             }
             error => panic!("expected participant validation error, received {error:?}"),
         }
+    }
+
+    fn assert_schema_profile(error: ProtocolError, expected_schema: &str, expected_path: &str) {
+        let ProtocolError::SchemaProfile { schema, path, .. } = error else {
+            panic!("expected schema profile error, got {error:?}")
+        };
+        assert_eq!(schema, expected_schema);
+        assert_eq!(path, expected_path);
     }
 }

@@ -1017,20 +1017,50 @@ mod tests {
 
     #[test]
     fn wire_schemas_reject_closed_object_keywords() {
-        for schema in [
-            json!({ "type": "object", "additionalProperties": false }),
-            json!({ "type": "object", "additionalProperties": { "type": "string" } }),
-            json!({ "type": "object", "unevaluatedProperties": false }),
-            json!({ "type": "object", "unevaluatedProperties": { "type": "string" } }),
-            json!({ "type": "object", "maxProperties": 2 }),
-            json!({ "type": "object", "patternProperties": { "x": true } }),
-            json!({ "type": "object", "propertyNames": { "type": "string" } }),
-            json!({
-                "type": "object",
-                "properties": {
-                    "nested": { "type": "object", "additionalProperties": false }
-                }
-            }),
+        for (schema, expected_path) in [
+            (
+                json!({ "type": "object", "additionalProperties": false }),
+                "/additionalProperties",
+            ),
+            (
+                json!({ "type": "object", "additionalProperties": { "type": "string" } }),
+                "/additionalProperties",
+            ),
+            (
+                json!({ "type": "object", "unevaluatedProperties": false }),
+                "/unevaluatedProperties",
+            ),
+            (
+                json!({ "type": "object", "not": { "required": ["futureField"] } }),
+                "/not",
+            ),
+            (
+                json!({ "type": "object", "if": { "required": ["futureField"] }, "then": false }),
+                "/if",
+            ),
+            (
+                json!({ "type": "object", "dependentSchemas": { "futureField": false } }),
+                "/dependentSchemas",
+            ),
+            (
+                json!({ "type": "object", "dependentRequired": { "futureField": ["other"] } }),
+                "/dependentRequired",
+            ),
+            (json!({ "const": { "fixed": true } }), "/const"),
+            (json!({ "enum": [{ "fixed": true }] }), "/enum"),
+            (
+                json!({ "allOf": [true, { "type": "object", "additionalProperties": false }] }),
+                "/allOf/1/additionalProperties",
+            ),
+            (
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "nested": { "type": "object", "additionalProperties": false }
+                    }
+                }),
+                "/properties/nested/additionalProperties",
+            ),
         ] {
             let value = json!({
                 "format": API_FORMAT_V1,
@@ -1046,10 +1076,8 @@ mod tests {
                     }
                 }
             });
-            assert!(matches!(
-                parse_api_v1(&value),
-                Err(ProtocolError::SchemaProfile { .. })
-            ));
+            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            assert_schema_profile(error, "Input", expected_path);
         }
 
         let private = json!({
@@ -1139,13 +1167,8 @@ mod tests {
         ] {
             let mut value = base.clone();
             value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
-            assert!(
-                matches!(
-                    parse_api_v1(&value),
-                    Err(ProtocolError::SchemaProfile { .. })
-                ),
-                "wire schema reference {name}"
-            );
+            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            assert_schema_profile(error, name, "/additionalProperties");
         }
     }
 
@@ -1208,5 +1231,13 @@ mod tests {
             ProtocolError::ApiValidation { path, .. } => assert_eq!(path, expected_path),
             error => panic!("expected API validation error, received {error:?}"),
         }
+    }
+
+    fn assert_schema_profile(error: ProtocolError, expected_schema: &str, expected_path: &str) {
+        let ProtocolError::SchemaProfile { schema, path, .. } = error else {
+            panic!("expected schema profile error, got {error:?}")
+        };
+        assert_eq!(schema, expected_schema);
+        assert_eq!(path, expected_path);
     }
 }
