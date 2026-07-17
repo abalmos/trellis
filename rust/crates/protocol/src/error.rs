@@ -1,3 +1,30 @@
+use jsonptr::PointerBuf;
+
+/// A contextual participant-resolution failure category.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResolutionErrorCodeV1 {
+    /// A referenced API was not supplied.
+    MissingApi,
+    /// A supplied API did not match the pinned digest.
+    ApiDigestMismatch,
+    /// A selected API surface does not exist.
+    MissingSurface,
+    /// Cancellation was selected for a non-cancelable operation.
+    InvalidCancelSelection,
+    /// A selected operation signal does not exist.
+    MissingOperationSignal,
+    /// An implemented operation transfer mapping is invalid.
+    InvalidImplementedTransfer,
+    /// An implemented send-transfer operation lacks a mapping.
+    MissingRequiredTransfer,
+    /// A required transfer uses an optional store.
+    OptionalStoreForRequiredTransfer,
+    /// A schema pointer cannot be proven to resolve.
+    UnresolvableSchemaPointer,
+    /// A resolved schema pointer cannot produce the required value type.
+    SchemaPointerTypeMismatch,
+}
+
 /// Errors produced while validating or canonicalizing Trellis protocol values.
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
@@ -57,6 +84,23 @@ pub enum ProtocolError {
         /// Path within the embedded schema.
         path: String,
         /// Specific profile or JSON Schema failure.
+        message: String,
+    },
+
+    /// Contextual participant resolution against exact API artifacts failed.
+    #[error("participant '{participant}' resolution failed at '{path}' ({code:?}): {message}")]
+    ParticipantResolution {
+        /// Stable failure category.
+        code: ResolutionErrorCodeV1,
+        /// Participant being resolved.
+        participant: String,
+        /// Participant-local API alias, when applicable.
+        alias: Option<String>,
+        /// Canonical API identifier, when known.
+        api: Option<String>,
+        /// Exact authored RFC 6901 path.
+        path: PointerBuf,
+        /// Specific validation failure.
         message: String,
     },
 }
