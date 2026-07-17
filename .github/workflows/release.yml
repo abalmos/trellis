@@ -629,7 +629,7 @@ jobs:
             rust/tools/generate -> target
 
       - name: Run Rust integration tests
-        run: time deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture
+        run: time deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
 
   verify-js-integration:
     name: Verify JS integration suite

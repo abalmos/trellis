@@ -36,13 +36,14 @@ Before committing or ending an implementation cycle, run the focused checks that
 
 ```sh
 deno task -c js/deno.json test:integration -- --parallel --jobs 4
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
 ```
 
 Four JS workers are the portable baseline used by release CI. Local
 `cargo xtask release verify` selects the available CPU count capped at eight;
 pass an explicit lower `--jobs` count when running the JS command directly on a
-smaller machine.
+smaller machine. The complete Rust integration suite uses eight test threads;
+focused Rust integration commands remain single-threaded for isolation.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
@@ -289,7 +290,7 @@ cargo test --manifest-path rust/tools/generate/Cargo.toml
 cargo test --manifest-path rust/xtask/Cargo.toml
 cargo test --manifest-path xtask/Cargo.toml
 deno task -c js/deno.json test:integration -- --parallel --jobs 4
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
 ```
 
 For focused local Deno loops after a single prepare, use the prepared partitions instead of rerunning generation before every slice:

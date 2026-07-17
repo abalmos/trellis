@@ -1451,7 +1451,7 @@ fn verify_command_specs(
             "js/deno.json".to_string(),
             "rust/crates/trellis-test/integration_runner.ts".to_string(),
             "--jobs".to_string(),
-            "4".to_string(),
+            "8".to_string(),
             "--".to_string(),
             "--nocapture".to_string(),
         ];
@@ -1961,7 +1961,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
+            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture"
         );
     }
 
@@ -1983,7 +1983,7 @@ mod tests {
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture"
         );
     }
 
