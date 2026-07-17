@@ -1,11 +1,13 @@
 //! Runtime-wide singleton ownership lifecycle.
 
 use std::collections::{hash_map::DefaultHasher, BTreeMap};
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
+use futures_util::future::try_join_all;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -73,7 +75,7 @@ pub(crate) struct RuntimeOwnership {
     manager: LeaseManager,
     owner_id: String,
     owners: BTreeMap<OwnerGroup, OwnerContext>,
-    guards: Arc<Mutex<Vec<HeldLease>>>,
+    guards: Arc<Vec<Mutex<HeldLease>>>,
     renewal_stop: StopHandle,
     renewal: JoinHandle<Result<(), RuntimeError>>,
     renewal_joined: bool,
@@ -136,7 +138,7 @@ impl RuntimeOwnership {
             }
         }
 
-        let guards = Arc::new(Mutex::new(held));
+        let guards = Arc::new(held.into_iter().map(Mutex::new).collect());
         let renewal_stop = StopHandle::new();
         let renewal = tokio::spawn(renew_owned(
             manager.clone(),
@@ -198,8 +200,7 @@ impl RuntimeOwnership {
             }
         }
 
-        let mut guards = self.guards.lock().await;
-        if let Err(error) = release_held(&self.manager, &self.owner_id, &mut guards).await {
+        if let Err(error) = release_owned(&self.manager, &self.owner_id, &self.guards).await {
             if first_error.is_some() {
                 tracing::error!(error = %error, "runtime ownership release failed during shutdown");
             } else {
@@ -213,7 +214,7 @@ impl RuntimeOwnership {
 async fn renew_owned(
     manager: LeaseManager,
     owner_id: String,
-    guards: Arc<Mutex<Vec<HeldLease>>>,
+    guards: Arc<Vec<Mutex<HeldLease>>>,
     stop: StopHandle,
 ) -> Result<(), RuntimeError> {
     let initial_delay = manager.renew + renewal_jitter(&owner_id, manager.renew, manager.ttl);
@@ -222,25 +223,95 @@ async fn renew_owned(
         () = tokio::time::sleep(initial_delay) => {}
     }
 
+    let mut next_round = tokio::time::Instant::now();
     loop {
-        {
-            let mut held = guards.lock().await;
-            for lease in held.iter_mut() {
-                if let Err(source) = manager.renew(&mut lease.guard).await {
-                    return Err(map_renewal_error(
-                        lease.group,
-                        lease.guard.key().clone(),
-                        &owner_id,
-                        source,
-                    ));
-                }
-            }
-        }
+        renew_round(&manager, &owner_id, &guards).await?;
+        next_round += manager.renew;
         tokio::select! {
             () = stop.stopped() => return Ok(()),
-            () = tokio::time::sleep(manager.renew) => {}
+            () = tokio::time::sleep_until(next_round) => {}
         }
     }
+}
+
+async fn renew_round(
+    manager: &LeaseManager,
+    owner_id: &str,
+    guards: &[Mutex<HeldLease>],
+) -> Result<(), RuntimeError> {
+    let renewals = guards.iter().map(|lease| async move {
+        let mut lease = lease.lock().await;
+        let group = lease.group;
+        let key = lease.guard.key().clone();
+        manager
+            .renew(&mut lease.guard)
+            .await
+            .map_err(|source| map_renewal_error(group, key, owner_id, source))
+    });
+    match complete_renewal_round(renewals, manager.renew).await {
+        Ok(()) => Ok(()),
+        Err(RenewalRoundFailure::Operation(error)) => Err(error),
+        Err(RenewalRoundFailure::Timeout) => Err(RuntimeError::OwnerRenewalRoundTimeout {
+            owner_id: owner_id.to_owned(),
+        }),
+    }
+}
+
+#[derive(Debug)]
+enum RenewalRoundFailure<E> {
+    Operation(E),
+    Timeout,
+}
+
+async fn complete_renewal_round<F, E>(
+    renewals: impl IntoIterator<Item = F>,
+    timeout: Duration,
+) -> Result<(), RenewalRoundFailure<E>>
+where
+    F: Future<Output = Result<(), E>>,
+{
+    match tokio::time::timeout(timeout, try_join_all(renewals)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(RenewalRoundFailure::Operation(error)),
+        Err(_) => Err(RenewalRoundFailure::Timeout),
+    }
+}
+
+async fn release_owned(
+    manager: &LeaseManager,
+    owner_id: &str,
+    held: &[Mutex<HeldLease>],
+) -> Result<(), RuntimeError> {
+    let mut first_error = None;
+    for lease in held.iter().rev() {
+        let lease = lease.lock().await;
+        let group = lease.group;
+        let guard = lease.guard.clone();
+        let key = guard.key().clone();
+        let release = tokio::time::timeout(OWNERSHIP_SHUTDOWN_TIMEOUT, manager.release(guard))
+            .await
+            .unwrap_or_else(|_| {
+                Err(LeaseError::Backend {
+                    key: Some(key.clone()),
+                    operation: "release",
+                    message: "operation exceeded shutdown bound".to_owned(),
+                })
+            });
+        if let Err(source) = release {
+            let error = RuntimeError::OwnerRelease {
+                subsystem: group.subsystem(),
+                key,
+                owner_id: owner_id.to_owned(),
+                source: Box::new(source),
+            };
+            if first_error.is_some() {
+                tracing::error!(error = %error, "additional runtime owner release failed");
+            } else {
+                first_error = Some(error);
+            }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 async fn release_held(
@@ -331,6 +402,8 @@ fn renewal_jitter(owner_id: &str, renew: Duration, ttl: Duration) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     #[test]
@@ -386,5 +459,67 @@ mod tests {
         let jitter = renewal_jitter("owner-1", renew, ttl);
         assert!(jitter <= Duration::from_secs(1));
         assert!(renew + jitter < ttl);
+    }
+
+    #[tokio::test]
+    async fn renewal_round_starts_all_operations_concurrently() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let renewals = (0..4).map(|_| {
+            let starts = Arc::clone(&starts);
+            async move {
+                starts.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<Result<(), ()>>().await
+            }
+        });
+
+        let result = complete_renewal_round(renewals, Duration::from_millis(20)).await;
+
+        assert!(matches!(result, Err(RenewalRoundFailure::Timeout)));
+        assert_eq!(starts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn stalled_renewal_does_not_block_another_lease() {
+        let completions = Arc::new(AtomicUsize::new(0));
+        let stalled = async { std::future::pending::<Result<(), ()>>().await };
+        let completed = {
+            let completions = Arc::clone(&completions);
+            async move {
+                completions.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        };
+
+        let result = complete_renewal_round(
+            [
+                futures_util::future::Either::Left(stalled),
+                futures_util::future::Either::Right(completed),
+            ],
+            Duration::from_millis(20),
+        )
+        .await;
+
+        assert!(matches!(result, Err(RenewalRoundFailure::Timeout)));
+        assert_eq!(completions.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn renewal_error_is_fatal_without_reacquisition() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let renewal = {
+            let attempts = Arc::clone(&attempts);
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err("lost")
+            }
+        };
+
+        let result = complete_renewal_round([renewal], Duration::from_secs(1)).await;
+
+        assert!(matches!(
+            result,
+            Err(RenewalRoundFailure::Operation("lost"))
+        ));
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }

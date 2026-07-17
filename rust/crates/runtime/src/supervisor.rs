@@ -13,6 +13,7 @@ use ulid::Ulid;
 const HTTP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 const SUBSYSTEM_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const OWNERSHIP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const NATS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 use crate::leases::{LeaseError, LeaseKey};
 use crate::ownership::{OwnerContext, OwnerGroup, RuntimeOwnership};
@@ -46,6 +47,12 @@ pub enum RuntimeError {
     /// Runtime NATS connection failed.
     #[error("runtime NATS connection failed: {0}")]
     Nats(String),
+    /// The final runtime NATS flush failed during shutdown.
+    #[error("runtime NATS flush failed during shutdown: {0}")]
+    NatsFlush(String),
+    /// The final runtime NATS flush exceeded its shutdown bound.
+    #[error("runtime NATS flush did not complete within the shutdown bound")]
+    NatsFlushTimeout,
     /// The runtime lease KV bucket could not be opened or created.
     #[error("failed to open runtime lease bucket for owner {owner_id}: {source}")]
     LeaseBucketOpen {
@@ -95,6 +102,12 @@ pub enum RuntimeError {
         /// Low-level lease failure.
         #[source]
         source: Box<LeaseError>,
+    },
+    /// A complete owner renewal round exceeded the configured renew interval.
+    #[error("runtime owner renewal round timed out for {owner_id}")]
+    OwnerRenewalRoundTimeout {
+        /// Process-unique owner identity.
+        owner_id: String,
     },
     /// The critical owner renewal task exited without a stop request.
     #[error("runtime owner renewal task exited unexpectedly for {owner_id}")]
@@ -234,18 +247,41 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
         RuntimeOwnership::acquire(trellis_nats.clone(), &leases, owner_id, options.mode).await?;
     let result = run_owned(config, options.mode, trellis_nats.clone(), &mut ownership).await;
     let release_result = ownership.shutdown().await;
-    if let Err(error) = trellis_nats.flush().await {
-        tracing::warn!(error = %error, "failed to flush runtime NATS client during shutdown");
+    let flush_result = bounded_flush(trellis_nats.flush(), NATS_FLUSH_TIMEOUT).await;
+    preserve_primary(result, release_result, flush_result)
+}
+
+async fn bounded_flush<F, E>(flush: F, timeout: Duration) -> Result<(), RuntimeError>
+where
+    F: Future<Output = Result<(), E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(timeout, flush).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(RuntimeError::NatsFlush(error.to_string())),
+        Err(_) => Err(RuntimeError::NatsFlushTimeout),
     }
-    match (result, release_result) {
-        (Err(primary), Err(release)) => {
-            tracing::error!(error = %release, "runtime ownership shutdown also failed");
-            Err(primary)
+}
+
+fn preserve_primary(
+    result: Result<(), RuntimeError>,
+    release: Result<(), RuntimeError>,
+    flush: Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
+    let mut primary = result.err();
+    for (secondary, message) in [
+        (release.err(), "runtime ownership shutdown also failed"),
+        (flush.err(), "runtime NATS flush also failed"),
+    ] {
+        if let Some(error) = secondary {
+            if primary.is_some() {
+                tracing::error!(error = %error, "{message}");
+            } else {
+                primary = Some(error);
+            }
         }
-        (Err(primary), Ok(())) => Err(primary),
-        (Ok(()), Err(release)) => Err(release),
-        (Ok(()), Ok(())) => Ok(()),
     }
+    primary.map_or(Ok(()), Err)
 }
 
 async fn run_owned(
@@ -269,35 +305,20 @@ async fn run_owned(
     let mut server = Box::pin(crate::run_http_server(
         &context.config,
         context.mode,
-        async move {
-            tokio::select! {
-                () = crate::shutdown::shutdown_signal() => {}
-                () = server_stop.stopped() => {}
-            }
-        },
+        async move { server_stop.stopped().await },
     ));
-    let (primary, server_finished) = tokio::select! {
-        server_result = server.as_mut() => {
-            (server_result.map_err(RuntimeError::from), true)
-        }
-        (index, task_result) = wait_for_subsystem(&mut handles), if !handles.is_empty() => {
-            let failed = handles.swap_remove(index);
-            let result = match task_result {
-                Ok(Ok(())) => Err(RuntimeError::SubsystemExited { subsystem: failed.name }),
-                Ok(Err(error)) => Err(error),
-                Err(source) => Err(RuntimeError::SubsystemTask {
-                    subsystem: failed.name,
-                    source,
-                }),
-            };
-            (result, false)
-        }
-        renewal_error = ownership.wait_for_renewal_failure() => {
-            (Err(renewal_error), false)
-        }
-    };
+    let (primary, server_finished) = wait_for_runtime_event(
+        server.as_mut(),
+        &mut handles,
+        crate::shutdown::shutdown_signal(),
+        ownership.wait_for_renewal_failure(),
+    )
+    .await;
 
     root_stop.stop();
+    for handle in &handles {
+        handle.stop.stop();
+    }
     if let Err(error) = finish_shutdown(
         server,
         server_finished,
@@ -314,6 +335,38 @@ async fn run_owned(
         }
     }
     primary
+}
+
+async fn wait_for_runtime_event<F, S, R>(
+    mut server: Pin<&mut F>,
+    handles: &mut Vec<SubsystemHandle>,
+    signal: S,
+    renewal: R,
+) -> (Result<(), RuntimeError>, bool)
+where
+    F: Future<Output = Result<(), ServerError>>,
+    S: Future<Output = ()>,
+    R: Future<Output = RuntimeError>,
+{
+    tokio::pin!(signal);
+    tokio::pin!(renewal);
+    tokio::select! {
+        () = &mut signal => (Ok(()), false),
+        server_result = server.as_mut() => (server_result.map_err(RuntimeError::from), true),
+        (index, task_result) = wait_for_subsystem(handles), if !handles.is_empty() => {
+            let failed = handles.swap_remove(index);
+            let result = match task_result {
+                Ok(Ok(())) => Err(RuntimeError::SubsystemExited { subsystem: failed.name }),
+                Ok(Err(error)) => Err(error),
+                Err(source) => Err(RuntimeError::SubsystemTask {
+                    subsystem: failed.name,
+                    source,
+                }),
+            };
+            (result, false)
+        }
+        renewal_error = &mut renewal => (Err(renewal_error), false),
+    }
 }
 
 async fn wait_for_subsystem(
@@ -379,9 +432,10 @@ async fn join_subsystems(
     timeout: Duration,
 ) -> Result<(), RuntimeError> {
     let mut first_error = None;
+    let deadline = tokio::time::Instant::now() + timeout;
     for handle in handles {
         let subsystem = handle.name;
-        match tokio::time::timeout(timeout, &mut handle.join).await {
+        match tokio::time::timeout_at(deadline, &mut handle.join).await {
             Ok(Ok(Ok(()))) => {}
             Ok(Ok(Err(error))) => {
                 if first_error.is_some() {
@@ -444,6 +498,31 @@ mod tests {
 
     use super::*;
 
+    struct DropMarker(Arc<AtomicBool>);
+
+    impl Drop for DropMarker {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_signal_is_observed_outside_http_future() {
+        let mut server = Box::pin(std::future::pending::<Result<(), ServerError>>());
+        let mut handles = Vec::new();
+
+        let (result, server_finished) = wait_for_runtime_event(
+            server.as_mut(),
+            &mut handles,
+            std::future::ready(()),
+            std::future::pending(),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert!(!server_finished);
+    }
+
     #[tokio::test]
     async fn subsystem_stop_is_signaled_before_pending_http_drain_is_awaited() {
         let stop = StopHandle::new();
@@ -478,5 +557,85 @@ mod tests {
 
         assert!(notified.load(Ordering::SeqCst));
         assert!(matches!(error, RuntimeError::HttpShutdownTimeout));
+    }
+
+    #[tokio::test]
+    async fn pending_http_drain_is_cancelled_at_its_bound() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropMarker(Arc::clone(&dropped));
+        let server = Box::pin(async move {
+            let _marker = marker;
+            std::future::pending::<Result<(), ServerError>>().await
+        });
+
+        let error = finish_shutdown(
+            server,
+            false,
+            Vec::new(),
+            Duration::from_millis(20),
+            Duration::from_millis(20),
+        )
+        .await
+        .expect_err("pending HTTP drain must time out");
+
+        assert!(matches!(error, RuntimeError::HttpShutdownTimeout));
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn pending_subsystem_is_aborted_at_the_shared_bound() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropMarker(Arc::clone(&dropped));
+        let join = tokio::spawn(async move {
+            let _marker = marker;
+            std::future::pending::<Result<(), RuntimeError>>().await
+        });
+
+        let error = finish_shutdown(
+            Box::pin(std::future::ready(Ok(()))),
+            true,
+            vec![SubsystemHandle {
+                name: SubsystemName::Jobs,
+                stop: StopHandle::new(),
+                join,
+            }],
+            Duration::from_millis(20),
+            Duration::from_millis(20),
+        )
+        .await
+        .expect_err("pending subsystem must time out");
+
+        assert!(matches!(
+            error,
+            RuntimeError::SubsystemShutdownTimeout {
+                subsystem: SubsystemName::Jobs
+            }
+        ));
+        assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn final_nats_flush_is_bounded() {
+        let error = bounded_flush(
+            std::future::pending::<Result<(), std::io::Error>>(),
+            Duration::from_millis(20),
+        )
+        .await
+        .expect_err("pending flush must time out");
+
+        assert!(matches!(error, RuntimeError::NatsFlushTimeout));
+    }
+
+    #[test]
+    fn shutdown_preserves_original_primary_error() {
+        let result = preserve_primary(
+            Err(RuntimeError::HttpShutdownTimeout),
+            Err(RuntimeError::OwnerRenewalShutdownTimeout {
+                owner_id: "owner-1".to_owned(),
+            }),
+            Err(RuntimeError::NatsFlushTimeout),
+        );
+
+        assert!(matches!(result, Err(RuntimeError::HttpShutdownTimeout)));
     }
 }

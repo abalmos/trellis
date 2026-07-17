@@ -84,13 +84,20 @@ impl RuntimeProcess {
     }
 
     async fn terminate(&mut self) -> ExitStatus {
+        let started = tokio::time::Instant::now();
         let pid = self.child.id().to_string();
         let signal = Command::new("kill")
             .args(["-TERM", &pid])
             .status()
             .expect("send SIGTERM to runtime");
         assert!(signal.success(), "send SIGTERM to runtime process");
-        self.wait_exit().await
+        let status = self.wait_exit().await;
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "SIGTERM shutdown exceeded its bound: {}",
+            self.stderr()
+        );
+        status
     }
 
     async fn is_ready(&mut self) -> bool {
@@ -197,6 +204,56 @@ async fn runtime_singleton_ownership_lifecycle() {
         .delete_expect_revision("health.owner", Some(held_health_revision))
         .await
         .expect("release fixture-held Health lease");
+
+    let all_runtime_config = runtime.workdir().join("all-runtime.toml");
+    let mut all_runtime =
+        RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
+    all_runtime.wait_ready().await;
+    let jobs_entry = leases
+        .entry("jobs.owner")
+        .await
+        .expect("inspect all-mode Jobs lease")
+        .expect("all-mode Jobs lease exists");
+    let manipulated_revision = leases
+        .update(
+            "jobs.owner",
+            Bytes::from_static(b"fixture-takeover"),
+            jobs_entry.revision,
+        )
+        .await
+        .expect("make all-mode Jobs lease guard stale");
+
+    let all_loss_status = all_runtime.wait_exit().await;
+    assert!(
+        !all_loss_status.success(),
+        "one all-mode lease loss must fail the process"
+    );
+    assert!(
+        !all_runtime.is_ready().await,
+        "all-mode runtime retained readiness after one owner loss"
+    );
+    let all_loss_error = all_runtime.stderr();
+    assert!(all_loss_error.contains("jobs.owner"), "{all_loss_error}");
+    assert!(all_loss_error.contains("OwnerRenewal"), "{all_loss_error}");
+    let manipulated = leases
+        .entry("jobs.owner")
+        .await
+        .expect("inspect manipulated Jobs lease")
+        .expect("fixture-owned Jobs lease remains");
+    assert_eq!(manipulated.revision, manipulated_revision);
+    assert_eq!(manipulated.value, Bytes::from_static(b"fixture-takeover"));
+    leases
+        .delete_expect_revision("jobs.owner", Some(manipulated_revision))
+        .await
+        .expect("release manipulated Jobs lease");
+    for key in [
+        "platform.owner",
+        "jobs.owner",
+        "health.owner",
+        "eventlog.owner",
+    ] {
+        acquire_and_release(&leases, key).await;
+    }
 }
 
 #[tokio::test]
@@ -257,6 +314,9 @@ fn write_runtime_config(
     port: u16,
 ) {
     let nats_dir = runtime.workdir().join("nats/creds");
+    let session_seed = runtime
+        .workdir()
+        .join(&runtime.manifest().paths.session_seed);
     let jobs_path = if label == "jobs-duplicate" {
         runtime.workdir().join("blocked-jobs.sqlite")
     } else {
@@ -264,6 +324,7 @@ fn write_runtime_config(
     };
     let mut config = format!(
         r#"instance_name = "{label}"
+event_session_seed_file = "{}"
 
 [http]
 port = {port}
@@ -287,6 +348,7 @@ replicas = 1
 ttl_ms = 3000
 renew_ms = 500
 "#,
+        toml_path(&session_seed),
         runtime.nats_url(),
         toml_path(&nats_dir.join("auth-auth.creds")),
         toml_path(&nats_dir.join("trellis-auth.creds")),
