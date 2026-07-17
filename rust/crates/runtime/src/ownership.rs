@@ -1,13 +1,12 @@
 //! Runtime-wide singleton ownership lifecycle.
 
 use std::collections::{hash_map::DefaultHasher, BTreeMap};
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_nats::jetstream;
-use futures_util::future::try_join_all;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -121,24 +120,22 @@ impl RuntimeOwnership {
             }
         }
 
-        for index in 0..held.len() {
-            let verification = {
-                let lease = &mut held[index];
-                manager
-                    .renew(&mut lease.guard)
-                    .await
-                    .map_err(|source| (lease.group, lease.guard.key().clone(), source))
-            };
-            if let Err((group, key, source)) = verification {
-                let primary = map_renewal_error(group, key, &owner_id, source);
-                if let Err(cleanup) = release_held(&manager, &owner_id, &mut held).await {
+        let guards = Arc::new(held.into_iter().map(Mutex::new).collect::<Vec<_>>());
+        let owners = match complete_acquisition(
+            renew_round(&manager, &owner_id, &guards),
+            move || owners,
+        )
+        .await
+        {
+            Ok(owners) => owners,
+            Err(primary) => {
+                if let Err(cleanup) = release_owned(&manager, &owner_id, &guards).await {
                     tracing::error!(error = %cleanup, "failed to clean up ownership after acquisition verification");
                 }
                 return Err(primary);
             }
-        }
+        };
 
-        let guards = Arc::new(held.into_iter().map(Mutex::new).collect());
         let renewal_stop = StopHandle::new();
         let renewal = tokio::spawn(renew_owned(
             manager.clone(),
@@ -270,11 +267,51 @@ async fn complete_renewal_round<F, E>(
 where
     F: Future<Output = Result<(), E>>,
 {
-    match tokio::time::timeout(timeout, try_join_all(renewals)).await {
-        Ok(Ok(_)) => Ok(()),
+    let mut renewals = renewals
+        .into_iter()
+        .map(|renewal| Some(Box::pin(renewal)))
+        .collect::<Vec<_>>();
+    let round = poll_fn(move |context| {
+        let mut pending = false;
+        let mut first_error = None;
+        for renewal in &mut renewals {
+            let result = match renewal.as_mut() {
+                Some(renewal) => renewal.as_mut().poll(context),
+                None => continue,
+            };
+            match result {
+                std::task::Poll::Ready(Ok(())) => *renewal = None,
+                std::task::Poll::Ready(Err(error)) => {
+                    *renewal = None;
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+                std::task::Poll::Pending => pending = true,
+            }
+        }
+        if let Some(error) = first_error {
+            std::task::Poll::Ready(Err(error))
+        } else if pending {
+            std::task::Poll::Pending
+        } else {
+            std::task::Poll::Ready(Ok(()))
+        }
+    });
+    match tokio::time::timeout(timeout, round).await {
+        Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(RenewalRoundFailure::Operation(error)),
         Err(_) => Err(RenewalRoundFailure::Timeout),
     }
+}
+
+async fn complete_acquisition<F, C, T, E>(verification: F, contexts: C) -> Result<T, E>
+where
+    F: Future<Output = Result<(), E>>,
+    C: FnOnce() -> T,
+{
+    verification.await?;
+    Ok(contexts())
 }
 
 async fn release_owned(
@@ -462,7 +499,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn renewal_round_starts_all_operations_concurrently() {
+    async fn final_verification_starts_all_operations_concurrently_and_is_bounded() {
         let starts = Arc::new(AtomicUsize::new(0));
         let renewals = (0..4).map(|_| {
             let starts = Arc::clone(&starts);
@@ -479,9 +516,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stalled_renewal_does_not_block_another_lease() {
+    async fn final_verification_starts_every_operation_before_reporting_failure() {
+        let starts = Arc::new(AtomicUsize::new(0));
+        let renewals = (0..4).map(|index| {
+            let starts = Arc::clone(&starts);
+            async move {
+                starts.fetch_add(1, Ordering::SeqCst);
+                if index == 0 {
+                    Err("stale")
+                } else {
+                    std::future::pending().await
+                }
+            }
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_millis(100),
+            complete_renewal_round(renewals, Duration::from_secs(5)),
+        )
+        .await
+        .expect("confirmed ownership loss must not wait for stalled renewals");
+
+        assert!(matches!(
+            result,
+            Err(RenewalRoundFailure::Operation("stale"))
+        ));
+        assert_eq!(starts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn early_guard_does_not_age_while_a_later_verification_is_stalled() {
         let completions = Arc::new(AtomicUsize::new(0));
-        let stalled = async { std::future::pending::<Result<(), ()>>().await };
         let completed = {
             let completions = Arc::clone(&completions);
             async move {
@@ -489,11 +554,12 @@ mod tests {
                 Ok(())
             }
         };
+        let stalled = async { std::future::pending::<Result<(), ()>>().await };
 
         let result = complete_renewal_round(
             [
-                futures_util::future::Either::Left(stalled),
-                futures_util::future::Either::Right(completed),
+                futures_util::future::Either::Left(completed),
+                futures_util::future::Either::Right(stalled),
             ],
             Duration::from_millis(20),
         )
@@ -521,5 +587,20 @@ mod tests {
             Err(RenewalRoundFailure::Operation("lost"))
         ));
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_final_verification_does_not_return_owner_contexts() {
+        let contexts_built = Arc::new(AtomicUsize::new(0));
+        let build_count = Arc::clone(&contexts_built);
+
+        let result = complete_acquisition(std::future::ready(Err("stale")), move || {
+            build_count.fetch_add(1, Ordering::SeqCst);
+            "owner contexts"
+        })
+        .await;
+
+        assert_eq!(result, Err("stale"));
+        assert_eq!(contexts_built.load(Ordering::SeqCst), 0);
     }
 }

@@ -225,6 +225,14 @@ pub(crate) struct SubsystemHandle {
     pub(crate) join: JoinHandle<Result<(), RuntimeError>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeStopCause {
+    Signal,
+    HttpFinished,
+    SubsystemFailed,
+    OwnershipLost,
+}
+
 /// Loads configuration, validates selected subsystem storage, and runs the runtime.
 pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     let config = RuntimeConfig::load_from_path(&options.config_path)?;
@@ -307,7 +315,7 @@ async fn run_owned(
         context.mode,
         async move { server_stop.stopped().await },
     ));
-    let (primary, server_finished) = wait_for_runtime_event(
+    let (primary, server_finished, cause) = wait_for_runtime_event(
         server.as_mut(),
         &mut handles,
         crate::shutdown::shutdown_signal(),
@@ -316,25 +324,30 @@ async fn run_owned(
     .await;
 
     root_stop.stop();
-    for handle in &handles {
-        handle.stop.stop();
-    }
-    if let Err(error) = finish_shutdown(
+    let shutdown = finish_shutdown(
         server,
         server_finished,
         handles,
+        cause,
         HTTP_SHUTDOWN_TIMEOUT,
         SUBSYSTEM_SHUTDOWN_TIMEOUT,
     )
-    .await
-    {
-        if primary.is_err() {
-            tracing::error!(error = %error, "runtime shutdown also failed");
-        } else {
-            return Err(error);
+    .await;
+    preserve_run_primary(primary, shutdown)
+}
+
+fn preserve_run_primary(
+    primary: Result<(), RuntimeError>,
+    shutdown: Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
+    match (primary, shutdown) {
+        (Err(primary), Err(secondary)) => {
+            tracing::error!(error = %secondary, "runtime shutdown also failed");
+            Err(primary)
         }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(()), result) => result,
     }
-    primary
 }
 
 async fn wait_for_runtime_event<F, S, R>(
@@ -342,7 +355,7 @@ async fn wait_for_runtime_event<F, S, R>(
     handles: &mut Vec<SubsystemHandle>,
     signal: S,
     renewal: R,
-) -> (Result<(), RuntimeError>, bool)
+) -> (Result<(), RuntimeError>, bool, RuntimeStopCause)
 where
     F: Future<Output = Result<(), ServerError>>,
     S: Future<Output = ()>,
@@ -351,8 +364,12 @@ where
     tokio::pin!(signal);
     tokio::pin!(renewal);
     tokio::select! {
-        () = &mut signal => (Ok(()), false),
-        server_result = server.as_mut() => (server_result.map_err(RuntimeError::from), true),
+        () = &mut signal => (Ok(()), false, RuntimeStopCause::Signal),
+        server_result = server.as_mut() => (
+            server_result.map_err(RuntimeError::from),
+            true,
+            RuntimeStopCause::HttpFinished,
+        ),
         (index, task_result) = wait_for_subsystem(handles), if !handles.is_empty() => {
             let failed = handles.swap_remove(index);
             let result = match task_result {
@@ -363,9 +380,13 @@ where
                     source,
                 }),
             };
-            (result, false)
+            (result, false, RuntimeStopCause::SubsystemFailed)
         }
-        renewal_error = &mut renewal => (Err(renewal_error), false),
+        renewal_error = &mut renewal => (
+            Err(renewal_error),
+            false,
+            RuntimeStopCause::OwnershipLost,
+        ),
     }
 }
 
@@ -391,9 +412,10 @@ async fn stop_subsystems(mut handles: Vec<SubsystemHandle>) -> Result<(), Runtim
 }
 
 async fn finish_shutdown<F>(
-    mut server: Pin<Box<F>>,
+    server: Pin<Box<F>>,
     server_finished: bool,
     mut handles: Vec<SubsystemHandle>,
+    cause: RuntimeStopCause,
     http_timeout: Duration,
     subsystem_timeout: Duration,
 ) -> Result<(), RuntimeError>
@@ -404,19 +426,18 @@ where
         handle.stop.stop();
     }
 
-    let mut first_error = None;
-    if !server_finished {
-        match tokio::time::timeout(http_timeout, server.as_mut()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => first_error = Some(RuntimeError::Server(error)),
-            Err(_) => {
-                drop(server);
-                first_error = Some(RuntimeError::HttpShutdownTimeout);
-            }
+    let http_shutdown = finish_http_shutdown(server, server_finished, http_timeout);
+    let subsystem_shutdown = async {
+        if cause == RuntimeStopCause::OwnershipLost {
+            abort_subsystems(&mut handles).await
+        } else {
+            join_subsystems(&mut handles, subsystem_timeout).await
         }
-    }
+    };
+    let (http_result, subsystem_result) = tokio::join!(http_shutdown, subsystem_shutdown);
 
-    if let Err(error) = join_subsystems(&mut handles, subsystem_timeout).await {
+    let mut first_error = http_result.err();
+    if let Err(error) = subsystem_result {
         if first_error.is_some() {
             tracing::error!(error = %error, "runtime subsystem shutdown also failed");
         } else {
@@ -424,6 +445,55 @@ where
         }
     }
 
+    first_error.map_or(Ok(()), Err)
+}
+
+async fn finish_http_shutdown<F>(
+    mut server: Pin<Box<F>>,
+    server_finished: bool,
+    timeout: Duration,
+) -> Result<(), RuntimeError>
+where
+    F: Future<Output = Result<(), ServerError>>,
+{
+    if server_finished {
+        return Ok(());
+    }
+    match tokio::time::timeout(timeout, server.as_mut()).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(error)) => Err(RuntimeError::Server(error)),
+        Err(_) => Err(RuntimeError::HttpShutdownTimeout),
+    }
+}
+
+async fn abort_subsystems(handles: &mut [SubsystemHandle]) -> Result<(), RuntimeError> {
+    for handle in handles.iter() {
+        handle.join.abort();
+    }
+
+    let mut first_error = None;
+    for handle in handles {
+        let subsystem = handle.name;
+        match (&mut handle.join).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                if first_error.is_some() {
+                    tracing::error!(error = %error, "additional runtime subsystem shutdown failed");
+                } else {
+                    first_error = Some(error);
+                }
+            }
+            Err(source) if source.is_cancelled() => {}
+            Err(source) => {
+                let error = RuntimeError::SubsystemTask { subsystem, source };
+                if first_error.is_some() {
+                    tracing::error!(error = %error, "additional runtime subsystem shutdown failed");
+                } else {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
     first_error.map_or(Ok(()), Err)
 }
 
@@ -511,7 +581,7 @@ mod tests {
         let mut server = Box::pin(std::future::pending::<Result<(), ServerError>>());
         let mut handles = Vec::new();
 
-        let (result, server_finished) = wait_for_runtime_event(
+        let (result, server_finished, cause) = wait_for_runtime_event(
             server.as_mut(),
             &mut handles,
             std::future::ready(()),
@@ -521,6 +591,7 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!server_finished);
+        assert_eq!(cause, RuntimeStopCause::Signal);
     }
 
     #[tokio::test]
@@ -549,6 +620,7 @@ mod tests {
                 stop,
                 join,
             }],
+            RuntimeStopCause::Signal,
             Duration::from_millis(20),
             Duration::from_millis(20),
         )
@@ -572,6 +644,7 @@ mod tests {
             server,
             false,
             Vec::new(),
+            RuntimeStopCause::Signal,
             Duration::from_millis(20),
             Duration::from_millis(20),
         )
@@ -599,6 +672,7 @@ mod tests {
                 stop: StopHandle::new(),
                 join,
             }],
+            RuntimeStopCause::Signal,
             Duration::from_millis(20),
             Duration::from_millis(20),
         )
@@ -615,6 +689,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn ownership_loss_aborts_subsystem_without_waiting_for_http_drain() {
+        let stop = StopHandle::new();
+        let observed_stop = stop.clone();
+        let task_stop = stop.clone();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropMarker(Arc::clone(&dropped));
+        let join = tokio::spawn(async move {
+            let _marker = marker;
+            task_stop.stopped().await;
+            std::future::pending::<Result<(), RuntimeError>>().await
+        });
+        let shutdown = tokio::spawn(finish_shutdown(
+            Box::pin(std::future::pending::<Result<(), ServerError>>()),
+            false,
+            vec![SubsystemHandle {
+                name: SubsystemName::Jobs,
+                stop,
+                join,
+            }],
+            RuntimeStopCause::OwnershipLost,
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        ));
+
+        tokio::time::timeout(Duration::from_millis(100), async {
+            while !dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("ownership loss must abort the subsystem immediately");
+
+        assert!(observed_stop.is_stopped());
+        assert!(
+            !shutdown.is_finished(),
+            "HTTP drain remains independently bounded"
+        );
+        shutdown.abort();
+        let _ = shutdown.await;
+    }
+
+    #[tokio::test]
+    async fn signal_shutdown_remains_cooperative() {
+        let stop = StopHandle::new();
+        let task_stop = stop.clone();
+        let completed = Arc::new(AtomicBool::new(false));
+        let task_completed = Arc::clone(&completed);
+        let join = tokio::spawn(async move {
+            task_stop.stopped().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            task_completed.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+
+        finish_shutdown(
+            Box::pin(std::future::ready(Ok(()))),
+            true,
+            vec![SubsystemHandle {
+                name: SubsystemName::Jobs,
+                stop,
+                join,
+            }],
+            RuntimeStopCause::Signal,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+        )
+        .await
+        .expect("signal shutdown should allow cooperative completion");
+
+        assert!(completed.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
     async fn final_nats_flush_is_bounded() {
         let error = bounded_flush(
             std::future::pending::<Result<(), std::io::Error>>(),
@@ -628,14 +775,23 @@ mod tests {
 
     #[test]
     fn shutdown_preserves_original_primary_error() {
-        let result = preserve_primary(
+        let primary = preserve_run_primary(
+            Err(RuntimeError::OwnerRenewalRoundTimeout {
+                owner_id: "owner-1".to_owned(),
+            }),
             Err(RuntimeError::HttpShutdownTimeout),
+        );
+        let result = preserve_primary(
+            primary,
             Err(RuntimeError::OwnerRenewalShutdownTimeout {
                 owner_id: "owner-1".to_owned(),
             }),
             Err(RuntimeError::NatsFlushTimeout),
         );
 
-        assert!(matches!(result, Err(RuntimeError::HttpShutdownTimeout)));
+        assert!(matches!(
+            result,
+            Err(RuntimeError::OwnerRenewalRoundTimeout { .. })
+        ));
     }
 }

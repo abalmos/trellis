@@ -223,6 +223,11 @@ async fn runtime_singleton_ownership_lifecycle() {
         .await
         .expect("make all-mode Jobs lease guard stale");
 
+    let mut fixture_owned = vec![("jobs.owner", manipulated_revision)];
+    for key in ["platform.owner", "health.owner", "eventlog.owner"] {
+        fixture_owned.push((key, wait_to_acquire(&leases, key).await));
+    }
+
     let all_loss_status = all_runtime.wait_exit().await;
     assert!(
         !all_loss_status.success(),
@@ -242,17 +247,11 @@ async fn runtime_singleton_ownership_lifecycle() {
         .expect("fixture-owned Jobs lease remains");
     assert_eq!(manipulated.revision, manipulated_revision);
     assert_eq!(manipulated.value, Bytes::from_static(b"fixture-takeover"));
-    leases
-        .delete_expect_revision("jobs.owner", Some(manipulated_revision))
-        .await
-        .expect("release manipulated Jobs lease");
-    for key in [
-        "platform.owner",
-        "jobs.owner",
-        "health.owner",
-        "eventlog.owner",
-    ] {
-        acquire_and_release(&leases, key).await;
+    for (key, revision) in fixture_owned {
+        leases
+            .delete_expect_revision(key, Some(revision))
+            .await
+            .unwrap_or_else(|error| panic!("release fixture-owned lease {key}: {error}"));
     }
 }
 
@@ -304,6 +303,25 @@ async fn acquire_and_release(leases: &kv::Store, key: &str) {
         .delete_expect_revision(key, Some(revision))
         .await
         .unwrap_or_else(|error| panic!("release probed lease {key}: {error}"));
+}
+
+async fn wait_to_acquire(leases: &kv::Store, key: &str) -> u64 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match leases
+            .create(key, Bytes::from_static(b"fixture-takeover"))
+            .await
+        {
+            Ok(revision) => return revision,
+            Err(error) => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "could not acquire owner lease {key} after forced ownership loss: {error}"
+                );
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        }
+    }
 }
 
 fn write_runtime_config(
