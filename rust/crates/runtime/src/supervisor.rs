@@ -364,6 +364,12 @@ where
     tokio::pin!(signal);
     tokio::pin!(renewal);
     tokio::select! {
+        biased;
+        renewal_error = &mut renewal => (
+            Err(renewal_error),
+            false,
+            RuntimeStopCause::OwnershipLost,
+        ),
         () = &mut signal => (Ok(()), false, RuntimeStopCause::Signal),
         server_result = server.as_mut() => (
             server_result.map_err(RuntimeError::from),
@@ -382,11 +388,6 @@ where
             };
             (result, false, RuntimeStopCause::SubsystemFailed)
         }
-        renewal_error = &mut renewal => (
-            Err(renewal_error),
-            false,
-            RuntimeStopCause::OwnershipLost,
-        ),
     }
 }
 
@@ -592,6 +593,36 @@ mod tests {
         assert!(result.is_ok());
         assert!(!server_finished);
         assert_eq!(cause, RuntimeStopCause::Signal);
+    }
+
+    #[tokio::test]
+    async fn ownership_loss_wins_when_runtime_events_are_simultaneously_ready() {
+        let mut server = Box::pin(std::future::ready(Ok(())));
+        let mut handles = vec![SubsystemHandle {
+            name: SubsystemName::Jobs,
+            stop: StopHandle::new(),
+            join: tokio::spawn(async { Ok(()) }),
+        }];
+
+        let (result, server_finished, cause) = wait_for_runtime_event(
+            server.as_mut(),
+            &mut handles,
+            std::future::ready(()),
+            std::future::ready(RuntimeError::OwnerRenewalRoundTimeout {
+                owner_id: "owner".to_owned(),
+            }),
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            Err(RuntimeError::OwnerRenewalRoundTimeout { .. })
+        ));
+        assert!(!server_finished);
+        assert_eq!(cause, RuntimeStopCause::OwnershipLost);
+        assert_eq!(handles.len(), 1);
+        handles[0].join.abort();
+        let _ = (&mut handles[0].join).await;
     }
 
     #[tokio::test]
