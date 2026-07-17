@@ -5,7 +5,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::{
-    canonicalize_json, digest_json, ApiArtifactV1, ApiSurfaceKindV1, ConsentMetadataV1,
+    canonicalize_json, digest_json, identifiers::compare_protocol_strings,
+    schema_profile::resolve_local_schema, ApiArtifactV1, ApiSurfaceKindV1, ConsentMetadataV1,
     DerivedEventSubjectsV1, GrantSetV1, ParticipantArtifactV1, ParticipantKindV1,
     PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError, ResolutionErrorCodeV1,
 };
@@ -303,6 +304,7 @@ impl ResolvedUsedApiV1 {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorityCapabilityEvidenceV1 {
     api: String,
+    api_digest: String,
     name: String,
     allows: Vec<PermissionAtomV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -313,6 +315,11 @@ impl AuthorityCapabilityEvidenceV1 {
     /// Return the API that owns the capability.
     pub fn api(&self) -> &str {
         &self.api
+    }
+
+    /// Return the exact API digest that defined this capability.
+    pub fn api_digest(&self) -> &str {
+        &self.api_digest
     }
 
     /// Return the capability name.
@@ -540,7 +547,7 @@ pub fn resolve_participant_v1(
                     format!("expected digest '{pinned_digest}', received '{actual_digest}'"),
                 ));
             }
-            validate_api_schema_pointers(participant.id(), alias, &path, api)?;
+            validate_api_schema_pointers(participant.id(), alias, api)?;
             resolved_by_alias.insert(alias.to_owned(), (api, actual_digest));
         }
     }
@@ -579,8 +586,12 @@ pub fn resolve_participant_v1(
             provided,
         });
     }
-    provided_needs.sort_by(|left, right| left.api.cmp(&right.api));
-    provided_authority.sort_by(|left, right| left.api.cmp(&right.api));
+    provided_needs.sort_by(|left, right| compare_protocol_strings(&left.api, &right.api));
+    provided_authority.sort_by(|left, right| compare_protocol_strings(&left.api, &right.api));
+    implemented_apis.sort_by(|left, right| {
+        compare_protocol_strings(left.provided.api(), right.provided.api())
+            .then_with(|| compare_protocol_strings(&left.alias, &right.alias))
+    });
 
     let required_apis = resolve_used_group(
         &participant_id,
@@ -666,7 +677,7 @@ fn resolve_used_group(
     references: &Map<String, Value>,
     resolved: &BTreeMap<String, (&ApiArtifactV1, String)>,
 ) -> Result<Vec<ResolvedUsedApiV1>, ProtocolError> {
-    references
+    let mut used = references
         .iter()
         .map(|(alias, selection)| {
             let (api, digest) = &resolved[alias];
@@ -679,7 +690,12 @@ fn resolve_used_group(
                 grant_set: GrantSetV1::new(permissions),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, ProtocolError>>()?;
+    used.sort_by(|left, right| {
+        compare_protocol_strings(&left.api, &right.api)
+            .then_with(|| compare_protocol_strings(&left.alias, &right.alias))
+    });
+    Ok(used)
 }
 
 fn derive_permissions(
@@ -747,7 +763,9 @@ fn derive_permissions(
             PermissionActionV1::Write,
         ),
     ] {
-        for name in nested_array_strings(selection, selection_path) {
+        for (index, name) in nested_array_strings(selection, selection_path).enumerate() {
+            let item_path =
+                join_tokens(path, selection_path.iter().copied()).with_trailing_token(index);
             let definition = object_at(&api_value, api_section)
                 .get(name)
                 .ok_or_else(|| {
@@ -756,7 +774,7 @@ fn derive_permissions(
                         participant_id,
                         Some(alias),
                         Some(api.id()),
-                        join_tokens(path, selection_path.iter().copied()),
+                        item_path.clone(),
                         format!("selected {api_section} surface '{name}' does not exist"),
                     )
                 })?;
@@ -768,7 +786,7 @@ fn derive_permissions(
                     participant_id,
                     Some(alias),
                     Some(api.id()),
-                    join_tokens(path, selection_path.iter().copied()),
+                    item_path,
                     format!("operation '{name}' is not cancelable"),
                 ));
             }
@@ -793,14 +811,15 @@ fn derive_permissions(
                 )
             })?;
         let available_signals = object_at(operation_definition, "signals");
-        for signal in array_strings(signals) {
+        for (index, signal) in array_strings(signals).enumerate() {
             if !available_signals.contains_key(signal) {
                 return Err(resolution_error(
                     ResolutionErrorCodeV1::MissingOperationSignal,
                     participant_id,
                     Some(alias),
                     Some(api.id()),
-                    join_tokens(path, ["operations", "control", operation, signal]),
+                    join_tokens(path, ["operations", "control", operation])
+                        .with_trailing_token(index),
                     format!("signal '{signal}' does not exist on operation '{operation}'"),
                 ));
             }
@@ -822,15 +841,25 @@ fn derive_provided_api(
     let operations = object_at(&value, "operations")
         .iter()
         .map(|(name, definition)| {
+            let mut signals = object_at(definition, "signals")
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            signals.sort_by(|left, right| compare_protocol_strings(left, right));
             Ok((
                 name.clone(),
                 ResolvedProvidedOperationV1 {
                     subject: subjects.operations[name].clone(),
-                    signals: object_at(definition, "signals").keys().cloned().collect(),
+                    signals,
                 },
             ))
         })
         .collect::<Result<_, ProtocolError>>()?;
+    let mut state = object_at(&value, "state")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    state.sort_by(|left, right| compare_protocol_strings(left, right));
     Ok(ResolvedProvidedApiV1 {
         api: api.id().to_owned(),
         api_digest: digest.to_owned(),
@@ -838,7 +867,7 @@ fn derive_provided_api(
         operations,
         events: subjects.events,
         feeds: subjects.feeds,
-        state: object_at(&value, "state").keys().cloned().collect(),
+        state,
     })
 }
 
@@ -861,15 +890,46 @@ fn derive_required_resources(
             .iter()
             .map(|(alias, names)| {
                 let (api, digest) = &resolved[alias];
-                serde_json::json!({
+                if nested_object_at(participant, &["uses", "optional"]).contains_key(alias) {
+                    return Err(resolution_error(
+                        ResolutionErrorCodeV1::RequiredConsumerUsesOptionalApi,
+                        participant_id,
+                        Some(alias),
+                        Some(api.id()),
+                        pointer(["eventConsumers", name, "events", alias]),
+                        "required event consumers cannot depend on optional API authority"
+                            .to_owned(),
+                    ));
+                }
+                let api_value = api.normalized_value()?;
+                let available_events = object_at(&api_value, "events");
+                let mut normalized_names =
+                    array_strings(names).map(str::to_owned).collect::<Vec<_>>();
+                normalized_names.sort_by(|left, right| compare_protocol_strings(left, right));
+                for (index, event) in normalized_names.iter().enumerate() {
+                    if !available_events.contains_key(event) {
+                        return Err(resolution_error(
+                            ResolutionErrorCodeV1::MissingSurface,
+                            participant_id,
+                            Some(alias),
+                            Some(api.id()),
+                            pointer(["eventConsumers", name, "events", alias])
+                                .with_trailing_token(index),
+                            format!("event consumer selects missing event '{event}'"),
+                        ));
+                    }
+                }
+                Ok(serde_json::json!({
                     "api": api.id(),
                     "apiDigest": digest,
-                    "names": names,
-                })
+                    "names": normalized_names,
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, ProtocolError>>()?;
         let mut events = events;
-        events.sort_by(|left, right| string_at(left, "api").cmp(string_at(right, "api")));
+        events.sort_by(|left, right| {
+            compare_protocol_strings(string_at(left, "api"), string_at(right, "api"))
+        });
         value
             .as_object_mut()
             .expect("normalized consumer is an object")
@@ -886,7 +946,6 @@ fn derive_required_resources(
         schemas,
         false,
     );
-    let _ = participant_id;
     Ok(ParticipantResourceNeedsV1 {
         state,
         job_queues,
@@ -1096,32 +1155,21 @@ fn validate_transfers(
 fn validate_api_schema_pointers(
     participant_id: &str,
     alias: &str,
-    reference_path: &PointerBuf,
     api: &ApiArtifactV1,
 ) -> Result<(), ProtocolError> {
     let value = api.normalized_value()?;
     let schemas = object_at(&value, "schemas");
     for (event_name, event) in object_at(&value, "events") {
         let schema_name = string_at(event.get("event").expect("event schema"), "schema");
-        for (index, pointer) in
+        for (index, pointer_value) in
             array_strings(event.get("params").unwrap_or(&Value::Null)).enumerate()
         {
             validate_typed_pointer(
                 participant_id,
                 alias,
                 api.id(),
-                &join_tokens(
-                    reference_path,
-                    [
-                        "events".to_owned(),
-                        event_name.clone(),
-                        "params".to_owned(),
-                        index.to_string(),
-                    ]
-                    .iter()
-                    .map(String::as_str),
-                ),
-                pointer,
+                &pointer(["events", event_name, "params"]).with_trailing_token(index),
+                pointer_value,
                 &schemas[schema_name],
                 ExpectedSchemaType::SubjectToken,
             )?;
@@ -1162,6 +1210,7 @@ fn validate_job_pointers(
 enum ExpectedSchemaType {
     String,
     Object,
+    Array,
     SubjectToken,
     JobKey,
 }
@@ -1224,8 +1273,8 @@ fn resolve_schema_pointer<'a>(
         if !refs.insert(reference.to_owned()) {
             return None;
         }
-        return resolve_local_ref(root, reference)
-            .and_then(|resolved| resolve_schema_pointer(root, resolved, tokens, refs));
+        return resolve_local_schema(root, reference)
+            .and_then(|(resolved, _)| resolve_schema_pointer(root, resolved, tokens, refs));
     }
     let Some((token, remaining)) = tokens.split_first() else {
         return Some(vec![schema]);
@@ -1254,14 +1303,34 @@ fn resolve_schema_pointer<'a>(
             return Some(resolved);
         }
     }
-    if let Some(property) = schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .and_then(|properties| properties.get(token))
+    let required = schema.get("required").and_then(Value::as_array);
+    if schema_proves_type(
+        root,
+        schema,
+        ExpectedSchemaType::Object,
+        &mut BTreeSet::new(),
+    ) && required
+        .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(token)))
     {
+        let property = schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get(token))?;
         return resolve_schema_pointer(root, property, remaining, refs);
     }
     let index = token.parse::<usize>().ok()?;
+    if !schema_proves_type(
+        root,
+        schema,
+        ExpectedSchemaType::Array,
+        &mut BTreeSet::new(),
+    ) {
+        return None;
+    }
+    let min_items = schema.get("minItems").and_then(Value::as_u64)?;
+    if u64::try_from(index).ok()?.checked_add(1)? > min_items {
+        return None;
+    }
     if let Some(item) = schema
         .get("prefixItems")
         .and_then(Value::as_array)
@@ -1281,8 +1350,8 @@ fn schema_proves_type(
 ) -> bool {
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
         return refs.insert(reference.to_owned())
-            && resolve_local_ref(root, reference)
-                .is_some_and(|resolved| schema_proves_type(root, resolved, expected, refs));
+            && resolve_local_schema(root, reference)
+                .is_some_and(|(resolved, _)| schema_proves_type(root, resolved, expected, refs));
     }
     for keyword in ["anyOf", "oneOf"] {
         if let Some(branches) = schema.get(keyword).and_then(Value::as_array) {
@@ -1314,17 +1383,12 @@ fn schema_proves_type(
     types.iter().all(|actual| match expected {
         ExpectedSchemaType::String => *actual == "string",
         ExpectedSchemaType::Object => *actual == "object",
+        ExpectedSchemaType::Array => *actual == "array",
         ExpectedSchemaType::SubjectToken => matches!(*actual, "string" | "number" | "integer"),
         ExpectedSchemaType::JobKey => {
             matches!(*actual, "string" | "number" | "integer" | "boolean")
         }
     })
-}
-
-fn resolve_local_ref<'a>(root: &'a Value, reference: &str) -> Option<&'a Value> {
-    let fragment = reference.strip_prefix('#')?;
-    let pointer = Pointer::parse(fragment).ok()?;
-    root.pointer(pointer.as_str())
 }
 
 fn derive_proposal_section(
@@ -1338,7 +1402,7 @@ fn derive_proposal_section(
     let mut capabilities = Vec::new();
     let mut covered = Vec::new();
     for use_ in used {
-        let (api, _) = resolved[&use_.alias];
+        let (api, api_digest) = &resolved[&use_.alias];
         let value = api.normalized_value()?;
         for (name, capability) in object_at(&value, "capabilities") {
             let allows = serde_json::from_value::<Vec<PermissionAtomV1>>(
@@ -1356,6 +1420,7 @@ fn derive_proposal_section(
                     .transpose()?;
                 capabilities.push(AuthorityCapabilityEvidenceV1 {
                     api: api.id().to_owned(),
+                    api_digest: api_digest.clone(),
                     name: name.clone(),
                     allows,
                     consent,
@@ -1368,9 +1433,8 @@ fn derive_proposal_section(
         .filter(|atom| !covered.contains(atom))
         .collect();
     capabilities.sort_by(|left, right| {
-        left.api
-            .cmp(&right.api)
-            .then_with(|| left.name.cmp(&right.name))
+        compare_protocol_strings(&left.api, &right.api)
+            .then_with(|| compare_protocol_strings(&left.name, &right.name))
     });
     Ok(AuthorityProposalSectionV1 {
         grant_set: grant_set.clone(),
@@ -1384,6 +1448,7 @@ fn literal_proves_type(value: &Value, expected: ExpectedSchemaType) -> bool {
     match expected {
         ExpectedSchemaType::String => value.is_string(),
         ExpectedSchemaType::Object => value.is_object(),
+        ExpectedSchemaType::Array => value.is_array(),
         ExpectedSchemaType::SubjectToken => value.is_string() || value.is_number(),
         ExpectedSchemaType::JobKey => value.is_string() || value.is_number() || value.is_boolean(),
     }
@@ -1397,7 +1462,7 @@ fn api_needs(used: &[ResolvedUsedApiV1]) -> Vec<ProvidedApiNeedV1> {
             api_digest: used.api_digest.clone(),
         })
         .collect::<Vec<_>>();
-    needs.sort_by(|left, right| left.api.cmp(&right.api));
+    needs.sort_by(|left, right| compare_protocol_strings(&left.api, &right.api));
     needs
 }
 
@@ -1511,8 +1576,14 @@ mod tests {
         required_actions: Option<Vec<String>>,
         optional_actions: Option<Vec<String>>,
         fully_requested_capabilities: Option<Vec<String>>,
+        optional_fully_requested_capabilities: Option<Vec<String>>,
+        required_capability_evidence: Option<Vec<ExpectedCapabilityEvidence>>,
+        optional_capability_evidence: Option<Vec<ExpectedCapabilityEvidence>>,
         uncovered_permissions: Option<usize>,
         provided_api: Option<String>,
+        required_api_order: Option<Vec<String>>,
+        provided_state_order: Option<Vec<String>>,
+        provided_signal_order: Option<Vec<String>>,
         expected_needs: Option<Value>,
         expected_needs_digest: Option<String>,
         expected_proposal: Option<Value>,
@@ -1520,10 +1591,30 @@ mod tests {
     }
 
     #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
     struct Fixture {
         apis: Vec<Value>,
+        pointer_proofs: Vec<PointerProofVector>,
         vectors: Vec<Vector>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct PointerProofVector {
+        name: String,
+        schema: Value,
+        pointer: String,
+        expected_type: String,
+        valid: bool,
+        error_code: Option<String>,
+    }
+
+    #[derive(Deserialize, Debug, Eq, PartialEq)]
+    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    struct ExpectedCapabilityEvidence {
+        api: String,
+        api_digest: String,
+        name: String,
     }
 
     // These are pure cross-artifact resolution and canonicalization vectors;
@@ -1548,6 +1639,34 @@ mod tests {
         let mut covered = BTreeSet::new();
         let mut needs = BTreeMap::new();
         let mut fingerprints = BTreeMap::new();
+
+        for vector in &fixture.pointer_proofs {
+            let expected = match vector.expected_type.as_str() {
+                "string" => ExpectedSchemaType::String,
+                "object" => ExpectedSchemaType::Object,
+                "subjectToken" => ExpectedSchemaType::SubjectToken,
+                "jobKey" => ExpectedSchemaType::JobKey,
+                other => panic!("{} has unknown expected type '{other}'", vector.name),
+            };
+            let result = validate_typed_pointer(
+                "fixture-participant",
+                "fixture-api",
+                "fixture@v1",
+                &pointer(["pointerProofs", &vector.name]),
+                &vector.pointer,
+                &vector.schema,
+                expected,
+            );
+            assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
+            if let Err(ProtocolError::ParticipantResolution { code, .. }) = result {
+                assert_eq!(
+                    resolution_code_name(code),
+                    vector.error_code.as_deref().unwrap(),
+                    "{}",
+                    vector.name
+                );
+            }
+        }
 
         for vector in &fixture.vectors {
             covered.extend(vector.covers.iter().copied());
@@ -1640,6 +1759,45 @@ mod tests {
                     vector.name
                 );
             }
+            if let Some(capabilities) = &vector.optional_fully_requested_capabilities {
+                assert_eq!(
+                    resolved
+                        .proposal()
+                        .optional()
+                        .capabilities()
+                        .iter()
+                        .map(|capability| capability.name.clone())
+                        .collect::<Vec<_>>(),
+                    *capabilities,
+                    "{} optional capabilities",
+                    vector.name
+                );
+            }
+            if let Some(expected) = &vector.required_capability_evidence {
+                assert_eq!(
+                    capability_evidence(resolved.proposal().required()).as_slice(),
+                    expected.as_slice(),
+                    "{} required capability evidence",
+                    vector.name
+                );
+            }
+            if let Some(expected) = &vector.optional_capability_evidence {
+                assert_eq!(
+                    capability_evidence(resolved.proposal().optional()).as_slice(),
+                    expected.as_slice(),
+                    "{} optional capability evidence",
+                    vector.name
+                );
+            }
+            for capability in resolved
+                .proposal()
+                .required()
+                .capabilities()
+                .iter()
+                .chain(resolved.proposal().optional().capabilities())
+            {
+                assert_eq!(capability.api_digest(), digests[capability.api()]);
+            }
             if let Some(count) = vector.uncovered_permissions {
                 assert_eq!(
                     resolved.proposal().required().uncovered_permissions().len(),
@@ -1650,6 +1808,31 @@ mod tests {
             }
             if let Some(api) = &vector.provided_api {
                 assert_eq!(resolved.implemented_apis()[0].provided().api(), api);
+            }
+            if let Some(order) = &vector.required_api_order {
+                assert_eq!(
+                    resolved
+                        .needs()
+                        .required()
+                        .apis()
+                        .iter()
+                        .map(|api| api.api().to_owned())
+                        .collect::<Vec<_>>(),
+                    *order
+                );
+            }
+            if let Some(order) = &vector.provided_state_order {
+                assert_eq!(resolved.implemented_apis()[0].provided().state(), order);
+            }
+            if let Some(order) = &vector.provided_signal_order {
+                let signals = resolved.implemented_apis()[0]
+                    .provided()
+                    .operations()
+                    .values()
+                    .next()
+                    .unwrap()
+                    .signals();
+                assert_eq!(signals, order);
             }
             needs.insert(vector.name.clone(), needs_digest);
             fingerprints.insert(vector.name.clone(), fingerprint);
@@ -1681,6 +1864,7 @@ mod tests {
             Value::String("Changed review wording.".to_owned());
         let changed_api = parse_api_v1(&api_value).unwrap();
         assert_eq!(base_api.digest().unwrap(), changed_api.digest().unwrap());
+        let expected_api_digest = base_api.digest().unwrap();
 
         let participant = participant_using("consent-app", &base_api);
         let base = resolve_participant_v1(
@@ -1706,6 +1890,10 @@ mod tests {
             base.proposal().normalized_value().unwrap(),
             changed.proposal().normalized_value().unwrap()
         );
+        assert_eq!(
+            base.proposal().required().capabilities()[0].api_digest(),
+            expected_api_digest
+        );
     }
 
     #[test]
@@ -1718,6 +1906,8 @@ mod tests {
         });
         let changed_api = parse_api_v1(&changed_value).unwrap();
         assert_ne!(base_api.digest().unwrap(), changed_api.digest().unwrap());
+        let base_api_digest = base_api.digest().unwrap();
+        let changed_api_digest = changed_api.digest().unwrap();
 
         let base_participant = participant_using("digest-app", &base_api);
         let changed_participant = participant_using("digest-app", &changed_api);
@@ -1734,6 +1924,14 @@ mod tests {
         assert_ne!(
             base.needs().digest().unwrap(),
             changed.needs().digest().unwrap()
+        );
+        assert_eq!(
+            base.proposal().required().capabilities()[0].api_digest(),
+            base_api_digest
+        );
+        assert_eq!(
+            changed.proposal().required().capabilities()[0].api_digest(),
+            changed_api_digest
         );
     }
 
@@ -1791,6 +1989,20 @@ mod tests {
             .collect()
     }
 
+    fn capability_evidence(
+        section: &AuthorityProposalSectionV1,
+    ) -> Vec<ExpectedCapabilityEvidence> {
+        section
+            .capabilities()
+            .iter()
+            .map(|capability| ExpectedCapabilityEvidence {
+                api: capability.api().to_owned(),
+                api_digest: capability.api_digest().to_owned(),
+                name: capability.name().to_owned(),
+            })
+            .collect()
+    }
+
     fn resolution_code_name(code: ResolutionErrorCodeV1) -> &'static str {
         match code {
             ResolutionErrorCodeV1::MissingApi => "missingApi",
@@ -1802,6 +2014,9 @@ mod tests {
             ResolutionErrorCodeV1::MissingRequiredTransfer => "missingRequiredTransfer",
             ResolutionErrorCodeV1::OptionalStoreForRequiredTransfer => {
                 "optionalStoreForRequiredTransfer"
+            }
+            ResolutionErrorCodeV1::RequiredConsumerUsesOptionalApi => {
+                "requiredConsumerUsesOptionalApi"
             }
             ResolutionErrorCodeV1::UnresolvableSchemaPointer => "unresolvableSchemaPointer",
             ResolutionErrorCodeV1::SchemaPointerTypeMismatch => "schemaPointerTypeMismatch",

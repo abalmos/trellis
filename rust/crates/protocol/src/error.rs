@@ -19,6 +19,8 @@ pub enum ResolutionErrorCodeV1 {
     MissingRequiredTransfer,
     /// A required transfer uses an optional store.
     OptionalStoreForRequiredTransfer,
+    /// A required event consumer depends on an optional API use.
+    RequiredConsumerUsesOptionalApi,
     /// A schema pointer cannot be proven to resolve.
     UnresolvableSchemaPointer,
     /// A resolved schema pointer cannot produce the required value type.

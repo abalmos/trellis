@@ -9,6 +9,7 @@
         "Any": true,
         "Event": {
           "type": "object",
+          "required": ["id"],
           "properties": { "id": { "type": "string" } }
         }
       },
@@ -180,6 +181,32 @@
               "action": "call"
             }
           ]
+        },
+        "𐀀": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            }
+          ]
+        },
+        "": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            }
+          ]
         }
       },
       "consent": {
@@ -207,6 +234,27 @@
           "input": { "schema": "Any" },
           "event": { "schema": "Any" }
         }
+      },
+      "events": {
+        "Optional.Changed": {
+          "version": "v1",
+          "event": { "schema": "Any" }
+        }
+      },
+      "capabilities": {
+        "optional.watch": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "optional@v1",
+                "surface": "feed",
+                "name": "Optional.Watch"
+              },
+              "action": "subscribe"
+            }
+          ]
+        }
       }
     },
     {
@@ -217,9 +265,11 @@
       "schemas": {
         "Input": {
           "type": "object",
+          "required": ["file"],
           "properties": {
             "file": {
               "type": "object",
+              "required": ["key", "contentType", "metadata"],
               "properties": {
                 "key": { "type": "string" },
                 "contentType": { "type": "string" },
@@ -239,6 +289,72 @@
         "Provider.Simple": {
           "version": "v1",
           "input": { "schema": "Input" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "𐀀@v1",
+      "displayName": "Supplementary API",
+      "description": "Unicode ordering API.",
+      "schemas": { "Any": true },
+      "rpc": {
+        "𐀀.Get": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "output": { "schema": "Any" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "@v1",
+      "displayName": "Private Use API",
+      "description": "Unicode ordering API.",
+      "schemas": { "Any": true },
+      "rpc": {
+        ".Get": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "output": { "schema": "Any" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "unicode-provider@v1",
+      "displayName": "Unicode Provider",
+      "description": "Unicode provider evidence ordering.",
+      "schemas": { "Any": true },
+      "operations": {
+        "Unicode.Run": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "signals": {
+            "𐀀": { "input": { "schema": "Any" } },
+            "": { "input": { "schema": "Any" } }
+          }
+        }
+      },
+      "state": {
+        "𐀀": { "kind": "value", "schema": { "schema": "Any" } },
+        "": { "kind": "value", "schema": { "schema": "Any" } }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "implemented-events@v1",
+      "displayName": "Implemented Events API",
+      "description": "Events implemented by a participant.",
+      "schemas": { "Any": true },
+      "events": {
+        "Implemented.Changed": {
+          "version": "v1",
+          "event": { "schema": "Any" }
+        },
+        "Event/Existing~": {
+          "version": "v1",
+          "event": { "schema": "Any" }
         }
       }
     },
@@ -265,6 +381,212 @@
           "params": ["/id"]
         }
       }
+    }
+  ],
+  "pointerProofs": [
+    {
+      "name": "optional-event-property",
+      "schema": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-event-property",
+      "schema": {
+        "type": "object",
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": true
+    },
+    {
+      "name": "required-keyword-without-object-type",
+      "schema": {
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "optional-nested-event-member",
+      "schema": {
+        "type": "object",
+        "required": ["record"],
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": { "id": { "type": "string" } }
+          }
+        }
+      },
+      "pointer": "/record/id",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-nested-event-path",
+      "schema": {
+        "type": "object",
+        "required": ["record"],
+        "properties": {
+          "record": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        }
+      },
+      "pointer": "/record/id",
+      "expectedType": "subjectToken",
+      "valid": true
+    },
+    {
+      "name": "optional-job-key-property",
+      "schema": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "jobKey",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-job-key-property",
+      "schema": {
+        "type": "object",
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "jobKey",
+      "valid": true
+    },
+    {
+      "name": "optional-transfer-key",
+      "schema": {
+        "type": "object",
+        "properties": { "key": { "type": "string" } }
+      },
+      "pointer": "/key",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-transfer-key",
+      "schema": {
+        "type": "object",
+        "required": ["key"],
+        "properties": { "key": { "type": "string" } }
+      },
+      "pointer": "/key",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "optional-transfer-content-type",
+      "schema": {
+        "type": "object",
+        "properties": { "contentType": { "type": "string" } }
+      },
+      "pointer": "/contentType",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "optional-transfer-metadata",
+      "schema": {
+        "type": "object",
+        "properties": { "metadata": { "type": "object" } }
+      },
+      "pointer": "/metadata",
+      "expectedType": "object",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "array-index-without-min-items",
+      "schema": { "type": "array", "items": { "type": "string" } },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "array-index-with-min-items",
+      "schema": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string" }
+      },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "min-items-without-array-type",
+      "schema": { "minItems": 1, "items": { "type": "string" } },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "local-json-pointer-ref",
+      "schema": {
+        "$defs": {
+          "value": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        },
+        "$ref": "#/$defs/value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "local-anchor-ref",
+      "schema": {
+        "$defs": {
+          "value": {
+            "$anchor": "value",
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        },
+        "$ref": "#value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "cyclic-local-ref",
+      "schema": {
+        "$defs": { "value": { "$ref": "#/$defs/value" } },
+        "$ref": "#/$defs/value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
     }
   ],
   "vectors": [
@@ -364,7 +686,29 @@
         "write",
         "control"
       ],
-      "fullyRequestedCapabilities": ["everything", "rpcOnly"],
+      "fullyRequestedCapabilities": ["everything", "rpcOnly", "𐀀", ""],
+      "requiredCapabilityEvidence": [
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "everything"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "rpcOnly"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "𐀀"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": ""
+        }
+      ],
       "uncoveredPermissions": 0
     },
     {
@@ -395,7 +739,15 @@
       },
       "valid": true,
       "requiredActions": ["call"],
-      "optionalActions": ["subscribe"]
+      "optionalActions": ["subscribe"],
+      "optionalFullyRequestedCapabilities": ["optional.watch"],
+      "optionalCapabilityEvidence": [
+        {
+          "api": "optional@v1",
+          "apiDigest": "tuQIEtFQB4eX1JGH_I1_6ufG-sf7mUUcVV4b53lO-DU",
+          "name": "optional.watch"
+        }
+      ]
     },
     {
       "name": "missing-api",
@@ -465,7 +817,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/consumer/rpc/call"
+      "errorPath": "/uses/required/consumer/rpc/call/0"
     },
     {
       "name": "missing-operation",
@@ -488,7 +840,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/consumer/operations/invoke"
+      "errorPath": "/uses/required/consumer/operations/invoke/0"
     },
     {
       "name": "invalid-cancel",
@@ -511,7 +863,7 @@
       },
       "valid": false,
       "errorCode": "invalidCancelSelection",
-      "errorPath": "/uses/required/consumer/operations/cancel"
+      "errorPath": "/uses/required/consumer/operations/cancel/0"
     },
     {
       "name": "missing-signal",
@@ -534,7 +886,7 @@
       },
       "valid": false,
       "errorCode": "missingOperationSignal",
-      "errorPath": "/uses/required/consumer/operations/control/Consumer.Run/missing"
+      "errorPath": "/uses/required/consumer/operations/control/Consumer.Run/0"
     },
     {
       "name": "missing-event-feed-state",
@@ -559,7 +911,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/consumer/events/subscribe"
+      "errorPath": "/uses/required/consumer/events/subscribe/0"
     },
     {
       "name": "missing-feed",
@@ -582,7 +934,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/consumer/feeds/subscribe"
+      "errorPath": "/uses/required/consumer/feeds/subscribe/0"
     },
     {
       "name": "missing-state",
@@ -605,7 +957,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/consumer/state/read"
+      "errorPath": "/uses/required/consumer/state/read/0"
     },
     {
       "name": "implemented-transfer",
@@ -771,7 +1123,7 @@
       },
       "valid": false,
       "errorCode": "unresolvableSchemaPointer",
-      "errorPath": "/uses/required/bad/events/Bad.Changed/params/0"
+      "errorPath": "/events/Bad.Changed/params/0"
     },
     {
       "name": "valid-job-pointer",
@@ -785,6 +1137,7 @@
         "schemas": {
           "Payload": {
             "type": "object",
+            "required": ["tenant"],
             "properties": { "tenant": { "type": "string" } }
           }
         },
@@ -809,6 +1162,7 @@
         "schemas": {
           "Payload": {
             "type": "object",
+            "required": ["tenant"],
             "properties": { "tenant": { "type": "object" } }
           }
         },
@@ -822,6 +1176,227 @@
       "valid": false,
       "errorCode": "schemaPointerTypeMismatch",
       "errorPath": "/jobQueues/work/keyConcurrency/key/0"
+    },
+    {
+      "name": "implemented-event-consumer-valid",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "implemented-consumer",
+        "displayName": "Implemented Consumer",
+        "description": "Consumes an event from an implemented API.",
+        "kind": "service",
+        "implements": {
+          "events": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "events": ["Implemented.Changed"] }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "implemented-event-consumer-missing-event",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "implemented-consumer-missing",
+        "displayName": "Implemented Consumer Missing",
+        "description": "Selects a missing implemented event.",
+        "kind": "service",
+        "implements": {
+          "events": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "events": ["Does.Not.Exist"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/eventConsumers/worker/events/events/0"
+    },
+    {
+      "name": "required-used-event-consumer-valid",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "required-used-consumer",
+        "displayName": "Required Used Consumer",
+        "description": "Consumes a required subscribed event.",
+        "kind": "service",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Consumer.Changed"] }
+            }
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "consumer": ["Consumer.Changed"] }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "required-consumer-optional-api-rejected",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "optional-used-consumer",
+        "displayName": "Optional Used Consumer",
+        "description": "Invalid required consumer dependency.",
+        "kind": "service",
+        "uses": {
+          "optional": {
+            "optional": {
+              "api": "optional@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Optional.Changed"] }
+            }
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "optional": ["Optional.Changed"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "requiredConsumerUsesOptionalApi",
+      "errorPath": "/eventConsumers/worker/events/optional"
+    },
+    {
+      "name": "event-consumer-indexed-escaped-error",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "escaped-consumer",
+        "displayName": "Escaped Consumer",
+        "description": "Escaped consumer diagnostics.",
+        "kind": "service",
+        "implements": {
+          "events/~": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker/~": {
+            "events": { "events/~": ["Does/Not~Exist"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/eventConsumers/worker~1~0/events/events~1~0/0"
+    },
+    {
+      "name": "unicode-api-needs-order",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "unicode-order-app",
+        "displayName": "Unicode Order App",
+        "description": "Proves UTF-16 API-needs ordering.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "private": {
+              "api": "@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": [".Get"] }
+            },
+            "supplementary": {
+              "api": "𐀀@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["𐀀.Get"] }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "requiredApiOrder": ["𐀀@v1", "@v1"],
+      "expectedNeeds": {
+        "format": "trellis.participant-needs.v1",
+        "participant": { "id": "unicode-order-app", "kind": "app" },
+        "provides": { "apis": [] },
+        "required": {
+          "apis": [
+            {
+              "api": "𐀀@v1",
+              "apiDigest": "FZzvezRRo5bRslptCKIoQP6NKwwjpqikSvpqsgbuEYA"
+            },
+            {
+              "api": "@v1",
+              "apiDigest": "Yh1_g5QD18XEh1M7nqidK_yt_6HYvk5WeIwXP_GEaQM"
+            }
+          ],
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "𐀀@v1",
+                  "surface": "rpc",
+                  "name": "𐀀.Get"
+                },
+                "action": "call"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "@v1",
+                  "surface": "rpc",
+                  "name": ".Get"
+                },
+                "action": "call"
+              }
+            ]
+          },
+          "resources": {}
+        },
+        "optional": {
+          "apis": [],
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "resources": {}
+        }
+      },
+      "expectedNeedsDigest": "ixCDhsuwCZaXI-8WKch_JSTfRL-6tCNDjX7jNLTt5PM"
+    },
+    {
+      "name": "unicode-provider-order",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "unicode-provider-worker",
+        "displayName": "Unicode Provider Worker",
+        "description": "Proves UTF-16 provider evidence ordering.",
+        "kind": "service",
+        "implements": {
+          "unicode": {
+            "api": "unicode-provider@v1",
+            "apiDigest": "$actual"
+          }
+        }
+      },
+      "valid": true,
+      "providedStateOrder": ["𐀀", ""],
+      "providedSignalOrder": ["𐀀", ""]
     },
     {
       "name": "alias-base",
@@ -984,7 +1559,7 @@
       },
       "valid": false,
       "errorCode": "missingSurface",
-      "errorPath": "/uses/required/a~1b~0c/rpc/call"
+      "errorPath": "/uses/required/a~1b~0c/rpc/call/0"
     }
   ]
 }

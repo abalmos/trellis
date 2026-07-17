@@ -45,10 +45,15 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   separate required and optional grants, provided APIs, and private resources.
   API aliases and human metadata do not affect the needs digest or authority
   fingerprint.
+- Configured extraction pointers must resolve for every schema-valid payload:
+  object members are required at every step, array indexes are guaranteed by
+  `minItems`, and every `anyOf` or `oneOf` branch proves the path and type.
+  Required event consumers cannot depend on optional API uses.
 - Participants select exact actions, never named capabilities. A capability is
   presented as review evidence only when all of its permission atoms are in the
   exact request; partial and uncovered permissions remain explicit, and
-  capability evidence never expands runtime grants.
+  capability evidence includes its defining API digest and never expands runtime
+  grants.
 - Safe deployment authority updates auto-apply during bootstrap. New capability
   grants and new resource aliases require update approval; strict-mode
   migrations require approval; `mutable-dev` records and auto-accepts migrations.

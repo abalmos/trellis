@@ -43,7 +43,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   private resource needs, capability/consent evidence, uncovered permissions,
   an alias-independent needs digest, and an authority-change fingerprint.
 - Exact action selections remain authoritative. Capability evidence explains a
-  complete selected permission bundle but never expands the derived grant set.
+  complete selected permission bundle, identifies the exact defining API digest,
+  and never expands the derived grant set.
+- Event subject, Jobs key, and operation-transfer pointers must be guaranteed to
+  resolve for every schema-valid payload. Every object step must be required and
+  every array index must be covered by `minItems`; optional fields are invalid
+  extraction paths even when their schemas have the expected type.
 
 ## Connection and authority
 
