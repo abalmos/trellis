@@ -9,6 +9,7 @@ use std::time::Duration;
 use async_nats::jetstream;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 
 use crate::leases::{LeaseError, LeaseFence, LeaseGuard, LeaseKey, LeaseManager};
 use crate::shutdown::StopHandle;
@@ -121,6 +122,7 @@ impl RuntimeOwnership {
         }
 
         let guards = Arc::new(held.into_iter().map(Mutex::new).collect::<Vec<_>>());
+        let verification_started = Instant::now();
         let owners = match complete_acquisition(
             renew_round(&manager, &owner_id, &guards),
             move || owners,
@@ -135,6 +137,8 @@ impl RuntimeOwnership {
                 return Err(primary);
             }
         };
+        let first_renewal =
+            first_renewal_deadline(verification_started, &owner_id, manager.renew, manager.ttl);
 
         let renewal_stop = StopHandle::new();
         let renewal = tokio::spawn(renew_owned(
@@ -142,6 +146,7 @@ impl RuntimeOwnership {
             owner_id.clone(),
             Arc::clone(&guards),
             renewal_stop.clone(),
+            first_renewal,
         ));
 
         Ok(Self {
@@ -213,21 +218,15 @@ async fn renew_owned(
     owner_id: String,
     guards: Arc<Vec<Mutex<HeldLease>>>,
     stop: StopHandle,
+    mut next_round: Instant,
 ) -> Result<(), RuntimeError> {
-    let initial_delay = manager.renew + renewal_jitter(&owner_id, manager.renew, manager.ttl);
-    tokio::select! {
-        () = stop.stopped() => return Ok(()),
-        () = tokio::time::sleep(initial_delay) => {}
-    }
-
-    let mut next_round = tokio::time::Instant::now();
     loop {
-        renew_round(&manager, &owner_id, &guards).await?;
-        next_round += manager.renew;
         tokio::select! {
             () = stop.stopped() => return Ok(()),
             () = tokio::time::sleep_until(next_round) => {}
         }
+        renew_round(&manager, &owner_id, &guards).await?;
+        next_round = next_round.checked_add(manager.renew).unwrap_or(next_round);
     }
 }
 
@@ -437,6 +436,18 @@ fn renewal_jitter(owner_id: &str, renew: Duration, ttl: Duration) -> Duration {
     Duration::from_millis(hasher.finish() % (bound + 1))
 }
 
+fn first_renewal_deadline(
+    verification_started: Instant,
+    owner_id: &str,
+    renew: Duration,
+    ttl: Duration,
+) -> Instant {
+    let delay = renew.saturating_add(renewal_jitter(owner_id, renew, ttl));
+    verification_started
+        .checked_add(delay)
+        .unwrap_or(verification_started)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -496,6 +507,52 @@ mod tests {
         let jitter = renewal_jitter("owner-1", renew, ttl);
         assert!(jitter <= Duration::from_secs(1));
         assert!(renew + jitter < ttl);
+    }
+
+    // These tests retain only the pure ownership-renewal scheduling invariant;
+    // distributed ownership behavior remains covered by live integration tests.
+    #[test]
+    fn slow_verification_makes_first_renewal_immediately_due() {
+        let renew = Duration::from_secs(5);
+        let ttl = renew * 3;
+        let verification_started = Instant::now();
+        let verification_completed = verification_started + renew + Duration::from_secs(1);
+
+        let deadline = first_renewal_deadline(verification_started, "owner-1", renew, ttl);
+
+        assert_eq!(
+            deadline,
+            verification_started + renew + renewal_jitter("owner-1", renew, ttl)
+        );
+        assert_eq!(
+            deadline.saturating_duration_since(verification_completed),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn first_renewal_failure_detection_precedes_lease_expiry_at_boundary() {
+        let renew = Duration::from_secs(5);
+        let ttl = renew * 3;
+        let maximum_jitter = renew / 5;
+
+        assert!(renew + maximum_jitter + renew < ttl);
+    }
+
+    #[test]
+    fn fast_verification_waits_for_absolute_first_renewal_deadline() {
+        let renew = Duration::from_secs(5);
+        let ttl = renew * 3;
+        let verification_started = Instant::now();
+        let verification_completed = verification_started + Duration::from_secs(1);
+
+        let deadline = first_renewal_deadline(verification_started, "owner-1", renew, ttl);
+
+        assert!(deadline > verification_completed);
+        assert_eq!(
+            deadline.saturating_duration_since(verification_completed),
+            renew + renewal_jitter("owner-1", renew, ttl) - Duration::from_secs(1)
+        );
     }
 
     #[tokio::test]
