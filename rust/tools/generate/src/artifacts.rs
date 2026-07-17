@@ -955,7 +955,7 @@ fn copy_embedded_trellis_owned_rust_sdk(
             file_name.to_os_string()
         };
         let dest_path = dest_dir.join(dest_name);
-        let rewritten = rewrite_embedded_rust_sdk_source(&contents, is_root);
+        let rewritten = rewrite_embedded_rust_sdk_source(&contents, is_root, module);
         let formatted = format_embedded_rust_sdk_source(&dest_path, &rewritten)?;
         write_if_changed(&dest_path, &formatted)?;
     }
@@ -1022,16 +1022,24 @@ fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
         .replace("from \"@qlever-llc/trellis\"", "from \"../../../index.ts\"")
 }
 
-fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool) -> String {
+fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool, module: &str) -> String {
     let rewritten = if is_root {
         contents.replace("crate::", "self::")
     } else {
         contents.replace("crate::", "super::")
     };
-    rewritten
+    let rewritten = rewritten
         .replace("trellis_rs::", "crate::")
         .replace("trellis_client::", "crate::client::")
-        .replace("trellis_contracts::", "crate::contracts::")
+        .replace("trellis_contracts::", "crate::contracts::");
+    if is_root && module == "jobs" {
+        rewritten.replace(
+            "/// Job descriptors.\npub mod jobs;",
+            "/// Job descriptors.\n#[expect(\n    clippy::module_inception,\n    reason = \"generated SDK modules mirror contract surface names\"\n)]\npub mod jobs;",
+        )
+    } else {
+        rewritten
+    }
 }
 
 pub fn format_generated_typescript_artifacts(
@@ -1407,6 +1415,7 @@ mod tests {
         let rewritten = rewrite_embedded_rust_sdk_source(
             "use trellis_rs::service::OperationFailureLike;\npub fn client( )->trellis_client::Result<()> { todo!() }\n",
             false,
+            "core",
         );
         let formatted = format_embedded_rust_sdk_source(&dest, &rewritten)
             .expect("format rewritten Rust SDK source");
@@ -1415,6 +1424,15 @@ mod tests {
             formatted,
             "use crate::service::OperationFailureLike;\npub fn client() -> crate::client::Result<()> {\n    todo!()\n}\n"
         );
+    }
+
+    #[test]
+    fn embedded_jobs_sdk_preserves_module_inception_expectation() {
+        let rewritten =
+            rewrite_embedded_rust_sdk_source("/// Job descriptors.\npub mod jobs;\n", true, "jobs");
+
+        assert!(rewritten.contains("#[expect(\n    clippy::module_inception,"));
+        assert!(rewritten.contains("pub mod jobs;"));
     }
 
     #[test]
