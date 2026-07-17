@@ -868,6 +868,8 @@ mod tests {
         same_normalized_as: Option<String>,
         same_digest_as: Option<String>,
         different_digest_from: Option<String>,
+        error_schema: Option<String>,
+        error_path: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -893,6 +895,23 @@ mod tests {
                 vector.name
             );
             let parsed = parse_api_v1(&vector.input);
+            if let (Err(error), Some(schema), Some(path)) =
+                (&parsed, &vector.error_schema, &vector.error_path)
+            {
+                let ProtocolError::SchemaProfile {
+                    schema: actual_schema,
+                    path: actual_path,
+                    ..
+                } = error
+                else {
+                    panic!(
+                        "expected schema profile error for {}: {error:?}",
+                        vector.name
+                    )
+                };
+                assert_eq!(actual_schema, schema, "schema for {}", vector.name);
+                assert_eq!(actual_path, path, "path for {}", vector.name);
+            }
             assert_eq!(
                 parsed.is_ok(),
                 vector.valid,

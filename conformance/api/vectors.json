@@ -1853,6 +1853,191 @@
       }
     },
     {
+      "name": "reachable-object-capable-one-of",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/oneOf",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects non-monotonic exclusive object branches.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "oneOf": [
+              { "required": ["a"] },
+              { "required": ["futureField"] }
+            ]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-scalar-only-one-of",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves scalar exclusive branches.",
+        "schemas": {
+          "Wire": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unique-possible-object-items",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/uniqueItems",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects uniqueness over possible object items.",
+        "schemas": {
+          "Wire": { "type": "array", "uniqueItems": true }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unique-scalar-only-items",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves uniqueness over scalar prefix and tail items.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }],
+            "items": { "type": "number" },
+            "uniqueItems": true
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-max-contains-object-match",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/maxContains",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects upper bounds on object-capable contains matches.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "required": ["futureField"] },
+            "maxContains": 1
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-max-contains-scalar-match",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves upper bounds on scalar contains matches.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "type": "string" },
+            "maxContains": 1
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/const",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects nested objects in exact constants.",
+        "schemas": { "Wire": { "const": [{}] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/enum",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects nested objects in exact enumerations.",
+        "schemas": { "Wire": { "enum": [[{}], "other"] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-scalar-array-exact-literals",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves scalar and scalar-array exact literals.",
+        "schemas": {
+          "Const": { "const": [1, "fixed", [true]] },
+          "Enum": { "enum": [[1, "a"], "b", false] }
+        },
+        "exports": { "schemas": ["Const", "Enum"] }
+      }
+    },
+    {
+      "name": "reachable-dynamic-ref",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/$dynamicRef",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects dynamic references until dynamic scope is supported.",
+        "schemas": {
+          "Wire": {
+            "$defs": {
+              "node": { "$dynamicAnchor": "node", "type": "object" }
+            },
+            "$dynamicRef": "#node"
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

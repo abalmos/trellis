@@ -1966,6 +1966,204 @@
       }
     },
     {
+      "name": "reachable-object-capable-one-of",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/oneOf",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects non-monotonic exclusive object branches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "oneOf": [
+              { "required": ["a"] },
+              { "required": ["futureField"] }
+            ]
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-scalar-only-one-of",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves scalar exclusive branches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }]
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-unique-possible-object-items",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/uniqueItems",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects uniqueness over possible object items.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "array", "uniqueItems": true }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-unique-scalar-only-items",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves uniqueness over scalar prefix and tail items.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }],
+            "items": { "type": "number" },
+            "uniqueItems": true
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-max-contains-object-match",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/maxContains",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects upper bounds on object-capable contains matches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "required": ["futureField"] },
+            "maxContains": 1
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-max-contains-scalar-match",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves upper bounds on scalar contains matches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "type": "string" },
+            "maxContains": 1
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-nested-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/const",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested objects in exact constants.",
+        "kind": "service",
+        "schemas": { "Wire": { "const": [{}] } },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-nested-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/enum",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested objects in exact enumerations.",
+        "kind": "service",
+        "schemas": { "Wire": { "enum": [[{}], "other"] } },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-scalar-array-exact-literals",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves scalar and scalar-array exact literals.",
+        "kind": "service",
+        "schemas": {
+          "Const": { "const": [1, "fixed", [true]] },
+          "Enum": { "enum": [[1, "a"], "b", false] }
+        },
+        "jobQueues": {
+          "const": { "payload": { "schema": "Const" } },
+          "enum": { "payload": { "schema": "Enum" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-dynamic-ref",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/$dynamicRef",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects dynamic references until dynamic scope is supported.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "$defs": {
+              "node": { "$dynamicAnchor": "node", "type": "object" }
+            },
+            "$dynamicRef": "#node"
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
       "name": "wrong-format",
       "schemaValid": false,
       "valid": false,

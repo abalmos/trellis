@@ -130,6 +130,7 @@ fn validate_wire_schema_additive_inner(
     };
 
     let object_capable = schema_can_validate_object(root, schema, &mut Default::default());
+    let can_contain_object = schema_can_contain_object_value(root, schema, &mut Default::default());
 
     for keyword in [
         "maxProperties",
@@ -160,23 +161,49 @@ fn validate_wire_schema_additive_inner(
             ));
         }
     }
-    if object_capable && map.get("const").is_some_and(Value::is_object) {
+    if map.get("const").is_some_and(literal_contains_object) {
         return Err(schema_error(
             name,
             child_path(path, "const"),
-            "wire schemas that accept objects must not use an object-valued 'const'",
+            "wire schemas must not use an object-containing 'const'",
         ));
     }
-    if object_capable
-        && map
-            .get("enum")
-            .and_then(Value::as_array)
-            .is_some_and(|values| values.iter().any(Value::is_object))
+    if map
+        .get("enum")
+        .and_then(Value::as_array)
+        .is_some_and(|values| values.iter().any(literal_contains_object))
     {
         return Err(schema_error(
             name,
             child_path(path, "enum"),
-            "wire schemas that accept objects must not use object values in 'enum'",
+            "wire schemas must not use object-containing values in 'enum'",
+        ));
+    }
+    if can_contain_object && map.contains_key("oneOf") {
+        return Err(schema_error(
+            name,
+            child_path(path, "oneOf"),
+            "wire schemas that can contain objects must not use 'oneOf'",
+        ));
+    }
+    if map.get("uniqueItems") == Some(&Value::Bool(true))
+        && array_items_can_contain_object(root, map, &mut Default::default())
+    {
+        return Err(schema_error(
+            name,
+            child_path(path, "uniqueItems"),
+            "wire array schemas must not require unique object-containing items",
+        ));
+    }
+    if map.contains_key("maxContains")
+        && map.get("contains").is_some_and(|contains| {
+            schema_can_contain_object_value(root, contains, &mut Default::default())
+        })
+    {
+        return Err(schema_error(
+            name,
+            child_path(path, "maxContains"),
+            "wire array schemas must not bound object-containing matches with 'maxContains'",
         ));
     }
     for keyword in ["not", "if", "then", "else"] {
@@ -193,18 +220,23 @@ fn validate_wire_schema_additive_inner(
         }
     }
 
-    for keyword in ["$ref", "$dynamicRef"] {
-        if let Some(reference) = map.get(keyword).and_then(Value::as_str) {
-            if refs.insert(reference.to_owned()) {
-                if let Some((referenced, referenced_path)) = resolve_local_schema(root, reference) {
-                    validate_wire_schema_additive_inner(
-                        name,
-                        root,
-                        referenced,
-                        &referenced_path,
-                        refs,
-                    )?;
-                }
+    if map.contains_key("$dynamicRef") {
+        return Err(schema_error(
+            name,
+            child_path(path, "$dynamicRef"),
+            "wire schemas do not support '$dynamicRef' dynamic-scope semantics",
+        ));
+    }
+    if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
+        if refs.insert(reference.to_owned()) {
+            if let Some((referenced, referenced_path)) = resolve_local_schema(root, reference) {
+                validate_wire_schema_additive_inner(
+                    name,
+                    root,
+                    referenced,
+                    &referenced_path,
+                    refs,
+                )?;
             }
         }
     }
@@ -255,6 +287,93 @@ fn validate_wire_schema_additive_inner(
         }
     }
     Ok(())
+}
+
+fn literal_contains_object(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => true,
+        Value::Array(values) => values.iter().any(literal_contains_object),
+        _ => false,
+    }
+}
+
+fn schema_can_contain_object_value(
+    root: &Value,
+    schema: &Value,
+    refs: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    let Value::Object(map) = schema else {
+        return schema == &Value::Bool(true);
+    };
+
+    if let Some(value) = map.get("const") {
+        return literal_contains_object(value);
+    }
+    if let Some(values) = map.get("enum").and_then(Value::as_array) {
+        return values.iter().any(literal_contains_object);
+    }
+    if map
+        .get("allOf")
+        .and_then(Value::as_array)
+        .is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| !schema_can_contain_object_value(root, schema, &mut refs.clone()))
+        })
+    {
+        return false;
+    }
+    for keyword in ["anyOf", "oneOf"] {
+        if let Some(schemas) = map.get(keyword).and_then(Value::as_array) {
+            return schemas
+                .iter()
+                .any(|schema| schema_can_contain_object_value(root, schema, &mut refs.clone()));
+        }
+    }
+    if let Some(reference) = map.get("$ref").and_then(Value::as_str) {
+        if !refs.insert(reference.to_owned()) {
+            return true;
+        }
+        return resolve_local_schema(root, reference)
+            .is_none_or(|(referenced, _)| schema_can_contain_object_value(root, referenced, refs));
+    }
+    if map.contains_key("$dynamicRef") {
+        return true;
+    }
+
+    let Some(types) = map.get("type") else {
+        return true;
+    };
+    match types {
+        Value::String(value) if value == "array" => array_items_can_contain_object(root, map, refs),
+        Value::String(value) => value == "object",
+        Value::Array(values) => values.iter().any(|value| match value.as_str() {
+            Some("object") => true,
+            Some("array") => array_items_can_contain_object(root, map, &mut refs.clone()),
+            _ => false,
+        }),
+        _ => true,
+    }
+}
+
+fn array_items_can_contain_object(
+    root: &Value,
+    map: &serde_json::Map<String, Value>,
+    refs: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    if map
+        .get("prefixItems")
+        .and_then(Value::as_array)
+        .is_some_and(|schemas| {
+            schemas
+                .iter()
+                .any(|schema| schema_can_contain_object_value(root, schema, &mut refs.clone()))
+        })
+    {
+        return true;
+    }
+    map.get("items")
+        .is_none_or(|schema| schema_can_contain_object_value(root, schema, &mut refs.clone()))
 }
 
 fn schema_can_validate_object(
@@ -500,7 +619,29 @@ mod tests {
             (json!({"then": {"required": ["x"]}}), "/then"),
             (json!({"else": {"required": ["x"]}}), "/else"),
             (json!({"const": {"x": 1}}), "/const"),
+            (json!({"const": [{}]}), "/const"),
             (json!({"enum": ["ok", {"x": 1}]}), "/enum"),
+            (json!({"enum": [[{}], "ok"]}), "/enum"),
+            (
+                json!({"type": "object", "oneOf": [{"required": ["a"]}, {"required": ["futureField"]}]}),
+                "/oneOf",
+            ),
+            (
+                json!({"type": "array", "uniqueItems": true}),
+                "/uniqueItems",
+            ),
+            (
+                json!({"type": "array", "prefixItems": [{"type": "string"}], "uniqueItems": true}),
+                "/uniqueItems",
+            ),
+            (
+                json!({"type": "array", "contains": {"required": ["futureField"]}, "maxContains": 1}),
+                "/maxContains",
+            ),
+            (
+                json!({"$defs": {"node": {"$dynamicAnchor": "node", "type": "object"}}, "$dynamicRef": "#node"}),
+                "/$dynamicRef",
+            ),
             (
                 json!({"properties": {"a/b~c": {"additionalProperties": false}}}),
                 "/properties/a~1b~0c/additionalProperties",
@@ -527,7 +668,7 @@ mod tests {
             ),
             (
                 json!({"oneOf": [{"type": "string"}, {"additionalProperties": false}]}),
-                "/oneOf/1/additionalProperties",
+                "/oneOf",
             ),
             (
                 json!({"$defs": {"closed": {"$anchor": "closed", "additionalProperties": false}}, "$ref": "#closed"}),
@@ -550,6 +691,12 @@ mod tests {
         for schema in [
             json!({"type": "string", "const": "fixed"}),
             json!({"type": "string", "enum": ["a", "b"]}),
+            json!({"const": [1, "fixed", [true]]}),
+            json!({"enum": [[1, "a"], "b"]}),
+            json!({"oneOf": [{"type": "string"}, {"type": "number"}]}),
+            json!({"type": "array", "prefixItems": [{"type": "string"}], "items": {"type": "number"}, "uniqueItems": true}),
+            json!({"type": "array", "contains": {"type": "string"}, "maxContains": 1}),
+            json!({"type": "array", "contains": {"required": ["futureField"]}, "minContains": 1}),
             json!({"type": "object"}),
             json!({"type": "object", "additionalProperties": true}),
             json!({"type": "object", "unevaluatedProperties": true}),
