@@ -1,0 +1,1694 @@
+{
+  "apis": [
+    {
+      "format": "trellis.api.v1",
+      "id": "consumer@v1",
+      "displayName": "Consumer API",
+      "description": "Exercises every selectable API surface.",
+      "schemas": {
+        "Any": true,
+        "Event": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } }
+        }
+      },
+      "rpc": {
+        "Consumer.Get": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "output": { "schema": "Any" }
+        }
+      },
+      "operations": {
+        "Consumer.Run": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "cancel": true,
+          "signals": { "approve": { "input": { "schema": "Any" } } }
+        },
+        "Consumer.Simple": {
+          "version": "v1",
+          "input": { "schema": "Any" }
+        }
+      },
+      "events": {
+        "Consumer.Changed": {
+          "version": "v1",
+          "event": { "schema": "Event" },
+          "params": ["/id"]
+        }
+      },
+      "feeds": {
+        "Consumer.Watch": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "event": { "schema": "Any" }
+        }
+      },
+      "state": {
+        "Consumer.Settings": {
+          "kind": "value",
+          "schema": { "schema": "Any" }
+        }
+      },
+      "capabilities": {
+        "everything": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "operation",
+                "name": "Consumer.Run"
+              },
+              "action": "invoke"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "operation",
+                "name": "Consumer.Run"
+              },
+              "action": "observe"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "operation",
+                "name": "Consumer.Run"
+              },
+              "action": "cancel"
+            },
+            {
+              "target": {
+                "kind": "operationSignal",
+                "api": "consumer@v1",
+                "operation": "Consumer.Run",
+                "signal": "approve"
+              },
+              "action": "control"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "event",
+                "name": "Consumer.Changed"
+              },
+              "action": "publish"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "event",
+                "name": "Consumer.Changed"
+              },
+              "action": "subscribe"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "feed",
+                "name": "Consumer.Watch"
+              },
+              "action": "subscribe"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "state",
+                "name": "Consumer.Settings"
+              },
+              "action": "read"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "state",
+                "name": "Consumer.Settings"
+              },
+              "action": "write"
+            }
+          ]
+        },
+        "partial": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            },
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "operation",
+                "name": "Consumer.Simple"
+              },
+              "action": "invoke"
+            }
+          ]
+        },
+        "rpcOnly": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            }
+          ]
+        },
+        "𐀀": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            }
+          ]
+        },
+        "": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "consumer@v1",
+                "surface": "rpc",
+                "name": "Consumer.Get"
+              },
+              "action": "call"
+            }
+          ]
+        }
+      },
+      "consent": {
+        "everything": {
+          "title": "Use consumer API",
+          "description": "Use every selected surface.",
+          "consequence": "The participant can use every selected surface."
+        },
+        "rpcOnly": {
+          "title": "Read consumer records",
+          "description": "Read records through the consumer API.",
+          "consequence": "The participant can read consumer records."
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "optional@v1",
+      "displayName": "Optional API",
+      "description": "An optional feed.",
+      "schemas": { "Any": true },
+      "feeds": {
+        "Optional.Watch": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "event": { "schema": "Any" }
+        }
+      },
+      "events": {
+        "Optional.Changed": {
+          "version": "v1",
+          "event": { "schema": "Any" }
+        }
+      },
+      "capabilities": {
+        "optional.watch": {
+          "allows": [
+            {
+              "target": {
+                "kind": "apiSurface",
+                "api": "optional@v1",
+                "surface": "feed",
+                "name": "Optional.Watch"
+              },
+              "action": "subscribe"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "provider@v1",
+      "displayName": "Provider API",
+      "description": "An implemented transfer API.",
+      "schemas": {
+        "Input": {
+          "type": "object",
+          "required": ["file"],
+          "properties": {
+            "file": {
+              "type": "object",
+              "required": ["key", "contentType", "metadata"],
+              "properties": {
+                "key": { "type": "string" },
+                "contentType": { "type": "string" },
+                "metadata": { "type": "object" }
+              }
+            }
+          }
+        }
+      },
+      "operations": {
+        "Provider.Import": {
+          "version": "v1",
+          "input": { "schema": "Input" },
+          "transfer": { "direction": "send" },
+          "signals": { "confirm": { "input": { "schema": "Input" } } }
+        },
+        "Provider.Simple": {
+          "version": "v1",
+          "input": { "schema": "Input" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "𐀀@v1",
+      "displayName": "Supplementary API",
+      "description": "Unicode ordering API.",
+      "schemas": { "Any": true },
+      "rpc": {
+        "𐀀.Get": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "output": { "schema": "Any" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "@v1",
+      "displayName": "Private Use API",
+      "description": "Unicode ordering API.",
+      "schemas": { "Any": true },
+      "rpc": {
+        ".Get": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "output": { "schema": "Any" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "unicode-provider@v1",
+      "displayName": "Unicode Provider",
+      "description": "Unicode provider evidence ordering.",
+      "schemas": { "Any": true },
+      "operations": {
+        "Unicode.Run": {
+          "version": "v1",
+          "input": { "schema": "Any" },
+          "signals": {
+            "𐀀": { "input": { "schema": "Any" } },
+            "": { "input": { "schema": "Any" } }
+          }
+        }
+      },
+      "state": {
+        "𐀀": { "kind": "value", "schema": { "schema": "Any" } },
+        "": { "kind": "value", "schema": { "schema": "Any" } }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "implemented-events@v1",
+      "displayName": "Implemented Events API",
+      "description": "Events implemented by a participant.",
+      "schemas": { "Any": true },
+      "events": {
+        "Implemented.Changed": {
+          "version": "v1",
+          "event": { "schema": "Any" }
+        },
+        "Event/Existing~": {
+          "version": "v1",
+          "event": { "schema": "Any" }
+        }
+      }
+    },
+    {
+      "format": "trellis.api.v1",
+      "id": "bad-pointer@v1",
+      "displayName": "Bad Pointer API",
+      "description": "Contains an unprovable event pointer.",
+      "schemas": {
+        "Event": {
+          "anyOf": [
+            { "type": "object", "properties": { "id": { "type": "string" } } },
+            {
+              "type": "object",
+              "properties": { "other": { "type": "string" } }
+            }
+          ]
+        }
+      },
+      "events": {
+        "Bad.Changed": {
+          "version": "v1",
+          "event": { "schema": "Event" },
+          "params": ["/id"]
+        }
+      }
+    }
+  ],
+  "pointerProofs": [
+    {
+      "name": "optional-event-property",
+      "schema": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-event-property",
+      "schema": {
+        "type": "object",
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": true
+    },
+    {
+      "name": "required-keyword-without-object-type",
+      "schema": {
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "optional-nested-event-member",
+      "schema": {
+        "type": "object",
+        "required": ["record"],
+        "properties": {
+          "record": {
+            "type": "object",
+            "properties": { "id": { "type": "string" } }
+          }
+        }
+      },
+      "pointer": "/record/id",
+      "expectedType": "subjectToken",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-nested-event-path",
+      "schema": {
+        "type": "object",
+        "required": ["record"],
+        "properties": {
+          "record": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        }
+      },
+      "pointer": "/record/id",
+      "expectedType": "subjectToken",
+      "valid": true
+    },
+    {
+      "name": "optional-job-key-property",
+      "schema": {
+        "type": "object",
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "jobKey",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-job-key-property",
+      "schema": {
+        "type": "object",
+        "required": ["tenant"],
+        "properties": { "tenant": { "type": "string" } }
+      },
+      "pointer": "/tenant",
+      "expectedType": "jobKey",
+      "valid": true
+    },
+    {
+      "name": "optional-transfer-key",
+      "schema": {
+        "type": "object",
+        "properties": { "key": { "type": "string" } }
+      },
+      "pointer": "/key",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "required-transfer-key",
+      "schema": {
+        "type": "object",
+        "required": ["key"],
+        "properties": { "key": { "type": "string" } }
+      },
+      "pointer": "/key",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "optional-transfer-content-type",
+      "schema": {
+        "type": "object",
+        "properties": { "contentType": { "type": "string" } }
+      },
+      "pointer": "/contentType",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "optional-transfer-metadata",
+      "schema": {
+        "type": "object",
+        "properties": { "metadata": { "type": "object" } }
+      },
+      "pointer": "/metadata",
+      "expectedType": "object",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "array-index-without-min-items",
+      "schema": { "type": "array", "items": { "type": "string" } },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "array-index-zero",
+      "schema": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "type": "string" }
+      },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": true,
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-one",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/1",
+      "expectedType": "string",
+      "valid": true,
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-leading-zero-zero",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/00",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-leading-zero-one",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/01",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-next",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/-",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-negative",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/-1",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-signed",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/+1",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-decimal",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/1.0",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-whitespace",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/ 1",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "array-index-nondigit",
+      "schema": {
+        "type": "array",
+        "minItems": 2,
+        "items": { "type": "string" }
+      },
+      "pointer": "/one",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "runtimeValue": ["zero", "one"]
+    },
+    {
+      "name": "numeric-looking-object-property",
+      "schema": {
+        "type": "object",
+        "required": ["01"],
+        "properties": { "01": { "type": "string" } }
+      },
+      "pointer": "/01",
+      "expectedType": "string",
+      "valid": true,
+      "runtimeValue": { "01": "property" }
+    },
+    {
+      "name": "min-items-without-array-type",
+      "schema": { "minItems": 1, "items": { "type": "string" } },
+      "pointer": "/0",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    },
+    {
+      "name": "local-json-pointer-ref",
+      "schema": {
+        "$defs": {
+          "value": {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        },
+        "$ref": "#/$defs/value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "local-anchor-ref",
+      "schema": {
+        "$defs": {
+          "value": {
+            "$anchor": "value",
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string" } }
+          }
+        },
+        "$ref": "#value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": true
+    },
+    {
+      "name": "cyclic-local-ref",
+      "schema": {
+        "$defs": { "value": { "$ref": "#/$defs/value" } },
+        "$ref": "#/$defs/value"
+      },
+      "pointer": "/id",
+      "expectedType": "string",
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "minimal",
+      "covers": [1, 36, 37, 38, 39],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Minimal participant.",
+        "kind": "app"
+      },
+      "valid": true,
+      "expectedNeeds": {
+        "format": "trellis.participant-needs.v1",
+        "participant": { "id": "documents-web", "kind": "app" },
+        "provides": { "apis": [] },
+        "required": {
+          "apis": [],
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "resources": {}
+        },
+        "optional": {
+          "apis": [],
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "resources": {}
+        }
+      },
+      "expectedNeedsDigest": "AOB5YCFHLd9-VjgNq6bbVL5az9Zt-RQ7EJvOMLc8sw4",
+      "expectedProposal": {
+        "format": "trellis.authority-proposal.v1",
+        "participantId": "documents-web",
+        "participantKind": "app",
+        "participantDigest": "giT5kAA0QJWlfWZkfHDI3rRjX5eKRIkNUMQAA8tkzSI",
+        "needsDigest": "AOB5YCFHLd9-VjgNq6bbVL5az9Zt-RQ7EJvOMLc8sw4",
+        "provides": [],
+        "required": {
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "capabilities": [],
+          "uncoveredPermissions": [],
+          "resources": {}
+        },
+        "optional": {
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "capabilities": [],
+          "uncoveredPermissions": [],
+          "resources": {}
+        }
+      },
+      "expectedFingerprint": "LZQKBVRzQ2IGEfvn7g20XnWXjUr6ExW0LyZesB1hbQ4"
+    },
+    {
+      "name": "all-required-actions",
+      "covers": [2, 10, 11, 12, 22, 23, 24, 25, 26, 34],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "consumer-app",
+        "displayName": "Consumer App",
+        "description": "Uses every action.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get", "Consumer.Get"] },
+              "operations": {
+                "invoke": ["Consumer.Run"],
+                "observe": ["Consumer.Run"],
+                "cancel": ["Consumer.Run"],
+                "control": { "Consumer.Run": ["approve", "approve"] }
+              },
+              "events": {
+                "publish": ["Consumer.Changed"],
+                "subscribe": ["Consumer.Changed"]
+              },
+              "feeds": { "subscribe": ["Consumer.Watch"] },
+              "state": {
+                "read": ["Consumer.Settings"],
+                "write": ["Consumer.Settings"]
+              }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "requiredActions": [
+        "publish",
+        "subscribe",
+        "subscribe",
+        "cancel",
+        "invoke",
+        "observe",
+        "call",
+        "read",
+        "write",
+        "control"
+      ],
+      "fullyRequestedCapabilities": ["everything", "rpcOnly", "𐀀", ""],
+      "requiredCapabilityEvidence": [
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "everything"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "rpcOnly"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": "𐀀"
+        },
+        {
+          "api": "consumer@v1",
+          "apiDigest": "ro9mcwkUjl8soFoGPTbk7zqUy9lP-GpASIy-5o50Lh0",
+          "name": ""
+        }
+      ],
+      "uncoveredPermissions": 0
+    },
+    {
+      "name": "required-and-optional",
+      "covers": [10, 32],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "split-app",
+        "displayName": "Split App",
+        "description": "Separates required and optional grants.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get"] }
+            }
+          },
+          "optional": {
+            "optional": {
+              "api": "optional@v1",
+              "apiDigest": "$actual",
+              "feeds": { "subscribe": ["Optional.Watch"] }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "requiredActions": ["call"],
+      "optionalActions": ["subscribe"],
+      "optionalFullyRequestedCapabilities": ["optional.watch"],
+      "optionalCapabilityEvidence": [
+        {
+          "api": "optional@v1",
+          "apiDigest": "tuQIEtFQB4eX1JGH_I1_6ufG-sf7mUUcVV4b53lO-DU",
+          "name": "optional.watch"
+        }
+      ]
+    },
+    {
+      "name": "missing-api",
+      "covers": [3],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-app",
+        "displayName": "Missing",
+        "description": "Missing API.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get"] }
+            }
+          }
+        }
+      },
+      "suppliedApis": [],
+      "valid": false,
+      "errorCode": "missingApi",
+      "errorPath": "/uses/required/consumer"
+    },
+    {
+      "name": "digest-mismatch",
+      "covers": [4],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "mismatch-app",
+        "displayName": "Mismatch",
+        "description": "Wrong digest.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+              "rpc": { "call": ["Consumer.Get"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "apiDigestMismatch",
+      "errorPath": "/uses/required/consumer/apiDigest"
+    },
+    {
+      "name": "missing-rpc",
+      "covers": [5],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-rpc",
+        "displayName": "Missing RPC",
+        "description": "Missing RPC.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Missing.Get"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/consumer/rpc/call/0"
+    },
+    {
+      "name": "missing-operation",
+      "covers": [6],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-operation",
+        "displayName": "Missing Operation",
+        "description": "Missing operation.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "operations": { "invoke": ["Missing.Run"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/consumer/operations/invoke/0"
+    },
+    {
+      "name": "invalid-cancel",
+      "covers": [7],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-cancel",
+        "displayName": "Invalid Cancel",
+        "description": "Invalid cancel.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "operations": { "cancel": ["Consumer.Simple"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "invalidCancelSelection",
+      "errorPath": "/uses/required/consumer/operations/cancel/0"
+    },
+    {
+      "name": "missing-signal",
+      "covers": [8, 12],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-signal",
+        "displayName": "Missing Signal",
+        "description": "Missing signal.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "operations": { "control": { "Consumer.Run": ["missing"] } }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingOperationSignal",
+      "errorPath": "/uses/required/consumer/operations/control/Consumer.Run/0"
+    },
+    {
+      "name": "missing-event-feed-state",
+      "covers": [9],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-event",
+        "displayName": "Missing Event",
+        "description": "Missing event.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Missing.Event"] },
+              "feeds": { "subscribe": ["Missing.Feed"] },
+              "state": { "read": ["Missing.State"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/consumer/events/subscribe/0"
+    },
+    {
+      "name": "missing-feed",
+      "covers": [9],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-feed",
+        "displayName": "Missing Feed",
+        "description": "Missing feed.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "feeds": { "subscribe": ["Missing.Feed"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/consumer/feeds/subscribe/0"
+    },
+    {
+      "name": "missing-state",
+      "covers": [9],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-state",
+        "displayName": "Missing State",
+        "description": "Missing state.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "state": { "read": ["Missing.State"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/consumer/state/read/0"
+    },
+    {
+      "name": "implemented-transfer",
+      "covers": [13, 20],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "provider-worker",
+        "displayName": "Provider",
+        "description": "Implements provider API.",
+        "kind": "service",
+        "implements": {
+          "provider": {
+            "api": "provider@v1",
+            "apiDigest": "$actual",
+            "operationTransfers": {
+              "Provider.Import": {
+                "store": "uploads",
+                "key": "/file/key",
+                "contentType": "/file/contentType",
+                "metadata": "/file/metadata"
+              }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      },
+      "valid": true,
+      "providedApi": "provider@v1"
+    },
+    {
+      "name": "transfer-missing-local-store-artifact-rejection",
+      "covers": [16],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-store",
+        "displayName": "Missing Store",
+        "description": "Transfer references a missing local store.",
+        "kind": "service",
+        "implements": {
+          "provider": {
+            "api": "provider@v1",
+            "apiDigest": "$actual",
+            "operationTransfers": {
+              "Provider.Import": { "store": "missing", "key": "/file/key" }
+            }
+          }
+        }
+      },
+      "participantErrorPath": "/implements/provider/operationTransfers/Provider.Import/store",
+      "valid": false
+    },
+    {
+      "name": "missing-transfer",
+      "covers": [14],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "missing-transfer",
+        "displayName": "Missing Transfer",
+        "description": "Missing mapping.",
+        "kind": "service",
+        "implements": {
+          "provider": { "api": "provider@v1", "apiDigest": "$actual" }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      },
+      "valid": false,
+      "errorCode": "missingRequiredTransfer",
+      "errorPath": "/implements/provider/operationTransfers"
+    },
+    {
+      "name": "extra-transfer",
+      "covers": [15],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "extra-transfer",
+        "displayName": "Extra Transfer",
+        "description": "Extra mapping.",
+        "kind": "service",
+        "implements": {
+          "provider": {
+            "api": "provider@v1",
+            "apiDigest": "$actual",
+            "operationTransfers": {
+              "Provider.Simple": { "store": "uploads", "key": "/file/key" },
+              "Provider.Import": { "store": "uploads", "key": "/file/key" }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      },
+      "valid": false,
+      "errorCode": "invalidImplementedTransfer",
+      "errorPath": "/implements/provider/operationTransfers/Provider.Simple"
+    },
+    {
+      "name": "optional-transfer-store",
+      "covers": [17],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "optional-transfer",
+        "displayName": "Optional Transfer",
+        "description": "Optional store.",
+        "kind": "service",
+        "implements": {
+          "provider": {
+            "api": "provider@v1",
+            "apiDigest": "$actual",
+            "operationTransfers": {
+              "Provider.Import": { "store": "uploads", "key": "/file/key" }
+            }
+          }
+        },
+        "resources": {
+          "store": { "uploads": { "purpose": "Uploads.", "required": false } }
+        }
+      },
+      "valid": false,
+      "errorCode": "optionalStoreForRequiredTransfer",
+      "errorPath": "/implements/provider/operationTransfers/Provider.Import/store"
+    },
+    {
+      "name": "invalid-transfer-pointer-type",
+      "covers": [20],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-transfer-pointer",
+        "displayName": "Invalid Transfer Pointer",
+        "description": "Transfer key resolves to an object.",
+        "kind": "service",
+        "implements": {
+          "provider": {
+            "api": "provider@v1",
+            "apiDigest": "$actual",
+            "operationTransfers": {
+              "Provider.Import": { "store": "uploads", "key": "/file/metadata" }
+            }
+          }
+        },
+        "resources": { "store": { "uploads": { "purpose": "Uploads." } } }
+      },
+      "valid": false,
+      "errorCode": "schemaPointerTypeMismatch",
+      "errorPath": "/implements/provider/operationTransfers/Provider.Import/key"
+    },
+    {
+      "name": "bad-event-pointer",
+      "covers": [18, 21],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "bad-pointer-app",
+        "displayName": "Bad Pointer",
+        "description": "Bad event pointer.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "bad": {
+              "api": "bad-pointer@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Bad.Changed"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "unresolvableSchemaPointer",
+      "errorPath": "/events/Bad.Changed/params/0"
+    },
+    {
+      "name": "valid-job-pointer",
+      "covers": [19],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "job-worker",
+        "displayName": "Job Worker",
+        "description": "Valid job key.",
+        "kind": "service",
+        "schemas": {
+          "Payload": {
+            "type": "object",
+            "required": ["tenant"],
+            "properties": { "tenant": { "type": "string" } }
+          }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "keyConcurrency": { "key": ["/tenant"] }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "invalid-job-pointer",
+      "covers": [19],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "bad-job-worker",
+        "displayName": "Bad Job",
+        "description": "Invalid job key.",
+        "kind": "service",
+        "schemas": {
+          "Payload": {
+            "type": "object",
+            "required": ["tenant"],
+            "properties": { "tenant": { "type": "object" } }
+          }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Payload" },
+            "keyConcurrency": { "key": ["/tenant"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "schemaPointerTypeMismatch",
+      "errorPath": "/jobQueues/work/keyConcurrency/key/0"
+    },
+    {
+      "name": "implemented-event-consumer-valid",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "implemented-consumer",
+        "displayName": "Implemented Consumer",
+        "description": "Consumes an event from an implemented API.",
+        "kind": "service",
+        "implements": {
+          "events": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "events": ["Implemented.Changed"] }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "implemented-event-consumer-missing-event",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "implemented-consumer-missing",
+        "displayName": "Implemented Consumer Missing",
+        "description": "Selects a missing implemented event.",
+        "kind": "service",
+        "implements": {
+          "events": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "events": ["Does.Not.Exist"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/eventConsumers/worker/events/events/0"
+    },
+    {
+      "name": "required-used-event-consumer-valid",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "required-used-consumer",
+        "displayName": "Required Used Consumer",
+        "description": "Consumes a required subscribed event.",
+        "kind": "service",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Consumer.Changed"] }
+            }
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "consumer": ["Consumer.Changed"] }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "required-consumer-optional-api-rejected",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "optional-used-consumer",
+        "displayName": "Optional Used Consumer",
+        "description": "Invalid required consumer dependency.",
+        "kind": "service",
+        "uses": {
+          "optional": {
+            "optional": {
+              "api": "optional@v1",
+              "apiDigest": "$actual",
+              "events": { "subscribe": ["Optional.Changed"] }
+            }
+          }
+        },
+        "eventConsumers": {
+          "worker": {
+            "events": { "optional": ["Optional.Changed"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "requiredConsumerUsesOptionalApi",
+      "errorPath": "/eventConsumers/worker/events/optional"
+    },
+    {
+      "name": "event-consumer-indexed-escaped-error",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "escaped-consumer",
+        "displayName": "Escaped Consumer",
+        "description": "Escaped consumer diagnostics.",
+        "kind": "service",
+        "implements": {
+          "events/~": {
+            "api": "implemented-events@v1",
+            "apiDigest": "$actual"
+          }
+        },
+        "eventConsumers": {
+          "worker/~": {
+            "events": { "events/~": ["Does/Not~Exist"] }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/eventConsumers/worker~1~0/events/events~1~0/0"
+    },
+    {
+      "name": "unicode-api-needs-order",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "unicode-order-app",
+        "displayName": "Unicode Order App",
+        "description": "Proves UTF-16 API-needs ordering.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "private": {
+              "api": "@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": [".Get"] }
+            },
+            "supplementary": {
+              "api": "𐀀@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["𐀀.Get"] }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "requiredApiOrder": ["𐀀@v1", "@v1"],
+      "expectedNeeds": {
+        "format": "trellis.participant-needs.v1",
+        "participant": { "id": "unicode-order-app", "kind": "app" },
+        "provides": { "apis": [] },
+        "required": {
+          "apis": [
+            {
+              "api": "𐀀@v1",
+              "apiDigest": "FZzvezRRo5bRslptCKIoQP6NKwwjpqikSvpqsgbuEYA"
+            },
+            {
+              "api": "@v1",
+              "apiDigest": "Yh1_g5QD18XEh1M7nqidK_yt_6HYvk5WeIwXP_GEaQM"
+            }
+          ],
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "𐀀@v1",
+                  "surface": "rpc",
+                  "name": "𐀀.Get"
+                },
+                "action": "call"
+              },
+              {
+                "target": {
+                  "kind": "apiSurface",
+                  "api": "@v1",
+                  "surface": "rpc",
+                  "name": ".Get"
+                },
+                "action": "call"
+              }
+            ]
+          },
+          "resources": {}
+        },
+        "optional": {
+          "apis": [],
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "resources": {}
+        }
+      },
+      "expectedNeedsDigest": "ixCDhsuwCZaXI-8WKch_JSTfRL-6tCNDjX7jNLTt5PM"
+    },
+    {
+      "name": "unicode-provider-order",
+      "covers": [],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "unicode-provider-worker",
+        "displayName": "Unicode Provider Worker",
+        "description": "Proves UTF-16 provider evidence ordering.",
+        "kind": "service",
+        "implements": {
+          "unicode": {
+            "api": "unicode-provider@v1",
+            "apiDigest": "$actual"
+          }
+        }
+      },
+      "valid": true,
+      "providedStateOrder": ["𐀀", ""],
+      "providedSignalOrder": ["𐀀", ""]
+    },
+    {
+      "name": "alias-base",
+      "covers": [27, 28, 29, 30],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "alias-app",
+        "displayName": "Alias App",
+        "description": "Base alias.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "first": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get"] }
+            }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "alias-and-metadata-variant",
+      "covers": [27, 28],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "alias-app",
+        "displayName": "Renamed Alias App",
+        "description": "Changed human metadata.",
+        "kind": "app",
+        "docs": { "markdown": "# Changed" },
+        "uses": {
+          "required": {
+            "renamed": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get"] }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "sameNeedsAs": "alias-base",
+      "sameFingerprintAs": "alias-base"
+    },
+    {
+      "name": "resource-base",
+      "covers": [29, 30, 31, 33],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource",
+        "description": "Resource base.",
+        "kind": "service",
+        "schemas": { "ValueA": { "type": "string" } },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Base purpose.",
+              "schema": { "schema": "ValueA" }
+            }
+          }
+        }
+      },
+      "valid": true
+    },
+    {
+      "name": "resource-schema-alias",
+      "covers": [29, 30],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Renamed Resource",
+        "description": "Changed copy.",
+        "kind": "service",
+        "schemas": { "ValueB": { "type": "string" } },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Changed purpose.",
+              "docs": { "markdown": "# Cache" },
+              "schema": { "schema": "ValueB" }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "sameNeedsAs": "resource-base",
+      "sameFingerprintAs": "resource-base"
+    },
+    {
+      "name": "resource-machine-change",
+      "covers": [31, 33],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "resource-worker",
+        "displayName": "Resource",
+        "description": "Machine change.",
+        "kind": "service",
+        "schemas": { "ValueA": { "type": "string" } },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Base purpose.",
+              "schema": { "schema": "ValueA" },
+              "history": 2
+            }
+          }
+        }
+      },
+      "valid": true,
+      "differentNeedsFrom": "resource-base"
+    },
+    {
+      "name": "optional-moved-to-required",
+      "covers": [32],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "split-app",
+        "displayName": "Split App",
+        "description": "Moves optional authority to required.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "consumer": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Consumer.Get"] }
+            },
+            "optional": {
+              "api": "optional@v1",
+              "apiDigest": "$actual",
+              "feeds": { "subscribe": ["Optional.Watch"] }
+            }
+          }
+        }
+      },
+      "valid": true,
+      "differentNeedsFrom": "required-and-optional"
+    },
+    {
+      "name": "escaped-alias-error",
+      "covers": [35],
+      "participant": {
+        "format": "trellis.participant.v1",
+        "id": "escaped-app",
+        "displayName": "Escaped",
+        "description": "Escaped path.",
+        "kind": "app",
+        "uses": {
+          "required": {
+            "a/b~c": {
+              "api": "consumer@v1",
+              "apiDigest": "$actual",
+              "rpc": { "call": ["Missing.Get"] }
+            }
+          }
+        }
+      },
+      "valid": false,
+      "errorCode": "missingSurface",
+      "errorPath": "/uses/required/a~1b~0c/rpc/call/0"
+    }
+  ]
+}

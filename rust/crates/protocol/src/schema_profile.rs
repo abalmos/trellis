@@ -465,7 +465,10 @@ fn schema_can_validate_type(
     true
 }
 
-fn resolve_local_schema<'a>(root: &'a Value, reference: &str) -> Option<(&'a Value, String)> {
+pub(crate) fn resolve_local_schema<'a>(
+    root: &'a Value,
+    reference: &str,
+) -> Option<(&'a Value, String)> {
     let fragment = reference.strip_prefix('#')?;
     if fragment.is_empty() || fragment.starts_with('/') {
         return root

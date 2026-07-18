@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-07-10).
+Last verified against Trellis main (2026-07-17).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -20,6 +20,11 @@ commands.
   `nats`, and permissions require current materialization for the accepted
   desired authority version. Stale or obsolete persisted projections are repaired
   by Trellis storage upgrade and reconciliation.
+- Pure participant resolution pins every referenced API by exact ID and digest,
+  keeps required and optional grants separate, and derives alias-independent
+  machine needs. Named capabilities identify their exact defining API digest and
+  explain fully selected exact permissions; they never add permissions to a
+  participant request.
 - Safe deployment authority updates auto-apply during bootstrap. New capability
   grants and new resource aliases require update approval; strict-mode
   migrations require approval; `mutable-dev` records and auto-accepts migrations.

@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-12).
+Last verified against Trellis main (2026-07-17).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -37,6 +37,18 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   request/publish/subscribe methods.
 - If a facade lacks a declared capability, fix the contract or generator. Do not
   add a transport shim in the service repository.
+- Protocol tooling can call `trellis_protocol::resolve_participant_v1(...)` with
+  one validated participant artifact and its exact digest-pinned API artifacts.
+  The pure result separates required and optional grant sets, provided APIs,
+  private resource needs, capability/consent evidence, uncovered permissions,
+  an alias-independent needs digest, and an authority-change fingerprint.
+- Exact action selections remain authoritative. Capability evidence explains a
+  complete selected permission bundle, identifies the exact defining API digest,
+  and never expands the derived grant set.
+- Event subject, Jobs key, and operation-transfer pointers must be guaranteed to
+  resolve for every schema-valid payload. Every object step must be required and
+  every array index must be covered by `minItems`; optional fields are invalid
+  extraction paths even when their schemas have the expected type.
 
 ## Connection and authority
 

@@ -186,6 +186,82 @@
 //! assert!(!compare_api_replacement_v1(&old, &wrong_lineage)?.compatible);
 //! # Ok::<(), trellis_protocol::ProtocolError>(())
 //! ```
+//!
+//! # Contextual resolution
+//!
+//! [`resolve_participant_v1`] proves a participant's exact API pins and selected
+//! surfaces, then derives separate required and optional machine needs and
+//! owner-reviewable authority evidence.
+//!
+//! ```
+//! use std::collections::BTreeMap;
+//! use serde_json::json;
+//! use trellis_protocol::{parse_api_v1, parse_participant_v1, resolve_participant_v1};
+//!
+//! let documents = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "displayName": "Documents", "description": "Documents."
+//! }))?;
+//! let billing = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "billing@v1",
+//!     "displayName": "Billing", "description": "Billing.",
+//!     "schemas": { "Input": true, "Output": true },
+//!     "rpc": {
+//!         "Billing.Get": { "version": "v1", "input": { "schema": "Input" }, "output": { "schema": "Output" } },
+//!         "Billing.Update": { "version": "v1", "input": { "schema": "Input" }, "output": { "schema": "Output" } }
+//!     },
+//!     "capabilities": { "billing.read": { "allows": [{
+//!         "target": { "kind": "apiSurface", "api": "billing@v1", "surface": "rpc", "name": "Billing.Get" },
+//!         "action": "call"
+//!     }] } },
+//!     "consent": { "billing.read": {
+//!         "title": "Read billing", "description": "Reads billing data.",
+//!         "consequence": "Billing data is shared."
+//!     } }
+//! }))?;
+//! let health = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "health@v1",
+//!     "displayName": "Health", "description": "Health.",
+//!     "schemas": { "Input": true, "Event": true },
+//!     "feeds": { "Health.Watch": {
+//!         "version": "v1", "input": { "schema": "Input" },
+//!         "event": { "schema": "Event" }
+//!     } }
+//! }))?;
+//!
+//! let participant = parse_participant_v1(&json!({
+//!     "format": "trellis.participant.v1", "id": "documents-worker",
+//!     "displayName": "Documents Worker", "description": "Processes documents.",
+//!     "kind": "service",
+//!     "implements": { "documents": { "api": "documents@v1", "apiDigest": documents.digest()? } },
+//!     "uses": {
+//!         "required": { "billing": {
+//!             "api": "billing@v1", "apiDigest": billing.digest()?,
+//!             "rpc": { "call": ["Billing.Update", "Billing.Get"] }
+//!         } },
+//!         "optional": { "health": {
+//!             "api": "health@v1", "apiDigest": health.digest()?,
+//!             "feeds": { "subscribe": ["Health.Watch"] }
+//!         } }
+//!     },
+//!     "resources": { "store": { "uploads": { "purpose": "Incoming files." } } }
+//! }))?;
+//!
+//! let mut apis = BTreeMap::new();
+//! apis.insert(documents.id().to_owned(), documents);
+//! apis.insert(billing.id().to_owned(), billing);
+//! apis.insert(health.id().to_owned(), health);
+//! let resolved = resolve_participant_v1(&participant, &apis)?;
+//!
+//! assert_eq!(resolved.needs().required().grant_set().permissions().len(), 2);
+//! assert_eq!(resolved.needs().optional().apis().len(), 1);
+//! assert_eq!(resolved.proposal().required().capabilities().len(), 1);
+//! assert_eq!(resolved.proposal().required().uncovered_permissions().len(), 1);
+//! assert_eq!(resolved.needs().provided_apis().len(), 1);
+//! assert_eq!(resolved.needs().digest()?.len(), 43);
+//! assert_eq!(resolved.proposal().fingerprint()?.len(), 43);
+//! # Ok::<(), trellis_protocol::ProtocolError>(())
+//! ```
 
 mod api;
 mod canonical;
@@ -193,6 +269,7 @@ mod error;
 mod identifiers;
 mod participant;
 mod permissions;
+mod resolution;
 mod schema_profile;
 mod subjects;
 
@@ -202,7 +279,7 @@ pub use api::{
     API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
 };
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
-pub use error::ProtocolError;
+pub use error::{ProtocolError, ResolutionErrorCodeV1};
 pub use participant::{
     lint_participant_v1_authoring, parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1,
     PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,
@@ -211,6 +288,13 @@ pub use permissions::{
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, GrantSetV1,
     ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
     GRANT_SET_FORMAT_V1,
+};
+pub use resolution::{
+    resolve_participant_v1, AuthorityCapabilityEvidenceV1, AuthorityProposalSectionV1,
+    AuthorityProposalV1, ParticipantNeedsSectionV1, ParticipantNeedsV1, ParticipantResourceNeedsV1,
+    ProvidedApiNeedV1, ResolvedImplementedApiV1, ResolvedParticipantV1, ResolvedProvidedApiV1,
+    ResolvedProvidedOperationV1, ResolvedUsedApiV1, AUTHORITY_PROPOSAL_FORMAT_V1,
+    PARTICIPANT_NEEDS_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
