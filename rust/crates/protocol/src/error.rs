@@ -30,4 +30,24 @@ pub enum ProtocolError {
     /// A grant set uses an unsupported wire format.
     #[error("unsupported grant-set format '{0}'")]
     InvalidGrantSetFormat(String),
+
+    /// A `trellis.api.v1` member failed structural or semantic validation.
+    #[error("invalid API artifact at '{path}': {message}")]
+    ApiValidation {
+        /// JSON Pointer-like path to the invalid member.
+        path: String,
+        /// Specific validation failure.
+        message: String,
+    },
+
+    /// An embedded API schema violates the Trellis Draft 2020-12 profile.
+    #[error("invalid schema '{schema}' at '{path}': {message}")]
+    SchemaProfile {
+        /// Name of the embedded schema.
+        schema: String,
+        /// Path within the embedded schema.
+        path: String,
+        /// Specific profile or JSON Schema failure.
+        message: String,
+    },
 }

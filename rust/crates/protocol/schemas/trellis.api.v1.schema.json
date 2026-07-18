@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trellis.dev/schemas/trellis.api.v1.schema.json",
+  "title": "Trellis API Artifact v1",
+  "type": "object",
+  "required": ["format", "id", "displayName", "description"],
+  "properties": {
+    "format": { "const": "trellis.api.v1" },
+    "id": {
+      "type": "string",
+      "pattern": "^.+@v[1-9][0-9]*$"
+    },
+    "displayName": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "docs": { "$ref": "#/$defs/docs" },
+    "schemas": { "$ref": "#/$defs/schemas" },
+    "exports": { "$ref": "#/$defs/exports" },
+    "errors": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/error" }
+    },
+    "rpc": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/rpc" }
+    },
+    "operations": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/operation" }
+    },
+    "events": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/event" }
+    },
+    "feeds": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/feed" }
+    },
+    "state": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/state" }
+    },
+    "capabilities": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/capability" }
+    },
+    "consent": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/consent" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "docs": {
+      "type": "object",
+      "required": ["markdown"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "markdown": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "schemaValue": {
+      "type": ["object", "boolean"]
+    },
+    "schemas": {
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": { "$ref": "#/$defs/schemaValue" }
+    },
+    "schemaRef": {
+      "type": "object",
+      "required": ["schema"],
+      "properties": {
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "exports": {
+      "type": "object",
+      "properties": {
+        "schemas": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "receiveTransfer": {
+      "type": "object",
+      "required": ["direction"],
+      "properties": {
+        "direction": { "const": "receive" }
+      },
+      "additionalProperties": false
+    },
+    "sendTransfer": {
+      "type": "object",
+      "required": ["direction"],
+      "properties": {
+        "direction": { "const": "send" }
+      },
+      "additionalProperties": false
+    },
+    "rpc": {
+      "type": "object",
+      "required": ["version", "input", "output"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "input": { "$ref": "#/$defs/schemaRef" },
+        "output": { "$ref": "#/$defs/schemaRef" },
+        "errors": { "$ref": "#/$defs/errorRefs" },
+        "transfer": { "$ref": "#/$defs/receiveTransfer" },
+        "internal": { "type": "boolean" },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": ["version", "input"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "input": { "$ref": "#/$defs/schemaRef" },
+        "progress": { "$ref": "#/$defs/schemaRef" },
+        "update": { "$ref": "#/$defs/schemaRef" },
+        "output": { "$ref": "#/$defs/schemaRef" },
+        "errors": { "$ref": "#/$defs/errorRefs" },
+        "transfer": { "$ref": "#/$defs/sendTransfer" },
+        "cancel": { "type": "boolean" },
+        "signals": {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/signal" }
+        },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "signal": {
+      "type": "object",
+      "required": ["input"],
+      "properties": {
+        "input": { "$ref": "#/$defs/schemaRef" },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["version", "event"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "event": { "$ref": "#/$defs/schemaRef" },
+        "params": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "class": { "enum": ["domain", "audit", "control"] },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "feed": {
+      "type": "object",
+      "required": ["version", "input", "event"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "input": { "$ref": "#/$defs/schemaRef" },
+        "event": { "$ref": "#/$defs/schemaRef" },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "required": ["kind", "schema"],
+      "properties": {
+        "kind": { "enum": ["value", "map"] },
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "stateVersion": { "type": "string", "minLength": 1 },
+        "acceptedVersions": {
+          "type": "object",
+          "propertyNames": { "type": "string", "minLength": 1 },
+          "additionalProperties": { "$ref": "#/$defs/schemaRef" }
+        },
+        "docs": { "$ref": "#/$defs/docs" }
+      },
+      "additionalProperties": false
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v[1-9][0-9]*$"
+    },
+    "errorRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["allows"],
+      "properties": {
+        "allows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/permissionAtom" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissionAtom": {
+      "type": "object",
+      "required": ["target", "action"],
+      "properties": {
+        "target": { "$ref": "#/$defs/permissionTarget" },
+        "action": {
+          "enum": [
+            "call",
+            "invoke",
+            "observe",
+            "cancel",
+            "control",
+            "publish",
+            "subscribe",
+            "read",
+            "write",
+            "delete",
+            "submit",
+            "process",
+            "consume"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissionTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "api", "surface", "name"],
+          "properties": {
+            "kind": { "const": "apiSurface" },
+            "api": { "type": "string", "minLength": 1 },
+            "surface": {
+              "enum": ["rpc", "operation", "event", "feed", "state"]
+            },
+            "name": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "participant", "resource", "name"],
+          "properties": {
+            "kind": { "const": "participantResource" },
+            "participant": { "type": "string", "minLength": 1 },
+            "resource": {
+              "enum": ["kv", "store", "jobQueue", "eventConsumer"]
+            },
+            "name": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "consent": {
+      "type": "object",
+      "required": ["title", "description", "consequence"],
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "consequence": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

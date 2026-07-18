@@ -264,6 +264,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Set up Deno
         uses: denoland/setup-deno@v2
@@ -300,7 +302,16 @@ jobs:
           fi
 
       - name: Package public Rust crates
-        run: cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
+          version="$(grep -m1 '^version = ' rust/Cargo.toml | cut -d '"' -f 2)"
+          tar -tzf "rust/target/package/trellis-protocol-${version}.crate" \
+            | grep -Fqx "trellis-protocol-${version}/schemas/trellis.api.v1.schema.json"
+
+      - name: Check protocol WASM target
+        run: cargo check --manifest-path rust/Cargo.toml --package trellis-protocol --target wasm32-unknown-unknown
 
       - name: Build integration runtime binaries
         shell: bash

@@ -18,6 +18,12 @@ pub fn canonicalize_json(value: &Value) -> Result<String, ContractsError> {
         trellis_protocol::ProtocolError::InvalidGrantSetFormat(_) => {
             unreachable!("grant-set validation is not part of canonical JSON rendering")
         }
+        trellis_protocol::ProtocolError::ApiValidation { .. } => {
+            unreachable!("API validation is not part of canonical JSON rendering")
+        }
+        trellis_protocol::ProtocolError::SchemaProfile { .. } => {
+            unreachable!("schema-profile validation is not part of canonical JSON rendering")
+        }
     })
 }
 
