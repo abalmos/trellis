@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use jsonptr::{Pointer, PointerBuf};
+use jsonptr::{index::Index, Pointer, PointerBuf, Token};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -1226,26 +1226,18 @@ fn validate_typed_pointer(
 ) -> Result<(), ProtocolError> {
     let parsed =
         Pointer::parse(pointer_value).expect("artifact pointers were parsed during validation");
-    let resolved = resolve_schema_pointer(
-        schema,
-        schema,
-        parsed
-            .tokens()
-            .map(|token| token.decoded().into_owned())
-            .collect::<Vec<_>>()
-            .as_slice(),
-        &mut BTreeSet::new(),
-    )
-    .ok_or_else(|| {
-        resolution_error(
-            ResolutionErrorCodeV1::UnresolvableSchemaPointer,
-            participant_id,
-            (!alias.is_empty()).then_some(alias),
-            (!api.is_empty()).then_some(api),
-            authored_path.clone(),
-            format!("schema pointer '{pointer_value}' cannot be proven to resolve"),
-        )
-    })?;
+    let tokens = parsed.tokens().collect::<Vec<_>>();
+    let resolved = resolve_schema_pointer(schema, schema, &tokens, &mut BTreeSet::new())
+        .ok_or_else(|| {
+            resolution_error(
+                ResolutionErrorCodeV1::UnresolvableSchemaPointer,
+                participant_id,
+                (!alias.is_empty()).then_some(alias),
+                (!api.is_empty()).then_some(api),
+                authored_path.clone(),
+                format!("schema pointer '{pointer_value}' cannot be proven to resolve"),
+            )
+        })?;
     if resolved
         .iter()
         .all(|node| schema_proves_type(schema, node, expected, &mut BTreeSet::new()))
@@ -1266,7 +1258,7 @@ fn validate_typed_pointer(
 fn resolve_schema_pointer<'a>(
     root: &'a Value,
     schema: &'a Value,
-    tokens: &[String],
+    tokens: &[Token<'_>],
     refs: &mut BTreeSet<String>,
 ) -> Option<Vec<&'a Value>> {
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
@@ -1304,21 +1296,21 @@ fn resolve_schema_pointer<'a>(
         }
     }
     let required = schema.get("required").and_then(Value::as_array);
+    let decoded = token.decoded();
     if schema_proves_type(
         root,
         schema,
         ExpectedSchemaType::Object,
         &mut BTreeSet::new(),
     ) && required
-        .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(token)))
+        .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(&decoded)))
     {
         let property = schema
             .get("properties")
             .and_then(Value::as_object)
-            .and_then(|properties| properties.get(token))?;
+            .and_then(|properties| properties.get(decoded.as_ref()))?;
         return resolve_schema_pointer(root, property, remaining, refs);
     }
-    let index = token.parse::<usize>().ok()?;
     if !schema_proves_type(
         root,
         schema,
@@ -1327,6 +1319,9 @@ fn resolve_schema_pointer<'a>(
     ) {
         return None;
     }
+    let Index::Num(index) = token.to_index().ok()? else {
+        return None;
+    };
     let min_items = schema.get("minItems").and_then(Value::as_u64)?;
     if u64::try_from(index).ok()?.checked_add(1)? > min_items {
         return None;
@@ -1607,6 +1602,7 @@ mod tests {
         expected_type: String,
         valid: bool,
         error_code: Option<String>,
+        runtime_value: Option<Value>,
     }
 
     #[derive(Deserialize, Debug, Eq, PartialEq)]
@@ -1658,6 +1654,15 @@ mod tests {
                 expected,
             );
             assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
+            if let Some(runtime_value) = &vector.runtime_value {
+                let parsed = Pointer::parse(&vector.pointer).unwrap();
+                assert_eq!(
+                    result.is_ok(),
+                    parsed.resolve(runtime_value).is_ok(),
+                    "{} static/runtime pointer decision",
+                    vector.name
+                );
+            }
             if let Err(ProtocolError::ParticipantResolution { code, .. }) = result {
                 assert_eq!(
                     resolution_code_name(code),
