@@ -35,9 +35,15 @@ named `trellis-test` helper and prove the behavior through a live control plane.
 Before committing or ending an implementation cycle, run the focused checks that match the files touched. If runtime or public behavior changed, also run the full language-owned integration suites:
 
 ```sh
-deno task -c js/deno.json test:integration
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
+deno task -c js/deno.json test:integration -- --parallel --jobs 4
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
 ```
+
+Four JS workers are the portable baseline used by release CI. Local
+`cargo xtask release verify` selects the available CPU count capped at eight;
+pass an explicit lower `--jobs` count when running the JS command directly on a
+smaller machine. The complete Rust integration suite uses eight test threads;
+focused Rust integration commands remain single-threaded for isolation.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
@@ -54,14 +60,14 @@ deno task -c js/deno.json test:integration -- --coverage cross-runtime-rpc
 deno task -c js/deno.json test:integration -- --fixture events --fixture feeds
 ```
 
-The Rust integration suite runs through Cargo's normal integration-test filter. Use the fixture module name or a concrete test function name as the single positional filter before `--`; hyphenated matrix fixture IDs use underscore module names in Rust filters:
+The Rust integration runner prebuilds the test and runtime binaries before starting the shared host, then forwards Cargo's normal integration-test filter. Use the fixture module name or a concrete test function name as the single positional filter before `--`; hyphenated matrix fixture IDs use underscore module names in Rust filters:
 
 ```sh
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration rpc -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration rpc_client_calls_service_success -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration service_approval -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration app_identity_approval -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration rust_integration_manifest_conforms_to_shared_matrix -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc_client_calls_service_success -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 service_approval -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 app_identity_approval -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rust_integration_manifest_conforms_to_shared_matrix -- --nocapture
 ```
 
 For coverage-focused Rust diagnostics, map the coverage ID back to matrix cases and run the corresponding fixture or test filters. Cargo accepts one test-filter substring per invocation; run multiple commands for multi-fixture slices.
@@ -72,9 +78,9 @@ When experimenting with CI sharding, keep the JS and Rust suites as peer jobs ag
 deno task -c js/deno.json test:integration -- --fixture rpc --fixture operations --fixture events --fixture feeds
 deno task -c js/deno.json test:integration -- --fixture state --fixture transfer --fixture resources --fixture jobs
 deno task -c js/deno.json test:integration -- --fixture health --fixture service-approval --fixture app-identity-approval --fixture device-activation
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration rpc -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration operations -- --nocapture
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration events -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 operations -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 events -- --nocapture
 ```
 
 Shards are a speed aid only; release verification still requires the full unsharded JS and Rust integration suites until shard equivalence is proven against the shared matrix.
@@ -270,6 +276,8 @@ deno fmt -c js/deno.json --check
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
 cargo fmt --manifest-path rust/xtask/Cargo.toml --check
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps
+cargo test --manifest-path rust/Cargo.toml --workspace --doc
 deno check -c js/deno.json js/packages/trellis/index.ts js/packages/trellis-svelte/src/index.ts js/packages/trellis-svelte/src/context.svelte.ts js/services/trellis/main.ts
 deno task -c js/deno.json test:prepared:packages
 deno task -c js/deno.json test:prepared:service:catalog-state
@@ -279,13 +287,24 @@ deno task -c js/deno.json packages:build:npm
 deno task -c js/deno.json test:prepared:packaging:built
 cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --doc
 cargo test --manifest-path rust/tools/generate/Cargo.toml
 cargo test --manifest-path rust/xtask/Cargo.toml
 cargo test --manifest-path xtask/Cargo.toml
-deno task -c js/deno.json test:integration
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
+deno task -c js/deno.json test:integration -- --parallel --jobs 4
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
 ```
+
+Release verification also checks that each Rust workspace member either inherits
+the workspace lint policy or appears in this exception registry:
+
+| Crates | Reason | Owner | Removal condition |
+| --- | --- | --- | --- |
+| `trellis-auth-adapters`, `trellis-core-bootstrap`, `trellis-local-bootstrap`, `trellis-jobs`, `trellis-service-jobs`, `trellis-service-eventlog` | Private runtime implementation crates expose cross-crate items that are not supported public APIs. Enforcing `missing_docs` would document internals as user-facing contracts. | Rust runtime maintainers | Remove each exception when the crate is folded behind a documented facade or its cross-crate surface becomes supported API. |
+| `trellis-test` | Test harness internals are intentionally available only to repository live tests. | Integration-test maintainers | Remove when a supported external test API replaces the private harness. |
+| `trellis-codegen-ts`, `trellis-codegen-rust`, `trellis-generate-runner`, `trellis-cli` | Private generator and CLI implementation boundaries are tooling internals, not library APIs. | Tooling maintainers | Remove when a crate becomes publishable or exposes a supported library surface. |
+
+The registry is checked by both xtask suites. New workspace members must inherit
+`[lints] workspace = true` unless reviewers add a similarly explicit exception.
 
 For focused local Deno loops after a single prepare, use the prepared partitions instead of rerunning generation before every slice:
 

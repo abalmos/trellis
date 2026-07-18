@@ -1252,6 +1252,7 @@ fn run_verify(
 ) -> Result<()> {
     version_base(version)?;
     parse_release_tag(since)?;
+    check_workspace_lint_policy(repo_root)?;
     if skip_integration {
         println!(
             "WARNING: --skip-integration was set; release verification is incomplete until the JS and Rust integration suites pass."
@@ -1260,6 +1261,83 @@ fn run_verify(
 
     for spec in verify_command_specs(version, since, skip_integration, keep_workdir) {
         run_checked_command(repo_root, &spec, "release verification command failed")?;
+    }
+    Ok(())
+}
+
+const RUST_WORKSPACE_MEMBERS: &[&str] = &[
+    "crates/trellis",
+    "crates/auth-adapters",
+    "crates/core-bootstrap",
+    "crates/local-bootstrap",
+    "crates/jobs",
+    "crates/bootstrap",
+    "crates/service-jobs",
+    "crates/service-eventlog",
+    "crates/trellis-test",
+    "crates/contracts",
+    "crates/protocol",
+    "crates/codegen-ts",
+    "crates/codegen-rust",
+    "crates/generate-runner",
+    "crates/cli",
+    "crates/runtime",
+];
+
+// The release guide owns the reason, owner, and removal condition for every
+// private implementation crate in this exception registry.
+const RUST_LINT_POLICY_EXCEPTIONS: &[&str] = &[
+    "crates/auth-adapters",
+    "crates/core-bootstrap",
+    "crates/local-bootstrap",
+    "crates/jobs",
+    "crates/service-jobs",
+    "crates/service-eventlog",
+    "crates/trellis-test",
+    "crates/codegen-ts",
+    "crates/codegen-rust",
+    "crates/generate-runner",
+    "crates/cli",
+];
+
+fn check_workspace_lint_policy(repo_root: &Path) -> Result<()> {
+    let workspace_manifest_path = repo_root.join("rust/Cargo.toml");
+    let workspace_manifest = fs::read_to_string(&workspace_manifest_path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to read {}", workspace_manifest_path.display()))?;
+    let members_block = workspace_manifest
+        .split_once("members = [")
+        .and_then(|(_, remainder)| remainder.split_once("\n]").map(|(members, _)| members))
+        .ok_or_else(|| {
+            miette!("rust/Cargo.toml must declare a multiline workspace members list")
+        })?;
+    let declared_members = members_block
+        .lines()
+        .filter_map(|line| line.trim().trim_end_matches(',').strip_prefix('"'))
+        .filter_map(|line| line.strip_suffix('"'))
+        .collect::<BTreeSet<_>>();
+    let checked_members = RUST_WORKSPACE_MEMBERS
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    if declared_members != checked_members {
+        return Err(miette!(
+            "Rust workspace lint-policy registry does not match rust/Cargo.toml members"
+        ));
+    }
+
+    for member in RUST_WORKSPACE_MEMBERS {
+        let manifest_path = repo_root.join("rust").join(member).join("Cargo.toml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read {}", manifest_path.display()))?;
+        let inherits = manifest.contains("[lints]\nworkspace = true")
+            || manifest.contains("[lints]\r\nworkspace = true");
+        if !inherits && !RUST_LINT_POLICY_EXCEPTIONS.contains(member) {
+            return Err(miette!(
+                "Rust workspace member `{member}` must contain `[lints]` with `workspace = true` or be added to the documented release exception list"
+            ));
+        }
     }
     Ok(())
 }
@@ -1389,13 +1467,24 @@ fn verify_command_specs(
             ],
         ),
         CommandSpec::new(
+            "env",
+            vec![
+                "RUSTDOCFLAGS=-D warnings",
+                "cargo",
+                "doc",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "--workspace",
+                "--no-deps",
+            ],
+        ),
+        CommandSpec::new(
             "cargo",
             vec![
                 "test",
                 "--manifest-path",
                 "rust/Cargo.toml",
-                "-p",
-                "trellis-rs",
+                "--workspace",
                 "--doc",
             ],
         ),
@@ -1422,11 +1511,19 @@ fn verify_command_specs(
     ];
 
     if !skip_integration {
+        let js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4)
+            .to_string();
         let mut js_args = vec![
             "task".to_string(),
             "-c".to_string(),
             "js/deno.json".to_string(),
             "test:integration".to_string(),
+            "--".to_string(),
+            "--parallel".to_string(),
+            "--jobs".to_string(),
+            js_jobs,
         ];
         if keep_workdir {
             js_args.insert(0, "deno".to_string());
@@ -1443,7 +1540,7 @@ fn verify_command_specs(
             "js/deno.json".to_string(),
             "rust/crates/trellis-test/integration_runner.ts".to_string(),
             "--jobs".to_string(),
-            "4".to_string(),
+            "8".to_string(),
             "--".to_string(),
             "--nocapture".to_string(),
         ];
@@ -1701,15 +1798,15 @@ impl VersionEntry {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_versions, command_text, extract_changelog_section, parse_release_command,
-        prepare_release, pretag_dispatch_command, pretag_list_command, pretag_watch_command,
-        rewrite_cargo_manifest_versions, rewrite_cargo_manifest_versions_for_release,
-        rewrite_js_internal_npm_dependency_versions,
+        check_workspace_lint_policy, collect_versions, command_text, extract_changelog_section,
+        parse_release_command, prepare_release, pretag_dispatch_command, pretag_list_command,
+        pretag_watch_command, rewrite_cargo_manifest_versions,
+        rewrite_cargo_manifest_versions_for_release, rewrite_js_internal_npm_dependency_versions,
         rewrite_json_manifest_internal_jsr_dependency_versions, rewrite_json_manifest_version,
         rewrite_json_manifest_version_for_release, verify_command_specs, version_base,
         ReleaseCommand, ReleaseVersion,
     };
-    use std::fs;
+    use std::{fs, path::Path};
 
     #[test]
     fn parse_release_bump_command() {
@@ -1936,20 +2033,37 @@ mod tests {
             &"cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib".to_string()
         ));
         assert!(commands.contains(
-            &"cargo test --manifest-path rust/Cargo.toml -p trellis-rs --doc".to_string()
+            &"env 'RUSTDOCFLAGS=-D warnings' cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps"
+                .to_string()
         ));
+        assert!(commands
+            .contains(&"cargo test --manifest-path rust/Cargo.toml --workspace --doc".to_string()));
         assert!(commands.contains(
             &"cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty"
                 .to_string()
         ));
+        let expected_js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4);
         assert_eq!(
             &commands[commands.len() - 2],
-            "deno task -c js/deno.json test:integration"
+            &format!(
+                "deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
+            )
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
+            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture"
         );
+    }
+
+    #[test]
+    fn rust_workspace_members_inherit_lints_or_have_documented_exceptions() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|path| path.join("rust/Cargo.toml").is_file())
+            .expect("xtask must be nested under the repository root");
+        check_workspace_lint_policy(repo_root).expect("workspace lint policy should be complete");
     }
 
     #[test]
@@ -1959,13 +2073,18 @@ mod tests {
             .map(command_text)
             .collect();
 
+        let expected_js_jobs = std::thread::available_parallelism()
+            .map(|count| count.get().min(8))
+            .unwrap_or(4);
         assert_eq!(
             &commands[commands.len() - 2],
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno task -c js/deno.json test:integration"
+            &format!(
+                "env TRELLIS_TEST_KEEP_WORKDIR=1 deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
+            )
         );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 4 -- --nocapture"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture"
         );
     }
 

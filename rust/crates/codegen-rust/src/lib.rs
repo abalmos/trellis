@@ -4492,6 +4492,10 @@ mod tests {
             .arg("--manifest-path")
             .arg(manifest_path)
             .arg("--quiet")
+            .env(
+                "CARGO_TARGET_DIR",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"),
+            )
             .output()
             .expect("run cargo check");
         if !output.status.success() {
@@ -5651,16 +5655,7 @@ mod tests {
             }
             assert!(!connect.contains("connect_service"));
 
-            let output = Command::new("cargo")
-                .args(["check", "--quiet", "--manifest-path"])
-                .arg(facade.join("Cargo.toml"))
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "generated {kind} facade did not compile:\n{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            cargo_check(&facade.join("Cargo.toml"));
         }
     }
 
