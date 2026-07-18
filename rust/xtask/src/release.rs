@@ -1401,6 +1401,17 @@ fn verify_command_specs(
         ),
         CommandSpec::new(
             "cargo",
+            vec![
+                "package",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "--package",
+                "trellis-protocol",
+                "--allow-dirty",
+            ],
+        ),
+        CommandSpec::new(
+            "cargo",
             vec!["test", "--manifest-path", "rust/tools/generate/Cargo.toml"],
         ),
         CommandSpec::new(
@@ -1926,6 +1937,10 @@ mod tests {
         ));
         assert!(commands.contains(
             &"cargo test --manifest-path rust/Cargo.toml -p trellis-rs --doc".to_string()
+        ));
+        assert!(commands.contains(
+            &"cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty"
+                .to_string()
         ));
         assert_eq!(
             &commands[commands.len() - 2],

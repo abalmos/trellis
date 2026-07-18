@@ -3244,6 +3244,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json_canonicalizer"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe52319a927259afbfa5180c5157cd8167edfd3e8c254f9558c7fef44c5649f2"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "serde_nanos"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4027,12 +4038,11 @@ dependencies = [
 name = "trellis-contracts"
 version = "0.11.0"
 dependencies = [
- "base64",
  "jsonschema",
  "serde",
  "serde_json",
- "sha2 0.11.0",
  "thiserror 2.0.18",
+ "trellis-protocol",
 ]
 
 [[package]]
@@ -4099,6 +4109,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "trellis-protocol"
+version = "0.11.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha2 0.11.0",
  "thiserror 2.0.18",
 ]
 

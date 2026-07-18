@@ -10,6 +10,7 @@ members = [
   "crates/service-eventlog",
   "crates/trellis-test",
   "crates/contracts",
+  "crates/protocol",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/generate-runner",
@@ -27,6 +28,7 @@ default-members = [
   "crates/service-eventlog",
   "crates/trellis-test",
   "crates/contracts",
+  "crates/protocol",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/generate-runner",
@@ -50,6 +52,7 @@ base64 = "0.22.1"
 ed25519-dalek = "2.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+serde_json_canonicalizer = "0.3.2"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 ryu-js = "1.0.3"
 rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }
@@ -77,3 +80,4 @@ trellis-sdk-core = { path = "../generated/packages/cargo/trellis-core", version 
 trellis-sdk-health = { path = "../generated/packages/cargo/health", version = "0.11.0" }
 trellis-sdk-jobs = { path = "../generated/packages/cargo/jobs", version = "0.11.0" }
 trellis-sdk-state = { path = "../generated/packages/cargo/state", version = "0.11.0" }
+trellis-protocol = { path = "crates/protocol", version = "0.11.0" }

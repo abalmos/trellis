@@ -1,0 +1,466 @@
+{
+  "ordering": {
+    "tuple": [
+      "target.kind",
+      "target.owner",
+      "target.surfaceOrResource",
+      "target.name",
+      "action"
+    ],
+    "stringComparison": "UTF-16 code-unit lexicographic"
+  },
+  "vectors": [
+    {
+      "name": "empty-grant-set",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": []
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[]}",
+      "digest": "z6Kekp7CGsmr8oFSZ0BYptK6fAResiJfrik-9_kF_08"
+    },
+    {
+      "name": "api-surfaces-in-noncanonical-order",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "state",
+              "name": "Documents"
+            },
+            "action": "write"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "operation",
+              "name": "Documents.Export"
+            },
+            "action": "observe"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "event",
+              "name": "Documents.Changed"
+            },
+            "action": "publish"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "feed",
+              "name": "Documents.Watch"
+            },
+            "action": "subscribe"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "operation",
+              "name": "Documents.Export"
+            },
+            "action": "invoke"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "operation",
+              "name": "Documents.Export"
+            },
+            "action": "control"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "operation",
+              "name": "Documents.Export"
+            },
+            "action": "cancel"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "event",
+              "name": "Documents.Changed"
+            },
+            "action": "subscribe"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "state",
+              "name": "Documents"
+            },
+            "action": "read"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"publish\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Watch\",\"surface\":\"feed\"}},{\"action\":\"cancel\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"control\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"invoke\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"observe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}},{\"action\":\"read\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}},{\"action\":\"write\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}}]}",
+      "digest": "T-stMxbxlUjCpCzlx50wQxD-jUOZ6Qt2eO69K7JQsHM"
+    },
+    {
+      "name": "duplicate-permission-atoms",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]}",
+      "digest": "WSzsqtQ-MSZvjcqd-JwcPR_cx27i_YmJYzGnntOkIms"
+    },
+    {
+      "name": "semantic-tuple-ordering",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "jobQueue",
+              "name": "reindex"
+            },
+            "action": "process"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.List"
+            },
+            "action": "call"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "event",
+              "name": "Documents.Changed"
+            },
+            "action": "subscribe"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "billing@v1",
+              "surface": "rpc",
+              "name": "Billing.Get"
+            },
+            "action": "call"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "event",
+              "name": "Documents.Changed"
+            },
+            "action": "publish"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"billing@v1\",\"kind\":\"apiSurface\",\"name\":\"Billing.Get\",\"surface\":\"rpc\"}},{\"action\":\"publish\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.List\",\"surface\":\"rpc\"}},{\"action\":\"process\",\"target\":{\"kind\":\"participantResource\",\"name\":\"reindex\",\"participant\":\"documents-worker\",\"resource\":\"jobQueue\"}}]}",
+      "digest": "itzKHYsTp1yP6-ZroCZ1q9gzk4nedHlT_vcLR59AOdk"
+    },
+    {
+      "name": "utf-16-code-unit-ordering",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "\ue000"
+            },
+            "action": "call"
+          },
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "\ud800\udc00"
+            },
+            "action": "call"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"\ud800\udc00\",\"surface\":\"rpc\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"\ue000\",\"surface\":\"rpc\"}}]}",
+      "digest": "xL0ZC38jyolWwjc8fAxvO75dt5eAzvSxPEkkWGywLtY"
+    },
+    {
+      "name": "participant-resource-permissions",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "store",
+              "name": "documents"
+            },
+            "action": "write"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "kv",
+              "name": "locks"
+            },
+            "action": "delete"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "jobQueue",
+              "name": "reindex"
+            },
+            "action": "process"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "eventConsumer",
+              "name": "updates"
+            },
+            "action": "consume"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "store",
+              "name": "documents"
+            },
+            "action": "read"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "store",
+              "name": "documents"
+            },
+            "action": "delete"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "kv",
+              "name": "locks"
+            },
+            "action": "write"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "kv",
+              "name": "locks"
+            },
+            "action": "read"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "jobQueue",
+              "name": "reindex"
+            },
+            "action": "submit"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"consume\",\"target\":{\"kind\":\"participantResource\",\"name\":\"updates\",\"participant\":\"documents-worker\",\"resource\":\"eventConsumer\"}},{\"action\":\"process\",\"target\":{\"kind\":\"participantResource\",\"name\":\"reindex\",\"participant\":\"documents-worker\",\"resource\":\"jobQueue\"}},{\"action\":\"submit\",\"target\":{\"kind\":\"participantResource\",\"name\":\"reindex\",\"participant\":\"documents-worker\",\"resource\":\"jobQueue\"}},{\"action\":\"delete\",\"target\":{\"kind\":\"participantResource\",\"name\":\"locks\",\"participant\":\"documents-worker\",\"resource\":\"kv\"}},{\"action\":\"read\",\"target\":{\"kind\":\"participantResource\",\"name\":\"locks\",\"participant\":\"documents-worker\",\"resource\":\"kv\"}},{\"action\":\"write\",\"target\":{\"kind\":\"participantResource\",\"name\":\"locks\",\"participant\":\"documents-worker\",\"resource\":\"kv\"}},{\"action\":\"delete\",\"target\":{\"kind\":\"participantResource\",\"name\":\"documents\",\"participant\":\"documents-worker\",\"resource\":\"store\"}},{\"action\":\"read\",\"target\":{\"kind\":\"participantResource\",\"name\":\"documents\",\"participant\":\"documents-worker\",\"resource\":\"store\"}},{\"action\":\"write\",\"target\":{\"kind\":\"participantResource\",\"name\":\"documents\",\"participant\":\"documents-worker\",\"resource\":\"store\"}}]}",
+      "digest": "DqVOxfUAxN4ateMgDlSvnroMvcjwdoauRFkW6IB7QLs"
+    },
+    {
+      "name": "invalid-rpc-publish",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "publish"
+          }
+        ]
+      }
+    },
+    {
+      "name": "invalid-job-queue-read",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "jobQueue",
+              "name": "reindex"
+            },
+            "action": "read"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-permission-field",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call",
+            "extra": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty-identifier",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "",
+              "surface": "rpc",
+              "name": "Documents.Get"
+            },
+            "action": "call"
+          }
+        ]
+      }
+    },
+    {
+      "name": "control-character-identifier",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "rpc",
+              "name": "Documents.\nGet"
+            },
+            "action": "call"
+          }
+        ]
+      }
+    },
+    {
+      "name": "edge-whitespace-identifier",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": " documents-worker",
+              "resource": "jobQueue",
+              "name": "reindex"
+            },
+            "action": "process"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unsupported-format",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v2",
+        "permissions": []
+      }
+    },
+    {
+      "name": "unknown-grant-set-field",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [],
+        "extra": true
+      }
+    }
+  ]
+}
