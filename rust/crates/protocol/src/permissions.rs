@@ -47,6 +47,8 @@ pub enum ParticipantResourceKindV1 {
     JobQueue,
     /// A durable contract-event consumer.
     EventConsumer,
+    /// Participant-local private state.
+    State,
 }
 
 impl ParticipantResourceKindV1 {
@@ -56,6 +58,7 @@ impl ParticipantResourceKindV1 {
             Self::Store => "store",
             Self::JobQueue => "jobQueue",
             Self::EventConsumer => "eventConsumer",
+            Self::State => "state",
         }
     }
 }
@@ -334,6 +337,9 @@ impl PermissionAtomV1 {
                 }
                 ParticipantResourceKindV1::EventConsumer => {
                     matches!(action, PermissionActionV1::Consume)
+                }
+                ParticipantResourceKindV1::State => {
+                    matches!(action, PermissionActionV1::Read | PermissionActionV1::Write)
                 }
             },
         };

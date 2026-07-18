@@ -1095,6 +1095,32 @@
       }
     },
     {
+      "name": "participant-state-capability-target",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "capabilities": {
+          "documents.state": {
+            "allows": [
+              {
+                "target": {
+                  "kind": "participantResource",
+                  "participant": "worker",
+                  "resource": "state",
+                  "name": "draftInspection"
+                },
+                "action": "read"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "capability-target-missing-surface",
       "schemaValid": true,
       "valid": false,

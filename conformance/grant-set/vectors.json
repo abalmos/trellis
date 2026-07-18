@@ -355,6 +355,53 @@
       }
     },
     {
+      "name": "participant-state-permissions",
+      "valid": true,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "state",
+              "name": "draftInspection"
+            },
+            "action": "write"
+          },
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "state",
+              "name": "draftInspection"
+            },
+            "action": "read"
+          }
+        ]
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"read\",\"target\":{\"kind\":\"participantResource\",\"name\":\"draftInspection\",\"participant\":\"documents-worker\",\"resource\":\"state\"}},{\"action\":\"write\",\"target\":{\"kind\":\"participantResource\",\"name\":\"draftInspection\",\"participant\":\"documents-worker\",\"resource\":\"state\"}}]}",
+      "digest": "_oayWipJ9hf1C0ne1LV3hFRRoXVyz2EJrUw-qjmiGQ0"
+    },
+    {
+      "name": "invalid-participant-state-delete",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "participantResource",
+              "participant": "documents-worker",
+              "resource": "state",
+              "name": "draftInspection"
+            },
+            "action": "delete"
+          }
+        ]
+      }
+    },
+    {
       "name": "invalid-job-queue-read",
       "valid": false,
       "input": {

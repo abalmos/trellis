@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trellis.dev/schemas/trellis.participant.v1.schema.json",
+  "title": "Trellis Participant Artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "id", "displayName", "description", "kind"],
+  "properties": {
+    "format": { "const": "trellis.participant.v1" },
+    "id": { "$ref": "#/$defs/identifier" },
+    "displayName": { "$ref": "#/$defs/nonemptyText" },
+    "description": { "$ref": "#/$defs/nonemptyText" },
+    "docs": { "$ref": "#/$defs/docs" },
+    "kind": { "enum": ["service", "app", "device", "agent"] },
+    "schemas": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/schemaValue" }
+    },
+    "implements": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/implementedApi" }
+    },
+    "uses": { "$ref": "#/$defs/uses" },
+    "state": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/state" }
+    },
+    "jobQueues": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/jobQueue" }
+    },
+    "eventConsumers": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/eventConsumer" }
+    },
+    "resources": { "$ref": "#/$defs/resources" }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "minLength": 1 },
+    "nonemptyText": { "type": "string", "minLength": 1 },
+    "apiId": {
+      "type": "string",
+      "pattern": "^.+@v[1-9][0-9]*$"
+    },
+    "apiDigest": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "logicalName": { "type": "string", "minLength": 1 },
+    "schemaValue": { "type": ["object", "boolean"] },
+    "docs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["markdown"],
+      "properties": {
+        "summary": { "$ref": "#/$defs/nonemptyText" },
+        "markdown": { "$ref": "#/$defs/nonemptyText" }
+      }
+    },
+    "schemaRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "operationTransfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["store", "key"],
+      "properties": {
+        "store": { "$ref": "#/$defs/identifier" },
+        "key": { "type": "string" },
+        "contentType": { "type": "string" },
+        "metadata": { "type": "string" },
+        "expiresInMs": { "type": "integer", "minimum": 1 },
+        "maxBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "implementedApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "apiDigest"],
+      "properties": {
+        "api": { "$ref": "#/$defs/apiId" },
+        "apiDigest": { "$ref": "#/$defs/apiDigest" },
+        "operationTransfers": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/logicalName" },
+          "additionalProperties": { "$ref": "#/$defs/operationTransfer" }
+        }
+      }
+    },
+    "nameList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logicalName" }
+    },
+    "rpcUses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "call": { "$ref": "#/$defs/nameList" }
+      }
+    },
+    "operationUses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "invoke": { "$ref": "#/$defs/nameList" },
+        "observe": { "$ref": "#/$defs/nameList" },
+        "cancel": { "$ref": "#/$defs/nameList" },
+        "control": { "$ref": "#/$defs/nameList" }
+      }
+    },
+    "eventUses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "publish": { "$ref": "#/$defs/nameList" },
+        "subscribe": { "$ref": "#/$defs/nameList" }
+      }
+    },
+    "feedUses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subscribe": { "$ref": "#/$defs/nameList" }
+      }
+    },
+    "stateUses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": { "$ref": "#/$defs/nameList" },
+        "write": { "$ref": "#/$defs/nameList" }
+      }
+    },
+    "usedApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "apiDigest"],
+      "properties": {
+        "api": { "$ref": "#/$defs/apiId" },
+        "apiDigest": { "$ref": "#/$defs/apiDigest" },
+        "rpc": { "$ref": "#/$defs/rpcUses" },
+        "operations": { "$ref": "#/$defs/operationUses" },
+        "events": { "$ref": "#/$defs/eventUses" },
+        "feeds": { "$ref": "#/$defs/feedUses" },
+        "state": { "$ref": "#/$defs/stateUses" }
+      }
+    },
+    "uses": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/usedApi" }
+        },
+        "optional": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/usedApi" }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schema"],
+      "properties": {
+        "kind": { "enum": ["value", "map"] },
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "stateVersion": { "$ref": "#/$defs/identifier" },
+        "acceptedVersions": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/schemaRef" }
+        },
+        "docs": { "$ref": "#/$defs/docs" }
+      }
+    },
+    "keyConcurrency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "maxActive": { "type": "integer", "minimum": 1 },
+        "heartbeatIntervalMs": { "type": "integer", "minimum": 1 },
+        "heartbeatTtlMs": { "type": "integer", "minimum": 1 },
+        "stalePolicy": { "enum": ["fail-stale", "block"] }
+      }
+    },
+    "queuePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "dependentRequired": { "whenFull": ["maxQueuedPerKey"] },
+      "properties": {
+        "maxQueuedPerKey": { "type": "integer", "minimum": 0 },
+        "whenFull": { "enum": ["reject", "coalesce", "replace-oldest"] }
+      }
+    },
+    "jobQueue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payload"],
+      "properties": {
+        "payload": { "$ref": "#/$defs/schemaRef" },
+        "update": { "$ref": "#/$defs/schemaRef" },
+        "result": { "$ref": "#/$defs/schemaRef" },
+        "maxDeliver": { "type": "integer", "minimum": 1 },
+        "backoffMs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "ackWaitMs": { "type": "integer", "minimum": 1 },
+        "defaultDeadlineMs": { "type": "integer", "minimum": 1 },
+        "progress": { "type": "boolean" },
+        "logs": { "type": "boolean" },
+        "dlq": { "type": "boolean" },
+        "keyConcurrency": { "$ref": "#/$defs/keyConcurrency" },
+        "queue": { "$ref": "#/$defs/queuePolicy" },
+        "docs": { "$ref": "#/$defs/docs" }
+      }
+    },
+    "eventConsumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events"],
+      "properties": {
+        "events": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/logicalName" }
+          }
+        },
+        "replay": { "enum": ["new", "all"] },
+        "ordering": { "enum": ["strict", "parallel"] },
+        "ackWaitMs": { "type": "integer", "minimum": 1 },
+        "maxDeliver": { "type": "integer", "minimum": 1 },
+        "backoffMs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "docs": { "$ref": "#/$defs/docs" }
+      }
+    },
+    "kvResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "schema"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/nonemptyText" },
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "required": { "type": "boolean", "default": true },
+        "history": { "type": "integer", "minimum": 1, "default": 1 },
+        "ttlMs": { "type": "integer", "minimum": 0, "default": 0 },
+        "maxValueBytes": { "type": "integer", "minimum": 1 },
+        "docs": { "$ref": "#/$defs/docs" }
+      }
+    },
+    "storeResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose"],
+      "properties": {
+        "purpose": { "$ref": "#/$defs/nonemptyText" },
+        "required": { "type": "boolean", "default": true },
+        "ttlMs": { "type": "integer", "minimum": 0, "default": 0 },
+        "maxObjectBytes": { "type": "integer", "minimum": 1 },
+        "maxTotalBytes": { "type": "integer", "minimum": 1 },
+        "docs": { "$ref": "#/$defs/docs" }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kv": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/kvResource" }
+        },
+        "store": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/storeResource" }
+        }
+      }
+    }
+  }
+}

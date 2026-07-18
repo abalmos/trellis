@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::{
-    identifiers::{validate_logical_name, validate_version},
+    identifiers::{api_error, validate_logical_name, validate_version},
     ProtocolError,
 };
 
@@ -100,8 +100,8 @@ fn derive_subject(
     version: &str,
     logical_name: &str,
 ) -> Result<String, ProtocolError> {
-    validate_version("/version", version)?;
-    validate_logical_name("/name", logical_name)?;
+    validate_version("/version", version, api_error)?;
+    validate_logical_name("/name", logical_name, api_error)?;
     Ok(format!("{family}.{version}.{logical_name}"))
 }
 

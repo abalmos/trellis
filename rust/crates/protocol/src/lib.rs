@@ -27,6 +27,56 @@
 //! # Ok::<(), trellis_protocol::ProtocolError>(())
 //! ```
 //!
+//! # Participant artifacts
+//!
+//! [`ParticipantArtifactV1`] describes a service, app, device, or agent. An
+//! `implements` entry says the participant provides a pinned API; `uses.required`
+//! and `uses.optional` select pinned API surfaces needed for mandatory and
+//! optional behavior. Participants may additionally declare local schemas,
+//! private state, Jobs queues, durable event consumers, KV buckets, object
+//! stores, and provider operation-transfer mappings.
+//!
+//! Parsing validates the artifact itself, including aliases, local schema
+//! references, resource declarations, and normalized ordering. It does not prove
+//! that a pinned API exists or that selected surfaces occur in it; contextual
+//! cross-artifact resolution is a separate, later boundary.
+//!
+//! Human display names, descriptions, docs, and resource-purpose text remain in
+//! normalized values but do not affect participant identity. Kind, schemas, API
+//! pins and selections, local resources, consumers, state, queues, and transfer
+//! mappings do affect the digest.
+//!
+//! ```
+//! use serde_json::json;
+//! use trellis_protocol::{parse_participant_v1, ParticipantKindV1};
+//!
+//! let raw = json!({
+//!     "format": "trellis.participant.v1",
+//!     "id": "documents-worker",
+//!     "displayName": "Documents Worker",
+//!     "description": "Processes documents.",
+//!     "kind": "service",
+//!     "uses": {
+//!         "required": { "billing": {
+//!             "api": "billing@v1",
+//!             "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+//!             "operations": { "control": ["Billing.Refund"] }
+//!         }},
+//!         "optional": { "health": {
+//!             "api": "health@v1",
+//!             "apiDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+//!             "feeds": { "subscribe": ["Health.Watch"] }
+//!         }}
+//!     },
+//!     "resources": { "store": { "uploads": { "purpose": "Incoming files." } } }
+//! });
+//! let participant = parse_participant_v1(&raw)?;
+//! assert_eq!(participant.kind(), ParticipantKindV1::Service);
+//! assert_eq!(participant.normalized_value()?["id"], "documents-worker");
+//! assert_eq!(participant.digest()?.len(), 43);
+//! # Ok::<(), trellis_protocol::ProtocolError>(())
+//! ```
+//!
 //! Construct one valid RPC permission and a content-addressed grant set:
 //!
 //! ```
@@ -102,6 +152,7 @@ mod api;
 mod canonical;
 mod error;
 mod identifiers;
+mod participant;
 mod permissions;
 mod schema_profile;
 mod subjects;
@@ -109,6 +160,10 @@ mod subjects;
 pub use api::{parse_api_v1, ApiArtifactV1, API_FORMAT_V1, API_SCHEMA_V1_JSON};
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::ProtocolError;
+pub use participant::{
+    parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1, PARTICIPANT_FORMAT_V1,
+    PARTICIPANT_SCHEMA_V1_JSON,
+};
 pub use permissions::{
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, GrantSetV1,
     ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,

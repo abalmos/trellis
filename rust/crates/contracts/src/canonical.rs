@@ -21,6 +21,9 @@ pub fn canonicalize_json(value: &Value) -> Result<String, ContractsError> {
         trellis_protocol::ProtocolError::ApiValidation { .. } => {
             unreachable!("API validation is not part of canonical JSON rendering")
         }
+        trellis_protocol::ProtocolError::ParticipantValidation { .. } => {
+            unreachable!("participant validation is not part of canonical JSON rendering")
+        }
         trellis_protocol::ProtocolError::SchemaProfile { .. } => {
             unreachable!("schema-profile validation is not part of canonical JSON rendering")
         }

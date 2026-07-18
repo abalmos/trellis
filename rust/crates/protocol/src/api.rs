@@ -209,26 +209,26 @@ impl ApiArtifactV1 {
                 format!("must equal '{API_FORMAT_V1}'"),
             ));
         }
-        validate_api_id("/id", &wire.id)?;
-        validate_nonempty_text("/displayName", &wire.display_name)?;
-        validate_nonempty_text("/description", &wire.description)?;
+        validate_api_id("/id", &wire.id, api_error)?;
+        validate_nonempty_text("/displayName", &wire.display_name, api_error)?;
+        validate_nonempty_text("/description", &wire.description, api_error)?;
         if let Some(docs) = &wire.docs {
             validate_docs("/docs", docs)?;
         }
 
         for (name, schema) in &wire.schemas {
-            validate_protocol_identifier(&member_path("schemas", name), name)?;
+            validate_protocol_identifier(&member_path("schemas", name), name, api_error)?;
             validate_embedded_schema(name, schema)?;
         }
         for name in &wire.exports.schemas {
-            validate_protocol_identifier("/exports/schemas", name)?;
+            validate_protocol_identifier("/exports/schemas", name, api_error)?;
             require_key(&wire.schemas, name, "/exports/schemas", "schema")?;
         }
         sort_deduplicate(&mut wire.exports.schemas);
 
         for (name, definition) in &wire.errors {
             let path = member_path("errors", name);
-            validate_protocol_identifier(&path, name)?;
+            validate_protocol_identifier(&path, name, api_error)?;
             validate_optional_schema_ref(
                 &wire.schemas,
                 definition.schema.as_ref(),
@@ -292,7 +292,7 @@ impl ApiArtifactV1 {
             }
             for (signal, descriptor) in &definition.signals {
                 let signal_path = format!("{path}/signals/{signal}");
-                validate_protocol_identifier(&signal_path, signal)?;
+                validate_protocol_identifier(&signal_path, signal, api_error)?;
                 require_schema(
                     &wire.schemas,
                     &descriptor.input,
@@ -346,15 +346,16 @@ impl ApiArtifactV1 {
 
         for (name, definition) in &wire.state {
             let path = member_path("state", name);
-            validate_protocol_identifier(&path, name)?;
+            validate_protocol_identifier(&path, name, api_error)?;
             require_schema(&wire.schemas, &definition.schema, &format!("{path}/schema"))?;
             if let Some(version) = &definition.state_version {
-                validate_protocol_identifier(&format!("{path}/stateVersion"), version)?;
+                validate_protocol_identifier(&format!("{path}/stateVersion"), version, api_error)?;
             }
             for (version, reference) in &definition.accepted_versions {
                 validate_protocol_identifier(
                     &format!("{path}/acceptedVersions/{version}"),
                     version,
+                    api_error,
                 )?;
                 require_schema(
                     &wire.schemas,
@@ -369,7 +370,7 @@ impl ApiArtifactV1 {
 
         for (capability_name, capability) in &wire.capabilities {
             let path = member_path("capabilities", capability_name);
-            validate_protocol_identifier(&path, capability_name)?;
+            validate_protocol_identifier(&path, capability_name, api_error)?;
             for (index, atom) in capability.allows().iter().enumerate() {
                 let atom_path = format!("{path}/allows/{index}");
                 let Some((api, surface, name)) = atom.target().as_api_surface() else {
@@ -416,7 +417,11 @@ impl ApiArtifactV1 {
             }
         }
         for capability in wire.consent.keys() {
-            validate_protocol_identifier(&member_path("consent", capability), capability)?;
+            validate_protocol_identifier(
+                &member_path("consent", capability),
+                capability,
+                api_error,
+            )?;
             require_key(
                 &wire.capabilities,
                 capability,
@@ -645,16 +650,16 @@ struct StateDefinitionV1 {
 }
 
 fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {
-    validate_nonempty_text(&format!("{path}/markdown"), &docs.markdown)?;
+    validate_nonempty_text(&format!("{path}/markdown"), &docs.markdown, api_error)?;
     if let Some(summary) = &docs.summary {
-        validate_nonempty_text(&format!("{path}/summary"), summary)?;
+        validate_nonempty_text(&format!("{path}/summary"), summary, api_error)?;
     }
     Ok(())
 }
 
 fn validate_surface(path: &str, name: &str, version: &str) -> Result<(), ProtocolError> {
-    validate_logical_name(path, name)?;
-    validate_version(&format!("{path}/version"), version)
+    validate_logical_name(path, name, api_error)?;
+    validate_version(&format!("{path}/version"), version, api_error)
 }
 
 fn require_schema(
@@ -662,7 +667,7 @@ fn require_schema(
     reference: &SchemaReferenceV1,
     path: &str,
 ) -> Result<(), ProtocolError> {
-    validate_protocol_identifier(&format!("{path}/schema"), &reference.schema)?;
+    validate_protocol_identifier(&format!("{path}/schema"), &reference.schema, api_error)?;
     require_key(schemas, &reference.schema, path, "schema")
 }
 
@@ -683,7 +688,7 @@ fn validate_error_refs(
     path: &str,
 ) -> Result<(), ProtocolError> {
     for reference in references.iter() {
-        validate_protocol_identifier(path, reference)?;
+        validate_protocol_identifier(path, reference, api_error)?;
         require_key(errors, reference, path, "error")?;
     }
     sort_deduplicate(references);
@@ -807,6 +812,7 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
     use serde::Deserialize;
+    use serde_json::json;
 
     use super::*;
     use crate::schema_profile::{validate_api_meta_schema, validate_api_structure};
@@ -916,6 +922,20 @@ mod tests {
             if let Some(other) = &vector.different_digest_from {
                 assert_ne!(digest, &digests[other], "{} and {other}", vector.name);
             }
+        }
+    }
+
+    #[test]
+    fn api_semantic_errors_remain_api_validation_errors() {
+        let value = json!({
+            "format": API_FORMAT_V1,
+            "id": " documents@v1",
+            "displayName": "Documents",
+            "description": "Invalid API identifier."
+        });
+        match parse_api_v1(&value).unwrap_err() {
+            ProtocolError::ApiValidation { path, .. } => assert_eq!(path, "/id"),
+            error => panic!("expected API validation error, received {error:?}"),
         }
     }
 }
