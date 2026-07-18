@@ -21,9 +21,11 @@ use trellis_jobs::publisher::{JobEventHeaders, JobEventPublisher};
 use trellis_jobs::types::{Job, JobContext, JobEvent, JobEventType, JobState};
 use trellis_jobs::JobCancellationToken;
 
+type PublishedCalls = Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>;
+
 #[derive(Default)]
 struct RecordingPublisher {
-    calls: Arc<Mutex<Vec<(String, JobEventHeaders, Vec<u8>)>>>,
+    calls: PublishedCalls,
     fail_event: Option<JobEventType>,
 }
 

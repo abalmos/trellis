@@ -8,6 +8,7 @@ use crate::{RuntimeMode, SubsystemName};
 
 /// TOML runtime configuration for `trellis-server`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
     /// Human-readable Trellis instance name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -264,6 +265,7 @@ impl RuntimeConfig {
 
 /// HTTP listener configuration for the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct HttpConfig {
     /// TCP port for the HTTP server.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,6 +289,7 @@ pub struct HttpConfig {
 
 /// NATS configuration for runtime connections and auth callout material.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NatsConfig {
     /// NATS server URL or comma-separated URLs.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -301,6 +304,7 @@ pub struct NatsConfig {
 
 /// Generated NATS credential paths used by the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NatsRuntimeConfig {
     /// Auth-account runtime user creds path.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,6 +322,7 @@ pub struct NatsRuntimeConfig {
 
 /// NATS auth-callout signing and encryption material paths.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NatsAuthCalloutConfig {
     /// Auth issuer signing seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -421,6 +426,7 @@ pub struct ResolvedNatsAuthCalloutConfig {
 
 /// Browser/client connection hints emitted by the runtime.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     /// WebSocket NATS server URLs for browser clients.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -432,6 +438,7 @@ pub struct ClientConfig {
 
 /// Runtime lease configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LeasesConfig {
     /// NATS KV bucket used for runtime leases.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -450,6 +457,26 @@ pub struct LeasesConfig {
 impl LeasesConfig {
     /// Resolves this raw lease config with defaults applied.
     pub(crate) fn resolve(&self) -> Result<ResolvedLeasesConfig, ConfigError> {
+        let ttl_ms = self.ttl_ms.unwrap_or(15_000);
+        let renew_ms = self.renew_ms.unwrap_or(5_000);
+        if ttl_ms == 0 {
+            return Err(ConfigError::InvalidLeasesConfig {
+                section: "leases",
+                field: "ttl_ms",
+                reason: "must be greater than zero",
+            });
+        }
+        if renew_ms == 0
+            || renew_ms
+                .checked_mul(3)
+                .is_none_or(|interval| interval > ttl_ms)
+        {
+            return Err(ConfigError::InvalidLeasesConfig {
+                section: "leases",
+                field: "renew_ms",
+                reason: "must be greater than zero and at most one third of ttl_ms",
+            });
+        }
         Ok(ResolvedLeasesConfig {
             bucket: self
                 .bucket
@@ -461,8 +488,8 @@ impl LeasesConfig {
                 field: "replicas",
                 reason: "must be configured explicitly",
             })?,
-            ttl_ms: self.ttl_ms.unwrap_or(15_000),
-            renew_ms: self.renew_ms.unwrap_or(5_000),
+            ttl_ms,
+            renew_ms,
         })
     }
 }
@@ -482,6 +509,7 @@ pub struct ResolvedLeasesConfig {
 
 /// Runtime authentication configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Local username/password identity configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -490,6 +518,7 @@ pub struct AuthConfig {
 
 /// Local identity provider configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct LocalIdentityConfig {
     /// Enables local identity authentication.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -501,6 +530,7 @@ pub struct LocalIdentityConfig {
 
 /// OAuth configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OAuthConfig {
     /// Base URL for OAuth redirect callbacks.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -515,6 +545,7 @@ pub struct OAuthConfig {
 
 /// OAuth provider configuration.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct OAuthProviderConfig {
     /// Provider type, currently expected to be `oidc`.
     #[serde(rename = "type")]
@@ -541,6 +572,7 @@ pub struct OAuthProviderConfig {
 
 /// Configuration for a built-in runtime subsystem.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SubsystemConfig {
     /// Storage configuration for the subsystem.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -564,6 +596,7 @@ pub struct SubsystemConfig {
 
 /// Platform TTL settings in milliseconds.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlatformTtlConfig {
     /// Session TTL.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -587,6 +620,7 @@ pub struct PlatformTtlConfig {
 
 /// Storage configuration for a built-in runtime subsystem.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// Storage backend kind. Only `sqlite` is implemented today.
     pub kind: String,

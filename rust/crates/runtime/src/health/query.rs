@@ -132,13 +132,11 @@ impl HealthStore {
         let mut entries = groups
             .into_values()
             .filter(|group| {
-                matches_filter(
-                    request.statuses.as_ref(),
-                    &group.effective_status().to_string(),
-                ) && search.as_ref().is_none_or(|search| {
-                    group.participant_name.to_lowercase().contains(search)
-                        || group.contract_id.to_lowercase().contains(search)
-                })
+                matches_filter(request.statuses.as_ref(), group.effective_status())
+                    && search.as_ref().is_none_or(|search| {
+                        group.participant_name.to_lowercase().contains(search)
+                            || group.contract_id.to_lowercase().contains(search)
+                    })
             })
             .map(|group| {
                 let effective_status = group.effective_status().to_string();

@@ -791,7 +791,7 @@ async fn jobs_service_creates_local_job_from_client_rpc() {
     fixture.service_task.abort_and_wait().await;
 
     assert_eq!(output.document_id, "doc-1");
-    assert!(output.job_id.len() > 0);
+    assert!(!output.job_id.is_empty());
 }
 
 #[tokio::test]
@@ -1095,7 +1095,7 @@ async fn jobs_job_context_propagates_request_and_trace() {
         .expect("stop jobs worker host");
     fixture.service_task.abort_and_wait().await;
 
-    assert!(output.request_id.len() > 0);
+    assert!(!output.request_id.is_empty());
     assert_eq!(output.trace_id.len(), 32);
 }
 

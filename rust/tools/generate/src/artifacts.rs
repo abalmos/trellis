@@ -88,6 +88,10 @@ pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedCont
     Ok(resolved)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the output matrix is the generator command boundary"
+)]
 pub fn write_contract_outputs(
     resolved: &ResolvedContractInput,
     artifact_version: String,
@@ -195,6 +199,10 @@ pub fn write_contract_outputs(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "shell generation mirrors the optional output matrix"
+)]
 pub fn write_contract_shell_outputs(
     contract_id: &str,
     artifact_version: &str,
@@ -496,6 +504,10 @@ fn string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("serializing a string cannot fail")
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "participant generation receives the resolved CLI output settings"
+)]
 pub fn write_participant_facade_outputs(
     manifest_path: &Path,
     rust_participant_out: &Path,
@@ -529,6 +541,10 @@ pub fn write_participant_facade_outputs(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "npm package assembly receives one value per package manifest field"
+)]
 pub fn build_npm_package_from_ts_sources(
     src_dir: &Path,
     npm_out: &Path,
@@ -754,6 +770,10 @@ fn binary_is_available(binary: &OsString) -> bool {
     Command::new(binary).arg("--version").output().is_ok()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "metadata construction records the complete generated output matrix"
+)]
 pub fn generated_artifacts_metadata(
     resolved: &ResolvedContractInput,
     artifact_version: &str,
@@ -935,7 +955,7 @@ fn copy_embedded_trellis_owned_rust_sdk(
             file_name.to_os_string()
         };
         let dest_path = dest_dir.join(dest_name);
-        let rewritten = rewrite_embedded_rust_sdk_source(&contents, is_root);
+        let rewritten = rewrite_embedded_rust_sdk_source(&contents, is_root, module);
         let formatted = format_embedded_rust_sdk_source(&dest_path, &rewritten)?;
         write_if_changed(&dest_path, &formatted)?;
     }
@@ -1002,16 +1022,24 @@ fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
         .replace("from \"@qlever-llc/trellis\"", "from \"../../../index.ts\"")
 }
 
-fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool) -> String {
+fn rewrite_embedded_rust_sdk_source(contents: &str, is_root: bool, module: &str) -> String {
     let rewritten = if is_root {
         contents.replace("crate::", "self::")
     } else {
         contents.replace("crate::", "super::")
     };
-    rewritten
+    let rewritten = rewritten
         .replace("trellis_rs::", "crate::")
         .replace("trellis_client::", "crate::client::")
-        .replace("trellis_contracts::", "crate::contracts::")
+        .replace("trellis_contracts::", "crate::contracts::");
+    if is_root && module == "jobs" {
+        rewritten.replace(
+            "/// Job descriptors.\npub mod jobs;",
+            "/// Job descriptors.\n#[expect(\n    clippy::module_inception,\n    reason = \"generated SDK modules mirror contract surface names\"\n)]\npub mod jobs;",
+        )
+    } else {
+        rewritten
+    }
 }
 
 pub fn format_generated_typescript_artifacts(
@@ -1270,6 +1298,21 @@ pub fn rust_runtime_deps(
     }
 }
 
+pub fn ts_runtime_deps(
+    source: RuntimeSource,
+    version: String,
+    repo_root: Option<PathBuf>,
+) -> TsRuntimeDeps {
+    TsRuntimeDeps {
+        source: match source {
+            RuntimeSource::Registry => CodegenTsRuntimeSource::Registry,
+            RuntimeSource::Local => CodegenTsRuntimeSource::Local,
+        },
+        version,
+        repo_root,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1372,6 +1415,7 @@ mod tests {
         let rewritten = rewrite_embedded_rust_sdk_source(
             "use trellis_rs::service::OperationFailureLike;\npub fn client( )->trellis_client::Result<()> { todo!() }\n",
             false,
+            "core",
         );
         let formatted = format_embedded_rust_sdk_source(&dest, &rewritten)
             .expect("format rewritten Rust SDK source");
@@ -1380,6 +1424,15 @@ mod tests {
             formatted,
             "use crate::service::OperationFailureLike;\npub fn client() -> crate::client::Result<()> {\n    todo!()\n}\n"
         );
+    }
+
+    #[test]
+    fn embedded_jobs_sdk_preserves_module_inception_expectation() {
+        let rewritten =
+            rewrite_embedded_rust_sdk_source("/// Job descriptors.\npub mod jobs;\n", true, "jobs");
+
+        assert!(rewritten.contains("#[expect(\n    clippy::module_inception,"));
+        assert!(rewritten.contains("pub mod jobs;"));
     }
 
     #[test]
@@ -1477,20 +1530,5 @@ mod tests {
 
         let cargo = fs::read_to_string(rust_out.join("Cargo.toml")).expect("read cargo shell");
         assert!(cargo.contains("publish = false"));
-    }
-}
-
-pub fn ts_runtime_deps(
-    source: RuntimeSource,
-    version: String,
-    repo_root: Option<PathBuf>,
-) -> TsRuntimeDeps {
-    TsRuntimeDeps {
-        source: match source {
-            RuntimeSource::Registry => CodegenTsRuntimeSource::Registry,
-            RuntimeSource::Local => CodegenTsRuntimeSource::Local,
-        },
-        version,
-        repo_root,
     }
 }

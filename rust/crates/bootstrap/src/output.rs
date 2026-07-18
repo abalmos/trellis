@@ -97,7 +97,7 @@ fn write_private_file(
             .mode(0o600)
             .open(path)?;
         file.write_all(contents.as_ref())?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(unix))]

@@ -1,7 +1,11 @@
 //! Rust runtime entrypoint support for Trellis.
 //!
-//! This crate currently provides only the first runtime slice: mode parsing and
-//! TOML configuration loading/validation plus a minimal HTTP readiness server.
+//! Runtime modes select platform, Jobs, Health, or Event Log ownership groups;
+//! `all` acquires every group. With NATS leases and SQLite enabled, [`run`]
+//! acquires all selected singleton leases before opening owner-controlled stores
+//! or starting subsystems. Ownership loss is fatal and does not trigger standby
+//! or reacquisition. Shutdown is bounded across subsystem stop, HTTP drain,
+//! lease release, and NATS flush.
 
 /// Runtime configuration loading, defaults, and validation.
 pub mod config;
@@ -24,6 +28,8 @@ pub mod jobs;
 #[cfg(feature = "nats-leases")]
 /// NATS-backed lease primitives.
 pub mod leases;
+#[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
+mod ownership;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Platform subsystem scaffold and bootstrap services.
 pub mod platform;

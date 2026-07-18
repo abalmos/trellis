@@ -11,7 +11,7 @@ use trellis_rs::sdk::auth::types::{
     AuthDeploymentAuthorityGetRequest, AuthDeploymentAuthorityPlansListRequest,
     AuthDeploymentAuthorityRejectRequest, AuthServiceInstancesProvisionRequest,
 };
-use trellis_rs::service::{ConnectedServiceRuntime, KvResourceClient};
+use trellis_rs::service::ConnectedServiceRuntime;
 
 use crate::support::assertions::{assert_case_registered, assert_service_case_registered};
 
@@ -300,7 +300,7 @@ async fn authority_plan_presented_update_approved_then_connects() {
     .await;
     let service_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
 
-    let mut connect_handle = spawn_service_connect(
+    let connect_handle = spawn_service_connect(
         runtime.trellis_url(),
         "authority-plan-additive-service",
         SERVICE_CONTRACT_ID,
@@ -487,7 +487,7 @@ async fn authority_plan_incompatible_migration_approved_replaces_contract() {
 
     let replacement_key =
         provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
-    let mut connect_handle = spawn_service_connect(
+    let connect_handle = spawn_service_connect(
         runtime.trellis_url(),
         "authority-plan-replacement-service",
         SERVICE_CONTRACT_ID,
@@ -567,7 +567,7 @@ async fn authority_plan_migration_replaces_desired_state() {
 
     let replacement_key =
         provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
-    let mut connect_handle = spawn_service_connect(
+    let connect_handle = spawn_service_connect(
         runtime.trellis_url(),
         "authority-plan-replacement-service",
         SERVICE_CONTRACT_ID,
@@ -998,7 +998,7 @@ async fn control_plane_service_resource_removal_purges_old_binding() {
     drop(resource_service);
 
     let removed_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
-    let mut connect_handle = spawn_service_connect(
+    let connect_handle = spawn_service_connect(
         runtime.trellis_url(),
         "authority-plan-resource-removed-service",
         RESOURCE_SERVICE_CONTRACT_ID,
@@ -1051,7 +1051,7 @@ async fn authority_plan_acceptance_rejects_wrong_classification_expired_and_vers
     )
     .await;
     let base_key = provision_instance_only(&mut admin, &bootstrap_url, STRICT_DEPLOYMENT).await;
-    let mut base_service = connect_service(
+    let base_service = connect_service(
         runtime.trellis_url(),
         "authority-plan-base-service",
         SERVICE_CONTRACT_ID,

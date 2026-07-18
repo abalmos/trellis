@@ -46,34 +46,32 @@ async fn next_watch_frame(state: WatchState) -> Option<(Result<Value, ServerErro
                     ));
                 }
             };
-            return Some((
+            Some((
                 Ok(json!({
                     "kind": "ready",
                     "cursor": "now",
                     "serverTime": now_timestamp_string(),
                 })),
                 WatchState::Open(messages),
-            ));
+            ))
         }
         WatchState::Open(mut messages) => match messages.next().await {
             Some(Ok(message)) => {
                 let _ = message.ack().await;
-                return Some((
+                Some((
                     Ok(json!({
                         "kind": "eventQueryInvalidated",
                         "reason": "new-event",
                         "serverTime": now_timestamp_string(),
                     })),
                     WatchState::Open(messages),
-                ));
+                ))
             }
-            Some(Err(error)) => {
-                return Some((
-                    Err(ServerError::Nats(format!("EventLog.Watch failed: {error}"))),
-                    WatchState::Done,
-                ));
-            }
-            None => return None,
+            Some(Err(error)) => Some((
+                Err(ServerError::Nats(format!("EventLog.Watch failed: {error}"))),
+                WatchState::Done,
+            )),
+            None => None,
         },
         WatchState::Done => None,
     }

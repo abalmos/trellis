@@ -449,6 +449,10 @@ impl<'a> ServiceConnectOptions<'a> {
 
 /// Errors returned by the high-level service runtime facade.
 #[derive(Debug, thiserror::Error)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "runtime errors retain typed handler context for operator diagnostics"
+)]
 pub enum ServiceRuntimeError {
     /// Client-side bootstrap, transport, or outbound RPC failure.
     #[error(transparent)]
@@ -1167,6 +1171,10 @@ impl<C> ConnectedServiceRuntime<C> {
 
     /// Build a connected runtime from a service client that already completed bootstrap.
     #[cfg(feature = "test-support")]
+    #[expect(
+        clippy::result_large_err,
+        reason = "ServiceRuntimeError preserves typed runtime diagnostics"
+    )]
     pub(crate) fn from_connected_client(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
@@ -1244,6 +1252,10 @@ impl<C> ConnectedServiceRuntime<C> {
     /// Return Jobs-only worker host access for Trellis integration tests.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "ServiceRuntimeError preserves typed runtime diagnostics"
+    )]
     pub fn test_jobs_worker_runtime(
         &self,
     ) -> Result<crate::jobs::TestJobsWorkerRuntime, ServiceRuntimeError> {
@@ -1790,10 +1802,10 @@ impl<C> ConnectedServiceRuntime<C> {
 
         #[cfg(test)]
         {
-            return runner
+            runner
                 .run(None, subjects, EmptyHandler)
                 .await
-                .map_err(ServiceRuntimeError::Server);
+                .map_err(ServiceRuntimeError::Server)
         }
 
         #[cfg(not(test))]
@@ -1857,6 +1869,21 @@ where
     }
 }
 
+type ServiceAcceptedOperationFuture<D> = BoxFuture<
+    'static,
+    Result<
+        AcceptedOperation<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
+        ServerError,
+    >,
+>;
+type ServiceOperationSnapshotFuture<D> = BoxFuture<
+    'static,
+    Result<
+        OperationSnapshot<<D as OperationDescriptor>::Progress, <D as OperationDescriptor>::Output>,
+        ServerError,
+    >,
+>;
+
 /// Provider-style operation handler using the high-level service handler context.
 pub trait ServiceOperationProvider<D>: Send + Sync + 'static
 where
@@ -1867,28 +1894,28 @@ where
         &self,
         context: ServiceHandlerContext,
         input: D::Input,
-    ) -> BoxFuture<'static, Result<AcceptedOperation<D::Progress, D::Output>, ServerError>>;
+    ) -> ServiceAcceptedOperationFuture<D>;
 
     /// Return the current snapshot for an operation id.
     fn get(
         &self,
         context: ServiceHandlerContext,
         operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    ) -> ServiceOperationSnapshotFuture<D>;
 
     /// Wait for a later or terminal snapshot for an operation id.
     fn wait(
         &self,
         context: ServiceHandlerContext,
         operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    ) -> ServiceOperationSnapshotFuture<D>;
 
     /// Cancel an operation id and return the resulting snapshot.
     fn cancel(
         &self,
         context: ServiceHandlerContext,
         operation_id: String,
-    ) -> BoxFuture<'static, Result<OperationSnapshot<D::Progress, D::Output>, ServerError>>;
+    ) -> ServiceOperationSnapshotFuture<D>;
 }
 
 struct OperationProviderAdapter<D, P> {
@@ -2007,6 +2034,10 @@ impl RequestHandler for EmptyHandler {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServiceRuntimeError preserves typed bootstrap diagnostics"
+)]
 fn parse_bootstrap_binding(
     client: &TrellisClient,
 ) -> Result<CoreBootstrapBinding, ServiceRuntimeError> {
@@ -2215,6 +2246,10 @@ where
     ))
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServiceRuntimeError preserves typed listener diagnostics"
+)]
 fn validate_event_listener_concurrency(
     group: &str,
     ordering: super::EventConsumerOrdering,
@@ -2428,6 +2463,10 @@ async fn durable_listener_ready(
         .unwrap_or(false)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "ServiceRuntimeError preserves typed binding diagnostics"
+)]
 fn resolve_event_consumer_binding(
     bindings: &BTreeMap<String, super::EventConsumerResourceBinding>,
     subject: &str,

@@ -106,7 +106,7 @@
                 "invoke": ["Billing.Refund"],
                 "observe": ["Billing.Refund"],
                 "cancel": ["Billing.Refund"],
-                "control": ["Billing.Refund"]
+                "control": { "Billing.Refund": ["approve"] }
               },
               "events": {
                 "publish": ["Billing.RefundRequested"],
@@ -243,7 +243,7 @@
                 "invoke": ["Billing.Refund"],
                 "observe": ["Billing.Refund"],
                 "cancel": ["Billing.Refund"],
-                "control": ["Billing.Refund"]
+                "control": { "Billing.Refund": ["approve"] }
               },
               "events": {
                 "publish": ["Billing.RefundRequested"],
@@ -322,7 +322,7 @@
           }
         }
       },
-      "digest": "TnzhycMCqE5L8a4yGoD7gLrtPtnpiX_abBJZZNciCNk"
+      "digest": "3LeLUHjR05DOJLQdEepgMZdfdWJRa7edI_DhMtMb8PA"
     },
     {
       "name": "multiline-human-documentation",
@@ -1202,7 +1202,7 @@
     {
       "name": "flat-uses",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-app",
@@ -1215,6 +1215,13 @@
             "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
           }
         }
+      },
+      "normalized": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-app",
+        "displayName": "Invalid App",
+        "description": "Flat uses.",
+        "kind": "app"
       }
     },
     {
@@ -1506,7 +1513,7 @@
     {
       "name": "operation-transfer-authored-direction",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1554,7 +1561,7 @@
     {
       "name": "api-owned-top-level-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1567,7 +1574,7 @@
     {
       "name": "old-jobs-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1598,20 +1605,22 @@
     {
       "name": "unknown-top-level-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
-        "id": "invalid-worker",
-        "displayName": "Invalid Worker",
-        "description": "Unknown field.",
-        "kind": "service",
+        "id": "documents-web",
+        "displayName": "Documents Web",
+        "description": "Document application.",
+        "kind": "app",
         "extra": true
-      }
+      },
+      "sameNormalizedAs": "minimal-app",
+      "sameDigestAs": "minimal-app"
     },
     {
       "name": "unknown-nested-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
@@ -1622,6 +1631,16 @@
           "store": {
             "uploads": { "purpose": "Uploads.", "subject": "STORE.uploads" }
           }
+        }
+      },
+      "normalized": {
+        "format": "trellis.participant.v1",
+        "id": "invalid-worker",
+        "displayName": "Invalid Worker",
+        "description": "Unknown field.",
+        "kind": "service",
+        "resources": {
+          "store": { "uploads": { "purpose": "Uploads." } }
         }
       }
     },
@@ -1667,6 +1686,518 @@
         "displayName": "Invalid Worker",
         "description": "Invalid identifier.",
         "kind": "service"
+      }
+    },
+    {
+      "name": "reachable-closed-job-payload-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "closed-worker",
+        "displayName": "Closed Worker",
+        "description": "Uses a closed job payload.",
+        "kind": "service",
+        "schemas": {
+          "Payload": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" } }
+        }
+      }
+    },
+    {
+      "name": "unused-private-closed-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "private-schema-worker",
+        "displayName": "Private Schema Worker",
+        "description": "Keeps an unused private schema closed.",
+        "kind": "service",
+        "schemas": {
+          "Private": { "type": "object", "additionalProperties": false }
+        }
+      }
+    },
+    {
+      "name": "wire-schema-scalar-constraints-and-explicit-open-objects",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Exercises valid additive schemas.",
+        "kind": "service",
+        "schemas": {
+          "Payload": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "mode": { "type": "string", "enum": ["a", "b"] },
+              "fixed": { "type": "string", "const": "fixed" },
+              "nested": { "type": "object", "unevaluatedProperties": true }
+            }
+          }
+        },
+        "jobQueues": {
+          "work": { "payload": { "schema": "Payload" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-job-update-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed job updates.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "update": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-job-result-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed job results.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "result": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-participant-state-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed participant state.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "state": {
+          "settings": { "kind": "value", "schema": { "schema": "Wire" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-accepted-state-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed accepted state.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "state": {
+          "settings": {
+            "kind": "value",
+            "schema": { "schema": "Open" },
+            "acceptedVersions": { "v1": { "schema": "Wire" } }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-closed-kv-value-schema",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects closed KV values.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "additionalProperties": false }
+        },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Wire" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-job-payload-not-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive job payloads.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "object", "not": { "required": ["futureField"] } }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-job-update-conditional-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive job updates.",
+        "kind": "service",
+        "schemas": {
+          "Open": true,
+          "Wire": {
+            "type": "object",
+            "if": { "required": ["futureField"] },
+            "then": false
+          }
+        },
+        "jobQueues": {
+          "work": {
+            "payload": { "schema": "Open" },
+            "update": { "schema": "Wire" }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-state-dependent-schemas-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive participant state.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentSchemas": { "futureField": false }
+          }
+        },
+        "state": {
+          "settings": { "kind": "value", "schema": { "schema": "Wire" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-kv-dependent-required",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects field-sensitive KV values.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentRequired": { "futureField": ["other"] }
+          }
+        },
+        "resources": {
+          "kv": {
+            "cache": {
+              "purpose": "Cache values.",
+              "schema": { "schema": "Wire" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "reachable-nested-closed-participant-object",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested closed participant objects.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "properties": {
+              "nested": { "type": "object", "additionalProperties": false }
+            }
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-object-capable-one-of",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/oneOf",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects non-monotonic exclusive object branches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "oneOf": [
+              { "required": ["a"] },
+              { "required": ["futureField"] }
+            ]
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-scalar-only-one-of",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves scalar exclusive branches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }]
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-unique-possible-object-items",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/uniqueItems",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects uniqueness over possible object items.",
+        "kind": "service",
+        "schemas": {
+          "Wire": { "type": "array", "uniqueItems": true }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-unique-scalar-only-items",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves uniqueness over scalar prefix and tail items.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }],
+            "items": { "type": "number" },
+            "uniqueItems": true
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-max-contains-object-match",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/maxContains",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects upper bounds on object-capable contains matches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "required": ["futureField"] },
+            "maxContains": 1
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-max-contains-scalar-match",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves upper bounds on scalar contains matches.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "type": "string" },
+            "maxContains": 1
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-nested-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/const",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested objects in exact constants.",
+        "kind": "service",
+        "schemas": { "Wire": { "const": [{}] } },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-nested-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/enum",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects nested objects in exact enumerations.",
+        "kind": "service",
+        "schemas": { "Wire": { "enum": [[{}], "other"] } },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-scalar-array-exact-literals",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves scalar and scalar-array exact literals.",
+        "kind": "service",
+        "schemas": {
+          "Const": { "const": [1, "fixed", [true]] },
+          "Enum": { "enum": [[1, "a"], "b", false] }
+        },
+        "jobQueues": {
+          "const": { "payload": { "schema": "Const" } },
+          "enum": { "payload": { "schema": "Enum" } }
+        }
+      }
+    },
+    {
+      "name": "reachable-dynamic-ref",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/$dynamicRef",
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Rejects dynamic references until dynamic scope is supported.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "$defs": {
+              "node": { "$dynamicAnchor": "node", "type": "object" }
+            },
+            "$dynamicRef": "#node"
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "reachable-scalar-local-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Preserves ordinary local references.",
+        "kind": "service",
+        "schemas": {
+          "Wire": {
+            "$defs": { "value": { "type": "string" } },
+            "$ref": "#/$defs/value"
+          }
+        },
+        "jobQueues": { "work": { "payload": { "schema": "Wire" } } }
+      }
+    },
+    {
+      "name": "unused-private-non-monotonic-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.participant.v1",
+        "id": "wire-profile-worker",
+        "displayName": "Wire Profile Worker",
+        "description": "Leaves unused private schemas outside the wire profile.",
+        "kind": "service",
+        "schemas": {
+          "Private": {
+            "type": "object",
+            "oneOf": [{ "required": ["a"] }, { "required": ["futureField"] }]
+          }
+        }
       }
     },
     {

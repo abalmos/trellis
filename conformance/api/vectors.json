@@ -297,10 +297,10 @@
               },
               {
                 "target": {
-                  "kind": "apiSurface",
+                  "kind": "operationSignal",
                   "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Billing.Refund"
+                  "operation": "Billing.Refund",
+                  "signal": "approve"
                 },
                 "action": "control"
               },
@@ -438,15 +438,6 @@
                   "surface": "operation",
                   "name": "Billing.Refund"
                 },
-                "action": "control"
-              },
-              {
-                "target": {
-                  "kind": "apiSurface",
-                  "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Billing.Refund"
-                },
                 "action": "invoke"
               },
               {
@@ -466,6 +457,15 @@
                   "name": "Settings"
                 },
                 "action": "read"
+              },
+              {
+                "target": {
+                  "kind": "operationSignal",
+                  "api": "documents@v1",
+                  "operation": "Billing.Refund",
+                  "signal": "approve"
+                },
+                "action": "control"
               }
             ]
           }
@@ -482,7 +482,7 @@
         },
         "feeds": { "Health.Watch": "feed.v2.Health.Watch" }
       },
-      "digest": "PTrtVHXJlRN1Za5zVyylXjT-H3Mbr_69GrHeEuh2J58"
+      "digest": "5BRrUumj6eB9p2nLKcuZPJZJtDrePl7mZphlUjVx9wc"
     },
     {
       "name": "metadata-base",
@@ -1194,10 +1194,10 @@
             "allows": [
               {
                 "target": {
-                  "kind": "apiSurface",
+                  "kind": "operationSignal",
                   "api": "documents@v1",
-                  "surface": "operation",
-                  "name": "Documents.Build"
+                  "operation": "Documents.Build",
+                  "signal": "approve"
                 },
                 "action": "control"
               }
@@ -1225,9 +1225,9 @@
       }
     },
     {
-      "name": "participant-top-level-fields-rejected",
+      "name": "participant-top-level-fields-ignored",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1242,9 +1242,9 @@
       }
     },
     {
-      "name": "authored-subject-rejected",
+      "name": "authored-subject-ignored",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1504,21 +1504,73 @@
       }
     },
     {
-      "name": "unknown-top-level-field",
-      "schemaValid": false,
+      "name": "reachable-closed-schema",
+      "schemaValid": true,
       "valid": false,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
         "displayName": "Documents",
         "description": "Document APIs.",
-        "extra": true
+        "schemas": {
+          "Input": { "type": "object", "additionalProperties": false },
+          "Output": true
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
+            "output": { "schema": "Output" }
+          }
+        }
       }
+    },
+    {
+      "name": "unused-private-closed-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": {
+          "Public": true,
+          "Private": { "type": "object", "additionalProperties": false }
+        },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Public" },
+            "output": { "schema": "Public" }
+          }
+        }
+      }
+    },
+    {
+      "name": "unknown-top-level-field",
+      "schemaValid": false,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "extra": true
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs."
+      },
+      "sameNormalizedAs": "minimal-api",
+      "sameDigestAs": "minimal-api"
     },
     {
       "name": "unknown-nested-field",
       "schemaValid": false,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.api.v1",
         "id": "documents@v1",
@@ -1529,6 +1581,20 @@
           "Documents.Get": {
             "version": "v1",
             "input": { "schema": "Input", "extra": true },
+            "output": { "schema": "Output" }
+          }
+        }
+      },
+      "normalized": {
+        "format": "trellis.api.v1",
+        "id": "documents@v1",
+        "displayName": "Documents",
+        "description": "Document APIs.",
+        "schemas": { "Input": true, "Output": true },
+        "rpc": {
+          "Documents.Get": {
+            "version": "v1",
+            "input": { "schema": "Input" },
             "output": { "schema": "Output" }
           }
         }
@@ -1595,6 +1661,415 @@
         "displayName": "Documents",
         "description": "Document APIs.",
         "docs": { "markdown": "# Documents", "summary": null }
+      }
+    },
+    {
+      "name": "wire-schema-scalar-constraints-and-explicit-open-objects",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Exercises valid additive schemas.",
+        "schemas": {
+          "ScalarConst": { "type": "string", "const": "fixed" },
+          "ScalarEnum": { "type": "string", "enum": ["a", "b"] },
+          "Open": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "nested": { "type": "object", "unevaluatedProperties": true }
+            }
+          }
+        },
+        "exports": { "schemas": ["ScalarConst", "ScalarEnum", "Open"] }
+      }
+    },
+    {
+      "name": "reachable-schema-valued-additional-properties",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unevaluated-properties-false",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": { "type": "object", "unevaluatedProperties": false }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-not-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": { "type": "object", "not": { "required": ["futureField"] } }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-conditional-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "if": { "required": ["futureField"] },
+            "then": false
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-dependent-schemas-field-gate",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentSchemas": { "futureField": false }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-dependent-required",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "dependentRequired": { "futureField": ["other"] }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": { "Wire": { "const": { "fixed": true } } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": { "Wire": { "enum": ["open", { "fixed": true }] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-all-of-closed-branch",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "allOf": [true, { "type": "object", "additionalProperties": false }]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-closed-object",
+      "schemaValid": true,
+      "valid": false,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects field-sensitive wire schemas.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "properties": {
+              "nested": { "type": "object", "additionalProperties": false }
+            }
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-object-capable-one-of",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/oneOf",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects non-monotonic exclusive object branches.",
+        "schemas": {
+          "Wire": {
+            "type": "object",
+            "oneOf": [
+              { "required": ["a"] },
+              { "required": ["futureField"] }
+            ]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-scalar-only-one-of",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves scalar exclusive branches.",
+        "schemas": {
+          "Wire": {
+            "oneOf": [{ "type": "string" }, { "type": "number" }]
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unique-possible-object-items",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/uniqueItems",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects uniqueness over possible object items.",
+        "schemas": {
+          "Wire": { "type": "array", "uniqueItems": true }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-unique-scalar-only-items",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves uniqueness over scalar prefix and tail items.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "prefixItems": [{ "type": "string" }],
+            "items": { "type": "number" },
+            "uniqueItems": true
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-max-contains-object-match",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/maxContains",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects upper bounds on object-capable contains matches.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "required": ["futureField"] },
+            "maxContains": 1
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-max-contains-scalar-match",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves upper bounds on scalar contains matches.",
+        "schemas": {
+          "Wire": {
+            "type": "array",
+            "contains": { "type": "string" },
+            "maxContains": 1
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-object-const",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/const",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects nested objects in exact constants.",
+        "schemas": { "Wire": { "const": [{}] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-nested-object-enum",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/enum",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects nested objects in exact enumerations.",
+        "schemas": { "Wire": { "enum": [[{}], "other"] } },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-scalar-array-exact-literals",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves scalar and scalar-array exact literals.",
+        "schemas": {
+          "Const": { "const": [1, "fixed", [true]] },
+          "Enum": { "enum": [[1, "a"], "b", false] }
+        },
+        "exports": { "schemas": ["Const", "Enum"] }
+      }
+    },
+    {
+      "name": "reachable-dynamic-ref",
+      "schemaValid": true,
+      "valid": false,
+      "errorSchema": "Wire",
+      "errorPath": "/$dynamicRef",
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Rejects dynamic references until dynamic scope is supported.",
+        "schemas": {
+          "Wire": {
+            "$defs": {
+              "node": { "$dynamicAnchor": "node", "type": "object" }
+            },
+            "$dynamicRef": "#node"
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "reachable-scalar-local-ref",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Preserves ordinary local references.",
+        "schemas": {
+          "Wire": {
+            "$defs": { "value": { "type": "string" } },
+            "$ref": "#/$defs/value"
+          }
+        },
+        "exports": { "schemas": ["Wire"] }
+      }
+    },
+    {
+      "name": "unused-private-non-monotonic-schema",
+      "schemaValid": true,
+      "valid": true,
+      "input": {
+        "format": "trellis.api.v1",
+        "id": "wire-profile@v1",
+        "displayName": "Wire Profile",
+        "description": "Leaves unused private schemas outside the wire profile.",
+        "schemas": {
+          "Private": {
+            "type": "object",
+            "oneOf": [{ "required": ["a"] }, { "required": ["futureField"] }]
+          }
+        }
       }
     },
     {

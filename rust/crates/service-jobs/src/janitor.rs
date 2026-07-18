@@ -146,6 +146,42 @@ fn parse_timestamp(timestamp: &str) -> OffsetDateTime {
     OffsetDateTime::parse(timestamp, &Rfc3339).unwrap_or(OffsetDateTime::UNIX_EPOCH)
 }
 
+pub async fn start_janitor_loop(
+    jobs_runtime: JobsRuntime,
+    store: SqliteJobsStore,
+    interval: std::time::Duration,
+) -> Result<JanitorHandle, ServerError> {
+    tracing::info!(
+        interval_ms = interval.as_millis(),
+        "started jobs janitor loop"
+    );
+    let task = tokio::spawn(async move {
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+        loop {
+            ticker.tick().await;
+            let now = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
+            let stats = run_janitor_once(jobs_runtime.clone(), &store, &now)
+                .await
+                .map_err(|error| {
+                    ServerError::Nats(format!(
+                        "jobs janitor loop failed for SQLite projection: {error}"
+                    ))
+                })?;
+            tracing::debug!(
+                scanned = stats.scanned,
+                eligible = stats.eligible,
+                published = stats.published,
+                now = %now,
+                "completed jobs janitor run"
+            );
+        }
+    });
+
+    Ok(JanitorHandle { task: Some(task) })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -261,40 +297,4 @@ mod tests {
             vec!["at-millis", "at-offset"]
         );
     }
-}
-
-pub async fn start_janitor_loop(
-    jobs_runtime: JobsRuntime,
-    store: SqliteJobsStore,
-    interval: std::time::Duration,
-) -> Result<JanitorHandle, ServerError> {
-    tracing::info!(
-        interval_ms = interval.as_millis(),
-        "started jobs janitor loop"
-    );
-    let task = tokio::spawn(async move {
-        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
-        loop {
-            ticker.tick().await;
-            let now = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
-            let stats = run_janitor_once(jobs_runtime.clone(), &store, &now)
-                .await
-                .map_err(|error| {
-                    ServerError::Nats(format!(
-                        "jobs janitor loop failed for SQLite projection: {error}"
-                    ))
-                })?;
-            tracing::debug!(
-                scanned = stats.scanned,
-                eligible = stats.eligible,
-                published = stats.published,
-                now = %now,
-                "completed jobs janitor run"
-            );
-        }
-    });
-
-    Ok(JanitorHandle { task: Some(task) })
 }

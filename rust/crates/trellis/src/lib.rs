@@ -15,6 +15,31 @@
 //! `publish_prepared`, `dispatch_outbox_once`, `OutboxStore`, `InboxStore`,
 //! `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and
 //! `PostgresInboxStore`.
+//!
+//! # Authoring model
+//!
+//! Generated participant facades are the normal connection boundary. Their
+//! generated `.client()` methods call typed RPCs, invoke operations and signals,
+//! publish or subscribe to events, and access contract state without exposing
+//! subjects. Service facades connect with [`service::ServiceConnectOptions`],
+//! register generated RPC and operation handlers, publish typed events, process
+//! private Jobs queues, and access resolved KV and object-store handles.
+//!
+//! Connection and request failures retain typed authentication, transport,
+//! validation, declared-RPC, and bootstrap errors. Callers should retry only
+//! errors documented as transient; service bootstrap already retries the
+//! authority-pending state according to its connect options.
+//!
+//! ```no_run
+//! use trellis_rs::service::ServiceConnectOptions;
+//!
+//! let options = ServiceConnectOptions::new(
+//!     "http://localhost:3000",
+//!     "documents-worker",
+//!     "base64url-session-seed",
+//! );
+//! assert_eq!(options.with_timeout_ms(10_000), options.with_timeout_ms(10_000));
+//! ```
 
 #[doc(hidden)]
 pub mod client;

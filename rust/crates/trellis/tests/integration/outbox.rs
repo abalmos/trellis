@@ -654,6 +654,10 @@ fn create_db() -> Connection {
     conn
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "test helpers exercise the public structured ServerError"
+)]
 fn enqueue_sql_event(
     conn: &Connection,
     id: &str,
@@ -764,6 +768,10 @@ fn apply_sqlite_sql_outbox_migrations(conn: &Connection) {
     .expect("create SQL outbox indexes and inbox table");
 }
 
+#[expect(
+    clippy::let_and_return,
+    reason = "the local forces the row iterator to drop before its statement"
+)]
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     let mut statement = conn
         .prepare(&format!("PRAGMA table_info({table})"))

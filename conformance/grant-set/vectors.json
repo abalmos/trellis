@@ -5,6 +5,7 @@
       "target.owner",
       "target.surfaceOrResource",
       "target.name",
+      "target.detail",
       "action"
     ],
     "stringComparison": "UTF-16 code-unit lexicographic"
@@ -82,10 +83,10 @@
           },
           {
             "target": {
-              "kind": "apiSurface",
+              "kind": "operationSignal",
               "api": "documents@v1",
-              "surface": "operation",
-              "name": "Documents.Export"
+              "operation": "Documents.Export",
+              "signal": "approve"
             },
             "action": "control"
           },
@@ -118,8 +119,8 @@
           }
         ]
       },
-      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"publish\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Watch\",\"surface\":\"feed\"}},{\"action\":\"cancel\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"control\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"invoke\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"observe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}},{\"action\":\"read\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}},{\"action\":\"write\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}}]}",
-      "digest": "T-stMxbxlUjCpCzlx50wQxD-jUOZ6Qt2eO69K7JQsHM"
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"publish\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Changed\",\"surface\":\"event\"}},{\"action\":\"subscribe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Watch\",\"surface\":\"feed\"}},{\"action\":\"cancel\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"invoke\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"observe\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Export\",\"surface\":\"operation\"}},{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}},{\"action\":\"read\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}},{\"action\":\"write\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents\",\"surface\":\"state\"}},{\"action\":\"control\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"operationSignal\",\"operation\":\"Documents.Export\",\"signal\":\"approve\"}}]}",
+      "digest": "XLIDJGvFNdcclmXscYy_4GktETEKJzlNORxpXlL2nYA"
     },
     {
       "name": "duplicate-permission-atoms",
@@ -337,6 +338,24 @@
       "digest": "DqVOxfUAxN4ateMgDlSvnroMvcjwdoauRFkW6IB7QLs"
     },
     {
+      "name": "invalid-generic-operation-control",
+      "valid": false,
+      "input": {
+        "format": "trellis.grant-set.v1",
+        "permissions": [
+          {
+            "target": {
+              "kind": "apiSurface",
+              "api": "documents@v1",
+              "surface": "operation",
+              "name": "Documents.Export"
+            },
+            "action": "control"
+          }
+        ]
+      }
+    },
+    {
       "name": "invalid-rpc-publish",
       "valid": false,
       "input": {
@@ -421,7 +440,7 @@
     },
     {
       "name": "unknown-permission-field",
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.grant-set.v1",
         "permissions": [
@@ -436,7 +455,9 @@
             "extra": true
           }
         ]
-      }
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]}",
+      "digest": "WSzsqtQ-MSZvjcqd-JwcPR_cx27i_YmJYzGnntOkIms"
     },
     {
       "name": "empty-identifier",
@@ -502,12 +523,14 @@
     },
     {
       "name": "unknown-grant-set-field",
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.grant-set.v1",
         "permissions": [],
         "extra": true
-      }
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[]}",
+      "digest": "z6Kekp7CGsmr8oFSZ0BYptK6fAResiJfrik-9_kF_08"
     }
   ]
 }

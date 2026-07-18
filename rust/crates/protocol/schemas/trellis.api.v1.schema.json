@@ -274,6 +274,17 @@
             "name": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "api", "operation", "signal"],
+          "properties": {
+            "kind": { "const": "operationSignal" },
+            "api": { "type": "string", "minLength": 1 },
+            "operation": { "type": "string", "minLength": 1 },
+            "signal": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
         }
       ]
     },

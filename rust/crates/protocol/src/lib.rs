@@ -60,7 +60,7 @@
 //!         "required": { "billing": {
 //!             "api": "billing@v1",
 //!             "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-//!             "operations": { "control": ["Billing.Refund"] }
+//!             "operations": { "control": { "Billing.Refund": ["approve"] } }
 //!         }},
 //!         "optional": { "health": {
 //!             "api": "health@v1",
@@ -123,7 +123,7 @@
 //!
 //! ```
 //! use serde_json::json;
-//! use trellis_protocol::{parse_api_v1, API_SCHEMA_V1_JSON};
+//! use trellis_protocol::{lint_api_v1_authoring, parse_api_v1, API_AUTHORING_SCHEMA_V1_JSON};
 //!
 //! let raw = json!({
 //!     "format": "trellis.api.v1",
@@ -139,12 +139,51 @@
 //!         }
 //!     }
 //! });
-//! assert!(API_SCHEMA_V1_JSON.contains("trellis.api.v1"));
+//! assert!(API_AUTHORING_SCHEMA_V1_JSON.contains("trellis.api.v1"));
+//! lint_api_v1_authoring(&raw)?;
 //! let api = parse_api_v1(&raw)?;
 //! assert_eq!(api.id(), "documents@v1");
 //! assert_eq!(api.normalized_value()?["displayName"], "Documents");
 //! assert_eq!(api.digest()?.len(), 43);
 //! assert_eq!(api.derived_subjects()?.rpc["Documents.Get"], "rpc.v1.Documents.Get");
+//! # Ok::<(), trellis_protocol::ProtocolError>(())
+//! ```
+//!
+//! Runtime parsers ignore unknown object members and project only semantics this
+//! version understands. Strict authoring lint reports those members before
+//! tolerant parsing. New required semantics need a negotiated feature or a new
+//! format rather than an ignored critical extension member.
+//!
+//! # Compatibility
+//!
+//! [`compare_api_replacement_v1`] is directional: it asks whether clients
+//! accepted against an old provider remain supported by a replacement provider.
+//! Additive optional object fields are compatible; removing a surface is not.
+//!
+//! ```
+//! use serde_json::json;
+//! use trellis_protocol::{compare_api_replacement_v1, parse_api_v1};
+//!
+//! let old = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "displayName": "Documents", "description": "Documents."
+//! }))?;
+//! let additive = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "documents@v1",
+//!     "displayName": "Documents", "description": "Documents.",
+//!     "schemas": { "Input": true, "Output": true },
+//!     "rpc": { "Documents.Get": {
+//!         "version": "v1", "input": { "schema": "Input" },
+//!         "output": { "schema": "Output" }
+//!     }}
+//! }))?;
+//! assert!(compare_api_replacement_v1(&old, &additive)?.compatible);
+//!
+//! let wrong_lineage = parse_api_v1(&json!({
+//!     "format": "trellis.api.v1", "id": "archive@v1",
+//!     "displayName": "Archive", "description": "Archive."
+//! }))?;
+//! assert!(!compare_api_replacement_v1(&old, &wrong_lineage)?.compatible);
 //! # Ok::<(), trellis_protocol::ProtocolError>(())
 //! ```
 
@@ -157,12 +196,16 @@ mod permissions;
 mod schema_profile;
 mod subjects;
 
-pub use api::{parse_api_v1, ApiArtifactV1, API_FORMAT_V1, API_SCHEMA_V1_JSON};
+pub use api::{
+    compare_api_replacement_v1, lint_api_v1_authoring, parse_api_v1, ApiArtifactV1,
+    ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1, ApiCompatibilityReportV1,
+    API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
+};
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::ProtocolError;
 pub use participant::{
-    parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1, PARTICIPANT_FORMAT_V1,
-    PARTICIPANT_SCHEMA_V1_JSON,
+    lint_participant_v1_authoring, parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1,
+    PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,
 };
 pub use permissions::{
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, GrantSetV1,

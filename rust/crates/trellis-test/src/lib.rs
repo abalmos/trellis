@@ -1089,15 +1089,12 @@ impl TrellisTestRuntime {
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
         let js = jetstream::new(client);
-        let stream = js
-            .get_stream("trellis")
-            .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+        let stream = js.get_stream("trellis").await.map_err(io::Error::other)?;
         let mut consumers = stream.consumers();
         let mut infos = Vec::new();
 
         while let Some(info) = consumers.next().await {
-            let info = info.map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            let info = info.map_err(io::Error::other)?;
             let mut filter_subjects = Vec::new();
             if !info.config.filter_subject.is_empty() {
                 filter_subjects.push(info.config.filter_subject.clone());
@@ -1129,11 +1126,8 @@ impl TrellisTestRuntime {
         let mut subscription = client
             .subscribe("$JS.ACK.trellis.>".to_string())
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
-        client
-            .flush()
-            .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
+        client.flush().await.map_err(io::Error::other)?;
 
         let frames = Arc::new(Mutex::new(Vec::new()));
         let errors = Arc::new(Mutex::new(Vec::new()));
@@ -1172,11 +1166,8 @@ impl TrellisTestRuntime {
         let mut subscription = client
             .subscribe(subject.clone())
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
-        client
-            .flush()
-            .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
+        client.flush().await.map_err(io::Error::other)?;
 
         let frames = Arc::new(Mutex::new(Vec::new()));
         let task_frames = Arc::clone(&frames);
@@ -1212,15 +1203,12 @@ impl TrellisTestRuntime {
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
         let js = jetstream::new(client);
-        let stream = js
-            .get_stream("trellis")
-            .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+        let stream = js.get_stream("trellis").await.map_err(io::Error::other)?;
 
         match stream.delete_consumer(durable_name).await {
             Ok(_) => Ok(true),
             Err(error) if is_jetstream_not_found_error(&error) => Ok(false),
-            Err(error) => Err(io::Error::new(io::ErrorKind::Other, error).into()),
+            Err(error) => Err(io::Error::other(error).into()),
         }
     }
 
@@ -1239,10 +1227,10 @@ impl TrellisTestRuntime {
         let kv = js
             .get_key_value("trellis_connections")
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
         kv.put(entry.key, entry.value.to_string().into())
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -1261,10 +1249,10 @@ impl TrellisTestRuntime {
         let kv = js
             .get_key_value("trellis_state")
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
         kv.put(entry.key, entry.value.to_string().into())
             .await
-            .map_err(|error| io::Error::new(io::ErrorKind::Other, error))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -2890,7 +2878,7 @@ async fn ensure_stream(
 }
 
 fn nats_io_error(error: async_nats::jetstream::context::CreateStreamError) -> TrellisTestError {
-    TrellisTestError::Io(io::Error::new(io::ErrorKind::Other, error))
+    TrellisTestError::Io(io::Error::other(error))
 }
 
 fn is_jetstream_not_found_error(error: &impl fmt::Display) -> bool {

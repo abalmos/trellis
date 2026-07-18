@@ -6,6 +6,10 @@
 //! small local wrappers.
 
 mod auth;
+#[expect(
+    clippy::module_inception,
+    reason = "the public client module keeps its core implementation in client.rs"
+)]
 mod client;
 mod descriptor;
 mod error;

@@ -229,6 +229,139 @@ fn rejected_admin_session_report() -> miette::Result<miette::Report> {
     Ok(miette::miette!(message))
 }
 
+async fn complete_admin_reauth(
+    format: OutputFormat,
+    state: &authlib::AdminSessionState,
+    agent_contract_json: &str,
+) -> miette::Result<authlib::AdminSessionState> {
+    let next_state = match authlib::start_admin_reauth(state, agent_contract_json).await {
+        Ok(authlib::AdminReauthOutcome::Bound(outcome)) => outcome.state,
+        Ok(authlib::AdminReauthOutcome::Flow(challenge)) => {
+            let login_url = challenge.login_url().to_string();
+            if output::is_json(format) {
+                output::print_json_progress(&pending_agent_login_json(&login_url))?;
+            } else {
+                output::print_info(&render_agent_login_instructions(&login_url)?);
+            }
+            map_admin_session_result(challenge.complete(&state.trellis_url).await)?.state
+        }
+        Err(error) => return Err(map_admin_session_error(error)),
+    };
+
+    authlib::save_admin_session(&next_state).into_diagnostic()?;
+    Ok(next_state)
+}
+
+pub(crate) async fn connect_with_creds(
+    servers: &str,
+    creds: &Path,
+) -> miette::Result<async_nats::Client> {
+    ConnectOptions::new()
+        .credentials_file(creds)
+        .await
+        .into_diagnostic()?
+        .connect(servers)
+        .await
+        .into_diagnostic()
+}
+
+pub(crate) async fn ensure_stream(
+    servers: &str,
+    creds: &Path,
+    name: &str,
+    subjects: Vec<String>,
+    num_replicas: usize,
+) -> miette::Result<bool> {
+    let client = connect_with_creds(servers, creds).await?;
+    let js = jetstream::new(client);
+    if js.get_stream(name).await.is_ok() {
+        return Ok(false);
+    }
+    js.create_stream(stream::Config {
+        name: name.to_string(),
+        subjects,
+        num_replicas,
+        ..Default::default()
+    })
+    .await
+    .into_diagnostic()?;
+    Ok(true)
+}
+
+pub(crate) async fn ensure_bucket(
+    servers: &str,
+    creds: &Path,
+    bucket: &str,
+    history: i64,
+    ttl_ms: u64,
+    num_replicas: usize,
+) -> miette::Result<BucketEnsureStatus> {
+    let client = connect_with_creds(servers, creds).await?;
+    let js = jetstream::new(client);
+    if let Ok(store) = js.get_key_value(bucket).await {
+        let status = store.status().await.into_diagnostic()?;
+        let current_ttl_ms = status.max_age().as_millis() as u64;
+        if status.history() == history && current_ttl_ms == ttl_ms {
+            return Ok(BucketEnsureStatus::Exists);
+        }
+
+        js.update_key_value(kv::Config {
+            bucket: bucket.to_string(),
+            history,
+            max_age: Duration::from_millis(ttl_ms),
+            num_replicas,
+            ..Default::default()
+        })
+        .await
+        .into_diagnostic()?;
+        return Ok(BucketEnsureStatus::Updated);
+    }
+
+    js.create_key_value(kv::Config {
+        bucket: bucket.to_string(),
+        history,
+        max_age: Duration::from_millis(ttl_ms),
+        num_replicas,
+        ..Default::default()
+    })
+    .await
+    .into_diagnostic()?;
+    Ok(BucketEnsureStatus::Created)
+}
+
+pub(crate) fn generate_session_keypair() -> (String, String) {
+    let seed: [u8; 32] = rand::random();
+    let signing_key = SigningKey::from_bytes(&seed);
+    let public_key = signing_key.verifying_key().to_bytes();
+    (base64url_encode(&seed), base64url_encode(&public_key))
+}
+
+pub(crate) fn json_value_label(value: &Value) -> String {
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
+    let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
+    let qr = qr.render::<unicode::Dense1x2>().quiet_zone(false).build();
+    Ok(format!(
+        "Open this activation URL:\n{login_url}\n\nScan this QR code:\n{qr}"
+    ))
+}
+
+fn pending_agent_login_json(login_url: &str) -> Value {
+    serde_json::json!({
+        "status": "pending",
+        "loginUrl": login_url,
+    })
+}
+
+pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {
+    ReleaseChannel::from_prerelease_flag(prerelease)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -478,137 +611,4 @@ mod tests {
             TrellisAuthError::AuthRequestHttpFailure(401, "session rejected".to_string()),
         );
     }
-}
-
-async fn complete_admin_reauth(
-    format: OutputFormat,
-    state: &authlib::AdminSessionState,
-    agent_contract_json: &str,
-) -> miette::Result<authlib::AdminSessionState> {
-    let next_state = match authlib::start_admin_reauth(state, agent_contract_json).await {
-        Ok(authlib::AdminReauthOutcome::Bound(outcome)) => outcome.state,
-        Ok(authlib::AdminReauthOutcome::Flow(challenge)) => {
-            let login_url = challenge.login_url().to_string();
-            if output::is_json(format) {
-                output::print_json_progress(&pending_agent_login_json(&login_url))?;
-            } else {
-                output::print_info(&render_agent_login_instructions(&login_url)?);
-            }
-            map_admin_session_result(challenge.complete(&state.trellis_url).await)?.state
-        }
-        Err(error) => return Err(map_admin_session_error(error)),
-    };
-
-    authlib::save_admin_session(&next_state).into_diagnostic()?;
-    Ok(next_state)
-}
-
-pub(crate) async fn connect_with_creds(
-    servers: &str,
-    creds: &Path,
-) -> miette::Result<async_nats::Client> {
-    ConnectOptions::new()
-        .credentials_file(creds)
-        .await
-        .into_diagnostic()?
-        .connect(servers)
-        .await
-        .into_diagnostic()
-}
-
-pub(crate) async fn ensure_stream(
-    servers: &str,
-    creds: &Path,
-    name: &str,
-    subjects: Vec<String>,
-    num_replicas: usize,
-) -> miette::Result<bool> {
-    let client = connect_with_creds(servers, creds).await?;
-    let js = jetstream::new(client);
-    if js.get_stream(name).await.is_ok() {
-        return Ok(false);
-    }
-    js.create_stream(stream::Config {
-        name: name.to_string(),
-        subjects,
-        num_replicas,
-        ..Default::default()
-    })
-    .await
-    .into_diagnostic()?;
-    Ok(true)
-}
-
-pub(crate) async fn ensure_bucket(
-    servers: &str,
-    creds: &Path,
-    bucket: &str,
-    history: i64,
-    ttl_ms: u64,
-    num_replicas: usize,
-) -> miette::Result<BucketEnsureStatus> {
-    let client = connect_with_creds(servers, creds).await?;
-    let js = jetstream::new(client);
-    if let Ok(store) = js.get_key_value(bucket).await {
-        let status = store.status().await.into_diagnostic()?;
-        let current_ttl_ms = status.max_age().as_millis() as u64;
-        if status.history() == history && current_ttl_ms == ttl_ms {
-            return Ok(BucketEnsureStatus::Exists);
-        }
-
-        js.update_key_value(kv::Config {
-            bucket: bucket.to_string(),
-            history,
-            max_age: Duration::from_millis(ttl_ms),
-            num_replicas,
-            ..Default::default()
-        })
-        .await
-        .into_diagnostic()?;
-        return Ok(BucketEnsureStatus::Updated);
-    }
-
-    js.create_key_value(kv::Config {
-        bucket: bucket.to_string(),
-        history,
-        max_age: Duration::from_millis(ttl_ms),
-        num_replicas,
-        ..Default::default()
-    })
-    .await
-    .into_diagnostic()?;
-    Ok(BucketEnsureStatus::Created)
-}
-
-pub(crate) fn generate_session_keypair() -> (String, String) {
-    let seed: [u8; 32] = rand::random();
-    let signing_key = SigningKey::from_bytes(&seed);
-    let public_key = signing_key.verifying_key().to_bytes();
-    (base64url_encode(&seed), base64url_encode(&public_key))
-}
-
-pub(crate) fn json_value_label(value: &Value) -> String {
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| value.to_string())
-}
-
-fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
-    let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
-    let qr = qr.render::<unicode::Dense1x2>().quiet_zone(false).build();
-    Ok(format!(
-        "Open this activation URL:\n{login_url}\n\nScan this QR code:\n{qr}"
-    ))
-}
-
-fn pending_agent_login_json(login_url: &str) -> Value {
-    serde_json::json!({
-        "status": "pending",
-        "loginUrl": login_url,
-    })
-}
-
-pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {
-    ReleaseChannel::from_prerelease_flag(prerelease)
 }

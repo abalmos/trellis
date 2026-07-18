@@ -349,9 +349,10 @@ async fn events_denies_subscribe_without_authority() {
         .await
         .expect("publish Entity.Changed event");
 
-    match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
-        Ok(Some(Ok(event))) => panic!("unauthorized subscriber received event: {event:?}"),
-        Ok(Some(Err(_))) | Ok(None) | Err(_) => {}
+    if let Ok(Some(Ok(event))) =
+        tokio::time::timeout(Duration::from_millis(500), stream.next()).await
+    {
+        panic!("unauthorized subscriber received event: {event:?}");
     }
 }
 

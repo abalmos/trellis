@@ -226,12 +226,12 @@ fn typed_jobs_traits_compile_for_custom_facades() {
     struct DemoHost;
 
     impl JobWorkerHost for DemoHost {
-        fn stop(self) -> impl std::future::Future<Output = Result<(), JobsError>> + Send {
-            async { Ok(()) }
+        async fn stop(self) -> Result<(), JobsError> {
+            Ok(())
         }
 
-        fn join(self) -> impl std::future::Future<Output = Result<(), JobsError>> + Send {
-            async { Ok(()) }
+        async fn join(self) -> Result<(), JobsError> {
+            Ok(())
         }
     }
 
@@ -240,10 +240,8 @@ fn typed_jobs_traits_compile_for_custom_facades() {
     impl JobsFacade for DemoFacade {
         type WorkerHost = DemoHost;
 
-        fn start_workers(
-            &self,
-        ) -> impl std::future::Future<Output = Result<Self::WorkerHost, JobsError>> + Send {
-            async { Ok(DemoHost) }
+        async fn start_workers(&self) -> Result<Self::WorkerHost, JobsError> {
+            Ok(DemoHost)
         }
     }
 

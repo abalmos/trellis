@@ -9,6 +9,10 @@ pub mod events;
 /// Feed descriptors.
 pub mod feeds;
 /// Job descriptors.
+#[expect(
+    clippy::module_inception,
+    reason = "generated SDK modules mirror contract surface names"
+)]
 pub mod jobs;
 /// Operation descriptors.
 pub mod operations;

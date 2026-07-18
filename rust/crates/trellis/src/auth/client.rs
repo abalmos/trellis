@@ -123,7 +123,7 @@ impl<'a> AuthClient<'a> {
     {
         let request = serde_json::to_value(input)?;
         let response = self.inner.request_json_value(subject, &request).await?;
-        Ok(convert(response)?)
+        convert(response)
     }
 
     async fn call_rpc<R>(&self, input: &R::Input) -> Result<R::Output, TrellisAuthError>
@@ -294,11 +294,7 @@ impl<'a> AuthClient<'a> {
             .await?
             .entries;
 
-        deployments
-            .into_iter()
-            .map(convert)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        deployments.into_iter().map(convert).collect()
     }
 
     /// Create a device deployment.
@@ -314,7 +310,7 @@ impl<'a> AuthClient<'a> {
         })?;
         let response = self.call_rpc::<AuthDeploymentsCreateRpc>(&request).await?;
 
-        Ok(convert(response.deployment)?)
+        convert(response.deployment)
     }
 
     /// Disable a device deployment.
@@ -576,7 +572,7 @@ impl<'a> AuthClient<'a> {
             "namespaces": namespaces,
         }))?;
         let response = self.call_rpc::<AuthDeploymentsCreateRpc>(&request).await?;
-        Ok(convert(response.deployment)?)
+        convert(response.deployment)
     }
 
     /// List service deployments.
@@ -594,8 +590,7 @@ impl<'a> AuthClient<'a> {
         .entries
         .into_iter()
         .map(convert)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+        .collect()
     }
 
     /// Disable one service deployment.
@@ -609,7 +604,7 @@ impl<'a> AuthClient<'a> {
                 kind: convert("service")?,
             })
             .await?;
-        Ok(convert(response.deployment)?)
+        convert(response.deployment)
     }
 
     /// Enable one service deployment.
@@ -623,7 +618,7 @@ impl<'a> AuthClient<'a> {
                 kind: convert("service")?,
             })
             .await?;
-        Ok(convert(response.deployment)?)
+        convert(response.deployment)
     }
 
     /// Remove one service deployment.

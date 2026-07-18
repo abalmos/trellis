@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use jsonptr::PointerBuf;
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -9,7 +10,10 @@ use crate::{
         api_error, sort_deduplicate, validate_api_id, validate_logical_name,
         validate_nonempty_text, validate_protocol_identifier, validate_version,
     },
-    schema_profile::{validate_api_structure, validate_embedded_schema},
+    schema_profile::{
+        lint_api_authoring, validate_api_runtime_structure, validate_embedded_schema,
+        validate_wire_schema_additive,
+    },
     subjects::{
         derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
         derive_operation_subject, derive_rpc_subject, DerivedApiSubjectsV1, DerivedEventSubjectsV1,
@@ -17,11 +21,34 @@ use crate::{
     ApiSurfaceKindV1, CapabilityDefinitionV1, ConsentMetadataV1, PermissionActionV1, ProtocolError,
 };
 
+mod compatibility;
+mod schema_compatibility;
+
+pub use compatibility::{
+    compare_api_replacement_v1, ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1,
+    ApiCompatibilityReportV1,
+};
+
 /// The first canonical Trellis API artifact format.
 pub const API_FORMAT_V1: &str = "trellis.api.v1";
 
-/// Draft 2020-12 authoring schema for `trellis.api.v1` artifacts.
-pub const API_SCHEMA_V1_JSON: &str = include_str!("../schemas/trellis.api.v1.schema.json");
+/// Strict Draft 2020-12 schema for authoring `trellis.api.v1` artifacts.
+pub const API_AUTHORING_SCHEMA_V1_JSON: &str =
+    include_str!("../schemas/trellis.api.v1.schema.json");
+
+/// Apply the strict, closed authoring lint to an API artifact.
+///
+/// Runtime parsing is intentionally tolerant of unknown object members; use
+/// this lint in authoring tools when extensions should be reported.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::ApiValidation`] when the closed authoring schema or
+/// the API's semantic invariants are violated.
+pub fn lint_api_v1_authoring(value: &Value) -> Result<(), ProtocolError> {
+    lint_api_authoring(value)?;
+    parse_api_v1(value).map(|_| ())
+}
 
 /// One validated, normalized `trellis.api.v1` artifact.
 ///
@@ -61,8 +88,10 @@ pub struct ApiArtifactV1 {
 
 /// Validate and parse one raw `trellis.api.v1` JSON value.
 ///
-/// This version applies the closed authoring schema as part of parsing. It also
-/// validates identifiers, references, surface invariants, and embedded schemas.
+/// Unknown object members are ignored and do not affect normalization,
+/// compatibility, capabilities, or the semantic digest. Use
+/// [`lint_api_v1_authoring`] before parsing in authoring tools that must reject
+/// unknown members.
 ///
 /// # Errors
 ///
@@ -70,7 +99,7 @@ pub struct ApiArtifactV1 {
 /// artifact or an embedded schema violates the API profile, or
 /// [`ProtocolError::Json`] when the value cannot be decoded.
 pub fn parse_api_v1(value: &Value) -> Result<ApiArtifactV1, ProtocolError> {
-    validate_api_structure(value)?;
+    validate_api_runtime_structure(value)?;
     let wire: WireApiArtifactV1 =
         serde_json::from_value(value.clone()).map_err(|error| api_error("", error.to_string()))?;
     ApiArtifactV1::from_wire(wire)
@@ -291,7 +320,7 @@ impl ApiArtifactV1 {
                 ));
             }
             for (signal, descriptor) in &definition.signals {
-                let signal_path = format!("{path}/signals/{signal}");
+                let signal_path = pointer(["operations", name, "signals", signal]);
                 validate_protocol_identifier(&signal_path, signal, api_error)?;
                 require_schema(
                     &wire.schemas,
@@ -352,20 +381,67 @@ impl ApiArtifactV1 {
                 validate_protocol_identifier(&format!("{path}/stateVersion"), version, api_error)?;
             }
             for (version, reference) in &definition.accepted_versions {
-                validate_protocol_identifier(
-                    &format!("{path}/acceptedVersions/{version}"),
-                    version,
-                    api_error,
-                )?;
-                require_schema(
-                    &wire.schemas,
-                    reference,
-                    &format!("{path}/acceptedVersions/{version}"),
-                )?;
+                let version_path = pointer(["state", name, "acceptedVersions", version]);
+                validate_protocol_identifier(&version_path, version, api_error)?;
+                require_schema(&wire.schemas, reference, &version_path)?;
             }
             if let Some(docs) = &definition.docs {
                 validate_docs(&format!("{path}/docs"), docs)?;
             }
+        }
+
+        let mut public_schemas = wire.exports.schemas.iter().collect::<BTreeSet<_>>();
+        for definition in wire.rpc.values() {
+            public_schemas.insert(&definition.input.schema);
+            public_schemas.insert(&definition.output.schema);
+            for error in &definition.errors {
+                if let Some(schema) = wire.errors[error].schema.as_ref() {
+                    public_schemas.insert(&schema.schema);
+                }
+            }
+        }
+        for definition in wire.operations.values() {
+            public_schemas.insert(&definition.input.schema);
+            public_schemas.extend(
+                [
+                    definition.progress.as_ref(),
+                    definition.update.as_ref(),
+                    definition.output.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                .map(|reference| &reference.schema),
+            );
+            public_schemas.extend(
+                definition
+                    .signals
+                    .values()
+                    .map(|signal| &signal.input.schema),
+            );
+            for error in &definition.errors {
+                if let Some(schema) = wire.errors[error].schema.as_ref() {
+                    public_schemas.insert(&schema.schema);
+                }
+            }
+        }
+        for definition in wire.events.values() {
+            public_schemas.insert(&definition.event.schema);
+        }
+        for definition in wire.feeds.values() {
+            public_schemas.insert(&definition.input.schema);
+            public_schemas.insert(&definition.event.schema);
+        }
+        for definition in wire.state.values() {
+            public_schemas.insert(&definition.schema.schema);
+            public_schemas.extend(
+                definition
+                    .accepted_versions
+                    .values()
+                    .map(|reference| &reference.schema),
+            );
+        }
+        for name in public_schemas {
+            validate_wire_schema_additive(name, &wire.schemas[name])?;
         }
 
         for (capability_name, capability) in &wire.capabilities {
@@ -373,6 +449,29 @@ impl ApiArtifactV1 {
             validate_protocol_identifier(&path, capability_name, api_error)?;
             for (index, atom) in capability.allows().iter().enumerate() {
                 let atom_path = format!("{path}/allows/{index}");
+                if let Some((api, operation, signal)) = atom.target().as_operation_signal() {
+                    if api != wire.id {
+                        return Err(api_error(
+                            atom_path,
+                            format!("capability target API '{api}' must equal '{}'", wire.id),
+                        ));
+                    }
+                    let Some(operation_definition) = wire.operations.get(operation) else {
+                        return Err(api_error(
+                            atom_path,
+                            format!("capability targets missing operation '{operation}'"),
+                        ));
+                    };
+                    if !operation_definition.signals.contains_key(signal) {
+                        return Err(api_error(
+                            atom_path,
+                            format!(
+                                "capability targets missing signal '{signal}' on operation '{operation}'"
+                            ),
+                        ));
+                    }
+                    continue;
+                }
                 let Some((api, surface, name)) = atom.target().as_api_surface() else {
                     return Err(api_error(
                         atom_path,
@@ -404,13 +503,6 @@ impl ApiArtifactV1 {
                         return Err(api_error(
                             &atom_path,
                             "cancel permission requires a cancelable operation",
-                        ));
-                    }
-                    if atom.action() == PermissionActionV1::Control && operation.signals.is_empty()
-                    {
-                        return Err(api_error(
-                            atom_path,
-                            "control permission requires at least one operation signal",
                         ));
                     }
                 }
@@ -471,7 +563,7 @@ impl<'de> Deserialize<'de> for ApiArtifactV1 {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct WireApiArtifactV1 {
     format: String,
     id: String,
@@ -502,7 +594,6 @@ struct WireApiArtifactV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct DocumentationV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
@@ -510,7 +601,6 @@ struct DocumentationV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct ExportsV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     schemas: Vec<String>,
@@ -523,7 +613,6 @@ impl ExportsV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct SchemaReferenceV1 {
     schema: String,
 }
@@ -536,13 +625,11 @@ enum TransferDirectionV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct TransferDefinitionV1 {
     direction: TransferDirectionV1,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct ErrorDefinitionV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     schema: Option<SchemaReferenceV1>,
@@ -551,7 +638,6 @@ struct ErrorDefinitionV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct RpcDefinitionV1 {
     version: String,
     input: SchemaReferenceV1,
@@ -567,7 +653,6 @@ struct RpcDefinitionV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct OperationSignalV1 {
     input: SchemaReferenceV1,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -575,7 +660,6 @@ struct OperationSignalV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct OperationDefinitionV1 {
     version: String,
     input: SchemaReferenceV1,
@@ -607,7 +691,6 @@ enum EventClassV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct EventDefinitionV1 {
     version: String,
     event: SchemaReferenceV1,
@@ -620,7 +703,6 @@ struct EventDefinitionV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 struct FeedDefinitionV1 {
     version: String,
     input: SchemaReferenceV1,
@@ -637,7 +719,7 @@ enum StateKindV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase")]
 struct StateDefinitionV1 {
     kind: StateKindV1,
     schema: SchemaReferenceV1,
@@ -712,7 +794,11 @@ fn require_key<T>(
 }
 
 fn member_path(section: &str, name: &str) -> String {
-    format!("/{section}/{}", name.replace('~', "~0").replace('/', "~1"))
+    pointer([section, name])
+}
+
+fn pointer<'a>(tokens: impl IntoIterator<Item = &'a str>) -> String {
+    PointerBuf::from_tokens(tokens).to_string()
 }
 
 fn insert_nonempty<T: Serialize>(
@@ -815,7 +901,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::schema_profile::{validate_api_meta_schema, validate_api_structure};
+    use crate::schema_profile::{lint_api_authoring, validate_api_meta_schema};
 
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -831,6 +917,8 @@ mod tests {
         same_normalized_as: Option<String>,
         same_digest_as: Option<String>,
         different_digest_from: Option<String>,
+        error_schema: Option<String>,
+        error_path: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -840,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn api_meta_schema_and_shared_vectors_agree() {
+    fn api_authoring_schema_and_shared_vectors_agree() {
         validate_api_meta_schema().unwrap();
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/api/vectors.json");
@@ -850,12 +938,29 @@ mod tests {
 
         for vector in &fixture.vectors {
             assert_eq!(
-                validate_api_structure(&vector.input).is_ok(),
+                lint_api_authoring(&vector.input).is_ok(),
                 vector.schema_valid,
-                "meta-schema result for {}",
+                "authoring lint result for {}",
                 vector.name
             );
             let parsed = parse_api_v1(&vector.input);
+            if let (Err(error), Some(schema), Some(path)) =
+                (&parsed, &vector.error_schema, &vector.error_path)
+            {
+                let ProtocolError::SchemaProfile {
+                    schema: actual_schema,
+                    path: actual_path,
+                    ..
+                } = error
+                else {
+                    panic!(
+                        "expected schema profile error for {}: {error:?}",
+                        vector.name
+                    )
+                };
+                assert_eq!(actual_schema, schema, "schema for {}", vector.name);
+                assert_eq!(actual_path, path, "path for {}", vector.name);
+            }
             assert_eq!(
                 parsed.is_ok(),
                 vector.valid,
@@ -937,5 +1042,270 @@ mod tests {
             ProtocolError::ApiValidation { path, .. } => assert_eq!(path, "/id"),
             error => panic!("expected API validation error, received {error:?}"),
         }
+    }
+
+    #[test]
+    fn api_authored_nested_keys_are_json_pointer_encoded() {
+        let signal = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": { "Any": true },
+            "operations": {
+                "Op": {
+                    "version": "v1",
+                    "input": { "schema": "Any" },
+                    "signals": {
+                        "sig/~": { "input": { "schema": "Missing" } }
+                    }
+                }
+            }
+        });
+        assert_api_error(&signal, "/operations/Op/signals/sig~1~0/input");
+
+        let accepted_version = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": { "Any": true },
+            "state": {
+                "S": {
+                    "kind": "value",
+                    "schema": { "schema": "Any" },
+                    "acceptedVersions": {
+                        "v/~": { "schema": "Missing" }
+                    }
+                }
+            }
+        });
+        assert_api_error(&accepted_version, "/state/S/acceptedVersions/v~1~0");
+    }
+
+    #[test]
+    fn wire_schemas_reject_closed_object_keywords() {
+        for (schema, expected_path) in [
+            (
+                json!({ "type": "object", "additionalProperties": false }),
+                "/additionalProperties",
+            ),
+            (
+                json!({ "type": "object", "additionalProperties": { "type": "string" } }),
+                "/additionalProperties",
+            ),
+            (
+                json!({ "type": "object", "unevaluatedProperties": false }),
+                "/unevaluatedProperties",
+            ),
+            (
+                json!({ "type": "object", "not": { "required": ["futureField"] } }),
+                "/not",
+            ),
+            (
+                json!({ "type": "object", "if": { "required": ["futureField"] }, "then": false }),
+                "/if",
+            ),
+            (
+                json!({ "type": "object", "dependentSchemas": { "futureField": false } }),
+                "/dependentSchemas",
+            ),
+            (
+                json!({ "type": "object", "dependentRequired": { "futureField": ["other"] } }),
+                "/dependentRequired",
+            ),
+            (json!({ "const": { "fixed": true } }), "/const"),
+            (json!({ "enum": [{ "fixed": true }] }), "/enum"),
+            (
+                json!({ "allOf": [true, { "type": "object", "additionalProperties": false }] }),
+                "/allOf/1/additionalProperties",
+            ),
+            (
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "nested": { "type": "object", "additionalProperties": false }
+                    }
+                }),
+                "/properties/nested/additionalProperties",
+            ),
+        ] {
+            let value = json!({
+                "format": API_FORMAT_V1,
+                "id": "example@v1",
+                "displayName": "Example",
+                "description": "Example API.",
+                "schemas": { "Input": schema },
+                "rpc": {
+                    "Example.Get": {
+                        "version": "v1",
+                        "input": { "schema": "Input" },
+                        "output": { "schema": "Input" }
+                    }
+                }
+            });
+            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            assert_schema_profile(error, "Input", expected_path);
+        }
+
+        let private = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": {
+                "Public": true,
+                "Private": { "type": "object", "additionalProperties": false }
+            },
+            "rpc": {
+                "Example.Get": {
+                    "version": "v1",
+                    "input": { "schema": "Public" },
+                    "output": { "schema": "Public" }
+                }
+            }
+        });
+        assert!(parse_api_v1(&private).is_ok());
+    }
+
+    #[test]
+    fn every_api_wire_schema_reference_requires_additive_objects() {
+        let base = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": {
+                "Export": true, "RpcInput": true, "RpcOutput": true, "RpcError": true,
+                "OpInput": true, "OpProgress": true, "OpUpdate": true, "OpOutput": true,
+                "OpSignal": true, "OpError": true, "Event": true, "FeedInput": true,
+                "FeedEvent": true, "State": true, "StateV1": true
+            },
+            "exports": { "schemas": ["Export"] },
+            "errors": {
+                "RpcFailure": { "schema": { "schema": "RpcError" } },
+                "OpFailure": { "schema": { "schema": "OpError" } }
+            },
+            "rpc": {
+                "Example.Get": {
+                    "version": "v1", "input": { "schema": "RpcInput" },
+                    "output": { "schema": "RpcOutput" }, "errors": ["RpcFailure"]
+                }
+            },
+            "operations": {
+                "Example.Run": {
+                    "version": "v1", "input": { "schema": "OpInput" },
+                    "progress": { "schema": "OpProgress" }, "update": { "schema": "OpUpdate" },
+                    "output": { "schema": "OpOutput" }, "errors": ["OpFailure"],
+                    "signals": { "approve": { "input": { "schema": "OpSignal" } } }
+                }
+            },
+            "events": { "Example.Changed": { "version": "v1", "event": { "schema": "Event" } } },
+            "feeds": {
+                "Example.Watch": {
+                    "version": "v1", "input": { "schema": "FeedInput" },
+                    "event": { "schema": "FeedEvent" }
+                }
+            },
+            "state": {
+                "Settings": {
+                    "kind": "value", "schema": { "schema": "State" },
+                    "acceptedVersions": { "v1": { "schema": "StateV1" } }
+                }
+            }
+        });
+        assert!(parse_api_v1(&base).is_ok());
+
+        for name in [
+            "Export",
+            "RpcInput",
+            "RpcOutput",
+            "RpcError",
+            "OpInput",
+            "OpProgress",
+            "OpUpdate",
+            "OpOutput",
+            "OpSignal",
+            "OpError",
+            "Event",
+            "FeedInput",
+            "FeedEvent",
+            "State",
+            "StateV1",
+        ] {
+            let mut value = base.clone();
+            value["schemas"][name] = json!({ "type": "object", "additionalProperties": false });
+            let error = parse_api_v1(&value).expect_err("closed wire schema must fail");
+            assert_schema_profile(error, name, "/additionalProperties");
+        }
+    }
+
+    #[test]
+    fn runtime_extensions_do_not_change_api_semantics() {
+        let base = json!({
+            "format": API_FORMAT_V1,
+            "id": "example@v1",
+            "displayName": "Example",
+            "description": "Example API.",
+            "schemas": { "Any": true },
+            "rpc": {
+                "Example.Get": {
+                    "version": "v1",
+                    "input": { "schema": "Any" },
+                    "output": { "schema": "Any" }
+                }
+            },
+            "capabilities": {
+                "read": {
+                    "allows": [{
+                        "target": {
+                            "kind": "apiSurface",
+                            "api": "example@v1",
+                            "surface": "rpc",
+                            "name": "Example.Get"
+                        },
+                        "action": "call"
+                    }]
+                }
+            },
+            "consent": {
+                "read": {
+                    "title": "Read",
+                    "description": "Read records.",
+                    "consequence": "Records are visible."
+                }
+            }
+        });
+        let mut extended = base.clone();
+        extended["extension"] = json!(true);
+        extended["rpc"]["Example.Get"]["extension"] = json!(true);
+        extended["capabilities"]["read"]["extension"] = json!(true);
+        extended["capabilities"]["read"]["allows"][0]["extension"] = json!(true);
+        extended["capabilities"]["read"]["allows"][0]["target"]["extension"] = json!(true);
+        extended["consent"]["read"]["extension"] = json!(true);
+
+        assert!(lint_api_v1_authoring(&extended).is_err());
+        let base = parse_api_v1(&base).unwrap();
+        let extended = parse_api_v1(&extended).unwrap();
+        assert_eq!(
+            extended.normalized_value().unwrap(),
+            base.normalized_value().unwrap()
+        );
+        assert_eq!(extended.digest().unwrap(), base.digest().unwrap());
+    }
+
+    fn assert_api_error(value: &Value, expected_path: &str) {
+        match parse_api_v1(value).unwrap_err() {
+            ProtocolError::ApiValidation { path, .. } => assert_eq!(path, expected_path),
+            error => panic!("expected API validation error, received {error:?}"),
+        }
+    }
+
+    fn assert_schema_profile(error: ProtocolError, expected_schema: &str, expected_path: &str) {
+        let ProtocolError::SchemaProfile { schema, path, .. } = error else {
+            panic!("expected schema profile error, got {error:?}")
+        };
+        assert_eq!(schema, expected_schema);
+        assert_eq!(path, expected_path);
     }
 }

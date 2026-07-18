@@ -23,9 +23,7 @@ use trellis_rs::sdk::auth::types::{
     AuthServiceInstancesRemoveRequest, AuthSessionsListRequest, AuthUsersCreateRequest,
     AuthUsersListRequest, AuthUsersPasswordChangeRequest, AuthUsersPasswordResetCreateRequest,
 };
-use trellis_rs::service::{
-    ConnectedServiceRuntime, GeneratedServiceContract, KvResourceClient, StoreResourceClient,
-};
+use trellis_rs::service::{ConnectedServiceRuntime, GeneratedServiceContract};
 
 use crate::support::assertions::assert_service_case_registered;
 
@@ -2811,7 +2809,7 @@ async fn control_plane_catalog_resource_binding_projection() {
         CATALOG_BINDING_PROJECTION_DEPLOYMENT,
     )
     .await;
-    let mut connect_handle = spawn_catalog_binding_projection_removed_connect(
+    let connect_handle = spawn_catalog_binding_projection_removed_connect(
         runtime.trellis_url(),
         removed_contract.digest(),
         removed_key.seed,
@@ -3017,11 +3015,13 @@ async fn control_plane_admin_service_deployment_rollback_fault() {
         "control_plane",
     );
 
-    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
-    options.fail_once_hooks = vec![
-        "auth.admin.serviceDeployments.createAuthority".to_string(),
-        "auth.admin.serviceDeployments.deleteCascadeRecord".to_string(),
-    ];
+    let options = trellis_test::TrellisTestRuntimeOptions {
+        fail_once_hooks: vec![
+            "auth.admin.serviceDeployments.createAuthority".to_string(),
+            "auth.admin.serviceDeployments.deleteCascadeRecord".to_string(),
+        ],
+        ..Default::default()
+    };
     let runtime = trellis_test::TrellisTestRuntime::start(options)
         .await
         .expect("start live Trellis test runtime with service deployment fault hooks");
@@ -3183,11 +3183,13 @@ async fn control_plane_admin_device_deployment_rollback_fault() {
         "control_plane",
     );
 
-    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
-    options.fail_once_hooks = vec![
-        "auth.admin.deviceDeployments.createAuthority".to_string(),
-        "auth.admin.deviceDeployments.deleteCascadeRecord".to_string(),
-    ];
+    let options = trellis_test::TrellisTestRuntimeOptions {
+        fail_once_hooks: vec![
+            "auth.admin.deviceDeployments.createAuthority".to_string(),
+            "auth.admin.deviceDeployments.deleteCascadeRecord".to_string(),
+        ],
+        ..Default::default()
+    };
     let runtime = trellis_test::TrellisTestRuntime::start(options)
         .await
         .expect("start live Trellis test runtime with device deployment fault hooks");
@@ -3656,8 +3658,6 @@ async fn control_plane_admin_service_deployment_enable_refresh_rollback() {
         deployment_disabled(&auth_rpc, "service", deployment_id).await,
         Some(true)
     );
-    drop(auth_rpc);
-    drop(auth);
     drop(admin_client);
 
     inject_fail_once_hook(&runtime, SERVICE_DEPLOYMENT_REFRESH_HOOK);
@@ -3769,8 +3769,6 @@ async fn control_plane_admin_service_instance_enable_refresh_rollback() {
         .await
         .expect("disable service instance before enable rollback test");
     assert_service_instance_disabled(&auth_rpc, deployment_id, &instance_id, true).await;
-    drop(auth_rpc);
-    drop(auth);
     drop(admin_client);
 
     inject_fail_once_hook(&runtime, SERVICE_INSTANCE_REFRESH_HOOK);
@@ -3923,8 +3921,6 @@ async fn control_plane_admin_device_deployment_enable_refresh_rollback() {
         deployment_disabled(&auth_rpc, "device", deployment_id).await,
         Some(true)
     );
-    drop(auth_rpc);
-    drop(auth);
     drop(admin_client);
 
     inject_fail_once_hook(&runtime, DEVICE_DEPLOYMENT_REFRESH_HOOK);
@@ -4036,8 +4032,6 @@ async fn control_plane_admin_device_instance_enable_refresh_rollback() {
         .await
         .expect("disable device instance before enable rollback test");
     assert_device_state(&auth_rpc, deployment_id, &instance_id, "disabled").await;
-    drop(auth_rpc);
-    drop(auth);
     drop(admin_client);
 
     inject_fail_once_hook(&runtime, DEVICE_INSTANCE_REFRESH_HOOK);
@@ -4133,13 +4127,11 @@ fn listed_deployment_disabled(
     }
 }
 
-fn deployment_field<'a>(deployment: &'a Value, field: &str) -> Option<&'a str> {
-    deployment.get(field).and_then(Value::as_str)
-}
-
 async fn start_runtime_with_fail_once_hook(hook: &str) -> trellis_test::TrellisTestRuntime {
-    let mut options = trellis_test::TrellisTestRuntimeOptions::default();
-    options.fail_once_hooks = vec![hook.to_string()];
+    let options = trellis_test::TrellisTestRuntimeOptions {
+        fail_once_hooks: vec![hook.to_string()],
+        ..Default::default()
+    };
     trellis_test::TrellisTestRuntime::start(options)
         .await
         .expect("start live Trellis test runtime with refresh fail-once hook")
@@ -5750,6 +5742,10 @@ fn create_outbox_restart_db() -> Connection {
     conn
 }
 
+#[expect(
+    clippy::await_holding_lock,
+    reason = "the SQLite outbox store borrows its connection for one dispatch pass"
+)]
 async fn dispatch_outbox_restart_once(
     db: &Arc<std::sync::Mutex<Connection>>,
     publisher: &trellis_rs::service::EventPublisher,
@@ -6940,10 +6936,10 @@ async fn connect_with_local_password(
     let flow_id = start_local_auth_flow(trellis_url, &redirect_to, &auth, contract).await?;
     let login = post_local_login(trellis_url, &flow_id, username, password).await?;
     if !(200..300).contains(&login.status) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("local login failed ({}): {}", login.status, login.body),
-        )
+        return Err(std::io::Error::other(format!(
+            "local login failed ({}): {}",
+            login.status, login.body
+        ))
         .into());
     }
     approve_flow_if_needed(trellis_url, &flow_id).await?;
@@ -6953,18 +6949,11 @@ async fn connect_with_local_password(
         transports,
     } = bound
     else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "local login flow did not bind after approval",
-        )
-        .into());
+        return Err(std::io::Error::other("local login flow did not bind after approval").into());
     };
-    let native = transports.native.ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "bind response missing native transport",
-        )
-    })?;
+    let native = transports
+        .native
+        .ok_or_else(|| std::io::Error::other("bind response missing native transport"))?;
     let servers = native.servers.join(",");
     Ok(
         trellis_rs::generated::Caller::connect_user(
@@ -7023,8 +7012,7 @@ async fn start_local_auth_flow(
         trellis_rs::auth::AuthStartResponse::FlowStarted { login_url, .. } => {
             flow_id_from_url(&login_url)
         }
-        trellis_rs::auth::AuthStartResponse::Bound { .. } => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        trellis_rs::auth::AuthStartResponse::Bound { .. } => Err(std::io::Error::other(
             "fresh local-password auth request unexpectedly returned bound",
         )
         .into()),
@@ -7048,11 +7036,7 @@ fn contract_manifest_map(
     contract: &trellis_test::TrellisTestContract,
 ) -> Result<BTreeMap<String, Value>, Box<dyn std::error::Error + Send + Sync>> {
     let Value::Object(map) = contract.manifest() else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "contract manifest must be a JSON object",
-        )
-        .into());
+        return Err(std::io::Error::other("contract manifest must be a JSON object").into());
     };
     Ok(map.clone().into_iter().collect())
 }
@@ -7098,10 +7082,9 @@ async fn approve_flow_if_needed(
             );
             Ok(())
         }
-        status => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("unexpected local auth flow status: {status:?}"),
-        )
+        status => Err(std::io::Error::other(format!(
+            "unexpected local auth flow status: {status:?}"
+        ))
         .into()),
     }
 }
@@ -7162,13 +7145,10 @@ where
     let status = response.status();
     let body = response.text().await?;
     if !status.is_success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "HTTP request failed ({}) for {url}: {body}",
-                status.as_u16()
-            ),
-        )
+        return Err(std::io::Error::other(format!(
+            "HTTP request failed ({}) for {url}: {body}",
+            status.as_u16()
+        ))
         .into());
     }
     Ok(serde_json::from_str(&body)?)
@@ -7196,11 +7176,7 @@ fn flow_id_from_url(url: &str) -> Result<String, Box<dyn std::error::Error + Sen
         .find_map(|(key, value)| (key == "flowId").then(|| value.into_owned()))
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Trellis auth URL is missing flowId: {url}"),
-            )
-            .into()
+            std::io::Error::other(format!("Trellis auth URL is missing flowId: {url}")).into()
         })
 }
 

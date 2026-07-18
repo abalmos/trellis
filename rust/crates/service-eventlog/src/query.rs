@@ -211,7 +211,7 @@ fn window_config(window: &str) -> Option<(i64, i64)> {
         "6h" => Some((6 * 60 * 60, 30 * 60)),
         "24h" => Some((24 * 60 * 60, 60 * 60)),
         "7d" => Some((7 * 24 * 60 * 60, 6 * 60 * 60)),
-        _ => return None,
+        _ => None,
     }
 }
 

@@ -1625,8 +1625,8 @@ impl OperationTransport for TrellisClient {
         Ok(Box::pin(stream) as BoxStream<'a, Result<Value, TrellisClientError>>)
     }
 
-    async fn put_upload_transfer<'a>(
-        &'a self,
+    async fn put_upload_transfer(
+        &self,
         grant: UploadTransferGrant,
         body: Vec<u8>,
     ) -> Result<FileInfo, TrellisClientError> {
@@ -1634,6 +1634,10 @@ impl OperationTransport for TrellisClient {
     }
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "CallError is the public typed caller failure envelope"
+)]
 fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
 where
     E: crate::client::DeclaredError,

@@ -115,12 +115,12 @@ impl PermissionActionV1 {
     }
 }
 
-/// The exact API surface or participant resource targeted by a permission.
+/// The exact API surface, operation signal, or participant resource targeted by a permission.
 ///
 /// Owner and local-name strings must be nonempty, have no surrounding
 /// whitespace, and contain no ASCII control characters.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "kind", deny_unknown_fields)]
+#[serde(tag = "kind")]
 pub enum PermissionTargetV1 {
     /// An externally visible surface owned by an API artifact.
     #[serde(rename = "apiSurface")]
@@ -142,6 +142,16 @@ pub enum PermissionTargetV1 {
         /// The participant-local resource name.
         name: String,
     },
+    /// One named signal on a caller-visible asynchronous operation.
+    #[serde(rename = "operationSignal")]
+    OperationSignal {
+        /// The owning versioned API identifier.
+        api: String,
+        /// The API-local operation name.
+        operation: String,
+        /// The operation-local signal name.
+        signal: String,
+    },
 }
 
 impl<'de> Deserialize<'de> for PermissionTargetV1 {
@@ -150,7 +160,7 @@ impl<'de> Deserialize<'de> for PermissionTargetV1 {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(tag = "kind", deny_unknown_fields)]
+        #[serde(tag = "kind")]
         enum WireTarget {
             #[serde(rename = "apiSurface")]
             ApiSurface {
@@ -164,6 +174,12 @@ impl<'de> Deserialize<'de> for PermissionTargetV1 {
                 resource: ParticipantResourceKindV1,
                 name: String,
             },
+            #[serde(rename = "operationSignal")]
+            OperationSignal {
+                api: String,
+                operation: String,
+                signal: String,
+            },
         }
 
         match WireTarget::deserialize(deserializer)? {
@@ -175,6 +191,11 @@ impl<'de> Deserialize<'de> for PermissionTargetV1 {
                 resource,
                 name,
             } => Self::participant_resource(participant, resource, name).map_err(D::Error::custom),
+            WireTarget::OperationSignal {
+                api,
+                operation,
+                signal,
+            } => Self::operation_signal(api, operation, signal).map_err(D::Error::custom),
         }
     }
 }
@@ -220,11 +241,39 @@ impl PermissionTargetV1 {
         Ok(target)
     }
 
+    /// Construct an operation-signal permission target.
+    pub fn operation_signal(
+        api: impl Into<String>,
+        operation: impl Into<String>,
+        signal: impl Into<String>,
+    ) -> Result<Self, ProtocolError> {
+        let target = Self::OperationSignal {
+            api: api.into(),
+            operation: operation.into(),
+            signal: signal.into(),
+        };
+        target.validate()?;
+        Ok(target)
+    }
+
     /// Return the API identifier, surface kind, and local name for an API target.
     pub fn as_api_surface(&self) -> Option<(&str, ApiSurfaceKindV1, &str)> {
         match self {
             Self::ApiSurface { api, surface, name } => Some((api, *surface, name)),
             Self::ParticipantResource { .. } => None,
+            Self::OperationSignal { .. } => None,
+        }
+    }
+
+    /// Return the API, operation, and signal names for an operation-signal target.
+    pub fn as_operation_signal(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::OperationSignal {
+                api,
+                operation,
+                signal,
+            } => Some((api, operation, signal)),
+            _ => None,
         }
     }
 
@@ -240,17 +289,39 @@ impl PermissionTargetV1 {
                 validate_identifier("participant identifier", participant)?;
                 validate_identifier("resource name", name)
             }
+            Self::OperationSignal {
+                api,
+                operation,
+                signal,
+            } => {
+                validate_identifier("API identifier", api)?;
+                validate_identifier("operation name", operation)?;
+                validate_identifier("signal name", signal)
+            }
         }
     }
 
-    fn ordering_key(&self) -> (&'static str, &str, &'static str, &str) {
+    fn ordering_key(&self) -> (&'static str, &str, &'static str, &str, &str) {
         match self {
-            Self::ApiSurface { api, surface, name } => ("apiSurface", api, surface.as_str(), name),
+            Self::ApiSurface { api, surface, name } => {
+                ("apiSurface", api, surface.as_str(), name, "")
+            }
             Self::ParticipantResource {
                 participant,
                 resource,
                 name,
-            } => ("participantResource", participant, resource.as_str(), name),
+            } => (
+                "participantResource",
+                participant,
+                resource.as_str(),
+                name,
+                "",
+            ),
+            Self::OperationSignal {
+                api,
+                operation,
+                signal,
+            } => ("operationSignal", api, "operation", operation, signal),
         }
     }
 
@@ -258,6 +329,7 @@ impl PermissionTargetV1 {
         match self {
             Self::ApiSurface { surface, .. } => surface.as_str(),
             Self::ParticipantResource { resource, .. } => resource.as_str(),
+            Self::OperationSignal { .. } => "operationSignal",
         }
     }
 }
@@ -268,7 +340,6 @@ impl PermissionTargetV1 {
 /// events accept `publish` or `subscribe`, and private Jobs queues accept
 /// `submit` or `process`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct PermissionAtomV1 {
     target: PermissionTargetV1,
     action: PermissionActionV1,
@@ -311,7 +382,6 @@ impl PermissionAtomV1 {
                     PermissionActionV1::Invoke
                         | PermissionActionV1::Observe
                         | PermissionActionV1::Cancel
-                        | PermissionActionV1::Control
                 ),
                 ApiSurfaceKindV1::Event => matches!(
                     action,
@@ -342,6 +412,9 @@ impl PermissionAtomV1 {
                     matches!(action, PermissionActionV1::Read | PermissionActionV1::Write)
                 }
             },
+            (PermissionTargetV1::OperationSignal { .. }, action) => {
+                matches!(action, PermissionActionV1::Control)
+            }
         };
 
         if valid {
@@ -354,9 +427,9 @@ impl PermissionAtomV1 {
         }
     }
 
-    fn ordering_key(&self) -> (&'static str, &str, &'static str, &str, &'static str) {
-        let (kind, owner, target_kind, name) = self.target.ordering_key();
-        (kind, owner, target_kind, name, self.action.as_str())
+    fn ordering_key(&self) -> (&'static str, &str, &'static str, &str, &str, &'static str) {
+        let (kind, owner, target_kind, name, detail) = self.target.ordering_key();
+        (kind, owner, target_kind, name, detail, self.action.as_str())
     }
 }
 
@@ -366,7 +439,6 @@ impl<'de> Deserialize<'de> for PermissionAtomV1 {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct WireAtom {
             target: PermissionTargetV1,
             action: PermissionActionV1,
@@ -382,7 +454,6 @@ impl<'de> Deserialize<'de> for PermissionAtomV1 {
 /// A capability is an authoring and explanation grouping. It does not itself
 /// confer authority; enforcement uses exact atoms in a [`GrantSetV1`].
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct CapabilityDefinitionV1 {
     allows: Vec<PermissionAtomV1>,
 }
@@ -407,7 +478,6 @@ impl<'de> Deserialize<'de> for CapabilityDefinitionV1 {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct WireCapability {
             allows: Vec<PermissionAtomV1>,
         }
@@ -420,7 +490,6 @@ impl<'de> Deserialize<'de> for CapabilityDefinitionV1 {
 ///
 /// These strings may be shown during owner review, but are non-authoritative.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ConsentMetadataV1 {
     /// Short consent heading.
     pub title: String,
@@ -435,7 +504,6 @@ pub struct ConsentMetadataV1 {
 /// Construction sorts by UTF-16 code units and removes duplicate atoms. The
 /// digest therefore identifies the enforceable set rather than authored order.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct GrantSetV1 {
     format: String,
     permissions: Vec<PermissionAtomV1>,
@@ -487,7 +555,6 @@ impl<'de> Deserialize<'de> for GrantSetV1 {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
         struct WireGrantSet {
             format: String,
             permissions: Vec<PermissionAtomV1>,
@@ -520,6 +587,7 @@ fn compare_permission_atoms(
         .then_with(|| compare_protocol_strings(left.2, right.2))
         .then_with(|| compare_protocol_strings(left.3, right.3))
         .then_with(|| compare_protocol_strings(left.4, right.4))
+        .then_with(|| compare_protocol_strings(left.5, right.5))
 }
 
 fn validate_identifier(field: &'static str, value: &str) -> Result<(), ProtocolError> {
@@ -584,6 +652,7 @@ mod tests {
                 "target.owner",
                 "target.surfaceOrResource",
                 "target.name",
+                "target.detail",
                 "action"
             ]
         );
@@ -638,6 +707,23 @@ mod tests {
             "reindex",
         )
         .unwrap();
+
+        assert!(PermissionAtomV1::new(
+            PermissionTargetV1::api_surface(
+                "trellis.core@v1",
+                ApiSurfaceKindV1::Operation,
+                "Documents.Build",
+            )
+            .unwrap(),
+            PermissionActionV1::Control,
+        )
+        .is_err());
+        PermissionAtomV1::new(
+            PermissionTargetV1::operation_signal("trellis.core@v1", "Documents.Build", "approve")
+                .unwrap(),
+            PermissionActionV1::Control,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -661,13 +747,6 @@ mod tests {
                 "surface": "rpc",
                 "name": "Documents.\nGet"
             }),
-            serde_json::json!({
-                "kind": "apiSurface",
-                "api": "documents@v1",
-                "surface": "rpc",
-                "name": "Documents.Get",
-                "extra": true
-            }),
         ] {
             assert!(serde_json::from_value::<PermissionTargetV1>(invalid).is_err());
         }
@@ -680,6 +759,24 @@ mod tests {
         });
         let target: PermissionTargetV1 = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(serde_json::to_value(target).unwrap(), value);
+
+        let extended = serde_json::json!({
+            "kind": "operationSignal",
+            "api": "trellis.core@v1",
+            "operation": "Documents.Build",
+            "signal": "approve",
+            "extra": true
+        });
+        let target: PermissionTargetV1 = serde_json::from_value(extended).unwrap();
+        assert_eq!(
+            serde_json::to_value(target).unwrap(),
+            serde_json::json!({
+                "kind": "operationSignal",
+                "api": "trellis.core@v1",
+                "operation": "Documents.Build",
+                "signal": "approve"
+            })
+        );
     }
 
     #[test]
@@ -727,27 +824,31 @@ mod tests {
     }
 
     #[test]
-    fn capability_and_consent_objects_are_closed() {
-        assert!(
-            serde_json::from_value::<CapabilityDefinitionV1>(serde_json::json!({
-                "allows": [],
-                "title": "not machine policy"
-            }))
-            .is_err()
+    fn capability_and_consent_objects_ignore_extensions() {
+        let capability: CapabilityDefinitionV1 = serde_json::from_value(serde_json::json!({
+            "allows": [],
+            "title": "not machine policy"
+        }))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(capability).unwrap(),
+            serde_json::json!({ "allows": [] })
         );
-        assert!(
-            serde_json::from_value::<ConsentMetadataV1>(serde_json::json!({
-                "title": "View documents",
-                "description": "Read documents.",
-                "consequence": "Documents are visible.",
-                "allows": []
-            }))
-            .is_err()
-        );
+        let consent: ConsentMetadataV1 = serde_json::from_value(serde_json::json!({
+            "title": "View documents",
+            "description": "Read documents.",
+            "consequence": "Documents are visible.",
+            "allows": []
+        }))
+        .unwrap();
+        assert!(serde_json::to_value(consent)
+            .unwrap()
+            .get("allows")
+            .is_none());
     }
 
     #[test]
-    fn permission_and_grant_objects_are_closed() {
+    fn permission_and_grant_objects_ignore_extensions() {
         for atom in [
             serde_json::json!({
                 "target": { "kind": "apiSurface", "api": "documents@v1", "surface": "rpc", "name": "Documents.Get" },
@@ -759,14 +860,16 @@ mod tests {
                 "action": "call"
             }),
         ] {
-            assert!(serde_json::from_value::<PermissionAtomV1>(atom).is_err());
+            let atom: PermissionAtomV1 = serde_json::from_value(atom).unwrap();
+            assert!(serde_json::to_value(atom).unwrap().get("extra").is_none());
         }
 
-        assert!(serde_json::from_value::<GrantSetV1>(serde_json::json!({
+        let grant: GrantSetV1 = serde_json::from_value(serde_json::json!({
             "format": GRANT_SET_FORMAT_V1,
             "permissions": [],
             "extra": true
         }))
-        .is_err());
+        .unwrap();
+        assert_eq!(grant, GrantSetV1::new(Vec::new()));
     }
 }

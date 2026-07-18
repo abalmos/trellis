@@ -84,6 +84,30 @@ fn loads_toml_config_from_path() {
 }
 
 #[test]
+fn rejects_unknown_runtime_config_fields_with_source_location() {
+    for (source, field) in [
+        ("unknown_top_level = true\n", "unknown_top_level"),
+        (
+            "[leases]\nreplicas = 1\nunknown_lease = true\n",
+            "unknown_lease",
+        ),
+        (
+            "[jobs.storage]\nkind = \"sqlite\"\npath = \"jobs.sqlite\"\nunknown_storage = true\n",
+            "unknown_storage",
+        ),
+        (
+            "[oauth.providers.example]\ntype = \"oidc\"\nunknown_provider = true\n",
+            "unknown_provider",
+        ),
+    ] {
+        let error = RuntimeConfig::from_toml_str(source).expect_err("reject unknown field");
+        let message = error.to_string();
+        assert!(message.contains(field), "{message}");
+        assert!(message.contains("line"), "{message}");
+    }
+}
+
+#[test]
 fn parses_plan_shaped_toml_config() {
     let config = RuntimeConfig::from_toml_str(
         r#"

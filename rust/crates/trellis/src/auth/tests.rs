@@ -511,11 +511,13 @@ async fn agent_flow_polling_waits_for_redirect_status() {
     .expect("poll flow");
 
     assert_eq!(flow_id, "flow_123");
-    let recorded = requests.lock().expect("lock requests");
-    assert_eq!(recorded.len(), 3);
-    assert!(recorded
-        .iter()
-        .all(|request| request.starts_with("GET /auth/flow/flow_123 HTTP/1.1\r\n")));
+    {
+        let recorded = requests.lock().expect("lock requests");
+        assert_eq!(recorded.len(), 3);
+        assert!(recorded
+            .iter()
+            .all(|request| request.starts_with("GET /auth/flow/flow_123 HTTP/1.1\r\n")));
+    }
 
     server.await.expect("server task");
 }
@@ -1079,9 +1081,7 @@ async fn device_connect_info_posts_signed_connect_info_request_and_parses_ready_
         assert!(request.contains(&format!("\"sig\":\"{}\"", expected.sig)));
         assert!(!request.contains("\"nonce\""));
 
-        let body = format!(
-            r#"{{"status":"ready","connectInfo":{{"instanceId":"dev_123","deploymentId":"reader.default","contractId":"acme.reader@v1","contractDigest":"digest-a","transports":{{"native":{{"natsServers":["nats://127.0.0.1:4222"]}}}},"transport":{{"sentinel":{{"jwt":"jwt","seed":"seed"}}}},"auth":{{"mode":"device_identity","iatSkewSeconds":30}}}}}}"#
-        );
+        let body = r#"{"status":"ready","connectInfo":{"instanceId":"dev_123","deploymentId":"reader.default","contractId":"acme.reader@v1","contractDigest":"digest-a","transports":{"native":{"natsServers":["nats://127.0.0.1:4222"]}},"transport":{"sentinel":{"jwt":"jwt","seed":"seed"}},"auth":{"mode":"device_identity","iatSkewSeconds":30}}}"#.to_string();
         let response = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             body.len(),

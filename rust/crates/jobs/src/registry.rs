@@ -173,6 +173,10 @@ async fn publish_worker_heartbeat_for_subject(
 }
 
 /// Start a background heartbeat loop for one worker-host queue type.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the heartbeat record has independent identity and scheduling fields"
+)]
 pub async fn start_worker_heartbeat_loop(
     nats: async_nats::Client,
     service: String,

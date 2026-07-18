@@ -33,21 +33,16 @@ impl StateTransport for TrellisClient {
 }
 
 /// Expected revision behavior for state puts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[doc = concat!("Public Trellis value set `", stringify!(ExpectedPutRevision), "`.")]
 pub enum ExpectedPutRevision {
     /// Omit `expectedRevision` for unconditional create-or-overwrite.
+    #[default]
     Unconditional,
     /// Send `expectedRevision: null` for create-if-absent.
     CreateIfAbsent,
     /// Send a concrete revision for update-if-current-revision-matches.
     Revision(String),
-}
-
-impl Default for ExpectedPutRevision {
-    fn default() -> Self {
-        Self::Unconditional
-    }
 }
 
 /// Options for state put requests.

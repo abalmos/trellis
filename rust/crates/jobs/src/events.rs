@@ -11,6 +11,10 @@ fn admin_action(reason: Option<&str>) -> Option<JobAdminAction> {
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 fn base_event(
     service: &str,
     job_type: &str,
@@ -49,6 +53,10 @@ fn base_event(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn created_event(
     service: &str,
     job_type: &str,
@@ -77,6 +85,10 @@ pub fn created_event(
 }
 
 /// Construct a `created` lifecycle event with keyed concurrency policy metadata.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn created_event_with_policy(
     service: &str,
     job_type: &str,
@@ -120,6 +132,10 @@ pub fn started_event(
 }
 
 /// Construct a `started` lifecycle event with active key ownership metadata.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn started_event_with_concurrency(
     service: &str,
     job_type: &str,
@@ -143,6 +159,10 @@ pub fn started_event_with_concurrency(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retry_event(
     service: &str,
     job_type: &str,
@@ -292,6 +312,10 @@ pub fn completed_event(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn failed_event(
     service: &str,
     job_type: &str,
@@ -339,6 +363,10 @@ pub fn cancelled_event(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn cancelled_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -364,6 +392,10 @@ pub fn cancelled_event_with_admin_reason(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn expired_event(
     service: &str,
     job_type: &str,
@@ -391,6 +423,10 @@ pub fn expired_event(
 }
 
 /// Construct a `skipped` terminal lifecycle event for queued work replaced by policy.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn skipped_event(
     service: &str,
     job_type: &str,
@@ -419,6 +455,10 @@ pub fn skipped_event(
 }
 
 /// Construct a `stale` terminal lifecycle event for active work that lost its key lease.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn stale_event(
     service: &str,
     job_type: &str,
@@ -473,6 +513,10 @@ pub fn heartbeat_event(
 }
 
 /// Construct an observability event for a stale worker completion that was ignored.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn stale_completion_ignored_event(
     service: &str,
     job_type: &str,
@@ -501,6 +545,10 @@ pub fn stale_completion_ignored_event(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retried_event(
     service: &str,
     job_type: &str,
@@ -526,6 +574,10 @@ pub fn retried_event(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retried_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -556,6 +608,10 @@ pub fn retried_event_with_admin_reason(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn dead_event(
     service: &str,
     job_type: &str,
@@ -582,6 +638,10 @@ pub fn dead_event(
     event
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn dismissed_event(
     service: &str,
     job_type: &str,

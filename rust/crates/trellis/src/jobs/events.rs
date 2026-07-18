@@ -11,6 +11,10 @@ fn admin_action(reason: Option<&str>) -> Option<JobAdminAction> {
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 fn base_event(
     service: &str,
     job_type: &str,
@@ -50,6 +54,10 @@ fn base_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(created_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn created_event(
     service: &str,
     job_type: &str,
@@ -79,6 +87,10 @@ pub fn created_event(
 
 /// Construct a `created` lifecycle event with keyed concurrency policy metadata.
 #[doc = concat!("Trellis API operation `", stringify!(created_event_with_policy), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn created_event_with_policy(
     service: &str,
     job_type: &str,
@@ -124,6 +136,10 @@ pub fn started_event(
 
 /// Construct a `started` lifecycle event with active key ownership metadata.
 #[doc = concat!("Trellis API operation `", stringify!(started_event_with_concurrency), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn started_event_with_concurrency(
     service: &str,
     job_type: &str,
@@ -148,6 +164,10 @@ pub fn started_event_with_concurrency(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(retry_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retry_event(
     service: &str,
     job_type: &str,
@@ -303,6 +323,10 @@ pub fn completed_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(failed_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn failed_event(
     service: &str,
     job_type: &str,
@@ -352,6 +376,10 @@ pub fn cancelled_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(cancelled_event_with_admin_reason), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn cancelled_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -378,6 +406,10 @@ pub fn cancelled_event_with_admin_reason(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(expired_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn expired_event(
     service: &str,
     job_type: &str,
@@ -406,6 +438,10 @@ pub fn expired_event(
 
 /// Construct a `skipped` terminal lifecycle event for queued work replaced by policy.
 #[doc = concat!("Trellis API operation `", stringify!(skipped_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn skipped_event(
     service: &str,
     job_type: &str,
@@ -435,6 +471,10 @@ pub fn skipped_event(
 
 /// Construct a `stale` terminal lifecycle event for active work that lost its key lease.
 #[doc = concat!("Trellis API operation `", stringify!(stale_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn stale_event(
     service: &str,
     job_type: &str,
@@ -491,6 +531,10 @@ pub fn heartbeat_event(
 
 /// Construct an observability event for a stale worker completion that was ignored.
 #[doc = concat!("Trellis API operation `", stringify!(stale_completion_ignored_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn stale_completion_ignored_event(
     service: &str,
     job_type: &str,
@@ -520,6 +564,10 @@ pub fn stale_completion_ignored_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(retried_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retried_event(
     service: &str,
     job_type: &str,
@@ -546,6 +594,10 @@ pub fn retried_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(retried_event_with_admin_reason), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn retried_event_with_admin_reason(
     service: &str,
     job_type: &str,
@@ -577,6 +629,10 @@ pub fn retried_event_with_admin_reason(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(dead_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn dead_event(
     service: &str,
     job_type: &str,
@@ -604,6 +660,10 @@ pub fn dead_event(
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(dismissed_event), "`.")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "job lifecycle events serialize independent protocol fields"
+)]
 pub fn dismissed_event(
     service: &str,
     job_type: &str,

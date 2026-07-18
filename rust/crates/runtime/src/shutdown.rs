@@ -1,12 +1,19 @@
 use std::future;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+
+use tokio::sync::watch;
 
 /// Cooperative stop handle shared with runtime subsystem tasks.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct StopHandle {
-    /// Shared stopped flag.
-    stopped: Arc<AtomicBool>,
+    stopped: watch::Sender<bool>,
+}
+
+impl Default for StopHandle {
+    fn default() -> Self {
+        Self {
+            stopped: watch::channel(false).0,
+        }
+    }
 }
 
 impl StopHandle {
@@ -18,13 +25,23 @@ impl StopHandle {
 
     /// Requests cooperative shutdown.
     pub fn stop(&self) {
-        self.stopped.store(true, Ordering::SeqCst);
+        self.stopped.send_replace(true);
     }
 
     /// Returns whether cooperative shutdown has been requested.
     #[must_use]
     pub fn is_stopped(&self) -> bool {
-        self.stopped.load(Ordering::SeqCst)
+        *self.stopped.borrow()
+    }
+
+    /// Waits until cooperative shutdown is requested.
+    pub async fn stopped(&self) {
+        let mut stopped = self.stopped.subscribe();
+        while !*stopped.borrow_and_update() {
+            if stopped.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }
 
@@ -53,5 +70,22 @@ pub async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StopHandle;
+
+    #[tokio::test]
+    async fn stop_notification_handles_stop_before_and_after_wait() {
+        let stop = StopHandle::new();
+        let waiter = stop.clone();
+        let join = tokio::spawn(async move { waiter.stopped().await });
+        stop.stop();
+        join.await.expect("stop waiter should finish");
+
+        stop.stopped().await;
+        assert!(stop.is_stopped());
     }
 }

@@ -1,4 +1,4 @@
-use super::{lease_bucket_config, LeaseManager};
+use super::{lease_bucket_config, LeaseFence, LeaseGuard, LeaseKey, LeaseManager};
 use crate::{ConfigError, LeasesConfig, ResolvedLeasesConfig};
 
 #[test]
@@ -91,6 +91,31 @@ fn lease_resolve_defers_replica_validation_to_nats() {
 }
 
 #[test]
+fn lease_resolve_requires_three_renewal_intervals_with_checked_arithmetic() {
+    for (ttl_ms, renew_ms) in [(0, 1), (1, 0), (2, 1), (u64::MAX, u64::MAX / 3 + 1)] {
+        let error = LeasesConfig {
+            bucket: None,
+            replicas: Some(1),
+            ttl_ms: Some(ttl_ms),
+            renew_ms: Some(renew_ms),
+        }
+        .resolve()
+        .expect_err("reject unsafe lease timing");
+        assert!(matches!(error, ConfigError::InvalidLeasesConfig { .. }));
+    }
+
+    let boundary = LeasesConfig {
+        bucket: None,
+        replicas: Some(1),
+        ttl_ms: Some(u64::MAX),
+        renew_ms: Some(u64::MAX / 3),
+    }
+    .resolve()
+    .expect("accept exact safe renewal boundary");
+    assert_eq!(boundary.renew_ms * 3, boundary.ttl_ms);
+}
+
+#[test]
 fn lease_bucket_config_matches_lease_semantics() {
     let config = lease_bucket_config("leases", std::time::Duration::from_secs(15), 3);
 
@@ -98,4 +123,21 @@ fn lease_bucket_config_matches_lease_semantics() {
     assert_eq!(config.history, 1);
     assert_eq!(config.max_age.as_secs(), 15);
     assert_eq!(config.num_replicas, 3);
+}
+
+#[test]
+fn lease_guard_keeps_acquisition_fence_when_revision_advances() {
+    let key = LeaseKey::new("jobs.owner");
+    let mut guard = LeaseGuard {
+        key,
+        fence: LeaseFence {
+            acquisition_revision: 41,
+        },
+        current_revision: 41,
+    };
+
+    guard.current_revision = 42;
+
+    assert_eq!(guard.fence().acquisition_revision(), 41);
+    assert_eq!(guard.current_revision(), 42);
 }

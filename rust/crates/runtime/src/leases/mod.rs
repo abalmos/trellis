@@ -70,6 +70,7 @@ impl LeaseManager {
             lease_bucket_config(&manager.bucket, manager.ttl, manager.replicas),
         )
         .await?;
+        validate_store_config(&store, manager.ttl, manager.replicas).await?;
         manager.store = Some(store);
         Ok(manager)
     }
@@ -84,7 +85,13 @@ impl LeaseManager {
             )
             .await
         {
-            Ok(revision) => Ok(LeaseGuard { key, revision }),
+            Ok(revision) => Ok(LeaseGuard {
+                key,
+                fence: LeaseFence {
+                    acquisition_revision: revision,
+                },
+                current_revision: revision,
+            }),
             Err(error) if error.kind() == kv::CreateErrorKind::AlreadyExists => {
                 Err(LeaseError::Held { key })
             }
@@ -109,12 +116,12 @@ impl LeaseManager {
             .update(
                 guard.key.value.clone(),
                 Bytes::copy_from_slice(self.owner_id.as_bytes()),
-                guard.revision,
+                guard.current_revision,
             )
             .await
         {
             Ok(revision) => {
-                guard.revision = revision;
+                guard.current_revision = revision;
                 Ok(())
             }
             Err(error) => Err(classify_revision_error(store, key, "renew", error).await),
@@ -126,7 +133,7 @@ impl LeaseManager {
         let store = self.store()?;
         let key = guard.key.clone();
         match store
-            .delete_expect_revision(guard.key.value.clone(), Some(guard.revision))
+            .delete_expect_revision(guard.key.value.clone(), Some(guard.current_revision))
             .await
         {
             Ok(()) => Ok(()),
@@ -145,15 +152,49 @@ impl LeaseManager {
 
 /// Proof that this runtime currently owns a lease key.
 ///
-/// The guard carries the last observed KV revision and must be passed back to
-/// [`LeaseManager::renew`] or [`LeaseManager::release`]. Revision checks make a
-/// stale guard fail instead of renewing or deleting another owner's lease.
+/// The guard carries a fixed acquisition fence and the last observed KV revision.
+/// It must be passed back to [`LeaseManager::renew`] or [`LeaseManager::release`].
+/// Revision checks make a stale guard fail instead of renewing or deleting
+/// another owner's lease.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LeaseGuard {
-    /// Acquired lease key.
-    pub key: LeaseKey,
-    /// Last observed NATS KV revision for the lease key.
-    pub revision: u64,
+    key: LeaseKey,
+    fence: LeaseFence,
+    current_revision: u64,
+}
+
+impl LeaseGuard {
+    /// Returns the acquired lease key.
+    #[must_use]
+    pub fn key(&self) -> &LeaseKey {
+        &self.key
+    }
+
+    /// Returns the immutable acquisition fence for this ownership generation.
+    #[must_use]
+    pub(crate) fn fence(&self) -> LeaseFence {
+        self.fence
+    }
+
+    /// Returns the current NATS KV revision used for renewal and release.
+    #[must_use]
+    pub fn current_revision(&self) -> u64 {
+        self.current_revision
+    }
+}
+
+/// Immutable fencing token for one lease ownership generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct LeaseFence {
+    acquisition_revision: u64,
+}
+
+impl LeaseFence {
+    /// Returns the NATS KV revision assigned when ownership was acquired.
+    #[must_use]
+    pub(crate) fn acquisition_revision(self) -> u64 {
+        self.acquisition_revision
+    }
 }
 
 /// Canonical key for a runtime lease entry.
@@ -175,11 +216,31 @@ impl LeaseKey {
             value: value.into(),
         }
     }
+
+    /// Returns the canonical lease key string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
 }
 
 /// Lease operation error.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum LeaseError {
+    /// An existing lease bucket does not satisfy runtime lease invariants.
+    #[error(
+        "lease bucket {bucket:?} has incompatible {field}: expected {expected}, actual {actual}"
+    )]
+    InfrastructureMismatch {
+        /// Lease bucket name.
+        bucket: String,
+        /// Incompatible bucket configuration field.
+        field: &'static str,
+        /// Required field value.
+        expected: String,
+        /// Actual field value reported by NATS.
+        actual: String,
+    },
     /// Lease is already held by another owner.
     #[error("lease {key:?} is already held")]
     Held {
@@ -248,6 +309,44 @@ async fn open_or_create_store(
             }),
         },
     }
+}
+
+async fn validate_store_config(
+    store: &kv::Store,
+    ttl: Duration,
+    replicas: usize,
+) -> Result<(), LeaseError> {
+    let status = store.status().await.map_err(|error| LeaseError::Backend {
+        key: None,
+        operation: "inspect bucket",
+        message: error.to_string(),
+    })?;
+    if status.history() != 1 {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "history",
+            expected: "1".to_owned(),
+            actual: status.history().to_string(),
+        });
+    }
+    if status.max_age() != ttl {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "max_age",
+            expected: format!("{}ms", ttl.as_millis()),
+            actual: format!("{}ms", status.max_age().as_millis()),
+        });
+    }
+    let actual_replicas = status.info.config.num_replicas;
+    if replicas != 0 && actual_replicas != replicas {
+        return Err(LeaseError::InfrastructureMismatch {
+            bucket: store.name.clone(),
+            field: "replicas",
+            expected: replicas.to_string(),
+            actual: actual_replicas.to_string(),
+        });
+    }
+    Ok(())
 }
 
 async fn classify_revision_error(

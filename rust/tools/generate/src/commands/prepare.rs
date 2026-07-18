@@ -569,7 +569,7 @@ mod tests {
     fn prepare_watch_changes_include_kind_and_relative_path() {
         let root = Path::new("/repo");
         let filter = super::WatchPathFilter::empty(root);
-        let paths = vec![
+        let paths = [
             Path::new("/repo/generated/contracts/manifests/trellis.orders@v1.json").to_path_buf(),
             Path::new("/repo/services/orders/contracts/orders.ts").to_path_buf(),
         ];
@@ -591,7 +591,7 @@ mod tests {
     fn prepare_watch_changes_skip_ignored_paths() {
         let root = Path::new("/repo");
         let filter = super::WatchPathFilter::empty(root);
-        let paths = vec![
+        let paths = [
             Path::new("/repo/generated/packages/jsr/orders/mod.ts").to_path_buf(),
             Path::new("/repo/.worktrees/prepare-watch/contracts/orders.ts").to_path_buf(),
         ];

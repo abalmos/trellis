@@ -48,7 +48,7 @@ pub fn validate_input_schema(schema_json: &str, value: &Value) -> Result<(), Ser
             .and_then(Value::as_str)
             .filter(|code| !code.is_empty());
 
-        if is_supported && annotated.is_some() {
+        if let Some(code) = annotated.filter(|_| is_supported) {
             let hint = extension
                 .and_then(|ext| ext.get("issues"))
                 .and_then(|issues| issues.get(keyword))
@@ -67,10 +67,10 @@ pub fn validate_input_schema(schema_json: &str, value: &Value) -> Result<(), Ser
             let severity = hint.get("severity").and_then(Value::as_str);
 
             schema_validation_issues.push(SchemaValidationIssue {
-                path: issue_path(error, &instance_path, &keyword),
+                path: issue_path(error, &instance_path, keyword),
                 schema_path: Some(schema_path),
                 keyword: keyword.to_string(),
-                code: annotated.unwrap().to_string(),
+                code: code.to_string(),
                 message: hint
                     .get("message")
                     .and_then(Value::as_str)
@@ -135,17 +135,14 @@ fn resolve_error_node<'a>(
     let keyword = error.kind().keyword();
 
     if keyword == "required" {
-        match error.kind() {
-            ValidationErrorKind::Required { property } => {
-                let property_str = property.as_str().unwrap_or("");
-                let parent_path = strip_last_segment(error.schema_path().as_str());
-                let parent_node = resolve_json_pointer(root, &parent_path);
-                let schema = parent_node
-                    .and_then(|n| n.get("properties"))
-                    .and_then(|p| p.get(property_str));
-                return (schema, keyword.to_string());
-            }
-            _ => {}
+        if let ValidationErrorKind::Required { property } = error.kind() {
+            let property_str = property.as_str().unwrap_or("");
+            let parent_path = strip_last_segment(error.schema_path().as_str());
+            let parent_node = resolve_json_pointer(root, &parent_path);
+            let schema = parent_node
+                .and_then(|n| n.get("properties"))
+                .and_then(|p| p.get(property_str));
+            return (schema, keyword.to_string());
         }
     }
 

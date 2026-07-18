@@ -228,6 +228,10 @@ pub struct StartedOperationTransfer<'a, T, D> {
 }
 
 /// Error returned when starting or uploading an operation transfer fails.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "upload failures return the live operation reference to the caller"
+)]
 pub enum OperationTransferStartError<'a, T, D> {
     Start(TrellisClientError),
     Upload {
@@ -1037,8 +1041,8 @@ mod tests {
             Ok(Box::pin(stream::iter(frames.into_iter().map(Ok))))
         }
 
-        async fn put_upload_transfer<'a>(
-            &'a self,
+        async fn put_upload_transfer(
+            &self,
             _grant: UploadTransferGrant,
             _body: Vec<u8>,
         ) -> Result<FileInfo, TrellisClientError> {

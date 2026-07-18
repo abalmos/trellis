@@ -384,7 +384,7 @@ fn setup_operation_service(
                     snapshots
                         .get(&operation_id)
                         .cloned()
-                        .ok_or_else(|| ServerError::OperationNotFound { operation_id })
+                        .ok_or(ServerError::OperationNotFound { operation_id })
                 }
             }
         },
@@ -600,7 +600,7 @@ fn setup_operation_service(
                 snapshots
                     .get(&operation_id)
                     .cloned()
-                    .ok_or_else(|| ServerError::OperationNotFound { operation_id })
+                    .ok_or(ServerError::OperationNotFound { operation_id })
             }
         },
         move |_context: trellis_rs::service::ServiceHandlerContext, operation_id: String| {
@@ -610,7 +610,7 @@ fn setup_operation_service(
                 snapshots
                     .get(&operation_id)
                     .cloned()
-                    .ok_or_else(|| ServerError::OperationNotFound { operation_id })
+                    .ok_or(ServerError::OperationNotFound { operation_id })
             }
         },
         |_context: trellis_rs::service::ServiceHandlerContext, _operation_id: String| async move {

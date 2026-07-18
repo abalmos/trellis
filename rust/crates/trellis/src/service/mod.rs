@@ -1,4 +1,13 @@
-//! Low-level inbound Trellis runtime primitives for generated Rust code.
+//! Service hosting, generated routing, resources, events, operations, and Jobs.
+//!
+//! Generated service facades use [`crate::service::ConnectedServiceRuntime`] to own bootstrap,
+//! authenticated routing, and lifecycle. Handler registration is descriptor
+//! driven; [`crate::service::ServiceHandlerContext`] carries the request and resolved service
+//! handles. Runtime-provided [`crate::service::KvHandle`] and
+//! [`crate::service::StoreHandle`] values are the
+//! supported resource boundary. Jobs are private execution, while operations
+//! are caller-visible workflows with progress, updates, cancellation, and named
+//! signals.
 
 mod bindings;
 #[doc(hidden)]
@@ -24,6 +33,10 @@ mod runtime_facade;
 #[doc(hidden)]
 mod schema_validation;
 #[doc(hidden)]
+#[expect(
+    clippy::module_inception,
+    reason = "the service module preserves its established public layout"
+)]
 mod service;
 mod service_host;
 mod transfer;
