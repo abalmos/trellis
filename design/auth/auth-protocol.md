@@ -21,6 +21,8 @@ This document defines the language-neutral Trellis auth protocol.
 It covers:
 
 - cryptographic encodings and signatures
+- pinned authorization roots, issuer certificates, and issuer manifests
+- signed authorization contexts and context-bound request proofs
 - NATS connect token shapes
 - auth callout behavior
 - RPC proof verification
@@ -46,6 +48,19 @@ Canonical byte encoding for signatures:
 | Strings         | UTF-8 bytes via `TextEncoder`                                              |
 | Numbers (`iat`) | ASCII decimal string (e.g. `"1735689600"`)                                 |
 | Concatenation   | `sign(hash("prefix:" + value))` means UTF-8 bytes of literal concatenation |
+
+Every integer carried by a signed JSON object or cross-language proof must be
+within the exactly interoperable JSON safe-integer range:
+
+```text
+-9_007_199_254_740_991 through +9_007_199_254_740_991
+```
+
+This applies to validity times, manifest generations, revocation times,
+authority versions, request `iat`, verification-policy time/generation inputs,
+and integers nested anywhere in signed extensions. Positive counters retain
+their positive/nonzero requirements. Verifiers reject unsafe values before
+canonicalization or signature acceptance and report the exact RFC 6901 path.
 
 All Trellis clients, including Rust CLIs and future non-TypeScript clients, must
 match this encoding exactly.
@@ -226,7 +241,91 @@ Rules:
 - `OPERATION_RESPONSE_MAX` MUST be greater than `1` and SHOULD default to
   `65535`
 
-## RPC Message Signing
+## Target 0.11 Local Request Authorization
+
+Ordinary authenticated runtime requests use two independent proofs and do not
+call `Auth.Requests.Validate` in the target 0.11 protocol:
+
+1. **Authority proof:** a pinned authorization root verifies a current
+   generation-numbered issuer manifest and a directly root-signed issuer
+   certificate; the active issuer verifies a short-lived authorization context.
+2. **Possession proof:** the session private key bound into that context signs
+   the exact context digest, subject, reply subject, raw payload hash, issue
+   time, and request id.
+
+The trust hierarchy is:
+
+```text
+pinned root
+  -> root-signed current issuer manifest
+  -> root-signed issuer certificate selected by exact signed digest
+  -> issuer-signed short-lived authorization context
+  -> session-key-signed request proof v2
+```
+
+All signed JSON security objects use strict recognized top-level fields. Signed
+forward-compatible data belongs in `extensions`; names in the canonical
+`critical` set fail closed unless understood. Each signature uses a distinct
+domain and covers SHA-256 of length-prefixed domain bytes plus RFC 8785
+canonical unsigned JSON. Key ids are derived as unpadded base64url SHA-256
+digests of the raw 32-byte Ed25519 public key.
+
+The root-signed manifest is the authoritative current issuer registry. Consumers
+explicitly supply their minimum accepted generation, preventing rollback when
+distribution storage returns an older valid manifest. Multiple active issuers
+permit overlap during key rotation. A revoked or omitted issuer is untrusted,
+and each entry binds the exact complete signed certificate digest. A writable
+distribution store therefore cannot create issuer authority without a root
+signature.
+
+A previously verified manifest remains subject to the policy supplied for each
+context decision. Raising the durable minimum generation invalidates stale
+verified or cloned handles immediately; context verification rechecks the
+manifest generation and returns `ManifestRollback` at `/generation`.
+
+The signed context binds the stable principal, exact participant artifact and
+accepted-needs digests, durable identity/deployment authority record and
+version, session id and public key, reply-inbox prefix, exact
+`trellis.grant-set.v1`, and canonical platform capability keys. Its validity is
+short-lived and entirely contained by both the issuer certificate and current
+manifest. Capabilities may authorize built-in/platform surfaces during
+migration, but never expand exact permission atoms.
+
+Verified caller metadata exposes the source authority record and version,
+deployment and instance ids, participant artifact and needs digests, context and
+session identity, validity bounds, grants, capabilities, and immutable signed
+context needed by auditing and later runtime integration.
+
+Request proof v2 input is:
+
+```text
+LP("trellis.authorization-request-proof.v2")
+LP(raw 32-byte signed-context digest)
+LP(exact subject UTF-8)
+LP(exact reply subject UTF-8, or empty)
+LP(SHA-256(raw payload bytes actually received))
+LP(ASCII decimal iat)
+LP(request-id UTF-8)
+```
+
+The receiver verifies the manifest, certificate, context, and session-key proof
+locally; computes the raw payload hash locally; validates a nonempty reply
+subject against the signed inbox prefix; and enforces required exact permission
+atoms and platform capabilities as subsets of the signed context. It then
+inserts `(contextId, requestId)` into a local replay cache until context expiry.
+Replay cache storage and runtime integration follow the pure protocol milestone.
+
+NATS authentication, transport JWT permissions, and connection kicking remain
+separate. Short context expiry bounds already-issued authority; immediate
+session/authority revocation also refuses refresh and kicks current transport
+connections.
+
+## Transitional RPC Message Signing
+
+The following request proof and `Auth.Requests.Validate` flow describes current
+migration-baseline implementation behavior, not the target 0.11 protocol. It
+remains temporarily so existing runtimes can migrate; no new ordinary request
+path should depend on it.
 
 Each authenticated RPC includes proof of session-key ownership. Contract digest
 binding is established earlier during connect, bootstrap, or session creation;
@@ -318,6 +417,10 @@ Verification steps:
    `payloadHash`, `iat`, `requestId`, and required capabilities for session
    lookup, replay detection, stored contract/principal context, and capability
    checking
+
+Target runtimes replace step 4 with the local signed-context decision described
+above. Historical proof v1 text remains here only to make that transition
+explicit.
 
 ## Pre-Auth Device Wait Verification
 
@@ -816,4 +919,6 @@ Rules:
 
 - defining HTTP endpoint and RPC request/response payloads
 - defining TypeScript or Rust client library APIs
-- deployment configuration, rate limiting, key rotation, or HA runbooks
+- deployment configuration, rate limiting, root-key rotation, or HA runbooks
+- issuer private-key storage, context issuance/distribution, runtime
+  replay-cache implementation, and event-proof v2

@@ -1,0 +1,2688 @@
+{
+  "format": "trellis.authorization-context.conformance.v2",
+  "cryptography": {
+    "hash": "SHA-256",
+    "signature": "Ed25519",
+    "binaryEncoding": "base64url without padding",
+    "jsonCanonicalization": "RFC 8785",
+    "integerEncoding": "ASCII decimal safe integers only",
+    "lengthPrefix": "unsigned 32-bit big endian"
+  },
+  "execution": {
+    "base": "Every case starts from completeChain canonical JSON values.",
+    "mutations": "mutations and postMutations are RFC 6902 add, remove, or replace operations with an additional target selecting root, certificate, manifest, or context.",
+    "resign": "resign deterministically signs named objects after mutations with completeChain seeds or inputs.issuerSeed.",
+    "expected": "Each case invokes operation through the public protocol API and compares valid, code, path, and the optional output subset."
+  },
+  "completeChain": {
+    "name": "complete-user-chain-v1",
+    "rootSeed": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "issuerSeed": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+    "sessionSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+    "rootPublicKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+    "rootKeyId": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4",
+    "rootCanonicalJson": "{\"authority\":\"trellis-test\",\"format\":\"trellis.authorization-trust-root.v1\",\"keyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"publicKey\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\"}",
+    "rootDigest": "5UukrkM5tHc81s0tVtlRT_ZDhVgcO8SgTSQuUr0dPAk",
+    "issuerPublicKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+    "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+    "certificateUnsignedCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":2000,\"extensions\":{},\"format\":\"trellis.authorization-issuer-certificate.v1\",\"issuedAt\":1000,\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"notBefore\":1000,\"publicKey\":\"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q\",\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"serial\":\"isc_test\",\"usages\":[\"authorizationContext\"]}",
+    "certificateSigningDigest": "vtR-ucpiJpsbmQB6zTAtqYMD3wRtRHCFzemMZU28IHA",
+    "certificateSignature": "kXWTrBYBlfFNtAhLtZf1haT4CAoy5X-FRwqv5OIJxaVDbvvCJz-D2AOsBKk5jb13AbrDxxe6CGp5mgLU8YiNCg",
+    "certificateCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":2000,\"extensions\":{},\"format\":\"trellis.authorization-issuer-certificate.v1\",\"issuedAt\":1000,\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"notBefore\":1000,\"publicKey\":\"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q\",\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"serial\":\"isc_test\",\"signature\":\"kXWTrBYBlfFNtAhLtZf1haT4CAoy5X-FRwqv5OIJxaVDbvvCJz-D2AOsBKk5jb13AbrDxxe6CGp5mgLU8YiNCg\",\"usages\":[\"authorizationContext\"]}",
+    "certificateDigest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs",
+    "manifestUnsignedCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":1500,\"extensions\":{},\"format\":\"trellis.authorization-issuer-manifest.v1\",\"generation\":7,\"issuedAt\":1000,\"issuers\":[{\"certificateDigest\":\"jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs\",\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"status\":\"active\"}],\"notBefore\":1000,\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\"}",
+    "manifestSigningDigest": "SvkMvSXQqhhV0N5iO6dXucUa9WA_EZdGmKaIbM9-p7U",
+    "manifestSignature": "MwBESGl9DPz2WwE8CC3NWsmqlDNKj1RToTRTP523qXZSdGCQ-FtHb1EkFxgH1_-UfYcucby4aRRPxnDQ0cQLAA",
+    "manifestCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":1500,\"extensions\":{},\"format\":\"trellis.authorization-issuer-manifest.v1\",\"generation\":7,\"issuedAt\":1000,\"issuers\":[{\"certificateDigest\":\"jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs\",\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"status\":\"active\"}],\"notBefore\":1000,\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"signature\":\"MwBESGl9DPz2WwE8CC3NWsmqlDNKj1RToTRTP523qXZSdGCQ-FtHb1EkFxgH1_-UfYcucby4aRRPxnDQ0cQLAA\"}",
+    "manifestDigest": "nclHpncaX3BeuM03hX5rmvpvJyhfpwEZx34jw1wE-a0",
+    "sessionPublicKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+    "sessionKeyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk",
+    "contextUnsignedCanonicalJson": "{\"authority\":\"trellis-test\",\"authorityRef\":{\"id\":\"usr_test\",\"kind\":\"identity\",\"version\":12},\"capabilities\":[\"platform.read\"],\"contextId\":\"ctx_test\",\"critical\":[],\"deploymentId\":null,\"expiresAt\":1300,\"extensions\":{},\"format\":\"trellis.authorization-context.v1\",\"grantSet\":{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]},\"inboxPrefix\":\"_INBOX.test\",\"instanceId\":null,\"issuedAt\":1100,\"issuerKeyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"notBefore\":1100,\"participant\":{\"artifactDigest\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ\",\"id\":\"documents-web\",\"kind\":\"app\",\"needsDigest\":\"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU\"},\"principal\":{\"id\":\"usr_test\",\"kind\":\"user\"},\"sessionId\":\"ses_test\",\"sessionKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E\"}",
+    "contextSigningDigest": "CiWJm5hLbl5_AH799iQ1B_HeRd3ujrA3VAu_W26Rrt8",
+    "contextSignature": "mm3tKfdSpGpb2LahAmBcbv_GdiQDrXYKw0vBefrLkT5BYgPO9Sao10lnBh0FBK964aeLecEBw_UV4aYy85Y-Bg",
+    "contextCanonicalJson": "{\"authority\":\"trellis-test\",\"authorityRef\":{\"id\":\"usr_test\",\"kind\":\"identity\",\"version\":12},\"capabilities\":[\"platform.read\"],\"contextId\":\"ctx_test\",\"critical\":[],\"deploymentId\":null,\"expiresAt\":1300,\"extensions\":{},\"format\":\"trellis.authorization-context.v1\",\"grantSet\":{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]},\"inboxPrefix\":\"_INBOX.test\",\"instanceId\":null,\"issuedAt\":1100,\"issuerKeyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"notBefore\":1100,\"participant\":{\"artifactDigest\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ\",\"id\":\"documents-web\",\"kind\":\"app\",\"needsDigest\":\"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU\"},\"principal\":{\"id\":\"usr_test\",\"kind\":\"user\"},\"sessionId\":\"ses_test\",\"sessionKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E\",\"signature\":\"mm3tKfdSpGpb2LahAmBcbv_GdiQDrXYKw0vBefrLkT5BYgPO9Sao10lnBh0FBK964aeLecEBw_UV4aYy85Y-Bg\"}",
+    "contextDigest": "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
+    "contextToken": "eyJhdXRob3JpdHkiOiJ0cmVsbGlzLXRlc3QiLCJhdXRob3JpdHlSZWYiOnsiaWQiOiJ1c3JfdGVzdCIsImtpbmQiOiJpZGVudGl0eSIsInZlcnNpb24iOjEyfSwiY2FwYWJpbGl0aWVzIjpbInBsYXRmb3JtLnJlYWQiXSwiY29udGV4dElkIjoiY3R4X3Rlc3QiLCJjcml0aWNhbCI6W10sImRlcGxveW1lbnRJZCI6bnVsbCwiZXhwaXJlc0F0IjoxMzAwLCJleHRlbnNpb25zIjp7fSwiZm9ybWF0IjoidHJlbGxpcy5hdXRob3JpemF0aW9uLWNvbnRleHQudjEiLCJncmFudFNldCI6eyJmb3JtYXQiOiJ0cmVsbGlzLmdyYW50LXNldC52MSIsInBlcm1pc3Npb25zIjpbeyJhY3Rpb24iOiJjYWxsIiwidGFyZ2V0Ijp7ImFwaSI6ImRvY3VtZW50c0B2MSIsImtpbmQiOiJhcGlTdXJmYWNlIiwibmFtZSI6IkRvY3VtZW50cy5HZXQiLCJzdXJmYWNlIjoicnBjIn19XX0sImluYm94UHJlZml4IjoiX0lOQk9YLnRlc3QiLCJpbnN0YW5jZUlkIjpudWxsLCJpc3N1ZWRBdCI6MTEwMCwiaXNzdWVyS2V5SWQiOiJhamdEMWZCWmtDb2NiYS04bTZSeWtoTDN5cXdJWTB6RHJuYXlkU253T0NjIiwibm90QmVmb3JlIjoxMTAwLCJwYXJ0aWNpcGFudCI6eyJhcnRpZmFjdERpZ2VzdCI6IkJBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVFFQkFRRUJBUUVCQVEiLCJpZCI6ImRvY3VtZW50cy13ZWIiLCJraW5kIjoiYXBwIiwibmVlZHNEaWdlc3QiOiJCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVRkJRVUZCUVVGQlFVIn0sInByaW5jaXBhbCI6eyJpZCI6InVzcl90ZXN0Iiwia2luZCI6InVzZXIifSwic2Vzc2lvbklkIjoic2VzX3Rlc3QiLCJzZXNzaW9uS2V5IjoiN1Vrb3hpalJ3c2JxNlFNNGtGbVZZU2xaSnpwY1lfazJOc0ZHRkt5SE45RSIsInNpZ25hdHVyZSI6Im1tM3RLZmRTcEdwYjJMYWhBbUJjYnZfR2RpUURyWFlLdzB2QmVmckxrVDVCWWdQTzlTYW8xMGxuQmgwRkJLOTY0YWVMZWNFQndfVVY0YVl5ODVZLUJnIn0",
+    "requestProofInputHex": "000000267472656c6c69732e617574686f72697a6174696f6e2d726571756573742d70726f6f662e7632000000206f2855613531af8895cb08289febad4c97acae5e566559b5302d0f5ea094d3a7000000147270632e76312e446f63756d656e74732e476574000000115f494e424f582e746573742e7265706c79000000209eb803b2c601706a797e2e58a58cb40b01ff0a0b024b1056ae044cafce2da7860000000431313030000000087265715f74657374",
+    "requestProofDigest": "XWkiJcfy8PkI01XDwnvlcIwthOsD9uLlGyI4S4OjiS8",
+    "requestProof": "nkBKi3jHLRk7_xYvZcdy_6aXjjyVjgAUy6EtWE1dwNu0UH1RouttDqJz0H-IWGnFPnQx5CAYB80M5TE8RQ_sDg"
+  },
+  "defaults": {
+    "policy": {
+      "nowUnixSeconds": 1100,
+      "allowedClockSkewSeconds": 30,
+      "maximumContextLifetimeSeconds": 300,
+      "maximumContextTokenBytes": 16384,
+      "maximumPermissions": 16,
+      "maximumCapabilities": 16,
+      "minimumManifestGeneration": 7
+    },
+    "request": {
+      "subject": "rpc.v1.Documents.Get",
+      "reply": "_INBOX.test.reply",
+      "payload": "{\"id\":\"doc-1\"}",
+      "iat": 1100,
+      "requestId": "req_test"
+    },
+    "permission": {
+      "action": "call",
+      "target": {
+        "api": "documents@v1",
+        "kind": "apiSurface",
+        "name": "Documents.Get",
+        "surface": "rpc"
+      }
+    },
+    "missingPermission": {
+      "action": "call",
+      "target": {
+        "api": "documents@v1",
+        "kind": "apiSurface",
+        "name": "Documents.Delete",
+        "surface": "rpc"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "trust-root-construction-and-key-id",
+      "operation": "constructTrustRoot",
+      "expected": {
+        "valid": true,
+        "output": {
+          "keyId": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4",
+          "digest": "5UukrkM5tHc81s0tVtlRT_ZDhVgcO8SgTSQuUr0dPAk"
+        }
+      }
+    },
+    {
+      "name": "active-issuer-certificate",
+      "operation": "verifyCertificate",
+      "expected": {
+        "valid": true,
+        "output": { "digest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs" }
+      }
+    },
+    {
+      "name": "manifest-one-active-issuer",
+      "operation": "verifyManifest",
+      "expected": {
+        "valid": true,
+        "output": {
+          "authority": "trellis-test",
+          "rootKeyId": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4",
+          "generation": 7,
+          "digest": "nclHpncaX3BeuM03hX5rmvpvJyhfpwEZx34jw1wE-a0",
+          "activeIssuerKeyIds": ["ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc"]
+        }
+      }
+    },
+    {
+      "name": "user-app-context",
+      "operation": "verifyContext",
+      "expected": {
+        "valid": true,
+        "output": {
+          "authority": "trellis-test",
+          "authorityRef": {
+            "kind": "identity",
+            "id": "usr_test",
+            "version": 12
+          },
+          "principal": { "kind": "user", "id": "usr_test" },
+          "participant": {
+            "kind": "app",
+            "id": "documents-web",
+            "artifactDigest": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "needsDigest": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+          },
+          "deploymentId": null,
+          "instanceId": null,
+          "contextId": "ctx_test",
+          "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+          "sessionId": "ses_test",
+          "sessionKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "inboxPrefix": "_INBOX.test",
+          "issuedAt": 1100,
+          "notBefore": 1100,
+          "expiresAt": 1300,
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [{
+              "action": "call",
+              "target": {
+                "api": "documents@v1",
+                "kind": "apiSurface",
+                "name": "Documents.Get",
+                "surface": "rpc"
+              }
+            }]
+          },
+          "capabilities": ["platform.read"],
+          "extensions": {},
+          "contextDigest": "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c"
+        }
+      }
+    },
+    {
+      "name": "service-context",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "svc_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/id",
+          "value": "documents-service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/kind",
+          "value": "deployment"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/version",
+          "value": 3
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/deploymentId",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/instanceId",
+          "value": "ins_service_01"
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": {
+          "authority": "trellis-test",
+          "authorityRef": {
+            "kind": "deployment",
+            "id": "dep_documents",
+            "version": 3
+          },
+          "principal": { "kind": "service", "id": "svc_documents" },
+          "participant": {
+            "kind": "service",
+            "id": "documents-service",
+            "artifactDigest": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "needsDigest": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+          },
+          "deploymentId": "dep_documents",
+          "instanceId": "ins_service_01",
+          "contextId": "ctx_test",
+          "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+          "sessionId": "ses_test",
+          "sessionKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "inboxPrefix": "_INBOX.test",
+          "issuedAt": 1100,
+          "notBefore": 1100,
+          "expiresAt": 1300,
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [
+              {
+                "action": "call",
+                "target": {
+                  "api": "documents@v1",
+                  "kind": "apiSurface",
+                  "name": "Documents.Get",
+                  "surface": "rpc"
+                }
+              }
+            ]
+          },
+          "capabilities": ["platform.read"],
+          "extensions": {},
+          "contextDigest": "_nvSiLQKfCSeGnHuqw6qCzkrFnVzoqL4mxot54xJgZY"
+        }
+      }
+    },
+    {
+      "name": "identity-authority-reference",
+      "operation": "verifyContext",
+      "expected": {
+        "valid": true,
+        "output": {
+          "authorityRef": {
+            "kind": "identity",
+            "id": "usr_test",
+            "version": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "deployment-authority-reference",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/kind",
+          "value": "device"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "dev_reference"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/kind",
+          "value": "device"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/id",
+          "value": "device-reference"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/kind",
+          "value": "deployment"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "dep_reference"
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": {
+          "authorityRef": {
+            "kind": "deployment",
+            "id": "dep_reference",
+            "version": 12
+          }
+        }
+      }
+    },
+    {
+      "name": "device-context",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/kind",
+          "value": "device"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "dev_scanner"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/kind",
+          "value": "device"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/id",
+          "value": "scanner-device"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/kind",
+          "value": "deployment"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "dep_scanner"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/version",
+          "value": 4
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/deploymentId",
+          "value": "dep_scanner"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/instanceId",
+          "value": "ins_device_01"
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": {
+          "authority": "trellis-test",
+          "authorityRef": {
+            "kind": "deployment",
+            "id": "dep_scanner",
+            "version": 4
+          },
+          "principal": { "kind": "device", "id": "dev_scanner" },
+          "participant": {
+            "kind": "device",
+            "id": "scanner-device",
+            "artifactDigest": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "needsDigest": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+          },
+          "deploymentId": "dep_scanner",
+          "instanceId": "ins_device_01",
+          "contextId": "ctx_test",
+          "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+          "sessionId": "ses_test",
+          "sessionKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "inboxPrefix": "_INBOX.test",
+          "issuedAt": 1100,
+          "notBefore": 1100,
+          "expiresAt": 1300,
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [
+              {
+                "action": "call",
+                "target": {
+                  "api": "documents@v1",
+                  "kind": "apiSurface",
+                  "name": "Documents.Get",
+                  "surface": "rpc"
+                }
+              }
+            ]
+          },
+          "capabilities": ["platform.read"],
+          "extensions": {},
+          "contextDigest": "DVRAP2eTmkpxe7fjccwa9YmxIlOjcCLMPtRm2sTQ-vw"
+        }
+      }
+    },
+    {
+      "name": "empty-grants-and-capabilities",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/grantSet/permissions",
+          "value": []
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": []
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": {
+          "grantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
+          "capabilities": []
+        }
+      }
+    },
+    {
+      "name": "multiple-permissions-utf16-order",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/grantSet/permissions/-",
+          "value": {
+            "action": "call",
+            "target": {
+              "api": "documents@v1",
+              "kind": "apiSurface",
+              "name": "Documents.List",
+              "surface": "rpc"
+            }
+          }
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": {
+          "grantSet": {
+            "permissions": [
+              {
+                "action": "call",
+                "target": {
+                  "api": "documents@v1",
+                  "kind": "apiSurface",
+                  "name": "Documents.Get",
+                  "surface": "rpc"
+                }
+              },
+              {
+                "action": "call",
+                "target": {
+                  "api": "documents@v1",
+                  "kind": "apiSurface",
+                  "name": "Documents.List",
+                  "surface": "rpc"
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "capabilities-supplementary-private-use-order",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": ["cap.𐀀", "cap."]
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": { "capabilities": ["cap.𐀀", "cap."] }
+      }
+    },
+    {
+      "name": "noncritical-extension-preserved",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/trace",
+          "value": { "v": 1 }
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": { "extensions": { "trace": { "v": 1 } } }
+      }
+    },
+    {
+      "name": "valid-extension-name-with-slash-and-tilde",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/future~1~0policy",
+          "value": true
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": { "extensions": { "future/~policy": true } }
+      }
+    },
+    {
+      "name": "context-token-and-digest",
+      "operation": "contextToken",
+      "expected": {
+        "valid": true,
+        "output": { "digest": "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c" }
+      }
+    },
+    {
+      "name": "request-proof-with-reply",
+      "operation": "verifyRequest",
+      "inputs": { "usePinnedProof": true },
+      "expected": {
+        "valid": true,
+        "output": {
+          "authority": "trellis-test",
+          "authorityRef": {
+            "kind": "identity",
+            "id": "usr_test",
+            "version": 12
+          },
+          "principal": { "kind": "user", "id": "usr_test" },
+          "participant": {
+            "kind": "app",
+            "id": "documents-web",
+            "artifactDigest": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ",
+            "needsDigest": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+          },
+          "deploymentId": null,
+          "instanceId": null,
+          "contextId": "ctx_test",
+          "sessionId": "ses_test",
+          "sessionKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
+          "inboxPrefix": "_INBOX.test",
+          "issuedAt": 1100,
+          "notBefore": 1100,
+          "expiresAt": 1300,
+          "grantSet": {
+            "format": "trellis.grant-set.v1",
+            "permissions": [
+              {
+                "action": "call",
+                "target": {
+                  "api": "documents@v1",
+                  "kind": "apiSurface",
+                  "name": "Documents.Get",
+                  "surface": "rpc"
+                }
+              }
+            ]
+          },
+          "capabilities": ["platform.read"],
+          "replayKey": { "contextId": "ctx_test", "requestId": "req_test" },
+          "replayExpiresAt": 1330
+        }
+      }
+    },
+    {
+      "name": "request-proof-without-reply",
+      "operation": "verifyRequest",
+      "inputs": {
+        "signedRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": null,
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_no_reply"
+        },
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": null,
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_no_reply"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "output": {
+          "replayKey": { "contextId": "ctx_test", "requestId": "req_no_reply" }
+        }
+      }
+    },
+    {
+      "name": "exact-permission-subset-allowed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "requiredPermissions": [
+          {
+            "action": "call",
+            "target": {
+              "api": "documents@v1",
+              "kind": "apiSurface",
+              "name": "Documents.Get",
+              "surface": "rpc"
+            }
+          }
+        ]
+      },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "platform-capability-allowed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "requiredCapabilities": ["platform.read"]
+      },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "context-skew-boundaries",
+      "operation": "verifyContextAtTimes",
+      "inputs": { "times": [1070, 1330] },
+      "expected": { "valid": true, "output": { "acceptedTimes": [1070, 1330] } }
+    },
+    {
+      "name": "manifest-minimum-generation-boundary",
+      "operation": "verifyManifest",
+      "inputs": { "policy": { "minimumManifestGeneration": 7 } },
+      "expected": { "valid": true, "output": { "generation": 7 } }
+    },
+    {
+      "name": "safe-integer-maximum-accepted",
+      "operation": "verifyCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 9007199254740990
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": 9007199254740990
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 9007199254740991
+        }
+      ],
+      "resign": ["certificate"],
+      "inputs": { "policy": { "nowUnixSeconds": 9007199254740990 } },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "safe-integer-minimum-accepted",
+      "operation": "verifyCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": -9007199254740991
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": -9007199254740991
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": -9007199254740990
+        }
+      ],
+      "resign": ["certificate"],
+      "inputs": { "policy": { "nowUnixSeconds": -9007199254740991 } },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "safe-manifest-generation-accepted",
+      "operation": "verifyManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/generation",
+          "value": 9007199254740991
+        }
+      ],
+      "resign": ["manifest"],
+      "inputs": { "policy": { "minimumManifestGeneration": 9007199254740991 } },
+      "expected": {
+        "valid": true,
+        "output": { "generation": 9007199254740991 }
+      }
+    },
+    {
+      "name": "safe-authority-version-accepted",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/version",
+          "value": 9007199254740991
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": { "authorityRef": { "version": 9007199254740991 } }
+      }
+    },
+    {
+      "name": "safe-request-iat-maximum-accepted",
+      "operation": "buildRequestProof",
+      "inputs": {
+        "signedRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": null,
+          "payload": "x",
+          "iat": 9007199254740991,
+          "requestId": "safe-max"
+        }
+      },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "safe-request-iat-minimum-accepted",
+      "operation": "buildRequestProof",
+      "inputs": {
+        "signedRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": null,
+          "payload": "x",
+          "iat": -9007199254740991,
+          "requestId": "safe-min"
+        }
+      },
+      "expected": { "valid": true }
+    },
+    {
+      "name": "safe-nested-extension-integer-accepted",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/a~1b",
+          "value": { "~value": [9007199254740991] }
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": true,
+        "output": { "extensions": { "a/b": { "~value": [9007199254740991] } } }
+      }
+    },
+    {
+      "name": "generation-8-stale-handle-success",
+      "operation": "verifyStaleManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/generation",
+          "value": 8
+        }
+      ],
+      "resign": ["manifest"],
+      "inputs": {
+        "initialMinimumManifestGeneration": 7,
+        "policy": { "minimumManifestGeneration": 8 }
+      },
+      "expected": { "valid": true }
+    },
+
+    {
+      "name": "manifest-overlapping-active-issuers",
+      "operation": "verifyManifest",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/keyId",
+          "value": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/serial",
+          "value": "isc_new"
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/-",
+          "value": {
+            "certificateDigest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs",
+            "keyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk",
+            "status": "active"
+          }
+        }
+      ],
+      "resign": ["certificate", "manifest"],
+      "inputs": {
+        "issuerSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+        "bindCertificate": true,
+        "certificateEntryIndex": 1,
+        "sortIssuers": true
+      },
+      "expected": {
+        "valid": true,
+        "output": {
+          "activeIssuerKeyIds": [
+            "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+            "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"
+          ]
+        }
+      }
+    },
+    {
+      "name": "manifest-revoked-old-issuer",
+      "operation": "verifyManifest",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/keyId",
+          "value": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/serial",
+          "value": "isc_new"
+        },
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/status",
+          "value": "revoked"
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/0/revokedAt",
+          "value": 1050
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/-",
+          "value": {
+            "certificateDigest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs",
+            "keyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk",
+            "status": "active"
+          }
+        }
+      ],
+      "resign": ["certificate", "manifest"],
+      "inputs": {
+        "issuerSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+        "bindCertificate": true,
+        "certificateEntryIndex": 1,
+        "sortIssuers": true
+      },
+      "expected": {
+        "valid": true,
+        "output": {
+          "activeIssuerKeyIds": ["ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"]
+        }
+      }
+    },
+    {
+      "name": "new-active-issuer-rotation",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/keyId",
+          "value": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E"
+        },
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/serial",
+          "value": "isc_new"
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/-",
+          "value": {
+            "certificateDigest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs",
+            "keyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk",
+            "status": "active"
+          }
+        }
+      ],
+      "resign": ["certificate", "manifest", "context"],
+      "inputs": {
+        "issuerSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+        "bindCertificate": true,
+        "certificateEntryIndex": 1,
+        "sortIssuers": true,
+        "bindContextIssuer": true
+      },
+      "expected": {
+        "valid": true,
+        "output": {
+          "issuerKeyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk"
+        }
+      }
+    },
+    {
+      "name": "padded-base64url",
+      "operation": "constructTrustRoot",
+      "mutations": [
+        {
+          "target": "root",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "AQ=="
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidEncoding",
+        "path": "/publicKey"
+      }
+    },
+    {
+      "name": "root-key-wrong-length",
+      "operation": "constructTrustRoot",
+      "mutations": [
+        {
+          "target": "root",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidPublicKey",
+        "path": "/publicKey"
+      }
+    },
+    {
+      "name": "malformed-root-key-id-reference",
+      "operation": "constructTrustRoot",
+      "mutations": [
+        { "target": "root", "op": "replace", "path": "/keyId", "value": "AQ" }
+      ],
+      "expected": { "valid": false, "code": "InvalidKeyId", "path": "/keyId" }
+    },
+    {
+      "name": "declared-key-id-mismatch",
+      "operation": "constructTrustRoot",
+      "mutations": [
+        {
+          "target": "root",
+          "op": "replace",
+          "path": "/keyId",
+          "value": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc"
+        }
+      ],
+      "expected": { "valid": false, "code": "InvalidKeyId", "path": "/keyId" }
+    },
+    {
+      "name": "issuer-key-wrong-length",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/publicKey",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidPublicKey",
+        "path": "/publicKey"
+      }
+    },
+    {
+      "name": "malformed-certificate-root-key-reference",
+      "operation": "parseCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/rootKeyId",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidKeyId",
+        "path": "/rootKeyId"
+      }
+    },
+    {
+      "name": "signature-wrong-length",
+      "operation": "parseCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/signature",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "certificate-another-root",
+      "operation": "verifyCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/signature",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "certificate-wrong-authority",
+      "operation": "verifyCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/authority",
+          "value": "trellis-other"
+        }
+      ],
+      "resign": ["certificate"],
+      "expected": {
+        "valid": false,
+        "code": "WrongAuthority",
+        "path": "/authority"
+      }
+    },
+    {
+      "name": "certificate-time-order",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 999
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidValidityWindow",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "certificate-usage-missing",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/usages",
+          "value": []
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "CertificateUsageMissing",
+        "path": "/usages"
+      }
+    },
+    {
+      "name": "certificate-usage-empty",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/usages",
+          "value": [""]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/usages/0"
+      }
+    },
+    {
+      "name": "certificate-usage-whitespace",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/usages",
+          "value": [" authorizationContext"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/usages/0"
+      }
+    },
+    {
+      "name": "certificate-usage-control",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/usages",
+          "value": ["authorizationContext\u0001"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/usages/0"
+      }
+    },
+    {
+      "name": "certificate-unknown-top-level",
+      "operation": "parseCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "add",
+          "path": "/unexpected",
+          "value": true
+        }
+      ],
+      "expected": { "valid": false, "code": "InvalidFormat", "path": "" }
+    },
+    {
+      "name": "manifest-signature-invalid",
+      "operation": "verifyManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/signature",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "manifest-generation-zero",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/generation",
+          "value": 0
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/generation"
+      }
+    },
+    {
+      "name": "manifest-rollback",
+      "operation": "verifyManifest",
+      "inputs": { "policy": { "minimumManifestGeneration": 8 } },
+      "expected": {
+        "valid": false,
+        "code": "ManifestRollback",
+        "path": "/generation"
+      }
+    },
+    {
+      "name": "stale-verified-manifest-rejected",
+      "operation": "verifyStaleManifest",
+      "inputs": {
+        "initialMinimumManifestGeneration": 7,
+        "policy": { "minimumManifestGeneration": 8 }
+      },
+      "expected": {
+        "valid": false,
+        "code": "ManifestRollback",
+        "path": "/generation"
+      }
+    },
+    {
+      "name": "cloned-stale-verified-manifest-rejected",
+      "operation": "verifyStaleManifest",
+      "inputs": {
+        "initialMinimumManifestGeneration": 7,
+        "clone": true,
+        "policy": { "minimumManifestGeneration": 8 }
+      },
+      "expected": {
+        "valid": false,
+        "code": "ManifestRollback",
+        "path": "/generation"
+      }
+    },
+    {
+      "name": "manifest-duplicate-issuer",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/-",
+          "value": {
+            "certificateDigest": "jcyl2X1t5DDrj5zXvF4tC09kmiXZWFEtynkdA0GBsZs",
+            "keyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
+            "status": "active"
+          }
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "NonCanonicalSet",
+        "path": "/issuers"
+      }
+    },
+    {
+      "name": "manifest-issuer-order",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/-",
+          "value": {
+            "certificateDigest": "5UukrkM5tHc81s0tVtlRT_ZDhVgcO8SgTSQuUr0dPAk",
+            "keyId": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4",
+            "status": "active"
+          }
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "NonCanonicalSet",
+        "path": "/issuers"
+      }
+    },
+    {
+      "name": "malformed-manifest-root-key-reference",
+      "operation": "parseManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/rootKeyId",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidKeyId",
+        "path": "/rootKeyId"
+      }
+    },
+    {
+      "name": "malformed-manifest-issuer-key-reference",
+      "operation": "parseManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/keyId",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidKeyId",
+        "path": "/issuers/0/keyId"
+      }
+    },
+    {
+      "name": "active-with-revoked-at",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/0/revokedAt",
+          "value": 1050
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/issuers/0/revokedAt"
+      }
+    },
+    {
+      "name": "revoked-without-revoked-at",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/status",
+          "value": "revoked"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/issuers/0/revokedAt"
+      }
+    },
+    {
+      "name": "issuer-not-listed",
+      "operation": "verifyContext",
+      "mutations": [
+        { "target": "manifest", "op": "remove", "path": "/issuers/0" }
+      ],
+      "resign": ["manifest"],
+      "expected": {
+        "valid": false,
+        "code": "IssuerNotListed",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "issuer-revoked",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/status",
+          "value": "revoked"
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/0/revokedAt",
+          "value": 1050
+        }
+      ],
+      "resign": ["manifest"],
+      "expected": {
+        "valid": false,
+        "code": "IssuerRevoked",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "certificate-digest-mismatch",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/certificateDigest",
+          "value": "5UukrkM5tHc81s0tVtlRT_ZDhVgcO8SgTSQuUr0dPAk"
+        }
+      ],
+      "resign": ["manifest"],
+      "expected": {
+        "valid": false,
+        "code": "CertificateDigestMismatch",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "manifest-unknown-top-level",
+      "operation": "parseManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/unexpected",
+          "value": true
+        }
+      ],
+      "expected": { "valid": false, "code": "InvalidFormat", "path": "" }
+    },
+    {
+      "name": "context-issuer-certificate-mismatch",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuerKeyId",
+          "value": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "IssuerNotListed",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "malformed-context-issuer-key-reference",
+      "operation": "parseContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuerKeyId",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidKeyId",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "context-wrong-authority",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authority",
+          "value": "trellis-other"
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "WrongAuthority",
+        "path": "/authority"
+      }
+    },
+    {
+      "name": "context-unlisted-key",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuerKeyId",
+          "value": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "IssuerNotListed",
+        "path": "/issuerKeyId"
+      }
+    },
+    {
+      "name": "context-signature-invalid",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/signature",
+          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "context-time-order",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 1400
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidValidityWindow",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "context-lifetime",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 1401
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "ContextLifetimeExceeded",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "context-outlives-certificate",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 999
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": 999
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 1200
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "ContextOutlivesCertificate",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "context-outlives-manifest",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 1250
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": 1250
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 1501
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "ContextOutlivesManifest",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "context-not-yet-valid",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 1200
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": 1200
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "ContextNotYetValid",
+        "path": "/notBefore"
+      }
+    },
+    {
+      "name": "context-expired",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 1000
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": 1000
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 1050
+        }
+      ],
+      "resign": ["context"],
+      "expected": {
+        "valid": false,
+        "code": "ContextExpired",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "permission-order",
+      "operation": "parseContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/grantSet/permissions/-",
+          "value": {
+            "action": "call",
+            "target": {
+              "api": "documents@v1",
+              "kind": "apiSurface",
+              "name": "Documents.Get",
+              "surface": "rpc"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "NonCanonicalSet",
+        "path": "/grantSet/permissions"
+      }
+    },
+    {
+      "name": "capability-order",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": ["z", "a"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "NonCanonicalSet",
+        "path": "/capabilities"
+      }
+    },
+    {
+      "name": "capability-empty",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": [""]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/capabilities/0"
+      }
+    },
+    {
+      "name": "capability-whitespace",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": [" platform.read"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/capabilities/0"
+      }
+    },
+    {
+      "name": "capability-control",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/capabilities",
+          "value": ["platform.read\u0001"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/capabilities/0"
+      }
+    },
+    {
+      "name": "critical-name-empty",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": [""]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/critical/0"
+      }
+    },
+    {
+      "name": "critical-name-whitespace",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": [" future"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/critical/0"
+      }
+    },
+    {
+      "name": "critical-name-control",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": ["future\u0001"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/critical/0"
+      }
+    },
+    {
+      "name": "critical-missing-extension",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": ["future/~policy"]
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/critical/0"
+      }
+    },
+    {
+      "name": "critical-missing-extension-nonzero-index",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": ["alpha", "future/~policy"]
+        },
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/alpha",
+          "value": true
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/critical/1"
+      }
+    },
+    {
+      "name": "critical-unknown",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": ["future/~policy"]
+        },
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/future~1~0policy",
+          "value": true
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnknownCriticalExtension",
+        "path": "/extensions/future~1~0policy"
+      }
+    },
+    {
+      "name": "context-token-too-large",
+      "operation": "contextToken",
+      "inputs": { "policy": { "maximumContextTokenBytes": 1 } },
+      "expected": { "valid": false, "code": "ContextTokenTooLarge", "path": "" }
+    },
+    {
+      "name": "diagnostic-escaping",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/critical",
+          "value": ["future/~policy"]
+        },
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/future~1~0policy",
+          "value": true
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnknownCriticalExtension",
+        "path": "/extensions/future~1~0policy"
+      }
+    },
+    {
+      "name": "session-key-malformed",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/sessionKey",
+          "value": "AQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSessionKey",
+        "path": "/sessionKey"
+      }
+    },
+    {
+      "name": "context-unknown-top-level",
+      "operation": "parseContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/unexpected",
+          "value": true
+        }
+      ],
+      "expected": { "valid": false, "code": "InvalidFormat", "path": "" }
+    },
+    {
+      "name": "unsafe-certificate-positive-time",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/expiresAt",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/expiresAt"
+      }
+    },
+    {
+      "name": "unsafe-certificate-negative-time",
+      "operation": "signCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/notBefore",
+          "value": -9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/notBefore"
+      }
+    },
+    {
+      "name": "unsafe-manifest-generation",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/generation",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/generation"
+      }
+    },
+    {
+      "name": "unsafe-authority-version",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/version",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/authorityRef/version"
+      }
+    },
+    {
+      "name": "unsafe-policy-now",
+      "operation": "verifyManifest",
+      "inputs": {
+        "mutatePolicyAfterConstruction": true,
+        "policy": { "nowUnixSeconds": 9007199254740992 }
+      },
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/nowUnixSeconds"
+      }
+    },
+    {
+      "name": "unsafe-policy-minimum-generation",
+      "operation": "verifyManifest",
+      "inputs": {
+        "mutatePolicyAfterConstruction": true,
+        "policy": { "minimumManifestGeneration": 9007199254740992 }
+      },
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/minimumManifestGeneration"
+      }
+    },
+    {
+      "name": "unsafe-request-iat",
+      "operation": "buildRequestProof",
+      "inputs": {
+        "signedRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": null,
+          "payload": "x",
+          "iat": 9007199254740992,
+          "requestId": "unsafe"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/iat"
+      }
+    },
+    {
+      "name": "unsafe-nested-extension-integer",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/a~1b",
+          "value": { "~value": [9007199254740992] }
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/extensions/a~1b/~0value/0"
+      }
+    },
+    {
+      "name": "adjacent-unsafe-integer-a-rejected",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/value",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/extensions/value"
+      }
+    },
+    {
+      "name": "adjacent-unsafe-integer-b-rejected",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/value",
+          "value": 9007199254740993
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/extensions/value"
+      }
+    },
+    {
+      "name": "proof-another-session-key",
+      "operation": "verifyRequest",
+      "inputs": {
+        "signedRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_test",
+          "sessionSeed": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-context-swapped",
+      "operation": "verifyRequest",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/contextId",
+          "value": "ctx_swapped"
+        }
+      ],
+      "resign": ["context"],
+      "inputs": { "usePinnedProof": true },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-subject-changed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Other",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-reply-changed-inside-prefix",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.changed",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-reply-outside-prefix",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "OTHER.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "ReplySubjectMismatch",
+        "path": "/reply"
+      }
+    },
+    {
+      "name": "proof-payload-changed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "changed",
+          "iat": 1100,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-iat-changed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1101,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "proof-iat-outside",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1200,
+          "requestId": "req_test"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "ProofIatOutOfRange",
+        "path": "/iat"
+      }
+    },
+    {
+      "name": "proof-request-id-empty",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": ""
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidFormat",
+        "path": "/request-id"
+      }
+    },
+    {
+      "name": "proof-request-id-changed",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "verificationRequest": {
+          "subject": "rpc.v1.Documents.Get",
+          "reply": "_INBOX.test.reply",
+          "payload": "{\"id\":\"doc-1\"}",
+          "iat": 1100,
+          "requestId": "req_other"
+        }
+      },
+      "expected": {
+        "valid": false,
+        "code": "InvalidRequestProof",
+        "path": "/proof"
+      }
+    },
+    {
+      "name": "missing-permission-denied",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "requiredPermissions": [
+          {
+            "action": "call",
+            "target": {
+              "api": "documents@v1",
+              "kind": "apiSurface",
+              "name": "Documents.Delete",
+              "surface": "rpc"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "code": "PermissionDenied",
+        "path": "/grantSet/permissions"
+      }
+    },
+    {
+      "name": "missing-platform-capability-denied",
+      "operation": "verifyRequest",
+      "inputs": {
+        "usePinnedProof": true,
+        "requiredCapabilities": ["platform.write"]
+      },
+      "expected": {
+        "valid": false,
+        "code": "CapabilityDenied",
+        "path": "/capabilities"
+      }
+    },
+    {
+      "name": "tampered-extension-value",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "add",
+          "path": "/extensions/trace",
+          "value": { "v": 1 }
+        }
+      ],
+      "resign": ["context"],
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/extensions/trace/v",
+          "value": 2
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-principal-id",
+      "operation": "verifyContext",
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "usr_other"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-participant-artifact-digest",
+      "operation": "verifyContext",
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/artifactDigest",
+          "value": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-participant-needs-digest",
+      "operation": "verifyContext",
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/needsDigest",
+          "value": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-authority-reference-id",
+      "operation": "verifyContext",
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "usr_other"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-authority-reference-version",
+      "operation": "verifyContext",
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/version",
+          "value": 13
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "malformed-certificate-key-id-reference",
+      "operation": "parseCertificate",
+      "mutations": [
+        {
+          "target": "certificate",
+          "op": "replace",
+          "path": "/keyId",
+          "value": "AQ"
+        }
+      ],
+      "expected": { "valid": false, "code": "InvalidKeyId", "path": "/keyId" }
+    },
+    {
+      "name": "unsafe-manifest-issued-at",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/issuedAt"
+      }
+    },
+    {
+      "name": "unsafe-manifest-revoked-at",
+      "operation": "signManifest",
+      "mutations": [
+        {
+          "target": "manifest",
+          "op": "replace",
+          "path": "/issuers/0/status",
+          "value": "revoked"
+        },
+        {
+          "target": "manifest",
+          "op": "add",
+          "path": "/issuers/0/revokedAt",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/issuers/0/revokedAt"
+      }
+    },
+    {
+      "name": "unsafe-context-issued-at",
+      "operation": "signContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/issuedAt",
+          "value": 9007199254740992
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "UnsafeJsonInteger",
+        "path": "/issuedAt"
+      }
+    },
+    {
+      "name": "tampered-deployment-id",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "svc_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/kind",
+          "value": "deployment"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/deploymentId",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/instanceId",
+          "value": "ins_service_01"
+        }
+      ],
+      "resign": ["context"],
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/deploymentId",
+          "value": "dep_other"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    },
+    {
+      "name": "tampered-instance-id",
+      "operation": "verifyContext",
+      "mutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/principal/id",
+          "value": "svc_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/participant/kind",
+          "value": "service"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/kind",
+          "value": "deployment"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/authorityRef/id",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/deploymentId",
+          "value": "dep_documents"
+        },
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/instanceId",
+          "value": "ins_service_01"
+        }
+      ],
+      "resign": ["context"],
+      "postMutations": [
+        {
+          "target": "context",
+          "op": "replace",
+          "path": "/instanceId",
+          "value": "ins_other"
+        }
+      ],
+      "expected": {
+        "valid": false,
+        "code": "InvalidSignature",
+        "path": "/signature"
+      }
+    }
+  ]
+}

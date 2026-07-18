@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-07-17).
+Last verified against Trellis main (2026-07-18).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -78,6 +78,18 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   consumer per viewer.
 - The runtime owns authentication, authorization, authority validation,
   deployment approval, resource bindings, request context, and wire validation.
+- The target ordinary-request trust chain is a pinned authorization root,
+  root-signed current generation-numbered issuer manifest and issuer
+  certificates, issuer-signed short-lived context, and context-bound session-key
+  request proof. Services compute the raw payload hash and enforce exact signed
+  permission/capability subsets locally. Current `Auth.Requests.Validate` use is
+  transitional; do not add new service dependencies on it.
+- Signed contexts distinguish the stable principal from participant evidence and
+  bind the exact participant/needs digests, source authority version, session
+  key, reply-inbox prefix, exact grant set, and platform capabilities.
+- Signed protocol integers and nested extension integers use the JSON safe-integer
+  range. Each context decision rechecks the caller-supplied minimum manifest
+  generation so stale verified handles cannot bypass rollback protection.
 - Use operations for caller-visible async workflows. Use jobs for service-private
   background work.
 - Operations and job queues may declare one optional `update` schema. Keep

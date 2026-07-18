@@ -100,9 +100,10 @@
 //! ```
 //!
 //! Semantic normalized projections are suitable for identity and comparison.
-//! They are not a future cryptographic signature payload: a signature must cover
+//! They are not a cryptographic signature payload: a signature must cover
 //! the complete raw canonical object, excluding only the signature member, so
-//! unknown fields cannot be dropped. Signature support is not implemented here.
+//! unknown fields cannot be dropped. The [`authorization`] module applies that
+//! rule to its deliberately strict signed security objects.
 //!
 //! # API artifacts
 //!
@@ -264,6 +265,7 @@
 //! ```
 
 mod api;
+pub mod authorization;
 mod canonical;
 mod error;
 mod identifiers;
@@ -278,8 +280,29 @@ pub use api::{
     ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1, ApiCompatibilityReportV1,
     API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
 };
+pub use authorization::{
+    authorization_context_signing_digest_v1, build_authorization_request_proof_input_v2,
+    encode_authorization_context_token_v1, issuer_certificate_signing_digest_v1,
+    issuer_manifest_signing_digest_v1, parse_authorization_context_token_v1,
+    parse_authorization_context_v1, parse_issuer_certificate_v1, parse_issuer_manifest_v1,
+    sign_authorization_context_v1, sign_authorization_request_v2, sign_issuer_certificate_v1,
+    sign_issuer_manifest_v1, verify_authorization_context_v1, verify_authorization_request_v2,
+    verify_issuer_certificate_v1, verify_issuer_manifest_v1, AuthorizationAuthorityKindV1,
+    AuthorizationAuthorityRefV1, AuthorizationContextVerificationPolicyV1,
+    AuthorizationIssuerManifestEntryV1, AuthorizationIssuerStatusV1, AuthorizationParticipantV1,
+    AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, AuthorizationReplayKeyV2,
+    AuthorizationRequestProofInputV2, AuthorizationRequestProofV2, AuthorizationTrustRootV1,
+    AuthorizationVerificationPolicyV1, SignedAuthorizationContextV1,
+    SignedAuthorizationIssuerCertificateV1, SignedAuthorizationIssuerManifestV1,
+    UnsignedAuthorizationContextV1, UnsignedAuthorizationIssuerCertificateV1,
+    UnsignedAuthorizationIssuerManifestV1, VerifiedAuthorizationContextV1,
+    VerifiedAuthorizationIssuerManifestV1, VerifiedAuthorizationRequestV2,
+    AUTHORIZATION_CONTEXT_FORMAT_V1, AUTHORIZATION_ISSUER_CERTIFICATE_FORMAT_V1,
+    AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1, AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2,
+    AUTHORIZATION_TRUST_ROOT_FORMAT_V1,
+};
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
-pub use error::{ProtocolError, ResolutionErrorCodeV1};
+pub use error::{AuthorizationErrorCodeV1, ProtocolError, ResolutionErrorCodeV1};
 pub use participant::{
     lint_participant_v1_authoring, parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1,
     PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,

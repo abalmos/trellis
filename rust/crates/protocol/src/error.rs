@@ -27,6 +27,73 @@ pub enum ResolutionErrorCodeV1 {
     SchemaPointerTypeMismatch,
 }
 
+/// Stable failure categories for signed authorization protocol values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthorizationErrorCodeV1 {
+    /// A value has the wrong protocol format or strict object shape.
+    InvalidFormat,
+    /// An integer cannot be represented exactly by interoperable JSON implementations.
+    UnsafeJsonInteger,
+    /// A binary value is not canonical unpadded base64url.
+    InvalidEncoding,
+    /// An Ed25519 public key is malformed.
+    InvalidPublicKey,
+    /// A declared key id does not match its public key.
+    InvalidKeyId,
+    /// A signature is malformed or cryptographically invalid.
+    InvalidSignature,
+    /// An object belongs to another authority.
+    WrongAuthority,
+    /// A critical extension is not understood.
+    UnknownCriticalExtension,
+    /// A set-like array is duplicated or out of canonical order.
+    NonCanonicalSet,
+    /// An authored validity interval is inconsistent.
+    InvalidValidityWindow,
+    /// A manifest generation is older than the accepted minimum.
+    ManifestRollback,
+    /// The issuer manifest is not yet valid.
+    ManifestNotYetValid,
+    /// The issuer manifest has expired.
+    ManifestExpired,
+    /// The context issuer is absent from the manifest.
+    IssuerNotListed,
+    /// The context issuer is explicitly revoked.
+    IssuerRevoked,
+    /// The manifest names another signed certificate digest.
+    CertificateDigestMismatch,
+    /// The issuer certificate is not yet valid.
+    CertificateNotYetValid,
+    /// The issuer certificate has expired.
+    CertificateExpired,
+    /// The issuer certificate lacks authorization-context usage.
+    CertificateUsageMissing,
+    /// The authorization context is not yet valid.
+    ContextNotYetValid,
+    /// The authorization context has expired.
+    ContextExpired,
+    /// The context lifetime exceeds explicit policy.
+    ContextLifetimeExceeded,
+    /// The context validity exceeds its certificate.
+    ContextOutlivesCertificate,
+    /// The context validity exceeds its manifest.
+    ContextOutlivesManifest,
+    /// The session verification key is malformed.
+    InvalidSessionKey,
+    /// One or more exact permission atoms are absent.
+    PermissionDenied,
+    /// One or more platform capability keys are absent.
+    CapabilityDenied,
+    /// The encoded context exceeds explicit policy.
+    ContextTokenTooLarge,
+    /// The request issue time is outside the accepted skew.
+    ProofIatOutOfRange,
+    /// The context-bound request signature is invalid.
+    InvalidRequestProof,
+    /// The request reply subject is outside the caller inbox prefix.
+    ReplySubjectMismatch,
+}
+
 /// Errors produced while validating or canonicalizing Trellis protocol values.
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
@@ -103,6 +170,17 @@ pub enum ProtocolError {
         /// Exact authored RFC 6901 path.
         path: PointerBuf,
         /// Specific validation failure.
+        message: String,
+    },
+
+    /// A signed authorization object or proof failed validation.
+    #[error("authorization validation failed at '{path}' ({code:?}): {message}")]
+    Authorization {
+        /// Stable failure category.
+        code: AuthorizationErrorCodeV1,
+        /// Exact authored RFC 6901 path.
+        path: PointerBuf,
+        /// Safe diagnostic that omits secrets and signed payloads.
         message: String,
     },
 }

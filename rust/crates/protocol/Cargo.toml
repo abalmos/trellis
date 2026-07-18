@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 base64.workspace = true
+ed25519-dalek.workspace = true
 jsonptr.workspace = true
 jsonschema.workspace = true
 serde.workspace = true

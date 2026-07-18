@@ -30,6 +30,9 @@ pub fn canonicalize_json(value: &Value) -> Result<String, ContractsError> {
         trellis_protocol::ProtocolError::ParticipantResolution { .. } => {
             unreachable!("participant resolution is not part of canonical JSON rendering")
         }
+        trellis_protocol::ProtocolError::Authorization { .. } => {
+            unreachable!("authorization validation is not part of canonical JSON rendering")
+        }
     })
 }
 

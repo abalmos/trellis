@@ -283,6 +283,40 @@ Rules:
 - Trellis session keys handle application identity proofs across connections
 - the same session key may back multiple concurrent NATS connections
 
+Application authorization has its own signed trust chain inside that second
+layer:
+
+```text
+pinned authorization root
+  -> root-signed current issuer manifest
+  -> root-signed issuer certificates
+  -> issuer-signed short-lived authorization contexts
+  -> session-key-signed context-bound requests
+```
+
+The root is trusted bootstrap configuration and is not self-signed. Its key id,
+and every issuer key id, is derived from the raw Ed25519 public key. The current
+manifest has a monotonic generation, explicitly identifies active and revoked
+issuers, and binds each issuer key id to the digest of one exact signed
+certificate. Multiple active issuers allow bounded rotation overlap; revoked and
+omitted issuers cannot validate current requests.
+
+Issuer manifests and certificates are root-signed independently. Therefore a
+writable or compromised NATS KV distribution store cannot inject trusted issuer
+authority, replace a certificate, or reactivate a revoked issuer without a valid
+root signature and an acceptable manifest generation. Distribution, accepted
+generation persistence, and issuer key custody remain runtime concerns around
+the pure protocol.
+
+An authorization context is a short-lived materialized lease, not durable
+desired authority. It binds principal identity separately from participant
+identity, exact participant/needs digests, the source identity/deployment
+authority version, session and inbox identity, exact grants, and platform
+capabilities. Services verify the complete chain and a context-bound request
+proof locally. Ordinary target request authorization does not call
+`Auth.Requests.Validate`; current uses of that RPC are transitional
+implementation behavior until runtime integration is complete.
+
 ### 6) Prove session-key ownership before granting access
 
 Users, services, and devices follow the same core runtime pattern:

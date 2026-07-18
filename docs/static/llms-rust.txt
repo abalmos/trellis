@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-17).
+Last verified against Trellis main (2026-07-18).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -45,6 +45,24 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - Exact action selections remain authoritative. Capability evidence explains a
   complete selected permission bundle, identifies the exact defining API digest,
   and never expands the derived grant set.
+- Pure protocol/tooling code can use `trellis-protocol` signed authorization
+  types to verify a pinned root, root-signed issuer certificate and current
+  generation-numbered manifest, issuer-signed short-lived context, and
+  context-bound request proof v2 without NATS, storage, wall-clock, or async
+  access. Supply verification time and limits explicitly.
+- Signed contexts bind principal and participant identity separately, exact
+  participant/needs digests, authority version, session key, inbox prefix, exact
+  grant set, and platform capabilities. Local checks compute the raw payload hash
+  and enforce exact permission/capability subsets; capabilities never expand the
+  grant set.
+- Signed protocol integers, including nested extension integers and request
+  `iat`, must remain within `-(2^53 - 1)..=(2^53 - 1)`. Context verification
+  rechecks the current minimum manifest generation even for an already verified
+  or cloned manifest handle.
+- Ordinary target request authorization validates the signed context and session
+  possession locally. Do not add new service-repository dependencies on
+  `Auth.Requests.Validate`; current runtime use is transitional until integration
+  completes.
 - Event subject, Jobs key, and operation-transfer pointers must be guaranteed to
   resolve for every schema-valid payload. Every object step must be required and
   every array index must be covered by `minItems`; optional fields are invalid

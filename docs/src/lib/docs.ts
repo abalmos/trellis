@@ -375,6 +375,13 @@ export const apiReferenceDocs: DocEntry[] = [
     href: "https://docs.rs/trellis-contracts/latest/trellis_contracts/",
     section: "Rustdoc",
   },
+  {
+    title: "trellis-protocol",
+    description:
+      "Language-neutral Trellis artifacts, exact permissions, and signed authorization protocol primitives on docs.rs.",
+    href: "https://docs.rs/trellis-protocol/latest/trellis_protocol/",
+    section: "Rustdoc",
+  },
 ];
 
 export const pendingRustdocCrates = [] as const;

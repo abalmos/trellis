@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-07-17).
+Last verified against Trellis main (2026-07-18).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -14,6 +14,13 @@ commands.
 
 - Trellis runtime authority comes from deployment authority and identity
   authority.
+- The target ordinary-request trust chain is a pinned root, root-signed current
+  issuer manifest and issuer certificates, issuer-signed short-lived
+  authorization context, and context-bound session-key request proof. Services
+  compute the raw payload hash and enforce exact permission/capability subsets
+  locally; current `Auth.Requests.Validate` use is transitional.
+- Signed authorization integers use the JSON safe-integer range, and context
+  decisions recheck the current minimum accepted manifest generation.
 - Deployment authority proposal/desired `needs` are grouped by `contracts`,
   `surfaces`, `capabilities`, and `resources`. Materialized authority is a
   projection; runtime `grants` are grouped by `capabilities`, `surfaces`, and

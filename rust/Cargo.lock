@@ -4123,6 +4123,7 @@ name = "trellis-protocol"
 version = "0.11.0"
 dependencies = [
  "base64",
+ "ed25519-dalek",
  "jsonptr",
  "jsonschema",
  "serde",
