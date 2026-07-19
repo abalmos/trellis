@@ -27,6 +27,9 @@ commands.
   `nats`, and permissions require current materialization for the accepted
   desired authority version. Stale or obsolete persisted projections are repaired
   by Trellis storage upgrade and reconciliation.
+- Deployment materialization is shared by the deployment and exact participant.
+  Session, instance, device, and delegation eligibility is checked separately;
+  one unhealthy instance does not rewrite authority for healthy peers.
 - Pure participant resolution pins every referenced API by exact ID and digest,
   keeps required and optional grants separate, and derives alias-independent
   machine needs. Named capabilities identify their exact defining API digest and

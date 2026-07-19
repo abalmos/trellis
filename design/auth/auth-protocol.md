@@ -579,6 +579,14 @@ return path and show sign-in UX. Non-browser clients may surface the same
 
 ## Internal State Model
 
+Rust-owned principal, provider-identity, session, desired-authority,
+runtime-evidence, and materialized-authority records are specified in
+[rust-authorization-state.md](./rust-authorization-state.md). Those records and
+the unsigned issuable-state query precede external auth/bootstrap cutover and
+signed authorization-context issuance. The browser-flow records below describe
+the retained external flow behavior until that cutover; they are not the Rust
+authority storage model.
+
 ## Browser Flow Protocol
 
 The portal-owned browser login UX uses `flowId` as the browser-visible

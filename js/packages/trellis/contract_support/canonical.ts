@@ -30,7 +30,7 @@ export function canonicalizeJson(value: JsonValue): string {
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "number") {
-    if (!Number.isFinite(value) || Object.is(value, -0)) {
+    if (!Number.isFinite(value)) {
       throw new Error(`Non-canonical number in manifest: ${value}`);
     }
     return JSON.stringify(value);

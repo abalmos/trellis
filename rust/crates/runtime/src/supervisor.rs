@@ -154,6 +154,9 @@ pub enum RuntimeError {
     /// Health subsystem setup or runtime failed.
     #[error("health subsystem failed: {0}")]
     Health(String),
+    /// Platform authorization setup or runtime failed.
+    #[error("platform subsystem failed: {0}")]
+    Platform(String),
     /// A subsystem scaffold failed to start.
     #[error("failed to start runtime subsystem {subsystem}: {reason}")]
     Subsystem {
@@ -543,7 +546,7 @@ async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandl
     let mut handles = Vec::new();
     for subsystem in context.mode.subsystems() {
         let result = match subsystem {
-            SubsystemName::Platform => platform::start(context),
+            SubsystemName::Platform => platform::start(context).await,
             SubsystemName::Jobs => jobs::start(context),
             SubsystemName::Health => health::start(context).await,
             SubsystemName::Eventlog => eventlog::start(context),

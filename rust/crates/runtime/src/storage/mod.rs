@@ -176,6 +176,12 @@ impl RuntimeStores {
             subsystem: SubsystemName::Health,
         })
     }
+
+    pub(crate) fn platform(&self) -> Result<&SqliteStore, StoreError> {
+        self.platform.as_ref().ok_or(StoreError::NotConfigured {
+            subsystem: SubsystemName::Platform,
+        })
+    }
 }
 
 fn migrate_sqlite(
@@ -230,6 +236,12 @@ fn apply_sqlite_pragmas(
     connection: &Connection,
     config: &SqliteStorageConfig,
 ) -> Result<(), StoreError> {
+    connection
+        .pragma_update(None, "foreign_keys", true)
+        .map_err(|source| StoreError::ConfigureSqlite {
+            path: config.path.clone(),
+            source,
+        })?;
     if let Some(timeout_ms) = config.busy_timeout_ms {
         connection
             .busy_timeout(Duration::from_millis(timeout_ms))

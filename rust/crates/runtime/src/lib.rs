@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! Rust runtime entrypoint support for Trellis.
 //!
 //! Runtime modes select platform, Jobs, Health, or Event Log ownership groups;

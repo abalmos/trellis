@@ -154,7 +154,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertEquals(
     countOccurrences(releaseWorkflow, "--test integration"),
-    1,
+    0,
   );
   assertStringIncludes(
     releaseWorkflow,

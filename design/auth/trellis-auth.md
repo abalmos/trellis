@@ -663,6 +663,10 @@ are split by concern:
 
 - [auth-protocol.md](./auth-protocol.md) - connect tokens, proofs, auth callout,
   reply validation, internal state records
+- [rust-authorization-state.md](./rust-authorization-state.md) - Rust-owned
+  principals, sessions, desired and materialized authority, repository
+  boundaries, and the unsigned issuable-state service required before context
+  issuance
 - [auth-api.md](./auth-api.md) - HTTP endpoints, `operations.v1.Auth.*`,
   `rpc.v1.Auth.*`, and emitted auth events
 - [device-activation.md](./device-activation.md) - known-device activation,

@@ -101,6 +101,17 @@ fn assert_marker(path: &Path, table_name: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn assert_table(path: &Path, table_name: &str) -> rusqlite::Result<()> {
+    let connection = rusqlite::Connection::open(path)?;
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table_name],
+        |row| row.get(0),
+    )?;
+    assert_eq!(count, 1, "missing table {table_name}");
+    Ok(())
+}
+
 fn assert_migration(path: &Path, version: i32, name: &str) -> rusqlite::Result<()> {
     let connection = Connection::open(path)?;
     let migration_count: i64 = connection.query_row(
@@ -134,6 +145,30 @@ fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
     assert!(path.exists());
     assert_marker(&path, "trellis_platform_store_marker")?;
     assert_migration(&path, 1000, "platform_init")?;
+    assert_migration(&path, 1001, "authorization_state")?;
+    assert_table(&path, "auth_principals")?;
+    assert_table(&path, "auth_sessions")?;
+    assert_table(&path, "auth_materialized_authorities")?;
+    Ok(())
+}
+
+#[test]
+fn sqlite_platform_store_upgrades_current_marker_schema_and_reruns_safely(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let path = temp_dir.path().join("platform-upgrade.sqlite");
+    let connection = rusqlite::Connection::open(&path)?;
+    connection.execute_batch(include_str!("sqlite/platform/V1000__platform_init.sql"))?;
+    drop(connection);
+
+    let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
+    store.migrate()?;
+    store.migrate()?;
+
+    assert_marker(&path, "trellis_platform_store_marker")?;
+    assert_table(&path, "auth_provider_identities")?;
+    assert_table(&path, "auth_materialized_dependencies")?;
+    assert_table(&path, "auth_materialized_resource_bindings")?;
     Ok(())
 }
 
@@ -225,7 +260,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&path, "trellis_health_projection_store_marker")?;
     assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&path, &[1000, 2000, 3000, 3001, 4000])?;
+    assert_migration_order(&path, &[1000, 1001, 2000, 3000, 3001, 4000])?;
     Ok(())
 }
 

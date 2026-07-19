@@ -39,6 +39,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   runtime projection with `grants` grouped by `capabilities`, `surfaces`, and
   `nats`; service and device permissions require current materialization for the
   accepted desired authority version.
+- Deployment materialization is shared by the deployment and exact participant,
+  with dependency and resource selections isolated per authority. Session,
+  instance, device, and delegation eligibility is checked separately, so one
+  unhealthy instance does not rewrite authority for healthy peers.
 - Contextual participant resolution is deterministic and network-free. Every
   implemented, required, or optional API reference resolves by exact API ID and
   digest; selected surfaces and schema pointers are checked before deriving

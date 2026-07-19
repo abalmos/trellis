@@ -59,6 +59,7 @@ These headings are intentionally named for fast human and AI lookup.
 | ---------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `core/trellis-patterns.md`               | You need Trellis-wide architecture rules                             | Service categories, platform boundaries, communication patterns                     |
 | `auth/trellis-auth.md`                   | You are changing auth architecture                                   | Identity model, identity authority, deployment authority, auth subsystem boundaries |
+| `auth/rust-authorization-state.md`       | You are changing Rust-owned auth state or materialization            | Durable records, exact authority materialization, issuable-state boundary           |
 | `auth/device-activation.md`              | You are changing device preregistration or device activation         | Known-device activation flow, connect info, profiles, online activation             |
 | `contracts/trellis-contracts-catalog.md` | You are changing manifests, codegen inputs, or permission derivation | Canonical contract format, `uses`, subject ownership, activation rules              |
 
