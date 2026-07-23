@@ -18,20 +18,6 @@ liveTrellisTest({
 
     try {
       const sqlOutbox = fixture.createOutbox(service, db);
-      await service.onDocumentProcessed(
-        async ({ event: event }) => {
-          await sqlOutbox.transaction(async ({ event: out }) => {
-            await out.document.audited.enqueue({
-              documentId: event.documentId,
-              action: "listener-derived",
-            }).orThrow();
-          }).orThrow();
-          return Result.ok(undefined);
-        },
-        {},
-        { mode: "ephemeral" },
-      ).orThrow();
-
       await service.handleDocumentsProcess(async ({ input }) => {
         await sqlOutbox.transaction(async ({ event }) => {
           await event.document.processed.enqueue({
@@ -73,6 +59,13 @@ liveTrellisTest({
         assertEquals(processed.payload, {
           documentId: fixture.listenerDocumentId,
         });
+
+        await sqlOutbox.transaction(async ({ event }) => {
+          await event.document.audited.enqueue({
+            documentId: processed.payload.documentId,
+            action: "listener-derived",
+          }).orThrow();
+        }).orThrow();
 
         const audited = await assertEventCaptured(
           capture,

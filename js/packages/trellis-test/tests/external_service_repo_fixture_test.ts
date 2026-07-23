@@ -30,8 +30,21 @@ const sharedRuntimeEnv = "TRELLIS_TEST_SHARED_RUNTIME";
 
 Deno.test("external service repo fixture config supplies the Trellis command", () => {
   assertEquals(externalServiceRepoRuntime.trellis.command, {
-    cmd: Deno.execPath(),
-    args: ["run", "-A", "services/trellis/main.ts"],
+    cmd: "cargo",
+    args: [
+      "run",
+      "--manifest-path",
+      "../rust/Cargo.toml",
+      "-p",
+      "trellis-runtime",
+      "--bin",
+      "trellis-server",
+      "--",
+      "--config",
+      "{config}",
+      "all",
+    ],
+    env: { RUST_LOG: "info,trellis_runtime::platform::auth_callout=debug" },
     cwd: externalServiceRepoJsRoot,
   });
   assertEquals(config.denoTestArgs, ["-A", "-c", fixtureDenoConfigPath]);

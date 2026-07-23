@@ -692,7 +692,7 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             "Audit.Feed",
             feed(
                 "v1",
-                "feeds.v1.Audit.Feed",
+                "feed.v1.Audit.Feed",
                 "ActivityLiveFeedRequest",
                 "ActivityLiveFeedEvent",
             )

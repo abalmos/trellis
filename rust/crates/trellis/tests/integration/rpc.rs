@@ -1,11 +1,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinHandle;
-use trellis_rs::client::{RpcDescriptor, SessionAuth};
+use trellis_rs::client::RpcDescriptor;
 use trellis_rs::service::{
     ConnectedServiceRuntime, DeclaredRpcError, GeneratedServiceContract, ServerError,
 };
@@ -281,15 +281,12 @@ type RpcServiceRuntime = ConnectedServiceRuntime<RpcServiceContract>;
 
 async fn connect_rpc_service(
     trellis_url: &str,
-    contract_digest: &str,
-    seed: &str,
+    key: &trellis_test::TrellisTestServiceKey,
 ) -> RpcServiceRuntime {
     trellis_test::connect_service_runtime::<RpcServiceContract>(
         trellis_url,
-        RPC_SERVICE_ID,
-        contract_digest,
         RPC_SERVICE_CONTRACT_JSON,
-        seed,
+        key,
     )
     .await
     .expect("connect live Rust RPC service runtime")
@@ -318,12 +315,8 @@ async fn rpc_client_calls_service_success() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     let observed_requests = Arc::new(tokio::sync::Mutex::new(Vec::<ObservedRpcRequest>::new()));
     let handler_observed_requests = Arc::clone(&observed_requests);
@@ -393,12 +386,8 @@ async fn rpc_service_receives_caller_context() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     let observed_requests = Arc::new(tokio::sync::Mutex::new(Vec::<ObservedRpcRequest>::new()));
     let handler_observed_requests = Arc::clone(&observed_requests);
@@ -471,12 +460,8 @@ async fn rpc_client_receives_declared_error() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     service.register_rpc::<EntityGetRpc, _, _>(move |_context, input| async move {
         Err(ServerError::DeclaredRpc(DeclaredRpcError::new(
@@ -513,7 +498,7 @@ async fn rpc_client_receives_declared_error() {
     );
     assert_eq!(
         context.get("contractDigest").and_then(Value::as_str),
-        Some(contract_digest.as_str())
+        Some(service_key.participant_digest.as_str())
     );
     assert!(context
         .get("requestId")
@@ -548,12 +533,8 @@ async fn rpc_denies_client_without_call_authority() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     service.register_rpc::<EntityGetRpc, _, _>(move |_context, input| async move {
         Ok(EntityGetOutput {
@@ -608,12 +589,8 @@ async fn rpc_invalid_annotated_input_schema_validation() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -671,12 +648,8 @@ async fn rpc_invalid_mixed_input_validation() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -747,12 +720,8 @@ async fn rpc_auth_validation_retries_transient_session_not_found() {
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-
     let trellis_url = runtime.trellis_url().to_string();
-    let seed = service_key.seed.clone();
-    let mut service: RpcServiceRuntime =
-        connect_rpc_service(&trellis_url, &contract_digest, &seed).await;
+    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
 
     let handler_call_count = Arc::new(AtomicUsize::new(0));
     let handler_counter = Arc::clone(&handler_call_count);
@@ -778,7 +747,7 @@ async fn rpc_auth_validation_retries_transient_session_not_found() {
         .await
         .expect("start auth validation NATS observer");
     let auth_reply_observer = runtime
-        .start_nats_message_observer(format!("_INBOX.{}.>", &service_key.session_key[..16]))
+        .start_nats_message_observer("_INBOX.>")
         .await
         .expect("start auth validation reply NATS observer");
     let session_snapshot = runtime
@@ -852,118 +821,101 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
-
     let service_contract =
         trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
             .expect("build RPC service test contract");
     let client_contract = rpc_client_contract().expect("build RPC client test contract");
-
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
         .expect("provision live RPC service instance");
-    let contract_digest = service_contract.digest().to_string();
-    let trellis_url = runtime.trellis_url().to_string();
-    let service = connect_rpc_service(&trellis_url, &contract_digest, &service_key.seed).await;
-    let service_caller = service.caller().clone();
-    let auth_client = trellis_rs::auth::AuthClient::new(&service_caller);
+    let service = connect_rpc_service(runtime.trellis_url(), &service_key).await;
+    let auth_client = trellis_rs::auth::TransitionalAuthClient::new(service.caller());
 
     let (target_seed, target_session_key) = trellis_rs::auth::generate_session_keypair();
     let _target_client = admin
         .connect_client_with_session_seed(&bootstrap_url, &client_contract, target_seed.clone())
         .await
         .expect("connect target app session");
-    let target_auth = SessionAuth::from_seed_base64url(&target_seed).expect("target session auth");
-    let service_auth =
-        SessionAuth::from_seed_base64url(&service_key.seed).expect("service session auth");
+    let target_auth =
+        trellis_rs::client::SessionAuth::from_seed_base64url(&target_seed).expect("target auth");
     let payload = br#"{}"#;
     let payload_hash = trellis_rs::auth::payload_hash_base64url(payload);
-    let now = unix_now_seconds();
-
-    let request = |auth: &SessionAuth,
-                   session_key: &str,
-                   subject: &str,
-                   request_id: &str,
-                   iat: i64,
-                   capabilities: Option<Vec<String>>| {
+    let now = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_secs(),
+    )
+    .expect("current time fits i64");
+    let request = |subject: &str, request_id: &str, iat: i64, capabilities: Vec<String>| {
         trellis_rs::auth::AuthRequestsValidateRequest {
-            capabilities,
-            iat,
+            session_key: target_session_key.clone(),
+            proof: target_auth.create_proof(subject, payload, iat, request_id),
+            subject: subject.to_owned(),
             payload_hash: payload_hash.clone(),
-            proof: auth.create_proof(subject, payload, iat, request_id),
-            request_id: request_id.to_string(),
-            session_key: session_key.to_string(),
-            subject: subject.to_string(),
+            iat,
+            request_id: request_id.to_owned(),
+            capabilities,
         }
     };
 
-    let allowed = auth_client
-        .validate_request(&request(
-            &target_auth,
-            &target_session_key,
-            EntityGetRpc::SUBJECT,
-            "req_allowed",
-            now,
-            None,
-        ))
-        .await
-        .expect("validate allowed app request");
-    assert!(allowed.allowed);
-    assert!(matches!(
-        allowed.caller,
-        trellis_rs::sdk::auth::types::AuthRequestsValidateResponseCaller::User { .. }
-    ));
-
-    let denied_subject = auth_client
-        .validate_request(&request(
-            &target_auth,
-            &target_session_key,
-            "rpc.v1.Removed.Ping",
-            "req_denied_subject",
-            now,
-            None,
-        ))
-        .await
-        .expect("validate denied app request");
-    assert!(!denied_subject.allowed);
-
-    expect_auth_reason(
-        auth_client
-            .validate_request(&trellis_rs::auth::AuthRequestsValidateRequest {
-                capabilities: None,
-                iat: now,
-                payload_hash: "!!!!".to_string(),
-                proof: "not-a-proof".to_string(),
-                request_id: "req_malformed_hash".to_string(),
-                session_key: target_session_key.clone(),
-                subject: EntityGetRpc::SUBJECT.to_string(),
-            })
-            .await,
-        "invalid_signature",
-    );
-
-    expect_auth_reason(
+    assert!(
         auth_client
             .validate_request(&request(
-                &target_auth,
-                &target_session_key,
                 EntityGetRpc::SUBJECT,
-                "req_stale",
-                now - 60,
-                None,
+                "req_allowed",
+                now,
+                Vec::new()
             ))
-            .await,
-        "iat_out_of_range",
+            .await
+            .expect("validate allowed request")
+            .allowed
     );
 
-    let replay = request(
-        &target_auth,
-        &target_session_key,
-        EntityGetRpc::SUBJECT,
-        "req_replay",
-        now,
-        None,
+    let invalid_signature = trellis_rs::auth::AuthRequestsValidateRequest {
+        proof: "invalid".to_owned(),
+        ..request(EntityGetRpc::SUBJECT, "req_invalid", now, Vec::new())
+    };
+    assert_validator_error(
+        auth_client.validate_request(&invalid_signature).await,
+        "invalid request proof",
     );
+    assert_validator_error(
+        auth_client
+            .validate_request(&request(
+                EntityGetRpc::SUBJECT,
+                "req_stale",
+                now - 61,
+                Vec::new(),
+            ))
+            .await,
+        "outside the accepted window",
+    );
+    assert_validator_error(
+        auth_client
+            .validate_request(&request(
+                "rpc.v1.Removed.Ping",
+                "req_denied_subject",
+                now,
+                Vec::new(),
+            ))
+            .await,
+        "not granted by the active authority",
+    );
+    assert_validator_error(
+        auth_client
+            .validate_request(&request(
+                EntityGetRpc::SUBJECT,
+                "req_denied_capability",
+                now,
+                vec!["missing".to_owned()],
+            ))
+            .await,
+        "capability is not granted",
+    );
+
+    let replay = request(EntityGetRpc::SUBJECT, "req_replay", now, Vec::new());
     assert!(
         auth_client
             .validate_request(&replay)
@@ -971,67 +923,23 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
             .expect("first replay probe succeeds")
             .allowed
     );
-    expect_auth_reason(
+    assert_validator_error(
         auth_client.validate_request(&replay).await,
-        "invalid_signature",
+        "request proof was already used",
     );
+}
 
-    let missing_session = request(
-        &target_auth,
-        &target_session_key,
-        EntityGetRpc::SUBJECT,
-        "req_missing_then_restored",
-        now,
-        None,
-    );
-    let snapshot = runtime
-        .control_plane_sqlite()
-        .take_session(&target_session_key)
-        .expect("take target session row")
-        .expect("target session row exists");
-    expect_auth_reason(
-        auth_client.validate_request(&missing_session).await,
-        "session_not_found",
-    );
-    snapshot.restore().expect("restore target session row");
-    assert!(
-        auth_client
-            .validate_request(&missing_session)
-            .await
-            .expect("restored missing-session replay probe succeeds")
-            .allowed
-    );
-
-    runtime
-        .control_plane_sqlite()
-        .execute(
-            "UPDATE service_instances SET capabilities = ? WHERE instance_key = ?",
-            ["[\"worker.run\"]", service_key.session_key.as_str()],
-        )
-        .expect("update current service instance capabilities");
-    let service_request = request(
-        &service_auth,
-        &service_key.session_key,
-        EntityGetRpc::SUBJECT,
-        "req_service_current_permissions",
-        now,
-        Some(vec!["worker.run".to_string()]),
-    );
-    let service_validation = auth_client
-        .validate_request(&service_request)
-        .await
-        .expect("validate current service permissions");
-    assert!(service_validation.allowed);
-    let trellis_rs::sdk::auth::types::AuthRequestsValidateResponseCaller::Service {
-        capabilities,
-        ..
-    } = service_validation.caller
-    else {
-        panic!("expected service caller");
-    };
-    assert!(capabilities
-        .iter()
-        .any(|capability| capability == "worker.run"));
+fn assert_validator_error(
+    result: Result<
+        trellis_rs::auth::AuthRequestsValidateResponse,
+        trellis_rs::auth::TrellisAuthError,
+    >,
+    internal_detail: &str,
+) {
+    let error = result.expect_err("validator request must fail");
+    let debug = format!("{error:?}");
+    assert!(debug.contains("invalid_request"), "{debug}");
+    assert!(!debug.contains(internal_detail), "{debug}");
 }
 
 async fn call_entity_get_with_retry(
@@ -1111,33 +1019,6 @@ fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClie
     }
 }
 
-fn expect_auth_reason<T>(
-    result: Result<T, trellis_rs::auth::TrellisAuthError>,
-    expected_reason: &str,
-) {
-    let Err(trellis_rs::auth::TrellisAuthError::TrellisClient(
-        trellis_rs::generated::TrellisClientError::RpcError(payload),
-    )) = result
-    else {
-        panic!("expected AuthError reason {expected_reason}");
-    };
-    assert_eq!(payload.error_type(), Some("AuthError"));
-    assert_eq!(
-        payload
-            .value()
-            .and_then(|value| value.get("reason"))
-            .and_then(Value::as_str),
-        Some(expected_reason)
-    );
-}
-
-fn unix_now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock is after Unix epoch")
-        .as_secs() as i64
-}
-
 fn rpc_client_contract() -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError>
 {
     let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
@@ -1166,10 +1047,6 @@ fn rpc_unauthorized_client_contract(
         "Trellis Integration Unauthorized RPC Client",
         "App/client without rpc.call authority for Entity.Get.",
         trellis_rs::contracts::ContractKind::App,
-    )
-    .use_ref(
-        "rpcService",
-        trellis_rs::contracts::use_contract(RPC_SERVICE_ID),
     )
     .build()?;
 

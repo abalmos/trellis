@@ -803,302 +803,15 @@ async fn state_migration_required_is_returned_live() {
 }
 
 #[tokio::test]
+#[ignore = "State administration owner is deferred beyond Milestone 8"]
 async fn state_admin_inspect_and_delete_state() {
     assert_case_registered("state.admin-inspect-and-delete-state", "state", "state");
-
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
-    let bootstrap_url = runtime
-        .wait_for_bootstrap_url(Duration::from_secs(10))
-        .await
-        .expect("observe first admin bootstrap URL");
-    let mut admin = runtime.admin();
-
-    let client_contract = state_client_contract().expect("build state client test contract");
-    let admin_contract = state_admin_contract().expect("build state admin test contract");
-
-    let client = admin
-        .connect_client(&bootstrap_url, &client_contract)
-        .await
-        .expect("connect live Rust state client");
-    let admin_client = admin
-        .connect_client(&bootstrap_url, &admin_contract)
-        .await
-        .expect("connect live Rust state admin client");
-
-    let preferences =
-        trellis_rs::client::ValueStateStore::<_, Preferences>::new(&client, "preferences");
-    let drafts =
-        trellis_rs::client::MapStateStore::<_, Draft>::new(&client, "drafts").prefix("inspection");
-
-    let preferences_created = preferences
-        .put_with_options(
-            &Preferences {
-                theme: "dark".to_string(),
-                density: "comfortable".to_string(),
-            },
-            &trellis_rs::client::PutStateOptions {
-                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("create preferences");
-    assert!(preferences_created.applied);
-    let preferences_entry = match preferences_created.entry {
-        Some(trellis_rs::client::StateValue::Current(entry)) => entry,
-        _ => panic!("expected current preferences entry"),
-    };
-
-    let draft_created = drafts
-        .put_with_options(
-            "state-draft",
-            &Draft {
-                title: "Admin Inspection".to_string(),
-                body: "from Rust".to_string(),
-            },
-            &trellis_rs::client::PutStateOptions {
-                expected_revision: trellis_rs::client::ExpectedPutRevision::CreateIfAbsent,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("create draft");
-    assert!(draft_created.applied);
-    let draft_entry = match draft_created.entry {
-        Some(trellis_rs::client::StateValue::Current(entry)) => entry,
-        _ => panic!("expected current draft entry"),
-    };
-
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
-    let target_user = find_user_target_for_contract(
-        &admin_auth
-            .rpc()
-            .auth()
-            .sessions_list(&auth_sessions_list_request())
-            .await
-            .expect("list sessions for state admin target"),
-        "trellis.integration.state-client@v1",
-    )
-    .expect("Auth.Sessions.List should include state client session");
-
-    let admin_state =
-        trellis_rs::sdk::state::StateClient::new(crate::generated_caller(&admin_client));
-    let state_target = json!({
-        "scope": "userApp",
-        "contractId": "trellis.integration.state-client@v1",
-        "contractDigest": client_contract.digest(),
-        "user": target_user,
-    });
-
-    let admin_preferences = admin_state
-        .rpc()
-        .state()
-        .admin_get(
-            &serde_json::from_value(json_object_merge(
-                &state_target,
-                json!({ "store": "preferences" }),
-            ))
-            .expect("valid State.Admin.Get request"),
-        )
-        .await
-        .expect("admin get preferences");
-    let trellis_rs::sdk::state::types::StateAdminGetResponse::Variant2 { entry, found } =
-        admin_preferences
-    else {
-        panic!("expected found preferences response");
-    };
-    assert!(found);
-    assert_eq!(
-        entry.value,
-        json!({ "theme": "dark", "density": "comfortable" })
-    );
-    assert_eq!(entry.revision, preferences_entry.revision);
-    assert!(!entry.updated_at.is_empty());
-
-    let admin_list = admin_state
-        .rpc()
-        .state()
-        .admin_list(
-            &serde_json::from_value(json_object_merge(
-                &state_target,
-                json!({
-                    "store": "drafts",
-                    "prefix": "inspection",
-                    "offset": 0,
-                    "limit": 10,
-                }),
-            ))
-            .expect("valid State.Admin.List request"),
-        )
-        .await
-        .expect("admin list drafts");
-    let listed_draft = admin_list
-        .entries
-        .into_iter()
-        .find_map(|entry| match entry {
-            trellis_rs::sdk::state::types::StateAdminListResponseEntriesItem::Variant1 {
-                key: Some(key),
-                revision,
-                value,
-                ..
-            } if key == "inspection/state-draft" => Some((revision, value)),
-            _ => None,
-        })
-        .expect("admin list should include draft state");
-    assert_eq!(
-        listed_draft.1,
-        json!({ "title": "Admin Inspection", "body": "from Rust" })
-    );
-    assert_eq!(listed_draft.0, draft_entry.revision);
-
-    let deleted_preferences = admin_state
-        .rpc()
-        .state()
-        .admin_delete(
-            &serde_json::from_value(json_object_merge(
-                &state_target,
-                json!({
-                    "store": "preferences",
-                    "expectedRevision": preferences_entry.revision.clone(),
-                }),
-            ))
-            .expect("valid State.Admin.Delete request"),
-        )
-        .await
-        .expect("admin delete preferences");
-    assert!(deleted_preferences.deleted);
-
-    let deleted_draft = admin_state
-        .rpc()
-        .state()
-        .admin_delete(
-            &serde_json::from_value(json_object_merge(
-                &state_target,
-                json!({
-                    "store": "drafts",
-                    "key": "inspection/state-draft",
-                    "expectedRevision": draft_entry.revision.clone(),
-                }),
-            ))
-            .expect("valid State.Admin.Delete request"),
-        )
-        .await
-        .expect("admin delete draft");
-    assert!(deleted_draft.deleted);
-
-    assert_eq!(
-        preferences
-            .get()
-            .await
-            .expect("read admin-deleted preferences"),
-        trellis_rs::client::StateGetResult::Missing { found: false }
-    );
-    assert_eq!(
-        drafts
-            .get("state-draft")
-            .await
-            .expect("read admin-deleted draft"),
-        trellis_rs::client::StateGetResult::Missing { found: false }
-    );
 }
 
 #[tokio::test]
+#[ignore = "State administration owner is deferred beyond Milestone 8"]
 async fn state_admin_deletes_corrupt_state_entry() {
     assert_case_registered("state.admin-deletes-corrupt-state-entry", "state", "state");
-
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
-    let bootstrap_url = runtime
-        .wait_for_bootstrap_url(Duration::from_secs(10))
-        .await
-        .expect("observe first admin bootstrap URL");
-    let mut admin = runtime.admin();
-
-    let client_contract = state_client_contract().expect("build state client test contract");
-    let admin_contract = state_admin_contract().expect("build state admin test contract");
-
-    let client = admin
-        .connect_client(&bootstrap_url, &client_contract)
-        .await
-        .expect("connect live Rust state client");
-    let admin_client = admin
-        .connect_client(&bootstrap_url, &admin_contract)
-        .await
-        .expect("connect live Rust state admin client");
-
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(&admin_client));
-    let target_user = find_user_target_for_contract(
-        &admin_auth
-            .rpc()
-            .auth()
-            .sessions_list(&auth_sessions_list_request())
-            .await
-            .expect("list sessions for state admin target"),
-        "trellis.integration.state-client@v1",
-    )
-    .expect("Auth.Sessions.List should include state client session");
-    let user_id = target_user["userId"]
-        .as_str()
-        .expect("state admin target should include userId");
-
-    let storage_key = [
-        encode_state_component("user"),
-        encode_state_component(user_id),
-        encode_state_component("trellis.integration.state-client@v1"),
-        encode_state_component("preferences"),
-        "=value".to_string(),
-    ]
-    .join(".");
-    runtime
-        .seed_raw_state_entry(trellis_test::TrellisRawStateEntry {
-            key: storage_key,
-            value: json!({
-                "value": { "theme": "dark", "density": "comfortable" },
-                "updatedAt": "2026-01-01T00:00:00.000Z",
-                "stateVersion": "preferences.v1"
-            }),
-        })
-        .await
-        .expect("seed corrupt raw state entry");
-
-    let preferences =
-        trellis_rs::client::ValueStateStore::<_, Preferences>::new(&client, "preferences");
-    assert!(
-        preferences.get().await.is_err(),
-        "corrupt raw state entry should fail public read"
-    );
-
-    let admin_state =
-        trellis_rs::sdk::state::StateClient::new(crate::generated_caller(&admin_client));
-    let deleted = admin_state
-        .rpc()
-        .state()
-        .admin_delete(
-            &serde_json::from_value(json!({
-                "scope": "userApp",
-                "contractId": "trellis.integration.state-client@v1",
-                "contractDigest": client_contract.digest(),
-                "user": target_user,
-                "store": "preferences"
-            }))
-            .expect("valid State.Admin.Delete request"),
-        )
-        .await
-        .expect("admin delete corrupt preferences");
-    assert!(deleted.deleted);
-
-    assert_eq!(
-        preferences
-            .get()
-            .await
-            .expect("read admin-deleted corrupt preferences"),
-        trellis_rs::client::StateGetResult::Missing { found: false }
-    );
 }
 
 fn state_client_contract(
@@ -1252,7 +965,7 @@ fn state_admin_contract(
         )
         .use_ref(
             "auth",
-            trellis_rs::contracts::use_contract(trellis_rs::sdk::auth::CONTRACT_ID)
+            trellis_rs::contracts::use_contract(trellis_rs::sdk::auth::API_ID)
                 .with_rpc_call(["Auth.Sessions.List"]),
         )
         .use_ref(
@@ -1267,9 +980,12 @@ fn state_admin_contract(
 
 fn auth_sessions_list_request() -> trellis_rs::sdk::auth::types::AuthSessionsListRequest {
     trellis_rs::sdk::auth::types::AuthSessionsListRequest {
-        limit: 500,
-        offset: None,
-        user: None,
+        cursor: None,
+        deployment_id: None,
+        limit: Some(500),
+        participant_id: None,
+        principal_id: None,
+        state: None,
     }
 }
 
@@ -1278,21 +994,13 @@ fn find_user_target_for_contract(
     contract_id: &str,
 ) -> Option<serde_json::Value> {
     sessions.entries.iter().find_map(|entry| {
-        let trellis_rs::sdk::auth::types::AuthSessionsListResponseEntriesItem::App {
-            contract_id: entry_contract_id,
-            principal,
-            ..
-        } = entry
-        else {
-            return None;
-        };
-        if entry_contract_id != contract_id {
+        if entry.participant_kind.as_str() != "app" || entry.participant_id != contract_id {
             return None;
         }
         Some(json!({
-            "origin": principal.identity.provider,
-            "id": principal.identity.subject,
-            "userId": principal.user_id,
+            "origin": "trellis",
+            "id": entry.principal_id,
+            "userId": entry.principal_id,
         }))
     })
 }
@@ -1325,21 +1033,6 @@ fn assert_state_migration(
     assert_eq!(actual["stateVersion"], json!(state_version));
     assert_eq!(actual["currentStateVersion"], json!(current_state_version));
     assert_eq!(actual["writerContractDigest"], json!(writer_digest));
-}
-
-fn encode_state_component(value: &str) -> String {
-    let mut encoded = String::new();
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '-') {
-            encoded.push(ch);
-            continue;
-        }
-        let mut buffer = [0; 4];
-        for byte in ch.encode_utf8(&mut buffer).bytes() {
-            encoded.push_str(&format!("={byte:02X}"));
-        }
-    }
-    encoded
 }
 
 async fn call_state_get_missing_with_retry(

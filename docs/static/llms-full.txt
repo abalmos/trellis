@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-07-18).
+Last verified against Trellis main (2026-07-22).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -58,9 +58,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   exact request; partial and uncovered permissions remain explicit, and
   capability evidence includes its defining API digest and never expands runtime
   grants.
-- Safe deployment authority updates auto-apply during bootstrap. New capability
-  grants and new resource aliases require update approval; strict-mode
-  migrations require approval; `mutable-dev` records and auto-accepts migrations.
+- Bootstrap presents canonical participant and referenced API artifacts through
+  the same semantic authority planner as admin APIs. Additive compatible changes
+  are updates, incompatible API changes are migrations, and equivalent retries
+  reuse one pending proposal; no client-authored transport permissions are used.
+  Deployment authority has one stable lineage per deployment + participant.
+  Proposal IDs are immutable review records: pending semantic duplicates reuse
+  one record, changed pending semantics supersede, and terminal history never
+  blocks later reproposal. Initial plans are visible before authority acceptance.
 - Service bootstrap polls pending deployment authority until it becomes ready by
   default. Rust services use
   `ServiceConnectOptions::with_authority_pending_timeout_ms(Some(...))` only when
@@ -82,6 +87,24 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   consumer per viewer.
 - The runtime owns authentication, authorization, authority validation,
   deployment approval, resource bindings, request context, and wire validation.
+- The Rust platform process is the sole auth runtime owner. TypeScript retains
+  portal source, generated clients, proof bindings, and live client/service tests;
+  it does not register auth handlers or access migrated auth state.
+- Auth and bootstrap exchange canonical `trellis.api.v1` and
+  `trellis.participant.v1` artifacts. Normal TypeScript contract authoring is
+  compiled to those protocol artifacts before runtime admission.
+- Physical resource bindings are evidence only. Exact participant-resource atoms
+  in `GrantSetV1` authorize access; missing optional evidence removes only the
+  corresponding optional atoms.
+- Browser approval accepts only a server-owned consent digest and selected
+  server-issued optional bundle ids. OIDC callbacks require a state-specific
+  `HttpOnly` cookie and revalidate portal/provider registration policy. The full
+  server-owned consent proposal is immutable across browser-flow transitions.
+- Bootstrap replays rerun current issuance and generate fresh credentials.
+  Public HTTP/RPC/operation/callout errors use stable redacted codes.
+- Bootstrap and browser bind return a deny-all JWT bound to the session NKey.
+  Every NATS connect signs the server nonce and a separate nonce-bound
+  `trellis.session-proof.v1`; shared sentinel credentials are retired.
 - The target ordinary-request trust chain is a pinned authorization root,
   root-signed current generation-numbered issuer manifest and issuer
   certificates, issuer-signed short-lived context, and context-bound session-key

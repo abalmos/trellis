@@ -123,10 +123,8 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
     );
     let jobs_runtime = trellis_test::connect_service_runtime::<trellis_service_jobs::JobsContract>(
         runtime.trellis_url(),
-        trellis_service_jobs::CONTRACT_ID,
-        jobs_contract.digest(),
         trellis_service_jobs::CONTRACT_JSON,
-        &jobs_service_key.seed,
+        &jobs_service_key,
     )
     .await
     .expect("connect Rust Jobs admin service runtime");
@@ -166,10 +164,8 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
 
     let mut probe_service = trellis_test::connect_service_runtime::<ProbeContract>(
         runtime.trellis_url(),
-        PROBE_SERVICE_CONTRACT_ID,
-        probe_contract.digest(),
         PROBE_SERVICE_CONTRACT_JSON,
-        &probe_service_key.seed,
+        &probe_service_key,
     )
     .await
     .expect("connect probe service runtime");

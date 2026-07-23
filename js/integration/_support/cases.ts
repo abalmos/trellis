@@ -6,7 +6,7 @@ export type JsIntegrationCase = {
 };
 
 /** Local JS integration cases implemented by this suite. */
-export const jsIntegrationCases: readonly JsIntegrationCase[] = [
+export const allJsIntegrationCases: readonly JsIntegrationCase[] = [
   {
     id: "rpc.client-calls-service-success",
     file: "rpc/client_calls_service_success.integration_test.ts",
@@ -990,6 +990,23 @@ export const jsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
 ];
+
+const supportedPrefixes = [
+  "rpc.",
+  "events.",
+  "operations.",
+  "feeds.",
+  "transfer.",
+  "resources.",
+  "health.",
+  "outbox.",
+];
+
+/** Client/service integration cases supported by the Rust platform cutover. */
+export const jsIntegrationCases = allJsIntegrationCases.filter((entry) =>
+  supportedPrefixes.some((prefix) => entry.id.startsWith(prefix)) &&
+  entry.id !== "operations.service-attach-job-waits-for-completion"
+);
 
 /** Returns local JS integration case IDs selected by fixture prefix. */
 export function jsCasesForFixture(

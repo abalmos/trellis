@@ -11,12 +11,16 @@ liveTrellisTest({
     "operations.client-watches-progress observes progress events on an operation stream",
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
+    let releaseProgress!: () => void;
+    const progressReady = new Promise<void>((resolve) => {
+      releaseProgress = resolve;
+    });
     const service = await fixture.connectService(runtime);
 
     try {
       await service.handleEntityProcess(async ({ input, op }) => {
         await op.started().orThrow();
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await progressReady;
         await op.progress({ message: input.message, step: 1 }).orThrow();
         return Result.ok({ message: input.message, done: true });
       });
@@ -29,6 +33,7 @@ liveTrellisTest({
         message: fixture.message,
       }).start().orThrow();
       const events = await ref.watch().orThrow();
+      releaseProgress();
 
       let sawProgress = false;
       for await (const event of events) {

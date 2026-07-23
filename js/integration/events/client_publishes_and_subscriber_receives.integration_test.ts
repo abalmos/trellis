@@ -11,6 +11,10 @@ liveTrellisTest({
     "events.client-publishes-and-subscriber-receives publishes and captures a generated event",
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
+    await runtime.services.createInstance({
+      name: `${fixture.captureName}-provider`,
+      contract: fixture.serviceContract,
+    });
     const capture = await runtime.captureEvents({
       name: fixture.captureName,
       contract: fixture.serviceContract,

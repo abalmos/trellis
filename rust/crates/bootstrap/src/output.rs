@@ -61,10 +61,6 @@ pub(crate) fn write_nats_material(
         render_user_creds(&material.trellis_user_jwt, &material.trellis_user_seed),
     )?;
     write_private_file(
-        out.join("creds/sentinel.creds"),
-        render_user_creds(&material.sentinel_user_jwt, &material.sentinel_user_seed),
-    )?;
-    write_private_file(
         out.join("secrets/auth-issuer-signing.seed"),
         &material.auth_issuer_signing_seed,
     )?;

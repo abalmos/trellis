@@ -39,7 +39,8 @@ const OBSERVER_CONTRACT_JSON: &str = r#"{
       "health": {
         "contract": "trellis.health@v1",
         "rpc": { "call": ["Health.Query", "Health.Inspect", "Health.Metrics"] },
-        "feeds": { "subscribe": ["Health.Watch"] }
+        "feeds": { "subscribe": ["Health.Watch"] },
+        "events": { "subscribe": ["Health.StatusChanged"] }
       }
     }
   }
@@ -80,7 +81,6 @@ servers = "{}"
 auth_creds_path = "{}"
 trellis_creds_path = "{}"
 system_creds_path = "{}"
-sentinel_creds_path = "{}"
 
 [health]
 history_retention_days = 30
@@ -97,15 +97,14 @@ single_writer = true
 [leases]
 bucket = "trellis_runtime_leases"
 replicas = 1
-ttl_ms = 15000
-renew_ms = 5000
+ttl_ms = 9000
+renew_ms = 3000
 "#,
             toml_path(&session_seed),
             runtime.nats_url(),
             toml_path(&nats_dir.join("auth-auth.creds")),
             toml_path(&nats_dir.join("trellis-auth.creds")),
             toml_path(&nats_dir.join("system.creds")),
-            toml_path(&nats_dir.join("sentinel.creds")),
             toml_path(&health_db),
         );
         std::fs::write(&config_path, config).expect("write health runtime config");
@@ -162,10 +161,11 @@ async fn health_projection_lifecycle_and_recovery() {
         "health",
     );
     assert_case_registered(CASE_ID, "health", "health");
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
+    let runtime = trellis_test::TrellisTestRuntime::start(
+        trellis_test::TrellisTestRuntimeOptions::repo_platform(),
+    )
+    .await
+    .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
@@ -209,10 +209,8 @@ async fn health_projection_lifecycle_and_recovery() {
 
     let service_runtime = trellis_test::connect_service_runtime::<HealthFixtureContract>(
         runtime.trellis_url(),
-        SERVICE_ID,
-        service_contract.digest(),
         SERVICE_CONTRACT_JSON,
-        &service_key.seed,
+        &service_key,
     )
     .await
     .expect("connect Rust health service");

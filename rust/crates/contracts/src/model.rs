@@ -137,6 +137,12 @@ pub struct ContractUseOperation {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[doc = concat!("The `", stringify!(call), "` contract value.")]
     pub call: Option<Vec<String>>,
+    /// Operations whose cancel controls are selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancel: Option<Vec<String>>,
+    /// Operations whose signal controls are selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control: Option<Vec<String>>,
 }
 
 /// One cross-contract dependency declared by a contract manifest.

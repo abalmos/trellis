@@ -68,17 +68,15 @@ trellisIntegrationTest({
   scope: runtimeScopeForCase(CASE_ID),
   runtime: externalServiceRepoRuntime,
   async fn(runtime) {
-    await runtime.deployments.create({ mutableDev: true });
-    await runtime.contracts.approve({
+    const serviceKey = await runtime.registerService({
+      name: serviceName,
       contract: serviceContract,
-      allowPlanClassifications: ["update"],
     });
-    const serviceKey = await runtime.services.provisionInstanceOnly({});
     const service = await TrellisService.connect({
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();

@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use trellis_contracts::{
     ContractCapabilityMetadata, ContractKind, ContractManifest, ContractManifestBuilder,
-    ContractUseRef, ContractUseRpc, ContractsError,
+    ContractsError,
 };
 
 const READ_CAPABILITY: &str = "events.read";
@@ -56,18 +56,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
     .schema("EventLogWatchFrame", open_schema())
     .schema("NotFoundErrorData", not_found_error_schema())
     .error(NOT_FOUND_ERROR, NOT_FOUND_ERROR, "NotFoundErrorData")
-    .use_ref(
-        "auth",
-        ContractUseRef {
-            contract: "trellis.auth@v1".to_string(),
-            rpc: Some(ContractUseRpc {
-                call: Some(vec!["Auth.EventConsumers.List".to_string()]),
-            }),
-            operations: None,
-            events: None,
-            feeds: None,
-        },
-    )
     .rpc("EventLog.Query", read_rpc("EventLog.Query", "EventLogQueryRequest", "EventLogQueryResponse").with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]))
     .rpc("EventLog.Inspect", read_rpc("EventLog.Inspect", "EventLogInspectRequest", "EventLogInspectResponse").with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR, NOT_FOUND_ERROR]))
     .rpc("EventLog.Metrics", read_rpc("EventLog.Metrics", "EventLogMetricsRequest", "EventLogMetricsResponse").with_error_types([UNEXPECTED_ERROR, VALIDATION_ERROR]))
@@ -83,7 +71,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
 
     manifest.uses.required_mut().remove("core");
     manifest.uses.optional_mut().remove("core");
-    manifest.uses.optional_mut().remove("auth");
     Ok(manifest)
 }
 

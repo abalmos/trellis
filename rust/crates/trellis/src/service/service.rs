@@ -13,6 +13,8 @@ pub struct RequestValidation {
     pub allowed: bool,
     #[doc = concat!("The `", stringify!(caller), "` value.")]
     pub caller: Option<Value>,
+    /// Server-authorized reply inbox prefix for this session.
+    pub inbox_prefix: Option<String>,
 }
 
 impl RequestValidation {
@@ -22,6 +24,7 @@ impl RequestValidation {
         Self {
             allowed: true,
             caller: None,
+            inbox_prefix: None,
         }
     }
 
@@ -31,6 +34,7 @@ impl RequestValidation {
         Self {
             allowed: true,
             caller: Some(caller),
+            inbox_prefix: None,
         }
     }
 
@@ -40,6 +44,7 @@ impl RequestValidation {
         Self {
             allowed: false,
             caller: None,
+            inbox_prefix: None,
         }
     }
 }
@@ -112,7 +117,12 @@ where
             });
         }
 
-        validate_reply_inbox(subject, &session_key, context.reply_to.as_deref())?;
+        validate_reply_inbox(
+            subject,
+            &session_key,
+            validation.inbox_prefix.as_deref(),
+            context.reply_to.as_deref(),
+        )?;
 
         let context = RequestContext {
             caller: validation.caller,
@@ -156,7 +166,12 @@ where
             });
         }
 
-        validate_reply_inbox(subject, &session_key, context.reply_to.as_deref())?;
+        validate_reply_inbox(
+            subject,
+            &session_key,
+            validation.inbox_prefix.as_deref(),
+            context.reply_to.as_deref(),
+        )?;
 
         let context = RequestContext {
             caller: validation.caller,
@@ -202,7 +217,12 @@ where
             });
         }
 
-        validate_reply_inbox(subject, &session_key, context.reply_to.as_deref())?;
+        validate_reply_inbox(
+            subject,
+            &session_key,
+            validation.inbox_prefix.as_deref(),
+            context.reply_to.as_deref(),
+        )?;
 
         let context = RequestContext {
             caller: validation.caller,
@@ -229,19 +249,23 @@ where
 fn validate_reply_inbox(
     subject: &str,
     session_key: &str,
+    authorized_prefix: Option<&str>,
     reply_to: Option<&str>,
 ) -> Result<(), ServerError> {
     let Some(reply_to) = reply_to else {
         return Ok(());
     };
-    let prefix = format!("_INBOX.{}", &session_key[..16.min(session_key.len())]);
+    let fallback = format!("_INBOX.{}", &session_key[..16.min(session_key.len())]);
+    let prefix = authorized_prefix.unwrap_or(&fallback);
     if reply_to == prefix || reply_to.starts_with(&format!("{prefix}.")) {
         return Ok(());
     }
 
+    tracing::warn!(reply_to, prefix, "request reply inbox prefix mismatch");
     Err(ServerError::ReplyInboxMismatch {
         subject: subject.to_string(),
         session_key: session_key.to_string(),
         reply_to: reply_to.to_string(),
+        expected_prefix: prefix.to_string(),
     })
 }

@@ -20,11 +20,9 @@ pub(crate) struct NatsMaterial {
     pub(crate) system_user_jwt: String,
     pub(crate) auth_user_jwt: String,
     pub(crate) trellis_user_jwt: String,
-    pub(crate) sentinel_user_jwt: String,
     pub(crate) system_user_seed: String,
     pub(crate) auth_user_seed: String,
     pub(crate) trellis_user_seed: String,
-    pub(crate) sentinel_user_seed: String,
     pub(crate) auth_issuer_signing_seed: String,
     pub(crate) auth_target_signing_seed: String,
     pub(crate) auth_callout_xkey_seed: String,
@@ -42,7 +40,6 @@ pub(crate) fn generate_nats_material(
     let system_user_key = KeyPair::new_user();
     let auth_user_key = KeyPair::new_user();
     let trellis_user_key = KeyPair::new_user();
-    let sentinel_user_key = KeyPair::new_user();
     let auth_callout_xkey = XKey::new();
 
     let system_acct_pk = system_account_key.public_key();
@@ -50,7 +47,6 @@ pub(crate) fn generate_nats_material(
     let trellis_acct_pk = trellis_account_key.public_key();
     let auth_user_pk = auth_user_key.public_key();
     let trellis_user_pk = trellis_user_key.public_key();
-    let sentinel_user_pk = sentinel_user_key.public_key();
     let system_user_pk = system_user_key.public_key();
 
     let allow_all = Permission {
@@ -62,16 +58,6 @@ pub(crate) fn generate_nats_material(
         subscribe: allow_all,
         resp: None,
     };
-    let deny_all = Permission {
-        allow: Vec::new(),
-        deny: vec![">".to_string()],
-    };
-    let deny_all_permissions = Permissions {
-        publish: deny_all.clone(),
-        subscribe: deny_all,
-        resp: None,
-    };
-
     let mut operator = Operator::new_claims(names.operator_name.clone(), operator_key.public_key());
     operator.payload_mut().system_account = Some(system_acct_pk.clone());
     let operator_jwt = encode_claims(&operator, &operator_key)?;
@@ -130,16 +116,6 @@ pub(crate) fn generate_nats_material(
         ),
         &trellis_signing_key,
     )?;
-    let sentinel_user_jwt = encode_claims(
-        &user_claim(
-            "sentinel",
-            sentinel_user_pk.clone(),
-            auth_acct_pk.clone(),
-            deny_all_permissions,
-        ),
-        &auth_signing_key,
-    )?;
-
     Ok(NatsMaterial {
         metadata: GeneratedMetadata {
             system_account_name: names.system_account.clone(),
@@ -151,7 +127,6 @@ pub(crate) fn generate_nats_material(
             trellis_account_public_key: trellis_acct_pk,
             auth_user_public_key: auth_user_pk,
             trellis_user_public_key: trellis_user_pk,
-            sentinel_user_public_key: sentinel_user_pk,
         },
         operator_jwt,
         system_account_jwt,
@@ -160,11 +135,9 @@ pub(crate) fn generate_nats_material(
         system_user_jwt,
         auth_user_jwt,
         trellis_user_jwt,
-        sentinel_user_jwt,
         system_user_seed: system_user_key.seed()?,
         auth_user_seed: auth_user_key.seed()?,
         trellis_user_seed: trellis_user_key.seed()?,
-        sentinel_user_seed: sentinel_user_key.seed()?,
         auth_issuer_signing_seed: auth_signing_key.seed()?,
         auth_target_signing_seed: trellis_signing_key.seed()?,
         auth_callout_xkey_seed: auth_callout_xkey.seed()?,

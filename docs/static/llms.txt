@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-07-18).
+Last verified against Trellis main (2026-07-23).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -12,6 +12,13 @@ commands.
 
 ## Current model
 
+- The Rust platform runtime is the sole auth owner. TypeScript owns portal source,
+  generated SDKs, clients, proof bindings, and tests, but no auth runtime state.
+- Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
+  TypeScript contracts are compiled to those artifacts before bootstrap.
+- Bootstrap returns a deny-all JWT bound to the session NKey. Every NATS connect
+  and reconnect signs the server nonce and a separate nonce-bound
+  `trellis.session-proof.v1`; there is no shared sentinel credential.
 - Trellis runtime authority comes from deployment authority and identity
   authority.
 - The target ordinary-request trust chain is a pinned root, root-signed current
@@ -35,16 +42,27 @@ commands.
   machine needs. Named capabilities identify their exact defining API digest and
   explain fully selected exact permissions; they never add permissions to a
   participant request.
-- Safe deployment authority updates auto-apply during bootstrap. New capability
-  grants and new resource aliases require update approval; strict-mode
-  migrations require approval; `mutable-dev` records and auto-accepts migrations.
+- Service/device bootstrap presents canonical participant and referenced API
+  artifacts. Trellis classifies additive compatible changes as updates and
+  incompatible API changes as migrations; both require an immutable authority
+  decision. Each deployment + participant has one stable authority lineage.
+  Equivalent pending retries reuse one proposal; terminal history remains
+  queryable and never blocks later reproposal.
 - Service bootstrap polls pending deployment authority until it becomes ready by
   default. Rust callers may set an explicit overall authority-pending timeout;
   request timeouts remain bounded.
 - The runtime `contracts` store is a manifest cache keyed by digest, not durable
   authority. If Trellis asks for a missing manifest or prunes an invalid cached
-  manifest, present the full contract manifest again instead of editing runtime
+  manifest, present the canonical participant/API artifacts again instead of editing runtime
   authority or implementation-offer records.
+- Physical resource bindings never grant access. Exact resource permission atoms
+  must be in `GrantSetV1`, and optional evidence contributes only optional atoms.
+- Browser approval submits only the server consent digest, selected server-issued
+  optional bundle ids, decision, and idempotency key. OIDC callbacks require the
+  state-specific browser cookie and current portal policy. Consent is immutable
+  for the lifetime of the browser flow.
+- Bootstrap replay revalidates current authority and mints a fresh credential;
+  public errors never expose internal storage, crypto, provider, or topology causes.
 - Caller-visible communication is contract-driven and runs through generated
   RPC, event, feed, and operation surfaces. Resources, state, files, and jobs are
   contract-declared runtime surfaces; jobs are service-private background work.

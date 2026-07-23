@@ -12,6 +12,10 @@ pub enum TrellisAuthError {
     #[error("contract digest error: {0}")]
     ContractDigest(#[from] trellis_contracts::ContractsError),
 
+    /// A protocol-owned participant or proof value was invalid.
+    #[error("auth protocol error: {0}")]
+    Protocol(Box<trellis_protocol::ProtocolError>),
+
     /// A configured auth or portal URL was invalid.
     #[error("invalid url: {0}")]
     Url(#[from] url::ParseError),
@@ -91,4 +95,10 @@ pub enum TrellisAuthError {
     /// The current session belongs to a non-user participant.
     #[error("current session is not a user session: participantKind={0}")]
     NotUserSession(String),
+}
+
+impl From<trellis_protocol::ProtocolError> for TrellisAuthError {
+    fn from(error: trellis_protocol::ProtocolError) -> Self {
+        Self::Protocol(Box::new(error))
+    }
 }

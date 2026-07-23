@@ -123,7 +123,6 @@ fn nats_bootstrap_generates_native_layout_without_transients() {
     assert!(temp.path().join("creds/system.creds").is_file());
     assert!(temp.path().join("creds/auth-auth.creds").is_file());
     assert!(temp.path().join("creds/trellis-auth.creds").is_file());
-    assert!(temp.path().join("creds/sentinel.creds").is_file());
     assert!(temp
         .path()
         .join("secrets/auth-issuer-signing.seed")
@@ -144,7 +143,6 @@ fn nats_bootstrap_generates_native_layout_without_transients() {
         "creds/system.creds",
         "creds/auth-auth.creds",
         "creds/trellis-auth.creds",
-        "creds/sentinel.creds",
     ] {
         let creds = fs::read_to_string(temp.path().join(path)).expect("read creds");
         async_nats::ConnectOptions::with_credentials(&creds).expect("parse generated creds");
@@ -174,7 +172,6 @@ fn nats_bootstrap_generates_native_layout_without_transients() {
             "creds/system.creds",
             "creds/auth-auth.creds",
             "creds/trellis-auth.creds",
-            "creds/sentinel.creds",
             "secrets/auth-issuer-signing.seed",
             "secrets/auth-target-signing.seed",
             "secrets/auth-sx.seed",
@@ -261,7 +258,6 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(config.contains("system_creds_path = \"../nats/creds/system.creds\""));
     assert!(config.contains("trellis_creds_path = \"../nats/creds/trellis-auth.creds\""));
     assert!(config.contains("auth_creds_path = \"../nats/creds/auth-auth.creds\""));
-    assert!(config.contains("sentinel_creds_path = \"../nats/creds/sentinel.creds\""));
     assert!(config.contains("[nats.auth_callout]"));
     assert!(
         config.contains("issuer_signing_seed_file = \"../nats/secrets/auth-issuer-signing.seed\"")

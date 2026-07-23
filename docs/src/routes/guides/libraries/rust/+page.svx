@@ -74,9 +74,11 @@ use orders_console_participant::{connect, ConnectOptions};
 
 let connected = connect(ConnectOptions::new(
     "nats://127.0.0.1:4222",
-    sentinel_jwt,
-    sentinel_seed,
+    bootstrap_jwt,
+    session_id,
+    inbox_prefix,
     session_key_seed,
+    participant_digest,
     30_000,
 ))
 .await?;

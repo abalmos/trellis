@@ -17,6 +17,7 @@ export type TrellisProcessHandle = {
   readonly trellisUrl: string;
   readonly bootstrapUrl: string | undefined;
   waitForBootstrapUrl(timeoutMs: number): Promise<string>;
+  outputTails(): string;
   stop(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 };
@@ -62,6 +63,8 @@ class StartedTrellisProcess implements TrellisProcessHandle {
   readonly #stdoutReader: Promise<void>;
   readonly #stderrReader: Promise<void>;
   readonly #shutdownTimeoutMs: number;
+  readonly #stdoutTail: TextTail;
+  readonly #stderrTail: TextTail;
   #bootstrapUrl: string | undefined;
   #bootstrapWaiters: BootstrapUrlWaiter[] = [];
   #stopping: Promise<void> | undefined;
@@ -73,6 +76,8 @@ class StartedTrellisProcess implements TrellisProcessHandle {
       status: Promise<CommandStatus>;
       stdoutReader: Promise<void>;
       stderrReader: Promise<void>;
+      stdoutTail: TextTail;
+      stderrTail: TextTail;
       shutdownTimeoutMs: number;
     },
   ) {
@@ -81,6 +86,8 @@ class StartedTrellisProcess implements TrellisProcessHandle {
     this.#status = args.status;
     this.#stdoutReader = args.stdoutReader;
     this.#stderrReader = args.stderrReader;
+    this.#stdoutTail = args.stdoutTail;
+    this.#stderrTail = args.stderrTail;
     this.#shutdownTimeoutMs = args.shutdownTimeoutMs;
   }
 
@@ -117,6 +124,13 @@ class StartedTrellisProcess implements TrellisProcessHandle {
         }, timeoutMs),
       };
       this.#bootstrapWaiters.push(waiter);
+    });
+  }
+
+  outputTails(): string {
+    return processOutputTails({
+      stdoutTail: this.#stdoutTail,
+      stderrTail: this.#stderrTail,
     });
   }
 
@@ -214,7 +228,8 @@ function jsonBootstrapUrl(line: string): string | undefined {
     return undefined;
   }
   if (!isRecord(parsed)) return undefined;
-  const value = parsed.bootstrapUrl;
+  const value = parsed.bootstrapUrl ??
+    (isRecord(parsed.fields) ? parsed.fields.bootstrapUrl : undefined);
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
@@ -265,7 +280,7 @@ function processOutputTails(args: {
 }
 
 function versionUrl(trellisUrl: string): string {
-  return `${trellisUrl.replace(/\/+$/, "")}/version`;
+  return `${trellisUrl.replace(/\/+$/, "")}/readyz`;
 }
 
 async function fetchReady(url: string, timeoutMs: number): Promise<boolean> {
@@ -362,7 +377,9 @@ export async function startTrellisProcess(
   const stderrTail = new TextTail(DEFAULT_OUTPUT_TAIL_CHARS);
 
   const child = new Deno.Command(command.cmd, {
-    args: Array.from(command.args),
+    args: command.args.map((arg) =>
+      arg.replaceAll("{config}", args.configPath)
+    ),
     cwd: command.cwd,
     env: {
       ...command.env,
@@ -401,6 +418,8 @@ export async function startTrellisProcess(
     status,
     stdoutReader,
     stderrReader,
+    stdoutTail,
+    stderrTail,
     shutdownTimeoutMs: args.shutdownTimeoutMs,
   });
 

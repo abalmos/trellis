@@ -19,7 +19,7 @@ import {
 import {
   CONTRACT as TRELLIS_AUTH_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_AUTH_CONTRACT_DIGEST,
-} from "../contracts/trellis_auth.ts";
+} from "../auth/reference/legacy_contract.ts";
 
 import {
   getServicePublishSubjectsForContracts,

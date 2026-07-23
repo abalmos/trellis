@@ -7,7 +7,7 @@ use futures_util::{stream, StreamExt};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
-use trellis_rs::sdk::auth::types::AuthEventsValidateRequest;
+use trellis_rs::auth::AuthEventsValidateRequest;
 use trellis_rs::service::ServerError;
 
 use crate::storage::{now_timestamp_string, EventLogStore, EventLogStoreError, ProjectedEvent};
@@ -240,7 +240,7 @@ async fn project_message_inner(
 
 struct ValidationResult {
     status: String,
-    publisher: Option<trellis_rs::sdk::auth::types::AuthEventsValidateResponsePublisher>,
+    publisher: Option<trellis_rs::auth::AuthEventPublisher>,
 }
 
 async fn validate_event(

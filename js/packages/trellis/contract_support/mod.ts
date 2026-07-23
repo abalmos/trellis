@@ -189,6 +189,12 @@ const ContractUseRpcSchema = Type.Object({
   call: Type.Optional(CapabilityListSchema),
 });
 
+const ContractUseOperationSchema = Type.Object({
+  call: Type.Optional(CapabilityListSchema),
+  cancel: Type.Optional(CapabilityListSchema),
+  control: Type.Optional(CapabilityListSchema),
+});
+
 const ContractUsePubSubSchema = Type.Object({
   publish: Type.Optional(CapabilityListSchema),
   subscribe: Type.Optional(CapabilityListSchema),
@@ -201,7 +207,7 @@ const ContractUseFeedSchema = Type.Object({
 const ContractUseSchema = Type.Object({
   contract: NonEmptyStringSchema,
   rpc: Type.Optional(ContractUseRpcSchema),
-  operations: Type.Optional(ContractUseRpcSchema),
+  operations: Type.Optional(ContractUseOperationSchema),
   events: Type.Optional(ContractUsePubSubSchema),
   feeds: Type.Optional(ContractUseFeedSchema),
 });
@@ -631,7 +637,10 @@ export type ContractUsesPubSub = {
 export type ContractUse = {
   contract: string;
   rpc?: ContractUsesRpc;
-  operations?: ContractUsesRpc;
+  operations?: ContractUsesRpc & {
+    cancel?: string[];
+    control?: string[];
+  };
   events?: ContractUsesPubSub;
   feeds?: { subscribe?: string[] };
 };
@@ -2782,8 +2791,21 @@ function projectDigestUsesFlat(
       {
         contract: use.contract,
         ...(use.rpc?.call ? { rpc: { call: sortedUnique(use.rpc.call) } } : {}),
-        ...(use.operations?.call
-          ? { operations: { call: sortedUnique(use.operations.call) } }
+        ...(use.operations?.call || use.operations?.cancel ||
+            use.operations?.control
+          ? {
+            operations: {
+              ...(use.operations.call
+                ? { call: sortedUnique(use.operations.call) }
+                : {}),
+              ...(use.operations.cancel
+                ? { cancel: sortedUnique(use.operations.cancel) }
+                : {}),
+              ...(use.operations.control
+                ? { control: sortedUnique(use.operations.control) }
+                : {}),
+            },
+          }
           : {}),
         ...((use.events?.publish || use.events?.subscribe)
           ? {
@@ -3570,7 +3592,7 @@ function operationSubject(name: string, version: `v${number}`): string {
 }
 
 function feedSubject(name: string, version: `v${number}`): string {
-  return `feeds.${version}.${name}`;
+  return `feed.${version}.${name}`;
 }
 
 function eventSubject(
@@ -3828,8 +3850,21 @@ function emitUsesFlat(
       {
         contract: use.contract,
         ...(use.rpc?.call ? { rpc: { call: sortedUnique(use.rpc.call) } } : {}),
-        ...(use.operations?.call
-          ? { operations: { call: sortedUnique(use.operations.call) } }
+        ...(use.operations?.call || use.operations?.cancel ||
+            use.operations?.control
+          ? {
+            operations: {
+              ...(use.operations.call
+                ? { call: sortedUnique(use.operations.call) }
+                : {}),
+              ...(use.operations.cancel
+                ? { cancel: sortedUnique(use.operations.cancel) }
+                : {}),
+              ...(use.operations.control
+                ? { control: sortedUnique(use.operations.control) }
+                : {}),
+            },
+          }
           : {}),
         ...((use.events?.publish || use.events?.subscribe)
           ? {
@@ -3879,7 +3914,7 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
       Object.entries(source.rpc).map(([name, method]) => {
         const emitted: ContractRpcMethod = {
           version: method.version,
-          subject: method.subject ?? rpcSubject(name, method.version),
+          subject: rpcSubject(name, method.version),
           input: { ...method.input },
           output: { ...method.output },
         };
@@ -3950,8 +3985,7 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
 
         const emitted: ContractOperation = {
           version: operation.version,
-          subject: operation.subject ??
-            operationSubject(name, operation.version),
+          subject: operationSubject(name, operation.version),
           input: { ...operation.input },
           output: { ...operation.output },
         };
@@ -4053,8 +4087,7 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
 
         const emitted: ContractEvent = {
           version: event.version,
-          subject: event.subject ??
-            eventSubject(name, event.version, event.params),
+          subject: eventSubject(name, event.version, event.params),
           event: { ...event.event },
         };
         if (event.params && event.params.length > 0) {
@@ -4098,7 +4131,7 @@ function emitContract(source: TrellisContractSource): TrellisContractV1 {
       Object.entries(source.feeds).map(([name, feed]) => {
         const emitted: ContractFeed = {
           version: feed.version,
-          subject: feed.subject ?? feedSubject(name, feed.version),
+          subject: feedSubject(name, feed.version),
           input: { ...feed.input },
           event: { ...feed.event },
         };
@@ -4205,7 +4238,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
   const rpc: Record<string, BuiltRpcDesc> = {};
   for (const [name, method] of Object.entries(source.rpc ?? {})) {
     rpc[name] = {
-      subject: method.subject ?? rpcSubject(name, method.version),
+      subject: rpcSubject(name, method.version),
       input: schema(
         resolveSchemaRef(source.schemas, method.input, `rpc '${name}' input`),
       ),
@@ -4239,7 +4272,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
     Object.entries(source.operations ?? {}).map(([name, operation]) => [
       name,
       {
-        subject: operation.subject ?? operationSubject(name, operation.version),
+        subject: operationSubject(name, operation.version),
         input: schema(
           resolveSchemaRef(
             source.schemas,
@@ -4343,8 +4376,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
       return [
         name,
         {
-          subject: event.subject ??
-            eventSubject(name, event.version, event.params),
+          subject: eventSubject(name, event.version, event.params),
           params: event.params,
           event: schema(
             resolveSchemaRef(source.schemas, event.event, `event '${name}'`),
@@ -4370,7 +4402,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
     Object.entries(source.feeds ?? {}).map(([name, feed]) => [
       name,
       {
-        subject: feed.subject ?? feedSubject(name, feed.version),
+        subject: feedSubject(name, feed.version),
         input: schema(
           resolveSchemaRef(source.schemas, feed.input, `feed '${name}' input`),
         ),
@@ -5223,23 +5255,65 @@ function defineContract(
     ...(source.exports ? { exports: source.exports } : {}),
     ...(source.state ? { state: source.state } : {}),
     ...(manifestUses ? { uses: manifestUses } : {}),
-    ...(source.rpc ? { rpc: source.rpc } : {}),
-    ...(source.operations ? { operations: source.operations } : {}),
-    ...(source.events ? { events: source.events } : {}),
-    ...(source.feeds ? { feeds: source.feeds } : {}),
+    ...(source.rpc
+      ? {
+        rpc: Object.fromEntries(
+          Object.entries(source.rpc).map(([name, method]) => [
+            name,
+            { ...method, subject: rpcSubject(name, method.version) },
+          ]),
+        ),
+      }
+      : {}),
+    ...(source.operations
+      ? {
+        operations: Object.fromEntries(
+          Object.entries(source.operations).map(([name, operation]) => [
+            name,
+            {
+              ...operation,
+              subject: operationSubject(name, operation.version),
+            },
+          ]),
+        ),
+      }
+      : {}),
+    ...(source.events
+      ? {
+        events: Object.fromEntries(
+          Object.entries(source.events).map(([name, event]) => [
+            name,
+            {
+              ...event,
+              subject: eventSubject(name, event.version, event.params),
+            },
+          ]),
+        ),
+      }
+      : {}),
+    ...(source.feeds
+      ? {
+        feeds: Object.fromEntries(
+          Object.entries(source.feeds).map(([name, feed]) => [
+            name,
+            { ...feed, subject: feedSubject(name, feed.version) },
+          ]),
+        ),
+      }
+      : {}),
     ...(source.errors ? { errors: source.errors } : {}),
     ...(source.jobs ? { jobs: source.jobs } : {}),
     ...(source.eventConsumers ? { eventConsumers: source.eventConsumers } : {}),
     ...(source.resources ? { resources: source.resources } : {}),
   };
 
+  const CONTRACT = emitContract(emittedSource);
   const ownedApi = buildOwnedApi(emittedSource);
   const ownedActions = buildOwnedActionDescriptors(source, ownedApi);
   const trellisApi = mergeDerivedApis(
     ownedApi as RuntimeApiShape & RuntimeApiLike,
     usedApi as RuntimeApiShape & RuntimeApiLike,
   ) as RuntimeApiShape;
-  const CONTRACT = emitContract(emittedSource);
   const CONTRACT_DIGEST = digestContractManifest(CONTRACT);
 
   type ConcreteDefinedContract = DefinedContract<
@@ -5880,3 +5954,7 @@ export {
   sha256Base64urlSync,
   unwrapSchema,
 };
+export {
+  type CompiledProtocolArtifacts,
+  compileProtocolArtifacts,
+} from "./protocol_artifacts.ts";

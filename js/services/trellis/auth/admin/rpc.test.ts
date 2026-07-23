@@ -14,7 +14,7 @@ import {
   TRELLIS_AUTH_EVENTS,
   TRELLIS_AUTH_OPERATIONS,
   TRELLIS_AUTH_RPC,
-} from "../../contracts/trellis_auth.ts";
+} from "../reference/legacy_contract.ts";
 
 import {
   type DeviceDeployment,

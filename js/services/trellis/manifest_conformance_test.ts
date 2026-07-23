@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { canonicalizeJson, type JsonValue } from "@qlever-llc/trellis";
-import { CONTRACT as AUTH_CONTRACT } from "./contracts/trellis_auth.ts";
+import { CONTRACT as AUTH_CONTRACT } from "./auth/reference/legacy_contract.ts";
 import { CONTRACT as CORE_CONTRACT } from "./contracts/trellis_core.ts";
 import { CONTRACT as STATE_CONTRACT } from "./contracts/trellis_state.ts";
 

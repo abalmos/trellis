@@ -94,6 +94,27 @@ pub enum AuthorizationErrorCodeV1 {
     ReplySubjectMismatch,
 }
 
+/// Stable failure categories for bootstrap, session-control, and NATS connect proofs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionProofErrorCodeV1 {
+    /// A value has the wrong protocol format or strict object shape.
+    InvalidFormat,
+    /// An integer cannot be represented exactly by interoperable JSON implementations.
+    UnsafeJsonInteger,
+    /// A binary value is not canonical unpadded base64url.
+    InvalidEncoding,
+    /// An Ed25519 public key is malformed.
+    InvalidPublicKey,
+    /// A declared key id does not match its public key.
+    InvalidKeyId,
+    /// A NATS User NKey is malformed or does not encode the session public key.
+    InvalidNatsKey,
+    /// A signature is malformed or cryptographically invalid.
+    InvalidSignature,
+    /// The proof issue time is outside the accepted policy window.
+    ProofIatOutOfRange,
+}
+
 /// Errors produced while validating or canonicalizing Trellis protocol values.
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
@@ -178,6 +199,17 @@ pub enum ProtocolError {
     Authorization {
         /// Stable failure category.
         code: AuthorizationErrorCodeV1,
+        /// Exact authored RFC 6901 path.
+        path: PointerBuf,
+        /// Safe diagnostic that omits secrets and signed payloads.
+        message: String,
+    },
+
+    /// A bootstrap, session-control, or NATS connect proof failed validation.
+    #[error("session proof validation failed at '{path}' ({code:?}): {message}")]
+    SessionProof {
+        /// Stable failure category.
+        code: SessionProofErrorCodeV1,
         /// Exact authored RFC 6901 path.
         path: PointerBuf,
         /// Safe diagnostic that omits secrets and signed payloads.

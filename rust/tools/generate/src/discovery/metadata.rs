@@ -11,6 +11,7 @@ pub fn discover_contract_metadata(
     contract: &DiscoveredContractSource,
 ) -> miette::Result<(String, ContractKind)> {
     match contract.language {
+        SourceLanguage::Protocol => resolve_contract_metadata(&contract.source_path),
         SourceLanguage::TypeScript => discover_typescript_contract_metadata(&contract.source_path),
         SourceLanguage::Rust => discover_rust_contract_metadata(&contract.source_path),
     }

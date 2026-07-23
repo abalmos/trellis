@@ -7,7 +7,7 @@ use std::process::Command;
 use miette::IntoDiagnostic;
 use serde_json::Value;
 use tempfile::TempDir;
-use trellis_contracts::{load_manifest, LoadedManifest};
+use trellis_contracts::{load_manifest, load_sdk_source, LoadedManifest};
 
 const DEFAULT_IMAGE_CONTRACT_PATH: &str = "/trellis/contract.json";
 const OCI_CONTRACT_PATH_LABELS: &[&str] = &["io.trellis.contract.path"];
@@ -223,6 +223,15 @@ fn resolve_source_contract(
     source_export: &str,
 ) -> miette::Result<ResolvedContractInput> {
     let source_path = source_path.canonicalize().into_diagnostic()?;
+    if source_path.file_name().and_then(|name| name.to_str()) == Some("trellis.api.json") {
+        let loaded = load_sdk_source(&source_path).into_diagnostic()?;
+        return Ok(ResolvedContractInput {
+            manifest_path: source_path.clone(),
+            loaded,
+            owner_version: infer_owner_version(&source_path),
+            _temp_dir: None,
+        });
+    }
     if source_path
         .extension()
         .and_then(|value| value.to_str())

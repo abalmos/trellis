@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::time::Duration;
 
-use super::{AuthenticatedUser, ClientTransportsRecord, SentinelCredsRecord};
+use super::AuthenticatedUser;
 use crate::client::SessionAuth;
 
 /// Persisted admin session details for the CLI.
@@ -22,18 +21,21 @@ pub struct AdminSessionState {
     /// Public session key derived from `session_seed`.
     #[doc = concat!("The `", stringify!(session_key), "` value.")]
     pub session_key: String,
-    /// Current delegated contract digest for admin runtime auth.
-    #[doc = concat!("The `", stringify!(contract_digest), "` value.")]
-    pub contract_digest: String,
-    /// Sentinel JWT used for runtime authentication.
-    #[doc = concat!("The `", stringify!(sentinel_jwt), "` value.")]
-    pub sentinel_jwt: String,
-    /// Sentinel seed used for runtime authentication.
-    #[doc = concat!("The `", stringify!(sentinel_seed), "` value.")]
-    pub sentinel_seed: String,
-    /// RFC3339 expiry timestamp for the current delegated agent grant.
-    #[doc = concat!("The `", stringify!(expires), "` value.")]
-    pub expires: String,
+    /// Exact administration participant artifact digest.
+    #[doc = concat!("The `", stringify!(participant_digest), "` value.")]
+    pub participant_digest: String,
+    /// Durable Trellis session identifier.
+    #[doc = concat!("The `", stringify!(session_id), "` value.")]
+    pub session_id: String,
+    /// NATS reply-inbox prefix authorized for this session.
+    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
+    pub inbox_prefix: String,
+    /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
+    #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
+    pub bootstrap_jwt: String,
+    /// Session expiry in Unix milliseconds, when bounded.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
+    pub expires_at: Option<i64>,
 }
 
 /// A successfully bound user session.
@@ -44,48 +46,49 @@ pub struct BoundSession {
     #[serde(rename = "inboxPrefix")]
     #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
     pub inbox_prefix: String,
-    /// RFC3339 expiry timestamp for this binding.
-    #[doc = concat!("The `", stringify!(expires), "` value.")]
-    pub expires: String,
+    /// Durable Trellis session identifier.
+    #[doc = concat!("The `", stringify!(session_id), "` value.")]
+    pub session_id: String,
+    /// Session expiry in Unix milliseconds, when bounded.
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
+    pub expires_at: Option<i64>,
     /// Comma-separated native transport endpoints for the session.
     #[serde(rename = "nats_servers", alias = "servers")]
     #[doc = concat!("The `", stringify!(servers), "` value.")]
     pub servers: String,
-    /// Sentinel credentials returned alongside the binding.
-    #[doc = concat!("The `", stringify!(sentinel), "` value.")]
-    pub sentinel: SentinelCredsRecord,
+    /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
+    #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
+    pub bootstrap_jwt: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[doc = concat!("Public Trellis data type `", stringify!(BindResponseBound), "`.")]
 pub struct BindResponseBound {
-    #[serde(rename = "inboxPrefix")]
-    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
-    pub inbox_prefix: String,
-    #[doc = concat!("The `", stringify!(expires), "` value.")]
-    pub expires: String,
-    #[doc = concat!("The `", stringify!(sentinel), "` value.")]
-    pub sentinel: SentinelCredsRecord,
-    #[doc = concat!("The `", stringify!(transports), "` value.")]
-    pub transports: ClientTransportsRecord,
+    #[doc = concat!("The `", stringify!(session), "` value.")]
+    pub session: BoundSessionRecord,
+    #[doc = concat!("The `", stringify!(nats), "` value.")]
+    pub nats: BoundNatsRecord,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-#[doc = concat!("Public Trellis value set `", stringify!(BindResponse), "`.")]
-pub enum BindResponse {
-    Bound(BindResponseBound),
-    ApprovalRequired {
-        approval: Value,
-    },
-    ApprovalDenied {
-        approval: Value,
-    },
-    InsufficientCapabilities {
-        approval: Value,
-        #[serde(rename = "missingCapabilities")]
-        missing_capabilities: Vec<String>,
-    },
+#[serde(rename_all = "camelCase")]
+#[doc = concat!("Public Trellis data type `", stringify!(BoundSessionRecord), "`.")]
+pub struct BoundSessionRecord {
+    #[doc = concat!("The `", stringify!(session_id), "` value.")]
+    pub session_id: String,
+    #[doc = concat!("The `", stringify!(inbox_prefix), "` value.")]
+    pub inbox_prefix: String,
+    #[doc = concat!("The `", stringify!(expires_at), "` value.")]
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[doc = concat!("Public Trellis data type `", stringify!(BoundNatsRecord), "`.")]
+pub struct BoundNatsRecord {
+    #[doc = concat!("The `", stringify!(jwt), "` value.")]
+    pub jwt: String,
+    #[doc = concat!("The `", stringify!(servers), "` value.")]
+    pub servers: Vec<String>,
 }
 
 /// An in-progress agent login flow waiting for completion.
@@ -97,8 +100,8 @@ pub struct AgentLoginChallenge {
     pub login_url: String,
     #[doc = concat!("The `", stringify!(session_seed), "` value.")]
     pub session_seed: String,
-    #[doc = concat!("The `", stringify!(contract_digest), "` value.")]
-    pub contract_digest: String,
+    #[doc = concat!("The `", stringify!(participant_digest), "` value.")]
+    pub participant_digest: String,
     #[doc = concat!("The `", stringify!(auth), "` value.")]
     pub auth: SessionAuth,
 }
@@ -108,9 +111,6 @@ pub struct StartAgentLoginOpts<'a> {
     /// Base URL for the Trellis deployment.
     #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
     pub trellis_url: &'a str,
-    /// Contract JSON sent to `/auth/login` when starting the flow.
-    #[doc = concat!("The `", stringify!(contract_json), "` value.")]
-    pub contract_json: &'a str,
 }
 
 /// Successful agent-login result after the admin user has been verified.

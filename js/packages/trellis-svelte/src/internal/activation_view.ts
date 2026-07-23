@@ -1,28 +1,8 @@
-import type { AuthResolveDeviceUserAuthoritiesOutput } from "@qlever-llc/trellis/auth";
+import type {
+  AuthDeviceUserAuthoritiesResolveOutput,
+  AuthDeviceUserAuthoritiesResolveProgress,
+} from "@qlever-llc/trellis/auth";
 import type { TerminalOperation } from "@qlever-llc/trellis";
-
-type DeviceActivationProgressInput = {
-  instanceId: string;
-  deploymentId: string;
-  reviewId: string;
-  requestedAt: string | Date;
-};
-type PendingReviewDeviceActivationOutput = Extract<
-  AuthResolveDeviceUserAuthoritiesOutput,
-  { status: "pending_review" }
->;
-
-function isDeviceActivationProgressInput(
-  value: AuthResolveDeviceUserAuthoritiesOutput,
-): value is PendingReviewDeviceActivationOutput {
-  const record = value as Record<string, unknown>;
-  return record.status === "pending_review" &&
-    typeof record.instanceId === "string" &&
-    typeof record.deploymentId === "string" &&
-    typeof record.reviewId === "string" &&
-    (typeof record.requestedAt === "string" ||
-      record.requestedAt instanceof Date);
-}
 
 export type DeviceActivationView =
   | { mode: "sign_in_required"; flowId: string }
@@ -30,10 +10,7 @@ export type DeviceActivationView =
   | {
     mode: "pending_review";
     flowId: string;
-    instanceId: string;
-    deploymentId: string;
-    reviewId: string;
-    requestedAt: string;
+    state: AuthDeviceUserAuthoritiesResolveProgress["state"];
   }
   | {
     mode: "activated";
@@ -47,8 +24,12 @@ export type DeviceActivationView =
   | { mode: "expired"; flowId: string; reason: string }
   | { mode: "invalid_flow"; reason: string; flowId?: string };
 
-function isoString(value: string | Date): string {
-  return value instanceof Date ? value.toISOString() : value;
+function isoString(value: string | number | Date): string {
+  return value instanceof Date
+    ? value.toISOString()
+    : typeof value === "number"
+    ? new Date(value).toISOString()
+    : value;
 }
 
 function errorMessage(error: unknown): string {
@@ -115,26 +96,22 @@ export function createInvalidDeviceActivationView(
 
 export function mapDeviceActivationOutput(
   flowId: string,
-  result: AuthResolveDeviceUserAuthoritiesOutput,
+  result: AuthDeviceUserAuthoritiesResolveOutput,
 ): DeviceActivationView {
-  if (result.status === "activated") {
+  if (result.device.state === "active") {
     return {
       mode: "activated",
       flowId,
-      instanceId: result.instanceId,
-      deploymentId: result.deploymentId,
-      activatedAt: isoString(result.activatedAt),
-      ...(result.confirmationCode
-        ? { confirmationCode: result.confirmationCode }
-        : {}),
+      instanceId: result.device.instanceId,
+      deploymentId: result.device.deploymentId,
+      activatedAt: isoString(
+        result.review.decidedAt ?? result.device.updatedAt,
+      ),
+      confirmationCode: result.review.confirmationCode,
     };
   }
 
-  if (isDeviceActivationProgressInput(result)) {
-    return mapDeviceActivationProgress(flowId, result);
-  }
-
-  if (result.reason === "device_flow_expired") {
+  if (result.review.state === "expired") {
     return {
       mode: "expired",
       flowId,
@@ -143,7 +120,7 @@ export function mapDeviceActivationOutput(
     };
   }
 
-  if (result.reason === "device_activation_revoked") {
+  if (result.review.state === "revoked") {
     return {
       mode: "rejected",
       flowId,
@@ -151,28 +128,21 @@ export function mapDeviceActivationOutput(
     };
   }
 
-  if (result.reason === "activation_not_started") {
-    return createDeviceActivationReadyView(flowId);
-  }
-
   return {
     mode: "rejected",
     flowId,
-    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.review.reason ? { reason: result.review.reason } : {}),
   };
 }
 
 export function mapDeviceActivationProgress(
   flowId: string,
-  progress: DeviceActivationProgressInput,
+  progress: AuthDeviceUserAuthoritiesResolveProgress,
 ): DeviceActivationView {
   return {
     mode: "pending_review",
     flowId,
-    instanceId: progress.instanceId,
-    deploymentId: progress.deploymentId,
-    reviewId: progress.reviewId,
-    requestedAt: isoString(progress.requestedAt),
+    state: progress.state,
   };
 }
 
@@ -253,7 +223,7 @@ export function mapDeviceActivationFailure(
 
 export function mapDeviceActivationTerminal(
   flowId: string,
-  terminal: TerminalOperation<unknown, AuthResolveDeviceUserAuthoritiesOutput>,
+  terminal: TerminalOperation<unknown, AuthDeviceUserAuthoritiesResolveOutput>,
 ): DeviceActivationView | null {
   if (terminal.state === "completed") {
     return terminal.output

@@ -923,17 +923,22 @@ fn validate_job_queue(
         if keyed.key.is_empty() {
             return Err(participant_error(
                 format!("{path}/keyConcurrency/key"),
-                "must contain at least one pointer",
+                "must contain at least one segment",
             ));
         }
         let mut pointers = BTreeSet::new();
         for (index, pointer) in keyed.key.iter().enumerate() {
             let pointer_path = format!("{path}/keyConcurrency/key/{index}");
-            validate_pointer(&pointer_path, pointer)?;
+            if pointer.is_empty() {
+                return Err(participant_error(pointer_path, "must not be empty"));
+            }
+            if pointer.starts_with('/') {
+                validate_pointer(&pointer_path, pointer)?;
+            }
             if !pointers.insert(pointer) {
                 return Err(participant_error(
                     pointer_path,
-                    "key pointers must be unique",
+                    "key segments must be unique",
                 ));
             }
         }

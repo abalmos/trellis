@@ -74,18 +74,21 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
     globalThis.fetch = (async (input) => {
       assertEquals(String(input), "https://auth.example.com/auth/flow/flow-1");
       return new Response(JSON.stringify({
-        status: "choose_provider",
         flowId: "flow-1",
-        app: {
-          contractId: "trellis.portal-app@v1",
-          contractDigest: "digest",
-          displayName: "Portal App",
-          description: "User-facing auth portal",
+        state: "choose_provider",
+        providers: ["github", "auth0"],
+        registrationEnabled: false,
+        federatedRegistrationEnabled: false,
+        consentViewDigest: "consent-digest",
+        consentView: {
+          participant: {
+            id: "trellis.portal-app@v1",
+            digest: "digest",
+            displayName: "Portal App",
+            description: "User-facing auth portal",
+          },
+          required: { permissions: [], capabilities: [] },
         },
-        providers: [
-          { id: "github", displayName: "GitHub" },
-          { id: "auth0", displayName: "Company SSO" },
-        ],
       }));
     }) as typeof fetch;
 
@@ -125,19 +128,47 @@ Deno.test("fetchPortalFlowState throws on non-success responses", async () => {
 Deno.test("submitPortalApproval posts decision and parses next state", async () => {
   const originalFetch = globalThis.fetch;
   try {
+    let call = 0;
     globalThis.fetch = (async (input, init) => {
+      call += 1;
+      if (call !== 2) {
+        return new Response(JSON.stringify({
+          flowId: "flow-1",
+          state: call === 1 ? "approval_required" : "approved",
+          providers: ["local"],
+          registrationEnabled: false,
+          federatedRegistrationEnabled: false,
+          consentViewDigest: "consent-digest",
+          consentView: {
+            participant: {
+              id: "trellis.console@v1",
+              digest: "digest",
+              displayName: "Trellis Console",
+              description: "Admin console",
+            },
+            required: { permissions: [], capabilities: [] },
+          },
+          user: {
+            origin: "trellis",
+            id: "usr-1",
+            name: "Admin",
+          },
+          redirectTarget: "https://app.example.com/callback?flowId=flow-1",
+        }));
+      }
       assertEquals(
         String(input),
         "https://auth.example.com/auth/flow/flow-1/approval",
       );
       assertEquals(init?.method, "POST");
       assertEquals(init?.headers, { "content-type": "application/json" });
-      assertEquals(String(init?.body), '{"approved":true}');
+      const body = JSON.parse(String(init?.body));
+      assertEquals(body.approved, true);
+      assertEquals(body.consentViewDigest, "consent-digest");
+      assertEquals(body.selectedOptionalBundles, []);
+      assertEquals(typeof body.idempotencyKey, "string");
 
-      return new Response(JSON.stringify({
-        status: "redirect",
-        location: "https://app.example.com/callback?flowId=flow-1",
-      }));
+      return new Response(JSON.stringify({ state: "approved" }));
     }) as typeof fetch;
 
     const state = await submitPortalApproval(

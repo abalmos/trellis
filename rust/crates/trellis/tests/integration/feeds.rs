@@ -76,7 +76,7 @@ impl trellis_rs::client::FeedDescriptor for EntityLiveFeed {
     type Event = EntityFeedFrame;
 
     const KEY: &'static str = "Entity.Live";
-    const SUBJECT: &'static str = "feeds.v1.Entity.Live";
+    const SUBJECT: &'static str = "feed.v1.Entity.Live";
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["readFeeds"];
     const INPUT_SCHEMA_JSON: &'static str =
         r#"{"type":"object","required":["topic"],"properties":{"topic":{"type":"string"}}}"#;
@@ -468,10 +468,6 @@ fn feeds_unauthorized_client_contract(
         "Trellis Integration Feeds Unauthorized Client",
         "App/client participant without feed subscribe authority.",
         trellis_rs::contracts::ContractKind::App,
-    )
-    .use_ref(
-        "feedsService",
-        trellis_rs::contracts::use_contract(FEEDS_SERVICE_ID),
     )
     .build()?;
 

@@ -597,10 +597,12 @@ fn transfer_completion_error(error: &ServerError) -> ServerError {
             subject,
             session_key,
             reply_to,
+            expected_prefix,
         } => ServerError::ReplyInboxMismatch {
             subject: subject.clone(),
             session_key: session_key.clone(),
             reply_to: reply_to.clone(),
+            expected_prefix: expected_prefix.clone(),
         },
         ServerError::TransferObjectTooLarge {
             service_name,

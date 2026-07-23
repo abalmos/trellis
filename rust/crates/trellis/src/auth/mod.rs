@@ -8,38 +8,13 @@ mod models;
 mod protocol;
 mod session_store;
 
-pub use crate::sdk::auth::types::{
-    AuthCapabilitiesListRequest, AuthCapabilitiesListResponse,
-    AuthCapabilitiesListResponseEntriesItem, AuthCapabilityGroupsListRequest,
-    AuthCapabilityGroupsListResponse, AuthCapabilityGroupsListResponseEntriesItem,
-    AuthDeploymentsCreateRequest, AuthDeploymentsCreateResponse, AuthDeploymentsDisableRequest,
-    AuthDeploymentsDisableResponse, AuthDeploymentsEnableRequest, AuthDeploymentsEnableResponse,
-    AuthDeploymentsListRequest, AuthDeploymentsListResponse, AuthDeploymentsRemoveRequest,
-    AuthDeploymentsRemoveResponse, AuthDevicesDisableRequest, AuthDevicesDisableResponse,
-    AuthDevicesEnableRequest, AuthDevicesEnableResponse, AuthDevicesListRequest,
-    AuthDevicesListResponse, AuthDevicesProvisionRequest, AuthDevicesProvisionResponse,
-    AuthDevicesRemoveRequest, AuthDevicesRemoveResponse, AuthIdentityGrantsListRequest,
-    AuthIdentityGrantsListResponse, AuthIdentityGrantsListResponseEntriesItem,
-    AuthIdentityGrantsRevokeRequest, AuthIdentityGrantsRevokeResponse,
-    AuthServiceInstancesDisableRequest, AuthServiceInstancesDisableResponse,
-    AuthServiceInstancesEnableRequest, AuthServiceInstancesEnableResponse,
-    AuthServiceInstancesListRequest, AuthServiceInstancesListResponse,
-    AuthServiceInstancesProvisionRequest, AuthServiceInstancesProvisionResponse,
-    AuthServiceInstancesRemoveRequest, AuthServiceInstancesRemoveResponse, AuthSessionsListRequest,
-    AuthSessionsListResponse, AuthSessionsMeResponse, AuthUsersCreateRequest,
-    AuthUsersCreateResponse, AuthUsersCreateResponseUser, AuthUsersGetRequest,
-    AuthUsersGetResponse, AuthUsersGetResponseUser, AuthUsersListRequest, AuthUsersListResponse,
-    AuthUsersListResponseEntriesItem, AuthUsersPasswordResetCreateRequest,
-    AuthUsersPasswordResetCreateResponse, AuthUsersUpdateRequest, AuthUsersUpdateResponse,
-};
+pub use crate::sdk::auth::AuthClient;
 pub use crate::service::payload_hash_base64url;
 pub use browser_login::{
-    contract_digest, generate_session_keypair, start_admin_reauth, start_agent_login,
+    administration_participant_digest, administration_participant_grants, contract_digest,
+    generate_session_keypair, start_admin_reauth, start_agent_login,
 };
-pub use client::{
-    connect_admin_client_async, session_public_key, AuthClient, DeviceDeploymentRecord,
-    RemoveDeviceDeploymentOptions, RemoveServiceDeploymentOptions, ServiceDeploymentRecord,
-};
+pub use client::{connect_admin_client_async, session_public_key, TransitionalAuthClient};
 pub use device_activation::{
     build_device_activation_payload, build_device_wait_proof_input,
     derive_device_confirmation_code, derive_device_identity, derive_device_qr_mac,
@@ -61,12 +36,8 @@ pub use models::{
     WaitForDeviceActivationResponse,
 };
 pub use protocol::{
-    AuthRequestsValidateRequest, AuthRequestsValidateResponse, AuthStartRequest, AuthStartResponse,
-    AuthenticatedIdentity, AuthenticatedUser, ClientTransportRecord, ClientTransportsRecord,
-    IdentityGrantContractEvidenceRecord, IdentityGrantEntryRecord, JobsBindings, JobsRegistry,
-    ListIdentityGrantsRequest, ResourceBindings, RevokeIdentityGrantRequest, SentinelCredsRecord,
+    AuthEventPublisher, AuthEventValidationStatus, AuthEventsValidateRequest,
+    AuthEventsValidateResponse, AuthRequestsValidateRequest, AuthRequestsValidateResponse,
+    AuthenticatedUser,
 };
 pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};
-
-#[cfg(test)]
-mod tests;

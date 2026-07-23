@@ -19,9 +19,23 @@ const RUN_RUNTIME_PROCESS_TEST =
   Deno.env.get("TRELLIS_TEST_RUNTIME_PROCESS") ===
     "1";
 const SERVICE_NAME = "runtime-process";
-const trellisMainPath = fromFileUrl(
-  new URL("../../../services/trellis/main.ts", import.meta.url),
-);
+const trellisCommand = {
+  cmd: "cargo",
+  args: [
+    "run",
+    "--manifest-path",
+    "../rust/Cargo.toml",
+    "-p",
+    "trellis-runtime",
+    "--bin",
+    "trellis-server",
+    "--",
+    "--config",
+    "{config}",
+    "all",
+  ],
+  cwd: fromFileUrl(new URL("../../../", import.meta.url)),
+};
 
 Deno.test("TrellisTestRuntime.start requires explicit trellis command", async () => {
   await assertRejects(
@@ -143,10 +157,7 @@ Deno.test({
   fn: async () => {
     const runtime = await TrellisTestRuntime.start({
       trellis: {
-        command: {
-          cmd: Deno.execPath(),
-          args: ["run", "-A", trellisMainPath],
-        },
+        command: trellisCommand,
       },
       timeouts: {
         startupMs: 60_000,
@@ -167,7 +178,7 @@ Deno.test({
         trellisUrl: runtime.trellisUrl,
         contract: runtimeProcessContract,
         name: SERVICE_NAME,
-        sessionKeySeed: serviceKey.seed,
+        identity: serviceKey,
         telemetry: false,
         server: {},
       }).orThrow();
@@ -190,10 +201,7 @@ Deno.test({
   fn: async () => {
     const runtime = await TrellisTestRuntime.start({
       trellis: {
-        command: {
-          cmd: Deno.execPath(),
-          args: ["run", "-A", trellisMainPath],
-        },
+        command: trellisCommand,
       },
       timeouts: {
         startupMs: 60_000,
@@ -211,7 +219,7 @@ Deno.test({
         trellisUrl: runtime.trellisUrl,
         contract: entityContract,
         name: "entity-live",
-        sessionKeySeed: serviceKey.seed,
+        identity: serviceKey,
         telemetry: false,
         server: {},
       }).orThrow();
@@ -249,10 +257,7 @@ Deno.test({
   fn: async () => {
     const runtime = await TrellisTestRuntime.start({
       trellis: {
-        command: {
-          cmd: Deno.execPath(),
-          args: ["run", "-A", trellisMainPath],
-        },
+        command: trellisCommand,
       },
       timeouts: {
         startupMs: 60_000,
@@ -307,10 +312,7 @@ Deno.test({
   fn: async () => {
     const runtime = await TrellisTestRuntime.start({
       trellis: {
-        command: {
-          cmd: Deno.execPath(),
-          args: ["run", "-A", trellisMainPath],
-        },
+        command: trellisCommand,
       },
       authority: { autoAccept: ["update", "migration"] },
       timeouts: {
@@ -344,10 +346,7 @@ Deno.test({
   fn: async () => {
     const runtime = await TrellisTestRuntime.start({
       trellis: {
-        command: {
-          cmd: Deno.execPath(),
-          args: ["run", "-A", trellisMainPath],
-        },
+        command: trellisCommand,
       },
       authority: { autoAccept: ["update", "migration"] },
       timeouts: {
@@ -366,7 +365,7 @@ Deno.test({
         trellisUrl: runtime.trellisUrl,
         contract: entityContract,
         name: "entity-live-source",
-        sessionKeySeed: entityKey.seed,
+        identity: entityKey,
         telemetry: false,
         server: {},
       }).orThrow();
@@ -378,7 +377,7 @@ Deno.test({
         trellisUrl: runtime.trellisUrl,
         contract: entitySubscriberContract,
         name: "entity-live-subscriber",
-        sessionKeySeed: subscriberKey.seed,
+        identity: subscriberKey,
         telemetry: false,
         server: {},
       }).orThrow();

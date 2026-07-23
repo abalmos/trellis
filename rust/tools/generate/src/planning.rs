@@ -15,7 +15,7 @@ use crate::artifacts::{
 };
 use crate::cli::{PackageTarget, RuntimeSource};
 use crate::contract_input;
-use crate::discovery::{discover_contract_metadata, DiscoveredContractSource};
+use crate::discovery::{discover_contract_metadata, DiscoveredContractSource, SourceLanguage};
 use crate::output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,7 +85,11 @@ pub fn build_auto_plan_with_targets(
                 let out_manifest = if !targets.is_empty() {
                     Some(
                         output_root
-                            .join("generated/contracts/manifests")
+                            .join(if contract.language == SourceLanguage::Protocol {
+                                "generated/apis"
+                            } else {
+                                "generated/contracts/manifests"
+                            })
                             .join(format!("{}.json", &contract_id)),
                     )
                 } else {
@@ -404,6 +408,18 @@ pub fn execute_auto_plan(
                     generator_fingerprint,
                     "generated contract artifacts",
                 )?;
+                if entry.discovered.language == SourceLanguage::Protocol {
+                    let generated_root = out_manifest
+                        .parent()
+                        .and_then(Path::parent)
+                        .ok_or_else(|| miette::miette!("API output has no generated root"))?;
+                    let legacy_manifest = generated_root
+                        .join("contracts/manifests")
+                        .join(format!("{}.json", resolved.loaded.manifest.id));
+                    if legacy_manifest.exists() {
+                        fs::remove_file(&legacy_manifest).into_diagnostic()?;
+                    }
+                }
                 if let Some(cargo_participant_out) = &entry.cargo_participant_out {
                     match participant_alias_mappings(entry, plan) {
                         Ok(mappings) => write_participant_facade_outputs(

@@ -33,12 +33,17 @@
 //! ```no_run
 //! use trellis_rs::service::ServiceConnectOptions;
 //!
-//! let options = ServiceConnectOptions::new(
+//! let _options = ServiceConnectOptions::new(
 //!     "http://localhost:3000",
 //!     "documents-worker",
+//!     "dep_documents",
+//!     "documents-worker@v1",
+//!     "participant-digest",
+//!     "participant-needs-digest",
+//!     "base64url-identity-seed",
 //!     "base64url-session-seed",
-//! );
-//! assert_eq!(options.with_timeout_ms(10_000), options.with_timeout_ms(10_000));
+//! )
+//! .with_timeout_ms(10_000);
 //! ```
 
 #[doc(hidden)]
@@ -53,21 +58,22 @@ pub mod service;
 /// Contract manifest, pagination, and schema helper types.
 pub mod contracts {
     pub use trellis_contracts::{
-        canonicalize_json, contract_capability_namespace, digest_contract_json,
-        digest_contract_value, digest_json, event, feed, global_capability_name, job_queue, kv,
-        load_json_value, load_manifest, manifest_paths_in_dir, normalize_manifest_value, operation,
-        parse_manifest, project_contract_digest_manifest, rpc, schema_ref, sha256_base64url, state,
-        store, use_contract, validate_catalog, validate_manifest, Catalog, CatalogEntry,
-        CatalogPack, ContractCapabilities, ContractCapabilityMetadata, ContractErrorDecl,
-        ContractErrorRef, ContractEvent, ContractExports, ContractFeed, ContractJobQueueResource,
-        ContractKind, ContractKvResource, ContractManifest, ContractManifestBuilder,
-        ContractOperation, ContractOperationSignal, ContractOperationTransfer,
-        ContractOperationTransferDirection, ContractResources, ContractRpcMethod,
-        ContractRpcTransfer, ContractRpcTransferDirection, ContractSchemaRef, ContractStateKind,
-        ContractStateStore, ContractStoreResource, ContractUseFeed, ContractUseOperation,
-        ContractUsePubSub, ContractUseRef, ContractUseRpc, ContractUses, ContractsError,
-        FeedCapabilities, LoadedManifest, OperationCapabilities, PageRequest, PageResponse,
-        PubSubCapabilities, RpcCapabilities, CATALOG_FORMAT_V1, CONTRACT_FORMAT_V1,
+        canonicalize_json, compile_protocol_artifacts, contract_capability_namespace,
+        digest_contract_json, digest_contract_value, digest_json, event, feed,
+        global_capability_name, job_queue, kv, load_json_value, load_manifest,
+        manifest_paths_in_dir, normalize_manifest_value, operation, parse_manifest,
+        project_contract_digest_manifest, rpc, schema_ref, sha256_base64url, state, store,
+        use_contract, validate_catalog, validate_manifest, Catalog, CatalogEntry, CatalogPack,
+        CompiledProtocolArtifacts, ContractCapabilities, ContractCapabilityMetadata,
+        ContractErrorDecl, ContractErrorRef, ContractEvent, ContractExports, ContractFeed,
+        ContractJobQueueResource, ContractKind, ContractKvResource, ContractManifest,
+        ContractManifestBuilder, ContractOperation, ContractOperationSignal,
+        ContractOperationTransfer, ContractOperationTransferDirection, ContractResources,
+        ContractRpcMethod, ContractRpcTransfer, ContractRpcTransferDirection, ContractSchemaRef,
+        ContractStateKind, ContractStateStore, ContractStoreResource, ContractUseFeed,
+        ContractUseOperation, ContractUsePubSub, ContractUseRef, ContractUseRpc, ContractUses,
+        ContractsError, FeedCapabilities, LoadedManifest, OperationCapabilities, PageRequest,
+        PageResponse, PubSubCapabilities, RpcCapabilities, CATALOG_FORMAT_V1, CONTRACT_FORMAT_V1,
     };
 }
 
@@ -108,8 +114,16 @@ mod tests {
             offset: None,
             limit: 25,
         };
-        let _options =
-            crate::service::ServiceConnectOptions::new("http://localhost:8080", "svc", "seed");
+        let _options = crate::service::ServiceConnectOptions::new(
+            "http://localhost:8080",
+            "svc",
+            "dep_1",
+            "svc@v1",
+            "participant-digest",
+            "participant-needs-digest",
+            "identity-seed",
+            "session-seed",
+        );
         let _state = crate::jobs::JobState::Pending;
     }
 
@@ -120,15 +134,14 @@ mod tests {
             .parent()
             .expect("trellis crate should live under rust/crates");
         for manifest in [
-            "auth-adapters/Cargo.toml",
             "cli/Cargo.toml",
             "codegen-rust/Cargo.toml",
             "codegen-ts/Cargo.toml",
             "bootstrap/Cargo.toml",
-            "core-bootstrap/Cargo.toml",
             "generate-runner/Cargo.toml",
             "jobs/Cargo.toml",
             "local-bootstrap/Cargo.toml",
+            "protocol-wasm/Cargo.toml",
             "runtime/Cargo.toml",
             "service-eventlog/Cargo.toml",
             "service-jobs/Cargo.toml",
@@ -169,9 +182,7 @@ mod tests {
                 .expect("trellis manifest should be readable");
         for package in [
             "trellis-auth",
-            "trellis-auth-adapters",
             "trellis-client",
-            "trellis-core-bootstrap",
             "trellis-jobs",
             "trellis-service",
             "trellis-service-runtime",

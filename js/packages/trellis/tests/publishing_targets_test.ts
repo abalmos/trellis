@@ -339,16 +339,6 @@ Deno.test("only platform runtime modules import private Trellis source", async (
   assertEquals(offenders, []);
 });
 
-Deno.test("trellis control-plane service package publishes from source", async () => {
-  const source = await Deno.readTextFile(
-    new URL("../../../services/trellis/deno.json", import.meta.url),
-  );
-  const config = parse(source) as { name?: string; exports?: unknown };
-
-  assertEquals(config.name, "@qlever-llc/trellis-control-plane");
-  assertEquals(config.exports, "./main.ts");
-});
-
 Deno.test("workspace config does not shadow publishable package members", async () => {
   const source = await Deno.readTextFile(
     new URL("../../../deno.json", import.meta.url),

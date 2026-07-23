@@ -2,8 +2,8 @@ import { AsyncResult } from "@qlever-llc/result";
 import type { BaseError } from "@qlever-llc/result";
 import type { OperationEvent, OperationSnapshot } from "@qlever-llc/trellis";
 import type {
-  AuthResolveDeviceUserAuthoritiesOutput,
-  AuthResolveDeviceUserAuthoritiesProgress,
+  AuthDeviceUserAuthoritiesResolveOutput,
+  AuthDeviceUserAuthoritiesResolveProgress,
 } from "@qlever-llc/trellis/auth";
 import { assertEquals } from "@std/assert";
 
@@ -19,8 +19,8 @@ import {
 type TestSnapshotOperationRef = DeviceActivationOperationRef & {
   get(): AsyncResult<
     OperationSnapshot<
-      AuthResolveDeviceUserAuthoritiesProgress,
-      AuthResolveDeviceUserAuthoritiesOutput
+      AuthDeviceUserAuthoritiesResolveProgress,
+      AuthDeviceUserAuthoritiesResolveOutput
     >,
     BaseError
   >;
@@ -38,6 +38,44 @@ function createStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
     },
     removeItem(key) {
       values.delete(key);
+    },
+  };
+}
+
+function activatedOutput(
+  decidedAt = Date.parse("2026-04-21T12:34:56Z"),
+): AuthDeviceUserAuthoritiesResolveOutput {
+  return {
+    authority: null,
+    device: {
+      administrativeApproval: "approved",
+      createdAt: decidedAt - 1_000,
+      delegationExpiresAt: null,
+      delegationRequired: true,
+      delegationState: "active",
+      deploymentId: "reader.default",
+      identityKeyId: null,
+      identityPublicKey: null,
+      instanceId: "dev_123",
+      participantId: null,
+      principalId: "device_123",
+      state: "active",
+      updatedAt: decidedAt,
+      version: 2,
+    },
+    review: {
+      confirmationCode: "1234",
+      decidedAt,
+      decidedBy: "usr_admin",
+      deploymentId: "reader.default",
+      devicePrincipalId: "device_123",
+      expiresAt: decidedAt + 60_000,
+      instanceId: "dev_123",
+      reason: null,
+      requestedAt: decidedAt - 1_000,
+      reviewId: "dar_123",
+      state: "approved",
+      version: 2,
     },
   };
 }
@@ -61,7 +99,7 @@ function createAuthStub(overrides: {
 }
 
 function createOperationRef(
-  output: AuthResolveDeviceUserAuthoritiesOutput,
+  output: AuthDeviceUserAuthoritiesResolveOutput,
 ): DeviceActivationOperationRef {
   const terminal = {
     id: "op_123",
@@ -106,8 +144,8 @@ function createOperationRef(
 }
 
 function createPendingReviewOperationRef(args: {
-  progress: AuthResolveDeviceUserAuthoritiesProgress;
-  output: AuthResolveDeviceUserAuthoritiesOutput;
+  progress: AuthDeviceUserAuthoritiesResolveProgress;
+  output: AuthDeviceUserAuthoritiesResolveOutput;
   onProgress(): void;
   waitForCompletion: Promise<void>;
 }): TestSnapshotOperationRef {
@@ -143,8 +181,8 @@ function createPendingReviewOperationRef(args: {
     watch() {
       return AsyncResult.ok((async function* (): AsyncIterable<
         OperationEvent<
-          AuthResolveDeviceUserAuthoritiesProgress,
-          AuthResolveDeviceUserAuthoritiesOutput
+          AuthDeviceUserAuthoritiesResolveProgress,
+          AuthDeviceUserAuthoritiesResolveOutput
         >
       > {
         yield {
@@ -245,13 +283,7 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
   const client: DeviceActivationClient = {
     activateDevice(input) {
       activateFlowId = input.flowId;
-      return Promise.resolve(createOperationRef({
-        status: "activated",
-        instanceId: "dev_123",
-        deploymentId: "reader.default",
-        activatedAt: "2026-04-21T12:34:56Z",
-        confirmationCode: "1234",
-      }));
+      return Promise.resolve(createOperationRef(activatedOutput()));
     },
   };
 
@@ -300,7 +332,7 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
     flowId: "device-flow",
     instanceId: "dev_123",
     deploymentId: "reader.default",
-    activatedAt: "2026-04-21T12:34:56Z",
+    activatedAt: "2026-04-21T12:34:56.000Z",
     confirmationCode: "1234",
   });
 });
@@ -360,18 +392,10 @@ Deno.test("DeviceActivationController shows pending review from operation progre
         activateDevice() {
           return Promise.resolve(createPendingReviewOperationRef({
             progress: {
-              status: "pending_review",
-              reviewId: "dar_123",
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              requestedAt: "2026-04-21T12:00:01Z",
+              state: "review_pending",
+              retryAfterMs: 1_000,
             },
-            output: {
-              status: "activated",
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              activatedAt: "2026-04-21T12:00:03Z",
-            },
+            output: activatedOutput(Date.parse("2026-04-21T12:00:03Z")),
             onProgress: progressSeen,
             waitForCompletion,
           }));
@@ -395,10 +419,7 @@ Deno.test("DeviceActivationController shows pending review from operation progre
   assertEquals(controller.view, {
     mode: "pending_review",
     flowId: "device-flow",
-    reviewId: "dar_123",
-    instanceId: "dev_123",
-    deploymentId: "reader.default",
-    requestedAt: "2026-04-21T12:00:01Z",
+    state: "review_pending",
   });
 
   releaseCompletion();
@@ -409,6 +430,7 @@ Deno.test("DeviceActivationController shows pending review from operation progre
     flowId: "device-flow",
     instanceId: "dev_123",
     deploymentId: "reader.default",
-    activatedAt: "2026-04-21T12:00:03Z",
+    activatedAt: "2026-04-21T12:00:03.000Z",
+    confirmationCode: "1234",
   });
 });

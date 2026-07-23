@@ -9,7 +9,21 @@ use async_nats::jetstream::{self, consumer};
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 
-use crate::client::TrellisClient;
+use crate::client::{RpcDescriptor, TrellisClient};
+
+struct AuthEventsValidateRpc;
+
+impl RpcDescriptor for AuthEventsValidateRpc {
+    type Input = crate::auth::AuthEventsValidateRequest;
+    type Output = crate::auth::AuthEventsValidateResponse;
+
+    const KEY: &'static str = "Auth.Events.Validate";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &[];
+    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+}
 
 const EVENT_STREAM: &str = "trellis";
 const EVENT_SUBJECT_WILDCARD: &str = "events.v1.>";
@@ -145,27 +159,9 @@ impl EventLogRuntime {
     /// Validate one delivered event proof through Auth.
     pub async fn validate_event(
         &self,
-        request: &crate::sdk::auth::types::AuthEventsValidateRequest,
-    ) -> Result<
-        crate::sdk::auth::types::AuthEventsValidateResponse,
-        crate::client::TrellisClientError,
-    > {
-        self.client
-            .call::<crate::sdk::auth::rpc::AuthEventsValidateRpc>(request)
-            .await
-    }
-
-    /// Return one page of Auth-attributed durable event consumers.
-    pub async fn event_consumers(
-        &self,
-        request: &crate::sdk::auth::types::AuthEventConsumersListRequest,
-    ) -> Result<
-        crate::sdk::auth::types::AuthEventConsumersListResponse,
-        crate::client::TrellisClientError,
-    > {
-        self.client
-            .call::<crate::sdk::auth::rpc::AuthEventConsumersListRpc>(request)
-            .await
+        request: &crate::auth::AuthEventsValidateRequest,
+    ) -> Result<crate::auth::AuthEventsValidateResponse, crate::client::TrellisClientError> {
+        self.client.call::<AuthEventsValidateRpc>(request).await
     }
 }
 

@@ -5,6 +5,7 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use trellis_protocol::{
     AuthorizationAuthorityKindV1, AuthorizationPrincipalKindV1, GrantSetV1, ParticipantKindV1,
+    ParticipantResourceKindV1, PermissionAtomV1,
 };
 
 use super::domain::canonical_capabilities;
@@ -82,6 +83,22 @@ fn materialize_available(
             requested.extend_from_slice(dependency.grant_set().permissions());
         }
     }
+    requested.extend(
+        participant
+            .needs()
+            .optional()
+            .grant_set()
+            .permissions()
+            .iter()
+            .filter(|permission| {
+                optional_resource_available(
+                    participant.participant_id(),
+                    permission,
+                    &snapshot.resources,
+                )
+            })
+            .cloned(),
+    );
     let accepted = authority.grant_set().permissions();
     let effective = GrantSetV1::new(
         requested
@@ -333,11 +350,10 @@ fn require_resource_needs(
 ) -> Result<(), AuthorizationStateError> {
     for (resource_kind, entries) in [
         ("state", resources.state()),
-        ("jobQueues", resources.job_queues()),
-        ("eventConsumers", resources.event_consumers()),
+        ("jobQueue", resources.job_queues()),
+        ("eventConsumer", resources.event_consumers()),
         ("kv", resources.kv()),
-        ("stores", resources.stores()),
-        ("operationTransfers", resources.operation_transfers()),
+        ("store", resources.stores()),
     ] {
         for local_name in entries.keys() {
             let available = evidence.iter().any(|item| {
@@ -354,6 +370,30 @@ fn require_resource_needs(
         }
     }
     Ok(())
+}
+
+fn optional_resource_available(
+    participant_id: &str,
+    permission: &PermissionAtomV1,
+    evidence: &[ResourceBindingEvidence],
+) -> bool {
+    let Some((owner, kind, local_name)) = permission.target().as_participant_resource() else {
+        return false;
+    };
+    let resource_kind = match kind {
+        ParticipantResourceKindV1::State => "state",
+        ParticipantResourceKindV1::JobQueue => "jobQueue",
+        ParticipantResourceKindV1::EventConsumer => "eventConsumer",
+        ParticipantResourceKindV1::Kv => "kv",
+        ParticipantResourceKindV1::Store => "store",
+    };
+    owner == participant_id
+        && evidence.iter().any(|item| {
+            item.owner_participant_id == participant_id
+                && item.resource_kind == resource_kind
+                && item.local_name == local_name
+                && item.state == ResourceBindingState::Available
+        })
 }
 
 pub(crate) fn transition_for_change(

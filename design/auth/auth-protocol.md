@@ -43,11 +43,11 @@ It does not define public HTTP and RPC endpoint schemas; those live in
 
 Canonical byte encoding for signatures:
 
-| Value type      | Encoding                                                                   |
-| --------------- | -------------------------------------------------------------------------- |
-| Strings         | UTF-8 bytes via `TextEncoder`                                              |
-| Numbers (`iat`) | ASCII decimal string (e.g. `"1735689600"`)                                 |
-| Concatenation   | `sign(hash("prefix:" + value))` means UTF-8 bytes of literal concatenation |
+| Value type       | Encoding                                           |
+| ---------------- | -------------------------------------------------- |
+| Strings          | UTF-8 bytes                                        |
+| Numbers          | JSON safe integers in the canonical request object |
+| Proof transcript | Domain-separated, length-prefixed binary fields    |
 
 Every integer carried by a signed JSON object or cross-language proof must be
 within the exactly interoperable JSON safe-integer range:
@@ -74,43 +74,38 @@ normalization is applied before signing.
 
 ## Connect Token Shapes
 
-After identity binding, clients connect to NATS with sentinel credentials plus a
-Trellis `auth_token` JSON payload.
+After bootstrap or browser binding, every client receives a deny-all
+Auth-account JWT whose subject is the session public key encoded as a NATS User
+NKey. The client uses the same session private key for the standard NATS nonce
+signature and a separately domain-separated Trellis connect proof.
 
-User/session-key runtime auth:
-
-```ts
-{
-  v: 1,
-  sessionKey: string,
-  contractDigest: string,
-  iat: number,
-  sig: string, // sign(hash("nats-connect:" + iat + ":" + contractDigest))
-}
-```
-
-Service/session-key runtime auth:
+The `auth_token` is a `trellis.nats-connect-token.v1` object:
 
 ```ts
 {
-  v: 1,
-  sessionKey: string,
-  contractDigest: string,
-  iat: number,
-  sig: string, // sign(hash("nats-connect:" + iat + ":" + contractDigest))
+  format: "trellis.nats-connect-token.v1",
+  requestId: string,
+  issuedAt: number,
+  sessionId: string,
+  participantDigest: string,
+  proof: SessionProofV1
 }
 ```
 
 Rules:
 
-- `v` is mandatory and unknown versions are rejected
-- user, device, and service runtimes MUST send `contractDigest`
-- verifiers MUST reject signatures if the presented `contractDigest` differs
-  from the digest used to produce the signature
-- reconnect uses freshly generated `iat`-based proofs rather than renewable
-  binding tokens
-- clients with unstable local clocks SHOULD derive `iat` from server-relative
-  time using bootstrap `serverNow`
+- `SessionProofV1` uses the `NatsConnect` purpose and binds the exact server
+  nonce, session id, participant digest, request id, issue time, and session
+  NKey
+- the proof transcript is built from protocol-owned length-prefixed frames; no
+  concatenated-signature format is accepted
+- the standard NATS nonce signature is padded standard Base64; Trellis proof
+  fields use unpadded Base64URL
+- the callout verifies that the bootstrap JWT subject, stored session key, proof
+  signer, and server-supplied `user_nkey` are the same identity
+- each connect or reconnect uses a fresh request id and nonce-bound proof;
+  consumed proof replays fail closed through CAS-backed replay state
+- clients with unstable clocks derive `issuedAt` from bootstrap `serverNow`
 
 ## Auth Callout Behavior
 
@@ -118,73 +113,21 @@ When NATS calls `$SYS.REQ.USER.AUTH`:
 
 1. Decode the encrypted request by requiring `Nats-Server-Xkey`, decrypting the
    payload, and extracting `user_nkey` plus `connect_opts.auth_token`.
-2. Validate the connect token by parsing
-   `{ v, sessionKey, sig, iat, contractDigest }`, checking token version and
-   proof freshness, and verifying the signed proof against the presented digest.
-3. Resolve the session and principal from the session key, presented proof
-   shape, and explicit runtime repositories for users, services, or devices.
-4. Derive permissions from current grants, the resolved principal's presented
-   contract context, materialized authority, effective active dependencies, and
-   materialized resource bindings, then issue a NATS JWT for the
-   server-generated `user_nkey`.
-5. Update session liveness and active-connection tracking.
-6. Emit `events.v1.Auth.Connections.Opened` for user and service sessions.
+2. Validate the `trellis.nats-connect-token.v1` envelope, deny-all bootstrap
+   JWT, standard nonce signature, and nonce-bound `trellis.session-proof.v1`.
+3. CAS-admit the proof replay key and resolve current issuable session,
+   principal, participant, authority, deployment/instance, and device/delegation
+   state.
+4. Compile permissions from exact `GrantSetV1` atoms plus matching API
+   descriptors and physical resource evidence. A subject or binding never
+   creates an atom.
+5. Sign the target-account JWT for the server-generated `user_nkey`, bounded by
+   current session, authority, and delegation expiry, then record connection
+   presence.
 
-Expected auth failures in those stages return typed denials and reason codes,
-such as `invalid_signature`, `iat_out_of_range`, or `service_disabled`. They
-must not escape as generic exceptions in normal denial paths.
-
-Detailed behavior:
-
-```text
-CASE: USER CONNECT / RECONNECT (`sessionKey + contractDigest + iat + sig`)
-- reject if abs(now - iat) > 30s
-- verify sig = sign(hash("nats-connect:" + iat + ":" + contractDigest))
-- lookup the session keyed by `sessionKey`
-- verify the bound session is still valid for the same app identity
-- verify user active
-- verify the presented contract fits the identity authority for that bound
-  user/app context
-- derive permissions and issue JWT
-- update session liveness and active-connection tracking
-
-CASE: SERVICE CONNECT / RECONNECT (`sessionKey + contractDigest + iat + sig`)
-- reject if abs(now - iat) > 30s
-- verify sig = sign(hash("nats-connect:" + iat + ":" + contractDigest))
-- lookup the service instance keyed by `sessionKey`
-- reject if the service instance is disabled or its deployment is missing/disabled
-- reject if the presented contract proposal's requested needs are not accepted
-  in deployment authority or have not converged into materialized authority
-- reject with `contract_changed` if the presented contract proposal no longer
-  fits accepted deployment authority; reconnects must not refresh an expired
-  offer back into authority
-- lookup or create the session keyed by `sessionKey` only after authority fit
-  succeeds
-- compute inboxPrefix
-- derive permissions from the exact presented service contract, materialized
-  authority, effective active dependencies, and materialized resource bindings,
-  then issue JWT
-
-CASE: DEVICE CONNECT / RECONNECT (`sessionKey + contractDigest + iat + sig`)
-- reject if abs(now - iat) > 30s
-- verify sig = sign(hash("nats-connect:" + iat + ":" + contractDigest))
-- if sessionKey matches an installed device, follow the installed-device path instead
-- otherwise resolve the device instance by public identity key
-- require the presented contract proposal to fit the device deployment authority
-  and materialized authority
-- reject if the device is unknown, disabled, revoked, or its deployment is
-  missing or disabled
-- if an activation record exists, require it to be activated and not revoked;
-  this produces user-delegated device authority
-- if no activation record exists, require an admin/review-approved setup flow;
-  this MUST NOT create or mutate a user activation record
-- create or refresh a device session keyed by `sessionKey`
-- preserve `activatedAt` from the activation record for user-delegated device
-  authority; admin/review-approved sessions keep `activatedAt: null`
-- compute inboxPrefix
-- derive permissions from materialized device authority and issue JWT
-- do not emit `events.v1.Auth.Connections.Opened` for device sessions
-```
+All principal kinds use this same pipeline. Expected denials return fixed reason
+codes. Unexpected storage, crypto, provider, and topology causes are logged
+internally and return only `internal_error`.
 
 ## Server-Relative Time
 
@@ -216,18 +159,18 @@ auth-callout payloads are not supported.
 
 The auth callout derives permissions from:
 
-- current session grants and grant overrides
-- presented contracts resolved against identity authority and identity grants
-  for user sessions
-- materialized authority for service/device sessions
-- declared `operations`, `rpc`, `events`, and `uses`
-- materialized resource bindings
+- current issuable authorization state
+- the exact `GrantSetV1` accepted for the bound participant
+- exact `trellis.api.v1` descriptors
+- typed materialized resource bindings
+- the session reply inbox and narrow built-in subjects
 
 Rules:
 
 - inbox subscribe permission always includes `${inboxPrefix}.>`
-- services receive only the resource-derived publish/subscribe permissions
-  appropriate to their materialized resource bindings
+- services receive resource publish/subscribe subjects only when the exact
+  participant-resource atom and its matching materialized binding are both
+  present; optional evidence contributes only the corresponding optional atoms
 - operation-control publish permissions are derived only from operation
   `observe`/`cancel` capabilities; `call` authorizes starting an operation but
   does not authorize publishing to its control subject
@@ -543,7 +486,10 @@ Rules:
 
 ## Error Codes
 
-All auth errors use `AuthError` with a `reason` code.
+Public Auth RPCs use their declared `AuthError`, `ValidationError`, or
+`UnexpectedError` envelope with stable codes and safe messages. Transitional
+internal validators retain the reason codes below where existing runtimes depend
+on them.
 
 | Scenario                     | Reason Code                   |
 | ---------------------------- | ----------------------------- |
@@ -568,8 +514,10 @@ All auth errors use `AuthError` with a `reason` code.
 | Reply mismatch               | `reply_subject_mismatch`      |
 | Missing capabilities         | `insufficient_permissions`    |
 
-Detailed errors are acceptable because callers only reach them after passing
-connection-level auth.
+Internal storage, SQL, crypto, provider, and topology causes are never public,
+even after connection authentication. They are recorded in structured server
+logs and collapse to `internal_error` at HTTP, RPC, operation, and callout
+boundaries.
 
 Browser clients treat `session_not_found` as an authentication-required state,
 not as a page-local application error. Revoked browser sessions therefore
@@ -590,78 +538,88 @@ authority storage model.
 ## Browser Flow Protocol
 
 The portal-owned browser login UX uses `flowId` as the browser-visible
-identifier and keeps `authToken` internal to the Trellis runtime service.
-`flowId` values are ULIDs because they are identifiers, not bearer secrets;
-`authToken` remains an auth-service generated bearer token and is stored only by
-hash. Trellis-generated account ids use `usr_` plus a ULID, and auth-owned
-review ids use their semantic prefix plus a ULID. Trellis ships a built-in
-portal served by the Trellis HTTP server from static assets. Login portal
-records and route selectors are global auth-owned routing config; the built-in
-login portal record is visible, non-removable, and non-replaceable. Device
-deployments may carry deployment-owned portal-route metadata for device flows.
-Neither form is standalone portal authority. Device activation uses the same
-browser-visible `flowId` concept with `kind: "device_activation"` flow records
-rather than a separate public identifier. Portals are web apps, not
-service-authenticated principals; if a portal later continues as a Trellis app
-after login, it does so under a normal user session.
+identifier. The flow is proof-bound to the initiating session key and exact
+participant; there is no second portal-authored authority token.
+Trellis-generated account ids use `usr_` plus a ULID, and auth-owned review ids
+use their semantic prefix plus a ULID. Trellis ships a built-in portal served by
+the Trellis HTTP server from static assets. Login portal records and route
+selectors are global auth-owned routing config; the built-in login portal record
+is visible, non-removable, and non-replaceable. Device deployments may carry
+deployment-owned portal-route metadata for device flows. Neither form is
+standalone portal authority. Device activation uses the same browser-visible
+`flowId` concept with `kind: "device_activation"` flow records rather than a
+separate public identifier. Portals are web apps, not service-authenticated
+principals; if a portal later continues as a Trellis app after login, it does so
+under a normal user session.
 
 Flow summary:
 
-1. `POST /auth/requests` validates the signed login-init request, validates the
-   initiating contract, and either returns `bound` immediately or creates a
-   Trellis-owned browser flow plus a short `flowId`-based `loginUrl`.
+1. `POST /auth/requests` validates the signed login-init request and exact
+   participant/API presentation, derives one server-owned required/optional
+   consent proposal, and creates a Trellis-owned browser flow plus a short
+   `flowId`-based `loginUrl` when current authority cannot bind immediately.
 2. `GET /auth/login/:provider` requires `flowId` and stores the provider choice
    in the same browser flow. The provider must be allowed by the selected login
    portal policy. If the referenced login flow is expired but still carries an
    app `redirectTo`, auth redirects to that app URL without adding an auth error
    so the app can restart its current auth request.
-3. `GET /auth/callback/:provider` provisions or refreshes the auth-local user
-   projection, stores the resulting `authToken` server-side against the browser
-   flow, and redirects back to the portal with the same `flowId`.
-4. `GET /auth/flow/:flowId` returns `PortalFlowState`. For a known expired
-   browser flow, the expired state may include `returnLocation` so portals can
-   return to the originating app without showing a transient expiration screen;
-   missing flows do not receive an invented return URL.
-5. `POST /auth/flow/:flowId/approval` records an account-scoped durable identity
-   grant when the user accepts, or ends the browser flow and redirects to the
-   caller with `authError=approval_denied` when the user denies.
+3. OIDC start creates PKCE/nonce state bound to a state-specific `HttpOnly`,
+   `SameSite=Lax` browser cookie and the exact portal-policy digest. Callback
+   verifies browser possession and current provider/registration policy before
+   CAS claim and exchange. Identity-link flows never self-register.
+4. `GET /auth/flow/:flowId` returns the current state, exact consent view and
+   digest, effective providers, registration policy, authenticated profile, and
+   validated redirect target. For a known expired browser flow, the expired
+   state may include `returnLocation` so portals can return to the originating
+   app without showing a transient expiration screen; missing flows do not
+   receive an invented return URL.
+5. `POST /auth/flow/:flowId/approval` accepts only the current consent-view
+   digest, selected server-issued optional bundle ids, decision, and idempotency
+   key. The server re-resolves the participant and rejects stale wording,
+   unknown bundles, caller-authored grants/capabilities, and reserved authority.
 6. `POST /auth/flow/:flowId/bind` completes the browser bind from
    `{ sessionKey, sig }`.
 
-When a caller's local contract digest changes, it starts the normal auth request
-flow again with the current contract body. Clients MUST compute that digest from
-the same normalized contract identity projection used by the catalog, not from
-human-facing manifest metadata such as `displayName` or `description`. Auth may
-bind immediately when the requested subjects and capabilities are a strict
-subset of the caller's current identity authority for the same app identity and
-contract lineage; otherwise it returns a normal browser flow.
+When a caller's participant changes, it starts the normal auth request flow with
+the current canonical participant and referenced API artifacts. Human wording
+may change the consent-view digest but does not change the machine proposal
+digest. Auth may bind immediately only when current exact identity authority
+covers the resolved required request; otherwise it returns a normal browser
+flow.
 
 Bind proof rules:
 
-- login-init uses
-  `sig = sign(hash("oauth-init:" + redirectTo + ":" + (provider ?? "") + ":" + canonicalJson(contract) + ":" + canonicalJson(context ?? null)))`
-- browser `flowId` bind uses `sig = sign(hash("bind-flow:" + flowId))`
-- browser clients SHOULD treat `authToken` as internal auth-service state rather
-  than a fragment-delivered public contract
+- browser flow creation uses the purpose-specific `trellis.session-proof.v1`
+  request transcript over the complete request with its signature removed
+- bind consumes the server-owned proof-bound flow with a durable idempotency
+  key; it does not accept a second concatenated-signature format
+- browser clients treat flow claims as internal auth-service state rather than a
+  fragment-delivered public contract
 
 Runtime storage responsibilities:
 
-| Storage                    | Logical contents                                                                                                                                                                                                                                                                                                          | TTL                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| SQL                        | Users, sessions, identity grants, deployment grant overrides, service records, device records, deployment authority, materialized authority, auth-owned login portal records/settings/routes, deployment-owned device portal-route metadata, contract history, implementation offers, and hashed account-management flows | Durable, with session expiry from `lastAuth` |
-| `trellis_oauth_states` KV  | OAuth state mapping keyed by `hash(state)`                                                                                                                                                                                                                                                                                | 5 min                                        |
-| `trellis_pending_auth` KV  | Pending authenticated bind keyed by `hash(authToken)`                                                                                                                                                                                                                                                                     | 5 min                                        |
-| `trellis_browser_flows` KV | Browser flow record keyed by `flowId`, including `kind: "login"` and `kind: "device_activation"`                                                                                                                                                                                                                          | Browser-flow TTL                             |
-| `trellis_connections` KV   | Active connection presence keyed by session, principal, and NATS user key                                                                                                                                                                                                                                                 | Connection TTL                               |
+| Storage                       | Logical contents                                                                                                                                                                                                                                                     | TTL                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| SQL                           | Users, credentials, sessions, principals, desired and materialized authority, proposals/decisions, deployments, instances, devices, delegations, portals/routes, provisioning records, idempotency results, post-commit actions, and hashed account-management flows | Durable, with explicit expiries |
+| `trellis_auth_oauth` KV       | PKCE/nonce state, browser-binding digest, portal-policy digest, CAS claim/result, and terminal unknown-outcome state                                                                                                                                                 | 15 min                          |
+| `trellis_auth_browser` KV     | Proof-bound browser flow and exact server-owned consent proposal keyed by `flowId`                                                                                                                                                                                   | Browser-flow TTL                |
+| `trellis_auth_replay` KV      | Short-lived NATS connect-proof replay admissions                                                                                                                                                                                                                     | Proof window                    |
+| `trellis_auth_connections` KV | Active connection presence keyed by NATS user key                                                                                                                                                                                                                    | 120 s                           |
 
-Ephemeral bearer tokens (`state`, `authToken`) are stored by `hash(token)`
-rather than raw token value.
+Ephemeral browser-binding and account-flow bearer secrets are stored by digest,
+not raw value. OAuth state ids are public correlation ids; the separate cookie
+secret supplies browser possession.
 
 Browser flows are keyed by raw `flowId` because the flow identifier is
 browser-visible and used to fetch auth-owned portal state. Device activation
 records persist for the lifetime of the activated device unless revoked. Browser
 login uses auth-owned global login portal records and route selectors. Device
 activation routing remains deployment-owned authority state.
+
+The complete server-owned `consent` value is immutable for the lifetime of the
+browser flow. CAS state transitions may advance lifecycle/result fields but must
+reject changes to the consent view, consent-view digest, machine proposal
+digest, optional bundles, or capability definitions.
 
 Provider chooser state returns only effective providers after selected portal
 policy. `allowedFederatedProviders: null` allows all configured providers, `[]`
@@ -671,195 +629,48 @@ allows none, and a non-empty array allows only that configured subset.
 
 ```ts
 {
+  format: "trellis.auth-browser-flow.v1";
   flowId: string;
-  kind: "login" | "device_activation";
-  sessionKey?: string;
-  app?: {
-    contractId: string;
-    origin?: string;
-  };
-  redirectTo?: string;
-  context?: unknown;
-  contract?: Record<string, unknown>;
-  deviceActivation?: {
-    instanceId: string;
-    deploymentId: string;
-    publicIdentityKey: string;
-    nonce: string;
-    qrMac: string;
-  };
-  provider?: string;
-  authToken?: string;
-  createdAt: Date;
-  expiresAt: Date;
+  state: "choose_provider" | "authenticated" | "approval_required" |
+    "approval_denied" | "approved" | "consumed" | "expired";
+  requestId: string;
+  requestDigest: string;
+  participantId: string;
+  participantArtifactDigest: string;
+  participantNeedsDigest: string;
+  consent: ServerOwnedConsentProposal;
+  sessionPublicKey: string;
+  sessionNkey: string;
+  portalId: string;
+  redirectTarget: string | null;
+  principalId: string | null;
+  createdAt: number;
+  expiresAt: number;
+  version: number;
 }
 ```
 
 ### Session Object
 
-```ts
-UserSession | ServiceSession | ActivatedDeviceSession;
+All principal kinds use the same durable session record: generated session id,
+principal id/kind, exact participant artifact and needs digests, session public
+key and key id, server-owned inbox prefix, created/last-seen/expiry/revocation
+times, and optional deployment/instance binding. Authority and transport ACLs
+are not copied into the session; issuance resolves current authority on every
+credential refresh.
 
-type UserSession = {
-  origin: string;
-  id: string;
-  type: "user";
-  contractDigest: string;
-  contractId: string;
-  contractDisplayName: string;
-  contractDescription: string;
-  app?: {
-    contractId: string;
-    origin?: string;
-  };
-  grantSource?: "stored_identity_grant" | "grant_override";
-  delegatedCapabilities: string[];
-  delegatedPublishSubjects: string[];
-  delegatedSubscribeSubjects: string[];
-  createdAt: Date;
-  lastAuth: Date;
-};
+### Identity Authority
 
-type ServiceSession = {
-  origin: string;
-  id: string;
-  type: "service";
-  createdAt: Date;
-  lastAuth: Date;
-};
+User/app, CLI, native, and device-user authority uses the same immutable
+proposal and terminal-decision workflow as deployment authority. Acceptance
+updates the current desired-authority projection and inserts its outbox record
+in one transaction. The accepted record binds the stable principal, exact
+participant artifact, needs digest, `GrantSetV1`, and expiry.
 
-type ActivatedDeviceSession = {
-  type: "device";
-  instanceId: string;
-  publicIdentityKey: string;
-  deploymentId: string;
-  contractId: string;
-  contractDigest: string;
-  delegatedCapabilities: string[];
-  delegatedPublishSubjects: string[];
-  delegatedSubscribeSubjects: string[];
-  createdAt: Date;
-  lastAuth: Date;
-  activatedAt: Date | null;
-  revokedAt: Date | null;
-};
-```
-
-Rules:
-
-- the durable session key is `sessionKey`
-- user sessions bind user identity, explicit app identity, and the last
-  delegated identity grant together; reconnect re-evaluates presented contract
-  context against the effective identity authority for that app context
-- activated-device sessions use the same `sessionKey` storage identity as user
-  and service sessions; the device instance identity remains part of the stored
-  session value
-
-### Identity Grant Object
-
-```ts
-{
-  userTrellisId: string;
-  identity: {
-    identityId: string;
-    provider: string;
-    subject: string;
-  };
-  identityAnchor:
-    | { kind: "web"; contractId: string; origin: string }
-    | { kind: "cli"; contractId: string; sessionPublicKey: string }
-    | { kind: "native"; contractId: string; sessionPublicKey: string }
-    | { kind: "device-user"; contractId: string; devicePublicKey: string };
-  answer: "granted" | "denied";
-  answeredAt: Date;
-  updatedAt: Date;
-  presentedContract: {
-    contractDigest: string;
-    contractId: string;
-  };
-  publishSubjects: string[];
-  subscribeSubjects: string[];
-}
-```
-
-Trellis stores identity grants when a durable user decision exists. Durable
-identity grant records are keyed for reuse by Trellis `userTrellisId` plus the
-app identity anchor. The identity that was active when the grant was created is
-recorded as evidence only; it is not used to decide whether a later linked local
-or OIDC identity on the same Trellis account may reuse the grant.
-
-The presented contract digest is stored with identity grant history for audit
-and repeat authority checks. It is not a manifest lookup fallback or active
-implementation source; full manifests are resolved from built-in Trellis
-contracts or the global `contracts` store. For one deployment and contract id,
-runtime-active non-builtin implementation comes from accepted non-expired
-service or device offers covered by materialized authority. Expired offers and
-historical rows remain audit context, and reconnects must fail with
-`contract_changed` rather than making an authority-incompatible digest active
-again. The normal portal denial path does not create or update a stored denial
-record; it is returned to the originating app as an `authError=approval_denied`
-browser callback so a later sign-in attempt can present the permission prompt
-again.
-
-### Grant Override Object
-
-```ts
-type DeploymentAuthorityGrantOverride =
-  & {
-    deploymentId: string;
-    contractId: string;
-    grantKind: "capability" | "capability-group";
-    capability: string | null;
-    capabilityGroupKey: string | null;
-  }
-  & (
-    | {
-      identityKind: "web";
-      origin: string;
-      sessionPublicKey: null;
-    }
-    | {
-      identityKind: "session";
-      origin: null;
-      sessionPublicKey: string;
-    }
-  );
-```
-
-Rules:
-
-- web overrides match exactly by `contractId` plus browser `origin`
-- session-keyed overrides match exactly by `contractId` plus `sessionPublicKey`
-- `grantKind: "capability"` grants one concrete capability and stores
-  `capability`; `capabilityGroupKey` is `null`
-- `grantKind: "capability-group"` grants one capability group reference and
-  stores `capabilityGroupKey`; `capability` is `null`
-- capability group references are resolved dynamically from the current group
-  definition during authorization and portal identity-grant decisions
-- matching enabled overrides may pre-authorize authority and capability
-  decisions dynamically; they do not mutate the user projection
-- matching overrides can satisfy identity-grant checks while they remain
-  enabled, but they cannot create availability missing from deployment authority
-  or materialized authority
-- grant overrides do not support any identity shape beyond the two web and
-  session-keyed rows above; other identities continue to use their normal
-  identity-authority and activation flows
+Mutable capability groups, deployment grant overrides, stored NATS subject ACLs,
+and contract-era identity-grant objects are not part of the protocol.
 
 ### Users Projection
-
-```ts
-{
-  userId: string;
-  active: boolean;
-  capabilities: string[];
-  capabilityGroups: string[];
-  identities: Array<{
-    identityId: string;
-    provider: string;
-    subject: string;
-  }>;
-}
-```
 
 This account projection is Trellis-local and is updated by Trellis-managed
 flows. `userId` is generated by Trellis and is not derived from provider
@@ -876,11 +687,9 @@ Local password-reset flows are bound to that existing local identity. The reset
 flow record stores the target identity id and local username; portals may not
 choose or change the username during reset completion.
 
-It stores explicit per-user capability grants plus assigned dynamic
-`capabilityGroups`. New admin-bootstrap accounts use this group assignment model
-for the built-in `admin` grant, storing the `admin` group key rather than
-copying the group's capabilities into direct grants. Deployment-wide implied app
-grants remain as separate grant override records.
+Authorization is not stored on the user profile. First-admin bootstrap creates
+and accepts authority for the exact built-in administration participant; its
+mandatory grants are derived from that artifact.
 
 ### Active Connections
 

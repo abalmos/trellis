@@ -34,6 +34,13 @@ export async function withTrellisIntegrationRuntime<T>(
   const runtime = await TrellisTestRuntime.start(options);
   try {
     return await fn(runtime);
+  } catch (cause) {
+    throw new Error(
+      `${
+        cause instanceof Error ? cause.message : String(cause)
+      }\n${runtime.controlPlaneOutput()}`,
+      { cause },
+    );
   } finally {
     await runtime.stop();
   }

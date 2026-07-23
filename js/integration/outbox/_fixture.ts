@@ -266,7 +266,7 @@ export function createOutboxFixture(caseId: string) {
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: runtimeName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: { log: false },
     }).orThrow();

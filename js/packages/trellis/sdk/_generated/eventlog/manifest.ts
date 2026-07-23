@@ -3,7 +3,7 @@ import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.eventlog@v1" as const;
 export const CONTRACT_DIGEST =
-  "f829n1xpdsRGJTNFqrwiClbWfol7-iTSx25ijPl--io" as const;
+  "gjd2FnnjBOF9y6uj9JGMdtWk5TBrgt9Ua52NdqDSC48" as const;
 export const CONTRACT: TrellisContractV1 = {
   "capabilities": {
     "trellis.eventlog::events.read": {
@@ -445,14 +445,6 @@ export const CONTRACT: TrellisContractV1 = {
       },
       "required": ["type", "message", "id"],
       "type": "object",
-    },
-  },
-  "uses": {
-    "required": {
-      "auth": {
-        "contract": "trellis.auth@v1",
-        "rpc": { "call": ["Auth.EventConsumers.List"] },
-      },
     },
   },
 };

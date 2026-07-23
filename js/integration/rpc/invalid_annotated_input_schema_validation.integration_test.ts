@@ -21,7 +21,7 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: fixture.serviceContract,
       name: fixture.serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();

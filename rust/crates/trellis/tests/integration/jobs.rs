@@ -128,7 +128,9 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
     "processDocument": {
       "payload": { "schema": "JobPayload" },
       "update": { "schema": "JobUpdate" },
-      "result": { "schema": "JobResult" }
+      "result": { "schema": "JobResult" },
+      "progress": true,
+      "logs": true
     },
     "longProcessDocument": {
       "payload": { "schema": "LongJobPayload" },
@@ -144,7 +146,7 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
       "payload": { "schema": "KeyedJobPayload" },
       "result": { "schema": "KeyedJobResult" },
       "keyConcurrency": {
-        "key": ["document", "/groupKey"],
+        "key": ["/groupKey"],
         "maxActive": 1,
         "heartbeatIntervalMs": 1000,
         "heartbeatTtlMs": 10000,
@@ -411,10 +413,8 @@ async fn setup_jobs_fixture() -> JobsFixture {
 
     let mut service = trellis_test::connect_service_runtime::<JobsFixtureContract>(
         runtime.trellis_url(),
-        JOBS_SERVICE_ID,
-        service_contract.digest(),
         JOBS_SERVICE_CONTRACT_JSON,
-        &service_key.seed,
+        &service_key,
     )
     .await
     .expect("connect live Rust jobs service runtime");
@@ -958,7 +958,7 @@ async fn jobs_keyed_jobs_reject_queue_full() {
     match third {
         JobSubmitOutcome::Rejected(error) => {
             assert_eq!(error.reason, JobNotEnqueuedReason::ActiveLimit);
-            assert_eq!(error.key, format!("document:{group_key}"));
+            assert_eq!(error.key, group_key);
             assert_eq!(error.active, 1);
             assert_eq!(error.queued, 1);
             assert_eq!(error.limit, 1);

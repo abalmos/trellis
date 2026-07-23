@@ -31,6 +31,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let trellis_url = required_env("TRELLIS_URL")?;
     let session_key_seed_base64url = required_env("SESSION_KEY_SEED_BASE64URL")?;
+    let provisioned_identity_seed_base64url = required_env("PROVISIONED_IDENTITY_SEED_BASE64URL")?;
+    let deployment_id = required_env("TRELLIS_DEPLOYMENT_ID")?;
+    let participant_id = required_env("TRELLIS_PARTICIPANT_ID")?;
+    let participant_digest = required_env("TRELLIS_PARTICIPANT_DIGEST")?;
+    let participant_needs_digest = required_env("TRELLIS_PARTICIPANT_NEEDS_DIGEST")?;
     let timeout_ms = env::var("TRELLIS_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -39,9 +44,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(service = SERVICE_NAME, %trellis_url, timeout_ms, ?mode, "starting event log service");
 
-    let options =
-        ServiceConnectOptions::new(&trellis_url, SERVICE_NAME, &session_key_seed_base64url)
-            .with_timeout_ms(timeout_ms);
+    let options = ServiceConnectOptions::new(
+        &trellis_url,
+        SERVICE_NAME,
+        &deployment_id,
+        &participant_id,
+        &participant_digest,
+        &participant_needs_digest,
+        &provisioned_identity_seed_base64url,
+        &session_key_seed_base64url,
+    )
+    .with_timeout_ms(timeout_ms);
 
     let service = connect_service(options).await?;
     tracing::info!(service = SERVICE_NAME, "event log service connected");

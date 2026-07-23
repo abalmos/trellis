@@ -30,7 +30,7 @@ import { createNatsAuthorityPhysicalResourceManager } from "../catalog/resources
 import type { ContractsModule } from "../catalog/runtime.ts";
 import type { SqlContractStorageRepository } from "../catalog/storage.ts";
 import type { Config } from "../config.ts";
-import { CONTRACT as trellisAuthContract } from "../contracts/trellis_auth.ts";
+import { CONTRACT as trellisAuthContract } from "../auth/reference/legacy_contract.ts";
 import { CONTRACT as trellisCoreContract } from "../contracts/trellis_core.ts";
 import { CONTRACT as trellisStateContract } from "../contracts/trellis_state.ts";
 

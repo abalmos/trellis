@@ -58,6 +58,22 @@ const PREPARED_EVENTS_CONTRACT_JSON: &str = r#"{
   }
 }"#;
 
+const PREPARED_EVENTS_LISTENER_CONTRACT_JSON: &str = r#"{
+  "format": "trellis.contract.v1",
+  "id": "trellis.integration.prepared-events-listener-rust@v1",
+  "displayName": "Trellis Rust Prepared Events Listener",
+  "description": "Consumes prepared events with explicit authority.",
+  "kind": "service",
+  "uses": {
+    "required": {
+      "preparedEvents": {
+        "contract": "trellis.integration.prepared-events-rust@v1",
+        "events": { "subscribe": ["Entity.Changed"] }
+      }
+    }
+  }
+}"#;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityChangedEvent {
     id: String,
@@ -69,17 +85,25 @@ struct EntityChanged;
 
 struct PreparedEventsContract;
 
+struct PreparedEventsListenerContract;
+
 impl trellis_rs::service::GeneratedServiceContract for PreparedEventsContract {
     const CONTRACT_ID: &'static str = "trellis.integration.prepared-events-rust@v1";
     const CONTRACT_DIGEST: &'static str = "runtime";
     const CONTRACT_JSON: &'static str = PREPARED_EVENTS_CONTRACT_JSON;
 }
 
+impl trellis_rs::service::GeneratedServiceContract for PreparedEventsListenerContract {
+    const CONTRACT_ID: &'static str = "trellis.integration.prepared-events-listener-rust@v1";
+    const CONTRACT_DIGEST: &'static str = "runtime";
+    const CONTRACT_JSON: &'static str = PREPARED_EVENTS_LISTENER_CONTRACT_JSON;
+}
+
 impl EventDescriptor for EntityChanged {
     type Event = EntityChangedEvent;
 
     const KEY: &'static str = "Entity.Changed";
-    const SUBJECT: &'static str = "events.v1.integration.prepared-events.rust.entity.changed";
+    const SUBJECT: &'static str = "events.v1.Entity.Changed";
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &["publishEvents"];
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["readEvents"];
 }
@@ -106,13 +130,31 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .expect("provision prepared-events service instance");
     let service = trellis_test::connect_service_runtime::<PreparedEventsContract>(
         runtime.trellis_url(),
-        contract_id(&contract),
-        contract.digest(),
         PREPARED_EVENTS_CONTRACT_JSON,
-        &service_key.seed,
+        &service_key,
     )
     .await
     .expect("connect prepared-events service runtime");
+    let listener_contract = trellis_test::TrellisTestContract::from_manifest_json(
+        PREPARED_EVENTS_LISTENER_CONTRACT_JSON,
+    )
+    .expect("build prepared-events listener contract");
+    let listener_key = admin
+        .provision_service_instance(
+            &bootstrap_url,
+            &listener_contract,
+            Some("prepared-events-listener"),
+            None,
+        )
+        .await
+        .expect("provision prepared-events listener instance");
+    let listener_service = trellis_test::connect_service_runtime::<PreparedEventsListenerContract>(
+        runtime.trellis_url(),
+        PREPARED_EVENTS_LISTENER_CONTRACT_JSON,
+        &listener_key,
+    )
+    .await
+    .expect("connect prepared-events listener runtime");
 
     let mut raw_observer = async_nats::ConnectOptions::new()
         .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
@@ -128,7 +170,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         None::<(EntityChangedEvent, ServiceEventListenerContext)>,
     ));
     let handler_observed = Arc::clone(&observed);
-    let listener = service
+    let listener = listener_service
         .listen_event::<EntityChanged, _, _>(
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
@@ -227,14 +269,6 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         }
         other => panic!("expected annotated event handler error, got {other:?}"),
     }
-}
-
-fn contract_id(contract: &trellis_test::TrellisTestContract) -> &str {
-    contract
-        .manifest()
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("contract manifest has string id")
 }
 
 async fn wait_for_observed(

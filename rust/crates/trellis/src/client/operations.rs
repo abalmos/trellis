@@ -527,6 +527,11 @@ where
     pub async fn cancel(
         &self,
     ) -> Result<OperationSnapshot<D::Progress, D::Output>, TrellisClientError> {
+        if !D::CANCELABLE {
+            return Err(TrellisClientError::OperationProtocol(
+                "operation is not cancelable".to_owned(),
+            ));
+        }
         let body = json!({
             "action": "cancel",
             "operationId": self.id(),

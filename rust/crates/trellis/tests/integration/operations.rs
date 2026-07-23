@@ -236,7 +236,7 @@ struct SharedOperationState {
     >,
     cancelled: tokio::sync::Mutex<HashMap<String, bool>>,
     cancel_notify: Notify,
-    fast_completion_watch_opened: Notify,
+    watch_opened: Notify,
     signals: tokio::sync::Mutex<HashMap<String, Vec<String>>>,
     signal_notify: Notify,
 }
@@ -255,7 +255,7 @@ impl SharedOperationState {
             watchers: Mutex::new(HashMap::new()),
             cancelled: tokio::sync::Mutex::new(HashMap::new()),
             cancel_notify: Notify::new(),
-            fast_completion_watch_opened: Notify::new(),
+            watch_opened: Notify::new(),
             signals: tokio::sync::Mutex::new(HashMap::new()),
             signal_notify: Notify::new(),
         })
@@ -312,11 +312,11 @@ fn setup_operation_service(
                         let shared = Arc::clone(&shared);
                         tokio::spawn(async move {
                             let fast_completion = input.message == "fast-completion";
-                            if fast_completion {
-                                shared.fast_completion_watch_opened.notified().await;
-                            } else {
-                                tokio::time::sleep(Duration::from_millis(50)).await;
-                            }
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(2),
+                                shared.watch_opened.notified(),
+                            )
+                            .await;
                             let progress_snapshot = OperationSnapshot {
                                 revision: 2,
                                 state: ServiceOperationState::Running,
@@ -409,9 +409,7 @@ fn setup_operation_service(
                     let watchers = shared.watchers.lock().unwrap();
                     watchers.get(&operation_id).map(|tx| tx.subscribe())
                 };
-                if operation_id == "op-fast-completion" {
-                    shared.fast_completion_watch_opened.notify_one();
-                }
+                shared.watch_opened.notify_one();
                 let stream: BoxStream<
                     'static,
                     Result<
@@ -2765,7 +2763,9 @@ fn operations_client_contract(
     .use_ref(
         "operationsService",
         trellis_rs::contracts::use_contract(OP_SERVICE_ID)
-            .with_operation_call(["Entity.Process", "Entity.Status"]),
+            .with_operation_call(["Entity.Process", "Entity.Status"])
+            .with_operation_cancel(["Entity.Process"])
+            .with_operation_control(["Entity.Process"]),
     )
     .build()?;
 
@@ -2782,7 +2782,7 @@ fn operations_unauthorized_client_contract(
     )
     .use_ref(
         "operationsService",
-        trellis_rs::contracts::use_contract(OP_SERVICE_ID),
+        trellis_rs::contracts::use_contract(OP_SERVICE_ID).with_operation_call(["Entity.Status"]),
     )
     .build()?;
 

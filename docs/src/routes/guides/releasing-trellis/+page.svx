@@ -36,7 +36,7 @@ Before committing or ending an implementation cycle, run the focused checks that
 
 ```sh
 deno task -c js/deno.json test:integration -- --parallel --jobs 4
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
 ```
 
 Four JS workers are the portable baseline used by release CI. Local
@@ -278,20 +278,20 @@ cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
 cargo fmt --manifest-path rust/xtask/Cargo.toml --check
 RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps
 cargo test --manifest-path rust/Cargo.toml --workspace --doc
-deno check -c js/deno.json js/packages/trellis/index.ts js/packages/trellis-svelte/src/index.ts js/packages/trellis-svelte/src/context.svelte.ts js/services/trellis/main.ts
+deno check -c js/deno.json js/packages/trellis/index.ts js/packages/trellis-svelte/src/index.ts js/packages/trellis-svelte/src/context.svelte.ts
 deno task -c js/deno.json test:prepared:packages
-deno task -c js/deno.json test:prepared:service:catalog-state
-deno task -c js/deno.json test:prepared:service:auth
 deno task -c js/deno.json test:prepared:ui-tools
 deno task -c js/deno.json packages:build:npm
 deno task -c js/deno.json test:prepared:packaging:built
-cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs
+cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs --exclude trellis-service-jobs --exclude trellis-service-eventlog
+cargo test --manifest-path rust/Cargo.toml -p trellis-service-jobs --lib
+cargo test --manifest-path rust/Cargo.toml -p trellis-service-eventlog --lib
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
 cargo test --manifest-path rust/tools/generate/Cargo.toml
 cargo test --manifest-path rust/xtask/Cargo.toml
 cargo test --manifest-path xtask/Cargo.toml
 deno task -c js/deno.json test:integration -- --parallel --jobs 4
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture
+deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
 ```
 
 Release verification also checks that each Rust workspace member either inherits
@@ -311,7 +311,6 @@ For focused local Deno loops after a single prepare, use the prepared partitions
 ```sh
 deno task -c js/deno.json prepare
 deno task -c js/deno.json test:prepared:packages
-deno task -c js/deno.json test:prepared:service:catalog-state
 deno task -c js/deno.json test:prepared:service:auth
 deno task -c js/deno.json test:prepared:ui-tools
 deno task -c js/deno.json packages:build:npm

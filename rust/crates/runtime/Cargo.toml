@@ -19,6 +19,7 @@ nats-leases = ["dep:async-nats", "dep:bytes"]
 workspace = true
 
 [dependencies]
+argon2.workspace = true
 async-trait = "0.1.89"
 async-nats = { workspace = true, optional = true }
 axum.workspace = true
@@ -27,19 +28,29 @@ ed25519-dalek.workspace = true
 bytes = { workspace = true, optional = true }
 clap.workspace = true
 futures-util.workspace = true
+getrandom.workspace = true
+nats-jwt-rs.workspace = true
+nkeys.workspace = true
+oauth2.workspace = true
+openidconnect.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 rusqlite = { workspace = true, optional = true }
 refinery = { workspace = true, optional = true }
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["net", "signal"] }
 toml = "1.1.2"
+tower_governor.workspace = true
+tower-http.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 trellis-protocol.workspace = true
 trellis-rs = { path = "../trellis" }
 ulid = "1.2.1"
+url.workspace = true
 
 [dev-dependencies]
 tempfile = "3.27.0"

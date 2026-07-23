@@ -286,7 +286,7 @@ impl trellis_rs::client::EventDescriptor for SourcePingedEvent {
     type Event = EventRecord;
 
     const KEY: &'static str = "Source.Pinged";
-    const SUBJECT: &'static str = "events.v1.integration.event-consumers.rust.source.pinged";
+    const SUBJECT: &'static str = "events.v1.Source.Pinged";
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &["publishEvents"];
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["readEvents"];
 }
@@ -297,7 +297,7 @@ impl trellis_rs::client::EventDescriptor for SelfPingedEvent {
     type Event = EventRecord;
 
     const KEY: &'static str = "Self.Pinged";
-    const SUBJECT: &'static str = "events.v1.integration.event-consumers.rust.self.pinged";
+    const SUBJECT: &'static str = "events.v1.Self.Pinged";
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
 }
@@ -308,7 +308,7 @@ impl trellis_rs::client::EventDescriptor for SourcePongedEvent {
     type Event = EventRecord;
 
     const KEY: &'static str = "Source.Ponged";
-    const SUBJECT: &'static str = "events.v1.integration.event-consumers.rust.source.ponged";
+    const SUBJECT: &'static str = "events.v1.Source.Ponged";
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &["publishEvents"];
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["readEvents"];
 }
@@ -319,7 +319,7 @@ impl trellis_rs::client::EventDescriptor for SelfPongedEvent {
     type Event = EventRecord;
 
     const KEY: &'static str = "Self.Ponged";
-    const SUBJECT: &'static str = "events.v1.integration.event-consumers.rust.self.ponged";
+    const SUBJECT: &'static str = "events.v1.Self.Ponged";
     const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
 }
@@ -335,7 +335,7 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -375,7 +375,7 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -495,7 +495,7 @@ async fn event_consumers_strict_group_rejects_parallel_workers() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -537,7 +537,7 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -617,7 +617,7 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -662,7 +662,7 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -737,7 +737,7 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -826,7 +826,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -973,7 +973,7 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -1055,7 +1055,7 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -1160,9 +1160,13 @@ async fn event_consumers_self_owned_durable_consumer_receives_self_published_eve
         .get("ingest")
         .expect("ingest self event consumer binding");
     let before = matching_consumers(&runtime, SelfPingedEvent::SUBJECT).await;
-    assert!(before
-        .iter()
-        .any(|consumer| consumer_name(consumer) == binding.consumer_name));
+    eprintln!("debug binding={binding:?} consumers={before:?}");
+    assert!(
+        before
+            .iter()
+            .any(|consumer| consumer_name(consumer) == binding.consumer_name),
+        "binding={binding:?} consumers={before:?}"
+    );
 
     let observed = Arc::new(Mutex::new(
         None::<(EventRecord, ServiceEventListenerContext)>,
@@ -1341,7 +1345,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -1417,7 +1421,7 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let source_contract = test_contract(SOURCE_CONTRACT_JSON);
     admin
-        .approve_contract(&bootstrap_url, &source_contract, None, &[])
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
     let consumer = connect_consumer(
@@ -1777,21 +1781,11 @@ async fn connect_consumer(
         .expect("provision event consumer service instance");
     trellis_test::connect_service_runtime::<EventConsumerContract>(
         trellis_url,
-        contract_id(&contract),
-        contract.digest(),
         manifest_json,
-        &service_key.seed,
+        &service_key,
     )
     .await
     .expect("connect event consumer service runtime")
-}
-
-fn contract_id(contract: &trellis_test::TrellisTestContract) -> &str {
-    contract
-        .manifest()
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("contract manifest has string id")
 }
 
 fn test_contract(manifest_json: &str) -> trellis_test::TrellisTestContract {

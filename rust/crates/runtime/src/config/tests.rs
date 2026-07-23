@@ -20,7 +20,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -129,7 +128,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -244,7 +242,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -262,10 +259,6 @@ replicas = 1
     assert_eq!(
         nats.auth_creds_path,
         PathBuf::from("./nats/auth-runtime.creds")
-    );
-    assert_eq!(
-        nats.sentinel_creds_path,
-        PathBuf::from("./nats/sentinel.creds")
     );
 
     let auth_callout = config
@@ -375,7 +368,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -420,7 +412,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -454,7 +445,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [eventlog.storage]
 kind = "postgres"
@@ -486,7 +476,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [health.storage]
 kind = ""
@@ -515,7 +504,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [health.storage]
 kind = "postgres"
@@ -546,7 +534,6 @@ servers = "nats://127.0.0.1:4222"
 [nats.runtime]
 auth_creds_path = "./nats/auth-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [jobs.storage]
 kind = "sqlite"
@@ -579,7 +566,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [nats.auth_callout]
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
@@ -616,7 +602,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [health.storage]
 kind = "sqlite"
@@ -641,7 +626,6 @@ fn all_modes_require_nats_servers() {
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [jobs.storage]
 kind = "sqlite"
@@ -671,7 +655,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [jobs.storage]
 kind = "sqlite"
@@ -694,7 +677,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [jobs.storage]
 kind = "sqlite"
@@ -727,7 +709,6 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
-sentinel_creds_path = "./nats/sentinel.creds"
 
 [jobs.storage]
 kind = "sqlite"

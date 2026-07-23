@@ -3,23 +3,18 @@
  */
 
 export {
-  bindFlow,
   classifyBrowserAuthError,
   clearSessionKey,
   createAuth,
-  createRpcProof,
   generateSessionKey,
   getOrCreateSessionKey,
   getPublicSessionKey,
   hasSessionKey,
-  isBindSuccessResponse,
   isRecoverableBrowserAuthError,
   loadSessionKey,
   signBytes,
 } from "./auth.ts";
 export type {
-  BindResponse,
-  BindSuccessResponse,
   BrowserAuthRecoveryClassification,
   BrowserAuthRecoveryKind,
   NatsConnectOptions,

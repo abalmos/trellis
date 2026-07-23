@@ -1,5 +1,5 @@
 import { getContractRuntime } from "@qlever-llc/trellis/internal/contract-runtime";
-import trellisAuth from "../contracts/trellis_auth.ts";
+import trellisAuth from "../auth/reference/legacy_contract.ts";
 import trellisCore from "../contracts/trellis_core.ts";
 import trellisState from "../contracts/trellis_state.ts";
 

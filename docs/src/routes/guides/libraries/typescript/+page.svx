@@ -92,8 +92,8 @@ returns a typed service object.
 Treat those resolved bindings as runtime internals. Service code should use the
 `service.kv`, `service.store`, and `service.jobs` handles returned by
 `TrellisService.connect(...)`; do not import the core SDK to bootstrap a service,
-call `Trellis.Bindings.Get`, construct `TrellisService` or `StoreHandle`, or pass
-binding/resource payloads into `Trellis` constructors.
+fetch binding payloads, construct `TrellisService` or `StoreHandle`, or pass
+resource payloads into `Trellis` constructors.
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";

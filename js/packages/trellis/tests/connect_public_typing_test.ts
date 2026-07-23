@@ -43,12 +43,17 @@ if (false) {
   const connected = await TrellisClient.connect({
     trellisUrl: "http://127.0.0.1:3000",
     contract: appContract,
+    participant: {
+      id: "trellis.connect-typing-app@v1",
+      artifactDigest: "participant-digest",
+      needsDigest: "needs-digest",
+    },
   }).orThrow();
 
   const me = await connected.authSessionsMe({}).orThrow();
   const selected = await connected.selectionSelected({}).orThrow();
   const jobs = await connected.jobsQuery({ limit: 8 }).orThrow();
-  me.participantKind;
+  me.session.participantKind;
   selected.selected;
   jobs.entries;
 

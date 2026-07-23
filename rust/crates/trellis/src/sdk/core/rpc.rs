@@ -4,42 +4,6 @@ use serde::{Deserialize, Serialize};
 /// Empty request or response payload used by zero-argument RPCs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Empty {}
-/// Descriptor for `Trellis.Bindings.Get`.
-pub struct TrellisBindingsGetRpc;
-impl RpcDescriptor for TrellisBindingsGetRpc {
-    type Input = super::types::TrellisBindingsGetRequest;
-    type Output = super::types::TrellisBindingsGetResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::TRELLIS_BINDINGS_GET_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::TRELLIS_BINDINGS_GET_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Trellis.Bindings.Get";
-    const SUBJECT: &'static str = "rpc.v1.Trellis.Bindings.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["service"];
-    const ERRORS: &'static [&'static str] = &["UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Trellis.Bindings.Get`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum TrellisBindingsGetError {
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for TrellisBindingsGetError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-}
 /// Descriptor for `Trellis.Catalog`.
 pub struct TrellisCatalogRpc;
 impl RpcDescriptor for TrellisCatalogRpc {

@@ -49,9 +49,7 @@ pub use bindings::{
     ServiceResourceBindings, StoreResourceBinding,
 };
 #[doc(hidden)]
-pub use bootstrap_ports::{resolve_bootstrap_binding, BootstrapBindingInfo, CoreBootstrapPort};
-#[doc(hidden)]
-pub use core_bootstrap::{CoreBootstrapAdapter, CoreBootstrapClientPort};
+pub use bootstrap_ports::BootstrapBindingInfo;
 #[doc(hidden)]
 pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{

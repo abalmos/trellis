@@ -1,6 +1,6 @@
 # Trellis AI guidance for TypeScript services
 
-Last verified against Trellis main (2026-07-10).
+Last verified against Trellis main (2026-07-22).
 
 Use this file for AI coding agents working in a TypeScript service repository
 that consumes Trellis. The language-neutral guide is:
@@ -66,10 +66,19 @@ Rules:
   boundary or another documented requirement must reject unknown fields
 - after changing a contract, run `deno task prepare` before typing extracted
   handlers so generated SDK aliases match the current surfaces
+- TypeScript contract authoring compiles to canonical `trellis.api.v1` and
+  `trellis.participant.v1` artifacts before bootstrap. Do not send legacy contract
+  manifests directly to the Rust auth runtime.
+- `TrellisService.connect(...)`, `TrellisClient.connect(...)`, and device helpers
+  own session bootstrap and reconnect. They use an immutable provisioned identity
+  or browser session key, a session-bound deny-all JWT, and fresh nonce-bound
+  proofs. Service/device bootstrap presents canonical participant and referenced
+  API artifacts inside the signed request. Service repositories do not load
+  shared NATS credentials.
 - Trellis caches manifests by digest at runtime. If auth/bootstrap reports a
   missing digest after the cache is pruned, regenerate from source and present the
-  full manifest; do not patch deployment authority or implementation offers by
-  hand.
+  full source boundary so the client can recompile its protocol artifacts; do not
+  patch deployment authority or implementation offers by hand.
 - Deployment authority proposal/desired `needs` are grouped by `contracts`,
   `surfaces`, `capabilities`, and `resources`. Materialized authority is a
   projection with runtime `grants` grouped by `capabilities`, `surfaces`, and
@@ -79,13 +88,22 @@ Rules:
 - Deployment materialization is shared by the deployment and exact participant.
   Session and instance eligibility is checked separately, so one unhealthy
   instance does not rewrite authority for healthy peers.
-- Safe deployment authority updates auto-apply during bootstrap. New capability
-  grants and new resource aliases require update approval; strict-mode
-  migrations require approval; `mutable-dev` records and auto-accepts migrations.
+- Additive compatible participant changes produce update proposals; incompatible
+  API changes produce migration proposals. Equivalent retries reuse one semantic
+  proposal, and changed proposals supersede older pending proposals. Each
+  deployment + participant has one stable authority lineage; terminal plan
+  history never blocks later reproposal.
 - Deployment authority plans can be `superseded`; only `pending` plans targeting
   the current desired authority version are actionable.
 - Deployment authority plans expose `breakingChanges` as structured per-target
   compatibility failures for operator UI.
+- Portal helpers submit only the current server-owned consent digest, selected
+  optional bundle ids, decision, and idempotency key. Do not send grants,
+  capabilities, resource atoms, or expiry. OIDC callbacks are browser-cookie and
+  portal-policy bound. The server-owned consent proposal is immutable across flow
+  state transitions.
+- Treat bindings as physical evidence, never authority. Bootstrap replay
+  revalidates current state and returns a newly generated credential.
 - TypeScript telemetry helpers are exported from `@qlever-llc/trellis/telemetry`.
   Use `recordTrellisDuration(...)` for low-cardinality OpenTelemetry duration
   histograms and `recordTrellisError(...)` for error counters. Metric attributes

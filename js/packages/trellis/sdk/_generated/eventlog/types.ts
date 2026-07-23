@@ -136,13 +136,15 @@ export type EventLogQueryOutput = {
 export type EventLogWatchInput = { [k: string]: unknown };
 export type EventLogWatchEvent = { [k: string]: unknown };
 
-export type NotFoundErrorData = {
-  context?: { [k: string]: unknown };
-  id: string;
-  message: string;
-  type: "NotFoundError";
-  [k: string]: unknown;
-};
+export type NotFoundErrorData =
+  & SerializableErrorData
+  & ({
+    context?: { [k: string]: unknown };
+    id: string;
+    message: string;
+    type: "NotFoundError";
+    [k: string]: unknown;
+  });
 export class NotFoundError extends TrellisError<NotFoundErrorData> {
   static readonly schema = NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;

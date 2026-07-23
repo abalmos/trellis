@@ -43,7 +43,7 @@ export class TrellisControlPlaneSessionSnapshot {
     const quotedColumns = columns.map(quoteSqlIdentifier).join(", ");
     const placeholders = columns.map(() => "?").join(", ");
     return await this.#sqlite.execute(
-      `INSERT OR IGNORE INTO sessions (${quotedColumns}) VALUES (${placeholders})`,
+      `INSERT OR IGNORE INTO auth_sessions (${quotedColumns}) VALUES (${placeholders})`,
       columns.map((column) => sqliteValue(this.#row[column])),
     );
   }
@@ -94,14 +94,17 @@ export class TrellisControlPlaneSqlite {
     sessionKey: string,
   ): Promise<TrellisControlPlaneSessionSnapshot | null> {
     const rows = await this.query(
-      "SELECT * FROM sessions WHERE session_key = ?",
+      "SELECT * FROM auth_sessions WHERE session_public_key = ?",
       [sessionKey],
     );
     const row = rows[0];
     if (!row) return null;
-    await this.execute("DELETE FROM sessions WHERE session_key = ?", [
-      sessionKey,
-    ]);
+    await this.execute(
+      "DELETE FROM auth_sessions WHERE session_public_key = ?",
+      [
+        sessionKey,
+      ],
+    );
     return new TrellisControlPlaneSessionSnapshot(this, row);
   }
 }

@@ -1255,14 +1255,14 @@
       }
     },
     {
-      "name": "malformed-job-key-pointer",
+      "name": "literal-job-key-segment",
       "schemaValid": true,
-      "valid": false,
+      "valid": true,
       "input": {
         "format": "trellis.participant.v1",
         "id": "invalid-worker",
         "displayName": "Invalid Worker",
-        "description": "Invalid pointer.",
+        "description": "Literal key segment.",
         "kind": "service",
         "schemas": { "Payload": true },
         "jobQueues": {

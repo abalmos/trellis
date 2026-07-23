@@ -10,12 +10,13 @@ use trellis_protocol::{
     parse_api_v1, parse_participant_v1, resolve_participant_v1, GrantSetV1, ParticipantKindV1,
 };
 use trellis_runtime::platform::auth::{
-    AuthorityDecision, AuthorityEvidenceScope, AuthorityKind, AuthorityState, AuthorityTarget,
-    AuthorizationStateError, AuthorizationStateService, DependencyEvidence, DependencyState,
-    EvidenceRepository, IdentityAuthorityRecord, IdentityAuthorityRepository,
-    InMemoryAuthorizationStore, NewSession, ParticipantBindingRecord, ParticipantBindingRepository,
-    ParticipantBindingState, PrincipalAuthorizationChange, PrincipalKind, PrincipalRecord,
-    PrincipalRepository, PrincipalState, SessionRecord, SessionRepository,
+    AuthSessionRepository, AuthorityDecision, AuthorityEvidenceScope, AuthorityKind,
+    AuthorityState, AuthorityTarget, AuthorizationStateError, AuthorizationStateService,
+    DependencyEvidence, DependencyState, DesiredAuthorityRecord, EvidenceRepository,
+    IdempotencyResultRecord, IdentityAuthorityRecord, InMemoryAuthorizationStore, NewSession,
+    ParticipantBindingRecord, ParticipantBindingRepository, ParticipantBindingState,
+    PrincipalAuthorizationChange, PrincipalKind, PrincipalRecord, PrincipalRepository,
+    PrincipalState, SessionCreation, SessionRecord,
 };
 
 #[tokio::main]
@@ -99,8 +100,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         created_at: now,
         expires_at: None,
     })?;
-    store.create_session(session.clone()).await?;
-
     let accepted_grants = GrantSetV1::new(
         resolved
             .needs()
@@ -112,29 +111,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .cloned()
             .collect(),
     );
+    let authority = IdentityAuthorityRecord {
+        authority_id: "ida_example".to_owned(),
+        principal_id: "usr_example".to_owned(),
+        participant_id: binding.participant_id.clone(),
+        participant_artifact_digest: binding.artifact_digest.clone(),
+        accepted_needs_digest: binding.needs_digest.clone(),
+        desired_grant_set: accepted_grants.clone(),
+        desired_capabilities: Vec::new(),
+        state: AuthorityState::Accepted,
+        version: 1,
+        created_at: now,
+        updated_at: now,
+        expires_at: None,
+        decision: Some(AuthorityDecision {
+            decided_at: now,
+            decided_by: "usr_owner".to_owned(),
+            reason: None,
+        }),
+    };
     store
-        .put_identity_authority(
-            IdentityAuthorityRecord {
-                authority_id: "ida_example".to_owned(),
-                principal_id: "usr_example".to_owned(),
-                participant_id: binding.participant_id.clone(),
-                participant_artifact_digest: binding.artifact_digest.clone(),
-                accepted_needs_digest: binding.needs_digest.clone(),
-                desired_grant_set: accepted_grants.clone(),
-                desired_capabilities: Vec::new(),
-                state: AuthorityState::Accepted,
-                version: 1,
+        .create_session(SessionCreation {
+            session: session.clone(),
+            desired_authority: Some(DesiredAuthorityRecord::Identity(authority)),
+            runtime_binding: None,
+            idempotency: IdempotencyResultRecord {
+                scope_key: session.session_key_id.clone(),
+                purpose: "session.create".to_owned(),
+                signer_id: session.principal_id.clone(),
+                request_id: session.session_id.clone(),
+                request_digest: binding.artifact_digest.clone(),
+                result: json!({ "sessionId": session.session_id }),
                 created_at: now,
-                updated_at: now,
-                expires_at: None,
-                decision: Some(AuthorityDecision {
-                    decided_at: now,
-                    decided_by: "usr_owner".to_owned(),
-                    reason: None,
-                }),
+                expires_at: now + 1_000,
             },
-            None,
-        )
+            actions: Vec::new(),
+        })
         .await?;
 
     let facade = AuthorizationStateService::new(store.clone());

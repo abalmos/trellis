@@ -25,6 +25,44 @@ fn contract_kind_serializes_and_deserializes_device() {
 }
 
 #[test]
+fn sdk_loader_lowers_api_artifacts_without_changing_api_identity() {
+    let dir = unique_temp_dir("api-sdk-source");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("trellis.api.json");
+    let value = json!({
+        "format": "trellis.api.v1",
+        "id": "example@v1",
+        "displayName": "Example",
+        "description": "Example API.",
+        "schemas": { "Input": true, "Output": true },
+        "errors": { "Denied": {} },
+        "rpc": {
+            "Example.Get": {
+                "version": "v1",
+                "input": { "schema": "Input" },
+                "output": { "schema": "Output" },
+                "errors": ["Denied"]
+            }
+        }
+    });
+    fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+    let loaded = load_sdk_source(&path).unwrap();
+    let parsed = trellis_protocol::parse_api_v1(&value).unwrap();
+    assert_eq!(loaded.value["format"], "trellis.api.v1");
+    assert_eq!(loaded.digest, parsed.digest().unwrap());
+    assert_eq!(
+        loaded.manifest.rpc["Example.Get"].subject,
+        "rpc.v1.Example.Get"
+    );
+    assert_eq!(
+        loaded.manifest.rpc["Example.Get"].errors.as_ref().unwrap()[0].error_type,
+        "Denied"
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn canonicalize_sorts_keys_and_matches_digest_vector() {
     let value = json!({"b": 1, "a": "x"});
     let canonical = canonicalize_json(&value).unwrap();
@@ -178,6 +216,41 @@ fn manifest_validation_ignores_unknown_top_level_fields() {
     assert_eq!(manifest.id, "example.contract@v1");
     let serialized = serde_json::to_value(&manifest).expect("serialize manifest");
     assert!(serialized.get("xFutureMetadata").is_none());
+}
+
+#[test]
+fn contract_authoring_compiles_to_canonical_protocol_artifacts() {
+    let compiled = compile_protocol_artifacts(
+        &json!({
+            "format": "trellis.contract.v1",
+            "id": "example.contract@v1",
+            "displayName": "Example Contract",
+            "description": "Example contract",
+            "kind": "service",
+            "schemas": {"Record": {"type": "object"}},
+            "events": {
+                "Example.Changed": {
+                    "version": "v1",
+                    "subject": "events.v1.Example.Changed",
+                    "event": {"schema": "Record"}
+                }
+            },
+            "eventConsumers": {
+                "projection": {"self": ["Example.Changed"]}
+            }
+        }),
+        &Default::default(),
+    )
+    .expect("contract should compile");
+
+    assert_eq!(compiled.api["format"], "trellis.api.v1");
+    assert_eq!(compiled.participant["format"], "trellis.participant.v1");
+    assert_eq!(
+        compiled.participant["eventConsumers"]["projection"]["events"]["self"],
+        json!(["Example.Changed"])
+    );
+    assert!(!compiled.participant_digest.is_empty());
+    assert!(!compiled.participant_needs_digest.is_empty());
 }
 
 #[test]

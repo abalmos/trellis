@@ -108,7 +108,7 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: caseScopedName("auth-validate-service", CASE_ID),
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: { log: false },
     }).orThrow();

@@ -20,8 +20,17 @@ export type ActionKind =
 
 type RuntimeDescriptor = RPCDesc | OperationDesc | FeedDesc | EventDesc;
 
+/** Canonical source artifact carried by portable generated actions. */
+export type ActionSource =
+  | Readonly<Record<string, unknown>>
+  | {
+    readonly artifact: Readonly<Record<string, unknown>>;
+    readonly digest: string;
+  };
+
 type ActionMetadata<TDescriptor extends RuntimeDescriptor> = {
   descriptor: TDescriptor;
+  source?: ActionSource;
 };
 
 /** A frozen, portable selection of one callable contract action. */
@@ -95,6 +104,7 @@ function createAction<
   descriptor: TDescriptor;
   exportName: string;
   connectedName: TConnectedName;
+  source?: ActionSource;
 }): ActionDescriptor<
   TContractId,
   TName,
@@ -117,7 +127,10 @@ function createAction<
     TConnectedName
   >;
   Object.defineProperty(action, ACTION_METADATA, {
-    value: Object.freeze({ descriptor: options.descriptor }),
+    value: Object.freeze({
+      descriptor: options.descriptor,
+      ...(options.source ? { source: options.source } : {}),
+    }),
   });
   return Object.freeze(action);
 }
@@ -132,6 +145,7 @@ export function rpcAction<
   name: TName,
   descriptor: TDescriptor,
   exportName: string,
+  source?: ActionSource,
 ): ActionDescriptor<
   TContractId,
   TName,
@@ -145,6 +159,7 @@ export function rpcAction<
     kind: "rpc",
     descriptor,
     exportName,
+    source,
     connectedName: lowerCamelSurfaceName(name) as ConnectedActionName<TName>,
   });
 }
@@ -159,6 +174,7 @@ export function operationAction<
   name: TName,
   descriptor: TDescriptor,
   exportName: string,
+  source?: ActionSource,
 ): ActionDescriptor<
   TContractId,
   TName,
@@ -172,6 +188,7 @@ export function operationAction<
     kind: "operation",
     descriptor,
     exportName,
+    source,
     connectedName: lowerCamelSurfaceName(name) as ConnectedActionName<TName>,
   });
 }
@@ -186,6 +203,7 @@ export function feedAction<
   name: TName,
   descriptor: TDescriptor,
   exportName: string,
+  source?: ActionSource,
 ): ActionDescriptor<
   TContractId,
   TName,
@@ -199,6 +217,7 @@ export function feedAction<
     kind: "feed",
     descriptor,
     exportName,
+    source,
     connectedName: lowerCamelSurfaceName(name) as ConnectedActionName<TName>,
   });
 }
@@ -215,6 +234,7 @@ export function eventActions<
   descriptor: TDescriptor,
   exportName: string,
   delegatedPublish: TDelegatedPublish,
+  source?: ActionSource,
 ): EventActions<
   ActionDescriptor<
     TContractId,
@@ -238,6 +258,7 @@ export function eventActions<
     name,
     kind: "event-subscribe",
     descriptor,
+    source,
     exportName: `${exportName}Subscribe`,
     connectedName: `on${baseName}` as `on${PascalActionName<TName>}`,
   });
@@ -247,6 +268,7 @@ export function eventActions<
       name,
       kind: "event-publish",
       descriptor,
+      source,
       exportName: `${exportName}Publish`,
       connectedName: `publish${baseName}` as `publish${PascalActionName<
         TName
@@ -286,6 +308,38 @@ export function optional<const TActions extends readonly ActionDescriptor[]>(
   return Object.freeze({ optional: true, actions: Object.freeze(actions) });
 }
 
+/** Selects the control surfaces requested for one operation dependency. */
+export function operationAccess<
+  const TAction extends ActionDescriptor<
+    string,
+    string,
+    "operation",
+    OperationDesc,
+    string
+  >,
+>(
+  action: TAction,
+  access: { readonly cancel?: boolean; readonly control?: boolean },
+): TAction {
+  const descriptor = action[ACTION_METADATA].descriptor;
+  return createAction({
+    contractId: action.contractId,
+    name: action.name,
+    kind: action.kind,
+    descriptor: {
+      ...descriptor,
+      cancel: access.cancel === true && descriptor.cancel === true,
+      controlCapabilities: access.control === true
+        ? descriptor.controlCapabilities
+        : [],
+      signals: access.control === true ? descriptor.signals : undefined,
+    },
+    source: action[ACTION_METADATA].source,
+    exportName: action.exportName,
+    connectedName: action.connectedName,
+  }) as TAction;
+}
+
 /** Overrides only the local connected method name for an action. */
 export function as<
   const TConnectedName extends string,
@@ -302,6 +356,7 @@ export function as<
     name: action.name,
     kind: action.kind,
     descriptor: action[ACTION_METADATA].descriptor,
+    source: action[ACTION_METADATA].source,
     exportName: action.exportName,
     connectedName,
   });
@@ -312,4 +367,11 @@ export function actionRuntimeDescriptor<TDescriptor extends RuntimeDescriptor>(
   action: ActionDescriptor<string, string, ActionKind, TDescriptor>,
 ): TDescriptor {
   return action[ACTION_METADATA].descriptor;
+}
+
+/** Returns the private source artifact associated with a generated action. */
+export function actionSource(
+  action: ActionDescriptor,
+): ActionSource | undefined {
+  return action[ACTION_METADATA].source;
 }

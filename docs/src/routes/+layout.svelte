@@ -60,13 +60,11 @@
       label: "Deployment Authority",
       docs: [
         { href: "/guides/concepts/deployment-authority#authority-model", label: "Authority model" },
-        { href: "/guides/concepts/deployment-authority#deployment-authority", label: "Deployment authority" },
+        { href: "/guides/concepts/deployment-authority#proposals-and-decisions", label: "Proposals and decisions" },
+        { href: "/guides/concepts/deployment-authority#reconciliation", label: "Reconciliation" },
+        { href: "/guides/concepts/deployment-authority#resources", label: "Resources" },
         { href: "/guides/concepts/deployment-authority#identity-authority", label: "Identity authority" },
-        { href: "/guides/concepts/deployment-authority#boundary-proposal-and-delta", label: "Proposal delta" },
-        { href: "/guides/concepts/deployment-authority#reconciliation-and-migration", label: "Reconciliation" },
-        { href: "/guides/concepts/deployment-authority#availability-and-liveness", label: "Availability and liveness" },
-        { href: "/guides/concepts/deployment-authority#grant-overrides", label: "Grant overrides" },
-        { href: "/guides/concepts/deployment-authority#contract-evidence", label: "Contract evidence" },
+        { href: "/guides/concepts/deployment-authority#runtime-issuance", label: "Runtime issuance" },
       ],
     },
     {

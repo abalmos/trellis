@@ -5334,12 +5334,12 @@
       "kind": "client",
       "id": "outbox.listener-derives-event",
       "fixture": "outbox",
-      "title": "Event listener derives a new event through SQL outbox",
+      "title": "Authorized event consumption derives a new event through SQL outbox",
       "coverage": [
         "service-sql-outbox",
         "outbox-listener-derivation"
       ],
-      "description": "A service registers an ephemeral event listener that uses outbox.transaction to enqueue a derived audit event. Both the original and derived events are published to NATS.",
+      "description": "An authorized capture consumes the source event, then the provider uses outbox.transaction to enqueue a derived audit event. Both events are published to NATS.",
       "scenario": {
         "participants": [
           {

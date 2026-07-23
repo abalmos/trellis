@@ -228,11 +228,16 @@ impl crate::client::OperationTransport for Caller {
 /// Connect an ad hoc generated service runtime for Trellis integration tests.
 #[cfg(feature = "test-support")]
 #[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
 pub async fn test_connect_service_runtime<C>(
     trellis_url: &str,
     contract_id: &str,
     contract_digest: &str,
     contract_json: &str,
+    deployment_id: &str,
+    instance_id: &str,
+    identity_seed: &str,
+    participant_needs_digest: &str,
     session_seed: &str,
 ) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError>
 where
@@ -244,6 +249,10 @@ where
             contract_id,
             contract_digest,
             contract_json,
+            deployment_id,
+            instance_id,
+            provisioned_identity_seed_base64url: identity_seed,
+            participant_needs_digest,
             session_key_seed_base64url: session_seed,
             timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
             retry_delay_ms: crate::service::DEFAULT_RETRY_DELAY_MS,

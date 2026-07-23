@@ -70,6 +70,7 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
                 "Sites.List",
             ])
             .with_operation_call(["Evidence.Upload", "Reports.Generate", "Sites.Refresh"])
+            .with_operation_cancel(["Reports.Generate"])
             .with_event_subscribe([
                 "Audit.Recorded",
                 "Evidence.Uploaded",

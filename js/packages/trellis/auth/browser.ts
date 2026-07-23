@@ -46,6 +46,7 @@ export {
   type SessionKeyHandle,
   type SessionKeyOptions,
   type SessionKeyPersistenceMode,
+  setSessionId,
   signBytes,
 } from "./browser/session.ts";
 export { deleteKeyPair, hasKeyPair } from "./browser/storage.ts";

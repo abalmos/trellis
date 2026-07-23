@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
-use trellis_contracts::{load_manifest, ContractKind, ContractUseRef, LoadedManifest};
+use trellis_contracts::{
+    load_manifest, load_sdk_source, ContractKind, ContractUseRef, LoadedManifest,
+};
 
 /// Errors returned while generating a Rust SDK crate.
 #[derive(thiserror::Error, Debug)]
@@ -230,7 +232,8 @@ pub fn generate_rust_sdk(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustEr
 }
 
 fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustError> {
-    let loaded = load_manifest(&opts.manifest_path)?;
+    let loaded = load_sdk_source(&opts.manifest_path)?;
+    let is_api = loaded.value["format"] == "trellis.api.v1";
     validate_generated_identifiers(&loaded)?;
     validate_supported_schemas(&loaded)?;
 
@@ -240,14 +243,24 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
         !loaded.manifest.feeds.is_empty() || !loaded.manifest.events.is_empty(),
         is_trellis_owned_sdk_contract(&loaded.manifest.id),
     )?;
-    cargo_toml.push_str(&format!(
-        "\n[package.metadata.trellis]\ncontract-id = {}\ncontract-digest = {}\ncontract-manifest = \"contract.json\"\n",
-        string_literal(&loaded.manifest.id),
-        string_literal(&loaded.digest),
-    ));
+    cargo_toml.push_str(&if is_api {
+        format!(
+            "\n[package.metadata.trellis]\napi-id = {}\napi-digest = {}\napi-artifact = \"api.json\"\n",
+            string_literal(&loaded.manifest.id),
+            string_literal(&loaded.digest),
+        )
+    } else {
+        format!(
+            "\n[package.metadata.trellis]\ncontract-id = {}\ncontract-digest = {}\ncontract-manifest = \"contract.json\"\n",
+            string_literal(&loaded.manifest.id),
+            string_literal(&loaded.digest),
+        )
+    });
     write_if_changed(&opts.out_dir.join("Cargo.toml"), &cargo_toml)?;
     write_if_changed(
-        &opts.out_dir.join("contract.json"),
+        &opts
+            .out_dir
+            .join(if is_api { "api.json" } else { "contract.json" }),
         &(loaded.canonical.clone() + "\n"),
     )?;
     write_if_changed(
@@ -261,10 +274,21 @@ fn generate_rust_sdk_into(opts: &GenerateRustSdkOpts) -> Result<(), CodegenRustE
             opts.crate_name, loaded.manifest.id
         ),
     )?;
-    write_rust_if_changed(
-        &opts.out_dir.join("src").join("contract.rs"),
-        &render_contract_rs(opts, &loaded),
-    )?;
+    if is_api {
+        write_rust_if_changed(
+            &opts.out_dir.join("src").join("api.rs"),
+            &render_api_rs(opts, &loaded),
+        )?;
+        remove_if_exists(&opts.out_dir.join("src").join("contract.rs"))?;
+        remove_if_exists(&opts.out_dir.join("contract.json"))?;
+    } else {
+        write_rust_if_changed(
+            &opts.out_dir.join("src").join("contract.rs"),
+            &render_contract_rs(opts, &loaded),
+        )?;
+        remove_if_exists(&opts.out_dir.join("src").join("api.rs"))?;
+        remove_if_exists(&opts.out_dir.join("api.json"))?;
+    }
     write_rust_if_changed(
         &opts.out_dir.join("src").join("types.rs"),
         &render_types_rs(&loaded),
@@ -1452,16 +1476,17 @@ use crate::Client;
 /// User-authenticated participant connection options.
 pub struct ConnectOptions<'a> {
     servers: &'a str,
-    sentinel_jwt: &'a str,
-    sentinel_seed: &'a str,
+    bootstrap_jwt: &'a str,
+    session_id: &'a str,
+    inbox_prefix: &'a str,
     session_key_seed_base64url: &'a str,
     timeout_ms: u64,
 }
 
 impl<'a> ConnectOptions<'a> {
     /// Create user-authenticated connection options.
-    pub fn new(servers: &'a str, sentinel_jwt: &'a str, sentinel_seed: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64) -> Self {
-        Self { servers, sentinel_jwt, sentinel_seed, session_key_seed_base64url, timeout_ms }
+    pub fn new(servers: &'a str, bootstrap_jwt: &'a str, session_id: &'a str, inbox_prefix: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64) -> Self {
+        Self { servers, bootstrap_jwt, session_id, inbox_prefix, session_key_seed_base64url, timeout_ms }
     }
 }
 
@@ -1478,8 +1503,9 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
     Ok(ConnectedClient {
         inner: Caller::connect_user(UserConnectOptions::new(
             opts.servers,
-            opts.sentinel_jwt,
-            opts.sentinel_seed,
+            opts.bootstrap_jwt,
+            opts.session_id,
+            opts.inbox_prefix,
             opts.session_key_seed_base64url,
             crate::contract::CONTRACT_DIGEST,
             opts.timeout_ms,
@@ -1504,15 +1530,19 @@ use crate::Client;
 /// Activated-device participant connection options.
 pub struct ConnectOptions<'a> {
     trellis_url: &'a str,
+    deployment_id: &'a str,
+    instance_id: &'a str,
+    participant_needs_digest: &'a str,
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
+    session_key_seed_base64url: &'a str,
     timeout_ms: u64,
 }
 
 impl<'a> ConnectOptions<'a> {
     /// Create activated-device connection options.
-    pub fn new(trellis_url: &'a str, public_identity_key: &'a str, identity_seed_base64url: &'a str, timeout_ms: u64) -> Self {
-        Self { trellis_url, public_identity_key, identity_seed_base64url, timeout_ms }
+    pub fn new(trellis_url: &'a str, deployment_id: &'a str, instance_id: &'a str, participant_needs_digest: &'a str, public_identity_key: &'a str, identity_seed_base64url: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64) -> Self {
+        Self { trellis_url, deployment_id, instance_id, participant_needs_digest, public_identity_key, identity_seed_base64url, session_key_seed_base64url, timeout_ms }
     }
 }
 
@@ -1529,9 +1559,14 @@ pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, Trelli
     Ok(ConnectedClient {
         inner: Caller::connect_device(DeviceConnectOptions::new(
             opts.trellis_url,
+            opts.deployment_id,
+            opts.instance_id,
+            crate::contract::CONTRACT_ID,
             crate::contract::CONTRACT_DIGEST,
+            opts.participant_needs_digest,
             opts.public_identity_key,
             opts.identity_seed_base64url,
+            opts.session_key_seed_base64url,
             opts.timeout_ms,
         )).await?,
     })
@@ -2271,13 +2306,28 @@ fn render_contract_rs(
     let source_reference =
         manifest_source_reference(&opts.manifest_path, opts.runtime_deps.repo_root.as_deref());
     format!(
-        "//! Contract metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis contract id.\npub const CONTRACT_ID: &str = {};\n\n/// Stable digest for the canonical manifest JSON.\npub const CONTRACT_DIGEST: &str = {};\n\n/// Human-readable contract name.\npub const CONTRACT_NAME: &str = {};\n\n/// Canonical manifest JSON embedded in the SDK crate.\npub const CONTRACT_JSON: &str = r#\"{}\"#;\n\n/// Deserialize the embedded contract manifest.\npub fn contract_manifest() -> trellis_contracts::ContractManifest {{\n    serde_json::from_str(CONTRACT_JSON).expect(\"generated manifest json\")\n}}\n",
+        "//! Contract metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis contract id.\npub const CONTRACT_ID: &str = {};\n\n/// Stable digest for the canonical manifest JSON.\npub const CONTRACT_DIGEST: &str = {};\n\n/// Human-readable contract name.\npub const CONTRACT_NAME: &str = {};\n\n/// Canonical manifest JSON embedded in the SDK crate.\npub const CONTRACT_JSON: &str = {};\n\n/// Deserialize the embedded contract manifest.\npub fn contract_manifest() -> trellis_contracts::ContractManifest {{\n    serde_json::from_str(CONTRACT_JSON).expect(\"generated manifest json\")\n}}\n",
         loaded.manifest.id,
         source_reference,
         string_literal(&loaded.manifest.id),
         string_literal(&loaded.digest),
         string_literal(&contract_name),
-        loaded.canonical,
+        string_literal(&loaded.canonical),
+    )
+}
+
+fn render_api_rs(opts: &GenerateRustSdkOpts, loaded: &trellis_contracts::LoadedManifest) -> String {
+    let api_name = manifest_display_name(loaded);
+    let source_reference =
+        manifest_source_reference(&opts.manifest_path, opts.runtime_deps.repo_root.as_deref());
+    format!(
+        "//! API metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis API id.\npub const API_ID: &str = {};\n\n/// Stable digest for the canonical API JSON.\npub const API_DIGEST: &str = {};\n\n/// Human-readable API name.\npub const API_NAME: &str = {};\n\n/// Canonical API JSON embedded in the SDK crate.\npub const API_JSON: &str = {};\n\n/// Deserialize the embedded API artifact as JSON.\npub fn api_artifact() -> serde_json::Value {{\n    serde_json::from_str(API_JSON).expect(\"generated API JSON\")\n}}\n",
+        loaded.manifest.id,
+        source_reference,
+        string_literal(&loaded.manifest.id),
+        string_literal(&loaded.digest),
+        string_literal(&api_name),
+        string_literal(&loaded.canonical),
     )
 }
 
@@ -2314,6 +2364,9 @@ fn render_types_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
     )];
 
     for (key, rpc) in &loaded.manifest.rpc {
+        if rpc.internal == Some(true) {
+            continue;
+        }
         let base = key_to_pascal(key);
         if !is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
             renderer.render_named_type(
@@ -2458,7 +2511,12 @@ fn render_rpc_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
         String::new(),
     ];
 
-    if !loaded.manifest.rpc.is_empty() {
+    if loaded
+        .manifest
+        .rpc
+        .values()
+        .any(|rpc| rpc.internal != Some(true))
+    {
         lines.push("use trellis_rs::generated::RpcDescriptor;".to_string());
         lines.push(String::new());
     }
@@ -2471,6 +2529,9 @@ fn render_rpc_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
     lines.push(String::new());
 
     for (key, rpc) in &loaded.manifest.rpc {
+        if rpc.internal == Some(true) {
+            continue;
+        }
         let base = key_to_pascal(key);
         let input_type = if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
             "Empty".to_string()
@@ -4227,8 +4288,23 @@ fn render_lib_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
     } else {
         "/// Feed descriptors.\npub mod feeds;\n".to_string()
     };
+    let (artifact_description, artifact_module, artifact_reexport) = if loaded.value["format"]
+        == "trellis.api.v1"
+    {
+        (
+            "API",
+            "/// Embedded API identity and artifact.\npub mod api;\n",
+            "pub use api::{api_artifact, API_DIGEST, API_ID, API_JSON, API_NAME};\n",
+        )
+    } else {
+        (
+                "contract",
+                "/// Embedded contract identity and manifest.\npub mod contract;\n",
+                "pub use contract::{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME};\n",
+            )
+    };
     format!(
-        "//! Generated Rust SDK crate for one Trellis contract.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\n/// Typed outbound contract adapters.\npub mod client;\n/// Embedded contract identity and manifest.\npub mod contract;\n/// Event descriptors.\npub mod events;\n{feeds_module}/// Job descriptors.\npub mod jobs;\n/// Operation descriptors.\npub mod operations;\n/// RPC descriptors and declared errors.\npub mod rpc;\n/// JSON Schema constants.\npub mod schemas;\n/// Generated wire types.\npub mod types;\n\npub use client::{client_name};\npub use contract::{{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME}};\n{events_reexport}{feeds_reexport}{jobs_reexport}{operations_reexport}pub use rpc::*;\npub use types::*;\n"
+        "//! Generated Rust SDK crate for one Trellis {artifact_description}.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\n/// Typed outbound adapters.\npub mod client;\n{artifact_module}/// Event descriptors.\npub mod events;\n{feeds_module}/// Job descriptors.\npub mod jobs;\n/// Operation descriptors.\npub mod operations;\n/// RPC descriptors and declared errors.\npub mod rpc;\n/// JSON Schema constants.\npub mod schemas;\n/// Generated wire types.\npub mod types;\n\npub use client::{client_name};\n{artifact_reexport}{events_reexport}{feeds_reexport}{jobs_reexport}{operations_reexport}pub use rpc::*;\npub use types::*;\n"
     )
 }
 
@@ -4245,6 +4321,9 @@ fn render_schemas_rs(loaded: &trellis_contracts::LoadedManifest) -> String {
     ];
 
     for (key, rpc) in &loaded.manifest.rpc {
+        if rpc.internal == Some(true) {
+            continue;
+        }
         let base = key_to_schema_constant_base(key);
         let input_schema = resolve_schema_ref(loaded, &rpc.input.schema);
         let input_json = serde_json::to_string(input_schema).expect("valid json");
@@ -4426,6 +4505,42 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("trellis-codegen-rust-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn protocol_api_generation_uses_api_identity_and_hides_internal_rpcs() {
+        let out_dir = unique_temp_dir("protocol-api");
+        generate_rust_sdk(&GenerateRustSdkOpts {
+            manifest_path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../runtime/trellis.api.json"),
+            out_dir: out_dir.clone(),
+            crate_name: "example-auth".to_owned(),
+            crate_version: "0.1.0".to_owned(),
+            runtime_deps: RustRuntimeDeps {
+                source: RustRuntimeSource::Registry,
+                version: "0.11.0".to_owned(),
+                repo_root: None,
+            },
+        })
+        .unwrap();
+
+        assert!(out_dir.join("api.json").is_file());
+        assert!(out_dir.join("src/api.rs").is_file());
+        assert!(!out_dir.join("contract.json").exists());
+        assert!(!out_dir.join("src/contract.rs").exists());
+        let api = fs::read_to_string(out_dir.join("src/api.rs")).unwrap();
+        assert!(api.contains("pub const API_ID"));
+        for path in [
+            "src/client.rs",
+            "src/rpc.rs",
+            "src/types.rs",
+            "src/schemas.rs",
+        ] {
+            let source = fs::read_to_string(out_dir.join(path)).unwrap();
+            assert!(!source.contains("AuthRequestsValidate"));
+            assert!(!source.contains("AuthEventsValidate"));
+        }
+        fs::remove_dir_all(out_dir).unwrap();
     }
 
     fn write_sample_manifest(root: &Path) -> PathBuf {
@@ -4763,8 +4878,7 @@ mod tests {
         assert!(contract_rs.contains("//! Generated from"));
         assert!(contract_rs.contains("pub const CONTRACT_NAME: &str = \"Trellis Core\";"));
         assert!(types_rs.contains("pub struct TrellisCatalogResponse {"));
-        assert!(types_rs.contains("pub struct TrellisBindingsGetRequest {"));
-        assert!(types_rs.contains("pub struct TrellisBindingsGetResponse {"));
+        assert!(!types_rs.contains("TrellisBindingsGet"));
         assert!(types_rs.contains("pub struct TrellisProcessInput {"));
         assert!(types_rs.contains("pub struct TrellisProcessProgress {"));
         assert!(types_rs.contains("pub struct TrellisProcessOutput {"));
@@ -4774,7 +4888,7 @@ mod tests {
         assert!(types_rs.contains("pub struct ExternalCheckpoint {"));
         assert!(types_rs.contains("pub status: String,"));
         assert!(rpc_rs.contains("pub struct TrellisCatalogRpc;"));
-        assert!(rpc_rs.contains("pub struct TrellisBindingsGetRpc;"));
+        assert!(!rpc_rs.contains("TrellisBindingsGet"));
         assert!(rpc_rs.contains("type Input = Empty;"));
         assert!(operations_rs.contains("pub struct TrellisProcessOperation;"));
         assert!(operations_rs.contains(

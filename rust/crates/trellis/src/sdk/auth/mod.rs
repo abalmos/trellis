@@ -1,9 +1,9 @@
-//! Generated Rust SDK crate for one Trellis contract.
+//! Generated Rust SDK crate for one Trellis API.
 const _: () = crate::generated::assert_abi(1);
-/// Typed outbound contract adapters.
+/// Embedded API identity and artifact.
+pub mod api;
+/// Typed outbound adapters.
 pub mod client;
-/// Embedded contract identity and manifest.
-pub mod contract;
 /// Event descriptors.
 pub mod events;
 /// Job descriptors.
@@ -16,8 +16,8 @@ pub mod rpc;
 pub mod schemas;
 /// Generated wire types.
 pub mod types;
+pub use api::{api_artifact, API_DIGEST, API_ID, API_JSON, API_NAME};
 pub use client::AuthClient;
-pub use contract::{contract_manifest, CONTRACT_DIGEST, CONTRACT_ID, CONTRACT_JSON, CONTRACT_NAME};
 pub use events::*;
 pub use operations::*;
 pub use rpc::*;

@@ -1,7 +1,5 @@
 import {
   defineServiceContract,
-  TrellisBindingsGetRequestSchema,
-  TrellisBindingsGetResponseSchema,
   TrellisCatalogRequestSchema,
   TrellisCatalogResponseSchema,
   TrellisContractGetRequestSchema,
@@ -15,8 +13,6 @@ const schemas = {
   TrellisCatalogResponse: TrellisCatalogResponseSchema,
   TrellisContractGetRequest: TrellisContractGetRequestSchema,
   TrellisContractGetResponse: TrellisContractGetResponseSchema,
-  TrellisBindingsGetRequest: TrellisBindingsGetRequestSchema,
-  TrellisBindingsGetResponse: TrellisBindingsGetResponseSchema,
   TrellisSurfaceStatusRequest: TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponse: TrellisSurfaceStatusResponseSchema,
 } as const;
@@ -66,19 +62,6 @@ export const trellisCore = defineServiceContract(
           summary: "Read one contract manifest.",
           markdown:
             "Returns the normalized contract manifest for a known contract digest.",
-        },
-      },
-      "Trellis.Bindings.Get": {
-        version: "v1",
-        input: ref.schema("TrellisBindingsGetRequest"),
-        output: ref.schema("TrellisBindingsGetResponse"),
-        capabilities: { call: ["service"] },
-        errors: [ref.error("ValidationError"), ref.error("UnexpectedError")],
-        internal: true,
-        docs: {
-          summary: "Read service resource bindings.",
-          markdown:
-            "Returns runtime resource bindings for the caller's active service contract.",
         },
       },
       "Trellis.Surface.Status": {

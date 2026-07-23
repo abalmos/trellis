@@ -885,7 +885,30 @@ impl ContractUseRef {
     ) -> Self {
         self.operations = Some(ContractUseOperation {
             call: Some(call.into_iter().map(Into::into).collect()),
+            ..ContractUseOperation::default()
         });
+        self
+    }
+
+    /// Select operation cancel controls from this dependency.
+    pub fn with_operation_cancel(
+        mut self,
+        cancel: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.operations
+            .get_or_insert_with(ContractUseOperation::default)
+            .cancel = Some(cancel.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Select operation signal controls from this dependency.
+    pub fn with_operation_control(
+        mut self,
+        control: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.operations
+            .get_or_insert_with(ContractUseOperation::default)
+            .control = Some(control.into_iter().map(Into::into).collect());
         self
     }
 

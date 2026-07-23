@@ -1,5 +1,6 @@
 //! High-level Trellis service runtime facade for generated Rust services.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::marker::PhantomData;
@@ -38,21 +39,48 @@ use super::{
     ServiceResourceBindings, StoreResourceBinding, StoreResourceClient, UploadTransferCompletion,
     UploadTransferGrantPlan, UploadTransferSession,
 };
+use crate::auth::{
+    AuthEventPublisher, AuthEventsValidateRequest, AuthEventsValidateResponse,
+    AuthRequestsValidateRequest, AuthRequestsValidateResponse,
+};
 use crate::client::{
     verify_event_proof, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
+    EventSubscriptionMode, RpcDescriptor as ClientRpcDescriptor, ServiceConnectWithContractOptions,
+    TrellisClient, TrellisClientError,
 };
 use crate::jobs::{
     start_worker_host_from_client, JobDescriptor, JobIdentity, JobManager, JobProcessError, JobRef,
     JobSnapshot, JobsError, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle,
     WorkerHostOptions,
 };
-use crate::sdk::auth::rpc::{AuthEventsValidateRpc, AuthRequestsValidateRpc};
-use crate::sdk::auth::types::{
-    AuthEventsValidateRequest, AuthEventsValidateResponse, AuthEventsValidateResponsePublisher,
-    AuthRequestsValidateRequest, AuthRequestsValidateResponse,
-};
-use crate::sdk::core::types::TrellisBindingsGetResponseBinding;
+
+struct AuthRequestsValidateRpc;
+
+impl ClientRpcDescriptor for AuthRequestsValidateRpc {
+    type Input = AuthRequestsValidateRequest;
+    type Output = AuthRequestsValidateResponse;
+
+    const KEY: &'static str = "Auth.Requests.Validate";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Requests.Validate";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &[];
+    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+}
+
+struct AuthEventsValidateRpc;
+
+impl ClientRpcDescriptor for AuthEventsValidateRpc {
+    type Input = AuthEventsValidateRequest;
+    type Output = AuthEventsValidateResponse;
+
+    const KEY: &'static str = "Auth.Events.Validate";
+    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &[];
+    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+}
 
 const AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS: usize = 3;
 const AUTH_VALIDATE_SESSION_RETRY_MS: u64 = 25;
@@ -166,9 +194,11 @@ impl RequestValidator for LocalAuthRequestValidatorAdapter<Arc<TrellisClient>> {
                 .await
                 .map_err(|error| map_validate_request_error(subject, error))?;
             if response.allowed {
-                Ok(RequestValidation::allowed_caller(serde_json::to_value(
-                    response.caller,
-                )?))
+                Ok(RequestValidation {
+                    allowed: true,
+                    caller: Some(serde_json::to_value(response.caller)?),
+                    inbox_prefix: Some(response.inbox_prefix),
+                })
             } else {
                 Ok(RequestValidation::denied())
             }
@@ -344,7 +374,7 @@ fn make_validate_request(
         })?;
 
     Ok(AuthRequestsValidateRequest {
-        capabilities: context.required_capabilities.clone(),
+        capabilities: context.required_capabilities.clone().unwrap_or_default(),
         iat: context.iat.unwrap_or_default(),
         payload_hash: payload_hash_base64url(payload),
         proof,
@@ -399,14 +429,24 @@ pub trait GeneratedServiceContract {
 }
 
 /// High-level options for connecting a generated Rust service runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceConnectOptions<'a> {
     /// Base Trellis runtime URL used for HTTP bootstrap.
     trellis_url: &'a str,
     /// Service instance name reported to the runtime.
     name: &'a str,
+    /// Deployment that owns the service instance.
+    deployment_id: &'a str,
+    /// Stable participant ID accepted by deployment authority.
+    participant_id: &'a str,
+    /// Exact participant artifact digest accepted by deployment authority.
+    participant_digest: &'a str,
+    /// Exact participant needs digest accepted by deployment authority.
+    participant_needs_digest: &'a str,
+    /// Base64url-encoded provisioned service identity seed.
+    provisioned_identity_seed_base64url: &'a str,
     /// Base64url-encoded service session seed.
-    session_key_seed_base64url: &'a str,
+    session_key_seed_base64url: Cow<'a, str>,
     /// Request/connect timeout in milliseconds.
     timeout_ms: u64,
     /// Retry delay in milliseconds while bootstrap is pending authority readiness.
@@ -417,15 +457,39 @@ pub struct ServiceConnectOptions<'a> {
 
 impl<'a> ServiceConnectOptions<'a> {
     /// Create service connect options with ergonomic default timeouts.
-    pub fn new(trellis_url: &'a str, name: &'a str, session_key_seed_base64url: &'a str) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        trellis_url: &'a str,
+        name: &'a str,
+        deployment_id: &'a str,
+        participant_id: &'a str,
+        participant_digest: &'a str,
+        participant_needs_digest: &'a str,
+        provisioned_identity_seed_base64url: &'a str,
+        session_key_seed_base64url: &'a str,
+    ) -> Self {
         Self {
             trellis_url,
             name,
-            session_key_seed_base64url,
+            deployment_id,
+            participant_id,
+            participant_digest,
+            participant_needs_digest,
+            provisioned_identity_seed_base64url,
+            session_key_seed_base64url: Cow::Borrowed(session_key_seed_base64url),
             timeout_ms: DEFAULT_TIMEOUT_MS,
             retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
         }
+    }
+
+    /// Replace the session seed, allowing each service process start to use a fresh session key.
+    pub fn with_session_key_seed(
+        mut self,
+        session_key_seed_base64url: impl Into<Cow<'a, str>>,
+    ) -> Self {
+        self.session_key_seed_base64url = session_key_seed_base64url.into();
+        self
     }
 
     /// Set the request/connect timeout in milliseconds.
@@ -634,8 +698,8 @@ pub struct ServiceEventPublisherContext {
     pub session_status: String,
 }
 
-impl From<AuthEventsValidateResponsePublisher> for ServiceEventPublisherContext {
-    fn from(publisher: AuthEventsValidateResponsePublisher) -> Self {
+impl From<AuthEventPublisher> for ServiceEventPublisherContext {
+    fn from(publisher: AuthEventPublisher) -> Self {
         Self {
             kind: publisher.kind.as_str().to_string(),
             deployment_id: publisher.deployment_id,
@@ -1855,10 +1919,14 @@ where
         let client =
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
-                contract_id: C::CONTRACT_ID,
-                contract_digest: C::CONTRACT_DIGEST,
+                contract_id: options.participant_id,
+                contract_digest: options.participant_digest,
                 contract_json: C::CONTRACT_JSON,
-                session_key_seed_base64url: options.session_key_seed_base64url,
+                deployment_id: options.deployment_id,
+                instance_id: options.name,
+                provisioned_identity_seed_base64url: options.provisioned_identity_seed_base64url,
+                participant_needs_digest: options.participant_needs_digest,
+                session_key_seed_base64url: options.session_key_seed_base64url.as_ref(),
                 timeout_ms: options.timeout_ms,
                 retry_delay_ms: options.retry_delay_ms,
                 authority_pending_timeout_ms: options.authority_pending_timeout_ms,
@@ -2041,12 +2109,10 @@ impl RequestHandler for EmptyHandler {
 fn parse_bootstrap_binding(
     client: &TrellisClient,
 ) -> Result<CoreBootstrapBinding, ServiceRuntimeError> {
-    let value = client
+    client
         .service_bootstrap_binding()
-        .ok_or(ServiceRuntimeError::MissingBootstrapBinding)?;
-    let binding = serde_json::from_value::<TrellisBindingsGetResponseBinding>(value.clone())
-        .map_err(ServiceRuntimeError::InvalidBootstrapBinding)?;
-    Ok(CoreBootstrapBinding::new(binding))
+        .cloned()
+        .ok_or(ServiceRuntimeError::MissingBootstrapBinding)
 }
 
 fn service_event_context_from_message<T>(
@@ -2535,7 +2601,8 @@ fn is_missing_durable_event_consumer_error(error: &TrellisClientError) -> bool {
 mod tests {
     use super::*;
     use crate::service::{
-        EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding, OperationFailure,
+        BootstrapBinding, EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
+        KvResourceBinding, OperationFailure, StoreResourceBinding,
     };
     use futures_util::future::ready;
     use serde::{Deserialize, Serialize};
@@ -2544,7 +2611,16 @@ mod tests {
 
     #[test]
     fn service_connect_waits_indefinitely_for_authority_by_default() {
-        let options = ServiceConnectOptions::new("http://localhost:3000", "svc", "seed");
+        let options = ServiceConnectOptions::new(
+            "http://localhost:3000",
+            "svc",
+            "dep_1",
+            "svc@v1",
+            "participant-digest",
+            "participant-needs-digest",
+            "identity-seed",
+            "session-seed",
+        );
 
         assert_eq!(options.authority_pending_timeout_ms, None);
     }
@@ -2652,44 +2728,46 @@ mod tests {
     }
 
     fn binding() -> CoreBootstrapBinding {
-        CoreBootstrapBinding::new(TrellisBindingsGetResponseBinding {
-            contract_id: "example.service@v1".to_string(),
-            digest: "sha256:test".to_string(),
-            resources: crate::sdk::core::types::TrellisBindingsGetResponseBindingResources {
-                event_consumers: Some(BTreeMap::from([(
+        CoreBootstrapBinding::new(
+            BootstrapBinding {
+                contract_id: "example.service@v1".to_string(),
+                digest: "sha256:test".to_string(),
+            },
+            ServiceResourceBindings {
+                event_consumers: BTreeMap::from([(
                     "projection".to_string(),
-                    crate::sdk::core::types::TrellisBindingsGetResponseBindingResourcesEventConsumersValue {
+                    EventConsumerResourceBinding {
                         stream: "trellis".to_string(),
                         consumer_name: "svc-projection".to_string(),
                         filter_subjects: vec!["events.v1.Billing.Paid".to_string()],
-                        replay: serde_json::from_value(serde_json::json!("new")).unwrap(),
-                        ordering: serde_json::from_value(serde_json::json!("strict")).unwrap(),
+                        replay: EventConsumerReplay::New,
+                        ordering: EventConsumerOrdering::Strict,
                         ack_wait_ms: 30_000,
                         max_deliver: 5,
                         backoff_ms: vec![1_000, 5_000],
                     },
-                )])),
+                )]),
                 jobs: None,
-                kv: Some(BTreeMap::from([(
+                kv: BTreeMap::from([(
                     "drafts".to_string(),
-                    crate::sdk::core::types::TrellisBindingsGetResponseBindingResourcesKvValue {
+                    KvResourceBinding {
                         bucket: "svc_drafts".to_string(),
                         history: 3,
                         max_value_bytes: Some(4096),
                         ttl_ms: 60_000,
                     },
-                )])),
-                store: Some(BTreeMap::from([(
+                )]),
+                store: BTreeMap::from([(
                     "evidence".to_string(),
-                    crate::sdk::core::types::TrellisBindingsGetResponseBindingResourcesStoreValue {
+                    StoreResourceBinding {
                         name: "svc_evidence".to_string(),
                         max_object_bytes: Some(8192),
                         max_total_bytes: None,
                         ttl_ms: 0,
                     },
-                )])),
+                )]),
             },
-        })
+        )
     }
 
     fn event_consumer_binding(subjects: &[&str]) -> EventConsumerResourceBinding {
@@ -2730,16 +2808,13 @@ mod tests {
 
     #[test]
     fn core_bootstrap_maps_parallel_event_consumer_ordering() {
-        let mut core = binding().into_inner();
-        core.resources
+        let mut resources = binding().resource_bindings();
+        resources
             .event_consumers
-            .as_mut()
-            .expect("event consumer bindings")
             .get_mut("projection")
             .expect("projection event consumer binding")
-            .ordering = serde_json::from_value(serde_json::json!("parallel")).unwrap();
+            .ordering = EventConsumerOrdering::Parallel;
 
-        let resources = CoreBootstrapBinding::new(core).resource_bindings();
         assert_eq!(
             resources.event_consumers["projection"].ordering,
             EventConsumerOrdering::Parallel
@@ -3012,7 +3087,10 @@ mod tests {
             ConnectedServiceRuntime::<TestContract>::from_test_binding("test-service", binding());
 
         assert_eq!(runtime.service_name(), "test-service");
-        assert_eq!(runtime.binding().contract_id, "example.service@v1");
+        assert_eq!(
+            runtime.binding().bootstrap_binding().contract_id,
+            "example.service@v1"
+        );
         assert_eq!(
             runtime.kv_binding("drafts").expect("kv binding").bucket,
             "svc_drafts"

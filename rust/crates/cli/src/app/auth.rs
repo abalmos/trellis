@@ -1,12 +1,12 @@
-use crate::agent_contract::agent_contract_json;
 use crate::app::connect_authenticated_cli_client;
 use crate::cli::*;
 use crate::output;
 use miette::IntoDiagnostic;
 use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
+use trellis_rs::sdk::auth::types as auth_types;
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
     let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
@@ -26,14 +26,11 @@ pub(crate) fn pending_agent_login_json(login_url: &str) -> Value {
 fn authenticated_user_json(me: &authlib::AuthenticatedUser) -> Value {
     json!({
         "userId": &me.user_id,
-        "identity": &me.identity,
+        "principalId": &me.principal_id,
+        "state": &me.state,
         "name": &me.name,
         "capabilities": &me.capabilities,
     })
-}
-
-fn authenticated_identity_label(identity: &authlib::AuthenticatedIdentity) -> String {
-    format!("{}:{}", identity.provider, identity.subject)
 }
 
 pub(super) async fn login(format: OutputFormat, args: &LoginArgs) -> miette::Result<()> {
@@ -104,6 +101,14 @@ fn trimmed_optional(value: &Option<String>) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn cli_idempotency_key() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("cli_{nanos:x}")
+}
+
 fn identity_labels(identities: &[Value]) -> String {
     identities
         .iter()
@@ -114,6 +119,17 @@ fn identity_labels(identities: &[Value]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn value_string(value: &Value, field: &str) -> String {
+    value
+        .get(field)
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) => Some(value.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default()
 }
 
 fn latest_last_auth_by_user(sessions: &[Value]) -> BTreeMap<String, String> {
@@ -207,23 +223,44 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
     let users = auth_client
-        .list_users(500, Some(0))
+        .rpc()
+        .auth()
+        .users_list(&auth_types::AuthUsersListRequest {
+            state: None,
+            cursor: None,
+            limit: Some(100),
+        })
         .await
         .into_diagnostic()?;
     let user_values = users
+        .entries
         .iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
         .into_diagnostic()?;
     let sessions = auth_client
-        .list_sessions(500, Some(0), None)
+        .rpc()
+        .auth()
+        .sessions_list(&auth_types::AuthSessionsListRequest {
+            principal_id: None,
+            participant_id: None,
+            deployment_id: None,
+            state: None,
+            cursor: None,
+            limit: Some(100),
+        })
         .await
+        .map(|response| response.entries)
         .unwrap_or_default();
-    let last_auth_by_user = latest_last_auth_by_user(&sessions);
+    let session_values = sessions
+        .iter()
+        .filter_map(|session| serde_json::to_value(session).ok())
+        .collect::<Vec<_>>();
+    let last_auth_by_user = latest_last_auth_by_user(&session_values);
 
     if output::is_json(format) {
         output::print_json(&json!({
-            "users": users,
+            "users": users.entries,
             "lastAuthByUser": last_auth_by_user,
         }))?;
         return Ok(());
@@ -256,9 +293,14 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
     let user = auth_client
-        .get_user(&args.user_id)
+        .rpc()
+        .auth()
+        .users_get(&auth_types::AuthUsersGetRequest {
+            user_id: args.user_id.clone(),
+        })
         .await
-        .into_diagnostic()?;
+        .into_diagnostic()?
+        .user;
 
     if output::is_json(format) {
         output::print_json(&json!({ "user": user }))?;
@@ -267,7 +309,7 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 
     let user_value = serde_json::to_value(&user).into_diagnostic()?;
     output::print_info(&format!("userId={}", user.user_id));
-    output::print_info(&format!("active={}", user.active));
+    output::print_info(&format!("state={}", user.state));
     output::print_info(&format!("name={}", user.name.as_deref().unwrap_or("")));
     output::print_info(&format!("email={}", user.email.as_deref().unwrap_or("")));
     output::print_info(&format!("direct={}", direct_capabilities(&user_value)));
@@ -279,23 +321,32 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
-    let username = trimmed_optional(&args.username)
+    let _username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
+    if !args.capabilities.is_empty() || !args.groups.is_empty() {
+        return Err(miette::miette!(
+            "direct capabilities and capability groups were removed; authorize the participant proposal instead"
+        ));
+    }
     let user = auth_client
-        .create_user(&authlib::AuthUsersCreateRequest {
-            active: Some(!args.inactive),
-            capabilities: Some(args.capabilities.clone()),
-            capability_groups: Some(args.groups.clone()),
+        .rpc()
+        .auth()
+        .users_create(&auth_types::AuthUsersCreateRequest {
             email: trimmed_optional(&args.email),
             name: trimmed_optional(&args.name),
-            username: Some(username),
+            image: None,
+            idempotency_key: cli_idempotency_key(),
         })
         .await
-        .into_diagnostic()?;
+        .into_diagnostic()?
+        .user;
     let setup_flow = auth_client
-        .create_password_reset_flow(&authlib::AuthUsersPasswordResetCreateRequest {
-            expires_in_seconds: None,
+        .rpc()
+        .auth()
+        .users_password_reset_create(&auth_types::AuthUsersPasswordResetCreateRequest {
             user_id: user.user_id.clone(),
+            return_target: None,
+            idempotency_key: cli_idempotency_key(),
         })
         .await
         .into_diagnostic()?;
@@ -310,7 +361,10 @@ async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> mi
 
     output::print_success("created user");
     output::print_info(&format!("userId={}", user.user_id));
-    output::print_info(&format!("setupUrl={}", setup_flow.url));
+    output::print_info(&format!(
+        "setupFlow={}",
+        serde_json::to_string(&setup_flow).into_diagnostic()?
+    ));
     Ok(())
 }
 
@@ -318,133 +372,76 @@ async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
     let current = auth_client
-        .get_user(&args.user_id)
-        .await
-        .into_diagnostic()?;
-    let groups = auth_client
-        .list_capability_groups(500, Some(0))
-        .await
-        .into_diagnostic()?;
-
-    let mut capabilities = current
-        .capabilities
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut capability_groups = current
-        .capability_groups
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-
-    if args.clear_capabilities {
-        capabilities.clear();
-    }
-    if !args.set_capabilities.is_empty() {
-        capabilities = args.set_capabilities.iter().cloned().collect();
-    }
-    for capability in &args.add_capabilities {
-        capabilities.insert(capability.clone());
-    }
-    for capability in &args.remove_capabilities {
-        capabilities.remove(capability);
-    }
-
-    if args.clear_groups {
-        capability_groups.clear();
-    }
-    if !args.set_groups.is_empty() {
-        capability_groups = args.set_groups.iter().cloned().collect();
-    }
-    for group in &args.add_groups {
-        capability_groups.insert(group.clone());
-    }
-    for group in &args.remove_groups {
-        capability_groups.remove(group);
-    }
-
-    let group_capabilities = capabilities_provided_by_groups(&capability_groups, &groups);
-    capabilities.retain(|capability| !group_capabilities.contains(capability));
-
-    let next_capabilities = capabilities.into_iter().collect::<Vec<_>>();
-    let next_groups = capability_groups.into_iter().collect::<Vec<_>>();
-    let next_active = if args.active {
-        Some(true)
-    } else if args.inactive {
-        Some(false)
-    } else {
-        None
-    };
-    let next_name = trimmed_optional(&args.name);
-    let next_email = trimmed_optional(&args.email);
-
-    let success = auth_client
-        .update_user(&authlib::AuthUsersUpdateRequest {
-            active: next_active.filter(|active| *active != current.active),
-            capabilities: (next_capabilities != current.capabilities).then_some(next_capabilities),
-            capability_groups: (next_groups != current.capability_groups).then_some(next_groups),
-            email: next_email.filter(|email| Some(email) != current.email.as_ref()),
-            name: next_name.filter(|name| Some(name) != current.name.as_ref()),
+        .rpc()
+        .auth()
+        .users_get(&auth_types::AuthUsersGetRequest {
             user_id: args.user_id.clone(),
         })
         .await
-        .into_diagnostic()?;
+        .into_diagnostic()?
+        .user;
+    if args.clear_capabilities
+        || args.clear_groups
+        || !args.set_capabilities.is_empty()
+        || !args.add_capabilities.is_empty()
+        || !args.remove_capabilities.is_empty()
+        || !args.set_groups.is_empty()
+        || !args.add_groups.is_empty()
+        || !args.remove_groups.is_empty()
+    {
+        return Err(miette::miette!(
+            "direct capabilities and capability groups were removed; update participant authority instead"
+        ));
+    }
+    let next_name = trimmed_optional(&args.name);
+    let next_email = trimmed_optional(&args.email);
+
+    let user = auth_client
+        .rpc()
+        .auth()
+        .users_update(&auth_types::AuthUsersUpdateRequest {
+            email: next_email.or(current.email),
+            name: next_name.or(current.name),
+            image: current.image,
+            state: if args.active {
+                auth_types::AuthUsersUpdateRequestState::Active
+            } else if args.inactive {
+                auth_types::AuthUsersUpdateRequestState::Disabled
+            } else {
+                match current.state {
+                    auth_types::AuthUsersGetResponseUserState::Active => {
+                        auth_types::AuthUsersUpdateRequestState::Active
+                    }
+                    auth_types::AuthUsersGetResponseUserState::Disabled
+                    | auth_types::AuthUsersGetResponseUserState::Revoked => {
+                        auth_types::AuthUsersUpdateRequestState::Disabled
+                    }
+                }
+            },
+            user_id: args.user_id.clone(),
+            expected_version: current.version,
+            idempotency_key: cli_idempotency_key(),
+        })
+        .await
+        .into_diagnostic()?
+        .user;
 
     if output::is_json(format) {
         output::print_json(&json!({
-            "success": success,
+            "user": user,
             "userId": args.user_id,
         }))?;
         return Ok(());
     }
 
-    if success {
-        output::print_success("updated user");
-    } else {
-        output::print_info("no matching user updated");
-    }
+    output::print_success("updated user");
     output::print_info(&format!("userId={}", args.user_id));
     Ok(())
-}
-
-fn capabilities_provided_by_groups(
-    selected_groups: &BTreeSet<String>,
-    groups: &[authlib::AuthCapabilityGroupsListResponseEntriesItem],
-) -> BTreeSet<String> {
-    let groups_by_key = groups
-        .iter()
-        .map(|group| (group.group_key.as_str(), group))
-        .collect::<BTreeMap<_, _>>();
-    let mut visited = BTreeSet::new();
-    let mut capabilities = BTreeSet::new();
-    for group in selected_groups {
-        collect_group_capabilities(group, &groups_by_key, &mut visited, &mut capabilities);
-    }
-    capabilities
-}
-
-fn collect_group_capabilities(
-    group_key: &str,
-    groups_by_key: &BTreeMap<&str, &authlib::AuthCapabilityGroupsListResponseEntriesItem>,
-    visited: &mut BTreeSet<String>,
-    capabilities: &mut BTreeSet<String>,
-) {
-    if !visited.insert(group_key.to_string()) {
-        return;
-    }
-    let Some(group) = groups_by_key.get(group_key) else {
-        return;
-    };
-    capabilities.extend(group.capabilities.iter().cloned());
-    for included_group in &group.included_groups {
-        collect_group_capabilities(included_group, groups_by_key, visited, capabilities);
-    }
 }
 
 async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result<()> {
     let challenge = authlib::start_agent_login(&authlib::StartAgentLoginOpts {
         trellis_url: &args.trellis_url,
-        contract_json: agent_contract_json(),
     })
     .await
     .into_diagnostic()?;
@@ -468,18 +465,15 @@ async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result
     if output::is_json(format) {
         let mut response = authenticated_user_json(&me);
         response["sessionKey"] = Value::String(state.session_key);
-        response["expires"] = Value::String(state.expires);
+        response["expiresAt"] = state.expires_at.map(Value::from).unwrap_or(Value::Null);
         output::print_json(&response)?;
     } else {
         output::print_success("logged in delegated agent session");
         output::print_info(&format!("userId={}", me.user_id));
-        output::print_info(&format!(
-            "identity={}",
-            authenticated_identity_label(&me.identity)
-        ));
-        output::print_info(&format!("name={}", me.name));
+        output::print_info(&format!("identity={}", me.principal_id));
+        output::print_info(&format!("name={}", me.name.as_deref().unwrap_or("")));
         output::print_info(&format!("sessionKey={}", state.session_key));
-        output::print_info(&format!("expires={}", state.expires));
+        output::print_info(&format!("expiresAt={:?}", state.expires_at));
     }
 
     Ok(())
@@ -490,8 +484,8 @@ async fn logout_command(format: OutputFormat) -> miette::Result<()> {
     let mut revoke_error = None;
     if let Ok(state) = authlib::load_admin_session() {
         match authlib::connect_admin_client_async(&state).await {
-            Ok(connected) => match authlib::AuthClient::new(&connected).logout().await {
-                Ok(response) => revoked = response,
+            Ok(connected) => match revoke_current_session(&connected).await {
+                Ok(()) => revoked = true,
                 Err(error) => revoke_error = Some(error.to_string()),
             },
             Err(error) => revoke_error = Some(error.to_string()),
@@ -521,27 +515,63 @@ async fn logout_command(format: OutputFormat) -> miette::Result<()> {
     Ok(())
 }
 
+pub(super) async fn current_user(
+    connected: &trellis_rs::generated::Caller,
+) -> Result<authlib::AuthenticatedUser, authlib::TrellisAuthError> {
+    let response = authlib::AuthClient::new(connected)
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
+    let user = response.user.ok_or_else(|| {
+        authlib::TrellisAuthError::NotUserSession(
+            response.session.participant_kind.as_str().to_owned(),
+        )
+    })?;
+    Ok(serde_json::from_value(serde_json::to_value(user)?)?)
+}
+
+async fn revoke_current_session(
+    connected: &trellis_rs::generated::Caller,
+) -> Result<(), authlib::TrellisAuthError> {
+    let auth = authlib::AuthClient::new(connected);
+    let current = auth
+        .rpc()
+        .auth()
+        .sessions_me()
+        .await
+        .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
+    auth.rpc()
+        .auth()
+        .sessions_revoke(&auth_types::AuthSessionsRevokeRequest {
+            session_id: current.session.session_id,
+            expected_version: Some(current.session.version),
+            reason: Some("CLI logout".to_owned()),
+            idempotency_key: cli_idempotency_key(),
+        })
+        .await
+        .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
+    Ok(())
+}
+
 async fn status_command(format: OutputFormat) -> miette::Result<()> {
     let (state, connected) = connect_authenticated_cli_client(format).await?;
-    let auth_client = authlib::AuthClient::new(&connected);
-    let me = auth_client.me().await.into_diagnostic()?;
+    let me = current_user(&connected).await.into_diagnostic()?;
 
     if output::is_json(format) {
         let mut response = authenticated_user_json(&me);
         response["loggedIn"] = Value::Bool(true);
         response["sessionKey"] = Value::String(state.session_key);
-        response["expires"] = Value::String(state.expires);
+        response["expiresAt"] = state.expires_at.map(Value::from).unwrap_or(Value::Null);
         output::print_json(&response)?;
     } else {
         output::print_success("delegated agent session is active");
         output::print_info(&format!("userId={}", me.user_id));
-        output::print_info(&format!(
-            "identity={}",
-            authenticated_identity_label(&me.identity)
-        ));
-        output::print_info(&format!("name={}", me.name));
+        output::print_info(&format!("identity={}", me.principal_id));
+        output::print_info(&format!("name={}", me.name.as_deref().unwrap_or("")));
         output::print_info(&format!("sessionKey={}", state.session_key));
-        output::print_info(&format!("expires={}", state.expires));
+        output::print_info(&format!("expiresAt={:?}", state.expires_at));
     }
 
     Ok(())
@@ -554,22 +584,47 @@ async fn identity_grants_list_command(
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
     let identity_grants = auth_client
-        .list_identity_grants(args.user.as_deref(), args.digest.as_deref())
+        .rpc()
+        .auth()
+        .identity_authority_list(&auth_types::AuthIdentityAuthorityListRequest {
+            principal_id: args.user.clone(),
+            participant_id: None,
+            state: None,
+            cursor: None,
+            limit: Some(100),
+        })
         .await
+        .into_diagnostic()?
+        .entries;
+    let identity_values = identity_grants
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
         .into_diagnostic()?;
+    let identity_values = identity_values
+        .into_iter()
+        .filter(|entry| {
+            args.digest.as_deref().is_none_or(|digest| {
+                entry
+                    .get("participantArtifactDigest")
+                    .and_then(Value::as_str)
+                    == Some(digest)
+            })
+        })
+        .collect::<Vec<_>>();
 
     if output::is_json(format) {
         output::print_json(&json!({
             "user": args.user,
             "digest": args.digest,
-            "identityGrants": identity_grants,
+            "identityAuthorities": identity_values,
         }))?;
         return Ok(());
     }
 
     output::print_info(&format!(
         "matched identity grants={}",
-        identity_grants.len()
+        identity_values.len()
     ));
     if let Some(user) = &args.user {
         output::print_info(&format!("user={user}"));
@@ -578,30 +633,22 @@ async fn identity_grants_list_command(
         output::print_info(&format!("digest={digest}"));
     }
 
-    let rows = identity_grants
+    let rows = identity_values
         .into_iter()
         .map(|entry| {
             vec![
-                entry.identity_grant_id,
-                entry.participant_kind.as_str().to_string(),
-                entry.display_name,
-                entry.description,
-                entry.contract_evidence.contract_digest,
-                entry.updated_at,
+                value_string(&entry, "authorityId"),
+                value_string(&entry, "participantId"),
+                value_string(&entry, "state"),
+                value_string(&entry, "participantArtifactDigest"),
+                value_string(&entry, "updatedAt"),
             ]
         })
         .collect();
     println!(
         "{}",
         output::table(
-            &[
-                "identityGrantId",
-                "participant",
-                "app",
-                "description",
-                "digest",
-                "updated"
-            ],
+            &["authorityId", "participantId", "state", "digest", "updated"],
             rows
         )
     );
@@ -614,10 +661,36 @@ async fn identity_grants_revoke_command(
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
     let auth_client = authlib::AuthClient::new(&connected);
-    let success = auth_client
-        .revoke_identity_grant(&args.identity_grant_id, args.user.as_deref())
+    let authority = auth_client
+        .rpc()
+        .auth()
+        .identity_authority_get(&auth_types::AuthIdentityAuthorityGetRequest {
+            authority_id: args.identity_grant_id.clone(),
+        })
+        .await
+        .into_diagnostic()?
+        .authority;
+    if args
+        .user
+        .as_deref()
+        .is_some_and(|user| authority.principal_id != user)
+    {
+        return Err(miette::miette!(
+            "identity authority does not belong to requested user"
+        ));
+    }
+    auth_client
+        .rpc()
+        .auth()
+        .identity_authority_revoke(&auth_types::AuthIdentityAuthorityRevokeRequest {
+            authority_id: args.identity_grant_id.clone(),
+            expected_version: authority.version,
+            reason: None,
+            idempotency_key: cli_idempotency_key(),
+        })
         .await
         .into_diagnostic()?;
+    let success = true;
 
     if output::is_json(format) {
         output::print_json(&json!({
@@ -643,11 +716,10 @@ async fn identity_grants_revoke_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        authenticated_identity_label, authenticated_user_json, pending_agent_login_json,
-        render_agent_login_instructions,
+        authenticated_user_json, pending_agent_login_json, render_agent_login_instructions,
     };
     use serde_json::json;
-    use trellis_rs::auth::{AuthenticatedIdentity, AuthenticatedUser};
+    use trellis_rs::auth::AuthenticatedUser;
 
     #[test]
     fn agent_login_instructions_include_plain_url_and_terminal_qr() {
@@ -681,33 +753,29 @@ mod tests {
     #[test]
     fn authenticated_user_output_is_account_first() {
         let user = AuthenticatedUser {
-            active: true,
+            principal_id: "usr_123".to_string(),
+            state: "active".to_string(),
             capabilities: vec!["admin".to_string()],
-            email: "ada@example.com".to_string(),
-            identity: AuthenticatedIdentity {
-                identity_id: "idn_github_123".to_string(),
-                provider: "github".to_string(),
-                subject: "123".to_string(),
-            },
+            email: Some("ada@example.com".to_string()),
             image: None,
-            last_login: None,
-            name: "Ada".to_string(),
+            name: Some("Ada".to_string()),
             user_id: "usr_123".to_string(),
+            created_at: 1,
+            updated_at: 1,
+            disabled_at: None,
+            revoked_at: None,
+            version: 1,
         };
 
         assert_eq!(
             authenticated_user_json(&user),
             json!({
                 "userId": "usr_123",
-                "identity": {
-                    "identityId": "idn_github_123",
-                    "provider": "github",
-                    "subject": "123",
-                },
+                "principalId": "usr_123",
+                "state": "active",
                 "name": "Ada",
                 "capabilities": ["admin"],
             })
         );
-        assert_eq!(authenticated_identity_label(&user.identity), "github:123");
     }
 }

@@ -23,7 +23,7 @@ impl OperationDescriptor for AuthDeviceUserAuthoritiesResolveOperation {
     const OBSERVE_CAPABILITIES: &'static [&'static str] = &[];
     const CANCEL_CAPABILITIES: &'static [&'static str] = &[];
     const CONTROL_CAPABILITIES: &'static [&'static str] = &[];
-    const CANCELABLE: bool = false;
+    const CANCELABLE: bool = true;
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Resolve`.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,9 +31,9 @@ pub enum AuthDeviceUserAuthoritiesResolveOperationError {
     /// `AuthError` failure.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` failure.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` failure.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesResolveOperationError {
     fn decode(
@@ -44,10 +44,10 @@ impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesResolveOperati
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }

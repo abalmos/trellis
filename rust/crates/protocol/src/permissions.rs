@@ -277,6 +277,19 @@ impl PermissionTargetV1 {
         }
     }
 
+    /// Return the participant identifier, resource kind, and local resource name.
+    #[must_use]
+    pub fn as_participant_resource(&self) -> Option<(&str, ParticipantResourceKindV1, &str)> {
+        match self {
+            Self::ParticipantResource {
+                participant,
+                resource,
+                name,
+            } => Some((participant, *resource, name)),
+            Self::ApiSurface { .. } | Self::OperationSignal { .. } => None,
+        }
+    }
+
     fn validate(&self) -> Result<(), ProtocolError> {
         match self {
             Self::ApiSurface { api, name, .. } => {

@@ -18,6 +18,7 @@ async function createHandle(): Promise<SessionKeyHandle> {
     "-",
   ).replace(/\//g, "_").replace(/=+$/g, "");
   return {
+    seed: new Uint8Array(32),
     privateKey: keyPair.privateKey,
     publicKey: keyPair.publicKey,
     publicKeyRaw,

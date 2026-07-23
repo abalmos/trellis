@@ -37,8 +37,8 @@ import {
 await using runtime = await TrellisTestRuntime.start({
   trellis: {
     command: {
-      cmd: Deno.execPath(),
-      args: ["run", "-A", "/path/to/cosmic-cactus/js/services/trellis/main.ts"],
+      cmd: "trellis-server",
+      args: ["--config", "{config}", "all"],
     },
   },
 });
@@ -184,19 +184,14 @@ Trellis control-plane process. Tests must provide `trellis.command` explicitly.
 Tests should connect services and clients through the normal public Trellis
 APIs.
 
-For example, point `trellis.command` at a local Trellis checkout or modified
-control-plane service:
+For example, point `trellis.command` at a built `trellis-server`:
 
 ```ts
 await using runtime = await TrellisTestRuntime.start({
   trellis: {
     command: {
-      cmd: Deno.execPath(),
-      args: [
-        "run",
-        "-A",
-        "/path/to/cosmic-cactus/js/services/trellis/main.ts",
-      ],
+      cmd: "/path/to/trellis-server",
+      args: ["--config", "{config}", "all"],
     },
   },
 });

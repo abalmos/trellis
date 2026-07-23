@@ -328,7 +328,7 @@ export function createJobsFixture(caseId: string) {
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: { log: false },
     }).orThrow();

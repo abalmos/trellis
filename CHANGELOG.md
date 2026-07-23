@@ -8,6 +8,80 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-23
+
+### Public Breaking Changes
+
+- Replaced contract-manifest authority at runtime with canonical
+  `trellis.api.v1` and `trellis.participant.v1` artifacts, exact participant
+  bindings, protocol-derived subjects, and materialized `GrantSetV1`
+  permissions.
+- Moved browser auth, service and device bootstrap, session lifecycle,
+  authorization reconciliation, NATS Auth Callout, Auth RPC, and connection
+  revocation into the Rust platform runtime. Removed the TypeScript auth owner,
+  sentinel credentials, mutable capability groups, grant overrides, and
+  `Trellis.Bindings.Get` compatibility surfaces.
+- Replaced legacy concatenated bootstrap signatures with purpose-separated,
+  canonical session proofs and nonce-bound NATS connection authentication.
+  Service, browser, device, CLI, TypeScript, Rust, and WASM clients now use one
+  session-key proof protocol.
+
+### Added
+
+- Added protocol-owned API and participant artifact parsing, semantic digests,
+  compatibility checks, participant resolution, permission atoms, authority
+  needs, proposals, and cross-language contract-to-protocol compilation.
+- Added Rust authorization storage and reconciliation with versioned desired and
+  materialized authority, entity-owned runtime evidence, effective expiry,
+  dependency and resource evidence, deterministic outbox actions, and matching
+  in-memory and SQLite repository conformance.
+- Added the Rust auth HTTP surface for first-administrator bootstrap, local and
+  OIDC browser flows, service and device provisioning, activation review,
+  password and identity workflows, portal policy, and unified session creation.
+- Added NATS Auth Callout admission with XKey transport, deny-all bootstrap
+  credentials, nonce and session-proof verification, replay protection,
+  deterministic transport-permission compilation, bounded response authority,
+  connection presence, and durable kick intents.
+- Added source-owned Auth API, runtime participant, and administration
+  participant artifacts; generated TypeScript and Rust SDKs; shared Rust/WASM/
+  TypeScript session-proof vectors; and an embedded reproducible Svelte login
+  portal.
+
+### Changed
+
+- Made deployment-authority planning one stable lineage per deployment and
+  participant, with pending-only semantic deduplication, preserved terminal
+  history, deterministic expiry, and initial-plan visibility before acceptance.
+- Made server-owned browser consent immutable across flow transitions.
+- Updated TypeScript and Rust clients, CLI commands, test harnesses, deployment
+  examples, local bootstrap, generated package metadata, documentation, and LLM
+  guidance for the Rust-owned, sentinel-free TOML runtime configuration.
+- Updated integration infrastructure to provision isolated NATS resources,
+  compile protocol artifacts in both languages, run supported suites in
+  parallel, and retain explicit deferred coverage for State and Jobs
+  administration owners.
+
+### Fixed
+
+- Preserved the accepted Milestone 7 migration byte-for-byte and moved M8 schema
+  evolution into a populated, repeatable V1002 upgrade. Added exact
+  grant-derived resource/request/event authorization and stable redacted public
+  errors.
+- Made browser consent server-owned, bound OIDC callbacks to browser possession
+  and current portal registration policy, stabilized first-admin restart and
+  federated completion, and added explicit first-admin token rotation.
+- Unified service/device artifact presentation with compatibility-aware semantic
+  authority proposals, preserved optional authority, and made bootstrap replay
+  revalidate current issuance before signing fresh credentials.
+- Fixed cross-language artifact digest normalization, generated action source
+  portability, operation-transfer metadata, feed and reply-inbox subjects,
+  JetStream discovery permissions, resource evidence projection, durable
+  operation reconnect identity, and operation watch readiness.
+- Fixed native and browser NATS nonce-signature encoding interoperability,
+  bootstrap proof hashing and clock correction, transient session-validation
+  retries, request-proof replay rejection, device activation gating, authority
+  expiry staleness, and session-bound reconnect behavior.
+
 ## [0.11.0-rc.8] - 2026-07-13
 
 ### Fixed
@@ -24,8 +98,9 @@ and this project adheres to
 
 - Replaced TypeScript owner SDK runtime packages with vocabulary-only generated
   packages and participant-contract-derived caller/provider facades. Removed the
-  old generated `api`, `client`, and `contract` surfaces, implicit contract uses,
-  low-level connection constructors, and direct binding/resource bootstrap.
+  old generated `api`, `client`, and `contract` surfaces, implicit contract
+  uses, low-level connection constructors, and direct binding/resource
+  bootstrap.
 - Changed TypeScript participant contracts to select explicit RPC, event,
   operation, feed, state, KV, store, and Jobs descriptors. Generated action
   names, handler registration types, and connected runtime access now derive
@@ -73,7 +148,8 @@ and this project adheres to
 
 - Updated the Console Jobs workspace around a job-type health matrix, scoped
   throughput and latency charts, execution-story timelines, attempt details,
-  lineage, wait edges, related jobs, worker state, and structured Trellis errors.
+  lineage, wait edges, related jobs, worker state, and structured Trellis
+  errors.
 - Updated deployment authority acceptance to commit desired state and return
   while physical reconciliation continues in the background. The Console plan
   workspace now surfaces structured schema/capability/resource breakage and
@@ -1539,7 +1615,13 @@ and this project adheres to
 - Stabilized console profile loading across reconnects, supported optional
   portal app contracts, and trimmed login portal files from the runtime image.
 
-[Unreleased]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.3...HEAD
+[Unreleased]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.8...v0.11.0
+[0.11.0-rc.8]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.7...v0.11.0-rc.8
+[0.11.0-rc.7]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.6...v0.11.0-rc.7
+[0.11.0-rc.6]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.5...v0.11.0-rc.6
+[0.11.0-rc.5]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.4...v0.11.0-rc.5
+[0.11.0-rc.4]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.3...v0.11.0-rc.4
 [0.11.0-rc.3]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.2...v0.11.0-rc.3
 [0.11.0-rc.2]: https://github.com/Qlever-LLC/trellis/compare/v0.11.0-rc.1...v0.11.0-rc.2
 [0.11.0-rc.1]: https://github.com/Qlever-LLC/trellis/compare/v0.10.22...v0.11.0-rc.1

@@ -8,7 +8,8 @@ use futures_util::future::BoxFuture;
 use sha2::{Digest, Sha256};
 
 use crate::auth::{
-    AuthClient, AuthRequestsValidateRequest, AuthRequestsValidateResponse, TrellisAuthError,
+    AuthRequestsValidateRequest, AuthRequestsValidateResponse, TransitionalAuthClient,
+    TrellisAuthError,
 };
 use crate::client::{RpcErrorPayload, TrellisClient, TrellisClientError};
 use crate::service::{RequestContext, RequestValidation, RequestValidator, ServerError};
@@ -23,7 +24,7 @@ pub trait AuthRequestValidatorClientPort: Send + Sync {
     ) -> BoxFuture<'a, Result<AuthRequestsValidateResponse, TrellisClientError>>;
 }
 
-impl<'a> AuthRequestValidatorClientPort for AuthClient<'a> {
+impl<'a> AuthRequestValidatorClientPort for TransitionalAuthClient<'a> {
     fn auth_validate_request<'b>(
         &'b self,
         input: &'b AuthRequestsValidateRequest,
@@ -39,7 +40,7 @@ impl AuthRequestValidatorClientPort for Arc<TrellisClient> {
     ) -> BoxFuture<'a, Result<AuthRequestsValidateResponse, TrellisClientError>> {
         Box::pin(async move {
             let caller = crate::generated::Caller::from_client(Arc::clone(self));
-            AuthClient::new(&caller)
+            TransitionalAuthClient::new(&caller)
                 .validate_request(input)
                 .await
                 .map_err(map_auth_error)
@@ -81,9 +82,11 @@ where
                 .await
                 .map_err(|error| map_validate_request_error(subject, error))?;
             if response.allowed {
-                Ok(RequestValidation::allowed_caller(serde_json::to_value(
-                    response.caller,
-                )?))
+                Ok(RequestValidation {
+                    allowed: true,
+                    caller: Some(serde_json::to_value(response.caller)?),
+                    inbox_prefix: Some(response.inbox_prefix),
+                })
             } else {
                 Ok(RequestValidation::denied())
             }
@@ -157,7 +160,7 @@ pub fn make_validate_request(
         })?;
 
     Ok(AuthRequestsValidateRequest {
-        capabilities: context.required_capabilities.clone(),
+        capabilities: context.required_capabilities.clone().unwrap_or_default(),
         iat: context.iat.unwrap_or_default(),
         payload_hash: payload_hash_base64url(payload),
         proof,

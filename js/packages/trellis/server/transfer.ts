@@ -60,6 +60,7 @@ export type OperationUploadTransfer = {
 
 export type InitiateDownloadArgs = {
   sessionKey: string;
+  inboxPrefix: string;
   store: string;
   key: string;
   expiresInMs: number;
@@ -111,6 +112,7 @@ type DownloadSession = {
   subject: string;
   transferId: string;
   sessionKey: string;
+  inboxPrefix: string;
   expiresAtMs: number;
   store: TypedStore;
   key: string;
@@ -575,6 +577,7 @@ export class ServiceTransfer {
       subject,
       transferId,
       sessionKey: args.sessionKey,
+      inboxPrefix: args.inboxPrefix,
       expiresAtMs,
       store: storeValue,
       key: args.key,
@@ -839,13 +842,17 @@ export class ServiceTransfer {
   ): Promise<void> {
     const reply = msg.reply;
     if (
-      !reply || !reply.startsWith(`_INBOX.${session.sessionKey.slice(0, 16)}.`)
+      !reply || !reply.startsWith(`${session.inboxPrefix}.`)
     ) {
       replyError(
         msg,
         new TransferError({
           operation: "get",
-          context: { reason: "reply_subject_mismatch" },
+          context: {
+            reason: "reply_subject_mismatch",
+            expected: session.inboxPrefix,
+            actual: reply,
+          },
         }),
       );
       return;

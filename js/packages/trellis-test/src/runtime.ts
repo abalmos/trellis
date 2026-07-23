@@ -165,24 +165,21 @@ export class TrellisTestRuntime implements AsyncDisposable {
     readonly plans: {
       list(args: {
         deploymentId?: string;
-        state?: "pending" | "accepted" | "rejected";
-        classification?: "update" | "migration";
+        state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
         limit?: number;
-        offset?: number;
-      }): Promise<
-        { entries: unknown[]; count: number; offset: number; limit: number }
-      >;
+        cursor?: string;
+      }): Promise<{ entries: unknown[]; nextCursor: string | null }>;
       reject(
         args: { planId: string; reason?: string },
-      ): Promise<{ success: boolean }>;
+      ): Promise<unknown>;
     };
     acceptUpdate(
-      args: { planId: string; expectedDesiredVersion?: string },
+      args: { planId: string; expectedDesiredVersion?: number },
     ): Promise<unknown>;
     acceptMigration(args: {
       planId: string;
       acknowledgement: string;
-      expectedDesiredVersion?: string;
+      expectedDesiredVersion?: number;
     }): Promise<unknown>;
   };
   readonly controlPlane: TrellisTestControlPlane;
@@ -308,7 +305,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
             sharedManifest.paths.creds.trellisService,
             "creds/trellis-auth.creds",
           ],
-          [sharedManifest.paths.creds.sentinel, "creds/sentinel.creds"],
           [
             sharedManifest.paths.secrets.authIssuerSigning,
             "secrets/auth-issuer-signing.seed",
@@ -334,7 +330,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
           systemService: "creds/system.creds",
           authService: "creds/auth-auth.creds",
           trellisService: "creds/trellis-auth.creds",
-          sentinel: "creds/sentinel.creds",
         };
         sharedManifest.paths.secrets = {
           authIssuerSigning: "secrets/auth-issuer-signing.seed",
@@ -379,7 +374,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
         defaultDeployment: deployment,
         defaultMutableDev: options.trellis.mutableDev ?? true,
         reconciliationMs: timeouts.reconciliationMs,
-        autoAccept: options.authority?.autoAccept ?? ["update"],
+        autoAccept: options.authority?.autoAccept ?? ["initial", "update"],
         getBootstrapUrl: () =>
           startedControlPlane.waitForBootstrapUrl(timeouts.startupMs),
       });
@@ -446,9 +441,19 @@ export class TrellisTestRuntime implements AsyncDisposable {
     contract: TrellisTestClientContract;
     sessionKeySeed?: string;
   }): Promise<TrellisTestClientKey> {
+    const approved = await this.#admin.approveContract({
+      deployment: `${this.#deployment}.client.${args.name}`,
+      contract: args.contract,
+    });
     const seed = args.sessionKeySeed ?? generateSessionSeed();
     const auth = await createAuth({ sessionKeySeed: seed });
-    return { seed, sessionKey: auth.sessionKey };
+    return {
+      seed,
+      sessionKey: auth.sessionKey,
+      participantId: approved.participantId,
+      participantArtifactDigest: approved.participantDigest,
+      participantNeedsDigest: approved.participantNeedsDigest,
+    };
   }
 
   /**
@@ -493,6 +498,11 @@ export class TrellisTestRuntime implements AsyncDisposable {
     const client = await TrellisClient.connect({
       ...args,
       trellisUrl: this.trellisUrl,
+      participant: {
+        id: key.participantId,
+        artifactDigest: key.participantArtifactDigest,
+        needsDigest: key.participantNeedsDigest,
+      },
       auth: auth.auth,
       onAuthRequired: auth.onAuthRequired,
     }).orThrow();
@@ -703,6 +713,11 @@ export class TrellisTestRuntime implements AsyncDisposable {
         `Failed to clean up ${failures.length} Trellis test runtime resource(s)`,
       );
     }
+  }
+
+  /** @internal Returns recent control-plane process output for test failures. */
+  controlPlaneOutput(): string {
+    return this.#controlPlane.outputTails();
   }
 
   [Symbol.asyncDispose](): Promise<void> {

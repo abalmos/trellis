@@ -1287,6 +1287,7 @@ function isConsumerNotFoundError(error: unknown): boolean {
 }
 
 type TrellisInternalOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
+  inboxPrefix?: string;
   eventConsumers?: RuntimeEventConsumers;
   durableEventConsumerBeforeReadinessCheck?:
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
@@ -1321,6 +1322,7 @@ export function createTrellisInternal<
   const {
     durableEventConsumerBeforeReadinessCheck,
     eventConsumers,
+    inboxPrefix,
     ...publicOpts
   } = opts ?? {};
   const internalOpts: InternalizedTrellisOpts<TA> = {
@@ -1329,7 +1331,13 @@ export function createTrellisInternal<
     [internalDurableEventConsumerBeforeReadinessCheck]:
       durableEventConsumerBeforeReadinessCheck,
   };
-  return new Trellis<TA, TMode, TState>(name, nats, auth, internalOpts);
+  return new Trellis<TA, TMode, TState>(
+    name,
+    nats,
+    auth,
+    internalOpts,
+    inboxPrefix,
+  );
 }
 
 type DurableEventRegistration<TA extends RuntimeApi> = {
@@ -1527,6 +1535,7 @@ type EventCallback<TMessage> = {
 export type RpcHandlerContext = {
   caller: SessionCaller;
   sessionKey: string;
+  inboxPrefix: string;
   requestId?: string;
   traceId?: string;
   /** Schedules work after the successful RPC response has reached NATS. */
@@ -2172,6 +2181,7 @@ export class Trellis<
   #nats: NatsConnection;
   #js: JetStreamClient;
   #auth: TrellisAuth;
+  #inboxPrefix: string;
   readonly api: TA;
   #log: LoggerLike;
   #tasks: TrellisTasks;
@@ -2180,6 +2190,7 @@ export class Trellis<
   #noResponderRetryMs: number;
   #onSessionNotFound?: () => MaybePromise<void>;
   #operationStore?: Promise<TypedKV<typeof DurableOperationRecordSchema>>;
+  #operationStoreId: string;
   #eventConsumers: RuntimeEventConsumers;
   #durableEventConsumerBeforeReadinessCheck?:
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
@@ -2193,6 +2204,7 @@ export class Trellis<
     nats: NatsConnection,
     auth: TrellisAuth,
     opts?: TrellisOpts<TA>,
+    inboxPrefix = "_INBOX",
   ) {
     const internalOpts = opts as InternalizedTrellisOpts<TA> | undefined;
     const api = opts?.api;
@@ -2201,6 +2213,8 @@ export class Trellis<
     this.#nats = nats;
     this.#js = jetstream(this.#nats);
     this.#auth = auth as TrellisAuth;
+    this.#operationStoreId = auth.sessionKey.slice(0, 16);
+    this.#inboxPrefix = inboxPrefix;
     this.api = (api ?? EMPTY_TRELLIS_API) as TA;
     this.#log = (opts?.log ?? logger).child({ lib: "trellis" });
     this.timeout = opts?.timeout ?? 3000;
@@ -2505,7 +2519,7 @@ export class Trellis<
     TypedKV<typeof DurableOperationRecordSchema>
   > {
     if (!this.#operationStore) {
-      const bucket = `trellis_operations_${this.#auth.sessionKey.slice(0, 16)}`;
+      const bucket = `trellis_operations_${this.#operationStoreId}`;
       this.#operationStore = (async () => {
         const result = await TypedKV.open(
           this.#nats,
@@ -2524,6 +2538,10 @@ export class Trellis<
       })();
     }
     return this.#operationStore;
+  }
+
+  protected setOperationStoreId(id: string): void {
+    this.#operationStoreId = id;
   }
 
   async loadOperationRecord(
@@ -3017,7 +3035,7 @@ export class Trellis<
       headers.set("request-id", authHeaders.requestId);
       injectTraceContext(createNatsHeaderCarrier(headers));
 
-      const inbox = createInbox(`_INBOX.${this.#auth.sessionKey.slice(0, 16)}`);
+      const inbox = createInbox(this.#inboxPrefix);
       const sub = this.#nats.subscribe(inbox);
       const iterator = sub[Symbol.asyncIterator]();
       const cancelPayload = JSON.stringify({
@@ -3492,6 +3510,7 @@ export class Trellis<
             this.#auth,
             this.timeout,
             grant,
+            this.#inboxPrefix,
           );
           if (!(handle instanceof Object) || !("send" in handle)) {
             return err(
@@ -3517,7 +3536,13 @@ export class Trellis<
   transfer(grant: SendTransferGrant): SendTransferHandle;
   transfer(grant: ReceiveTransferGrant): ReceiveTransferHandle;
   transfer(grant: TransferGrant): ReturnType<typeof createTransferHandle> {
-    return createTransferHandle(this.#nats, this.#auth, this.timeout, grant);
+    return createTransferHandle(
+      this.#nats,
+      this.#auth,
+      this.timeout,
+      grant,
+      this.#inboxPrefix,
+    );
   }
 
   /*
@@ -3693,6 +3718,7 @@ export class Trellis<
         }
 
         let caller: SessionCaller;
+        let callerInboxPrefix = "_INBOX";
         const callerSessionKey = msg.headers?.get("session-key") ?? "";
         const handlerRequestIdFromHeader = msg.headers?.get("request-id") ?? "";
         const handlerTraceIdFromHeader = traceIdFromTraceparent(
@@ -3937,6 +3963,7 @@ export class Trellis<
           }
 
           caller = auth.caller;
+          callerInboxPrefix = auth.inboxPrefix;
         }
 
         span.setAttribute("auth.caller.type", caller.type);
@@ -3968,6 +3995,7 @@ export class Trellis<
               context: {
                 caller,
                 sessionKey: callerSessionKey,
+                inboxPrefix: callerInboxPrefix,
                 requestId: handlerRequestIdFromHeader || undefined,
                 traceId: handlerTraceIdFromHeader || undefined,
                 afterReply: (task) => afterReply.push(task),
@@ -5296,7 +5324,7 @@ export class Trellis<
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
 
-      const inbox = createInbox(`_INBOX.${this.#auth.sessionKey.slice(0, 16)}`);
+      const inbox = createInbox(this.#inboxPrefix);
       const sub = this.#nats.subscribe(inbox);
 
       try {

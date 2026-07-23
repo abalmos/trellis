@@ -145,7 +145,7 @@ Register workers for each job type before calling `service.wait()`. Handler regi
 
 Use the `service.jobs` handle returned by `TrellisService.connect(...)`. Jobs
 bindings are Trellis runtime internals, not values service code should fetch with
-`Trellis.Bindings.Get` or pass into `Trellis` constructors.
+fetch binding payloads or pass resource payloads into `Trellis` constructors.
 
 ```ts
 const deps = {

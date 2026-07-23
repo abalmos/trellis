@@ -1,20 +1,11 @@
 use ed25519_dalek::{Signature, Signer, SigningKey};
-use serde::Serialize;
+use nkeys::{KeyPair, KeyPairType};
+use trellis_protocol::{sign_session_proof_v1, SessionProofInputV1, SessionProofV1};
 
 use crate::client::proof::{
     base64url_decode, base64url_encode, build_event_proof_input, build_proof_input, sha256,
 };
 use crate::client::TrellisClientError;
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NatsConnectToken<'a> {
-    contract_digest: &'a str,
-    iat: u64,
-    session_key: &'a str,
-    sig: &'a str,
-    v: u8,
-}
 
 /// Session-scoped signing material used for Trellis auth and RPC proofs.
 #[doc = concat!("Public Trellis data type `", stringify!(SessionAuth), "`.")]
@@ -59,25 +50,27 @@ impl SessionAuth {
         base64url_encode(&signature.to_bytes())
     }
 
-    /// Create a service auth-callout token using an `iat` timestamp and contract digest.
-    #[doc = concat!("Trellis API operation `", stringify!(nats_connect_token), "`.")]
-    pub fn nats_connect_token(&self, iat: u64, contract_digest: &str) -> String {
-        let signature =
-            self.sign_sha256_domain("nats-connect", &format!("{iat}:{contract_digest}"));
-        serde_json::to_string(&NatsConnectToken {
-            contract_digest,
-            iat,
-            session_key: &self.session_key,
-            sig: &signature,
-            v: 1,
-        })
-        .expect("nats auth token json")
+    pub(crate) fn key_id(&self) -> String {
+        base64url_encode(&sha256(self.signing_key.verifying_key().as_bytes()))
     }
 
-    /// Create a user auth-callout token using an `iat` timestamp and contract digest.
-    #[doc = concat!("Trellis API operation `", stringify!(nats_connect_user_token), "`.")]
-    pub fn nats_connect_user_token(&self, iat: u64, contract_digest: &str) -> String {
-        self.nats_connect_token(iat, contract_digest)
+    pub(crate) fn nkey_pair(&self) -> Result<KeyPair, TrellisClientError> {
+        KeyPair::new_from_raw(KeyPairType::User, self.signing_key.to_bytes())
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
+    }
+
+    /// Sign one canonical protocol-owned session proof input.
+    pub fn sign_session_proof(
+        &self,
+        input: &SessionProofInputV1,
+    ) -> Result<SessionProofV1, TrellisClientError> {
+        sign_session_proof_v1(input, &self.signing_key)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
+    }
+
+    /// Return the session public key encoded as a NATS User NKey.
+    pub fn session_nkey(&self) -> Result<String, TrellisClientError> {
+        Ok(self.nkey_pair()?.public_key())
     }
 
     /// Return the inbox prefix derived from the session key.
@@ -125,45 +118,5 @@ impl SessionAuth {
         let digest = sha256(&input);
         let signature: Signature = self.signing_key.sign(&digest);
         base64url_encode(&signature.to_bytes())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::Value;
-
-    use super::SessionAuth;
-
-    #[test]
-    fn service_nats_token_matches_auth_proof_conformance_vectors() {
-        let vectors: Value = serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../conformance/auth-proof/vectors.json"
-        )))
-        .expect("auth proof vectors should parse");
-
-        for vector in vectors.as_array().expect("vectors should be an array") {
-            let auth = SessionAuth::from_seed_base64url(
-                vector["seed"]
-                    .as_str()
-                    .expect("vector seed should be string"),
-            )
-            .expect("vector seed should be valid");
-            let nats_connect = &vector["natsConnect"];
-            let iat = nats_connect["iat"].as_u64().expect("iat should be u64");
-            let contract_digest = nats_connect["contractDigest"]
-                .as_str()
-                .expect("contract digest should be string");
-
-            assert_eq!(auth.session_key, vector["sessionKey"]);
-            assert_eq!(
-                auth.sign_sha256_domain("nats-connect", &format!("{iat}:{contract_digest}")),
-                nats_connect["iatSig"]
-            );
-            assert_eq!(
-                auth.nats_connect_token(iat, contract_digest),
-                nats_connect["runtimeToken"]
-            );
-        }
     }
 }

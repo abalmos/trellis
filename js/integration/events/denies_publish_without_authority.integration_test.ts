@@ -10,7 +10,10 @@ liveTrellisTest({
     "events.denies-publish-without-authority rejects a subscribe-only client publish",
   scope: runtimeScopeForCase(CASE_ID),
   async fn(runtime) {
-    await runtime.contracts.approve({ contract: fixture.serviceContract });
+    await runtime.services.createInstance({
+      name: `${fixture.subscribeOnlyName}-provider`,
+      contract: fixture.serviceContract,
+    });
     const client = await runtime.connectClient({
       name: fixture.subscribeOnlyName,
       contract: fixture.subscribeOnlyClientContract,

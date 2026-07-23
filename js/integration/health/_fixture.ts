@@ -25,6 +25,7 @@ export function createHealthFixture(caseId: string) {
       health.HealthInspect,
       health.HealthMetrics,
       health.HealthWatch,
+      health.HealthStatusChanged.subscribe,
     ],
   }));
 
@@ -37,7 +38,7 @@ export function createHealthFixture(caseId: string) {
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: { health: { publishIntervalMs: 1_000 } },
     }).orThrow();

@@ -56,6 +56,12 @@ Deno.test("parseTrellisBootstrapUrl reads structured and fallback log lines", ()
     "http://127.0.0.1:8000/bootstrap",
   );
   assertEquals(
+    parseTrellisBootstrapUrl(JSON.stringify({
+      fields: { bootstrapUrl: "http://127.0.0.1:8002/bootstrap" },
+    })),
+    "http://127.0.0.1:8002/bootstrap",
+  );
+  assertEquals(
     parseTrellisBootstrapUrl(
       "ready TRELLIS_ADMIN_BOOTSTRAP_URL=http://127.0.0.1:8001/bootstrap",
     ),
@@ -88,7 +94,7 @@ Deno.test("startTrellisProcess reports readiness timeout with output tails", asy
     "Timed out after 100ms waiting for Trellis process readiness",
   );
 
-  assertStringIncludes(error.message, "http://127.0.0.1:9/version");
+  assertStringIncludes(error.message, "http://127.0.0.1:9/readyz");
   assertStringIncludes(error.message, `TRELLIS_CONFIG=${configPath}`);
   assertStringIncludes(
     error.message,

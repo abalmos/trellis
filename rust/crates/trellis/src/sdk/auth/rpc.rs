@@ -15,7 +15,7 @@ impl RpcDescriptor for AuthCapabilitiesListRpc {
         super::schemas::AUTH_CAPABILITIES_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Capabilities.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Capabilities.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Capabilities.List`.
@@ -24,9 +24,9 @@ pub enum AuthCapabilitiesListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthCapabilitiesListError {
     fn decode(
@@ -37,250 +37,10 @@ impl crate::generated::DeclaredError for AuthCapabilitiesListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.CapabilityGroups.Delete`.
-pub struct AuthCapabilityGroupsDeleteRpc;
-impl RpcDescriptor for AuthCapabilityGroupsDeleteRpc {
-    type Input = super::types::AuthCapabilityGroupsDeleteRequest;
-    type Output = super::types::AuthCapabilityGroupsDeleteResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_DELETE_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_DELETE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.CapabilityGroups.Delete";
-    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Delete";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.CapabilityGroups.Delete`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthCapabilityGroupsDeleteError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthCapabilityGroupsDeleteError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.CapabilityGroups.Get`.
-pub struct AuthCapabilityGroupsGetRpc;
-impl RpcDescriptor for AuthCapabilityGroupsGetRpc {
-    type Input = super::types::AuthCapabilityGroupsGetRequest;
-    type Output = super::types::AuthCapabilityGroupsGetResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_GET_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_GET_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.CapabilityGroups.Get";
-    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.CapabilityGroups.Get`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthCapabilityGroupsGetError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthCapabilityGroupsGetError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.CapabilityGroups.List`.
-pub struct AuthCapabilityGroupsListRpc;
-impl RpcDescriptor for AuthCapabilityGroupsListRpc {
-    type Input = super::types::AuthCapabilityGroupsListRequest;
-    type Output = super::types::AuthCapabilityGroupsListResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_LIST_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.CapabilityGroups.List";
-    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.CapabilityGroups.List`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthCapabilityGroupsListError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthCapabilityGroupsListError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.CapabilityGroups.Put`.
-pub struct AuthCapabilityGroupsPutRpc;
-impl RpcDescriptor for AuthCapabilityGroupsPutRpc {
-    type Input = super::types::AuthCapabilityGroupsPutRequest;
-    type Output = super::types::AuthCapabilityGroupsPutResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_PUT_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CAPABILITY_GROUPS_PUT_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.CapabilityGroups.Put";
-    const SUBJECT: &'static str = "rpc.v1.Auth.CapabilityGroups.Put";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.CapabilityGroups.Put`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthCapabilityGroupsPutError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthCapabilityGroupsPutError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.CatalogIssues.Resolve`.
-pub struct AuthCatalogIssuesResolveRpc;
-impl RpcDescriptor for AuthCatalogIssuesResolveRpc {
-    type Input = super::types::AuthCatalogIssuesResolveRequest;
-    type Output = super::types::AuthCatalogIssuesResolveResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CATALOG_ISSUES_RESOLVE_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_CATALOG_ISSUES_RESOLVE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.CatalogIssues.Resolve";
-    const SUBJECT: &'static str = "rpc.v1.Auth.CatalogIssues.Resolve";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.CatalogIssues.Resolve`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthCatalogIssuesResolveError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthCatalogIssuesResolveError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -302,7 +62,7 @@ impl RpcDescriptor for AuthConnectionsKickRpc {
         super::schemas::AUTH_CONNECTIONS_KICK_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Connections.Kick";
     const SUBJECT: &'static str = "rpc.v1.Auth.Connections.Kick";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Connections.Kick`.
@@ -311,9 +71,9 @@ pub enum AuthConnectionsKickError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthConnectionsKickError {
     fn decode(
@@ -324,10 +84,10 @@ impl crate::generated::DeclaredError for AuthConnectionsKickError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -349,7 +109,7 @@ impl RpcDescriptor for AuthConnectionsListRpc {
         super::schemas::AUTH_CONNECTIONS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Connections.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Connections.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Connections.List`.
@@ -358,9 +118,9 @@ pub enum AuthConnectionsListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthConnectionsListError {
     fn decode(
@@ -371,10 +131,10 @@ impl crate::generated::DeclaredError for AuthConnectionsListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -397,7 +157,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityAcceptMigrationRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_MIGRATION_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.AcceptMigration";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.AcceptMigration";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.AcceptMigration`.
@@ -406,9 +166,9 @@ pub enum AuthDeploymentAuthorityAcceptMigrationError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityAcceptMigrationError {
     fn decode(
@@ -419,10 +179,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityAcceptMigrationE
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -445,7 +205,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityAcceptUpdateRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_ACCEPT_UPDATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.AcceptUpdate";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.AcceptUpdate`.
@@ -454,9 +214,9 @@ pub enum AuthDeploymentAuthorityAcceptUpdateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityAcceptUpdateError {
     fn decode(
@@ -467,10 +227,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityAcceptUpdateErro
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -493,7 +253,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityGetRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Get";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Get`.
@@ -502,9 +262,9 @@ pub enum AuthDeploymentAuthorityGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityGetError {
     fn decode(
@@ -515,154 +275,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.DeploymentAuthority.GrantOverrides.List`.
-pub struct AuthDeploymentAuthorityGrantOverridesListRpc;
-impl RpcDescriptor for AuthDeploymentAuthorityGrantOverridesListRpc {
-    type Input = super::types::AuthDeploymentAuthorityGrantOverridesListRequest;
-    type Output = super::types::AuthDeploymentAuthorityGrantOverridesListResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_LIST_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.DeploymentAuthority.GrantOverrides.List";
-    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.DeploymentAuthority.GrantOverrides.List`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthDeploymentAuthorityGrantOverridesListError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthDeploymentAuthorityGrantOverridesListError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.DeploymentAuthority.GrantOverrides.Put`.
-pub struct AuthDeploymentAuthorityGrantOverridesPutRpc;
-impl RpcDescriptor for AuthDeploymentAuthorityGrantOverridesPutRpc {
-    type Input = super::types::AuthDeploymentAuthorityGrantOverridesPutRequest;
-    type Output = super::types::AuthDeploymentAuthorityGrantOverridesPutResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_PUT_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_PUT_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.DeploymentAuthority.GrantOverrides.Put";
-    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.Put";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.DeploymentAuthority.GrantOverrides.Put`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthDeploymentAuthorityGrantOverridesPutError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthDeploymentAuthorityGrantOverridesPutError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.DeploymentAuthority.GrantOverrides.Remove`.
-pub struct AuthDeploymentAuthorityGrantOverridesRemoveRpc;
-impl RpcDescriptor for AuthDeploymentAuthorityGrantOverridesRemoveRpc {
-    type Input = super::types::AuthDeploymentAuthorityGrantOverridesRemoveRequest;
-    type Output = super::types::AuthDeploymentAuthorityGrantOverridesRemoveResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_REMOVE_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_DEPLOYMENT_AUTHORITY_GRANT_OVERRIDES_REMOVE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.DeploymentAuthority.GrantOverrides.Remove";
-    const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.GrantOverrides.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.DeploymentAuthority.GrantOverrides.Remove`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthDeploymentAuthorityGrantOverridesRemoveError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthDeploymentAuthorityGrantOverridesRemoveError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -685,7 +301,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityListRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.List`.
@@ -694,9 +310,9 @@ pub enum AuthDeploymentAuthorityListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityListError {
     fn decode(
@@ -707,10 +323,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -733,7 +349,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityPlanRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLAN_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Plan";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plan";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Plan`.
@@ -742,9 +358,9 @@ pub enum AuthDeploymentAuthorityPlanError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlanError {
     fn decode(
@@ -755,10 +371,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlanError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -781,7 +397,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityPlansGetRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Plans.Get";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plans.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Plans.Get`.
@@ -790,9 +406,9 @@ pub enum AuthDeploymentAuthorityPlansGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlansGetError {
     fn decode(
@@ -803,10 +419,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlansGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -829,8 +445,8 @@ impl RpcDescriptor for AuthDeploymentAuthorityPlansListRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_PLANS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Plans.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Plans.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Plans.List`.
 #[derive(Debug, Clone, PartialEq)]
@@ -838,7 +454,9 @@ pub enum AuthDeploymentAuthorityPlansListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlansListError {
     fn decode(
@@ -849,8 +467,11 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityPlansListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
     }
@@ -872,7 +493,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityReconcileRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_RECONCILE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Reconcile";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Reconcile";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Reconcile`.
@@ -881,9 +502,9 @@ pub enum AuthDeploymentAuthorityReconcileError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityReconcileError {
     fn decode(
@@ -894,10 +515,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityReconcileError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -920,7 +541,7 @@ impl RpcDescriptor for AuthDeploymentAuthorityRejectRpc {
         super::schemas::AUTH_DEPLOYMENT_AUTHORITY_REJECT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeploymentAuthority.Reject";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeploymentAuthority.Reject";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeploymentAuthority.Reject`.
@@ -929,9 +550,9 @@ pub enum AuthDeploymentAuthorityRejectError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentAuthorityRejectError {
     fn decode(
@@ -942,10 +563,10 @@ impl crate::generated::DeclaredError for AuthDeploymentAuthorityRejectError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -968,7 +589,7 @@ impl RpcDescriptor for AuthDeploymentsCreateRpc {
         super::schemas::AUTH_DEPLOYMENTS_CREATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Deployments.Create";
     const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Create";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Deployments.Create`.
@@ -977,9 +598,9 @@ pub enum AuthDeploymentsCreateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentsCreateError {
     fn decode(
@@ -990,10 +611,10 @@ impl crate::generated::DeclaredError for AuthDeploymentsCreateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1016,7 +637,7 @@ impl RpcDescriptor for AuthDeploymentsDisableRpc {
         super::schemas::AUTH_DEPLOYMENTS_DISABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Deployments.Disable";
     const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Disable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Deployments.Disable`.
@@ -1025,9 +646,9 @@ pub enum AuthDeploymentsDisableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentsDisableError {
     fn decode(
@@ -1038,10 +659,10 @@ impl crate::generated::DeclaredError for AuthDeploymentsDisableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1064,7 +685,7 @@ impl RpcDescriptor for AuthDeploymentsEnableRpc {
         super::schemas::AUTH_DEPLOYMENTS_ENABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Deployments.Enable";
     const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Enable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Deployments.Enable`.
@@ -1073,9 +694,9 @@ pub enum AuthDeploymentsEnableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentsEnableError {
     fn decode(
@@ -1086,10 +707,10 @@ impl crate::generated::DeclaredError for AuthDeploymentsEnableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1111,7 +732,7 @@ impl RpcDescriptor for AuthDeploymentsListRpc {
         super::schemas::AUTH_DEPLOYMENTS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Deployments.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Deployments.List`.
@@ -1120,9 +741,9 @@ pub enum AuthDeploymentsListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentsListError {
     fn decode(
@@ -1133,10 +754,10 @@ impl crate::generated::DeclaredError for AuthDeploymentsListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1159,7 +780,7 @@ impl RpcDescriptor for AuthDeploymentsRemoveRpc {
         super::schemas::AUTH_DEPLOYMENTS_REMOVE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Deployments.Remove";
     const SUBJECT: &'static str = "rpc.v1.Auth.Deployments.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Deployments.Remove`.
@@ -1168,9 +789,9 @@ pub enum AuthDeploymentsRemoveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeploymentsRemoveError {
     fn decode(
@@ -1181,10 +802,10 @@ impl crate::generated::DeclaredError for AuthDeploymentsRemoveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1207,7 +828,7 @@ impl RpcDescriptor for AuthDeviceUserAuthoritiesListRpc {
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.List`.
@@ -1216,9 +837,9 @@ pub enum AuthDeviceUserAuthoritiesListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesListError {
     fn decode(
@@ -1229,10 +850,10 @@ impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1255,7 +876,7 @@ impl RpcDescriptor for AuthDeviceUserAuthoritiesReviewsDecideRpc {
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_DECIDE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Reviews.Decide";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.Decide";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::device.review"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Reviews.Decide`.
@@ -1264,9 +885,9 @@ pub enum AuthDeviceUserAuthoritiesReviewsDecideError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesReviewsDecideError {
     fn decode(
@@ -1277,10 +898,10 @@ impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesReviewsDecideE
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1303,7 +924,7 @@ impl RpcDescriptor for AuthDeviceUserAuthoritiesReviewsListRpc {
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVIEWS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Reviews.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::device.review"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Reviews.List`.
@@ -1312,9 +933,9 @@ pub enum AuthDeviceUserAuthoritiesReviewsListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesReviewsListError {
     fn decode(
@@ -1325,10 +946,10 @@ impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesReviewsListErr
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1351,7 +972,7 @@ impl RpcDescriptor for AuthDeviceUserAuthoritiesRevokeRpc {
         super::schemas::AUTH_DEVICE_USER_AUTHORITIES_REVOKE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.DeviceUserAuthorities.Revoke";
     const SUBJECT: &'static str = "rpc.v1.Auth.DeviceUserAuthorities.Revoke";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.DeviceUserAuthorities.Revoke`.
@@ -1360,9 +981,9 @@ pub enum AuthDeviceUserAuthoritiesRevokeError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesRevokeError {
     fn decode(
@@ -1373,10 +994,10 @@ impl crate::generated::DeclaredError for AuthDeviceUserAuthoritiesRevokeError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1408,9 +1029,9 @@ pub enum AuthDevicesConnectInfoGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesConnectInfoGetError {
     fn decode(
@@ -1421,10 +1042,10 @@ impl crate::generated::DeclaredError for AuthDevicesConnectInfoGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1446,7 +1067,7 @@ impl RpcDescriptor for AuthDevicesDisableRpc {
         super::schemas::AUTH_DEVICES_DISABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Devices.Disable";
     const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Disable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Devices.Disable`.
@@ -1455,9 +1076,9 @@ pub enum AuthDevicesDisableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesDisableError {
     fn decode(
@@ -1468,10 +1089,10 @@ impl crate::generated::DeclaredError for AuthDevicesDisableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1492,7 +1113,7 @@ impl RpcDescriptor for AuthDevicesEnableRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_DEVICES_ENABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Devices.Enable";
     const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Enable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Devices.Enable`.
@@ -1501,9 +1122,9 @@ pub enum AuthDevicesEnableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesEnableError {
     fn decode(
@@ -1514,10 +1135,10 @@ impl crate::generated::DeclaredError for AuthDevicesEnableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1538,7 +1159,7 @@ impl RpcDescriptor for AuthDevicesListRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_DEVICES_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Devices.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Devices.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Devices.List`.
@@ -1547,9 +1168,9 @@ pub enum AuthDevicesListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesListError {
     fn decode(
@@ -1560,10 +1181,10 @@ impl crate::generated::DeclaredError for AuthDevicesListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1586,7 +1207,7 @@ impl RpcDescriptor for AuthDevicesProvisionRpc {
         super::schemas::AUTH_DEVICES_PROVISION_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Devices.Provision";
     const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Provision";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Devices.Provision`.
@@ -1595,9 +1216,9 @@ pub enum AuthDevicesProvisionError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesProvisionError {
     fn decode(
@@ -1608,10 +1229,10 @@ impl crate::generated::DeclaredError for AuthDevicesProvisionError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1632,7 +1253,7 @@ impl RpcDescriptor for AuthDevicesRemoveRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_DEVICES_REMOVE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Devices.Remove";
     const SUBJECT: &'static str = "rpc.v1.Auth.Devices.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Devices.Remove`.
@@ -1641,9 +1262,9 @@ pub enum AuthDevicesRemoveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthDevicesRemoveError {
     fn decode(
@@ -1654,10 +1275,10 @@ impl crate::generated::DeclaredError for AuthDevicesRemoveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1669,78 +1290,31 @@ impl crate::generated::DeclaredError for AuthDevicesRemoveError {
         }
     }
 }
-/// Descriptor for `Auth.EventConsumers.List`.
-pub struct AuthEventConsumersListRpc;
-impl RpcDescriptor for AuthEventConsumersListRpc {
-    type Input = super::types::AuthEventConsumersListRequest;
-    type Output = super::types::AuthEventConsumersListResponse;
+/// Descriptor for `Auth.IdentityAuthority.Get`.
+pub struct AuthIdentityAuthorityGetRpc;
+impl RpcDescriptor for AuthIdentityAuthorityGetRpc {
+    type Input = super::types::AuthIdentityAuthorityGetRequest;
+    type Output = super::types::AuthIdentityAuthorityGetResponse;
     const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_EVENT_CONSUMERS_LIST_INPUT_SCHEMA_JSON;
+        super::schemas::AUTH_IDENTITY_AUTHORITY_GET_INPUT_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_EVENT_CONSUMERS_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.EventConsumers.List";
-    const SUBJECT: &'static str = "rpc.v1.Auth.EventConsumers.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.auth::event-consumers.read"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.EventConsumers.List`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthEventConsumersListError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthEventConsumersListError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.Events.Validate`.
-pub struct AuthEventsValidateRpc;
-impl RpcDescriptor for AuthEventsValidateRpc {
-    type Input = super::types::AuthEventsValidateRequest;
-    type Output = super::types::AuthEventsValidateResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_EVENTS_VALIDATE_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_EVENTS_VALIDATE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.Events.Validate";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
+        super::schemas::AUTH_IDENTITY_AUTHORITY_GET_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.Get";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.Get";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
-/// Errors declared by `Auth.Events.Validate`.
+/// Errors declared by `Auth.IdentityAuthority.Get`.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AuthEventsValidateError {
+pub enum AuthIdentityAuthorityGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
-impl crate::generated::DeclaredError for AuthEventsValidateError {
+impl crate::generated::DeclaredError for AuthIdentityAuthorityGetError {
     fn decode(
         payload: &crate::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
@@ -1749,10 +1323,10 @@ impl crate::generated::DeclaredError for AuthEventsValidateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1764,76 +1338,31 @@ impl crate::generated::DeclaredError for AuthEventsValidateError {
         }
     }
 }
-/// Descriptor for `Auth.Identities.List`.
-pub struct AuthIdentitiesListRpc;
-impl RpcDescriptor for AuthIdentitiesListRpc {
-    type Input = super::types::AuthIdentitiesListRequest;
-    type Output = super::types::AuthIdentitiesListResponse;
-    const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_IDENTITIES_LIST_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_IDENTITIES_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.Identities.List";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Identities.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.Identities.List`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthIdentitiesListError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthIdentitiesListError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.IdentityGrants.List`.
-pub struct AuthIdentityGrantsListRpc;
-impl RpcDescriptor for AuthIdentityGrantsListRpc {
-    type Input = super::types::AuthIdentityGrantsListRequest;
-    type Output = super::types::AuthIdentityGrantsListResponse;
+/// Descriptor for `Auth.IdentityAuthority.List`.
+pub struct AuthIdentityAuthorityListRpc;
+impl RpcDescriptor for AuthIdentityAuthorityListRpc {
+    type Input = super::types::AuthIdentityAuthorityListRequest;
+    type Output = super::types::AuthIdentityAuthorityListResponse;
     const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_IDENTITY_GRANTS_LIST_INPUT_SCHEMA_JSON;
+        super::schemas::AUTH_IDENTITY_AUTHORITY_LIST_INPUT_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_IDENTITY_GRANTS_LIST_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.IdentityGrants.List";
-    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityGrants.List";
+        super::schemas::AUTH_IDENTITY_AUTHORITY_LIST_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.List";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.List";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
-/// Errors declared by `Auth.IdentityGrants.List`.
+/// Errors declared by `Auth.IdentityAuthority.List`.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AuthIdentityGrantsListError {
+pub enum AuthIdentityAuthorityListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
 }
-impl crate::generated::DeclaredError for AuthIdentityGrantsListError {
+impl crate::generated::DeclaredError for AuthIdentityAuthorityListError {
     fn decode(
         payload: &crate::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
@@ -1842,8 +1371,11 @@ impl crate::generated::DeclaredError for AuthIdentityGrantsListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
     }
@@ -1854,31 +1386,31 @@ impl crate::generated::DeclaredError for AuthIdentityGrantsListError {
         }
     }
 }
-/// Descriptor for `Auth.IdentityGrants.Revoke`.
-pub struct AuthIdentityGrantsRevokeRpc;
-impl RpcDescriptor for AuthIdentityGrantsRevokeRpc {
-    type Input = super::types::AuthIdentityGrantsRevokeRequest;
-    type Output = super::types::AuthIdentityGrantsRevokeResponse;
+/// Descriptor for `Auth.IdentityAuthority.Revoke`.
+pub struct AuthIdentityAuthorityRevokeRpc;
+impl RpcDescriptor for AuthIdentityAuthorityRevokeRpc {
+    type Input = super::types::AuthIdentityAuthorityRevokeRequest;
+    type Output = super::types::AuthIdentityAuthorityRevokeResponse;
     const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_IDENTITY_GRANTS_REVOKE_INPUT_SCHEMA_JSON;
+        super::schemas::AUTH_IDENTITY_AUTHORITY_REVOKE_INPUT_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_IDENTITY_GRANTS_REVOKE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.IdentityGrants.Revoke";
-    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityGrants.Revoke";
+        super::schemas::AUTH_IDENTITY_AUTHORITY_REVOKE_OUTPUT_SCHEMA_JSON;
+    const KEY: &'static str = "Auth.IdentityAuthority.Revoke";
+    const SUBJECT: &'static str = "rpc.v1.Auth.IdentityAuthority.Revoke";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
-/// Errors declared by `Auth.IdentityGrants.Revoke`.
+/// Errors declared by `Auth.IdentityAuthority.Revoke`.
 #[derive(Debug, Clone, PartialEq)]
-pub enum AuthIdentityGrantsRevokeError {
+pub enum AuthIdentityAuthorityRevokeError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
-impl crate::generated::DeclaredError for AuthIdentityGrantsRevokeError {
+impl crate::generated::DeclaredError for AuthIdentityAuthorityRevokeError {
     fn decode(
         payload: &crate::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
@@ -1887,10 +1419,10 @@ impl crate::generated::DeclaredError for AuthIdentityGrantsRevokeError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1911,7 +1443,7 @@ impl RpcDescriptor for AuthPortalsGetRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_PORTALS_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.Get";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.Get`.
@@ -1920,9 +1452,9 @@ pub enum AuthPortalsGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsGetError {
     fn decode(
@@ -1933,10 +1465,10 @@ impl crate::generated::DeclaredError for AuthPortalsGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -1957,8 +1489,8 @@ impl RpcDescriptor for AuthPortalsListRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_PORTALS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.List`.
 #[derive(Debug, Clone, PartialEq)]
@@ -1966,7 +1498,9 @@ pub enum AuthPortalsListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsListError {
     fn decode(
@@ -1977,8 +1511,11 @@ impl crate::generated::DeclaredError for AuthPortalsListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
     }
@@ -2000,7 +1537,7 @@ impl RpcDescriptor for AuthPortalsLoginSettingsGetRpc {
         super::schemas::AUTH_PORTALS_LOGIN_SETTINGS_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.LoginSettings.Get";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.LoginSettings.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.LoginSettings.Get`.
@@ -2009,9 +1546,9 @@ pub enum AuthPortalsLoginSettingsGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsLoginSettingsGetError {
     fn decode(
@@ -2022,10 +1559,10 @@ impl crate::generated::DeclaredError for AuthPortalsLoginSettingsGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2048,7 +1585,7 @@ impl RpcDescriptor for AuthPortalsLoginSettingsUpdateRpc {
         super::schemas::AUTH_PORTALS_LOGIN_SETTINGS_UPDATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.LoginSettings.Update";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.LoginSettings.Update";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.LoginSettings.Update`.
@@ -2057,9 +1594,9 @@ pub enum AuthPortalsLoginSettingsUpdateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsLoginSettingsUpdateError {
     fn decode(
@@ -2070,10 +1607,10 @@ impl crate::generated::DeclaredError for AuthPortalsLoginSettingsUpdateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2094,7 +1631,7 @@ impl RpcDescriptor for AuthPortalsPutRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_PORTALS_PUT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.Put";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Put";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.Put`.
@@ -2103,9 +1640,9 @@ pub enum AuthPortalsPutError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsPutError {
     fn decode(
@@ -2116,10 +1653,10 @@ impl crate::generated::DeclaredError for AuthPortalsPutError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2140,7 +1677,7 @@ impl RpcDescriptor for AuthPortalsRemoveRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_PORTALS_REMOVE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.Remove";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.Remove`.
@@ -2149,9 +1686,9 @@ pub enum AuthPortalsRemoveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsRemoveError {
     fn decode(
@@ -2162,10 +1699,10 @@ impl crate::generated::DeclaredError for AuthPortalsRemoveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2188,7 +1725,7 @@ impl RpcDescriptor for AuthPortalsRoutesPutRpc {
         super::schemas::AUTH_PORTALS_ROUTES_PUT_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.Routes.Put";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Routes.Put";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.Routes.Put`.
@@ -2197,9 +1734,9 @@ pub enum AuthPortalsRoutesPutError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsRoutesPutError {
     fn decode(
@@ -2210,10 +1747,10 @@ impl crate::generated::DeclaredError for AuthPortalsRoutesPutError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2236,7 +1773,7 @@ impl RpcDescriptor for AuthPortalsRoutesRemoveRpc {
         super::schemas::AUTH_PORTALS_ROUTES_REMOVE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Portals.Routes.Remove";
     const SUBJECT: &'static str = "rpc.v1.Auth.Portals.Routes.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Portals.Routes.Remove`.
@@ -2245,9 +1782,9 @@ pub enum AuthPortalsRoutesRemoveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthPortalsRoutesRemoveError {
     fn decode(
@@ -2258,58 +1795,10 @@ impl crate::generated::DeclaredError for AuthPortalsRoutesRemoveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
-                .map(|value| value.map(Self::ValidationError)),
-            _ => Ok(None),
-        }
-    }
-    fn auth_error_reason(&self) -> Option<&str> {
-        match self {
-            Self::AuthError(payload) => Some(payload.reason.as_str()),
-            _ => None,
-        }
-    }
-}
-/// Descriptor for `Auth.Requests.Validate`.
-pub struct AuthRequestsValidateRpc;
-impl RpcDescriptor for AuthRequestsValidateRpc {
-    type Input = super::types::AuthRequestsValidateRequest;
-    type Output = super::types::AuthRequestsValidateResponse;
-    const INPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_REQUESTS_VALIDATE_INPUT_SCHEMA_JSON;
-    const OUTPUT_SCHEMA_JSON: &'static str =
-        super::schemas::AUTH_REQUESTS_VALIDATE_OUTPUT_SCHEMA_JSON;
-    const KEY: &'static str = "Auth.Requests.Validate";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Requests.Validate";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["service"];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
-}
-/// Errors declared by `Auth.Requests.Validate`.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AuthRequestsValidateError {
-    /// `AuthError` error payload.
-    AuthError(crate::generated::AuthErrorPayload),
-    /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
-    /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
-}
-impl crate::generated::DeclaredError for AuthRequestsValidateError {
-    fn decode(
-        payload: &crate::generated::RemoteErrorPayload,
-    ) -> Result<Option<Self>, serde_json::Error> {
-        match payload.error_type() {
-            Some("AuthError") => payload
-                .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
-                .map(|value| value.map(Self::AuthError)),
-            Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
-                .map(|value| value.map(Self::UnexpectedError)),
-            Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2332,7 +1821,7 @@ impl RpcDescriptor for AuthServiceInstancesDisableRpc {
         super::schemas::AUTH_SERVICE_INSTANCES_DISABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.ServiceInstances.Disable";
     const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Disable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.ServiceInstances.Disable`.
@@ -2341,9 +1830,9 @@ pub enum AuthServiceInstancesDisableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthServiceInstancesDisableError {
     fn decode(
@@ -2354,10 +1843,10 @@ impl crate::generated::DeclaredError for AuthServiceInstancesDisableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2380,7 +1869,7 @@ impl RpcDescriptor for AuthServiceInstancesEnableRpc {
         super::schemas::AUTH_SERVICE_INSTANCES_ENABLE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.ServiceInstances.Enable";
     const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Enable";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.ServiceInstances.Enable`.
@@ -2389,9 +1878,9 @@ pub enum AuthServiceInstancesEnableError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthServiceInstancesEnableError {
     fn decode(
@@ -2402,10 +1891,10 @@ impl crate::generated::DeclaredError for AuthServiceInstancesEnableError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2428,7 +1917,7 @@ impl RpcDescriptor for AuthServiceInstancesListRpc {
         super::schemas::AUTH_SERVICE_INSTANCES_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.ServiceInstances.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.ServiceInstances.List`.
@@ -2437,9 +1926,9 @@ pub enum AuthServiceInstancesListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthServiceInstancesListError {
     fn decode(
@@ -2450,10 +1939,10 @@ impl crate::generated::DeclaredError for AuthServiceInstancesListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2476,7 +1965,7 @@ impl RpcDescriptor for AuthServiceInstancesProvisionRpc {
         super::schemas::AUTH_SERVICE_INSTANCES_PROVISION_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.ServiceInstances.Provision";
     const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Provision";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.ServiceInstances.Provision`.
@@ -2485,9 +1974,9 @@ pub enum AuthServiceInstancesProvisionError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthServiceInstancesProvisionError {
     fn decode(
@@ -2498,10 +1987,10 @@ impl crate::generated::DeclaredError for AuthServiceInstancesProvisionError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2524,7 +2013,7 @@ impl RpcDescriptor for AuthServiceInstancesRemoveRpc {
         super::schemas::AUTH_SERVICE_INSTANCES_REMOVE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.ServiceInstances.Remove";
     const SUBJECT: &'static str = "rpc.v1.Auth.ServiceInstances.Remove";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.ServiceInstances.Remove`.
@@ -2533,9 +2022,9 @@ pub enum AuthServiceInstancesRemoveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthServiceInstancesRemoveError {
     fn decode(
@@ -2546,10 +2035,10 @@ impl crate::generated::DeclaredError for AuthServiceInstancesRemoveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2570,7 +2059,7 @@ impl RpcDescriptor for AuthSessionsListRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_SESSIONS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Sessions.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Sessions.List`.
@@ -2579,9 +2068,9 @@ pub enum AuthSessionsListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthSessionsListError {
     fn decode(
@@ -2592,10 +2081,10 @@ impl crate::generated::DeclaredError for AuthSessionsListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2610,7 +2099,7 @@ impl crate::generated::DeclaredError for AuthSessionsListError {
 /// Descriptor for `Auth.Sessions.Logout`.
 pub struct AuthSessionsLogoutRpc;
 impl RpcDescriptor for AuthSessionsLogoutRpc {
-    type Input = Empty;
+    type Input = super::types::AuthSessionsLogoutRequest;
     type Output = super::types::AuthSessionsLogoutResponse;
     const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_SESSIONS_LOGOUT_INPUT_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str =
@@ -2618,7 +2107,7 @@ impl RpcDescriptor for AuthSessionsLogoutRpc {
     const KEY: &'static str = "Auth.Sessions.Logout";
     const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Logout";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Sessions.Logout`.
 #[derive(Debug, Clone, PartialEq)]
@@ -2626,7 +2115,9 @@ pub enum AuthSessionsLogoutError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthSessionsLogoutError {
     fn decode(
@@ -2637,8 +2128,11 @@ impl crate::generated::DeclaredError for AuthSessionsLogoutError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
     }
@@ -2659,7 +2153,7 @@ impl RpcDescriptor for AuthSessionsMeRpc {
     const KEY: &'static str = "Auth.Sessions.Me";
     const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Me";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError"];
+    const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Sessions.Me`.
 #[derive(Debug, Clone, PartialEq)]
@@ -2667,7 +2161,9 @@ pub enum AuthSessionsMeError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
+    /// `ValidationError` error payload.
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthSessionsMeError {
     fn decode(
@@ -2678,8 +2174,11 @@ impl crate::generated::DeclaredError for AuthSessionsMeError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
+            Some("ValidationError") => payload
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
+                .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
     }
@@ -2700,7 +2199,7 @@ impl RpcDescriptor for AuthSessionsRevokeRpc {
         super::schemas::AUTH_SESSIONS_REVOKE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Sessions.Revoke";
     const SUBJECT: &'static str = "rpc.v1.Auth.Sessions.Revoke";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Sessions.Revoke`.
@@ -2709,9 +2208,9 @@ pub enum AuthSessionsRevokeError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthSessionsRevokeError {
     fn decode(
@@ -2722,10 +2221,10 @@ impl crate::generated::DeclaredError for AuthSessionsRevokeError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2748,7 +2247,7 @@ impl RpcDescriptor for AuthUserIdentitiesListRpc {
         super::schemas::AUTH_USER_IDENTITIES_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.UserIdentities.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.UserIdentities.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.UserIdentities.List`.
@@ -2757,9 +2256,9 @@ pub enum AuthUserIdentitiesListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUserIdentitiesListError {
     fn decode(
@@ -2770,10 +2269,10 @@ impl crate::generated::DeclaredError for AuthUserIdentitiesListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2796,7 +2295,7 @@ impl RpcDescriptor for AuthUserIdentitiesUnlinkRpc {
         super::schemas::AUTH_USER_IDENTITIES_UNLINK_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.UserIdentities.Unlink";
     const SUBJECT: &'static str = "rpc.v1.Auth.UserIdentities.Unlink";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.UserIdentities.Unlink`.
@@ -2805,9 +2304,9 @@ pub enum AuthUserIdentitiesUnlinkError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUserIdentitiesUnlinkError {
     fn decode(
@@ -2818,10 +2317,10 @@ impl crate::generated::DeclaredError for AuthUserIdentitiesUnlinkError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2842,7 +2341,7 @@ impl RpcDescriptor for AuthUsersCreateRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_CREATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Users.Create";
     const SUBJECT: &'static str = "rpc.v1.Auth.Users.Create";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Users.Create`.
@@ -2851,9 +2350,9 @@ pub enum AuthUsersCreateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersCreateError {
     fn decode(
@@ -2864,10 +2363,10 @@ impl crate::generated::DeclaredError for AuthUsersCreateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2888,7 +2387,7 @@ impl RpcDescriptor for AuthUsersGetRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_GET_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Users.Get";
     const SUBJECT: &'static str = "rpc.v1.Auth.Users.Get";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Users.Get`.
@@ -2897,9 +2396,9 @@ pub enum AuthUsersGetError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersGetError {
     fn decode(
@@ -2910,10 +2409,10 @@ impl crate::generated::DeclaredError for AuthUsersGetError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2945,9 +2444,9 @@ pub enum AuthUsersIdentityLinkCreateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersIdentityLinkCreateError {
     fn decode(
@@ -2958,10 +2457,10 @@ impl crate::generated::DeclaredError for AuthUsersIdentityLinkCreateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -2982,7 +2481,7 @@ impl RpcDescriptor for AuthUsersListRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_LIST_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Users.List";
     const SUBJECT: &'static str = "rpc.v1.Auth.Users.List";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Users.List`.
@@ -2991,9 +2490,9 @@ pub enum AuthUsersListError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersListError {
     fn decode(
@@ -3004,10 +2503,10 @@ impl crate::generated::DeclaredError for AuthUsersListError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -3039,9 +2538,9 @@ pub enum AuthUsersPasswordChangeError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersPasswordChangeError {
     fn decode(
@@ -3052,10 +2551,10 @@ impl crate::generated::DeclaredError for AuthUsersPasswordChangeError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -3078,7 +2577,7 @@ impl RpcDescriptor for AuthUsersPasswordResetCreateRpc {
         super::schemas::AUTH_USERS_PASSWORD_RESET_CREATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Users.PasswordReset.Create";
     const SUBJECT: &'static str = "rpc.v1.Auth.Users.PasswordReset.Create";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Users.PasswordReset.Create`.
@@ -3087,9 +2586,9 @@ pub enum AuthUsersPasswordResetCreateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersPasswordResetCreateError {
     fn decode(
@@ -3100,10 +2599,10 @@ impl crate::generated::DeclaredError for AuthUsersPasswordResetCreateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -3133,9 +2632,9 @@ pub enum AuthUsersResolveError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersResolveError {
     fn decode(
@@ -3146,10 +2645,10 @@ impl crate::generated::DeclaredError for AuthUsersResolveError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }
@@ -3170,7 +2669,7 @@ impl RpcDescriptor for AuthUsersUpdateRpc {
     const OUTPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_USERS_UPDATE_OUTPUT_SCHEMA_JSON;
     const KEY: &'static str = "Auth.Users.Update";
     const SUBJECT: &'static str = "rpc.v1.Auth.Users.Update";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &["admin"];
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const ERRORS: &'static [&'static str] = &["AuthError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `Auth.Users.Update`.
@@ -3179,9 +2678,9 @@ pub enum AuthUsersUpdateError {
     /// `AuthError` error payload.
     AuthError(crate::generated::AuthErrorPayload),
     /// `UnexpectedError` error payload.
-    UnexpectedError(crate::generated::DeclaredErrorPayload),
+    UnexpectedError(super::types::AuthErrorDetails),
     /// `ValidationError` error payload.
-    ValidationError(crate::generated::DeclaredErrorPayload),
+    ValidationError(super::types::AuthErrorDetails),
 }
 impl crate::generated::DeclaredError for AuthUsersUpdateError {
     fn decode(
@@ -3192,10 +2691,10 @@ impl crate::generated::DeclaredError for AuthUsersUpdateError {
                 .decode_declared::<crate::generated::AuthErrorPayload>("AuthError")
                 .map(|value| value.map(Self::AuthError)),
             Some("UnexpectedError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
+                .decode_declared::<super::types::AuthErrorDetails>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
-                .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
+                .decode_declared::<super::types::AuthErrorDetails>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
             _ => Ok(None),
         }

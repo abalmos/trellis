@@ -116,6 +116,7 @@
           ...client,
           trellisUrl,
           contract: trellisApp.contract,
+          participant: trellisApp.participant,
           auth: connectAuth,
           onAuthRequired: onAuthRequired
             ? async (ctx) => {

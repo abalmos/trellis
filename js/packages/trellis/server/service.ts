@@ -1,6 +1,5 @@
 import {
   headers as natsHeaders,
-  jwtAuthenticator,
   type MsgHdrs,
   type NatsConnection,
   type Subscription,
@@ -18,10 +17,13 @@ import {
   type TrellisServiceRuntimeFor,
 } from "../server.ts";
 import {
+  base64urlDecode,
+  base64urlEncode,
   createAuth,
   estimateMidpointClockOffsetMs,
-  type SentinelCreds,
-  SentinelCredsSchema,
+  SESSION_PROOF_FORMAT_V1,
+  sessionProofRequestDigestV1,
+  sha256,
   type TrellisAuth as SessionAuth,
 } from "../auth.ts";
 import {
@@ -30,6 +32,7 @@ import {
 } from "../contracts.ts";
 import type { RuntimeApi } from "../contract_support/runtime.ts";
 import type { TrellisContractV1 } from "../contract_support/mod.ts";
+import { compileProtocolArtifacts } from "../contract_support/protocol_artifacts.ts";
 import type {
   ContractEventConsumers,
   ContractJobsMetadata,
@@ -313,7 +316,8 @@ const ClientTransportsSchema = Type.Object({
 });
 
 type ServiceBootstrapConnectInfo = {
-  sessionKey: string;
+  sessionId: string;
+  participantDigest: string;
   instanceId: string;
   deploymentId: string;
   contractId: string;
@@ -322,13 +326,7 @@ type ServiceBootstrapConnectInfo = {
     native?: { natsServers: string[] };
     websocket?: { natsServers: string[] };
   };
-  transport: {
-    sentinel: SentinelCreds;
-  };
-  auth: {
-    mode: "service_identity";
-    iatSkewSeconds: number;
-  };
+  jwt: string;
 };
 
 type ServiceBootstrapResponse = {
@@ -578,27 +576,21 @@ function automaticTelemetryEnabled(
 }
 
 const ServiceBootstrapReadySchema = Type.Object({
-  status: Type.Literal("ready"),
   serverNow: Type.Integer(),
-  connectInfo: Type.Object({
-    sessionKey: Type.String({ minLength: 1 }),
-    instanceId: Type.String({ minLength: 1 }),
-    deploymentId: Type.String({ minLength: 1 }),
-    contractId: Type.String({ minLength: 1 }),
-    contractDigest: Type.String({ minLength: 1 }),
-    transports: ClientTransportsSchema,
-    transport: Type.Object({
-      sentinel: SentinelCredsSchema,
-    }),
-    auth: Type.Object({
-      mode: Type.Literal("service_identity"),
-      iatSkewSeconds: Type.Integer({ minimum: 1 }),
-    }),
-  }),
-  binding: Type.Object({
-    contractId: Type.String({ minLength: 1 }),
-    digest: Type.String({ minLength: 1 }),
-    resources: ContractResourceBindingsSchema,
+  state: Type.Literal("ready"),
+  session: Type.Object({
+    sessionId: Type.String({ minLength: 1 }),
+    inboxPrefix: Type.String({ minLength: 1 }),
+  }, { additionalProperties: true }),
+  authorization: Type.Object({
+    participantId: Type.String({ minLength: 1 }),
+    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantNeedsDigest: Type.String({ minLength: 1 }),
+    resourceRuntime: ContractResourceBindingsSchema,
+  }, { additionalProperties: true }),
+  nats: Type.Object({
+    jwt: Type.String({ minLength: 1 }),
+    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }),
 }, { additionalProperties: true });
 
@@ -613,7 +605,9 @@ async function fetchServiceBootstrapInfoOnce(args: {
   contractId: string;
   contractDigest: string;
   contract?: TrellisContractV1;
-  auth: SessionAuth;
+  identityAuth: SessionAuth;
+  sessionAuth: SessionAuth;
+  identity: TrellisServiceConnectOpts["identity"];
 }): Promise<{
   response: Response;
   responseText: string;
@@ -622,14 +616,47 @@ async function fetchServiceBootstrapInfoOnce(args: {
   responseReceivedAtMs: number;
 }> {
   const requestStartedAtMs = Date.now();
-  const iat = args.auth.currentIat();
+  const requestId = ulid();
+  const issuedAt = args.identityAuth.currentIat() * 1_000;
+  const provisionedIdentityKeyId = base64urlEncode(
+    await sha256(base64urlDecode(args.identityAuth.sessionKey)),
+  );
+  const presentation = args.contract === undefined
+    ? undefined
+    : await compileProtocolArtifacts(args.contract);
+  const unsigned = {
+    requestId,
+    issuedAt,
+    deploymentId: args.identity.deploymentId,
+    instanceId: args.identity.instanceId,
+    provisionedIdentityKeyId,
+    newSessionPublicKey: args.sessionAuth.sessionKey,
+    newSessionNkey: args.sessionAuth.sessionNkey,
+    participantId: args.identity.participantId,
+    participantArtifactDigest: args.identity.participantArtifactDigest,
+    participantNeedsDigest: args.identity.participantNeedsDigest,
+    participantArtifact: presentation?.participant ?? null,
+    referencedApiArtifacts: presentation === undefined
+      ? null
+      : [presentation.api, ...presentation.referencedApis],
+    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+  };
+  const requestDigest = await sessionProofRequestDigestV1(unsigned);
   const body = JSON.stringify({
-    sessionKey: args.auth.sessionKey,
-    contractId: args.contractId,
-    contractDigest: args.contractDigest,
-    ...(args.contract ? { contract: args.contract } : {}),
-    iat,
-    sig: await args.auth.natsConnectSigForIat(iat, args.contractDigest),
+    ...unsigned,
+    proof: await args.identityAuth.signSessionProof({
+      purpose: "serviceBootstrap",
+      requestId,
+      issuedAt,
+      deploymentId: args.identity.deploymentId,
+      instanceId: args.identity.instanceId,
+      provisionedIdentityKeyId,
+      newSessionPublicKey: args.sessionAuth.sessionKey,
+      newSessionNkey: args.sessionAuth.sessionNkey,
+      participantId: args.identity.participantId,
+      participantDigest: args.identity.participantArtifactDigest,
+      requestDigest,
+    }),
   });
   let response: Response;
   try {
@@ -665,11 +692,12 @@ async function fetchServiceBootstrapInfo(args: {
   contractId: string;
   contractDigest: string;
   contract?: TrellisContractV1;
-  auth: SessionAuth;
+  identityAuth: SessionAuth;
+  sessionAuth: SessionAuth;
+  identity: TrellisServiceConnectOpts["identity"];
   log: LoggerLike;
 }): Promise<ServiceBootstrapResponse> {
   const bootstrapUrl = new URL("/bootstrap/service", args.trellisUrl);
-  let includeContract = false;
   let unavailableAttempt = 0;
   const loggedPendingRequests = new Set<string>();
   while (true) {
@@ -678,7 +706,7 @@ async function fetchServiceBootstrapInfo(args: {
       settled = await fetchServiceBootstrapInfoOnce({
         ...args,
         bootstrapUrl,
-        contract: includeContract ? args.contract : undefined,
+        contract: args.contract,
       });
       unavailableAttempt = 0;
     } catch (cause) {
@@ -713,11 +741,11 @@ async function fetchServiceBootstrapInfo(args: {
         failure.reason === "iat_out_of_range" &&
         typeof failure.serverNow === "number"
       ) {
-        args.auth.setServerClockOffsetMs(
+        args.identityAuth.setServerClockOffsetMs(
           estimateMidpointClockOffsetMs({
             requestStartedAtMs: settled.requestStartedAtMs,
             responseReceivedAtMs: settled.responseReceivedAtMs,
-            serverNowSeconds: failure.serverNow,
+            serverNowSeconds: failure.serverNow / 1_000,
           }),
         );
         continue;
@@ -725,7 +753,6 @@ async function fetchServiceBootstrapInfo(args: {
       if (
         failure.reason === "manifest_required" && args.contract !== undefined
       ) {
-        includeContract = true;
         continue;
       }
       if (
@@ -752,7 +779,6 @@ async function fetchServiceBootstrapInfo(args: {
           );
         }
         await delay(retryDelayMs);
-        includeContract = true;
         continue;
       }
       if (failure.reason === "contract_activation_pending") {
@@ -779,7 +805,6 @@ async function fetchServiceBootstrapInfo(args: {
           );
         }
         await delay(retryDelayMs);
-        includeContract = true;
         continue;
       }
       if (failure.reason === "contract_catalog_issue") {
@@ -802,7 +827,6 @@ async function fetchServiceBootstrapInfo(args: {
           );
         }
         await delay(retryDelayMs);
-        includeContract = true;
         continue;
       }
       throw new TransportError({
@@ -820,6 +844,34 @@ async function fetchServiceBootstrapInfo(args: {
           reason: failure.reason,
         },
       });
+    }
+
+    const bootstrapState =
+      settled.payload && typeof settled.payload === "object"
+        ? (settled.payload as { state?: unknown }).state
+        : undefined;
+    if (bootstrapState === "manifest_required" && args.contract !== undefined) {
+      continue;
+    }
+    if (
+      bootstrapState === "authority_pending" ||
+      bootstrapState === "migration_required" ||
+      bootstrapState === "dependency_pending" ||
+      bootstrapState === "resource_pending"
+    ) {
+      const retryDelayMs = bootstrapRetryDelayMs(settled.response);
+      args.log.info(
+        {
+          service: args.serviceName,
+          contractId: args.contractId,
+          contractDigest: args.contractDigest,
+          state: bootstrapState,
+          retryDelayMs,
+        },
+        "Service deployment authority pending",
+      );
+      await delay(retryDelayMs);
+      continue;
     }
 
     if (!settled.response.ok) {
@@ -856,19 +908,56 @@ async function fetchServiceBootstrapInfo(args: {
       });
     }
 
-    const ready = Value.Parse(
+    const response = Value.Parse(
       ServiceBootstrapReadySchema,
       settled.payload,
-    ) as ServiceBootstrapResponse;
-    args.auth.setServerClockOffsetMs(
+    );
+    args.identityAuth.setServerClockOffsetMs(
       estimateMidpointClockOffsetMs({
         requestStartedAtMs: settled.requestStartedAtMs,
         responseReceivedAtMs: settled.responseReceivedAtMs,
-        serverNowSeconds: ready.serverNow,
+        serverNowSeconds: response.serverNow / 1_000,
       }),
     );
-
-    return ready;
+    args.sessionAuth.setServerClockOffsetMs(
+      estimateMidpointClockOffsetMs({
+        requestStartedAtMs: settled.requestStartedAtMs,
+        responseReceivedAtMs: settled.responseReceivedAtMs,
+        serverNowSeconds: response.serverNow / 1_000,
+      }),
+    );
+    return {
+      status: "ready",
+      serverNow: response.serverNow / 1_000,
+      connectInfo: {
+        sessionId: response.session.sessionId,
+        participantDigest: response.authorization.participantArtifactDigest,
+        instanceId: args.identity.instanceId,
+        deploymentId: args.identity.deploymentId,
+        contractId: args.contractId,
+        contractDigest: args.contractDigest,
+        transports: { websocket: { natsServers: response.nats.servers } },
+        jwt: response.nats.jwt,
+      },
+      binding: {
+        contractId: args.contractId,
+        digest: response.authorization.participantArtifactDigest,
+        resources: {
+          kv: response.authorization.resourceRuntime.kv ?? {},
+          store: response.authorization.resourceRuntime.store ?? {},
+          ...(response.authorization.resourceRuntime.jobs === undefined
+            ? {}
+            : { jobs: response.authorization.resourceRuntime.jobs }),
+          ...(response.authorization.resourceRuntime.eventConsumers ===
+              undefined
+            ? {}
+            : {
+              eventConsumers:
+                response.authorization.resourceRuntime.eventConsumers,
+            }),
+        },
+      },
+    };
   }
 }
 
@@ -986,22 +1075,8 @@ type TrellisServiceRuntimeConnectOpts<
   nats: {
     servers: string | string[];
 
-    /**
-     * Sentinel creds content (NATS creds file bytes).
-     * Provide this OR `sentinelCredsPath` OR `authenticator`.
-     */
-    sentinelCreds?: Uint8Array;
-
-    /**
-     * Path to a sentinel creds file on disk.
-     * Provide this OR `sentinelCreds` OR `authenticator`.
-     */
-    sentinelCredsPath?: string;
-
-    /**
-     * Custom NATS authenticator. If provided, sentinel creds are not used.
-     */
-    authenticator?: NatsConnectOpts["authenticator"];
+    /** Custom NATS authenticator for this internal runtime connection. */
+    authenticator: NatsConnectOpts["authenticator"];
 
     /**
      * Additional NATS connection options (reconnect, timeouts, etc).
@@ -1020,7 +1095,15 @@ export type TrellisServiceConnectOpts<
   trellisUrl: string;
   contract: ServiceContract<TOwnedApi, TTrellisApi>;
   name: string;
-  sessionKeySeed: string;
+  /** Immutable provisioned service identity and exact participant binding. */
+  identity: {
+    seed: string;
+    deploymentId: string;
+    instanceId: string;
+    participantId: string;
+    participantArtifactDigest: string;
+    participantNeedsDigest: string;
+  };
   /**
    * Controls automatic telemetry initialization for this service connection.
    * Enabled by default; pass `false` or `{ enabled: false }` to disable it.
@@ -1727,7 +1810,15 @@ export type TrellisServiceConnectArgs<
   trellisUrl: string;
   contract: TContract;
   name: string;
-  sessionKeySeed: string;
+  /** Immutable provisioned service identity and exact participant binding. */
+  identity: {
+    seed: string;
+    deploymentId: string;
+    instanceId: string;
+    participantId: string;
+    participantArtifactDigest: string;
+    participantNeedsDigest: string;
+  };
   /**
    * Controls automatic telemetry initialization for this service connection.
    * Enabled by default; pass `false` or `{ enabled: false }` to disable it.
@@ -1759,6 +1850,7 @@ export type TrellisServiceInternalConnectArgs<
   TTrellisApi extends RuntimeApi = TOwnedApi,
   TKv extends ContractKvMetadata = {},
 > = TrellisServiceRuntimeConnectOpts<TOwnedApi, TTrellisApi> & {
+  identity?: TrellisServiceConnectOpts["identity"];
   contractId?: string;
   contractDigest: string;
   contractKv?: TKv;
@@ -1780,8 +1872,10 @@ export async function createConnectedService<
   name: string;
   auth: SessionAuth;
   nc: NatsConnection;
+  inboxPrefix: string;
   contractId?: string;
   contractDigest?: string;
+  participantDigest?: string;
   contractJobs: TJobs;
   contractKv: TKv;
   contractEventConsumers?: ContractEventConsumers;
@@ -1833,6 +1927,7 @@ export async function createConnectedService<
         openOperationTransfer: (transferArgs) =>
           getTransfer().createOperationUpload(transferArgs),
       },
+      operationStoreId: args.healthIdentity?.instanceId,
       version: args.server.version,
     },
   );
@@ -1849,6 +1944,7 @@ export async function createConnectedService<
       api: runtimeApi,
       contractId: args.contractId,
       contractDigest: args.contractDigest,
+      inboxPrefix: args.inboxPrefix,
       eventConsumers: {
         metadata: args.contractEventConsumers,
         bindings: args.bindings.eventConsumers,
@@ -1907,7 +2003,7 @@ export async function createConnectedService<
     serviceName: args.name,
     instanceId: args.healthIdentity?.instanceId,
     contractId: args.contractId ?? "unknown",
-    contractDigest: args.contractDigest ?? "unknown",
+    contractDigest: args.participantDigest ?? "unknown",
     publishIntervalMs: args.server.health?.publishIntervalMs ?? 30_000,
   });
   health.add("nats", () => ({
@@ -3242,7 +3338,14 @@ export function connectTrellisServiceWithRuntimeDeps<
       if (automaticTelemetryEnabled(args.telemetry)) {
         runtimeDeps.initTelemetry?.(args.name);
       }
-      const auth = await createAuth({ sessionKeySeed: args.sessionKeySeed });
+      const identityAuth = await createAuth({
+        sessionKeySeed: args.identity.seed,
+      });
+      const sessionAuth = await createAuth({
+        sessionKeySeed: base64urlEncode(
+          crypto.getRandomValues(new Uint8Array(32)),
+        ),
+      });
       const bootstrapLog = resolveServiceLogger(args.server?.log);
       const bootstrapStartedAt = performance.now();
       const bootstrap = await fetchServiceBootstrapInfo({
@@ -3251,7 +3354,9 @@ export function connectTrellisServiceWithRuntimeDeps<
         contractId: args.contract.CONTRACT_ID,
         contractDigest: args.contract.CONTRACT_DIGEST,
         contract: args.contract.CONTRACT,
-        auth,
+        identityAuth,
+        sessionAuth,
+        identity: args.identity,
         log: bootstrapLog,
       });
       recordTrellisDuration(
@@ -3263,9 +3368,11 @@ export function connectTrellisServiceWithRuntimeDeps<
           outcome: "ok",
         },
       );
-      const { authenticator: authTokenAuthenticator, inboxPrefix } = await auth
+      const { authenticator, inboxPrefix } = await sessionAuth
         .natsConnectOptions({
-          contractDigest: args.contract.CONTRACT_DIGEST,
+          sessionId: bootstrap.connectInfo.sessionId,
+          participantDigest: bootstrap.connectInfo.participantDigest,
+          jwt: bootstrap.connectInfo.jwt,
         });
 
       let nc: NatsConnection;
@@ -3278,15 +3385,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           maxReconnectAttempts: DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
           waitOnFirstConnect: DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
           inboxPrefix,
-          authenticator: [
-            authTokenAuthenticator,
-            jwtAuthenticator(
-              bootstrap.connectInfo.transport.sentinel.jwt,
-              new TextEncoder().encode(
-                bootstrap.connectInfo.transport.sentinel.seed,
-              ),
-            ),
-          ],
+          authenticator,
         });
         recordTrellisDuration(
           "trellis.connect.duration",
@@ -3327,10 +3426,12 @@ export function connectTrellisServiceWithRuntimeDeps<
           ContractKvOf<TContract>
         >({
           name: args.name,
-          auth,
+          auth: sessionAuth,
           nc,
+          inboxPrefix,
           contractId: args.contract.CONTRACT_ID,
           contractDigest: args.contract.CONTRACT_DIGEST,
+          participantDigest: bootstrap.connectInfo.participantDigest,
           contractJobs:
             (args.contract[CONTRACT_JOBS_METADATA] ?? {}) as ContractJobsOf<
               TContract
@@ -3788,6 +3889,7 @@ export class TrellisServiceSession<
     store: string;
     key: string;
     sessionKey: string;
+    inboxPrefix: string;
     expiresInMs?: number;
   }): AsyncResult<ReceiveTransferGrant, TransferError> {
     return AsyncResult.from(
@@ -3795,6 +3897,7 @@ export class TrellisServiceSession<
         store: args.store,
         key: args.key,
         sessionKey: args.sessionKey,
+        inboxPrefix: args.inboxPrefix,
         expiresInMs: args.expiresInMs ?? 60_000,
       }),
     );

@@ -30,7 +30,8 @@ use crate::{
     canonicalize_json, digest_json, identifiers::compare_protocol_strings,
     schema_profile::resolve_local_schema, ApiArtifactV1, ApiSurfaceKindV1, ConsentMetadataV1,
     DerivedEventSubjectsV1, GrantSetV1, ParticipantArtifactV1, ParticipantKindV1,
-    PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError, ResolutionErrorCodeV1,
+    ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
+    ProtocolError, ResolutionErrorCodeV1,
 };
 
 /// The first canonical participant-needs format.
@@ -696,18 +697,26 @@ pub fn resolve_participant_v1(
         nested_object_at(&participant_value, &["uses", "optional"]),
         &resolved_by_alias,
     )?;
-    let required_grants = GrantSetV1::new(
-        required_apis
-            .iter()
-            .flat_map(|used| used.grant_set.permissions().iter().cloned())
-            .collect(),
-    );
-    let optional_grants = GrantSetV1::new(
-        optional_apis
-            .iter()
-            .flat_map(|used| used.grant_set.permissions().iter().cloned())
-            .collect(),
-    );
+    let mut required_permissions = required_apis
+        .iter()
+        .flat_map(|used| used.grant_set.permissions().iter().cloned())
+        .collect::<Vec<_>>();
+    for provided in &provided_authority {
+        for event in provided.events().keys() {
+            required_permissions.push(PermissionAtomV1::new(
+                PermissionTargetV1::api_surface(provided.api(), ApiSurfaceKindV1::Event, event)?,
+                PermissionActionV1::Publish,
+            )?);
+        }
+    }
+    required_permissions.extend(resource_permissions(&participant_id, &required_resources)?);
+    let required_grants = GrantSetV1::new(required_permissions);
+    let mut optional_permissions = optional_apis
+        .iter()
+        .flat_map(|used| used.grant_set.permissions().iter().cloned())
+        .collect::<Vec<_>>();
+    optional_permissions.extend(resource_permissions(&participant_id, &optional_resources)?);
+    let optional_grants = GrantSetV1::new(optional_permissions);
     let needs = ParticipantNeedsV1 {
         format: PARTICIPANT_NEEDS_FORMAT_V1.to_owned(),
         participant: NeedsParticipantV1 {
@@ -1047,6 +1056,60 @@ fn derive_required_resources(
     })
 }
 
+fn resource_permissions(
+    participant_id: &str,
+    resources: &ParticipantResourceNeedsV1,
+) -> Result<Vec<PermissionAtomV1>, ProtocolError> {
+    let mut permissions = Vec::new();
+    for (kind, names, actions) in [
+        (
+            ParticipantResourceKindV1::State,
+            resources.state.keys(),
+            &[
+                PermissionActionV1::Read,
+                PermissionActionV1::Write,
+                PermissionActionV1::Delete,
+            ][..],
+        ),
+        (
+            ParticipantResourceKindV1::Kv,
+            resources.kv.keys(),
+            &[
+                PermissionActionV1::Read,
+                PermissionActionV1::Write,
+                PermissionActionV1::Delete,
+            ][..],
+        ),
+        (
+            ParticipantResourceKindV1::Store,
+            resources.stores.keys(),
+            &[
+                PermissionActionV1::Read,
+                PermissionActionV1::Write,
+                PermissionActionV1::Delete,
+            ][..],
+        ),
+        (
+            ParticipantResourceKindV1::JobQueue,
+            resources.job_queues.keys(),
+            &[PermissionActionV1::Process][..],
+        ),
+        (
+            ParticipantResourceKindV1::EventConsumer,
+            resources.event_consumers.keys(),
+            &[PermissionActionV1::Consume][..],
+        ),
+    ] {
+        for name in names {
+            let target = PermissionTargetV1::participant_resource(participant_id, kind, name)?;
+            for action in actions {
+                permissions.push(PermissionAtomV1::new(target.clone(), *action)?);
+            }
+        }
+    }
+    Ok(permissions)
+}
+
 fn derive_optional_resources(
     participant: &Value,
     schemas: &Map<String, Value>,
@@ -1214,6 +1277,7 @@ fn validate_transfers(
             string_at(mapping, "key"),
             root,
             ExpectedSchemaType::String,
+            false,
         )?;
         for (field, expected) in [
             ("contentType", ExpectedSchemaType::String),
@@ -1228,6 +1292,7 @@ fn validate_transfers(
                     pointer,
                     root,
                     expected,
+                    true,
                 )?;
             }
         }
@@ -1263,6 +1328,7 @@ fn validate_api_schema_pointers(
                 pointer_value,
                 &schemas[schema_name],
                 ExpectedSchemaType::SubjectToken,
+                false,
             )?;
         }
     }
@@ -1282,6 +1348,9 @@ fn validate_job_pointers(
         for (index, pointer_value) in
             array_strings(keyed.get("key").expect("key pointers")).enumerate()
         {
+            if !pointer_value.starts_with('/') {
+                continue;
+            }
             validate_typed_pointer(
                 participant_id,
                 "",
@@ -1291,6 +1360,7 @@ fn validate_job_pointers(
                 pointer_value,
                 &schemas[payload_name],
                 ExpectedSchemaType::JobKey,
+                false,
             )?;
         }
     }
@@ -1306,6 +1376,7 @@ enum ExpectedSchemaType {
     JobKey,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_typed_pointer(
     participant_id: &str,
     alias: &str,
@@ -1314,21 +1385,28 @@ fn validate_typed_pointer(
     pointer_value: &str,
     schema: &Value,
     expected: ExpectedSchemaType,
+    allow_optional: bool,
 ) -> Result<(), ProtocolError> {
     let parsed =
         Pointer::parse(pointer_value).expect("artifact pointers were parsed during validation");
     let tokens = parsed.tokens().collect::<Vec<_>>();
-    let resolved = resolve_schema_pointer(schema, schema, &tokens, &mut BTreeSet::new())
-        .ok_or_else(|| {
-            resolution_error(
-                ResolutionErrorCodeV1::UnresolvableSchemaPointer,
-                participant_id,
-                (!alias.is_empty()).then_some(alias),
-                (!api.is_empty()).then_some(api),
-                authored_path.clone(),
-                format!("schema pointer '{pointer_value}' cannot be proven to resolve"),
-            )
-        })?;
+    let resolved = resolve_schema_pointer(
+        schema,
+        schema,
+        &tokens,
+        &mut BTreeSet::new(),
+        allow_optional,
+    )
+    .ok_or_else(|| {
+        resolution_error(
+            ResolutionErrorCodeV1::UnresolvableSchemaPointer,
+            participant_id,
+            (!alias.is_empty()).then_some(alias),
+            (!api.is_empty()).then_some(api),
+            authored_path.clone(),
+            format!("schema pointer '{pointer_value}' cannot be proven to resolve"),
+        )
+    })?;
     if resolved
         .iter()
         .all(|node| schema_proves_type(schema, node, expected, &mut BTreeSet::new()))
@@ -1351,13 +1429,15 @@ fn resolve_schema_pointer<'a>(
     schema: &'a Value,
     tokens: &[Token<'_>],
     refs: &mut BTreeSet<String>,
+    allow_optional: bool,
 ) -> Option<Vec<&'a Value>> {
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
         if !refs.insert(reference.to_owned()) {
             return None;
         }
-        return resolve_local_schema(root, reference)
-            .and_then(|(resolved, _)| resolve_schema_pointer(root, resolved, tokens, refs));
+        return resolve_local_schema(root, reference).and_then(|(resolved, _)| {
+            resolve_schema_pointer(root, resolved, tokens, refs, allow_optional)
+        });
     }
     let Some((token, remaining)) = tokens.split_first() else {
         return Some(vec![schema]);
@@ -1371,6 +1451,7 @@ fn resolve_schema_pointer<'a>(
                     branch,
                     tokens,
                     &mut refs.clone(),
+                    allow_optional,
                 )?);
             }
             return Some(resolved);
@@ -1379,7 +1460,9 @@ fn resolve_schema_pointer<'a>(
     if let Some(branches) = schema.get("allOf").and_then(Value::as_array) {
         let resolved = branches
             .iter()
-            .filter_map(|branch| resolve_schema_pointer(root, branch, tokens, &mut refs.clone()))
+            .filter_map(|branch| {
+                resolve_schema_pointer(root, branch, tokens, &mut refs.clone(), allow_optional)
+            })
             .flatten()
             .collect::<Vec<_>>();
         if !resolved.is_empty() {
@@ -1393,14 +1476,15 @@ fn resolve_schema_pointer<'a>(
         schema,
         ExpectedSchemaType::Object,
         &mut BTreeSet::new(),
-    ) && required
-        .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(&decoded)))
+    ) && (allow_optional
+        || required
+            .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(&decoded))))
     {
         let property = schema
             .get("properties")
             .and_then(Value::as_object)
             .and_then(|properties| properties.get(decoded.as_ref()))?;
-        return resolve_schema_pointer(root, property, remaining, refs);
+        return resolve_schema_pointer(root, property, remaining, refs, allow_optional);
     }
     if !schema_proves_type(
         root,
@@ -1413,9 +1497,11 @@ fn resolve_schema_pointer<'a>(
     let Index::Num(index) = token.to_index().ok()? else {
         return None;
     };
-    let min_items = schema.get("minItems").and_then(Value::as_u64)?;
-    if u64::try_from(index).ok()?.checked_add(1)? > min_items {
-        return None;
+    if !allow_optional {
+        let min_items = schema.get("minItems").and_then(Value::as_u64)?;
+        if u64::try_from(index).ok()?.checked_add(1)? > min_items {
+            return None;
+        }
     }
     if let Some(item) = schema
         .get("prefixItems")
@@ -1423,7 +1509,7 @@ fn resolve_schema_pointer<'a>(
         .and_then(|items| items.get(index))
         .or_else(|| schema.get("items"))
     {
-        return resolve_schema_pointer(root, item, remaining, refs);
+        return resolve_schema_pointer(root, item, remaining, refs, allow_optional);
     }
     None
 }
@@ -1743,6 +1829,7 @@ mod tests {
                 &vector.pointer,
                 &vector.schema,
                 expected,
+                false,
             );
             assert_eq!(result.is_ok(), vector.valid, "{}: {result:?}", vector.name);
             if let Some(runtime_value) = &vector.runtime_value {

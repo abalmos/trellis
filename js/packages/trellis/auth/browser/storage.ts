@@ -1,5 +1,5 @@
 const DB_NAME = "trellis-auth";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "keys";
 const KEY_ID = "trellis-session-key";
 
@@ -24,6 +24,8 @@ export type StoredKeyPair = {
   privateKey: CryptoKey;
   publicKey: CryptoKey;
   publicKeyRaw: Uint8Array;
+  seed: Uint8Array;
+  sessionId?: string;
   createdAt: number;
   persistence?: "remembered";
   expiresAt?: number;
@@ -36,6 +38,7 @@ export type StoredKeyPairOptions = {
 export async function storeKeyPair(
   keyPair: CryptoKeyPair,
   publicKeyRaw: Uint8Array,
+  seed: Uint8Array,
   options: StoredKeyPairOptions = {},
 ): Promise<void> {
   const db = await openDB();
@@ -48,6 +51,7 @@ export async function storeKeyPair(
       privateKey: keyPair.privateKey,
       publicKey: keyPair.publicKey,
       publicKeyRaw,
+      seed,
       createdAt: Date.now(),
       persistence: "remembered",
       ...(options.expiresAt === undefined
@@ -73,6 +77,11 @@ export async function loadKeyPair(): Promise<StoredKeyPair | null> {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const result = request.result as StoredKeyPair | undefined;
+      if (result !== undefined && !(result.seed instanceof Uint8Array)) {
+        store.delete(KEY_ID);
+        resolve(null);
+        return;
+      }
       if (result?.expiresAt !== undefined && result.expiresAt <= Date.now()) {
         store.delete(KEY_ID);
         resolve(null);
@@ -82,6 +91,30 @@ export async function loadKeyPair(): Promise<StoredKeyPair | null> {
     };
 
     tx.oncomplete = () => db.close();
+  });
+}
+
+/** Associates the durable session ID returned after browser binding. */
+export async function storeSessionId(sessionId: string): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(KEY_ID);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const record = request.result as StoredKeyPair | undefined;
+      if (!record) {
+        reject(new Error("session key is unavailable"));
+        return;
+      }
+      store.put({ ...record, sessionId });
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
   });
 }
 

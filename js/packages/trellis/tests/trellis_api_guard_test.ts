@@ -131,14 +131,6 @@ const emptyRpcContract = defineServiceContract({}, () => ({
   description: "Covers empty RPC facade behavior.",
 }));
 
-Deno.test("generated core SDK keeps internal bindings RPC descriptor", () => {
-  assertEquals(
-    getContractRuntime(trellisCore).ownedApi.rpc["Trellis.Bindings.Get"]
-      .subject,
-    "rpc.v1.Trellis.Bindings.Get",
-  );
-});
-
 Deno.test("private transport explains when no API surface was configured", async () => {
   const trellis = createTrellisInternal(
     "test-client",

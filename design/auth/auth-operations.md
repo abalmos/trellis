@@ -42,19 +42,20 @@ request-id replay-cache retention.
 
 ### Per-service Secrets
 
-| Config key               | Description                 |
-| ------------------------ | --------------------------- |
-| `sessionKeySeedFile`     | Base64url Ed25519 seed file |
-| `client.natsServers`     | NATS server URL(s)          |
-| `nats.sentinelCredsPath` | Path to sentinel creds      |
+| Config key                        | Description                              |
+| --------------------------------- | ---------------------------------------- |
+| provisioned service identity seed | Immutable deployment identity credential |
+| `client.nats_servers`             | Native NATS server URL(s)                |
+| `client.ws_nats_servers`          | Browser/WebSocket NATS server URL(s)     |
 
 Additional `trellis` service config:
 
-| Config key               | Description                  |
-| ------------------------ | ---------------------------- |
-| `nats.auth.credsPath`    | Auth account credentials     |
-| `nats.trellis.credsPath` | Trellis account credentials  |
-| `storage.dbPath`         | SQLite auth/control-plane DB |
+| Config key                        | Description                  |
+| --------------------------------- | ---------------------------- |
+| `nats.runtime.auth_creds_path`    | Auth account credentials     |
+| `nats.runtime.trellis_creds_path` | Trellis account credentials  |
+| `nats.runtime.system_creds_path`  | System account credentials   |
+| `storage.sqlite_path`             | SQLite auth/control-plane DB |
 
 ### Store TTLs
 
@@ -160,9 +161,10 @@ Minimum targets:
 - `/auth/flow/:flowId`
 - `/auth/flow/:flowId/approval`
 - `/auth/flow/:flowId/bind`
-- `/auth/devices/activate`
 - `/auth/devices/activate/wait`
-- `/auth/devices/connect-info`
+- `/bootstrap/client`
+- `/bootstrap/service`
+- `/bootstrap/device`
 
 Deployments should not go live without configured limits. HTTP auth limits must
 use an address or edge identity supplied by the trusted runtime/proxy boundary;
@@ -188,13 +190,15 @@ rate-limit identity by themselves.
 3. Deploy the new seed
 4. Remove the old key after rollout
 
-### Sentinel credentials
+### Auth callout signing and XKey material
 
-1. Generate new sentinel user via NSC
-2. Update `trellis` config
-3. Restart `trellis`
-4. Restart dependent services with updated creds
-5. Remove the old sentinel user
+1. Generate replacement account signing or XKey material
+2. Update the configured seed files
+3. Restart the Rust platform owner
+4. Verify callout admission before destroying old material
+
+Clients have no shared sentinel credential to rotate. Each bootstrap JWT is
+bound to one session key and naturally expires with that session.
 
 ## Accepted Risks
 

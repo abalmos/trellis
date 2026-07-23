@@ -1,22 +1,14 @@
 export {
-  bindFlow,
   clearSessionKey,
   createAuth,
-  createRpcProof,
   generateSessionKey,
   getOrCreateSessionKey,
   getPublicSessionKey,
   hasSessionKey,
-  isBindSuccessResponse,
   loadSessionKey,
   signBytes,
 } from "./auth.ts";
-export type {
-  BindResponse,
-  BindSuccessResponse,
-  NatsConnectOptions,
-  SessionKeyHandle,
-} from "./auth.ts";
+export type { NatsConnectOptions, SessionKeyHandle } from "./auth.ts";
 export {
   canonicalizeJson,
   CATALOG_FORMAT_V1,
@@ -26,14 +18,6 @@ export {
   schema,
   unwrapSchema,
 } from "./contracts.ts";
-export {
-  TrellisBindingsGetRequestSchema,
-  TrellisBindingsGetResponseSchema,
-} from "./models/trellis/rpc/TrellisBindingsGet.ts";
-export {
-  AuthSessionsLogoutResponseSchema,
-  AuthSessionsLogoutSchema,
-} from "./models/auth/rpc/Logout.ts";
 export {
   TrellisCatalogRequestSchema,
   TrellisCatalogResponseSchema,
@@ -88,7 +72,7 @@ export {
   state,
   store,
 } from "./contract.ts";
-export { optional } from "./contract_support/descriptors.ts";
+export { operationAccess, optional } from "./contract_support/descriptors.ts";
 export type { DefineContractInput, TrellisContractV1 } from "./contract.ts";
 export {
   AsyncResult,

@@ -374,6 +374,11 @@ mod tests {
         let options = ServiceConnectOptions::new(
             "http://127.0.0.1:1",
             "trellis-service-jobs",
+            "dep_test",
+            "trellis.jobs@v1",
+            "participant-digest",
+            "participant-needs-digest",
+            VALID_SEED_BASE64URL,
             "not-base64url",
         )
         .with_timeout_ms(1_000);
@@ -391,9 +396,17 @@ mod tests {
 
     #[tokio::test]
     async fn connect_service_returns_bootstrap_error_for_invalid_trellis_url() {
-        let options =
-            ServiceConnectOptions::new("not a url", "trellis-service-jobs", VALID_SEED_BASE64URL)
-                .with_timeout_ms(1_000);
+        let options = ServiceConnectOptions::new(
+            "not a url",
+            "trellis-service-jobs",
+            "dep_test",
+            "trellis.jobs@v1",
+            "participant-digest",
+            "participant-needs-digest",
+            VALID_SEED_BASE64URL,
+            VALID_SEED_BASE64URL,
+        )
+        .with_timeout_ms(1_000);
         let result = connect_service(options).await;
 
         assert!(matches!(
@@ -409,6 +422,11 @@ mod tests {
         let options = ServiceConnectOptions::new(
             "http://127.0.0.1:1",
             "trellis-service-jobs",
+            "dep_test",
+            "trellis.jobs@v1",
+            "participant-digest",
+            "participant-needs-digest",
+            VALID_SEED_BASE64URL,
             "not-base64url",
         )
         .with_timeout_ms(1_000);

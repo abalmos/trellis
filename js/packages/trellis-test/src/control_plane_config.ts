@@ -45,7 +45,6 @@ export type TrellisControlPlaneConfig = {
     system: { credsPath: string };
     trellis: { credsPath: string };
     auth: { credsPath: string };
-    sentinelCredsPath: string;
     authCallout: {
       issuer: { nkey: string; signing: string };
       target: { nkey: string; signing: string };
@@ -164,7 +163,6 @@ export function buildControlPlaneConfig(args: {
         credsPath: join(natsDir, args.manifest.paths.creds.trellisService),
       },
       auth: { credsPath: join(natsDir, args.manifest.paths.creds.authService) },
-      sentinelCredsPath: join(natsDir, args.manifest.paths.creds.sentinel),
       authCallout: {
         issuer: {
           nkey: args.manifest.accounts.auth.publicKey,
@@ -204,11 +202,117 @@ export async function writeTrellisConfig(args: {
   configPath?: string;
 }): Promise<string> {
   const configPath = args.configPath ??
-    join(args.workdir, "trellis", "config.jsonc");
+    join(args.workdir, "trellis", "config.toml");
   await Deno.mkdir(dirname(configPath), { recursive: true });
+  const configDir = dirname(configPath);
+  await Promise.all([
+    Deno.writeTextFile(
+      join(configDir, "event-session.seed"),
+      `${args.config.sessionKeySeed}\n`,
+    ),
+    Deno.writeTextFile(
+      join(configDir, "auth-issuer-signing.seed"),
+      `${args.config.nats.authCallout.issuer.signing}\n`,
+    ),
+    Deno.writeTextFile(
+      join(configDir, "auth-target-signing.seed"),
+      `${args.config.nats.authCallout.target.signing}\n`,
+    ),
+    Deno.writeTextFile(
+      join(configDir, "auth-sx.seed"),
+      `${args.config.nats.authCallout.sxSeed}\n`,
+    ),
+  ]);
+
+  const quote = (value: string) => JSON.stringify(value);
+  const strings = (values: string[]) => `[${values.map(quote).join(", ")}]`;
+  const storage = (section: string) => `
+[${section}.storage]
+kind = "sqlite"
+path = ${quote(args.config.storage.dbPath)}
+journal_mode = "wal"
+busy_timeout_ms = 5000
+single_writer = true
+`;
+  let providers = "";
+  for (const [id, provider] of Object.entries(args.config.oauth.providers)) {
+    providers += `\n[oauth.providers.${quote(id)}]\n`;
+    providers += `type = ${quote(provider.type)}\n`;
+    if (provider.type === "oidc") {
+      providers += `issuer = ${quote(provider.issuer)}\n`;
+    }
+    providers += `client_id = ${quote(provider.clientId)}\n`;
+    if (provider.clientSecret) {
+      providers += `client_secret = ${quote(provider.clientSecret)}\n`;
+    }
+    if (provider.displayName) {
+      providers += `display_name = ${quote(provider.displayName)}\n`;
+    }
+    if (provider.type === "oidc" && provider.scopes) {
+      providers += `scopes = ${strings(provider.scopes)}\n`;
+    }
+  }
+
   await Deno.writeTextFile(
     configPath,
-    `${JSON.stringify(args.config, null, 2)}\n`,
+    `
+instance_name = ${quote(args.config.instanceName)}
+event_session_seed_file = "./event-session.seed"
+
+[http]
+port = ${args.config.port}
+public_origin = ${quote(args.config.web.publicOrigin)}
+origins = ${strings(args.config.web.origins)}
+allow_insecure_origins = ${strings(args.config.web.allowInsecureOrigins)}
+rate_limit_max = ${args.config.httpRateLimit.max}
+rate_limit_window_ms = ${args.config.httpRateLimit.windowMs}
+
+[nats]
+servers = ${quote(args.config.nats.servers)}
+
+[nats.runtime]
+auth_creds_path = ${quote(args.config.nats.auth.credsPath)}
+trellis_creds_path = ${quote(args.config.nats.trellis.credsPath)}
+system_creds_path = ${quote(args.config.nats.system.credsPath)}
+
+[nats.auth_callout]
+issuer_signing_seed_file = "./auth-issuer-signing.seed"
+target_signing_seed_file = "./auth-target-signing.seed"
+xkey_seed_file = "./auth-sx.seed"
+
+[client]
+ws_nats_servers = ${strings(args.config.client.natsServers)}
+nats_servers = ${strings(args.config.client.nativeNatsServers)}
+
+[leases]
+bucket = "trellis_runtime_leases"
+replicas = 1
+ttl_ms = 9000
+renew_ms = 3000
+
+[auth.local_identity]
+enabled = ${args.config.auth.localIdentity.enabled}
+password_min_length = ${args.config.auth.localIdentity.passwordPolicy.minLength}
+
+[oauth]
+redirect_base = ${quote(args.config.oauth.redirectBase)}
+always_show_provider_chooser = ${args.config.oauth.alwaysShowProviderChooser}
+${providers}
+${storage("platform")}
+[platform.ttl_ms]
+sessions = ${args.config.ttlMs.sessions}
+oauth = ${args.config.ttlMs.oauth}
+device_flow = ${args.config.ttlMs.deviceFlow}
+pending_auth = ${args.config.ttlMs.pendingAuth}
+connections = ${args.config.ttlMs.connections}
+nats_jwt = ${args.config.ttlMs.natsJwt}
+${storage("jobs")}
+[health]
+transport_retention_hours = 1
+transport_max_bytes = 16777216
+${storage("health")}
+${storage("eventlog")}
+`,
   );
   return configPath;
 }

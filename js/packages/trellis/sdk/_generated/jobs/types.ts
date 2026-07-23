@@ -1313,15 +1313,17 @@ export type JobsWatchEvent = { kind: "ready"; timestamp: string } | {
   timestamp: string;
 } | { id: string; kind: "jobInspectChanged"; timestamp: string };
 
-export type NotFoundErrorData = {
-  context?: { [k: string]: unknown };
-  id: string;
-  jobId?: string;
-  message: string;
-  resource: string;
-  traceId?: string;
-  type: "NotFoundError";
-};
+export type NotFoundErrorData =
+  & SerializableErrorData
+  & ({
+    context?: { [k: string]: unknown };
+    id: string;
+    jobId?: string;
+    message: string;
+    resource: string;
+    traceId?: string;
+    type: "NotFoundError";
+  });
 export class NotFoundError extends TrellisError<NotFoundErrorData> {
   static readonly schema = NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;

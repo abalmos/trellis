@@ -1,4 +1,8 @@
-import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
+import {
+  defineAppContract,
+  defineServiceContract,
+  operationAccess,
+} from "@qlever-llc/trellis";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
@@ -134,7 +138,10 @@ export function createOperationsFixture(
     description:
       "App/client participant for the operations integration fixture.",
     uses: [
-      serviceContract.EntityProcess,
+      operationAccess(serviceContract.EntityProcess, {
+        cancel: options.cancelable === true,
+        control: clientControlsOperation,
+      }),
       ...(options.statusOperation === true
         ? [serviceContract.EntityStatus]
         : []),
@@ -162,7 +169,7 @@ export function createOperationsFixture(
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();

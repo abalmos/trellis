@@ -226,7 +226,6 @@ impl RuntimeConfig {
                 resolve_path(base_dir, &mut runtime.auth_creds_path);
                 resolve_path(base_dir, &mut runtime.trellis_creds_path);
                 resolve_path(base_dir, &mut runtime.system_creds_path);
-                resolve_path(base_dir, &mut runtime.sentinel_creds_path);
             }
             if let Some(auth_callout) = &mut nats.auth_callout {
                 resolve_path(base_dir, &mut auth_callout.issuer_signing_seed_file);
@@ -315,9 +314,6 @@ pub struct NatsRuntimeConfig {
     /// System-account runtime user creds path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_creds_path: Option<PathBuf>,
-    /// Sentinel user creds path returned during bootstrap.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sentinel_creds_path: Option<PathBuf>,
 }
 
 /// NATS auth-callout signing and encryption material paths.
@@ -358,11 +354,6 @@ impl NatsConfig {
                 "nats.runtime",
                 "system_creds_path",
                 runtime.system_creds_path.as_ref(),
-            )?,
-            sentinel_creds_path: require_path(
-                "nats.runtime",
-                "sentinel_creds_path",
-                runtime.sentinel_creds_path.as_ref(),
             )?,
         })
     }
@@ -409,8 +400,6 @@ pub struct ResolvedRuntimeNatsConfig {
     pub trellis_creds_path: PathBuf,
     /// System-account runtime user creds path.
     pub system_creds_path: PathBuf,
-    /// Sentinel user creds path.
-    pub sentinel_creds_path: PathBuf,
 }
 
 /// Resolved NATS auth-callout signing and encryption material paths.

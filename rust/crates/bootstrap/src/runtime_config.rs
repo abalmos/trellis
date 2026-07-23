@@ -44,7 +44,6 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
                 auth_creds_path: Some(PathBuf::from("../nats/creds/auth-auth.creds")),
                 trellis_creds_path: Some(PathBuf::from("../nats/creds/trellis-auth.creds")),
                 system_creds_path: Some(PathBuf::from("../nats/creds/system.creds")),
-                sentinel_creds_path: Some(PathBuf::from("../nats/creds/sentinel.creds")),
             }),
             auth_callout: Some(NatsAuthCalloutConfig {
                 issuer_signing_seed_file: Some(PathBuf::from(

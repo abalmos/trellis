@@ -12,8 +12,21 @@ export const externalServiceRepoRuntime = {
   trellis: {
     mutableDev: true,
     command: {
-      cmd: Deno.execPath(),
-      args: ["run", "-A", "services/trellis/main.ts"],
+      cmd: "cargo",
+      args: [
+        "run",
+        "--manifest-path",
+        "../rust/Cargo.toml",
+        "-p",
+        "trellis-runtime",
+        "--bin",
+        "trellis-server",
+        "--",
+        "--config",
+        "{config}",
+        "all",
+      ],
+      env: { RUST_LOG: "info,trellis_runtime::platform::auth_callout=debug" },
       cwd: externalServiceRepoJsRoot,
     },
   },

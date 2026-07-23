@@ -81,12 +81,14 @@ authority that you update through Trellis Auth.
 
 ## 5. Start the service process
 
-Pass the seed and NATS details as environment variables and start the service with your normal command:
+Pass the provisioned identity and Trellis endpoint using the service's documented
+configuration variables, then start the service with your normal command:
 
 ```sh
-export MY_SERVICE_SESSION_KEY_SEED="<seed printed by trellis svc my-service provision>"
-export NATS_SERVERS=localhost
-export NATS_SENTINEL_CREDS=$HOME/trellis/nats/creds/sentinel.creds
+export TRELLIS_URL=http://127.0.0.1:3000
+export MY_SERVICE_IDENTITY_SEED="<seed printed by trellis svc my-service provision>"
+export MY_SERVICE_DEPLOYMENT_ID="<deployment id>"
+export MY_SERVICE_INSTANCE_ID="<instance id>"
 ```
 
 ```sh

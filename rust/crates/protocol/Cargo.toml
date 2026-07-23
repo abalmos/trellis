@@ -15,6 +15,7 @@ base64.workspace = true
 ed25519-dalek.workspace = true
 jsonptr.workspace = true
 jsonschema.workspace = true
+nkeys.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_json_canonicalizer.workspace = true

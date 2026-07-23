@@ -40,15 +40,14 @@ const legacyAuthorityPatterns = [
 
 const requiredAuthorityTerms = [
   "deployment authority",
+  "desired authority",
   "materialized authority",
-  "authority update",
-  "authority migration",
   "reconciliation",
-  "contract proposal",
+  "authority proposals",
   "identity authority",
-  "identity grant",
-  "grant override",
-  "implementation offer",
+  "participant artifact",
+  "resource evidence",
+  "grantsetv1",
 ];
 
 Deno.test("deployment authority docs define the clean-break vocabulary", async () => {
@@ -73,8 +72,8 @@ Deno.test("auth API docs use deployment authority names", async () => {
       "Auth.DeploymentAuthority.AcceptUpdate",
       "Auth.DeploymentAuthority.AcceptMigration",
       "Auth.DeploymentAuthority.Reconcile",
-      "Auth.IdentityGrants.List",
-      "Auth.IdentityGrants.Revoke",
+      "Auth.IdentityAuthority.List",
+      "Auth.IdentityAuthority.Revoke",
     ]
   ) {
     assert(text.includes(rpc), `auth-api.md should document ${rpc}`);

@@ -38,7 +38,7 @@ Deno.test("service and SDK subpaths expose the canonical wrapper API", () => {
 });
 
 Deno.test("auth and device runtime subpaths retain depended-on helpers", () => {
-  assertEquals(typeof authSurface.startAuthRequest, "function");
+  assertEquals(typeof authSurface.signSessionProofV1, "function");
   assertEquals(typeof authBrowserSurface.completeSessionLogout, "function");
   assertEquals(typeof authBrowserSurface.fetchPortalFlowState, "function");
   assertEquals(typeof deviceDeno.checkDeviceActivation, "function");

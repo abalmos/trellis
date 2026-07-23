@@ -49,6 +49,7 @@ pub fn build_version_info(mode: RuntimeMode) -> VersionInfo {
 pub async fn run_http_server(
     config: &RuntimeConfig,
     mode: RuntimeMode,
+    application_router: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
     let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.http_port()));
@@ -59,12 +60,16 @@ pub async fn run_http_server(
     let router = Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(healthz))
-        .with_state(version);
+        .with_state(version)
+        .merge(application_router);
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown)
-        .await
-        .map_err(ServerError::Serve)
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
+    .map_err(ServerError::Serve)
 }
 
 /// Returns readiness metadata for runtime liveness probes.

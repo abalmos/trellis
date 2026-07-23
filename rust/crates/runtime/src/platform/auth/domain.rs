@@ -196,33 +196,8 @@ impl SessionRecord {
                 "expiresAt precedes createdAt".to_owned(),
             ));
         }
-        let bytes = URL_SAFE_NO_PAD
-            .decode(&value.session_public_key)
-            .map_err(|_| {
-                AuthorizationStateError::InvalidRecord(
-                    "sessionPublicKey is not unpadded base64url".to_owned(),
-                )
-            })?;
-        let raw: [u8; 32] = bytes.try_into().map_err(|_| {
-            AuthorizationStateError::InvalidRecord(
-                "sessionPublicKey must encode 32 bytes".to_owned(),
-            )
-        })?;
-        if URL_SAFE_NO_PAD.encode(raw) != value.session_public_key {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "sessionPublicKey is not canonical".to_owned(),
-            ));
-        }
-        let verifying_key = VerifyingKey::from_bytes(&raw).map_err(|_| {
-            AuthorizationStateError::InvalidRecord(
-                "sessionPublicKey is not a valid Ed25519 public key".to_owned(),
-            )
-        })?;
-        if verifying_key.is_weak() {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "sessionPublicKey is a weak Ed25519 public key".to_owned(),
-            ));
-        }
+        let session_key_id =
+            validate_ed25519_public_key("sessionPublicKey", &value.session_public_key)?;
         Ok(Self {
             session_id: value.session_id,
             principal_id: value.principal_id,
@@ -232,7 +207,7 @@ impl SessionRecord {
             participant_artifact_digest: value.participant_artifact_digest,
             participant_needs_digest: value.participant_needs_digest,
             session_public_key: value.session_public_key,
-            session_key_id: URL_SAFE_NO_PAD.encode(Sha256::digest(raw)),
+            session_key_id,
             inbox_prefix: value.inbox_prefix,
             state: SessionState::Active,
             created_at: value.created_at,
@@ -242,6 +217,32 @@ impl SessionRecord {
             version: 1,
         })
     }
+}
+
+pub(super) fn validate_ed25519_public_key(
+    field: &str,
+    value: &str,
+) -> Result<String, AuthorizationStateError> {
+    let bytes = URL_SAFE_NO_PAD.decode(value).map_err(|_| {
+        AuthorizationStateError::InvalidRecord(format!("{field} is not unpadded base64url"))
+    })?;
+    let raw: [u8; 32] = bytes.try_into().map_err(|_| {
+        AuthorizationStateError::InvalidRecord(format!("{field} must encode 32 bytes"))
+    })?;
+    if URL_SAFE_NO_PAD.encode(raw) != value {
+        return Err(AuthorizationStateError::InvalidRecord(format!(
+            "{field} is not canonical"
+        )));
+    }
+    let verifying_key = VerifyingKey::from_bytes(&raw).map_err(|_| {
+        AuthorizationStateError::InvalidRecord(format!("{field} is not a valid Ed25519 public key"))
+    })?;
+    if verifying_key.is_weak() {
+        return Err(AuthorizationStateError::InvalidRecord(format!(
+            "{field} is a weak Ed25519 public key"
+        )));
+    }
+    Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(raw)))
 }
 
 /// Exact participant artifact and API-artifact binding.
@@ -650,6 +651,12 @@ pub struct RuntimeInstanceRecord {
     pub principal_id: String,
     /// Current instance lifecycle state.
     pub state: RuntimeInstanceState,
+    /// Creation time in Unix milliseconds.
+    pub created_at: i64,
+    /// Last lifecycle update time in Unix milliseconds.
+    pub updated_at: i64,
+    /// Optimistic lifecycle version.
+    pub version: u64,
 }
 
 /// Session selection of deployment-owned runtime evidence.
@@ -668,6 +675,8 @@ pub struct SessionRuntimeBinding {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceState {
+    /// The device is awaiting administrative activation approval.
+    Pending,
     /// The device can currently authorize sessions.
     Active,
     /// The device was administratively disabled.
@@ -686,6 +695,12 @@ pub struct DeviceRecord {
     pub deployment_id: String,
     /// Current device lifecycle state.
     pub state: DeviceState,
+    /// Creation time in Unix milliseconds.
+    pub created_at: i64,
+    /// Last lifecycle update time in Unix milliseconds.
+    pub updated_at: i64,
+    /// Optimistic lifecycle version.
+    pub version: u64,
 }
 
 /// Durable device-delegation lifecycle state.
@@ -776,14 +791,59 @@ pub struct ResourceBindingEvidence {
     pub binding_id: String,
     /// Participant that owns the private resource.
     pub owner_participant_id: String,
-    /// Provider or storage identity, not an inferred bucket name.
-    pub provider_identity: String,
+    /// Exact typed physical provider identity.
+    pub provider_identity: ResourceProviderIdentity,
     /// Current binding state.
     pub state: ResourceBindingState,
     /// Materialization time in Unix milliseconds.
     pub materialized_at: i64,
     /// Safe binding error when unavailable.
     pub error: Option<String>,
+}
+
+/// Exact physical transport identity for one participant resource binding.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ResourceProviderIdentity {
+    /// NATS KV bucket backing a participant KV resource.
+    Kv {
+        /// Exact NATS KV bucket name.
+        bucket: String,
+    },
+    /// NATS object-store bucket backing a participant store resource.
+    Store {
+        /// Exact NATS object-store bucket name.
+        bucket: String,
+    },
+    /// NATS KV bucket backing participant-local state.
+    State {
+        /// Exact NATS KV bucket used by State.
+        bucket: String,
+    },
+    /// Jobs namespace, work stream, and exact queue subject prefixes.
+    JobQueue {
+        /// Exact Jobs namespace.
+        namespace: String,
+        /// Exact JetStream work-stream name.
+        work_stream: String,
+        /// Exact queue submission subject prefix.
+        publish_prefix: String,
+        /// Optional exact job-update subject prefix.
+        updates_prefix: Option<String>,
+        /// Exact worker delivery subject.
+        work_subject: String,
+        /// Exact durable worker consumer name.
+        consumer: String,
+    },
+    /// Exact JetStream stream and durable consumer identity.
+    EventConsumer {
+        /// Exact JetStream source stream.
+        stream: String,
+        /// Exact durable consumer name.
+        consumer: String,
+        /// Exact event subjects selected by the durable consumer.
+        filter_subjects: Vec<String>,
+    },
 }
 
 /// Service deployment and instance authorization evidence.
@@ -959,6 +1019,8 @@ pub struct IssuableAuthorizationState {
     pub instance_id: Option<String>,
     /// Exact effective permissions.
     pub grant_set: GrantSetV1,
+    /// Exact available physical resource bindings supporting the grant set.
+    pub resource_bindings: Vec<ResourceBindingEvidence>,
     /// Canonical platform capabilities.
     pub capabilities: Vec<String>,
     /// Session expiry bound in Unix milliseconds.

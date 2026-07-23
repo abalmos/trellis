@@ -213,7 +213,7 @@ export function createTransferFixture(
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();
@@ -251,6 +251,7 @@ export function createTransferFixture(
             store: "uploads",
             key: input.key,
             sessionKey: context.sessionKey,
+            inboxPrefix: context.inboxPrefix,
             expiresInMs: 60000,
           }).orThrow();
           return Result.ok(grant);

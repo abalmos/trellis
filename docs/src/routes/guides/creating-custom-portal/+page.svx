@@ -14,9 +14,10 @@ When a browser app starts a Trellis login with `POST /auth/requests`, Trellis cr
 
 For a normal user login, the portal usually shows the supported identity providers, starts the chosen provider flow, and then shows the approval screen so the user can allow the original app to access their account.
 
-That approval screen shows Trellis capabilities derived from the app contract.
-They are internal Trellis permissions, not OAuth scopes from the external login
-provider.
+That approval screen shows a server-owned consent view derived from the app's
+resolved participant and APIs. Required permission atoms are always included;
+optional dependency bundles are identified only by server-issued ids. They are
+Trellis authority, not OAuth scopes from the external login provider.
 
 Approval decisions belong to the Trellis user account and app identity. If the
 same account later signs in through another linked local or OIDC identity, Trellis
@@ -113,6 +114,7 @@ For a SvelteKit portal, the target shape is a page like `src/routes/login/+page.
   }
 
   async function approve(): Promise<void> {
+    // Pass only ids from portal.state.optionalBundles when the user selects them.
     followRedirect(await portal.approve());
   }
 
@@ -166,7 +168,13 @@ For a SvelteKit portal, the target shape is a page like `src/routes/login/+page.
 {/if}
 ```
 
-The helper shown above is the intended public shape. Under the hood it still uses the auth-owned flow endpoints and maps approve/deny actions to the canonical `approved: boolean` request body, but app authors should not need to rebuild those request details by hand.
+The helper shown above is the intended public shape. Immediately before a
+decision it reloads the flow, then submits only `approved`, the current
+`consentViewDigest`, selected server-issued optional bundle ids, and an
+idempotency key. It never sends grants, capabilities, expiry, resource atoms, or
+platform authority. `portal.approve()` selects no optional bundles;
+`portal.approve([bundleId])` may select ids exposed by the current
+`approval_required` state.
 
 `portalRedirectLocation(...)` centralizes auth-owned continuation handling. It
 returns redirect targets for `redirect`, `approval_denied.returnLocation`, and
@@ -174,9 +182,10 @@ restartable `expired.returnLocation` states. Custom portals should follow that
 location immediately and show an expiration message only when auth did not provide
 a return location.
 
-`portal.state.approval.capabilities` is the Trellis-side capability list that
-the app contract requested. A portal should present it as application access
-inside Trellis, not as provider-owned OAuth scopes.
+`portal.state.approval.capabilities` explains required Trellis-side authority.
+`portal.state.optionalBundles` contains separately selectable optional authority.
+A portal should present both as application access inside Trellis, not as
+provider-owned OAuth scopes. Unknown ids and stale consent digests fail closed.
 
 `portal.state.approval.contractDigest` is technical evidence for the reviewed
 contract body. Custom portals may show it in an advanced details view, but the
@@ -194,6 +203,11 @@ credentialless mode for arbitrary browser apps, but portal flow routes still
 validate the selected portal origin and use credentialed flow handling where the
 OAuth/browser-flow protocol requires it. Do not rely on a broad CORS setting to
 make an unregistered portal trusted.
+
+OIDC start also sets a state-specific `HttpOnly`, `SameSite=Lax` cookie. The
+callback requires that browser possession and rechecks the exact portal/provider
+policy revision before exchanging the code. A portal must navigate the browser
+through the provider URL; it must not proxy or replay callbacks.
 
 ## 4. Deploy the portal app
 
@@ -239,8 +253,8 @@ activation portal URL changes remain deployment-owned device routing metadata.
 
 If the portal app contract changes, treat it like any other browser app contract
 change: the portal presents the new contract during login, and Trellis resolves
-it through the user's identity authority and any deployment grant overrides. It
-does not receive service deployment authority.
+its compiled participant artifact through the user's identity authority. It does
+not receive service deployment authority.
 
 ## Disabling a custom portal
 

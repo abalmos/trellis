@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::sdk::core::types::TrellisBindingsGetResponseBinding;
+use crate::service::ServiceResourceBindings;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -82,7 +82,8 @@ pub struct JobsQueueBinding {
 }
 
 /// Normalized keyed concurrency policy for one jobs queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(JobKeyConcurrencyBinding), "`.")]
 pub struct JobKeyConcurrencyBinding {
     /// Ordered key template segments.
@@ -103,7 +104,8 @@ pub struct JobKeyConcurrencyBinding {
 }
 
 /// Stale active-key policy.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[doc = concat!("Public Trellis value set `", stringify!(JobKeyStalePolicy), "`.")]
 pub enum JobKeyStalePolicy {
     /// Mark stale jobs before acquiring their expired slot.
@@ -113,7 +115,8 @@ pub enum JobKeyStalePolicy {
 }
 
 /// Normalized queue-depth policy for one keyed jobs queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(JobQueueDepthBinding), "`.")]
 pub struct JobQueueDepthBinding {
     /// Maximum queued jobs allowed for one derived key.
@@ -125,7 +128,8 @@ pub struct JobQueueDepthBinding {
 }
 
 /// Queue-full policy for keyed jobs.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[doc = concat!("Public Trellis value set `", stringify!(JobQueueWhenFull), "`.")]
 pub enum JobQueueWhenFull {
     /// Reject the new job.
@@ -240,19 +244,43 @@ pub fn parse_jobs_binding(
     ))
 }
 
-impl TryFrom<&TrellisBindingsGetResponseBinding> for JobsRuntimeBinding {
+impl TryFrom<&ServiceResourceBindings> for JobsRuntimeBinding {
     type Error = JobsBindingError;
 
-    fn try_from(binding: &TrellisBindingsGetResponseBinding) -> Result<Self, Self::Error> {
+    fn try_from(binding: &ServiceResourceBindings) -> Result<Self, Self::Error> {
         let jobs = binding
-            .resources
             .jobs
             .as_ref()
             .ok_or(JobsBindingError::MissingJobsResource)?;
         let normalized = jobs
             .queues
             .iter()
-            .map(|(queue_type, queue)| normalize_core_queue_binding(queue_type, queue))
+            .map(|(queue_type, queue)| {
+                Ok(NormalizedJobsQueueBinding {
+                    queue_type: queue.queue_type.clone(),
+                    publish_prefix: queue.publish_prefix.clone(),
+                    updates_prefix: queue.updates_prefix.clone(),
+                    work_subject: queue.work_subject.clone(),
+                    consumer_name: queue.consumer_name.clone(),
+                    max_deliver: i64_to_u64(queue.max_deliver, queue_type, "maxDeliver")?,
+                    backoff_ms: queue
+                        .backoff_ms
+                        .iter()
+                        .copied()
+                        .map(|value| i64_to_u64(value, queue_type, "backoffMs"))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    ack_wait_ms: i64_to_u64(queue.ack_wait_ms, queue_type, "ackWaitMs")?,
+                    default_deadline_ms: queue
+                        .default_deadline_ms
+                        .map(|value| i64_to_u64(value, queue_type, "defaultDeadlineMs"))
+                        .transpose()?,
+                    update: queue.update.as_ref().map(|update| update.schema.clone()),
+                    progress: queue.progress,
+                    logs: queue.logs,
+                    key_concurrency: queue.key_concurrency.clone(),
+                    queue: queue.queue.clone(),
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let work_stream = jobs
@@ -339,50 +367,6 @@ fn normalize_json_queue_binding(
         logs: parsed.logs,
         key_concurrency: parsed.key_concurrency.map(job_key_concurrency_from_value),
         queue: parsed.queue.map(job_queue_depth_from_value),
-    })
-}
-
-fn normalize_core_queue_binding(
-    queue_type: &str,
-    queue: &crate::sdk::core::types::TrellisBindingsGetResponseBindingResourcesJobsQueuesValue,
-) -> Result<NormalizedJobsQueueBinding, JobsBindingError> {
-    let parsed_policy: JobsQueueBindingValue =
-        serde_json::from_value(serde_json::to_value(queue).map_err(|error| {
-            JobsBindingError::InvalidQueueBinding {
-                queue_type: queue_type.to_string(),
-                details: error.to_string(),
-            }
-        })?)
-        .map_err(|error| JobsBindingError::InvalidQueueBinding {
-            queue_type: queue_type.to_string(),
-            details: error.to_string(),
-        })?;
-
-    Ok(NormalizedJobsQueueBinding {
-        queue_type: queue.queue_type.clone(),
-        publish_prefix: queue.publish_prefix.clone(),
-        updates_prefix: parsed_policy.updates_prefix,
-        work_subject: queue.work_subject.clone(),
-        consumer_name: queue.consumer_name.clone(),
-        max_deliver: i64_to_u64(queue.max_deliver, queue_type, "maxDeliver")?,
-        backoff_ms: queue
-            .backoff_ms
-            .iter()
-            .copied()
-            .map(|value| i64_to_u64(value, queue_type, "backoffMs"))
-            .collect::<Result<Vec<_>, _>>()?,
-        ack_wait_ms: i64_to_u64(queue.ack_wait_ms, queue_type, "ackWaitMs")?,
-        default_deadline_ms: queue
-            .default_deadline_ms
-            .map(|value| i64_to_u64(value, queue_type, "defaultDeadlineMs"))
-            .transpose()?,
-        update: parsed_policy.update.map(|update| update.schema),
-        progress: queue.progress,
-        logs: queue.logs,
-        key_concurrency: parsed_policy
-            .key_concurrency
-            .map(job_key_concurrency_from_value),
-        queue: parsed_policy.queue.map(job_queue_depth_from_value),
     })
 }
 

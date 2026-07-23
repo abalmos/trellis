@@ -403,49 +403,36 @@ Recommended shared response shape:
 type DeviceConnectInfo = {
   instanceId: string;
   deploymentId: string;
-  contractId: string;
-  contractDigest: string;
-  transports: {
-    native?: {
-      natsServers: string[];
-    };
-    websocket?: {
-      natsServers: string[];
-    };
+  participant: {
+    id: string;
+    artifactDigest: string;
+    needsDigest: string;
   };
-  transport: {
-    sentinel: {
-      jwt: string;
-      seed: string;
-    };
+  session: SessionRecord;
+  nats: {
+    jwt: string;
+    servers: string[];
   };
-  auth: {
-    mode: "device_identity";
-    authority: "admin_reviewed" | "user_delegated";
-    iatSkewSeconds: number;
-  };
+  serverNow: number;
 };
 ```
 
 Rules:
 
-- Trellis returns `natsServers` and sentinel credentials from deployment state
-- connect info is served by `POST /auth/devices/connect-info` and the matching
-  `Auth.Devices.ConnectInfo.Get` RPC wrapper, not by bootstrap-route state
-  cached on the device
-- devices should refresh connect info on startup rather than treating cached
-  transport data as a permanent source of truth
-- `auth.authority` distinguishes admin/review-approved setup authority from
-  user-delegated authority added by activation
-- reboot-safe storage should keep the root secret, not connect info, sentinel
-  credentials, or hard-coded NATS topology; any Deno activation-state
-  persistence stays internal to the Deno activation helper
+- `POST /bootstrap/device` is the single bootstrap and reconnect boundary; the
+  retired `/auth/devices/connect-info` preflight does not exist
+- Trellis returns current endpoints, exact participant binding, effective
+  grants, resource evidence, session metadata, and a deny-all JWT bound to the
+  device's session NKey
+- a pending activation returns pending review state and no usable credential
+- reboot-safe storage keeps the device identity seed and durable activation
+  identifiers, not transport topology or reusable shared credentials
 
 ### 11) Runtime auth presents a contract
 
-Runtime auth happens after connect-info returns `ready`. Device runtime is gated
-by registration, lifecycle state, and a presented contract proposal whose
-requested needs fit enabled device deployment authority and have converged into
+Runtime auth happens after bootstrap returns `ready`. Device runtime is gated by
+registration, lifecycle state, and a presented contract proposal whose requested
+needs fit enabled device deployment authority and have converged into
 materialized authority. Activation is the user-delegated authority path; admin
 review can grant setup authority, but neither path replaces the runtime
 authority check.

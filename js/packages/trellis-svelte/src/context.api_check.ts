@@ -33,6 +33,11 @@ const testContract = defineAppContract(
 
 const app = createTrellisApp({
   contract: testContract,
+  participant: {
+    id: testContract.CONTRACT_ID,
+    artifactDigest: testContract.CONTRACT_DIGEST,
+    needsDigest: testContract.CONTRACT_DIGEST,
+  },
   trellisUrl: "https://trellis.example",
 });
 const providerProps: Omit<

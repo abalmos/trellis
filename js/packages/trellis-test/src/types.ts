@@ -23,7 +23,10 @@ export type TrellisTestContractLike = {
 } & ({ readonly __brand?: never });
 
 /** Authority plan classifications the test runtime may approve automatically. */
-export type TrellisTestAuthorityPlanClassification = "update" | "migration";
+export type TrellisTestAuthorityPlanClassification =
+  | "initial"
+  | "update"
+  | "migration";
 
 /** Polling options for `waitFor` and runtime readiness helpers. */
 export type WaitForOptions = {
@@ -109,12 +112,20 @@ export type TrellisTestRuntimeStartOptions = {
 export type TrellisTestServiceKey = {
   seed: string;
   sessionKey: string;
+  deploymentId: string;
+  instanceId: string;
+  participantId: string;
+  participantArtifactDigest: string;
+  participantNeedsDigest: string;
 };
 
 /** Session-key material returned for a registered app/client participant. */
 export type TrellisTestClientKey = {
   seed: string;
   sessionKey: string;
+  participantId: string;
+  participantArtifactDigest: string;
+  participantNeedsDigest: string;
 };
 
 /** Authentication options for connecting a test app/client participant. */
@@ -129,6 +140,10 @@ export type TrellisTestClientAuth = {
 export type TrellisTestContractApproval = {
   planId: string;
   classification: TrellisTestAuthorityPlanClassification;
+  participantId: string;
+  participantDigest: string;
+  participantNeedsDigest: string;
+  deploymentId: string;
 };
 
 /** Contract value accepted by the Trellis test runtime. */

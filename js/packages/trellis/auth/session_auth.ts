@@ -1,4 +1,7 @@
-import { type Authenticator } from "@nats-io/nats-core";
+import { type Authenticator, jwtAuthenticator } from "@nats-io/nats-core";
+import { sha256 as sha256Sync } from "@noble/hashes/sha256";
+import { Codec } from "@nats-io/nkeys/lib/codec.js";
+import { fromSeed, Prefix } from "@nats-io/nkeys";
 import { ulid } from "ulid";
 
 import {
@@ -17,14 +20,21 @@ import {
   utf8,
 } from "./utils.ts";
 import type { NatsAuthTokenV1 } from "./types.ts";
+import {
+  type SessionProofInputV1,
+  type SessionProofV1,
+  signSessionProofV1,
+  signSessionProofV1Sync,
+} from "./session_proof.ts";
 
 export type NatsConnectOptions = {
-  authenticator: Authenticator;
+  authenticator: Authenticator | Authenticator[];
   inboxPrefix: string;
 };
 
 export type TrellisAuth = {
   sessionKey: string; // base64url raw public key
+  sessionNkey: string;
   sign: (data: Uint8Array) => Promise<Uint8Array>;
   currentIat: () => number;
   setServerClockOffsetMs: (clockOffsetMs: number) => void;
@@ -47,8 +57,9 @@ export type TrellisAuth = {
     requestId?: string,
     iat?: number,
   ) => Promise<string>;
+  signSessionProof: (input: SessionProofInputV1) => Promise<SessionProofV1>;
   natsConnectOptions: (
-    opts: { contractDigest: string },
+    opts: { sessionId: string; participantDigest: string; jwt: string },
   ) => Promise<NatsConnectOptions>;
 };
 
@@ -70,6 +81,8 @@ export async function createAuth(
     opts.sessionKeySeed,
   );
   const sessionKey = publicKeyBase64urlFromSeed(seed);
+  const encodedSeed = Codec.encodeSeed(Prefix.User, seed);
+  const sessionNkey = fromSeed(encodedSeed).getPublicKey();
   let serverClockOffsetMs = 0;
 
   const sign = async (data: Uint8Array): Promise<Uint8Array> => {
@@ -132,6 +145,7 @@ export async function createAuth(
 
   return {
     sessionKey,
+    sessionNkey,
     sign,
     currentIat,
     setServerClockOffsetMs: (clockOffsetMs) => {
@@ -152,16 +166,46 @@ export async function createAuth(
         iat: iat ?? currentIat(),
         requestId,
       }),
+    signSessionProof: (input) =>
+      signSessionProofV1(input, privateKey, sessionKey),
     natsConnectOptions: async (options) => {
+      const nkey = fromSeed(encodedSeed);
+      const sessionKeyId = base64urlEncode(
+        sha256Sync(base64urlDecode(sessionKey)),
+      );
       return {
-        authenticator: () => {
-          const authToken = buildServiceNatsAuthToken(
-            currentIat(),
-            options.contractDigest,
-          );
-          return { auth_token: JSON.stringify(authToken) };
-        },
-        inboxPrefix: `_INBOX.${sessionKey.slice(0, 16)}`,
+        authenticator: [
+          jwtAuthenticator(options.jwt, encodedSeed),
+          (nonce) => {
+            if (!nonce) throw new Error("NATS server nonce is required");
+            const issuedAt = Math.trunc(
+              Date.now() + serverClockOffsetMs,
+            );
+            const requestId = ulid();
+            const input = {
+              purpose: "natsConnect" as const,
+              requestId,
+              issuedAt,
+              sessionId: options.sessionId,
+              sessionKeyId,
+              sessionPublicKey: sessionKey,
+              sessionNkey,
+              participantDigest: options.participantDigest,
+              nonce,
+            };
+            return {
+              auth_token: JSON.stringify({
+                format: "trellis.nats-connect-token.v1",
+                requestId,
+                issuedAt,
+                sessionId: options.sessionId,
+                participantDigest: options.participantDigest,
+                proof: signSessionProofV1Sync(input, seed, sessionKey),
+              }),
+            };
+          },
+        ],
+        inboxPrefix: `_INBOX.${options.sessionId}`,
       };
     },
   };

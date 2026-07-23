@@ -59,7 +59,6 @@ fn runtime_config() -> RuntimeConfig {
                 auth_creds_path: Some(PathBuf::from("auth.creds")),
                 trellis_creds_path: Some(PathBuf::from("trellis.creds")),
                 system_creds_path: Some(PathBuf::from("system.creds")),
-                sentinel_creds_path: Some(PathBuf::from("sentinel.creds")),
             }),
             auth_callout: Some(crate::NatsAuthCalloutConfig {
                 issuer_signing_seed_file: Some(PathBuf::from("issuer.seed")),
@@ -172,6 +171,147 @@ fn sqlite_platform_store_upgrades_current_marker_schema_and_reruns_safely(
     Ok(())
 }
 
+#[tokio::test]
+async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::platform::auth::{
+        DeploymentAuthorityRepository, EvidenceRepository, SqliteAuthorizationStore,
+    };
+
+    let temp_dir = tempfile::tempdir()?;
+    let path = temp_dir.path().join("platform-m7-upgrade.sqlite");
+    let mut connection = rusqlite::Connection::open(&path)?;
+    let accepted_m7_migrations = [
+        refinery::Migration::unapplied(
+            "V1000__platform_init.sql",
+            include_str!("sqlite/platform/V1000__platform_init.sql"),
+        )?,
+        refinery::Migration::unapplied(
+            "V1001__authorization_state.sql",
+            include_str!("sqlite/platform/V1001__authorization_state.sql"),
+        )?,
+    ];
+    refinery::Runner::new(&accepted_m7_migrations).run(&mut connection)?;
+    connection.execute_batch(include_str!(
+        "sqlite/platform/fixtures/accepted_m7_authorization_state.sql"
+    ))?;
+    drop(connection);
+
+    let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
+    store.migrate()?;
+    store.migrate()?;
+
+    assert_migration_order(&path, &[1000, 1001, 1002])?;
+    let connection = rusqlite::Connection::open(&path)?;
+    connection.pragma_update(None, "foreign_keys", true)?;
+    let foreign_key_errors = connection
+        .prepare("PRAGMA foreign_key_check")?
+        .query_map([], |_| Ok(()))?
+        .collect::<rusqlite::Result<Vec<()>>>()?;
+    assert!(foreign_key_errors.is_empty());
+    for (table, expected) in [
+        ("auth_sessions", 1_i64),
+        ("auth_identity_authorities", 1),
+        ("auth_deployment_authorities", 1),
+        ("auth_instances", 1),
+        ("auth_devices", 1),
+        ("auth_device_delegations", 1),
+        ("auth_dependency_evidence", 1),
+        ("auth_resource_binding_evidence", 1),
+        ("auth_materialized_authorities", 1),
+        ("auth_materialized_dependencies", 1),
+        ("auth_materialized_resource_bindings", 1),
+        ("auth_transition_outbox", 1),
+    ] {
+        let count: i64 =
+            connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(count, expected, "row loss in {table}");
+    }
+    let instance_metadata: (i64, i64, i64) = connection.query_row(
+        "SELECT created_at, updated_at, version FROM auth_instances WHERE instance_id = 'inst_m7'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    assert_eq!(instance_metadata, (0, 0, 1));
+    let device_metadata: (String, i64, i64, i64) = connection.query_row(
+        "SELECT state, created_at, updated_at, version FROM auth_devices WHERE principal_id = 'dev_m7'",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+    )?;
+    assert_eq!(device_metadata, ("active".to_owned(), 0, 0, 1));
+    let expected_authority_id = "dau_v1_6:dep_m7participant-m7";
+    for table in [
+        "auth_deployment_authorities",
+        "auth_dependency_evidence",
+        "auth_resource_binding_evidence",
+        "auth_materialized_authorities",
+    ] {
+        let predicate = if table == "auth_deployment_authorities" {
+            ""
+        } else {
+            " WHERE authority_kind = 'deployment'"
+        };
+        let authority_id: String = connection.query_row(
+            &format!("SELECT authority_id FROM {table}{predicate}"),
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            authority_id, expected_authority_id,
+            "lineage drift in {table}"
+        );
+    }
+    connection.execute(
+        "UPDATE auth_devices SET state = 'pending' WHERE principal_id = 'dev_m7'",
+        [],
+    )?;
+    assert!(connection
+        .execute(
+            "UPDATE auth_devices SET state = 'invalid' WHERE principal_id = 'dev_m7'",
+            [],
+        )
+        .is_err());
+    connection.execute(
+        "UPDATE auth_devices SET state = 'active' WHERE principal_id = 'dev_m7'",
+        [],
+    )?;
+    drop(connection);
+
+    let repository = SqliteAuthorizationStore::open_path(&path)?;
+    assert_eq!(
+        repository
+            .get_deployment_authority("dep_m7", "participant-m7")
+            .await?
+            .expect("accepted M7 deployment authority must survive")
+            .authority_id,
+        expected_authority_id,
+    );
+    let instance = repository
+        .get_runtime_instance("inst_m7")
+        .await?
+        .expect("accepted M7 instance must survive");
+    assert_eq!(instance.version, 1);
+    let mut device = repository
+        .get_device("dev_m7", "dep_m7")
+        .await?
+        .expect("accepted M7 device must survive");
+    device.updated_at = 1001;
+    device.version = 2;
+    repository.put_device(device).await?;
+    assert_eq!(
+        repository
+            .get_device("dev_m7", "dep_m7")
+            .await?
+            .expect("upgraded device must remain writable")
+            .version,
+        2
+    );
+
+    Ok(())
+}
+
 #[test]
 fn sqlite_jobs_projection_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
@@ -260,7 +400,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&path, "trellis_health_projection_store_marker")?;
     assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&path, &[1000, 1001, 2000, 3000, 3001, 4000])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 2000, 3000, 3001, 4000])?;
     Ok(())
 }
 

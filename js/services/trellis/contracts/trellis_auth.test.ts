@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { defineAppContract } from "@qlever-llc/trellis";
 import { getContractRuntime } from "@qlever-llc/trellis/internal/contract-runtime";
 
-import { trellisAuth } from "./trellis_auth.ts";
+import { trellisAuth } from "../auth/reference/legacy_contract.ts";
 
 const app = defineAppContract(() => ({
   id: "test.portal@v1",

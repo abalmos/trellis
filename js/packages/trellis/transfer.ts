@@ -193,7 +193,17 @@ function deserializeTransferError(msg: Msg, operation: string): TransferError {
     return new TransferError({
       operation,
       context: value.context,
-      cause: value.message ? new Error(value.message) : undefined,
+      cause: typeof value.context?.causeMessage === "string"
+        ? new Error(value.context.causeMessage)
+        : typeof value.context?.reason === "string"
+        ? new Error(
+          `${value.message ?? "Transfer failed"}: ${
+            JSON.stringify(value.context)
+          }`,
+        )
+        : value.message
+        ? new Error(value.message)
+        : undefined,
     });
   } catch (cause) {
     return new TransferError({ operation, cause });
@@ -520,15 +530,18 @@ export class SendTransferHandle extends BaseTransferHandle {
 
 export class ReceiveTransferHandle extends BaseTransferHandle {
   readonly #grant: ReceiveTransferGrant;
+  readonly #inboxPrefix: string;
 
   constructor(
     nc: NatsConnection,
     auth: TrellisTransferAuth,
     timeoutMs: number,
     grant: ReceiveTransferGrant,
+    inboxPrefix = "_INBOX",
   ) {
     super(nc, auth, timeoutMs);
     this.#grant = grant;
+    this.#inboxPrefix = inboxPrefix;
   }
 
   stream(): AsyncResult<ReadableStream<Uint8Array>, TransferError> {
@@ -543,9 +556,7 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
           );
         }
 
-        const inbox = createInbox(
-          `_INBOX.${this.auth.sessionKey.slice(0, 16)}`,
-        );
+        const inbox = createInbox(this.#inboxPrefix);
         const sub = this.nc.subscribe(inbox);
         const payload = new Uint8Array();
         const headers = await this.buildHeaders(this.#grant.subject, payload);
@@ -590,28 +601,32 @@ export function createTransferHandle(
   auth: TrellisTransferAuth,
   timeoutMs: number,
   grant: SendTransferGrant,
+  inboxPrefix?: string,
 ): SendTransferHandle;
 export function createTransferHandle(
   nc: NatsConnection,
   auth: TrellisTransferAuth,
   timeoutMs: number,
   grant: ReceiveTransferGrant,
+  inboxPrefix?: string,
 ): ReceiveTransferHandle;
 export function createTransferHandle(
   nc: NatsConnection,
   auth: TrellisTransferAuth,
   timeoutMs: number,
   grant: TransferGrant,
+  inboxPrefix?: string,
 ): TransferHandle;
 export function createTransferHandle(
   nc: NatsConnection,
   auth: TrellisTransferAuth,
   timeoutMs: number,
   grant: TransferGrant,
+  inboxPrefix = "_INBOX",
 ): TransferHandle {
   return grant.direction === "send"
     ? new SendTransferHandle(nc, auth, timeoutMs, grant)
-    : new ReceiveTransferHandle(nc, auth, timeoutMs, grant);
+    : new ReceiveTransferHandle(nc, auth, timeoutMs, grant, inboxPrefix);
 }
 
 export async function verifyTransferMessage(args: {

@@ -1,10 +1,16 @@
 import {
+  base64urlDecode,
   base64urlEncode,
   canonicalizeJsonValue,
   sha256,
   toArrayBuffer,
   utf8,
 } from "../utils.ts";
+import {
+  importEd25519PrivateKeyFromSeedBase64url,
+  importEd25519PublicKeyFromBase64url,
+  publicKeyBase64urlFromSeed,
+} from "../keys.ts";
 import { createProof } from "../proof.ts";
 import {
   buildLogoutSignaturePayload,
@@ -16,12 +22,15 @@ import {
   hasKeyPair,
   loadKeyPair,
   storeKeyPair,
+  storeSessionId,
 } from "./storage.ts";
 
 export type SessionKeyHandle = {
   privateKey: CryptoKey;
   publicKey: CryptoKey;
   publicKeyRaw: Uint8Array;
+  seed: Uint8Array;
+  sessionId?: string;
   sessionKey: string;
   persistence?: SessionKeyPersistenceMode;
   expiresAt?: number;
@@ -52,21 +61,21 @@ export async function generateSessionKey(
 ): Promise<SessionKeyHandle> {
   const persistence = options.persistence ?? "remembered";
   const expiresAt = resolveExpiresAt(options);
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
-  const sessionKey = base64urlEncode(publicKeyRaw);
+  const seed = crypto.getRandomValues(new Uint8Array(32));
+  const sessionKey = publicKeyBase64urlFromSeed(seed);
+  const publicKeyRaw = base64urlDecode(sessionKey);
+  const keyPair = {
+    privateKey: await importEd25519PrivateKeyFromSeedBase64url(
+      base64urlEncode(seed),
+    ),
+    publicKey: await importEd25519PublicKeyFromBase64url(sessionKey),
+  };
 
   const handle: SessionKeyHandle = {
     privateKey: keyPair.privateKey,
     publicKey: keyPair.publicKey,
     publicKeyRaw,
+    seed,
     sessionKey,
     persistence,
     ...(expiresAt === undefined ? {} : { expiresAt }),
@@ -75,7 +84,7 @@ export async function generateSessionKey(
   if (persistence === "temporary") {
     temporarySessionKey = handle;
   } else {
-    await storeKeyPair(keyPair, publicKeyRaw, { expiresAt });
+    await storeKeyPair(keyPair, publicKeyRaw, seed, { expiresAt });
   }
 
   return handle;
@@ -92,10 +101,21 @@ export async function loadSessionKey(
     privateKey: stored.privateKey,
     publicKey: stored.publicKey,
     publicKeyRaw: stored.publicKeyRaw,
+    seed: stored.seed,
+    ...(stored.sessionId === undefined ? {} : { sessionId: stored.sessionId }),
     sessionKey: base64urlEncode(stored.publicKeyRaw),
     persistence: "remembered",
     ...(stored.expiresAt === undefined ? {} : { expiresAt: stored.expiresAt }),
   };
+}
+
+/** Persists the session ID bound to the current browser key. */
+export async function setSessionId(
+  handle: SessionKeyHandle,
+  sessionId: string,
+): Promise<void> {
+  handle.sessionId = sessionId;
+  if (handle.persistence !== "temporary") await storeSessionId(sessionId);
 }
 
 export async function getOrCreateSessionKey(

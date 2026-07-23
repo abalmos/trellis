@@ -89,7 +89,7 @@ export function createFeedsFixture(caseId: string) {
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: caseScopedName("feeds-fixture-service", caseId),
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();

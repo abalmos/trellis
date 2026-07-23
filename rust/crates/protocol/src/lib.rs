@@ -254,10 +254,10 @@
 //! apis.insert(health.id().to_owned(), health);
 //! let resolved = resolve_participant_v1(&participant, &apis)?;
 //!
-//! assert_eq!(resolved.needs().required().grant_set().permissions().len(), 2);
+//! assert_eq!(resolved.needs().required().grant_set().permissions().len(), 5);
 //! assert_eq!(resolved.needs().optional().apis().len(), 1);
 //! assert_eq!(resolved.proposal().required().capabilities().len(), 1);
-//! assert_eq!(resolved.proposal().required().uncovered_permissions().len(), 1);
+//! assert_eq!(resolved.proposal().required().uncovered_permissions().len(), 4);
 //! assert_eq!(resolved.needs().provided_apis().len(), 1);
 //! assert_eq!(resolved.needs().digest()?.len(), 43);
 //! assert_eq!(resolved.proposal().fingerprint()?.len(), 43);
@@ -273,6 +273,7 @@ mod participant;
 mod permissions;
 mod resolution;
 mod schema_profile;
+mod session_proof;
 mod subjects;
 
 pub use api::{
@@ -302,7 +303,9 @@ pub use authorization::{
     AUTHORIZATION_TRUST_ROOT_FORMAT_V1,
 };
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
-pub use error::{AuthorizationErrorCodeV1, ProtocolError, ResolutionErrorCodeV1};
+pub use error::{
+    AuthorizationErrorCodeV1, ProtocolError, ResolutionErrorCodeV1, SessionProofErrorCodeV1,
+};
 pub use participant::{
     lint_participant_v1_authoring, parse_participant_v1, ParticipantArtifactV1, ParticipantKindV1,
     PARTICIPANT_AUTHORING_SCHEMA_V1_JSON, PARTICIPANT_FORMAT_V1,
@@ -318,6 +321,12 @@ pub use resolution::{
     ProvidedApiNeedV1, ResolvedImplementedApiV1, ResolvedParticipantV1, ResolvedProvidedApiV1,
     ResolvedProvidedOperationV1, ResolvedUsedApiV1, AUTHORITY_PROPOSAL_FORMAT_V1,
     PARTICIPANT_NEEDS_FORMAT_V1,
+};
+pub use session_proof::{
+    parse_session_proof_v1, session_proof_request_digest_v1, session_proof_signing_digest_v1,
+    sign_session_proof_v1, verify_session_proof_v1, SessionProofInputV1, SessionProofPolicyV1,
+    SessionProofPurposeV1, SessionProofReplayKeyV1, SessionProofV1, VerifiedSessionProofV1,
+    SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,

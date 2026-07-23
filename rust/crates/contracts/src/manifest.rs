@@ -296,6 +296,93 @@ pub fn load_manifest(path: impl AsRef<Path>) -> Result<LoadedManifest, Contracts
     })
 }
 
+/// Load a contract manifest or lower a protocol-owned API artifact into the
+/// existing SDK renderer model.
+///
+/// API inputs retain their normalized `trellis.api.v1` JSON, canonical form,
+/// and API digest. The lowering only supplies derived subjects and legacy-named
+/// Rust renderer structs in memory; it does not emit or accept a
+/// `trellis.contract.v1` compatibility artifact.
+pub fn load_sdk_source(path: impl AsRef<Path>) -> Result<LoadedManifest, ContractsError> {
+    let path = path.as_ref();
+    let raw_value = load_json_value(path)?;
+    if raw_value.get("format").and_then(Value::as_str) != Some("trellis.api.v1") {
+        return load_manifest(path);
+    }
+
+    trellis_protocol::lint_api_v1_authoring(&raw_value)?;
+    let api = trellis_protocol::parse_api_v1(&raw_value)?;
+    let value = api.normalized_value()?;
+    let canonical = api.canonical_json()?;
+    let digest = api.digest()?;
+    let subjects = api.derived_subjects()?;
+    let mut renderer_value = value.clone();
+    let renderer = renderer_value
+        .as_object_mut()
+        .expect("normalized API artifact is an object");
+    renderer.insert("kind".to_owned(), Value::String("service".to_owned()));
+    renderer.remove("capabilities");
+    renderer.remove("consent");
+
+    for (section, derived) in [
+        ("rpc", &subjects.rpc),
+        ("operations", &subjects.operations),
+        ("feeds", &subjects.feeds),
+    ] {
+        if let Some(definitions) = renderer.get_mut(section).and_then(Value::as_object_mut) {
+            for (name, definition) in definitions {
+                if let (Some(subject), Some(definition)) =
+                    (derived.get(name), definition.as_object_mut())
+                {
+                    definition.insert("subject".to_owned(), Value::String(subject.clone()));
+                }
+                lower_error_references(definition);
+            }
+        }
+    }
+    if let Some(definitions) = renderer.get_mut("events").and_then(Value::as_object_mut) {
+        for (name, definition) in definitions {
+            if let (Some(subject), Some(definition)) =
+                (subjects.events.get(name), definition.as_object_mut())
+            {
+                definition.insert("subject".to_owned(), Value::String(subject.base.clone()));
+            }
+        }
+    }
+    if let Some(errors) = renderer.get_mut("errors").and_then(Value::as_object_mut) {
+        for (name, definition) in errors {
+            if let Some(definition) = definition.as_object_mut() {
+                definition.insert("type".to_owned(), Value::String(name.clone()));
+                definition.remove("docs");
+            }
+        }
+    }
+
+    let manifest = serde_json::from_value(renderer_value)?;
+    Ok(LoadedManifest {
+        path: path.to_path_buf(),
+        value,
+        manifest,
+        canonical,
+        digest,
+    })
+}
+
+fn lower_error_references(definition: &mut Value) {
+    let Some(errors) = definition
+        .as_object_mut()
+        .and_then(|definition| definition.get_mut("errors"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for error in errors {
+        if let Some(error_type) = error.as_str() {
+            *error = serde_json::json!({ "type": error_type });
+        }
+    }
+}
+
 fn object(value: Option<&Value>) -> Option<&serde_json::Map<String, Value>> {
     value.and_then(Value::as_object)
 }

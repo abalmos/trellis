@@ -9,7 +9,9 @@ use oxc_allocator::Allocator;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use serde_json::Value;
-use trellis_contracts::{load_manifest, LoadedManifest};
+#[cfg(test)]
+use trellis_contracts::load_manifest;
+use trellis_contracts::{load_sdk_source, LoadedManifest};
 
 /// Errors returned while generating a TypeScript SDK package.
 #[derive(thiserror::Error, Debug)]
@@ -112,7 +114,7 @@ pub fn generate_ts_sdk(opts: &GenerateTsSdkOpts) -> Result<(), CodegenTsError> {
 pub fn collect_ts_sdk_sources(
     opts: &GenerateTsSdkOpts,
 ) -> Result<Vec<GeneratedTsSource>, CodegenTsError> {
-    let loaded = load_manifest(&opts.manifest_path)?;
+    let loaded = load_sdk_source(&opts.manifest_path)?;
     validate_public_export_names(&loaded)?;
     Ok(vec![
         GeneratedTsSource {
@@ -215,6 +217,15 @@ fn deno_json(
 fn render_manifest_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> String {
     let source_reference =
         manifest_source_reference(&opts.manifest_path, opts.runtime_deps.repo_root.as_deref());
+    if loaded.value["format"] == "trellis.api.v1" {
+        return format!(
+            "// Generated from {}\n\nexport const API_ID = {} as const;\nexport const API_DIGEST = {} as const;\nexport const API = {} as const;\n",
+            escape_js_string(&source_reference),
+            js_string(&loaded.manifest.id),
+            js_string(&loaded.digest),
+            loaded.canonical,
+        );
+    }
     let trellis_contracts_import = trellis_contracts_import(opts);
     let lines = [
         format!("// Generated from {}", escape_js_string(&source_reference)),
@@ -409,10 +420,13 @@ fn render_wire_types_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> St
             .schema
             .as_ref()
             .map(|schema| {
-                schema_to_ts_with_aliases(
-                    resolve_schema_ref(loaded, &schema.schema),
-                    &schema_type_aliases,
-                    None,
+                format!(
+                    "SerializableErrorData & ({})",
+                    schema_to_ts_with_aliases(
+                        resolve_schema_ref(loaded, &schema.schema),
+                        &schema_type_aliases,
+                        None,
+                    )
                 )
             })
             .unwrap_or_else(|| "SerializableErrorData".to_string());
@@ -495,7 +509,12 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         .map(|export| (export.key.as_str(), export.const_name.as_str()))
         .collect::<BTreeMap<_, _>>();
     let mut api_schema_imports = BTreeSet::new();
-    for rpc in loaded.manifest.rpc.values() {
+    for rpc in loaded
+        .manifest
+        .rpc
+        .values()
+        .filter(|rpc| is_public_rpc(rpc))
+    {
         api_schema_imports.insert(rpc.input.schema.as_str());
         api_schema_imports.insert(rpc.output.schema.as_str());
     }
@@ -527,6 +546,21 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         }
     }
     let uses_types_as_value = !loaded.manifest.errors.is_empty();
+    let owner_id = if loaded.value["format"] == "trellis.api.v1" {
+        "API_ID"
+    } else {
+        "CONTRACT_ID"
+    };
+    let source_export = if loaded.value["format"] == "trellis.api.v1" {
+        "API"
+    } else {
+        "CONTRACT"
+    };
+    let digest_export = if loaded.value["format"] == "trellis.api.v1" {
+        "API_DIGEST"
+    } else {
+        "CONTRACT_DIGEST"
+    };
     let mut lines = vec![
         format!("// Generated from {}", escape_js_string(&source_reference)),
         format!(
@@ -538,9 +572,15 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         } else {
             "import type * as Types from \"./types.ts\";".to_string()
         },
+        format!(
+            "import {{ {source_export} as ACTION_ARTIFACT, {digest_export} as ACTION_DIGEST }} from \"./manifest.ts\";"
+        ),
+        String::new(),
+        "const ACTION_SOURCE = { artifact: ACTION_ARTIFACT, digest: ACTION_DIGEST } as const;"
+            .to_string(),
         String::new(),
         format!(
-            "const CONTRACT_ID = {} as const;",
+            "const {owner_id} = {} as const;",
             js_string(&loaded.manifest.id)
         ),
     ];
@@ -567,7 +607,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         }
         lines.push(String::new());
         lines.push(format!(
-            "export const {base} = rpcAction(CONTRACT_ID, {}, {{",
+            "export const {base} = rpcAction({owner_id}, {}, {{",
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&rpc.subject)));
@@ -651,14 +691,14 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             }
             lines.push("  ] as const,".to_string());
         }
-        lines.push(format!("}}, {});", js_string(&base)));
+        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
     }
 
     for (key, operation) in &loaded.manifest.operations {
         let base = key_to_pascal(key);
         lines.push(String::new());
         lines.push(format!(
-            "export const {base} = operationAction(CONTRACT_ID, {}, {{",
+            "export const {base} = operationAction({owner_id}, {}, {{",
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&operation.subject)));
@@ -825,14 +865,14 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
                 if cancelable { "true" } else { "false" }
             ));
         }
-        lines.push(format!("}}, {});", js_string(&base)));
+        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
     }
 
     for (key, event) in &loaded.manifest.events {
         let base = key_to_pascal(key);
         lines.push(String::new());
         lines.push(format!(
-            "export const {base} = eventActions(CONTRACT_ID, {}, {{",
+            "export const {base} = eventActions({owner_id}, {}, {{",
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&event.subject)));
@@ -873,7 +913,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             .as_ref()
             .is_some_and(|capabilities| capabilities.publish.is_some());
         lines.push(format!(
-            "}}, {}, {});",
+            "}}, {}, {}, ACTION_SOURCE);",
             js_string(&base),
             if delegated_publish { "true" } else { "false" }
         ));
@@ -883,7 +923,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         let base = key_to_pascal(key);
         lines.push(String::new());
         lines.push(format!(
-            "export const {base} = feedAction(CONTRACT_ID, {}, {{",
+            "export const {base} = feedAction({owner_id}, {}, {{",
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&feed.subject)));
@@ -908,7 +948,7 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             "  subscribeCapabilities: {} as const,",
             serde_json::to_string(&subscribe).unwrap()
         ));
-        lines.push(format!("}}, {});", js_string(&base)));
+        lines.push(format!("}}, {}, ACTION_SOURCE);", js_string(&base)));
     }
     lines.push(String::new());
 
@@ -1586,7 +1626,12 @@ fn public_schema_type_aliases(
 fn public_schema_keys(loaded: &LoadedManifest) -> BTreeSet<String> {
     let mut keys = exported_schema_keys(loaded);
 
-    for rpc in loaded.manifest.rpc.values() {
+    for rpc in loaded
+        .manifest
+        .rpc
+        .values()
+        .filter(|rpc| is_public_rpc(rpc))
+    {
         keys.insert(rpc.input.schema.clone());
         keys.insert(rpc.output.schema.clone());
     }
@@ -1705,6 +1750,39 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("trellis-codegen-ts-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn protocol_api_generation_uses_api_identity_and_hides_internal_rpcs() {
+        let manifest_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
+        let sources = collect_ts_sdk_sources(&GenerateTsSdkOpts {
+            manifest_path,
+            out_dir: unique_temp_dir("protocol-api"),
+            package_name: "@example/auth".to_owned(),
+            package_version: "0.1.0".to_owned(),
+            runtime_deps: TsRuntimeDeps {
+                source: TsRuntimeSource::Registry,
+                version: "0.11.0".to_owned(),
+                repo_root: None,
+            },
+        })
+        .unwrap();
+        let source = |path: &str| {
+            sources
+                .iter()
+                .find(|source| source.path == Path::new(path))
+                .unwrap()
+                .contents
+                .as_str()
+        };
+
+        assert!(source("manifest.ts").contains("export const API_ID"));
+        assert!(!source("manifest.ts").contains("CONTRACT_ID"));
+        for path in ["descriptors.ts", "types.ts", "schemas.ts"] {
+            assert!(!source(path).contains("AuthRequestsValidate"));
+            assert!(!source(path).contains("AuthEventsValidate"));
+        }
     }
 
     fn minimal_manifest(contract_id: &str) -> Value {
@@ -2478,7 +2556,7 @@ mod tests {
         assert!(types.contains("import { TrellisError } from \"@qlever-llc/trellis/errors\";"));
         assert!(!types.contains("Handler"));
         assert!(!types.contains("RpcHandlerContext"));
-        assert!(types.contains("export type NotFoundErrorData = {"));
+        assert!(types.contains("export type NotFoundErrorData = SerializableErrorData & ({"));
         assert!(types.contains("type: \"NotFoundError\";"));
         assert!(types.contains("resource: string;"));
         assert!(

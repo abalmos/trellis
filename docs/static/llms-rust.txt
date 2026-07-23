@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-18).
+Last verified against Trellis main (2026-07-22).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -26,7 +26,15 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   connection bootstrap, `ConnectedService`, or generic runtime clients.
 - Service participants expose service bootstrap only. Apps and agents expose
   user-session bootstrap only. Devices expose activated-device bootstrap only.
-- The participant facade embeds its contract id, digest, and canonical manifest.
+- The participant facade embeds its canonical API and participant artifacts and
+  their exact digests.
+- Service connect options carry the immutable provisioned identity binding.
+  User/device connect options carry the session-bound bootstrap JWT, session id,
+  inbox prefix, session seed, and participant digest. No shared sentinel
+  credential is configured or accepted.
+- Generated service/device clients present their embedded canonical participant
+  and exact referenced API artifacts during bootstrap. Runtime planning parses
+  and resolves them through the same semantic proposal path as admin planning.
 - Dependency aliases become generated accessors. Absent aliases and unselected
   surfaces do not exist at compile time.
 - Register owned RPC, feed, and operation providers through
@@ -45,6 +53,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - Exact action selections remain authoritative. Capability evidence explains a
   complete selected permission bundle, identifies the exact defining API digest,
   and never expands the derived grant set.
+- Resource bindings are physical evidence only; transport and request validation
+  require exact `GrantSetV1` atoms. Missing optional evidence removes only the
+  optional atoms it supports.
+- Bootstrap replay resolves current issuance and signs a fresh credential.
+  Externally serialized errors use stable redacted codes; internal causes belong
+  only in structured logs.
 - Pure protocol/tooling code can use `trellis-protocol` signed authorization
   types to verify a pinned root, root-signed issuer certificate and current
   generation-numbered manifest, issuer-signed short-lived context, and
@@ -74,11 +88,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   default. Use `ServiceConnectOptions::with_authority_pending_timeout_ms(...)`
   only when startup needs an overall deadline; `with_timeout_ms(...)` bounds each
   request.
-- Safe resource definition updates and additive provided surfaces auto-apply.
-  New requested capabilities, new resource aliases, and strict migrations
-  require approval. Mutable-dev records auto-accept migrations.
+- Bootstrap and admin planning share one semantic proposal path. Additive
+  compatible changes are updates, incompatible API changes are migrations, and
+  both require an authority decision. Deployment authority has one stable
+  lineage per deployment + participant. Equivalent pending semantics reuse one
+  proposal; terminal history remains queryable and never blocks reproposal.
 - Only `pending` plans for the current desired authority version are actionable;
-  older plans become `superseded`.
+  older plans become `superseded`. Initial plans are listable before desired
+  authority exists.
 - Deployment authority acceptance commits desired state and returns while
   physical reconciliation continues in the background.
 - Deployment authority `needs` group contracts, surfaces, capabilities, and
@@ -198,7 +215,8 @@ idempotent.
 
 - Access KV, store, state, and Jobs through generated named handles. They already
   contain resolved bootstrap bindings.
-- Services must not call `Trellis.Bindings.Get` or construct resource clients.
+- Services use only the resolved handles returned by the connected facade; they
+  do not fetch binding payloads or construct resource clients.
 - Transfer-capable operations expose transfer methods on the typed operation
   reference. Providers plan grants through `ServiceHandlerContext`, which owns
   caller identity, service session material, and resolved stores.

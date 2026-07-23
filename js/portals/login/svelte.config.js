@@ -16,6 +16,7 @@ const config = {
   preprocess: vitePreprocess(),
   kit: {
     appDir: "_trellis/assets",
+    version: { name: env("TRELLIS_LOGIN_PORTAL_VERSION") ?? "embedded" },
     outDir: svelteKitDir,
     adapter: adapter({
       pages: buildDir,

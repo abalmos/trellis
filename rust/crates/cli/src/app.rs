@@ -3,7 +3,6 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::agent_contract::agent_contract_json;
 use crate::cli::*;
 use crate::output;
 use crate::self_update::{ReleaseChannel, SelfUpdateTarget};
@@ -126,15 +125,14 @@ pub(crate) async fn connect_authenticated_cli_client(
     format: OutputFormat,
 ) -> miette::Result<(authlib::AdminSessionState, Caller)> {
     let mut state = authlib::load_admin_session().into_diagnostic()?;
-    let agent_contract_json = agent_contract_json();
-    let agent_contract_digest = authlib::contract_digest(agent_contract_json).into_diagnostic()?;
-    if state.contract_digest != agent_contract_digest {
+    let participant_digest = authlib::administration_participant_digest().into_diagnostic()?;
+    if state.participant_digest != participant_digest {
         if !output::is_json(format) {
             output::print_info(
-                "Saved agent session contract changed; starting agent reauthentication",
+                "Saved administration participant changed; starting agent reauthentication",
             );
         }
-        state = complete_admin_reauth(format, &state, agent_contract_json).await?;
+        state = complete_admin_reauth(format, &state).await?;
     }
 
     let connected = match authlib::connect_admin_client_async(&state).await {
@@ -142,7 +140,7 @@ pub(crate) async fn connect_authenticated_cli_client(
         Err(error) => return Err(map_admin_session_error(error)),
     };
 
-    match authlib::AuthClient::new(&connected).me().await {
+    match auth::current_user(&connected).await {
         Ok(_) => {}
         Err(error) => return Err(map_admin_session_error(error)),
     }
@@ -232,9 +230,8 @@ fn rejected_admin_session_report() -> miette::Result<miette::Report> {
 async fn complete_admin_reauth(
     format: OutputFormat,
     state: &authlib::AdminSessionState,
-    agent_contract_json: &str,
 ) -> miette::Result<authlib::AdminSessionState> {
-    let next_state = match authlib::start_admin_reauth(state, agent_contract_json).await {
+    let next_state = match authlib::start_admin_reauth(state).await {
         Ok(authlib::AdminReauthOutcome::Bound(outcome)) => outcome.state,
         Ok(authlib::AdminReauthOutcome::Flow(challenge)) => {
             let login_url = challenge.login_url().to_string();
@@ -400,10 +397,11 @@ mod tests {
             servers: "localhost".to_string(),
             session_seed: "seed".to_string(),
             session_key: "key".to_string(),
-            contract_digest: "digest".to_string(),
-            sentinel_jwt: "jwt".to_string(),
-            sentinel_seed: "sentinel".to_string(),
-            expires: "2026-01-01T00:00:00Z".to_string(),
+            participant_digest: "digest".to_string(),
+            session_id: "ses_test".to_string(),
+            inbox_prefix: "_INBOX.ses_test".to_string(),
+            bootstrap_jwt: "jwt".to_string(),
+            expires_at: Some(1_767_225_600_000),
         }
     }
 

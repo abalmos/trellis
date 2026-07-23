@@ -140,19 +140,21 @@ async fn events_client_publishes_and_subscriber_receives() {
     let observed_events = Arc::new(tokio::sync::Mutex::new(Vec::<EntityChangedEvent>::new()));
     let handler_observed_events = Arc::clone(&observed_events);
 
-    let event_stream = service
-        .caller()
+    let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
+
+    let client = admin
+        .connect_client(&bootstrap_url, &pubsub_client_contract)
+        .await
+        .expect("connect live Rust events pubsub client");
+    let event_stream = client
         .subscribe::<EntityChangedEventDescriptor>()
         .await
         .expect("subscribe to Entity.Changed events");
-
     let event_collection_task = tokio::spawn(async move {
         let mut stream = event_stream;
         while let Some(result) = stream.next().await {
             match result {
-                Ok(event) => {
-                    handler_observed_events.lock().await.push(event);
-                }
+                Ok(event) => handler_observed_events.lock().await.push(event),
                 Err(error) => {
                     eprintln!("event subscription error: {error}");
                     break;
@@ -160,13 +162,6 @@ async fn events_client_publishes_and_subscriber_receives() {
             }
         }
     });
-
-    let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
-
-    let client = admin
-        .connect_client(&bootstrap_url, &pubsub_client_contract)
-        .await
-        .expect("connect live Rust events pubsub client");
 
     let event = EntityChangedEvent {
         id: "entity-events-1".to_string(),

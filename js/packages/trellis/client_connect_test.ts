@@ -3,8 +3,8 @@ import { headers, type Msg, type NatsConnection } from "@nats-io/nats-core";
 import { createUser } from "@nats-io/nkeys";
 import { Type } from "typebox";
 
-import { base64urlEncode, createAuth } from "./auth/mod.ts";
-import type { SessionKeyHandle } from "./auth/browser.ts";
+import { base64urlEncode } from "./auth/mod.ts";
+import { generateSessionKey, type SessionKeyHandle } from "./auth/browser.ts";
 import {
   ClientAuthHandledError,
   connectClientWithDeps,
@@ -41,33 +41,29 @@ const testContract = defineAppContract(() => ({
 const authRequiredRpcContract = testContract;
 
 const TEST_SEED = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const TEST_PARTICIPANT = {
+  id: testContract.CONTRACT_ID,
+  artifactDigest: testContract.CONTRACT_DIGEST,
+  needsDigest: testContract.CONTRACT_DIGEST,
+};
 const textDecoder = new TextDecoder();
 
 async function createBrowserHandle(): Promise<SessionKeyHandle> {
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
-  return {
-    privateKey: keyPair.privateKey,
-    publicKey: keyPair.publicKey,
-    publicKeyRaw,
-    sessionKey: base64urlEncode(publicKeyRaw),
-  };
+  const handle = await generateSessionKey({ persistence: "temporary" });
+  handle.sessionId = "session-key";
+  return handle;
 }
 
-function authTokenFromAuthenticator(authenticator: unknown): string {
+async function authTokenFromAuthenticator(
+  authenticator: unknown,
+): Promise<string> {
   const candidates = Array.isArray(authenticator)
-    ? authenticator
+    ? authenticator.flat(Infinity)
     : [authenticator];
   for (const candidate of candidates) {
     if (typeof candidate !== "function") continue;
     try {
-      const value = candidate();
+      const value = await candidate("nonce");
       if (
         value && typeof value === "object" && "auth_token" in value &&
         typeof value.auth_token === "string"
@@ -82,14 +78,14 @@ function authTokenFromAuthenticator(authenticator: unknown): string {
   throw new Error("Expected runtime authenticator to expose auth_token");
 }
 
-function jwtFromAuthenticator(authenticator: unknown): string {
+async function jwtFromAuthenticator(authenticator: unknown): Promise<string> {
   const candidates = Array.isArray(authenticator)
-    ? authenticator
+    ? authenticator.flat(Infinity)
     : [authenticator];
   for (const candidate of candidates) {
     if (typeof candidate !== "function") continue;
     try {
-      const value = candidate();
+      const value = await candidate("nonce");
       if (
         value && typeof value === "object" && "jwt" in value &&
         typeof value.jwt === "string"
@@ -227,6 +223,7 @@ Deno.test("connectClientWithDeps cleans browser callback URLs without CSP-unsafe
         connectClientWithDeps({
           trellisUrl: "https://trellis.example",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(
@@ -283,21 +280,13 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
             serverNow: 1_700_000_000,
-            connectInfo: {
-              sessionKey: "session-key",
-              contractId: testContract.CONTRACT.id,
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
-              },
-              transport: {
-                inboxPrefix: "_INBOX.session-key",
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-            },
+            sessionId: "session-key",
+            inboxPrefix: "_INBOX.session-key",
+            participantId: testContract.CONTRACT.id,
+            participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            participantNeedsDigest: testContract.CONTRACT_DIGEST,
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -312,9 +301,11 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -333,41 +324,25 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
 
     assertEquals(error.code, "trellis.runtime.connect_failed");
 
-    const auth = await createAuth({ sessionKeySeed: TEST_SEED });
     const firstToken = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      sessionKey: string;
-      iat: number;
-      contractDigest: string;
-      sig: string;
-      bindingToken?: string;
+      format: string;
+      issuedAt: number;
+      participantDigest: string;
+      sessionId: string;
     };
     nowMs += 31_000;
     const secondToken = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as typeof firstToken;
 
     assertEquals(connectInboxPrefix, "_INBOX.session-key");
     assertEquals(maxReconnectAttempts, -1);
-    assertEquals(firstToken.sessionKey, auth.sessionKey);
-    assertEquals(firstToken.contractDigest, testContract.CONTRACT_DIGEST);
-    assertEquals(firstToken.bindingToken, undefined);
-    assertEquals(
-      firstToken.sig,
-      await auth.natsConnectSigForIat(
-        firstToken.iat,
-        firstToken.contractDigest,
-      ),
-    );
-    assert(secondToken.iat > firstToken.iat);
-    assertEquals(
-      secondToken.sig,
-      await auth.natsConnectSigForIat(
-        secondToken.iat,
-        secondToken.contractDigest,
-      ),
-    );
+    assertEquals(firstToken.format, "trellis.nats-connect-token.v1");
+    assertEquals(firstToken.participantDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(firstToken.sessionId, "session-key");
+    assert(secondToken.issuedAt > firstToken.issuedAt);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -381,14 +356,14 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
     globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/bootstrap/client")) {
-        const body = JSON.parse(String(init?.body)) as { iat: number };
-        bootstrapIats.push(body.iat);
+        const body = JSON.parse(String(init?.body)) as { issuedAt: number };
+        bootstrapIats.push(body.issuedAt);
         if (bootstrapIats.length === 1) {
           return Promise.resolve(
             new Response(
               JSON.stringify({
                 reason: "iat_out_of_range",
-                serverNow: 1_700_000_030,
+                serverNow: 1_700_000_030_000,
               }),
               {
                 status: 400,
@@ -401,21 +376,13 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
-              serverNow: 1_700_000_030,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              serverNow: 1_700_000_030_000,
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -433,9 +400,11 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -450,7 +419,7 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
     );
 
     assertEquals(error.code, "trellis.runtime.connect_failed");
-    assertEquals(bootstrapIats, [1_700_000_000, 1_700_000_030]);
+    assertEquals(bootstrapIats, [1_700_000_000_000, 1_700_000_030_000]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -479,9 +448,11 @@ Deno.test("connectClientWithDeps maps callback bind failures to TransportError",
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
             flowId: "flow_123",
           },
@@ -526,6 +497,7 @@ Deno.test("connectClientWithDeps maps malformed bind responses to TransportError
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(
@@ -591,6 +563,7 @@ Deno.test("connectClientWithDeps maps insufficient bind capabilities to Transpor
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(
@@ -606,8 +579,8 @@ Deno.test("connectClientWithDeps maps insufficient bind capabilities to Transpor
       TransportError,
     );
 
-    assertEquals(error.code, "trellis.auth.insufficient_capabilities");
-    assertEquals(error.getContext().missingCapabilities, ["admin"]);
+    assertEquals(error.code, "trellis.auth.bind_invalid_response");
+    assertEquals(error.getContext().missingCapabilities, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -621,16 +594,7 @@ Deno.test("connectClientWithDeps maps invalid login flow responses to TransportE
       const url = String(input);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
@@ -650,9 +614,11 @@ Deno.test("connectClientWithDeps maps invalid login flow responses to TransportE
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -690,9 +656,11 @@ Deno.test("connectClientWithDeps maps invalid bootstrap responses to TransportEr
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -730,9 +698,11 @@ Deno.test("connectClientWithDeps maps malformed bootstrap responses to Transport
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -758,16 +728,7 @@ Deno.test("connectClientWithDeps maps malformed login flow responses to Transpor
       const url = String(input);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
@@ -787,9 +748,11 @@ Deno.test("connectClientWithDeps maps malformed login flow responses to Transpor
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -815,20 +778,13 @@ Deno.test("connectClientWithDeps maps runtime connection failures to TransportEr
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
             serverNow: 1_700_000_000,
-            connectInfo: {
-              sessionKey: "session-key",
-              contractId: testContract.CONTRACT.id,
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                inboxPrefix: "_INBOX.session-key",
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-            },
+            sessionId: "session-key",
+            inboxPrefix: "_INBOX.session-key",
+            participantId: testContract.CONTRACT.id,
+            participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            participantNeedsDigest: testContract.CONTRACT_DIGEST,
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -843,9 +799,11 @@ Deno.test("connectClientWithDeps maps runtime connection failures to TransportEr
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -876,20 +834,13 @@ Deno.test("connectClientWithDeps preserves trellisUrl path when calling bootstra
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
             serverNow: 1_700_000_000,
-            connectInfo: {
-              sessionKey: "session-key",
-              contractId: testContract.CONTRACT.id,
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                inboxPrefix: "_INBOX.session-key",
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-            },
+            sessionId: "session-key",
+            inboxPrefix: "_INBOX.session-key",
+            participantId: testContract.CONTRACT.id,
+            participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            participantNeedsDigest: testContract.CONTRACT_DIGEST,
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -904,9 +855,11 @@ Deno.test("connectClientWithDeps preserves trellisUrl path when calling bootstra
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com/base",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
@@ -934,34 +887,20 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
+  const handle = await createBrowserHandle();
 
   try {
     globalThis.fetch = (() => {
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
             serverNow: 1_700_000_000,
-            connectInfo: {
-              sessionKey: "session-key",
-              contractId: testContract.CONTRACT.id,
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                inboxPrefix: "_INBOX.session-key",
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-            },
+            sessionId: "session-key",
+            inboxPrefix: "_INBOX.session-key",
+            participantId: testContract.CONTRACT.id,
+            participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            participantNeedsDigest: testContract.CONTRACT_DIGEST,
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -976,14 +915,10 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             redirectTo: "https://app.example.com/callback",
-            handle: {
-              privateKey: keyPair.privateKey,
-              publicKey: keyPair.publicKey,
-              publicKeyRaw,
-              sessionKey: base64urlEncode(publicKeyRaw),
-            },
+            handle: handle,
           },
         }, {
           loadTransport: async () => ({
@@ -993,30 +928,28 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
             },
           }),
           now: () => nowMs,
-          setInterval: () => 1,
-          clearInterval: () => {},
         }),
       TransportError,
     );
 
     assertEquals(error.code, "trellis.runtime.connect_failed");
     const firstToken = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      iat: number;
-      contractDigest: string;
+      issuedAt: number;
+      participantDigest: string;
     };
     nowMs += 31_000;
     const secondToken = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      iat: number;
-      contractDigest: string;
+      issuedAt: number;
+      participantDigest: string;
     };
 
-    assertEquals(firstToken.contractDigest, testContract.CONTRACT_DIGEST);
-    assertEquals(secondToken.contractDigest, testContract.CONTRACT_DIGEST);
-    assert(secondToken.iat > firstToken.iat);
+    assertEquals(firstToken.participantDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(secondToken.participantDigest, testContract.CONTRACT_DIGEST);
+    assert(secondToken.issuedAt > firstToken.issuedAt);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -1052,20 +985,13 @@ Deno.test("connectClientWithDeps does not bind browser callbacks from window.loc
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -1083,6 +1009,7 @@ Deno.test("connectClientWithDeps does not bind browser callbacks from window.loc
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: { handle },
         }, {
           loadTransport: async () => ({
@@ -1137,16 +1064,7 @@ Deno.test("connectClientWithDeps requires explicit browser redirect state when r
       const url = String(input);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
 
@@ -1158,6 +1076,7 @@ Deno.test("connectClientWithDeps requires explicit browser redirect state when r
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: { handle },
         }, {
           loadTransport: async () => {
@@ -1211,29 +1130,20 @@ Deno.test("connectClientWithDeps redirects browser to loginUrl using ClientAuthH
       fetchUrls.push(url);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
         const body = JSON.parse(String(init?.body ?? "null")) as {
-          redirectTo?: string;
+          redirectTarget?: string;
         };
-        assertEquals(body.redirectTo, "https://app.example.com/dashboard");
+        assertEquals(body.redirectTarget, "https://app.example.com/dashboard");
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-handled",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-handled",
             }),
             {
@@ -1252,6 +1162,7 @@ Deno.test("connectClientWithDeps redirects browser to loginUrl using ClientAuthH
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(testWindow.location.href),
@@ -1311,19 +1222,19 @@ Deno.test("TrellisClient.connect preserves ClientAuthHandledError through orThro
       const url = String(input);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          Response.json({ status: "auth_required", serverNow: 1_700_000_000 }),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
         const body = JSON.parse(String(init?.body ?? "null")) as {
-          redirectTo?: string;
+          redirectTarget?: string;
         };
-        assertEquals(body.redirectTo, "https://app.example.com/dashboard");
+        assertEquals(body.redirectTarget, "https://app.example.com/dashboard");
         return Promise.resolve(
           Response.json({
-            status: "flow_started",
+            state: "flow",
             flowId: "flow-handled",
-            loginUrl:
+            portalUrl:
               "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-handled",
           }),
         );
@@ -1337,6 +1248,7 @@ Deno.test("TrellisClient.connect preserves ClientAuthHandledError through orThro
         TrellisClient.connect({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(testWindow.location.href),
@@ -1388,29 +1300,20 @@ Deno.test("connectClientWithDeps lets auth continuation handle browser login wit
       fetchUrls.push(url);
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
         const body = JSON.parse(String(init?.body ?? "null")) as {
-          redirectTo?: string;
+          redirectTarget?: string;
         };
-        assertEquals(body.redirectTo, "https://app.example.com/dashboard");
+        assertEquals(body.redirectTarget, "https://app.example.com/dashboard");
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-handled",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-handled",
             }),
             {
@@ -1429,6 +1332,7 @@ Deno.test("connectClientWithDeps lets auth continuation handle browser login wit
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl: new URL(testWindow.location.href),
@@ -1467,7 +1371,7 @@ Deno.test("connectClientWithDeps lets auth continuation handle browser login wit
   }
 });
 
-Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead is exhausted", async () => {
+Deno.test("connectClientWithDeps keeps session-bound enrollment after token lookahead", async () => {
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
@@ -1475,14 +1379,7 @@ Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead 
   const testConnection = createControllableNatsConnection();
   const initialSentinelSeed = textDecoder.decode(createUser().getSeed());
   const refreshedSentinelSeed = textDecoder.decode(createUser().getSeed());
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
+  const handle = await createBrowserHandle();
 
   try {
     globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
@@ -1498,20 +1395,13 @@ Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead 
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
             serverNow: 1_700_000_000 + (bootstrapCalls - 1) * 301,
-            connectInfo: {
-              sessionKey: "session-key",
-              contractId: testContract.CONTRACT.id,
-              contractDigest,
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                inboxPrefix: "_INBOX.session-key",
-                sentinel,
-              },
-            },
+            sessionId: "session-key",
+            inboxPrefix: "_INBOX.session-key",
+            participantId: testContract.CONTRACT.id,
+            participantArtifactDigest: contractDigest,
+            participantNeedsDigest: contractDigest,
+            nats: { jwt: sentinel.jwt, servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -1524,13 +1414,9 @@ Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead 
     const client = await connectClientWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      participant: TEST_PARTICIPANT,
       auth: {
-        handle: {
-          privateKey: keyPair.privateKey,
-          publicKey: keyPair.publicKey,
-          publicKeyRaw,
-          sessionKey: base64urlEncode(publicKeyRaw),
-        },
+        handle: handle,
       },
     }, {
       loadTransport: async () => ({
@@ -1540,36 +1426,23 @@ Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead 
         },
       }),
       now: () => nowMs,
-      setInterval: () => 1,
-      clearInterval: () => {},
     });
 
     assertEquals(client.connection.status.kind, "client");
     assertEquals(client.connection.status.phase, "connected");
     nowMs += 301_000;
-    authTokenFromAuthenticator(connectAuthenticator);
-    await waitFor(() => bootstrapCalls === 2);
-    await waitFor(() => {
-      const token = JSON.parse(
-        authTokenFromAuthenticator(connectAuthenticator),
-      ) as {
-        contractDigest?: string;
-      };
-      return token.contractDigest === testContract.CONTRACT_DIGEST;
-    });
+    await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      bindingToken?: string;
-      contractDigest?: string;
-      iat?: number;
+      participantDigest?: string;
+      issuedAt?: number;
     };
 
-    assertEquals(bootstrapCalls, 2);
-    assertEquals(token.bindingToken, undefined);
-    assertEquals(token.contractDigest, testContract.CONTRACT_DIGEST);
-    assertEquals(jwtFromAuthenticator(connectAuthenticator), "jwt-b");
-    assert(typeof token.iat === "number");
+    assertEquals(bootstrapCalls, 1);
+    assertEquals(token.participantDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(await jwtFromAuthenticator(connectAuthenticator), "jwt-a");
+    assert(typeof token.issuedAt === "number");
     await testConnection.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
   } finally {
@@ -1577,7 +1450,7 @@ Deno.test("connectClientWithDeps rebootstraps browser auth when token lookahead 
   }
 });
 
-Deno.test("connectClientWithDeps recovers exhausted browser auth through auth continuation", async () => {
+Deno.test("connectClientWithDeps does not restart browser auth after token lookahead", async () => {
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
@@ -1585,14 +1458,7 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
   let authRequiredCalls = 0;
   let currentUrlValue = new URL("https://app.example.com/start");
   const testConnection = createControllableNatsConnection();
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
+  const handle = await createBrowserHandle();
 
   try {
     globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
@@ -1603,20 +1469,13 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
           return Promise.resolve(
             new Response(
               JSON.stringify({
-                status: "ready",
                 serverNow: 1_700_000_000,
-                connectInfo: {
-                  sessionKey: "session-key",
-                  contractId: testContract.CONTRACT.id,
-                  contractDigest: testContract.CONTRACT_DIGEST,
-                  transports: {
-                    native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  },
-                  transport: {
-                    inboxPrefix: "_INBOX.session-key",
-                    sentinel: { jwt: "jwt", seed: "seed" },
-                  },
-                },
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantId: testContract.CONTRACT.id,
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
+                participantNeedsDigest: testContract.CONTRACT_DIGEST,
+                nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
               }),
               { status: 200, headers: { "Content-Type": "application/json" } },
             ),
@@ -1624,32 +1483,19 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
         }
         if (bootstrapCalls === 2) {
           return Promise.resolve(
-            new Response(
-              JSON.stringify({
-                status: "auth_required",
-                serverNow: 1_700_000_301,
-              }),
-              { status: 200, headers: { "Content-Type": "application/json" } },
-            ),
+            new Response(null, { status: 401 }),
           );
         }
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_301,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1658,13 +1504,13 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
       if (url.endsWith("/auth/requests")) {
         authRequiredCalls += 1;
         const body = JSON.parse(String(init?.body ?? "null"));
-        assertEquals(body.redirectTo, "https://app.example.com/after");
+        assertEquals(body.redirectTarget, "https://app.example.com/after");
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-2",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-2",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1675,14 +1521,13 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-2",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:08:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -1697,14 +1542,10 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
     await connectClientWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      participant: TEST_PARTICIPANT,
       auth: {
         currentUrl: () => currentUrlValue,
-        handle: {
-          privateKey: keyPair.privateKey,
-          publicKey: keyPair.publicKey,
-          publicKeyRaw,
-          sessionKey: base64urlEncode(publicKeyRaw),
-        },
+        handle: handle,
       },
       onAuthRequired: async () => ({ status: "bound", flowId: "flow-2" }),
     }, {
@@ -1715,33 +1556,20 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
         },
       }),
       now: () => nowMs,
-      setInterval: () => 1,
-      clearInterval: () => {},
     });
 
     currentUrlValue = new URL("https://app.example.com/after");
     nowMs += 301_000;
-    authTokenFromAuthenticator(connectAuthenticator);
-    await waitFor(() => bootstrapCalls === 3 && authRequiredCalls === 1);
-    await waitFor(() => {
-      const token = JSON.parse(
-        authTokenFromAuthenticator(connectAuthenticator),
-      ) as {
-        contractDigest?: string;
-      };
-      return token.contractDigest === testContract.CONTRACT_DIGEST;
-    });
+    await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      bindingToken?: string;
-      contractDigest?: string;
+      participantDigest?: string;
     };
 
-    assertEquals(authRequiredCalls, 1);
-    assertEquals(bootstrapCalls, 3);
-    assertEquals(token.bindingToken, undefined);
-    assertEquals(token.contractDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(authRequiredCalls, 0);
+    assertEquals(bootstrapCalls, 1);
+    assertEquals(token.participantDigest, testContract.CONTRACT_DIGEST);
     await testConnection.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
   } finally {
@@ -1749,21 +1577,14 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
   }
 });
 
-Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets another contract", async () => {
+Deno.test("connectClientWithDeps does not rebootstrap during NATS reconnect", async () => {
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
   let bootstrapCalls = 0;
   let authRequiredCalls = 0;
   const testConnection = createControllableNatsConnection();
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "Ed25519" },
-    false,
-    ["sign", "verify"],
-  ) as CryptoKeyPair;
-  const publicKeyRaw = new Uint8Array(
-    await crypto.subtle.exportKey("raw", keyPair.publicKey),
-  );
+  const handle = await createBrowserHandle();
 
   try {
     globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
@@ -1781,20 +1602,13 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000 + (bootstrapCalls - 1) * 301,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId,
-                contractDigest,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: contractId,
+              participantArtifactDigest: contractDigest,
+              participantNeedsDigest: contractDigest,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1803,13 +1617,13 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
       if (url.endsWith("/auth/requests")) {
         authRequiredCalls += 1;
         const body = JSON.parse(String(init?.body ?? "null"));
-        assertEquals(body.redirectTo, "https://app.example.com/after");
+        assertEquals(body.redirectTarget, "https://app.example.com/after");
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-wrong-contract",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-wrong-contract",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1820,14 +1634,13 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-wrong-contract",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:08:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1839,14 +1652,10 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
     await connectClientWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      participant: TEST_PARTICIPANT,
       auth: {
         redirectTo: "https://app.example.com/after",
-        handle: {
-          privateKey: keyPair.privateKey,
-          publicKey: keyPair.publicKey,
-          publicKeyRaw,
-          sessionKey: base64urlEncode(publicKeyRaw),
-        },
+        handle: handle,
       },
       onAuthRequired: () => ({
         status: "bound",
@@ -1860,22 +1669,19 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
         },
       }),
       now: () => nowMs,
-      setInterval: () => 1,
-      clearInterval: () => {},
     });
 
     nowMs += 301_000;
-    authTokenFromAuthenticator(connectAuthenticator);
-    await waitFor(() => bootstrapCalls === 3 && authRequiredCalls === 1);
+    await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
+      await authTokenFromAuthenticator(connectAuthenticator),
     ) as {
-      contractDigest?: string;
+      participantDigest?: string;
     };
 
-    assertEquals(authRequiredCalls, 1);
-    assertEquals(bootstrapCalls, 3);
-    assertEquals(token.contractDigest, testContract.CONTRACT_DIGEST);
+    assertEquals(authRequiredCalls, 0);
+    assertEquals(bootstrapCalls, 1);
+    assertEquals(token.participantDigest, testContract.CONTRACT_DIGEST);
     await testConnection.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
   } finally {
@@ -1895,31 +1701,20 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
       if (url.endsWith("/bootstrap/client") && bootstrapCalls === 0) {
         bootstrapCalls += 1;
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.includes("/auth/flow/flow-1/bind")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-1",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:03:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -1932,9 +1727,9 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-1",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-1",
             }),
             {
@@ -1949,21 +1744,13 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -1981,9 +1768,11 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async ({ loginUrl }) => {
@@ -2056,25 +1845,16 @@ Deno.test("connectClientWithDeps restarts browser auth after an expired callback
       }
       if (url.endsWith("/bootstrap/client")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "auth_required",
-              serverNow: 1_700_000_000,
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
+          new Response(null, { status: 401 }),
         );
       }
       if (url.endsWith("/auth/requests")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-new",
-              loginUrl: "https://trellis.example.com/login?flowId=flow-new",
+              portalUrl: "https://trellis.example.com/login?flowId=flow-new",
             }),
             {
               status: 200,
@@ -2092,6 +1872,7 @@ Deno.test("connectClientWithDeps restarts browser auth after an expired callback
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl,
@@ -2168,6 +1949,7 @@ Deno.test("connectClientWithDeps surfaces browser authError callbacks without st
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             handle,
             currentUrl,
@@ -2215,21 +1997,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: "other.client@v1",
-                contractDigest: "digest-other",
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: "other.client@v1",
+              participantArtifactDigest: "digest-other",
+              participantNeedsDigest: "digest-other",
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2242,15 +2016,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-3",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:03:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2263,9 +2035,9 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-3",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-3",
             }),
             {
@@ -2280,21 +2052,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2312,9 +2076,11 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async () => ({ status: "bound", flowId: "flow-3" }),
@@ -2354,21 +2120,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: "digest-old",
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: "digest-old",
+              participantNeedsDigest: "digest-old",
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2381,15 +2139,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-stale-digest",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:03:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2402,9 +2158,9 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-stale-digest",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-stale-digest",
             }),
             {
@@ -2419,21 +2175,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2451,9 +2199,11 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async () => ({
@@ -2503,7 +2253,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
               serverNow: 1_700_000_000,
             }),
             {
-              status: 200,
+              status: 403,
               headers: { "Content-Type": "application/json" },
             },
           ),
@@ -2513,9 +2263,9 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-2",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-2",
             }),
             {
@@ -2529,15 +2279,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-2",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:03:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2551,21 +2299,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2583,9 +2323,11 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async ({ loginUrl }) => {
@@ -2632,7 +2374,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
               serverNow: 1_700_000_000,
             }),
             {
-              status: 200,
+              status: 403,
               headers: { "Content-Type": "application/json" },
             },
           ),
@@ -2642,9 +2384,9 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-4",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-4",
             }),
             {
@@ -2658,15 +2400,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "bound",
-              bindingToken: "binding-token-4",
-              inboxPrefix: "_INBOX.session-key",
-              expires: "2026-01-01T00:03:00.000Z",
-              sentinel: { jwt: "jwt", seed: "seed" },
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-                websocket: { natsServers: ["ws://localhost:8080"] },
+              serverNow: 1_700_000_000_000,
+              session: {
+                sessionId: "session-key",
+                inboxPrefix: "_INBOX.session-key",
+                participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2680,21 +2420,13 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: "session-key",
-                contractId: testContract.CONTRACT.id,
-                contractDigest: testContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
+              participantId: testContract.CONTRACT.id,
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+              participantNeedsDigest: testContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2712,9 +2444,11 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
         connectClientWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
             sessionKeySeed: TEST_SEED,
+            sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async ({ loginUrl }) => {
@@ -2756,21 +2490,14 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "ready",
               serverNow: 1_700_000_000,
-              connectInfo: {
-                sessionKey: handle.sessionKey,
-                contractId: authRequiredRpcContract.CONTRACT.id,
-                contractDigest: authRequiredRpcContract.CONTRACT_DIGEST,
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                  websocket: { natsServers: ["ws://localhost:8080"] },
-                },
-                transport: {
-                  inboxPrefix: "_INBOX.session-key",
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-              },
+              sessionId: handle.sessionKey,
+              inboxPrefix: "_INBOX.session-key",
+              participantId: authRequiredRpcContract.CONTRACT.id,
+              participantArtifactDigest:
+                authRequiredRpcContract.CONTRACT_DIGEST,
+              participantNeedsDigest: authRequiredRpcContract.CONTRACT_DIGEST,
+              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
             }),
             {
               status: 200,
@@ -2784,9 +2511,9 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              status: "flow_started",
+              state: "flow",
               flowId: "flow-session-missing",
-              loginUrl:
+              portalUrl:
                 "https://trellis.example.com/_trellis/portal/users/login?flowId=flow-session-missing",
             }),
             {
@@ -2803,6 +2530,7 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
     const trellis = await connectClientWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: authRequiredRpcContract,
+      participant: TEST_PARTICIPANT,
       auth: {
         mode: "browser",
         handle,

@@ -196,8 +196,10 @@ export class PortalFlowController {
     return portalProviderLoginUrl(this.#config, providerId, this.flowId);
   }
 
-  async approve(): Promise<PortalFlowState | null> {
-    return this.#submit("approved");
+  async approve(
+    selectedOptionalBundles: readonly string[] = [],
+  ): Promise<PortalFlowState | null> {
+    return this.#submit("approved", selectedOptionalBundles);
   }
 
   async deny(): Promise<PortalFlowState | null> {
@@ -206,6 +208,7 @@ export class PortalFlowController {
 
   async #submit(
     decision: "approved" | "denied",
+    selectedOptionalBundles: readonly string[] = [],
   ): Promise<PortalFlowState | null> {
     if (!this.flowId) {
       this.error = "Missing flow id.";
@@ -222,6 +225,7 @@ export class PortalFlowController {
         this.#config,
         this.flowId,
         decision,
+        selectedOptionalBundles,
       );
       this.state = state;
       return state;

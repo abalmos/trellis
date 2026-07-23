@@ -1,8 +1,4 @@
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
-use trellis_rs::sdk::auth::types::{
-    AuthEventConsumersListRequest, AuthEventConsumersListResponseEntriesItem,
-};
 
 use crate::projector::{
     is_eventlog_projector_consumer, EventLogRuntime, CONSUMER_METADATA_CONTRACT_ID,
@@ -26,20 +22,13 @@ pub(crate) async fn query_consumers(
         .unwrap_or_default();
     let subject = input.get("subject").and_then(Value::as_str);
     let deployment_id = input.get("deploymentId").and_then(Value::as_str);
-    let expected = expected_consumers(runtime).await?;
-    let mut live = runtime
+    let rows = runtime
         .consumers()
         .await?
         .into_iter()
         .filter(|info| info.config.durable_name.is_some())
-        .map(|info| (info.name.clone(), info))
-        .collect::<BTreeMap<_, _>>();
-    let mut rows = Vec::new();
-    for consumer in expected {
-        let live_info = live.remove(&consumer.consumer_name);
-        rows.push(expected_consumer_row(&consumer, live_info));
-    }
-    rows.extend(live.into_values().map(unmatched_consumer_row));
+        .map(unmatched_consumer_row)
+        .collect::<Vec<_>>();
     let mut rows = rows
         .into_iter()
         .filter(|row| {
@@ -87,12 +76,8 @@ pub(crate) async fn inspect_consumer(
         .or_else(|| input.get("name"))
         .and_then(Value::as_str)
         .ok_or_else(|| "consumerName is required".to_string())?;
-    let expected = expected_consumers(runtime)
-        .await?
-        .into_iter()
-        .find(|consumer| consumer.consumer_name == name);
     let info = runtime.consumer(name).await.ok();
-    if expected.is_none() && info.is_none() {
+    if info.is_none() {
         return Err(format!("consumer not found: {name}"));
     }
     let live = info.as_ref().map(|info| {
@@ -108,37 +93,13 @@ pub(crate) async fn inspect_consumer(
             "filterSubject": info.config.filter_subject,
         })
     });
-    let consumer = if let Some(expected) = expected.as_ref() {
-        expected_consumer_row(expected, info)
-    } else {
-        unmatched_consumer_row(info.expect("checked above"))
-    };
+    let consumer = unmatched_consumer_row(info.expect("checked above"));
     Ok(json!({
         "consumer": consumer,
-        "expected": expected.as_ref().map(expected_consumer_value),
+        "expected": null,
         "live": live,
         "recentEvents": []
     }))
-}
-
-async fn expected_consumers(
-    runtime: &EventLogRuntime,
-) -> Result<Vec<AuthEventConsumersListResponseEntriesItem>, String> {
-    let mut offset = Some(0);
-    let mut entries = Vec::new();
-    while let Some(current_offset) = offset {
-        let response = runtime
-            .event_consumers(&AuthEventConsumersListRequest {
-                deployment_id: None,
-                limit: 500,
-                offset: Some(current_offset),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        entries.extend(response.entries);
-        offset = response.next_offset;
-    }
-    Ok(entries)
 }
 
 fn consumer_status(info: &async_nats::jetstream::consumer::Info) -> &'static str {
@@ -233,41 +194,4 @@ fn attributed_consumer_row(
         row["group"] = json!(group);
     }
     row
-}
-
-fn expected_consumer_value(consumer: &AuthEventConsumersListResponseEntriesItem) -> Value {
-    json!({
-        "deploymentId": consumer.deployment_id,
-        "group": consumer.group,
-        "stream": consumer.stream,
-        "consumerName": consumer.consumer_name,
-        "filterSubjects": consumer.filter_subjects,
-        "replay": consumer.replay,
-        "ordering": consumer.ordering,
-        "ackWaitMs": consumer.ack_wait_ms,
-        "maxDeliver": consumer.max_deliver,
-        "backoffMs": consumer.backoff_ms,
-    })
-}
-
-fn expected_consumer_row(
-    consumer: &AuthEventConsumersListResponseEntriesItem,
-    live: Option<async_nats::jetstream::consumer::Info>,
-) -> Value {
-    let status = live.as_ref().map(consumer_status).unwrap_or("missing");
-    json!({
-        "deploymentId": consumer.deployment_id,
-        "group": consumer.group,
-        "stream": consumer.stream,
-        "consumerName": consumer.consumer_name,
-        "filterSubjects": consumer.filter_subjects,
-        "status": status,
-        "managedBy": "authority",
-        "pending": live.as_ref().map(|info| info.num_pending).unwrap_or(0),
-        "ackPending": live.as_ref().map(|info| info.num_ack_pending as u64).unwrap_or(0),
-        "waitingPulls": live.as_ref().map(|info| info.num_waiting as u64).unwrap_or(0),
-        "redelivered": live.as_ref().map(|info| info.num_redelivered as u64).unwrap_or(0),
-        "ackWaitMs": consumer.ack_wait_ms,
-        "maxDeliver": consumer.max_deliver,
-    })
 }

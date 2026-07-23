@@ -30,6 +30,8 @@ pub struct RuntimeOptions {
     pub mode: RuntimeMode,
     /// Path to the TOML runtime config file.
     pub config_path: PathBuf,
+    /// Explicitly rotate an unexpired pending first-administrator bootstrap flow.
+    pub rotate_first_admin: bool,
 }
 
 /// Error returned while starting or running the Trellis runtime.
@@ -198,12 +200,15 @@ pub(crate) struct RuntimeContext {
     pub(crate) config: RuntimeConfig,
     /// Runtime mode selected for this process.
     pub(crate) mode: RuntimeMode,
+    /// Whether startup must rotate the pending first-administrator bootstrap flow.
+    pub(crate) rotate_first_admin: bool,
     /// SQLite stores opened for the selected subsystems.
     pub(crate) stores: RuntimeStores,
     /// Trellis-account runtime NATS client shared by built-in subsystems.
     pub(crate) trellis_nats: async_nats::Client,
     /// Fixed owner contexts for selected runtime subsystems.
     owners: BTreeMap<OwnerGroup, OwnerContext>,
+    http_router: std::sync::Mutex<axum::Router>,
 }
 
 impl RuntimeContext {
@@ -214,6 +219,23 @@ impl RuntimeContext {
             .ok_or(RuntimeError::OwnerContextMissing {
                 subsystem: group.subsystem(),
             })
+    }
+
+    pub(crate) fn register_http_router(&self, router: axum::Router) -> Result<(), RuntimeError> {
+        let mut registered = self
+            .http_router
+            .lock()
+            .map_err(|_| RuntimeError::Platform("HTTP router lock poisoned".to_owned()))?;
+        *registered = std::mem::take(&mut *registered).merge(router);
+        Ok(())
+    }
+
+    fn take_http_router(&self) -> Result<axum::Router, RuntimeError> {
+        let mut registered = self
+            .http_router
+            .lock()
+            .map_err(|_| RuntimeError::Platform("HTTP router lock poisoned".to_owned()))?;
+        Ok(std::mem::take(&mut *registered))
     }
 }
 
@@ -256,7 +278,14 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     );
     let mut ownership =
         RuntimeOwnership::acquire(trellis_nats.clone(), &leases, owner_id, options.mode).await?;
-    let result = run_owned(config, options.mode, trellis_nats.clone(), &mut ownership).await;
+    let result = run_owned(
+        config,
+        options.mode,
+        options.rotate_first_admin,
+        trellis_nats.clone(),
+        &mut ownership,
+    )
+    .await;
     let release_result = ownership.shutdown().await;
     let flush_result = bounded_flush(trellis_nats.flush(), NATS_FLUSH_TIMEOUT).await;
     preserve_primary(result, release_result, flush_result)
@@ -298,6 +327,7 @@ fn preserve_primary(
 async fn run_owned(
     config: RuntimeConfig,
     mode: RuntimeMode,
+    rotate_first_admin: bool,
     trellis_nats: async_nats::Client,
     ownership: &mut RuntimeOwnership,
 ) -> Result<(), RuntimeError> {
@@ -306,16 +336,20 @@ async fn run_owned(
     let context = RuntimeContext {
         config,
         mode,
+        rotate_first_admin,
         stores,
         trellis_nats,
         owners: ownership.contexts(),
+        http_router: std::sync::Mutex::new(axum::Router::new()),
     };
     let mut handles = start_subsystems(&context).await?;
     let root_stop = StopHandle::new();
     let server_stop = root_stop.clone();
+    let http_router = context.take_http_router()?;
     let mut server = Box::pin(crate::run_http_server(
         &context.config,
         context.mode,
+        http_router,
         async move { server_stop.stopped().await },
     ));
     let (primary, server_finished, cause) = wait_for_runtime_event(

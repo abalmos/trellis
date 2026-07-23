@@ -15,7 +15,6 @@ export type LocalNatsBootstrapManifest = {
     system: { name: string; publicKey: string };
     authService: { name: string; publicKey: string };
     trellisService: { name: string; publicKey: string };
-    sentinel: { name: string; publicKey: string };
   };
   paths: {
     natsConfig: string;
@@ -24,7 +23,6 @@ export type LocalNatsBootstrapManifest = {
       systemService: string;
       authService: string;
       trellisService: string;
-      sentinel: string;
     };
     secrets: {
       authIssuerSigning: string;
@@ -49,7 +47,6 @@ type GeneratedMetadata = {
   systemUserPublicKey: string;
   authUserPublicKey: string;
   trellisUserPublicKey: string;
-  sentinelUserPublicKey: string;
 };
 
 type JsonValue =
@@ -120,15 +117,12 @@ nsc edit account --name "$AUTH_ACCOUNT_NAME" --js-mem-storage -1 --js-disk-stora
 nsc edit account --name "$TRELLIS_ACCOUNT_NAME" --js-mem-storage -1 --js-disk-storage -1 --js-streams -1 --js-consumer -1
 nsc add user --account "$AUTH_ACCOUNT_NAME" --name auth --allow-pubsub ">"
 nsc add user --account "$TRELLIS_ACCOUNT_NAME" --name auth --allow-pubsub ">"
-nsc add user --account "$AUTH_ACCOUNT_NAME" --name sentinel --deny-pubsub ">"
 AUTH_USER=$(nsc describe user --account "$AUTH_ACCOUNT_NAME" --name auth --field sub | tr -d '"')
 TRELLIS_USER=$(nsc describe user --account "$TRELLIS_ACCOUNT_NAME" --name auth --field sub | tr -d '"')
-SENTINEL_USER=$(nsc describe user --account "$AUTH_ACCOUNT_NAME" --name sentinel --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
 nsc edit authcallout --account "$AUTH_ACCOUNT_NAME" --auth-user "$AUTH_USER" --allowed-account "$TRELLIS_ACCOUNT" --curve generate
 nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name auth > /work/creds/auth-auth${fileSuffix}.creds
 nsc generate creds --account "$TRELLIS_ACCOUNT_NAME" --name auth > /work/creds/trellis-auth${fileSuffix}.creds
-nsc generate creds --account "$AUTH_ACCOUNT_NAME" --name sentinel > /work/creds/sentinel${fileSuffix}.creds
 AUTH_ACCOUNT=$(nsc describe account --name "$AUTH_ACCOUNT_NAME" --field sub | tr -d '"')
 TRELLIS_ACCOUNT=$(nsc describe account --name "$TRELLIS_ACCOUNT_NAME" --field sub | tr -d '"')
 nsc describe account --name "$AUTH_ACCOUNT_NAME" --raw > "/work/data/jwt/\${AUTH_ACCOUNT}.jwt"
@@ -145,8 +139,7 @@ cat > /work/generated/metadata${fileSuffix}.json <<EOF
   "trellisAccountPublicKey": "\${TRELLIS_ACCOUNT}",
   "systemUserPublicKey": "\${SYSTEM_USER}",
   "authUserPublicKey": "\${AUTH_USER}",
-  "trellisUserPublicKey": "\${TRELLIS_USER}",
-  "sentinelUserPublicKey": "\${SENTINEL_USER}"
+  "trellisUserPublicKey": "\${TRELLIS_USER}"
 }
 EOF`;
   }).join("\n\n");
@@ -357,10 +350,6 @@ export async function generateLocalNatsBootstrapPool(args: {
           name: "auth",
           publicKey: metadata.trellisUserPublicKey,
         },
-        sentinel: {
-          name: "sentinel",
-          publicKey: metadata.sentinelUserPublicKey,
-        },
       },
       paths: {
         natsConfig: "nats.conf",
@@ -369,7 +358,6 @@ export async function generateLocalNatsBootstrapPool(args: {
           systemService: "creds/system.creds",
           authService: `creds/auth-auth${suffix}.creds`,
           trellisService: `creds/trellis-auth${suffix}.creds`,
-          sentinel: `creds/sentinel${suffix}.creds`,
         },
         secrets: {
           authIssuerSigning: issuerPath,

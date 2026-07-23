@@ -219,14 +219,16 @@ export type HealthWatchEvent = { projectionRevision: number; type: "ready" } | {
   type: "healthInvalidated";
 };
 
-export type NotFoundErrorData = {
-  context?: { [k: string]: unknown };
-  id: string;
-  message: string;
-  resource: string;
-  traceId?: string;
-  type: "NotFoundError";
-};
+export type NotFoundErrorData =
+  & SerializableErrorData
+  & ({
+    context?: { [k: string]: unknown };
+    id: string;
+    message: string;
+    resource: string;
+    traceId?: string;
+    type: "NotFoundError";
+  });
 export class NotFoundError extends TrellisError<NotFoundErrorData> {
   static readonly schema = NotFoundErrorDataSchema;
   override readonly name = "NotFoundError" as const;

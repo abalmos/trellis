@@ -76,6 +76,7 @@ type TrellisServiceRuntimeOpts<TA extends RuntimeApi> =
     api: TA;
     transferSupport?: RuntimeOperationTransferSupport;
     version?: string;
+    operationStoreId?: string;
   };
 
 export type TrellisServiceRuntimeFor<TA extends RuntimeApi = RuntimeApi> =
@@ -255,6 +256,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     opts?: TrellisServiceRuntimeOpts<RuntimeApi>,
   ) {
     super(name, nats, auth, { ...opts, log: opts?.log ?? serverLogger });
+    if (opts?.operationStoreId) this.setOperationStoreId(opts.operationStoreId);
     this.#nats = nats;
     this.#version = opts?.version;
     this.#log = (opts?.log ?? serverLogger).child({ lib: "trellis-server" });

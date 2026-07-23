@@ -39,6 +39,12 @@ Rules:
   the returned callback URL. A plain callback after an expired login attempt is a
   restart opportunity, not a user-facing error; only explicit callback errors
   such as `authError=approval_denied` should be surfaced as denial outcomes.
+- Portal approval is server-owned. `portal.approve()` selects required authority
+  only; pass only ids from `portal.state.optionalBundles` to select optional
+  authority. Never construct grant sets or capability lists in a Svelte portal.
+  Treat the returned consent proposal as immutable for the lifetime of the flow.
+- OIDC provider links must navigate the same browser so Trellis can verify its
+  state-specific `HttpOnly` cookie and current portal policy at callback.
 - `TrellisClientFor<typeof contract>` and
   `createTrellisApp(...)` require a module-shaped contract with `CONTRACT`,
   `CONTRACT_DIGEST`, and `API.trellis`. The source contract returned by

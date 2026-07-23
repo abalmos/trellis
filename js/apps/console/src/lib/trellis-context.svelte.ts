@@ -16,6 +16,11 @@ export function setSelectedTrellisUrl(trellisUrl: string | undefined): void {
 
 export const trellisApp = createTrellisApp({
   contract,
+  participant: {
+    id: contract.CONTRACT_ID,
+    artifactDigest: contract.CONTRACT_DIGEST,
+    needsDigest: contract.CONTRACT_DIGEST,
+  },
   trellisUrl: () => selectedTrellisUrl,
 });
 

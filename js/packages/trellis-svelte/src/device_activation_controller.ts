@@ -5,8 +5,8 @@ import type {
   TerminalOperation,
 } from "@qlever-llc/trellis";
 import type {
-  AuthResolveDeviceUserAuthoritiesOutput,
-  AuthResolveDeviceUserAuthoritiesProgress,
+  AuthDeviceUserAuthoritiesResolveOutput,
+  AuthDeviceUserAuthoritiesResolveProgress,
 } from "@qlever-llc/trellis/auth";
 import { ulid } from "ulid";
 
@@ -69,16 +69,16 @@ export type DeviceActivationOperationRef = {
   watch(): AsyncResult<
     AsyncIterable<
       OperationEvent<
-        AuthResolveDeviceUserAuthoritiesProgress,
-        AuthResolveDeviceUserAuthoritiesOutput
+        AuthDeviceUserAuthoritiesResolveProgress,
+        AuthDeviceUserAuthoritiesResolveOutput
       >
     >,
     BaseError
   >;
   wait(): AsyncResult<
     TerminalOperation<
-      AuthResolveDeviceUserAuthoritiesProgress,
-      AuthResolveDeviceUserAuthoritiesOutput
+      AuthDeviceUserAuthoritiesResolveProgress,
+      AuthDeviceUserAuthoritiesResolveOutput
     >,
     BaseError
   >;
@@ -89,8 +89,8 @@ type SnapshotCapableDeviceActivationOperationRef =
   & {
     get(): AsyncResult<
       OperationSnapshot<
-        AuthResolveDeviceUserAuthoritiesProgress,
-        AuthResolveDeviceUserAuthoritiesOutput
+        AuthDeviceUserAuthoritiesResolveProgress,
+        AuthDeviceUserAuthoritiesResolveOutput
       >,
       BaseError
     >;
@@ -369,8 +369,8 @@ export class DeviceActivationControllerCore {
   #applyTerminal(
     flowId: string,
     terminal: TerminalOperation<
-      AuthResolveDeviceUserAuthoritiesProgress,
-      AuthResolveDeviceUserAuthoritiesOutput
+      AuthDeviceUserAuthoritiesResolveProgress,
+      AuthDeviceUserAuthoritiesResolveOutput
     >,
   ): void {
     const view = mapDeviceActivationTerminal(flowId, terminal);
@@ -389,8 +389,8 @@ export class DeviceActivationControllerCore {
     flowId: string,
     watch: AsyncIterable<
       OperationEvent<
-        AuthResolveDeviceUserAuthoritiesProgress,
-        AuthResolveDeviceUserAuthoritiesOutput
+        AuthDeviceUserAuthoritiesResolveProgress,
+        AuthDeviceUserAuthoritiesResolveOutput
       >
     >,
     runId: number,

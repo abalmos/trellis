@@ -97,6 +97,41 @@ where
         let snapshot = self.repositories.load_issuance_snapshot(session_id).await?;
         resolve_snapshot(snapshot, now)
     }
+
+    /// Resolve issuance state as it applied at a signed event's timestamp.
+    ///
+    /// This transitional Milestone 8 path permits a retained revoked session
+    /// only when the event predates revocation and ordinary session expiry.
+    /// Milestone 10 removes it with remote event validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable authorization denial when the retained session or its
+    /// authority was not valid at `event_time`.
+    pub async fn resolve_retained_event_state(
+        &self,
+        session_id: &str,
+        event_time: i64,
+    ) -> Result<IssuableAuthorizationState, AuthorizationStateError> {
+        super::domain::require_protocol_timestamp("eventTime", event_time)?;
+        let mut snapshot = self.repositories.load_issuance_snapshot(session_id).await?;
+        let session = snapshot
+            .session
+            .as_mut()
+            .ok_or(AuthorizationStateError::SessionMissing)?;
+        if event_time < session.created_at
+            || session
+                .expires_at
+                .is_some_and(|expiry| event_time >= expiry)
+            || session
+                .revoked_at
+                .is_some_and(|revoked_at| event_time >= revoked_at)
+        {
+            return Err(AuthorizationStateError::SessionExpired);
+        }
+        session.state = SessionState::Active;
+        resolve_snapshot(snapshot, event_time)
+    }
 }
 
 fn resolve_snapshot(
@@ -169,6 +204,7 @@ fn resolve_snapshot(
     let materialized = snapshot
         .materialization
         .ok_or(AuthorizationStateError::MaterializationStale)?;
+    let resource_bindings = materialized.resources;
     let header = materialized.authority;
     let effective_authority_expires_at = match (&authority, snapshot.deployment.as_ref()) {
         (DesiredAuthorityRecord::Deployment(record), Some(deployment)) => {
@@ -213,6 +249,7 @@ fn resolve_snapshot(
         deployment_id,
         instance_id,
         grant_set: header.effective_grant_set,
+        resource_bindings,
         capabilities: header.effective_capabilities,
         session_expires_at: session.expires_at,
         effective_authority_expires_at: header.expires_at,

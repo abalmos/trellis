@@ -68,11 +68,9 @@ TRELLIS_ACCOUNT={trellis_account}
 TRELLIS_ACCOUNT_PUBLIC_KEY={trellis_public}
 AUTH_USER_PUBLIC_KEY={auth_user}
 TRELLIS_USER_PUBLIC_KEY={trellis_user}
-SENTINEL_USER_PUBLIC_KEY={sentinel_user}
 AUTH_ISSUER_SIGNING_SEED_FILE=./secrets/auth-issuer-signing.seed
 AUTH_TARGET_SIGNING_SEED_FILE=./secrets/auth-target-signing.seed
 AUTH_CALLOUT_XKEY_SEED_FILE=./secrets/auth-sx.seed
-SENTINEL_CREDS_FILE=./creds/sentinel.creds
 AUTH_SERVICE_CREDS_FILE=./creds/auth-auth.creds
 TRELLIS_SERVICE_CREDS_FILE=./creds/trellis-auth.creds
 "#,
@@ -82,6 +80,5 @@ TRELLIS_SERVICE_CREDS_FILE=./creds/trellis-auth.creds
         trellis_public = generated.trellis_account_public_key,
         auth_user = generated.auth_user_public_key,
         trellis_user = generated.trellis_user_public_key,
-        sentinel_user = generated.sentinel_user_public_key,
     )
 }

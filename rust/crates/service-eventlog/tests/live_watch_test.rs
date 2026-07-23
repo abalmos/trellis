@@ -98,10 +98,8 @@ async fn eventlog_watch_is_ephemeral() {
     let service_runtime =
         trellis_test::connect_service_runtime::<trellis_service_eventlog::EventLogContract>(
             runtime.trellis_url(),
-            trellis_service_eventlog::CONTRACT_ID,
-            eventlog_contract.digest(),
             trellis_service_eventlog::CONTRACT_JSON,
-            &eventlog_key.seed,
+            &eventlog_key,
         )
         .await
         .expect("connect Event Log service runtime");
@@ -129,10 +127,8 @@ async fn eventlog_watch_is_ephemeral() {
 
     let publisher = trellis_test::connect_service_runtime::<PublisherContract>(
         runtime.trellis_url(),
-        PUBLISHER_CONTRACT_ID,
-        publisher_contract.digest(),
         PUBLISHER_CONTRACT_JSON,
-        &publisher_key.seed,
+        &publisher_key,
     )
     .await
     .expect("connect publisher service runtime");

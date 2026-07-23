@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 use serde_json::Value;
-use trellis_rs::sdk::core::types::TrellisBindingsGetResponseBinding;
+use trellis_rs::service::ServiceResourceBindings;
 
 /// Resolved service-local jobs binding derived from Trellis resource bindings.
 #[derive(Debug, Clone, PartialEq)]
@@ -205,19 +205,18 @@ pub fn parse_jobs_binding(
     ))
 }
 
-impl TryFrom<&TrellisBindingsGetResponseBinding> for JobsRuntimeBinding {
+impl TryFrom<&ServiceResourceBindings> for JobsRuntimeBinding {
     type Error = JobsBindingError;
 
-    fn try_from(binding: &TrellisBindingsGetResponseBinding) -> Result<Self, Self::Error> {
+    fn try_from(binding: &ServiceResourceBindings) -> Result<Self, Self::Error> {
         let jobs = binding
-            .resources
             .jobs
             .as_ref()
             .ok_or(JobsBindingError::MissingJobsResource)?;
         let normalized = jobs
             .queues
             .iter()
-            .map(|(queue_type, queue)| normalize_core_queue_binding(queue_type, queue))
+            .map(|(queue_type, queue)| normalize_service_queue_binding(queue_type, queue))
             .collect::<Result<Vec<_>, _>>()?;
 
         let work_stream = jobs
@@ -307,26 +306,14 @@ fn normalize_json_queue_binding(
     })
 }
 
-fn normalize_core_queue_binding(
+fn normalize_service_queue_binding(
     queue_type: &str,
-    queue: &trellis_rs::sdk::core::types::TrellisBindingsGetResponseBindingResourcesJobsQueuesValue,
+    queue: &trellis_rs::service::JobsQueueResourceBinding,
 ) -> Result<NormalizedJobsQueueBinding, JobsBindingError> {
-    let parsed_policy: JobsQueueBindingValue =
-        serde_json::from_value(serde_json::to_value(queue).map_err(|error| {
-            JobsBindingError::InvalidQueueBinding {
-                queue_type: queue_type.to_string(),
-                details: error.to_string(),
-            }
-        })?)
-        .map_err(|error| JobsBindingError::InvalidQueueBinding {
-            queue_type: queue_type.to_string(),
-            details: error.to_string(),
-        })?;
-
     Ok(NormalizedJobsQueueBinding {
         queue_type: queue.queue_type.clone(),
         publish_prefix: queue.publish_prefix.clone(),
-        updates_prefix: parsed_policy.updates_prefix,
+        updates_prefix: queue.updates_prefix.clone(),
         work_subject: queue.work_subject.clone(),
         consumer_name: queue.consumer_name.clone(),
         max_deliver: i64_to_u64(queue.max_deliver, queue_type, "maxDeliver")?,
@@ -341,13 +328,38 @@ fn normalize_core_queue_binding(
             .default_deadline_ms
             .map(|value| i64_to_u64(value, queue_type, "defaultDeadlineMs"))
             .transpose()?,
-        update: parsed_policy.update.map(|update| update.schema),
+        update: queue.update.as_ref().map(|update| update.schema.clone()),
         progress: queue.progress,
         logs: queue.logs,
-        key_concurrency: parsed_policy
+        key_concurrency: queue
             .key_concurrency
-            .map(job_key_concurrency_from_value),
-        queue: parsed_policy.queue.map(job_queue_depth_from_value),
+            .as_ref()
+            .map(|policy| JobKeyConcurrencyBinding {
+                key: policy.key.clone(),
+                max_active: policy.max_active,
+                heartbeat_interval_ms: policy.heartbeat_interval_ms,
+                heartbeat_ttl_ms: policy.heartbeat_ttl_ms,
+                stale_policy: match policy.stale_policy {
+                    trellis_rs::jobs::bindings::JobKeyStalePolicy::FailStale => {
+                        JobKeyStalePolicy::FailStale
+                    }
+                    trellis_rs::jobs::bindings::JobKeyStalePolicy::Block => {
+                        JobKeyStalePolicy::Block
+                    }
+                },
+            }),
+        queue: queue.queue.as_ref().map(|policy| JobQueueDepthBinding {
+            max_queued_per_key: policy.max_queued_per_key,
+            when_full: match policy.when_full {
+                trellis_rs::jobs::bindings::JobQueueWhenFull::Reject => JobQueueWhenFull::Reject,
+                trellis_rs::jobs::bindings::JobQueueWhenFull::Coalesce => {
+                    JobQueueWhenFull::Coalesce
+                }
+                trellis_rs::jobs::bindings::JobQueueWhenFull::ReplaceOldest => {
+                    JobQueueWhenFull::ReplaceOldest
+                }
+            },
+        }),
     })
 }
 

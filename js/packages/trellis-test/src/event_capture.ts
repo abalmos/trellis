@@ -11,7 +11,6 @@ import type {
   DescriptorForAction,
 } from "@qlever-llc/trellis/contracts";
 import type { EventDesc } from "@qlever-llc/trellis/contracts";
-import { AuthEventsValidate } from "@qlever-llc/trellis/sdk/auth";
 
 import type { WaitForOptions } from "./types.ts";
 
@@ -279,7 +278,7 @@ export async function startTrellisTestEventCapture<
     }@v1`,
     displayName: `Trellis Test Event Capture: ${args.options.name}`,
     description: "Synthetic app participant for live test event capture.",
-    uses: [AuthEventsValidate, ...events],
+    uses: events,
   }));
   const {
     contract: _sourceContract,

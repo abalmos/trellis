@@ -14,7 +14,6 @@ struct AuthProofFixture {
     session_key: String,
     oauth_init: DomainSigFixture,
     flow_bind: DomainSigFixture,
-    nats_connect: NatsConnectFixture,
     rpc_proof: RpcProofFixture,
 }
 
@@ -24,15 +23,6 @@ struct DomainSigFixture {
     redirect_to: Option<String>,
     flow_id: Option<String>,
     sig: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NatsConnectFixture {
-    contract_digest: String,
-    iat: u64,
-    iat_sig: String,
-    runtime_token: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,24 +75,6 @@ fn auth_proof_matches_shared_conformance_vectors() {
             auth.sign_sha256_domain("bind-flow", fixture.flow_bind.flow_id.as_deref().unwrap()),
             fixture.flow_bind.sig
         );
-        assert_eq!(
-            auth.sign_sha256_domain(
-                "nats-connect",
-                &format!(
-                    "{}:{}",
-                    fixture.nats_connect.iat, fixture.nats_connect.contract_digest
-                )
-            ),
-            fixture.nats_connect.iat_sig
-        );
-        assert_eq!(
-            auth.nats_connect_user_token(
-                fixture.nats_connect.iat,
-                &fixture.nats_connect.contract_digest,
-            ),
-            fixture.nats_connect.runtime_token
-        );
-
         let payload_hash = sha256(fixture.rpc_proof.payload.as_bytes());
         assert_eq!(
             base64url_encode(&payload_hash),

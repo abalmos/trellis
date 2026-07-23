@@ -127,7 +127,7 @@ impl Drop for RuntimeProcess {
 #[tokio::test]
 async fn runtime_singleton_ownership_lifecycle() {
     trellis_test::set_current_test_tenant(TEST_NAME);
-    let runtime =
+    let mut runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
             .expect("start live Trellis test runtime");
@@ -138,6 +138,13 @@ async fn runtime_singleton_ownership_lifecycle() {
         .connect(runtime.nats_url())
         .await
         .expect("connect authenticated lease test client");
+    runtime
+        .stop_control_plane()
+        .expect("stop default platform owner");
+    jetstream::new(client.clone())
+        .delete_key_value(LEASE_BUCKET)
+        .await
+        .expect("remove default platform lease bucket");
 
     let first_config = runtime.workdir().join("jobs-first.toml");
     let mut first = RuntimeProcess::start(&runtime, "jobs", &first_config, "jobs-first");
@@ -258,7 +265,7 @@ async fn runtime_singleton_ownership_lifecycle() {
 #[tokio::test]
 async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
     trellis_test::set_current_test_tenant(INCOMPATIBLE_BUCKET_TEST_NAME);
-    let runtime =
+    let mut runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
             .expect("start live Trellis test runtime");
@@ -269,6 +276,13 @@ async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
         .connect(runtime.nats_url())
         .await
         .expect("connect authenticated lease test client");
+    runtime
+        .stop_control_plane()
+        .expect("stop default platform owner");
+    jetstream::new(client.clone())
+        .delete_key_value(LEASE_BUCKET)
+        .await
+        .expect("remove default platform lease bucket");
     jetstream::new(client)
         .create_key_value(kv::Config {
             bucket: LEASE_BUCKET.to_owned(),
@@ -354,7 +368,6 @@ servers = "{}"
 auth_creds_path = "{}"
 trellis_creds_path = "{}"
 system_creds_path = "{}"
-sentinel_creds_path = "{}"
 
 [jobs.storage]
 kind = "sqlite"
@@ -371,16 +384,15 @@ renew_ms = 500
         toml_path(&nats_dir.join("auth-auth.creds")),
         toml_path(&nats_dir.join("trellis-auth.creds")),
         toml_path(&nats_dir.join("system.creds")),
-        toml_path(&nats_dir.join("sentinel.creds")),
         toml_path(&jobs_path),
     );
     if mode == "all" {
         config.push_str(&format!(
             r#"
 [nats.auth_callout]
-issuer_signing_seed_file = "unused-issuer.seed"
-target_signing_seed_file = "unused-target.seed"
-xkey_seed_file = "unused-xkey.seed"
+issuer_signing_seed_file = "{}"
+target_signing_seed_file = "{}"
+xkey_seed_file = "{}"
 
 [platform.storage]
 kind = "sqlite"
@@ -394,6 +406,17 @@ path = "{}"
 kind = "sqlite"
 path = "{}"
 "#,
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("nats/secrets/auth-issuer-signing.seed")
+            ),
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("nats/secrets/auth-target-signing.seed")
+            ),
+            toml_path(&runtime.workdir().join("nats/secrets/auth-sx.seed")),
             toml_path(&runtime.workdir().join("all-platform.sqlite")),
             toml_path(&runtime.workdir().join("all-health.sqlite")),
             toml_path(&runtime.workdir().join("all-eventlog.sqlite")),

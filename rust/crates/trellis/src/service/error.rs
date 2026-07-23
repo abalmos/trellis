@@ -181,13 +181,14 @@ pub enum ServerError {
     },
 
     #[error(
-        "reply inbox '{reply_to}' is not valid for session '{session_key}' on subject '{subject}'"
+        "reply inbox '{reply_to}' does not match authorized prefix '{expected_prefix}' for session '{session_key}' on subject '{subject}'"
     )]
     #[doc(hidden)]
     ReplyInboxMismatch {
         subject: String,
         session_key: String,
         reply_to: String,
+        expected_prefix: String,
     },
 
     #[error(

@@ -1,7 +1,10 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { NatsConnection } from "@nats-io/nats-core";
 
-import { deriveDeviceIdentity, startDeviceActivationRequest } from "./auth.ts";
+import {
+  deriveDeviceIdentity,
+  startDeviceActivationRequest,
+} from "./auth/device_activation.ts";
 import { connectDeviceWithDeps } from "./device.ts";
 import { defineDeviceContract } from "./contract.ts";
 import { TransportError } from "./errors/index.ts";
@@ -12,6 +15,14 @@ const testContract = defineDeviceContract(() => ({
   displayName: "Example Device",
   description: "Exercise device connection behavior.",
 }));
+const TEST_DEVICE_IDENTITY = {
+  deploymentId: "dep_test",
+  instanceId: "ins_test",
+  principalId: "dev_test",
+  participantId: testContract.CONTRACT_ID,
+  participantArtifactDigest: testContract.CONTRACT_DIGEST,
+  participantNeedsDigest: testContract.CONTRACT_DIGEST,
+};
 
 function createTestLogger() {
   const childBindings: Array<Record<string, unknown>> = [];
@@ -109,14 +120,16 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function authTokenFromAuthenticator(authenticator: unknown): string {
+async function authTokenFromAuthenticator(
+  authenticator: unknown,
+): Promise<string> {
   const candidates = Array.isArray(authenticator)
-    ? authenticator
+    ? authenticator.flat(Infinity)
     : [authenticator];
   for (const candidate of candidates) {
     if (typeof candidate !== "function") continue;
     try {
-      const value = candidate();
+      const value = await candidate("nonce");
       if (
         value && typeof value === "object" && "auth_token" in value &&
         typeof value.auth_token === "string"
@@ -137,9 +150,13 @@ Deno.test("connectDeviceWithDeps returns TransportError when activation is requi
   try {
     globalThis.fetch = (() => {
       return Promise.resolve(
-        new Response(JSON.stringify({ reason: "unknown_device" }), {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
+        Response.json({
+          state: "activation_pending",
+          serverNow: 1_700_000_000_000,
+          activation: {
+            reviewId: "review_123",
+            activationUrl: "https://trellis.example.com/activate/review_123",
+          },
         }),
       );
     }) as typeof fetch;
@@ -149,6 +166,7 @@ Deno.test("connectDeviceWithDeps returns TransportError when activation is requi
         connectDeviceWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          identity: TEST_DEVICE_IDENTITY,
           rootSecret: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
         }, {
           loadTransport: async () => ({
@@ -185,6 +203,7 @@ Deno.test("connectDeviceWithDeps maps invalid bootstrap responses to TransportEr
         connectDeviceWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          identity: TEST_DEVICE_IDENTITY,
           rootSecret: new Uint8Array(32).fill(7),
         }, {
           loadTransport: async () => ({
@@ -221,6 +240,7 @@ Deno.test("connectDeviceWithDeps maps malformed bootstrap responses to Transport
         connectDeviceWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          identity: TEST_DEVICE_IDENTITY,
           rootSecret: new Uint8Array(32).fill(7),
         }, {
           loadTransport: async () => ({
@@ -248,25 +268,16 @@ Deno.test("connectDeviceWithDeps maps runtime connection failures to TransportEr
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "example.device@v1",
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: {
-                  natsServers: ["nats://127.0.0.1:4222"],
-                },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                iatSkewSeconds: 30,
-              },
+            state: "ready",
+            serverNow: 1_700_000_000,
+            session: {
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
             },
+            authorization: {
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            },
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -281,6 +292,7 @@ Deno.test("connectDeviceWithDeps maps runtime connection failures to TransportEr
         connectDeviceWithDeps({
           trellisUrl: "https://trellis.example.com",
           contract: testContract,
+          identity: TEST_DEVICE_IDENTITY,
           rootSecret: new Uint8Array(32).fill(7),
         }, {
           loadTransport: async () => ({
@@ -312,25 +324,14 @@ Deno.test("connectDeviceWithDeps rejects bootstrap contract mismatches", async (
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "different.device@v1",
-              contractDigest: "digest-b",
-              transports: {
-                native: {
-                  natsServers: ["nats://127.0.0.1:4222"],
-                },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                iatSkewSeconds: 30,
-              },
+            state: "ready",
+            serverNow: 1_700_000_000,
+            session: {
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
             },
+            authorization: { participantArtifactDigest: "digest-b" },
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -346,6 +347,7 @@ Deno.test("connectDeviceWithDeps rejects bootstrap contract mismatches", async (
           {
             trellisUrl: "https://trellis.example.com",
             contract: testContract,
+            identity: TEST_DEVICE_IDENTITY,
             rootSecret: new Uint8Array(32).fill(7),
           },
           {
@@ -368,10 +370,12 @@ Deno.test("connectDeviceWithDeps rejects bootstrap contract mismatches", async (
 
 Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range using server time", async () => {
   const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
   let bootstrapCalls = 0;
   let connectAuthenticator: unknown;
 
   try {
+    Date.now = () => 1_700_000_000_000;
     globalThis.fetch = (() => {
       bootstrapCalls += 1;
       if (bootstrapCalls === 1) {
@@ -379,10 +383,10 @@ Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range usin
           new Response(
             JSON.stringify({
               reason: "iat_out_of_range",
-              serverNow: 1_700_000_120,
+              serverNow: 1_700_000_120_000,
             }),
             {
-              status: 400,
+              status: 401,
               headers: { "Content-Type": "application/json" },
             },
           ),
@@ -392,25 +396,16 @@ Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range usin
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "example.device@v1",
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: {
-                  natsServers: ["nats://127.0.0.1:4222"],
-                },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                iatSkewSeconds: 30,
-              },
+            state: "ready",
+            serverNow: 1_700_000_120_000,
+            session: {
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
             },
+            authorization: {
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            },
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -426,6 +421,7 @@ Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range usin
           {
             trellisUrl: "https://trellis.example.com",
             contract: testContract,
+            identity: TEST_DEVICE_IDENTITY,
             rootSecret: new Uint8Array(32).fill(7),
           },
           {
@@ -444,11 +440,12 @@ Deno.test("connectDeviceWithDeps retries bootstrap once on iat_out_of_range usin
     assertEquals(error.code, "trellis.runtime.connect_failed");
     assertEquals(bootstrapCalls, 2);
     const runtimeToken = JSON.parse(
-      authTokenFromAuthenticator(connectAuthenticator),
-    ) as { iat: number };
-    assertEquals(runtimeToken.iat, 1_700_000_120);
+      await authTokenFromAuthenticator(connectAuthenticator),
+    ) as { issuedAt: number };
+    assertEquals(runtimeToken.issuedAt, 1_700_000_120_000);
   } finally {
     globalThis.fetch = originalFetch;
+    Date.now = originalNow;
   }
 });
 
@@ -461,25 +458,16 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS lifecycle status even
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "example.device@v1",
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: {
-                  natsServers: ["nats://127.0.0.1:4222"],
-                },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                iatSkewSeconds: 30,
-              },
+            state: "ready",
+            serverNow: 1_700_000_000,
+            session: {
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
             },
+            authorization: {
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            },
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -492,6 +480,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS lifecycle status even
     const connected = await connectDeviceWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      identity: TEST_DEVICE_IDENTITY,
       rootSecret: new Uint8Array(32).fill(7),
       log: testLogger.logger,
     }, {
@@ -542,25 +531,16 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS closed outcomes", asy
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            status: "ready",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "example.device@v1",
-              contractDigest: testContract.CONTRACT_DIGEST,
-              transports: {
-                native: {
-                  natsServers: ["nats://127.0.0.1:4222"],
-                },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                iatSkewSeconds: 30,
-              },
+            state: "ready",
+            serverNow: 1_700_000_000,
+            session: {
+              sessionId: "session-key",
+              inboxPrefix: "_INBOX.session-key",
             },
+            authorization: {
+              participantArtifactDigest: testContract.CONTRACT_DIGEST,
+            },
+            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
           }),
           {
             status: 200,
@@ -574,6 +554,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS closed outcomes", asy
     await connectDeviceWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      identity: TEST_DEVICE_IDENTITY,
       rootSecret: new Uint8Array(32).fill(8),
       log: closedLogger.logger,
     }, {
@@ -600,6 +581,7 @@ Deno.test("connectDeviceWithDeps logs explicit device NATS closed outcomes", asy
     await connectDeviceWithDeps({
       trellisUrl: "https://trellis.example.com",
       contract: testContract,
+      identity: TEST_DEVICE_IDENTITY,
       rootSecret: new Uint8Array(32).fill(9),
       log: errorLogger.logger,
     }, {

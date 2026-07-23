@@ -1,5 +1,4 @@
 import { fromFileUrl } from "@std/path";
-import { trellisRepoRuntimeOptions } from "../../../js/integration/_support/runtime.ts";
 import { startTrellisIntegrationSharedRuntimeHost } from "../../../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
@@ -17,11 +16,16 @@ if (import.meta.main) {
 
 async function main(args: readonly string[]): Promise<number> {
   const { jobs, testArgs } = parseIntegrationRunnerArgs(args);
+  const tempDir = fromFileUrl(
+    new URL("../../target/trellis-test-tmp/", import.meta.url),
+  );
+  await Deno.mkdir(tempDir, { recursive: true });
+  Deno.env.set("TMPDIR", tempDir);
   const executable = await buildIntegrationTest();
   const runtimeBinaries = await buildRuntimeBinaries();
   const tenantIds = await listTests(executable, testArgs);
   const host = await startTrellisIntegrationSharedRuntimeHost({
-    runtime: trellisRepoRuntimeOptions(),
+    runtime: {},
     tenantIds,
   });
 
@@ -29,7 +33,7 @@ async function main(args: readonly string[]): Promise<number> {
     const command = new Deno.Command(executable, {
       args: [...testArgs, `--test-threads=${jobs}`],
       cwd: repoRoot,
-      env: { ...host.env, ...runtimeBinaries },
+      env: { ...host.env, ...runtimeBinaries, TMPDIR: tempDir },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",

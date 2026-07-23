@@ -37,8 +37,8 @@ The contract can be active before this instance connects. If deployment authorit
 
 Those resolved bindings are Trellis runtime internals. Use the returned
 `service.kv`, `service.store`, and `service.jobs` handles; do not call
-`Trellis.Bindings.Get`, construct `TrellisService` or `StoreHandle`, or pass
-binding/resource payloads into `Trellis` constructors.
+fetch binding payloads, construct `TrellisService` or `StoreHandle`, or pass
+resource payloads into `Trellis` constructors.
 
 Use normal JavaScript closures for application-owned dependencies such as
 repositories, clocks, loggers, or local projections. Trellis handlers receive

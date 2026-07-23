@@ -109,7 +109,7 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: serviceFixture.serviceContract,
       name: serviceFixture.serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();
@@ -142,7 +142,7 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: serviceFixture.serviceContract,
       name: serviceFixture.serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     });

@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::collections::BTreeMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -6,83 +7,65 @@ use ed25519_dalek::SigningKey;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use trellis_protocol::{
+    parse_api_v1, parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
+    SessionProofInputV1,
+};
 
-use super::client::{connect_admin_client_async, AuthClient};
+use super::client::connect_admin_client_async;
 use super::models::{
-    AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge, BindResponse,
+    AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge,
     BindResponseBound, BoundSession, StartAgentLoginOpts,
 };
 use super::TrellisAuthError;
-use super::{AuthStartRequest, AuthStartResponse, ClientTransportsRecord};
 use crate::client::SessionAuth;
+use crate::sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-fn canonicalize_json_value(value: &Value) -> Result<String, TrellisAuthError> {
-    match value {
-        Value::Null => Ok("null".to_string()),
-        Value::Bool(value) => Ok(if *value { "true" } else { "false" }.to_string()),
-        Value::Number(value) => Ok(value.to_string()),
-        Value::String(value) => Ok(serde_json::to_string(value)?),
-        Value::Array(values) => {
-            let mut canonical = String::from("[");
-            for (index, entry) in values.iter().enumerate() {
-                if index > 0 {
-                    canonical.push(',');
-                }
-                canonical.push_str(&canonicalize_json_value(entry)?);
-            }
-            canonical.push(']');
-            Ok(canonical)
-        }
-        Value::Object(values) => {
-            let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| *key);
-
-            let mut canonical = String::from("{");
-            for (index, (key, entry)) in entries.into_iter().enumerate() {
-                if index > 0 {
-                    canonical.push(',');
-                }
-                canonical.push_str(&serde_json::to_string(key)?);
-                canonical.push(':');
-                canonical.push_str(&canonicalize_json_value(entry)?);
-            }
-            canonical.push('}');
-            Ok(canonical)
-        }
-    }
-}
-
-#[doc = concat!("Trellis API operation `", stringify!(build_auth_start_signature_payload), "`.")]
-pub fn build_auth_start_signature_payload(
-    redirect_to: &str,
-    provider: Option<&str>,
-    contract: &Value,
-    context: Option<&Value>,
-) -> Result<String, TrellisAuthError> {
-    Ok(format!(
-        "{}:{}:{}:{}",
-        redirect_to,
-        provider.unwrap_or_default(),
-        canonicalize_json_value(contract)?,
-        canonicalize_json_value(context.unwrap_or(&Value::Null))?,
-    ))
-}
-
-fn join_native_servers(transports: &ClientTransportsRecord) -> Result<String, TrellisAuthError> {
-    let Some(native) = &transports.native else {
-        return Err(TrellisAuthError::UnexpectedBindStatus(
-            "missing_native_transport".to_string(),
-        ));
-    };
-    let servers = &native.servers;
+fn join_native_servers(servers: &[String]) -> Result<String, TrellisAuthError> {
     if servers.is_empty() {
         return Err(TrellisAuthError::UnexpectedBindStatus(
             "missing_native_transport".to_string(),
         ));
     }
     Ok(servers.join(","))
+}
+
+struct AdministrationParticipant {
+    id: String,
+    digest: String,
+    needs_digest: String,
+    required_grants: trellis_protocol::GrantSetV1,
+}
+
+fn administration_participant() -> Result<AdministrationParticipant, TrellisAuthError> {
+    let participant_value: Value = serde_json::from_str(include_str!(
+        "../../artifacts/trellis.admin.participant.json"
+    ))?;
+    let participant = parse_participant_v1(&participant_value)?;
+    let api_value: Value = serde_json::from_str(crate::sdk::auth::api::API_JSON)?;
+    let api = parse_api_v1(&api_value)?;
+    let mut apis = BTreeMap::new();
+    apis.insert(api.id().to_owned(), api.clone());
+    let resolved = resolve_participant_v1(&participant, &apis)?;
+    Ok(AdministrationParticipant {
+        id: participant.id().to_owned(),
+        digest: participant.digest()?,
+        needs_digest: resolved.needs().digest()?,
+        required_grants: resolved.proposal().required().grant_set().clone(),
+    })
+}
+
+/// Return the exact built-in administration participant artifact digest.
+pub fn administration_participant_digest() -> Result<String, TrellisAuthError> {
+    Ok(administration_participant()?.digest)
+}
+
+/// Return the exact required grants declared by the built-in administration participant.
+pub fn administration_participant_grants() -> Result<trellis_protocol::GrantSetV1, TrellisAuthError>
+{
+    Ok(administration_participant()?.required_grants)
 }
 
 fn base64url_encode(bytes: &[u8]) -> String {
@@ -113,35 +96,52 @@ async fn start_auth_request(
     trellis_url: &str,
     redirect_to: &str,
     auth: &SessionAuth,
-    contract_json: &str,
-) -> Result<AuthStartResponse, TrellisAuthError> {
-    let contract: Value = serde_json::from_str(contract_json)?;
-    let contract = contract.as_object().cloned().ok_or_else(|| {
-        TrellisAuthError::InvalidArgument("contract json must be an object".to_string())
-    })?;
-    let sig = auth.sign_sha256_domain(
-        "oauth-init",
-        &build_auth_start_signature_payload(
-            redirect_to,
-            None,
-            &Value::Object(contract.clone()),
-            None,
-        )?,
-    );
+) -> Result<AuthStartResponseV1, TrellisAuthError> {
+    let participant = administration_participant()?;
+    let request_id = ulid::Ulid::new().to_string();
+    let issued_at = now_ms()?;
+    let session_nkey = auth.nkey_pair()?.public_key();
+    let mut request = json!({
+        "requestId": request_id,
+        "issuedAt": issued_at,
+        "sessionPublicKey": auth.session_key,
+        "sessionNkey": session_nkey,
+        "participantId": participant.id,
+        "participantArtifactDigest": participant.digest,
+        "participantNeedsDigest": participant.needs_digest,
+        "participantArtifact": null,
+        "referencedApiArtifacts": [],
+        "redirectTarget": redirect_to,
+        "proof": auth.sign_session_proof(&SessionProofInputV1::user_auth_request(
+            request_id.clone(),
+            issued_at,
+            auth.session_key.clone(),
+            session_nkey.clone(),
+            participant.id.clone(),
+            participant.digest.clone(),
+            redirect_to.to_owned(),
+            participant.digest.clone(),
+        )?)?,
+    });
+    let request_digest = session_proof_request_digest_v1(&request)?;
+    let input = SessionProofInputV1::user_auth_request(
+        request_id,
+        issued_at,
+        auth.session_key.clone(),
+        session_nkey,
+        participant.id,
+        participant.digest,
+        redirect_to.to_owned(),
+        request_digest,
+    )?;
+    request["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     let client = HttpClient::builder().build()?;
     let response = client
         .post(format!(
             "{}/auth/requests",
             trellis_url.trim_end_matches('/')
         ))
-        .json(&AuthStartRequest {
-            provider: None,
-            redirect_to: redirect_to.to_string(),
-            session_key: auth.session_key.clone(),
-            sig,
-            contract: contract.into_iter().collect(),
-            context: None,
-        })
+        .json(&request)
         .send()
         .await?;
     let status = response.status();
@@ -152,18 +152,19 @@ async fn start_auth_request(
             text,
         ));
     }
-    Ok(serde_json::from_str::<AuthStartResponse>(&text)?)
+    Ok(serde_json::from_str::<AuthStartResponseV1>(&text)?)
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum AgentFlowStatusResponse {
-    Redirect { location: String },
-    ChooseProvider,
-    ApprovalRequired,
-    ApprovalDenied,
-    InsufficientCapabilities,
-    Expired,
+#[serde(rename_all = "camelCase")]
+struct AuthStartResponseV1 {
+    flow_id: String,
+    portal_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentFlowStatusResponse {
+    state: String,
 }
 
 async fn fetch_agent_flow_status(
@@ -199,26 +200,22 @@ pub async fn poll_agent_flow_until_ready(
 ) -> Result<String, TrellisAuthError> {
     let deadline = tokio::time::Instant::now() + timeout_after;
     loop {
-        match fetch_agent_flow_status(trellis_url, flow_id).await? {
-            AgentFlowStatusResponse::Redirect { location } => {
-                let _ = location;
-                return Ok(flow_id.to_string());
-            }
-            AgentFlowStatusResponse::ChooseProvider | AgentFlowStatusResponse::ApprovalRequired => {
-            }
-            AgentFlowStatusResponse::ApprovalDenied => {
+        match fetch_agent_flow_status(trellis_url, flow_id)
+            .await?
+            .state
+            .as_str()
+        {
+            "approved" | "consumed" => return Ok(flow_id.to_string()),
+            "choose_provider" | "authenticated" | "approval_required" => {}
+            "approval_denied" => {
                 return Err(TrellisAuthError::AuthFlowFailed(
                     "approval_denied".to_string(),
                 ));
             }
-            AgentFlowStatusResponse::InsufficientCapabilities => {
-                return Err(TrellisAuthError::AuthFlowFailed(
-                    "insufficient_capabilities".to_string(),
-                ));
-            }
-            AgentFlowStatusResponse::Expired => {
+            "expired" => {
                 return Err(TrellisAuthError::AuthFlowFailed("expired".to_string()));
             }
+            state => return Err(TrellisAuthError::AuthFlowFailed(state.to_owned())),
         }
 
         if tokio::time::Instant::now() >= deadline {
@@ -228,23 +225,18 @@ pub async fn poll_agent_flow_until_ready(
     }
 }
 
-async fn bind_session(
-    trellis_url: &str,
-    auth: &SessionAuth,
-    flow_id: &str,
-) -> Result<BoundSession, TrellisAuthError> {
+async fn bind_session(trellis_url: &str, flow_id: &str) -> Result<BoundSession, TrellisAuthError> {
     let client = HttpClient::builder().build()?;
     let bind_url = format!(
         "{}/auth/flow/{}/bind",
         trellis_url.trim_end_matches('/'),
         flow_id
     );
-    let sig = auth.sign_sha256_domain("bind-flow", flow_id);
     let response = client
         .post(bind_url)
+        .header(reqwest::header::ORIGIN, trellis_url.trim_end_matches('/'))
         .json(&json!({
-            "sessionKey": auth.session_key,
-            "sig": sig,
+            "idempotencyKey": flow_id,
         }))
         .send()
         .await?;
@@ -254,31 +246,14 @@ async fn bind_session(
         return Err(TrellisAuthError::BindHttpFailure(status.as_u16(), text));
     }
 
-    match serde_json::from_str::<BindResponse>(&text)? {
-        BindResponse::Bound(BindResponseBound {
-            inbox_prefix,
-            expires,
-            sentinel,
-            transports,
-        }) => Ok(BoundSession {
-            inbox_prefix,
-            expires,
-            servers: join_native_servers(&transports)?,
-            sentinel,
-        }),
-        BindResponse::ApprovalRequired { approval } => Err(TrellisAuthError::UnexpectedBindStatus(
-            format!("approval_required:{approval}"),
-        )),
-        BindResponse::ApprovalDenied { approval } => Err(TrellisAuthError::UnexpectedBindStatus(
-            format!("approval_denied:{approval}"),
-        )),
-        BindResponse::InsufficientCapabilities {
-            approval,
-            missing_capabilities,
-        } => Err(TrellisAuthError::UnexpectedBindStatus(format!(
-            "insufficient_capabilities:{approval}:{missing_capabilities:?}"
-        ))),
-    }
+    let BindResponseBound { session, nats } = serde_json::from_str(&text)?;
+    Ok(BoundSession {
+        inbox_prefix: session.inbox_prefix,
+        session_id: session.session_id,
+        expires_at: session.expires_at,
+        servers: join_native_servers(&nats.servers)?,
+        bootstrap_jwt: nats.jwt,
+    })
 }
 
 impl AgentLoginChallenge {
@@ -295,7 +270,7 @@ impl AgentLoginChallenge {
             flow_id,
             login_url: _,
             session_seed,
-            contract_digest,
+            participant_digest,
             auth,
         } = self;
         let flow_id = poll_agent_flow_until_ready(
@@ -305,21 +280,35 @@ impl AgentLoginChallenge {
             Duration::from_secs(300),
         )
         .await?;
-        let bound = bind_session(trellis_url, &auth, &flow_id).await?;
+        let bound = bind_session(trellis_url, &flow_id).await?;
         let state = AdminSessionState {
             trellis_url: trellis_url.to_string(),
             servers: bound.servers.clone(),
             session_seed,
             session_key: auth.session_key.clone(),
-            contract_digest,
-            sentinel_jwt: bound.sentinel.jwt,
-            sentinel_seed: bound.sentinel.seed,
-            expires: bound.expires,
+            participant_digest,
+            session_id: bound.session_id,
+            inbox_prefix: bound.inbox_prefix,
+            bootstrap_jwt: bound.bootstrap_jwt,
+            expires_at: bound.expires_at,
         };
 
         let client = connect_admin_client_async(&state).await?;
         let auth_client = AuthClient::new(&client);
-        let user = auth_client.me().await?;
+        let response = auth_client
+            .rpc()
+            .auth()
+            .sessions_me()
+            .await
+            .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
+        let user: super::AuthenticatedUser = response
+            .user
+            .ok_or_else(|| {
+                TrellisAuthError::NotUserSession(
+                    response.session.participant_kind.as_str().to_owned(),
+                )
+            })
+            .and_then(|user| Ok(serde_json::from_value(serde_json::to_value(user)?)?))?;
         if !user
             .capabilities
             .iter()
@@ -339,28 +328,19 @@ pub async fn start_agent_login(
 ) -> Result<AgentLoginChallenge, TrellisAuthError> {
     let (session_seed, _session_key) = generate_session_keypair();
     let auth = SessionAuth::from_seed_base64url(&session_seed)?;
-    let redirect_to = detached_login_redirect_to()?;
-    let (flow_id, login_url) = match start_auth_request(
-        opts.trellis_url,
-        &redirect_to,
-        &auth,
-        opts.contract_json,
-    )
-    .await?
-    {
-        AuthStartResponse::FlowStarted { flow_id, login_url } => (flow_id, login_url),
-        AuthStartResponse::Bound { .. } => {
-            return Err(TrellisAuthError::UnexpectedAuthRequestStatus(
-                "bound_without_existing_session".to_string(),
-            ));
-        }
-    };
+    let redirect_to = format!(
+        "{}/{}",
+        opts.trellis_url.trim_end_matches('/'),
+        detached_login_redirect_to()?.trim_start_matches('/')
+    );
+    let response = start_auth_request(opts.trellis_url, &redirect_to, &auth).await?;
+    let participant_digest = administration_participant()?.digest;
 
     Ok(AgentLoginChallenge {
-        flow_id,
-        login_url,
+        flow_id: response.flow_id,
+        login_url: response.portal_url,
         session_seed,
-        contract_digest: contract_digest(opts.contract_json)?,
+        participant_digest,
         auth,
     })
 }
@@ -369,50 +349,29 @@ pub async fn start_agent_login(
 #[doc = concat!("Asynchronous Trellis API operation `", stringify!(start_admin_reauth), "`.")]
 pub async fn start_admin_reauth(
     state: &AdminSessionState,
-    contract_json: &str,
 ) -> Result<AdminReauthOutcome, TrellisAuthError> {
     let auth = SessionAuth::from_seed_base64url(&state.session_seed)?;
-    let redirect_to = detached_login_redirect_to()?;
-    match start_auth_request(&state.trellis_url, &redirect_to, &auth, contract_json).await? {
-        AuthStartResponse::Bound {
-            inbox_prefix: _,
-            expires,
-            sentinel,
-            transports,
-        } => {
-            let next_state = AdminSessionState {
-                trellis_url: state.trellis_url.clone(),
-                servers: join_native_servers(&transports)?,
-                session_seed: state.session_seed.clone(),
-                session_key: auth.session_key.clone(),
-                contract_digest: contract_digest(contract_json)?,
-                sentinel_jwt: sentinel.jwt,
-                sentinel_seed: sentinel.seed,
-                expires,
-            };
-            let client = connect_admin_client_async(&next_state).await?;
-            let auth_client = AuthClient::new(&client);
-            let user = auth_client.me().await?;
-            if !user
-                .capabilities
-                .iter()
-                .any(|capability| capability == "admin")
-            {
-                return Err(TrellisAuthError::NotAdmin);
-            }
-            Ok(AdminReauthOutcome::Bound(AdminLoginOutcome {
-                state: next_state,
-                user,
-            }))
-        }
-        AuthStartResponse::FlowStarted { flow_id, login_url } => {
-            Ok(AdminReauthOutcome::Flow(AgentLoginChallenge {
-                flow_id,
-                login_url,
-                session_seed: state.session_seed.clone(),
-                contract_digest: contract_digest(contract_json)?,
-                auth,
-            }))
-        }
-    }
+    let redirect_to = format!(
+        "{}/{}",
+        state.trellis_url.trim_end_matches('/'),
+        detached_login_redirect_to()?.trim_start_matches('/')
+    );
+    let response = start_auth_request(&state.trellis_url, &redirect_to, &auth).await?;
+    Ok(AdminReauthOutcome::Flow(AgentLoginChallenge {
+        flow_id: response.flow_id,
+        login_url: response.portal_url,
+        session_seed: state.session_seed.clone(),
+        participant_digest: administration_participant()?.digest,
+        auth,
+    }))
+}
+
+fn now_ms() -> Result<i64, TrellisAuthError> {
+    i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| TrellisAuthError::InvalidArgument(error.to_string()))?
+            .as_millis(),
+    )
+    .map_err(|_| TrellisAuthError::InvalidArgument("current time exceeds i64 milliseconds".into()))
 }

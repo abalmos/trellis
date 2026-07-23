@@ -63,16 +63,22 @@ authority that you update through Trellis Auth.
 
 ## 4. Run the container
 
-Run the same image you installed from. Pass the session seed and NATS connection details as environment variables:
+Run the same image you installed from. Pass the immutable provisioned identity
+returned by the provisioning step and the Trellis HTTP endpoint using the
+service's documented configuration variables:
 
 ```sh
 podman run --rm \
-  -e MY_SERVICE_SESSION_KEY_SEED="<seed from provision>" \
-  -e NATS_SERVERS=host.containers.internal \
-  -e NATS_SENTINEL_CREDS=/run/creds/sentinel.creds \
-  -v "$HOME/trellis/nats/creds/sentinel.creds:/run/creds/sentinel.creds:ro,Z" \
+  -e TRELLIS_URL="http://host.containers.internal:3000" \
+  -e MY_SERVICE_IDENTITY_SEED="<seed from provision>" \
+  -e MY_SERVICE_DEPLOYMENT_ID="<deployment id>" \
+  -e MY_SERVICE_INSTANCE_ID="<instance id>" \
   ghcr.io/my-org/my-service:1.2.3
 ```
+
+The service bootstraps through Trellis and receives its session-bound NATS
+credential and endpoints. Do not mount shared NATS or sentinel credentials into
+service containers.
 
 For a permanent deployment, create a Quadlet unit for the service similar to the runtime and console units in the [Starting Trellis](/guides/starting-trellis) guide.
 

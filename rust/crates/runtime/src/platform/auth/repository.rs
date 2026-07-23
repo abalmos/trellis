@@ -18,8 +18,9 @@ use super::{
     DeviceDelegationRecord, DeviceDelegationState, DeviceEvidence, DeviceRecord, DeviceState,
     IdentityAuthorityRecord, MaterializedAuthorityRecord, ParticipantBindingRecord,
     PrincipalAuthorizationChange, PrincipalKind, PrincipalRecord, PrincipalState,
-    ProviderIdentityLink, ResourceBindingEvidence, RuntimeEvidence, RuntimeInstanceRecord,
-    RuntimeInstanceState, ServiceEvidence, SessionRecord, SessionRuntimeBinding, SessionState,
+    ProviderIdentityLink, ResourceBindingEvidence, ResourceProviderIdentity, RuntimeEvidence,
+    RuntimeInstanceRecord, RuntimeInstanceState, ServiceEvidence, SessionRecord,
+    SessionRuntimeBinding, SessionState,
 };
 
 /// Atomic materialized-authority replacement and its exact supporting evidence.
@@ -144,6 +145,18 @@ pub trait ProviderIdentityRepository: Send + Sync {
         &self,
         link: ProviderIdentityLink,
     ) -> Result<(), AuthorizationStateError>;
+
+    /// List provider identities owned by one principal.
+    async fn list_provider_identities(
+        &self,
+        principal_id: &str,
+    ) -> Result<Vec<ProviderIdentityLink>, AuthorizationStateError>;
+
+    /// Atomically unlink one external identity while preserving a login method.
+    async fn unlink_provider_identity(
+        &self,
+        command: super::companion_repository::ProviderIdentityUnlink,
+    ) -> Result<super::companion_repository::IdempotentOutcome<bool>, AuthorizationStateError>;
 }
 
 /// Durable authenticated-session repository port.
@@ -153,11 +166,14 @@ pub trait SessionRepository: Send + Sync {
     async fn get_session(&self, id: &str)
         -> Result<Option<SessionRecord>, AuthorizationStateError>;
 
-    /// Create a validated participant-bound session.
-    async fn create_session(
+    /// Load the unique session bound to one session public key.
+    async fn get_session_by_public_key(
         &self,
-        record: SessionRecord,
-    ) -> Result<SessionRecord, AuthorizationStateError>;
+        public_key: &str,
+    ) -> Result<Option<SessionRecord>, AuthorizationStateError>;
+
+    /// List all sessions in stable session-id order.
+    async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError>;
 
     /// Update liveness only when the session remains active.
     async fn touch_session(
@@ -165,14 +181,6 @@ pub trait SessionRepository: Send + Sync {
         id: &str,
         observed_at: i64,
     ) -> Result<(), AuthorizationStateError>;
-
-    /// Revoke a session with an optimistic version guard.
-    async fn revoke_session(
-        &self,
-        id: &str,
-        expected_version: u64,
-        revoked_at: i64,
-    ) -> Result<SessionRecord, AuthorizationStateError>;
 
     /// Mark a session expired with an optimistic version guard.
     async fn expire_session(
@@ -217,6 +225,11 @@ pub trait ParticipantBindingRepository: Send + Sync {
 /// Desired identity-authority repository port.
 #[async_trait]
 pub trait IdentityAuthorityRepository: Send + Sync {
+    /// List current identity authorities in stable key order.
+    async fn list_identity_authorities(
+        &self,
+    ) -> Result<Vec<IdentityAuthorityRecord>, AuthorizationStateError>;
+
     /// Load current identity authority for one principal and participant.
     async fn get_identity_authority(
         &self,
@@ -235,6 +248,11 @@ pub trait IdentityAuthorityRepository: Send + Sync {
 /// Desired deployment-authority repository port.
 #[async_trait]
 pub trait DeploymentAuthorityRepository: Send + Sync {
+    /// List current deployment authorities in stable key order.
+    async fn list_deployment_authorities(
+        &self,
+    ) -> Result<Vec<DeploymentAuthorityRecord>, AuthorizationStateError>;
+
     /// Load current deployment authority for one deployment and participant.
     async fn get_deployment_authority(
         &self,
@@ -253,6 +271,14 @@ pub trait DeploymentAuthorityRepository: Send + Sync {
 /// Narrow runtime evidence repository port used by materialization.
 #[async_trait]
 pub trait EvidenceRepository: Send + Sync {
+    /// List runtime instances in stable ID order.
+    async fn list_runtime_instances(
+        &self,
+    ) -> Result<Vec<RuntimeInstanceRecord>, AuthorizationStateError>;
+
+    /// List devices in stable deployment/principal order.
+    async fn list_devices(&self) -> Result<Vec<DeviceRecord>, AuthorizationStateError>;
+
     /// Load current authority-level deployment evidence.
     async fn get_deployment_evidence(
         &self,
@@ -389,26 +415,46 @@ pub trait AuthorizationMaterializationRepository: Send + Sync {
     async fn acknowledge_transition(&self, event_id: &str) -> Result<(), AuthorizationStateError>;
 }
 
-#[derive(Debug, Default)]
-struct MemoryState {
-    principals: BTreeMap<String, PrincipalRecord>,
-    provider_identities: BTreeMap<(String, String), ProviderIdentityLink>,
-    sessions: BTreeMap<String, SessionRecord>,
-    session_key_ids: BTreeMap<String, String>,
-    participant_bindings: BTreeMap<(String, String), ParticipantBindingRecord>,
-    identity_authorities: BTreeMap<(String, String), IdentityAuthorityRecord>,
-    deployment_authorities: BTreeMap<(String, String), DeploymentAuthorityRecord>,
-    deployments: BTreeMap<String, DeploymentRecord>,
-    runtime_instances: BTreeMap<String, RuntimeInstanceRecord>,
-    session_runtime_bindings: BTreeMap<String, SessionRuntimeBinding>,
-    devices: BTreeMap<(String, String), DeviceRecord>,
-    device_delegations: BTreeMap<(String, String), DeviceDelegationRecord>,
+#[derive(Clone, Debug, Default)]
+pub(super) struct MemoryState {
+    pub(super) principals: BTreeMap<String, PrincipalRecord>,
+    pub(super) provider_identities: BTreeMap<(String, String), ProviderIdentityLink>,
+    pub(super) sessions: BTreeMap<String, SessionRecord>,
+    pub(super) session_key_ids: BTreeMap<String, String>,
+    pub(super) participant_bindings: BTreeMap<(String, String), ParticipantBindingRecord>,
+    pub(super) identity_authorities: BTreeMap<(String, String), IdentityAuthorityRecord>,
+    pub(super) deployment_authorities: BTreeMap<(String, String), DeploymentAuthorityRecord>,
+    pub(super) deployments: BTreeMap<String, DeploymentRecord>,
+    pub(super) runtime_instances: BTreeMap<String, RuntimeInstanceRecord>,
+    pub(super) session_runtime_bindings: BTreeMap<String, SessionRuntimeBinding>,
+    pub(super) devices: BTreeMap<(String, String), DeviceRecord>,
+    pub(super) device_delegations: BTreeMap<(String, String), DeviceDelegationRecord>,
     dependency_evidence:
         BTreeMap<AuthorityTarget, (AuthorityEvidenceScope, Vec<DependencyEvidence>)>,
     resource_evidence:
         BTreeMap<AuthorityTarget, (AuthorityEvidenceScope, Vec<ResourceBindingEvidence>)>,
     materializations: BTreeMap<(AuthorityKind, String), MaterializationReplacement>,
     transition_outbox: BTreeMap<String, AuthorizationTransitionOutboxRecord>,
+    pub(super) user_profiles: BTreeMap<String, super::UserProfileRecord>,
+    pub(super) local_credentials: BTreeMap<String, super::LocalCredentialRecord>,
+    pub(super) local_usernames: BTreeMap<String, String>,
+    pub(super) login_portals: BTreeMap<String, super::LoginPortalRecord>,
+    pub(super) deployment_profiles: BTreeMap<String, super::DeploymentProfileRecord>,
+    pub(super) login_settings: BTreeMap<String, super::LoginSettingsRecord>,
+    pub(super) portal_routes: BTreeMap<String, super::PortalRouteRecord>,
+    pub(super) account_flows: BTreeMap<String, super::AccountFlowRecord>,
+    pub(super) account_flow_hashes: BTreeMap<String, String>,
+    pub(super) authority_proposals: BTreeMap<String, super::AuthorityProposalRecord>,
+    pub(super) authority_decisions: BTreeMap<String, super::AuthorityDecisionRecord>,
+    pub(super) authority_decision_digests: BTreeMap<String, String>,
+    pub(super) provisioned_identities: BTreeMap<String, super::ProvisionedIdentityRecord>,
+    pub(super) provisioned_public_keys: BTreeMap<String, String>,
+    pub(super) provisioning_secrets: BTreeMap<String, super::DeviceProvisioningSecretRecord>,
+    pub(super) provisioning_secret_hashes: BTreeMap<String, String>,
+    pub(super) activation_reviews: BTreeMap<String, super::DeviceActivationReviewRecord>,
+    pub(super) idempotency_results: BTreeMap<String, super::IdempotencyResultRecord>,
+    pub(super) idempotency_requests: BTreeMap<(String, String, String), String>,
+    pub(super) post_commit_actions: BTreeMap<String, super::PostCommitActionRecord>,
 }
 
 /// Constraint-faithful in-memory authorization repositories for pure tests and examples.
@@ -418,7 +464,9 @@ pub struct InMemoryAuthorizationStore {
 }
 
 impl InMemoryAuthorizationStore {
-    fn state(&self) -> Result<std::sync::MutexGuard<'_, MemoryState>, AuthorizationStateError> {
+    pub(super) fn state(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, MemoryState>, AuthorizationStateError> {
         self.state
             .lock()
             .map_err(|_| AuthorizationStateError::Storage("in-memory lock poisoned".to_owned()))
@@ -516,6 +564,71 @@ impl ProviderIdentityRepository for InMemoryAuthorizationStore {
         state.provider_identities.insert(key, link);
         Ok(())
     }
+
+    async fn list_provider_identities(
+        &self,
+        principal_id: &str,
+    ) -> Result<Vec<ProviderIdentityLink>, AuthorizationStateError> {
+        let mut identities = self
+            .state()?
+            .provider_identities
+            .values()
+            .filter(|identity| identity.principal_id == principal_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        identities.sort_by(|left, right| {
+            (&left.provider, &left.provider_subject)
+                .cmp(&(&right.provider, &right.provider_subject))
+        });
+        Ok(identities)
+    }
+
+    async fn unlink_provider_identity(
+        &self,
+        command: super::companion_repository::ProviderIdentityUnlink,
+    ) -> Result<super::companion_repository::IdempotentOutcome<bool>, AuthorizationStateError> {
+        if command.provider == "local" {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "local credentials cannot be unlinked".to_owned(),
+            ));
+        }
+        let mut state = self.state()?;
+        if let Some(value) =
+            super::companion_repository::memory_idempotency_replay(&state, &command.idempotency)?
+        {
+            return Ok(super::companion_repository::IdempotentOutcome::Replayed(
+                value,
+            ));
+        }
+        let key = (command.provider.clone(), command.provider_subject.clone());
+        let identity = state
+            .provider_identities
+            .get(&key)
+            .filter(|identity| identity.principal_id == command.principal_id)
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord("identity not found".to_owned())
+            })?;
+        let has_other_method = state.local_credentials.contains_key(&identity.principal_id)
+            || state.provider_identities.values().any(|candidate| {
+                candidate.principal_id == identity.principal_id
+                    && (candidate.provider != command.provider
+                        || candidate.provider_subject != command.provider_subject)
+            });
+        if !has_other_method {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "the last authentication method cannot be unlinked".to_owned(),
+            ));
+        }
+        state.provider_identities.remove(&key);
+        super::companion_repository::memory_commit_idempotency_and_actions(
+            &mut state,
+            command.idempotency,
+            command.actions,
+        )?;
+        Ok(super::companion_repository::IdempotentOutcome::Applied(
+            true,
+        ))
+    }
 }
 
 #[async_trait]
@@ -558,49 +671,20 @@ impl SessionRepository for InMemoryAuthorizationStore {
         Ok(self.state()?.sessions.get(id).cloned())
     }
 
-    async fn create_session(
+    async fn get_session_by_public_key(
         &self,
-        record: SessionRecord,
-    ) -> Result<SessionRecord, AuthorizationStateError> {
-        validate_session(&record)?;
-        let mut state = self.state()?;
-        let principal = state
-            .principals
-            .get(&record.principal_id)
-            .ok_or(AuthorizationStateError::PrincipalMissing)?;
-        if principal.kind != record.principal_kind {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "session principal kind does not match principal".to_owned(),
-            ));
-        }
-        let binding_key = (
-            record.participant_id.clone(),
-            record.participant_artifact_digest.clone(),
-        );
-        let binding = state
-            .participant_bindings
-            .get(&binding_key)
-            .ok_or(AuthorizationStateError::ParticipantMissing)?;
-        if binding.participant_kind != record.participant_kind {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "session participant kind does not match participant binding".to_owned(),
-            ));
-        }
-        if binding.needs_digest != record.participant_needs_digest {
-            return Err(AuthorizationStateError::NeedsDigestMismatch);
-        }
-        if state.sessions.contains_key(&record.session_id)
-            || state.session_key_ids.contains_key(&record.session_key_id)
-        {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        state
-            .session_key_ids
-            .insert(record.session_key_id.clone(), record.session_id.clone());
-        state
+        public_key: &str,
+    ) -> Result<Option<SessionRecord>, AuthorizationStateError> {
+        Ok(self
+            .state()?
             .sessions
-            .insert(record.session_id.clone(), record.clone());
-        Ok(record)
+            .values()
+            .find(|session| session.session_public_key == public_key)
+            .cloned())
+    }
+
+    async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError> {
+        Ok(self.state()?.sessions.values().cloned().collect())
     }
 
     async fn touch_session(
@@ -623,27 +707,6 @@ impl SessionRepository for InMemoryAuthorizationStore {
         }
         record.last_seen_at = record.last_seen_at.max(observed_at);
         Ok(())
-    }
-
-    async fn revoke_session(
-        &self,
-        id: &str,
-        expected_version: u64,
-        revoked_at: i64,
-    ) -> Result<SessionRecord, AuthorizationStateError> {
-        require_protocol_timestamp("revokedAt", revoked_at)?;
-        let mut state = self.state()?;
-        let record = state
-            .sessions
-            .get_mut(id)
-            .ok_or(AuthorizationStateError::SessionMissing)?;
-        if record.version != expected_version || record.state != SessionState::Active {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        record.state = SessionState::Revoked;
-        record.revoked_at = Some(revoked_at);
-        record.version = next_version("version", record.version)?;
-        Ok(record.clone())
     }
 
     async fn expire_session(
@@ -721,6 +784,17 @@ impl SessionRepository for InMemoryAuthorizationStore {
 
 #[async_trait]
 impl IdentityAuthorityRepository for InMemoryAuthorizationStore {
+    async fn list_identity_authorities(
+        &self,
+    ) -> Result<Vec<IdentityAuthorityRecord>, AuthorizationStateError> {
+        Ok(self
+            .state()?
+            .identity_authorities
+            .values()
+            .cloned()
+            .collect())
+    }
+
     async fn get_identity_authority(
         &self,
         principal_id: &str,
@@ -770,6 +844,17 @@ impl IdentityAuthorityRepository for InMemoryAuthorizationStore {
 
 #[async_trait]
 impl DeploymentAuthorityRepository for InMemoryAuthorizationStore {
+    async fn list_deployment_authorities(
+        &self,
+    ) -> Result<Vec<DeploymentAuthorityRecord>, AuthorizationStateError> {
+        Ok(self
+            .state()?
+            .deployment_authorities
+            .values()
+            .cloned()
+            .collect())
+    }
+
     async fn get_deployment_authority(
         &self,
         deployment_id: &str,
@@ -816,6 +901,16 @@ impl DeploymentAuthorityRepository for InMemoryAuthorizationStore {
 
 #[async_trait]
 impl EvidenceRepository for InMemoryAuthorizationStore {
+    async fn list_runtime_instances(
+        &self,
+    ) -> Result<Vec<RuntimeInstanceRecord>, AuthorizationStateError> {
+        Ok(self.state()?.runtime_instances.values().cloned().collect())
+    }
+
+    async fn list_devices(&self) -> Result<Vec<DeviceRecord>, AuthorizationStateError> {
+        Ok(self.state()?.devices.values().cloned().collect())
+    }
+
     async fn get_deployment_evidence(
         &self,
         deployment_id: &str,
@@ -874,6 +969,13 @@ impl EvidenceRepository for InMemoryAuthorizationStore {
                     "runtime instance identity cannot change".to_owned(),
                 ));
             }
+            if existing.created_at != instance.created_at
+                || instance.version != next_version("instanceVersion", existing.version)?
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+        } else if instance.version != 1 {
+            return Err(AuthorizationStateError::StorageConflict);
         }
         state
             .runtime_instances
@@ -897,6 +999,18 @@ impl EvidenceRepository for InMemoryAuthorizationStore {
         validate_device(&device)?;
         let mut state = self.state()?;
         validate_device_relationships(&state, &device)?;
+        if let Some(existing) = state
+            .devices
+            .get(&(device.principal_id.clone(), device.deployment_id.clone()))
+        {
+            if existing.created_at != device.created_at
+                || device.version != next_version("deviceVersion", existing.version)?
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+        } else if device.version != 1 {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
         state.devices.insert(
             (device.principal_id.clone(), device.deployment_id.clone()),
             device,
@@ -1422,7 +1536,7 @@ fn validate_device_relationships(
     Ok(())
 }
 
-fn validate_session_runtime_binding_relationships(
+pub(super) fn validate_session_runtime_binding_relationships(
     state: &MemoryState,
     binding: &SessionRuntimeBinding,
 ) -> Result<(), AuthorizationStateError> {
@@ -1832,7 +1946,73 @@ pub(super) fn validate_resource_evidence(
         require_nonempty("resource.localName", &item.local_name)?;
         require_nonempty("resource.bindingId", &item.binding_id)?;
         require_nonempty("resource.ownerParticipantId", &item.owner_participant_id)?;
-        require_nonempty("resource.providerIdentity", &item.provider_identity)?;
+        match (&item.resource_kind[..], &item.provider_identity) {
+            ("kv", ResourceProviderIdentity::Kv { bucket })
+            | ("store", ResourceProviderIdentity::Store { bucket })
+            | ("state", ResourceProviderIdentity::State { bucket }) => {
+                validate_physical_name("resource.providerIdentity.bucket", bucket, false)?;
+            }
+            (
+                "jobQueue",
+                ResourceProviderIdentity::JobQueue {
+                    namespace,
+                    work_stream,
+                    publish_prefix,
+                    updates_prefix,
+                    work_subject,
+                    consumer,
+                },
+            ) => {
+                validate_physical_name("resource.providerIdentity.namespace", namespace, false)?;
+                validate_physical_name("resource.providerIdentity.workStream", work_stream, false)?;
+                validate_physical_name(
+                    "resource.providerIdentity.publishPrefix",
+                    publish_prefix,
+                    true,
+                )?;
+                if let Some(prefix) = updates_prefix {
+                    validate_physical_name(
+                        "resource.providerIdentity.updatesPrefix",
+                        prefix,
+                        true,
+                    )?;
+                }
+                validate_physical_name(
+                    "resource.providerIdentity.workSubject",
+                    work_subject,
+                    true,
+                )?;
+                validate_physical_name("resource.providerIdentity.consumer", consumer, false)?;
+            }
+            (
+                "eventConsumer",
+                ResourceProviderIdentity::EventConsumer {
+                    stream,
+                    consumer,
+                    filter_subjects,
+                },
+            ) => {
+                validate_physical_name("resource.providerIdentity.stream", stream, false)?;
+                validate_physical_name("resource.providerIdentity.consumer", consumer, false)?;
+                if filter_subjects.is_empty() {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "event consumer requires filter subjects".to_owned(),
+                    ));
+                }
+                for subject in filter_subjects {
+                    validate_physical_name(
+                        "resource.providerIdentity.filterSubjects",
+                        subject,
+                        true,
+                    )?;
+                }
+            }
+            _ => {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "resource kind does not match provider identity".to_owned(),
+                ));
+            }
+        }
         require_protocol_timestamp("resource.materializedAt", item.materialized_at)?;
         if keys
             .insert((&item.resource_kind, &item.local_name), ())
@@ -1846,17 +2026,43 @@ pub(super) fn validate_resource_evidence(
     Ok(())
 }
 
+fn validate_physical_name(
+    field: &str,
+    value: &str,
+    allow_tokens: bool,
+) -> Result<(), AuthorizationStateError> {
+    require_nonempty(field, value)?;
+    if value.contains('*')
+        || value.contains('>')
+        || value.chars().any(char::is_whitespace)
+        || (!allow_tokens && value.contains('.'))
+        || (allow_tokens
+            && (value.starts_with('.') || value.ends_with('.') || value.contains("..")))
+    {
+        return Err(AuthorizationStateError::InvalidRecord(format!(
+            "{field} is not a safe physical NATS identity"
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn validate_runtime_instance(
     instance: &RuntimeInstanceRecord,
 ) -> Result<(), AuthorizationStateError> {
     require_nonempty("instanceId", &instance.instance_id)?;
     require_nonempty("deploymentId", &instance.deployment_id)?;
-    require_nonempty("principalId", &instance.principal_id)
+    require_nonempty("principalId", &instance.principal_id)?;
+    require_protocol_timestamp("createdAt", instance.created_at)?;
+    require_protocol_timestamp("updatedAt", instance.updated_at)?;
+    require_positive("version", instance.version)
 }
 
 pub(super) fn validate_device(device: &DeviceRecord) -> Result<(), AuthorizationStateError> {
     require_nonempty("principalId", &device.principal_id)?;
-    require_nonempty("deploymentId", &device.deployment_id)
+    require_nonempty("deploymentId", &device.deployment_id)?;
+    require_protocol_timestamp("createdAt", device.created_at)?;
+    require_protocol_timestamp("updatedAt", device.updated_at)?;
+    require_positive("version", device.version)
 }
 
 pub(super) fn validate_device_delegation(

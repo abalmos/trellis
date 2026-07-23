@@ -17,7 +17,6 @@ function testManifest(): LocalNatsBootstrapManifest {
       system: { name: "system", publicKey: "SYSTEM_USER_PUBLIC" },
       authService: { name: "auth", publicKey: "AUTH_USER_PUBLIC" },
       trellisService: { name: "auth", publicKey: "TRELLIS_USER_PUBLIC" },
-      sentinel: { name: "sentinel", publicKey: "SENTINEL_USER_PUBLIC" },
     },
     paths: {
       natsConfig: "nats.conf",
@@ -26,7 +25,6 @@ function testManifest(): LocalNatsBootstrapManifest {
         systemService: "creds/system.creds",
         authService: "creds/auth-auth.creds",
         trellisService: "creds/trellis-auth.creds",
-        sentinel: "creds/sentinel.creds",
       },
       secrets: {
         authIssuerSigning: "secrets/auth-issuer-signing.seed",
@@ -78,23 +76,22 @@ Deno.test("writeTrellisConfig writes file-backed test control-plane config", asy
     const configPath = await writeTrellisConfig({ workdir, config });
     const text = await Deno.readTextFile(configPath);
 
-    assertEquals(configPath, join(workdir, "trellis", "config.jsonc"));
+    assertEquals(configPath, join(workdir, "trellis", "config.toml"));
     assertEquals(config.logLevel, "info");
     assertStringIncludes(
       text,
-      `"dbPath": "${join(workdir, "trellis", "trellis.sqlite")}"`,
+      `path = "${join(workdir, "trellis", "trellis.sqlite")}"`,
     );
     assertStringIncludes(
       text,
-      `"credsPath": "${join(workdir, "nats", "creds/system.creds")}"`,
+      `system_creds_path = "${join(workdir, "nats", "creds/system.creds")}"`,
     );
-    assertStringIncludes(text, `"signing": "issuer-seed"`);
-    assertStringIncludes(text, `"sxSeed": "sx-seed"`);
-    assertStringIncludes(text, `"oidc_test"`);
-    assertStringIncludes(text, `"endpoint": "https://idp.example/logout"`);
-    assertStringIncludes(
-      text,
-      `"auth.admin.serviceDeployments.refreshActiveContracts"`,
+    assertStringIncludes(text, `[oauth.providers."oidc_test"]`);
+    assertEquals(
+      await Deno.readTextFile(
+        join(workdir, "trellis", "auth-issuer-signing.seed"),
+      ),
+      "issuer-seed\n",
     );
   } finally {
     await Deno.remove(workdir, { recursive: true }).catch(() => undefined);

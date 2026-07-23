@@ -16,6 +16,7 @@ mod error;
 mod manifest;
 mod model;
 mod pagination;
+mod protocol_artifacts;
 mod schema;
 
 pub use builder::{
@@ -29,7 +30,7 @@ pub use catalog::{
 };
 pub use error::ContractsError;
 pub use manifest::{
-    digest_contract_json, digest_contract_value, load_json_value, load_manifest,
+    digest_contract_json, digest_contract_value, load_json_value, load_manifest, load_sdk_source,
     manifest_paths_in_dir, normalize_manifest_value, parse_manifest,
     project_contract_digest_manifest,
 };
@@ -48,6 +49,7 @@ pub use model::{
     CONTRACT_FORMAT_V1,
 };
 pub use pagination::{PageRequest, PageResponse};
+pub use protocol_artifacts::{compile_protocol_artifacts, CompiledProtocolArtifacts};
 pub use schema::{validate_catalog, validate_manifest};
 
 #[cfg(test)]

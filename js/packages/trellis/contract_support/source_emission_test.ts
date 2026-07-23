@@ -1497,7 +1497,7 @@ Deno.test("grouped optional uses normalize selectors and affect digest", () => {
   assertEquals(
     getContractRuntime(withOptional).usedApi.feeds["Dependency.Changes"]
       .subject,
-    "feeds.v1.Dependency.Changes",
+    "feed.v1.Dependency.Changes",
   );
   assertNotEquals(requiredOnly.CONTRACT_DIGEST, withOptional.CONTRACT_DIGEST);
 });
@@ -2402,7 +2402,11 @@ Deno.test("defineServiceContract emits owned and used operations", () => {
   });
   assertEquals(requiredUses(payments.CONTRACT.uses)?.["trellis.billing@v1"], {
     contract: "trellis.billing@v1",
-    operations: { call: ["Billing.Refund"] },
+    operations: {
+      call: ["Billing.Refund"],
+      cancel: ["Billing.Refund"],
+      control: ["Billing.Refund"],
+    },
   });
   assertEquals(
     getContractRuntime(payments).ownedApi.operations["Payments.Capture"]

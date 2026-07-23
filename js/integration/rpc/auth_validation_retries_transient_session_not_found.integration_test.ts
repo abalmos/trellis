@@ -35,7 +35,7 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: fixture.serviceContract,
       name: fixture.serviceName,
-      sessionKeySeed: serviceKey.seed,
+      identity: serviceKey,
       telemetry: false,
       server: {},
     }).orThrow();
@@ -48,6 +48,11 @@ liveTrellisTest({
       trellisUrl: runtime.trellisUrl,
       contract: fixture.clientContract,
       name: fixture.clientName,
+      participant: {
+        id: clientKey.participantId,
+        artifactDigest: clientKey.participantArtifactDigest,
+        needsDigest: clientKey.participantNeedsDigest,
+      },
       ...clientAuth,
     }).orThrow();
     assert(
@@ -58,7 +63,7 @@ liveTrellisTest({
       "rpc.v1.Auth.Requests.Validate",
     );
     const authReplyObserver = await runtime.startNatsMessageObserver(
-      `_INBOX.${serviceKey.sessionKey.slice(0, 16)}.>`,
+      "_INBOX.>",
       ["status"],
     );
 

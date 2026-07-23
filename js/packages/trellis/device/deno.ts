@@ -15,8 +15,8 @@ import {
   resumeDeviceActivationWithDeps,
   startDeviceActivationWithDeps,
 } from "../device.ts";
+import { TransportError } from "../errors/index.ts";
 import { base64urlDecode, base64urlEncode } from "../auth/utils.ts";
-import { signDeviceWaitRequest } from "../auth/device_activation.ts";
 
 const PendingActivationStateSchema = Type.Object({
   status: Type.Literal("pending"),
@@ -53,86 +53,6 @@ const PersistedActivationStateSchema = Type.Object({
 type PersistedActivationState = StaticDecode<
   typeof PersistedActivationStateSchema
 >;
-
-const ClientTransportEndpointsSchema = Type.Object({
-  natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-});
-
-const ClientTransportsSchema = Type.Object({
-  native: Type.Optional(ClientTransportEndpointsSchema),
-  websocket: Type.Optional(ClientTransportEndpointsSchema),
-});
-
-const DeviceBootstrapReadySchema = Type.Object({
-  status: Type.Literal("ready"),
-  connectInfo: Type.Object({
-    instanceId: Type.String({ minLength: 1 }),
-    deploymentId: Type.String({ minLength: 1 }),
-    contractId: Type.String({ minLength: 1 }),
-    contractDigest: Type.String({ minLength: 1 }),
-    transports: ClientTransportsSchema,
-    transport: Type.Object({
-      sentinel: Type.Object({
-        jwt: Type.String({ minLength: 1 }),
-        seed: Type.String({ minLength: 1 }),
-      }),
-    }),
-    auth: Type.Object({
-      mode: Type.Literal("device_identity"),
-      iatSkewSeconds: Type.Integer({ minimum: 1 }),
-    }),
-  }),
-});
-
-const DeviceBootstrapActivationRequiredSchema = Type.Object({
-  status: Type.Literal("activation_required"),
-});
-
-const DeviceBootstrapNotReadySchema = Type.Object({
-  status: Type.Literal("not_ready"),
-  reason: Type.String({ minLength: 1 }),
-});
-
-const WaitForDeviceActivationPendingSchema = Type.Object({
-  status: Type.Literal("pending"),
-});
-
-const WaitForDeviceActivationActivatedSchema = Type.Object({
-  status: Type.Literal("activated"),
-  activatedAt: Type.String({ minLength: 1 }),
-  confirmationCode: Type.Optional(Type.String({ minLength: 1 })),
-  connectInfo: DeviceBootstrapReadySchema.properties.connectInfo,
-});
-
-const WaitForDeviceActivationRejectedSchema = Type.Object({
-  status: Type.Literal("rejected"),
-  reason: Type.Optional(Type.String({ minLength: 1 })),
-});
-
-type DeviceBootstrapResponse =
-  | {
-    status: "ready";
-    connectInfo: StaticDecode<typeof DeviceBootstrapReadySchema>["connectInfo"];
-  }
-  | { status: "activation_required" }
-  | { status: "not_ready"; reason: string };
-
-type DeviceActivationWaitStatus =
-  | { status: "pending"; retryAfterMs?: number }
-  | {
-    status: "activated";
-    connectInfo: StaticDecode<typeof DeviceBootstrapReadySchema>["connectInfo"];
-  }
-  | { status: "not_ready"; reason: string }
-  | { status: "rejected"; reason?: string };
-
-type PendingActivationResolution =
-  | { status: "pending" }
-  | { status: "activated" }
-  | { status: "not_ready"; reason: string }
-  | { status: "stale" };
-
-const DEFAULT_WAIT_POLL_INTERVAL_MS = 3_000;
 
 type DeviceActivationStateStoreOptions = {
   trellisUrl: string;
@@ -434,229 +354,8 @@ async function openDeviceActivationStateStore(
   };
 }
 
-function readResponseReason(text: string): string | null {
-  if (!text) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    if (typeof parsed.reason === "string" && parsed.reason.length > 0) {
-      return parsed.reason;
-    }
-  } catch {
-    return text;
-  }
-
-  return text;
-}
-
-function parseResponseRecord(text: string): Record<string, unknown> | null {
-  if (text.length === 0) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchDeviceBootstrap(args: {
-  trellisUrl: string;
-  publicIdentityKey: string;
-  identitySeed: Uint8Array | string;
-  contractDigest: string;
-  iat?: number;
-}): Promise<DeviceBootstrapResponse> {
-  let iat = args.iat;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const request = await signDeviceWaitRequest({
-      flowId: "connect-info",
-      publicIdentityKey: args.publicIdentityKey,
-      nonce: "connect-info",
-      identitySeed: args.identitySeed,
-      contractDigest: args.contractDigest,
-      iat,
-    });
-    const bootstrapRequest = {
-      publicIdentityKey: request.publicIdentityKey,
-      contractDigest: request.contractDigest,
-      iat: request.iat,
-      sig: request.sig,
-    };
-    const response = await fetch(
-      new URL("/auth/devices/connect-info", args.trellisUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bootstrapRequest),
-      },
-    );
-    if (!response.ok) {
-      const responseText = await response.text();
-      const parsed = parseResponseRecord(responseText);
-      const reason = typeof parsed?.reason === "string"
-        ? parsed.reason
-        : responseText;
-      const serverNow = typeof parsed?.serverNow === "number"
-        ? parsed.serverNow
-        : null;
-      if (
-        attempt === 0 &&
-        response.status === 400 &&
-        reason === "iat_out_of_range" &&
-        serverNow !== null
-      ) {
-        iat = serverNow;
-        continue;
-      }
-      if (
-        response.status === 404 &&
-        (reason === "unknown_device" || reason === "activation_required")
-      ) {
-        return { status: "activation_required" };
-      }
-
-      throw new Error(
-        `Device bootstrap failed: ${response.status}${
-          reason ? ` ${reason}` : ""
-        }`,
-      );
-    }
-
-    const payload = await response.json();
-    if (Value.Check(DeviceBootstrapReadySchema, payload)) {
-      return payload;
-    }
-    if (Value.Check(DeviceBootstrapActivationRequiredSchema, payload)) {
-      return payload;
-    }
-    if (Value.Check(DeviceBootstrapNotReadySchema, payload)) {
-      return payload;
-    }
-    throw new Error("Device bootstrap returned an invalid response");
-  }
-
-  throw new Error("Device bootstrap time synchronization failed");
-}
-
-async function fetchDeviceActivationWaitStatus(args: {
-  trellisUrl: string;
-  flowId: string;
-  publicIdentityKey: string;
-  identitySeed: Uint8Array | string;
-  contractDigest: string;
-  nonce: string;
-  signal?: AbortSignal;
-  iat?: number;
-}): Promise<DeviceActivationWaitStatus> {
-  let iat = args.iat;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const request = await signDeviceWaitRequest({
-      flowId: args.flowId,
-      publicIdentityKey: args.publicIdentityKey,
-      nonce: args.nonce,
-      identitySeed: args.identitySeed,
-      contractDigest: args.contractDigest,
-      iat,
-    });
-    const response = await fetch(
-      new URL("/auth/devices/activate/wait", args.trellisUrl),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-        signal: args.signal,
-      },
-    );
-    if (!response.ok) {
-      if (response.status === 429) {
-        return { status: "pending", ...retryAfterStatus(response) };
-      }
-      const responseText = await response.text();
-      const parsed = parseResponseRecord(responseText);
-      const reason = typeof parsed?.reason === "string"
-        ? parsed.reason
-        : responseText;
-      const serverNow = typeof parsed?.serverNow === "number"
-        ? parsed.serverNow
-        : null;
-      if (
-        attempt === 0 &&
-        response.status === 400 &&
-        reason === "iat_out_of_range" &&
-        serverNow !== null
-      ) {
-        iat = serverNow;
-        continue;
-      }
-      if (response.status === 403 && reason === "contract_digest_not_allowed") {
-        return { status: "not_ready", reason };
-      }
-      throw new Error(
-        `Device activation status failed: ${response.status}${
-          reason ? ` ${reason}` : ""
-        }`,
-      );
-    }
-
-    const payload = await response.json();
-    if (Value.Check(WaitForDeviceActivationPendingSchema, payload)) {
-      return payload;
-    }
-    if (Value.Check(WaitForDeviceActivationActivatedSchema, payload)) {
-      return payload;
-    }
-    if (Value.Check(WaitForDeviceActivationRejectedSchema, payload)) {
-      return payload;
-    }
-
-    throw new Error("Device activation status returned an invalid response");
-  }
-
-  throw new Error("Device activation status time synchronization failed");
-}
-
-function retryAfterStatus(response: Response): { retryAfterMs?: number } {
-  const value = response.headers.get("Retry-After");
-  if (!value) return {};
-
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return { retryAfterMs: seconds * 1_000 };
-  }
-
-  const dateMs = Date.parse(value);
-  if (!Number.isFinite(dateMs)) return {};
-  return { retryAfterMs: Math.max(0, dateMs - Date.now()) };
-}
-
 function activatedStatus(): TrellisDeviceActivatedStatus {
   return { status: "activated" };
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new Error("Aborted"));
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      reject(signal?.reason ?? new Error("Aborted"));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 function createActivatedLocalState(
@@ -670,68 +369,6 @@ function createActivatedLocalState(
   };
 }
 
-function assertActivationConnectInfoMatchesContract(args: {
-  contractId: string;
-  contractDigest: string;
-  connectInfo: StaticDecode<typeof DeviceBootstrapReadySchema>["connectInfo"];
-}): void {
-  if (
-    args.connectInfo.contractId !== args.contractId ||
-    args.connectInfo.contractDigest !== args.contractDigest
-  ) {
-    throw new Error(
-      "Trellis activation status returned connection details for a different contract.",
-    );
-  }
-}
-
-async function waitForActivationCompletion(args: {
-  trellisUrl: string;
-  rootSecret: Uint8Array | string;
-  contractId: string;
-  contractDigest: string;
-  localState: TrellisDevicePendingActivationState;
-  signal?: AbortSignal;
-}): Promise<TrellisDeviceActivatedActivationState> {
-  const identity = await deriveDeviceIdentity(
-    normalizeRootSecret(args.rootSecret),
-  );
-
-  while (true) {
-    const waitStatus = await fetchDeviceActivationWaitStatus({
-      trellisUrl: args.trellisUrl,
-      publicIdentityKey: identity.publicIdentityKey,
-      identitySeed: identity.identitySeed,
-      contractDigest: args.contractDigest,
-      flowId: args.localState.flowId,
-      nonce: args.localState.nonce,
-      signal: args.signal,
-    });
-
-    if (waitStatus.status === "activated") {
-      assertActivationConnectInfoMatchesContract({
-        contractId: args.contractId,
-        contractDigest: args.contractDigest,
-        connectInfo: waitStatus.connectInfo,
-      });
-      return createActivatedLocalState(args.localState);
-    }
-    if (waitStatus.status === "rejected") {
-      throw new Error(
-        `device activation rejected: ${waitStatus.reason ?? "unknown_reason"}`,
-      );
-    }
-    if (waitStatus.status === "not_ready") {
-      throw new Error(`device activation not ready: ${waitStatus.reason}`);
-    }
-
-    await sleep(
-      Math.max(DEFAULT_WAIT_POLL_INTERVAL_MS, waitStatus.retryAfterMs ?? 0),
-      args.signal,
-    );
-  }
-}
-
 async function createActivationRequiredStatus<
   TContract extends TrellisDeviceActivationArgs["contract"],
 >(args: {
@@ -743,12 +380,14 @@ async function createActivationRequiredStatus<
     ? await resumeDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
       contract: args.checkArgs.contract,
+      identity: args.checkArgs.identity,
       rootSecret: args.checkArgs.rootSecret,
       localState: args.localState,
     }, { now: () => Date.now() })
     : await startDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
       contract: args.checkArgs.contract,
+      identity: args.checkArgs.identity,
       rootSecret: args.checkArgs.rootSecret,
     }, { now: () => Date.now() });
 
@@ -787,60 +426,12 @@ async function createActivationRequiredStatus<
     status: "activation_required",
     activationUrl: session.activationUrl,
     waitForOnlineApproval(opts?: { signal?: AbortSignal }) {
-      return finish(() =>
-        waitForActivationCompletion({
-          trellisUrl: args.checkArgs.trellisUrl,
-          rootSecret: args.checkArgs.rootSecret,
-          contractId: args.checkArgs.contract.CONTRACT_ID,
-          contractDigest: args.checkArgs.contract.CONTRACT_DIGEST,
-          localState: session.localState,
-          signal: opts?.signal,
-        })
-      );
+      return finish(() => session.waitForOnlineApproval(opts));
     },
     acceptConfirmationCode(code: string) {
       return finish(() => session.acceptConfirmationCode(code));
     },
   };
-}
-
-async function resolvePendingActivation(args: {
-  trellisUrl: string;
-  publicIdentityKey: string;
-  identitySeed: Uint8Array;
-  contractId: string;
-  contractDigest: string;
-  localState: TrellisDevicePendingActivationState;
-  store: DeviceActivationStateStore;
-}): Promise<PendingActivationResolution> {
-  const waitStatus = await fetchDeviceActivationWaitStatus({
-    trellisUrl: args.trellisUrl,
-    publicIdentityKey: args.publicIdentityKey,
-    identitySeed: args.identitySeed,
-    contractDigest: args.contractDigest,
-    flowId: args.localState.flowId,
-    nonce: args.localState.nonce,
-  });
-
-  if (waitStatus.status === "activated") {
-    assertActivationConnectInfoMatchesContract({
-      contractId: args.contractId,
-      contractDigest: args.contractDigest,
-      connectInfo: waitStatus.connectInfo,
-    });
-    await args.store.save(createActivatedLocalState(args.localState));
-    return { status: "activated" };
-  }
-
-  if (waitStatus.status === "rejected") {
-    return { status: "stale" };
-  }
-
-  if (waitStatus.status === "not_ready") {
-    return waitStatus;
-  }
-
-  return { status: "pending" };
 }
 
 /**
@@ -858,60 +449,31 @@ export async function checkDeviceActivation<
     stateDir: args.stateDir,
     statePath: args.statePath,
   });
-  let localState = await store.load();
-  const identity = await deriveDeviceIdentity(
-    normalizeRootSecret(args.rootSecret),
-  );
-  const bootstrap = await fetchDeviceBootstrap({
-    trellisUrl: args.trellisUrl,
-    publicIdentityKey: identity.publicIdentityKey,
-    identitySeed: identity.identitySeed,
-    contractDigest: args.contract.CONTRACT_DIGEST,
-  });
-
-  if (bootstrap.status === "ready") {
-    assertActivationConnectInfoMatchesContract({
-      contractId: args.contract.CONTRACT_ID,
-      contractDigest: args.contract.CONTRACT_DIGEST,
-      connectInfo: bootstrap.connectInfo,
-    });
-    if (localState?.status === "pending") {
-      await store.save(createActivatedLocalState(localState));
-    }
-    return activatedStatus();
-  }
-
-  if (bootstrap.status === "not_ready") {
-    return bootstrap;
-  }
-
-  if (localState?.status === "pending") {
-    const pendingStatus = await resolvePendingActivation({
-      trellisUrl: args.trellisUrl,
-      publicIdentityKey: identity.publicIdentityKey,
-      identitySeed: identity.identitySeed,
-      contractId: args.contract.CONTRACT_ID,
-      contractDigest: args.contract.CONTRACT_DIGEST,
-      localState,
+  const localState = await store.load();
+  try {
+    return await createActivationRequiredStatus({
+      checkArgs: args,
       store,
+      localState,
     });
-
-    if (pendingStatus.status === "activated") {
+  } catch (error) {
+    if (
+      error instanceof TransportError &&
+      error.code === "trellis.auth.device_activation_unavailable" &&
+      error.getContext().status === "ready"
+    ) {
+      if (localState?.status === "pending") {
+        await store.save(createActivatedLocalState(localState));
+      }
       return activatedStatus();
     }
-
-    if (pendingStatus.status === "not_ready") {
-      return pendingStatus;
+    if (
+      error instanceof TransportError &&
+      error.code === "trellis.auth.device_activation_unavailable" &&
+      error.getContext().status === "not_ready"
+    ) {
+      return { status: "not_ready", reason: "activation_rejected" };
     }
-
-    if (pendingStatus.status === "stale") {
-      localState = null;
-    }
+    throw error;
   }
-
-  return await createActivationRequiredStatus({
-    checkArgs: args,
-    store,
-    localState,
-  });
 }

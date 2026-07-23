@@ -7,6 +7,8 @@ use miette::IntoDiagnostic;
 const TS_MANIFEST_FILES: &[&str] = &["deno.json", "deno.jsonc", "package.json"];
 const CONVENTIONAL_TS_CONTRACT_FILES: &[&str] = &["contract.ts", "contract.js"];
 const RUST_MANIFEST_FILE: &str = "Cargo.toml";
+const API_ARTIFACT_FILE: &str = "trellis.api.json";
+const PARTICIPANT_ARTIFACT_FILE: &str = "trellis.participant.json";
 const SKIPPED_DISCOVERY_DIRS: &[&str] = &[
     ".git",
     ".worktrees",
@@ -22,6 +24,7 @@ const SKIPPED_DISCOVERY_DIRS: &[&str] = &[
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SourceLanguage {
+    Protocol,
     TypeScript,
     Rust,
 }
@@ -83,6 +86,19 @@ pub fn discover_contracts(root: &Path) -> miette::Result<Vec<DiscoveredContractS
 fn discover_contracts_in_dir(dir: &Path) -> miette::Result<Vec<DiscoveredContractSource>> {
     let mut discovered = BTreeMap::new();
 
+    let api_artifact = dir.join(API_ARTIFACT_FILE);
+    let participant_artifact = dir.join(PARTICIPANT_ARTIFACT_FILE);
+    let cargo_manifest = dir.join(RUST_MANIFEST_FILE);
+    if api_artifact.is_file() && participant_artifact.is_file() && cargo_manifest.is_file() {
+        let source = DiscoveredContractSource {
+            project_root: dir.to_path_buf(),
+            manifest_path: cargo_manifest.clone(),
+            language: SourceLanguage::Protocol,
+            source_path: api_artifact,
+        };
+        discovered.insert(source.source_path.clone(), source);
+    }
+
     for manifest_name in TS_MANIFEST_FILES {
         let manifest_path = dir.join(manifest_name);
         if !manifest_path.exists() {
@@ -93,7 +109,6 @@ fn discover_contracts_in_dir(dir: &Path) -> miette::Result<Vec<DiscoveredContrac
         }
     }
 
-    let cargo_manifest = dir.join(RUST_MANIFEST_FILE);
     if cargo_manifest.exists() {
         for contract in collect_project_contracts(&cargo_manifest, SourceLanguage::Rust)? {
             discovered.insert(contract.source_path.clone(), contract);
@@ -111,11 +126,15 @@ fn collect_project_contracts(
         .parent()
         .ok_or_else(|| miette::miette!("manifest has no parent: {}", manifest_path.display()))?
         .to_path_buf();
-    if language == SourceLanguage::TypeScript {
-        return collect_typescript_project_contracts(&project_root, manifest_path);
+    match language {
+        SourceLanguage::TypeScript => {
+            collect_typescript_project_contracts(&project_root, manifest_path)
+        }
+        SourceLanguage::Rust => {
+            collect_contracts_dir_sources(&project_root, manifest_path, language)
+        }
+        SourceLanguage::Protocol => Ok(Vec::new()),
     }
-
-    collect_contracts_dir_sources(&project_root, manifest_path, language)
 }
 
 fn collect_typescript_project_contracts(
@@ -227,6 +246,7 @@ fn matches_contract_source(path: &Path, language: SourceLanguage) -> bool {
     }
 
     match language {
+        SourceLanguage::Protocol => false,
         SourceLanguage::TypeScript => {
             path.extension().and_then(|value| value.to_str()) == Some("ts")
         }
@@ -243,6 +263,23 @@ fn should_skip_dir(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovers_paired_protocol_artifacts_as_one_source() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname='auth'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("trellis.api.json"), "{}\n").unwrap();
+        fs::write(temp.path().join("trellis.participant.json"), "{}\n").unwrap();
+
+        let discovered = discover_local_contracts(temp.path()).unwrap();
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].language, SourceLanguage::Protocol);
+        assert!(discovered[0].source_path.ends_with("trellis.api.json"));
+    }
 
     #[test]
     fn discover_local_contracts_uses_nearest_manifest_root() {

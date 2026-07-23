@@ -11,6 +11,7 @@ import {
   utf8,
   verifyEventProof,
   verifyProof,
+  verifySessionProofV1,
 } from "./mod.ts";
 
 function authTokenFromAuthenticatorResult(value: unknown): string {
@@ -159,9 +160,10 @@ Deno.test("trellisIdFromOriginId is stable and 22 chars", async () => {
   assert(id1 !== id3);
 });
 
-Deno.test("natsConnectOptions returns a reconnect-safe authenticator with fresh iat values", async () => {
+Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
   const seed = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const auth = await createAuth({ sessionKeySeed: seed });
+  const participantDigest = base64urlEncode(await sha256(utf8("participant")));
   const originalNow = Date.now;
 
   try {
@@ -169,49 +171,60 @@ Deno.test("natsConnectOptions returns a reconnect-safe authenticator with fresh 
     Date.now = () => nowMs;
 
     const options = await auth.natsConnectOptions({
-      contractDigest: "digest-a",
+      sessionId: "ses_test",
+      participantDigest,
+      jwt: "deny-all-jwt",
     });
+    const authenticators = Array.isArray(options.authenticator)
+      ? options.authenticator
+      : [options.authenticator];
+    const jwt = authenticators[0]("nonce-a") as {
+      jwt: string;
+      nkey: string;
+    };
     const firstToken = JSON.parse(
-      authTokenFromAuthenticatorResult(options.authenticator()),
+      authTokenFromAuthenticatorResult(authenticators[1]("nonce-a")),
     ) as {
-      sessionKey: string;
-      iat: number;
-      sig: string;
-      contractDigest: string;
+      format: string;
+      requestId: string;
+      issuedAt: number;
+      sessionId: string;
+      participantDigest: string;
+      proof: { format: "trellis.session-proof.v1"; signature: string };
     };
 
     nowMs += 31_000;
 
     const secondToken = JSON.parse(
-      authTokenFromAuthenticatorResult(options.authenticator()),
-    ) as {
-      sessionKey: string;
-      iat: number;
-      sig: string;
-      contractDigest: string;
-    };
+      authTokenFromAuthenticatorResult(authenticators[1]("nonce-b")),
+    ) as typeof firstToken;
 
-    assertEquals(options.inboxPrefix, `_INBOX.${auth.sessionKey.slice(0, 16)}`);
-    assertEquals(firstToken.sessionKey, auth.sessionKey);
-    assertEquals(secondToken.sessionKey, auth.sessionKey);
-    assertEquals(firstToken.contractDigest, "digest-a");
-    assertEquals(secondToken.contractDigest, "digest-a");
-    assertEquals(
-      firstToken.sig,
-      await auth.natsConnectSigForIat(
-        firstToken.iat,
-        firstToken.contractDigest,
-      ),
+    assertEquals(options.inboxPrefix, "_INBOX.ses_test");
+    assertEquals(jwt.jwt, "deny-all-jwt");
+    assertEquals(firstToken.format, "trellis.nats-connect-token.v1");
+    assertEquals(firstToken.sessionId, "ses_test");
+    assertEquals(firstToken.participantDigest, participantDigest);
+    assertEquals(secondToken.issuedAt - firstToken.issuedAt, 31_000);
+    assertNotEquals(firstToken.proof.signature, secondToken.proof.signature);
+    const sessionKeyId = base64urlEncode(
+      await sha256(base64urlDecode(auth.sessionKey)),
     );
-    assertEquals(
-      secondToken.sig,
-      await auth.natsConnectSigForIat(
-        secondToken.iat,
-        secondToken.contractDigest,
-      ),
+    await verifySessionProofV1(
+      {
+        purpose: "natsConnect",
+        requestId: firstToken.requestId,
+        issuedAt: firstToken.issuedAt,
+        sessionId: firstToken.sessionId,
+        sessionKeyId,
+        sessionPublicKey: auth.sessionKey,
+        sessionNkey: jwt.nkey,
+        participantDigest: firstToken.participantDigest,
+        nonce: "nonce-a",
+      },
+      firstToken.proof,
+      auth.sessionKey,
+      firstToken.issuedAt,
     );
-    assertEquals(secondToken.iat - firstToken.iat, 31);
-    assertNotEquals(firstToken.sig, secondToken.sig);
   } finally {
     Date.now = originalNow;
   }
@@ -220,6 +233,7 @@ Deno.test("natsConnectOptions returns a reconnect-safe authenticator with fresh 
 Deno.test("createAuth applies server clock offsets to current iat and reconnect auth tokens", async () => {
   const seed = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const auth = await createAuth({ sessionKeySeed: seed });
+  const participantDigest = base64urlEncode(await sha256(utf8("participant")));
   const originalNow = Date.now;
 
   try {
@@ -229,21 +243,20 @@ Deno.test("createAuth applies server clock offsets to current iat and reconnect 
     assertEquals(auth.currentIat(), correctedIatSeconds(Date.now(), 900));
 
     const options = await auth.natsConnectOptions({
-      contractDigest: "digest-a",
+      sessionId: "ses_test",
+      participantDigest,
+      jwt: "deny-all-jwt",
     });
+    const authenticators = Array.isArray(options.authenticator)
+      ? options.authenticator
+      : [options.authenticator];
     const token = JSON.parse(
-      authTokenFromAuthenticatorResult(options.authenticator()),
+      authTokenFromAuthenticatorResult(authenticators[1]("nonce")),
     ) as {
-      iat: number;
-      sig: string;
-      contractDigest: string;
+      issuedAt: number;
     };
 
-    assertEquals(token.iat, 1_700_000_001);
-    assertEquals(
-      token.sig,
-      await auth.natsConnectSigForIat(1_700_000_001, token.contractDigest),
-    );
+    assertEquals(token.issuedAt, 1_700_000_001_150);
   } finally {
     Date.now = originalNow;
   }

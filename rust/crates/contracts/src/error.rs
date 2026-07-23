@@ -3,6 +3,10 @@ use std::path::PathBuf;
 /// Errors returned while loading, validating, or packing Trellis contracts.
 #[derive(thiserror::Error, Debug)]
 pub enum ContractsError {
+    /// A protocol-owned API or participant artifact is invalid.
+    #[error("protocol artifact error: {0}")]
+    Protocol(Box<trellis_protocol::ProtocolError>),
+
     /// Contract I/O failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
@@ -94,4 +98,10 @@ pub enum ContractsError {
         /// The reserved contract prefix.
         prefix: String,
     },
+}
+
+impl From<trellis_protocol::ProtocolError> for ContractsError {
+    fn from(error: trellis_protocol::ProtocolError) -> Self {
+        Self::Protocol(Box::new(error))
+    }
 }

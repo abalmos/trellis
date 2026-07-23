@@ -1318,6 +1318,12 @@ export const PortalFlowStateSchema = Type.Union([
   Type.Object({
     status: Type.Literal("approval_required"),
     flowId: Type.String({ minLength: 1 }),
+    consentViewDigest: DigestSchema,
+    optionalBundles: Type.Array(Type.Object({
+      id: Type.String({ minLength: 1 }),
+      apiId: Type.String({ minLength: 1 }),
+      permissions: Type.Array(OpenObjectSchema),
+    })),
     user: Type.Object({
       origin: Type.String({ minLength: 1 }),
       id: Type.String({ minLength: 1 }),

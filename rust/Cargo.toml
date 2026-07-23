@@ -1,8 +1,6 @@
 [workspace]
 members = [
   "crates/trellis",
-  "crates/auth-adapters",
-  "crates/core-bootstrap",
   "crates/local-bootstrap",
   "crates/jobs",
   "crates/bootstrap",
@@ -11,6 +9,7 @@ members = [
   "crates/trellis-test",
   "crates/contracts",
   "crates/protocol",
+  "crates/protocol-wasm",
   "crates/codegen-ts",
   "crates/codegen-rust",
   "crates/generate-runner",
@@ -19,8 +18,6 @@ members = [
 ]
 default-members = [
   "crates/trellis",
-  "crates/auth-adapters",
-  "crates/core-bootstrap",
   "crates/local-bootstrap",
   "crates/jobs",
   "crates/bootstrap",
@@ -48,6 +45,7 @@ repository = "https://github.com/qlever-llc/trellis"
 rust.missing_docs = "deny"
 
 [workspace.dependencies]
+argon2 = "0.5.3"
 base64 = "0.22.1"
 ed25519-dalek = "2.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -58,11 +56,15 @@ ryu-js = "1.0.3"
 rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }
 refinery = { version = "0.9.1", default-features = false, features = ["rusqlite"] }
 sha2 = "0.11.0"
+subtle = "2.6.1"
 thiserror = "2.0.18"
 tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread", "time"] }
 async-nats = "0.47.0"
+nkeys = "0.4.5"
+wasm-bindgen = "0.2.114"
 bytes = "1.11.1"
 futures-util = "0.3.32"
+getrandom = "0.3.4"
 clap = { version = "4.6.0", features = ["derive"] }
 clap_complete = "4.6.0"
 comfy-table = "7.2.2"
@@ -72,9 +74,15 @@ jsonschema = { version = "0.47.0", default-features = false }
 miette = { version = "7.6.0", features = ["fancy"] }
 owo-colors = "4.3.0"
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 axum = "0.7.9"
+openidconnect = "4.0.1"
+oauth2 = "5.0.0"
+nats-jwt-rs = "0.1.1"
+tower_governor = "0.5.0"
+tower-http = { version = "0.6.8", features = ["cors", "limit", "set-header", "trace"] }
 time = { version = "=0.3.46", features = ["formatting"] }
+url = "2.5.8"
 self_update = { version = "0.44.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls", "ureq"] }
 trellis-sdk-auth = { path = "../generated/packages/cargo/auth", version = "0.11.0" }
 trellis-sdk-core = { path = "../generated/packages/cargo/trellis-core", version = "0.11.0" }

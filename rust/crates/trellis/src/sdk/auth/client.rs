@@ -60,81 +60,6 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
-    /// Call `Auth.CapabilityGroups.Delete`.
-    pub async fn capability_groups_delete(
-        &self,
-        input: &super::types::AuthCapabilityGroupsDeleteRequest,
-    ) -> Result<
-        super::types::AuthCapabilityGroupsDeleteResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsDeleteError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthCapabilityGroupsDeleteRpc,
-                super::rpc::AuthCapabilityGroupsDeleteError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.CapabilityGroups.Get`.
-    pub async fn capability_groups_get(
-        &self,
-        input: &super::types::AuthCapabilityGroupsGetRequest,
-    ) -> Result<
-        super::types::AuthCapabilityGroupsGetResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsGetError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthCapabilityGroupsGetRpc,
-                super::rpc::AuthCapabilityGroupsGetError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.CapabilityGroups.List`.
-    pub async fn capability_groups_list(
-        &self,
-        input: &super::types::AuthCapabilityGroupsListRequest,
-    ) -> Result<
-        super::types::AuthCapabilityGroupsListResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthCapabilityGroupsListRpc,
-                super::rpc::AuthCapabilityGroupsListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.CapabilityGroups.Put`.
-    pub async fn capability_groups_put(
-        &self,
-        input: &super::types::AuthCapabilityGroupsPutRequest,
-    ) -> Result<
-        super::types::AuthCapabilityGroupsPutResponse,
-        crate::generated::CallError<super::rpc::AuthCapabilityGroupsPutError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthCapabilityGroupsPutRpc,
-                super::rpc::AuthCapabilityGroupsPutError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.CatalogIssues.Resolve`.
-    pub async fn catalog_issues_resolve(
-        &self,
-        input: &super::types::AuthCatalogIssuesResolveRequest,
-    ) -> Result<
-        super::types::AuthCatalogIssuesResolveResponse,
-        crate::generated::CallError<super::rpc::AuthCatalogIssuesResolveError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthCatalogIssuesResolveRpc,
-                super::rpc::AuthCatalogIssuesResolveError,
-            >(input)
-            .await
-    }
     /// Call `Auth.Connections.Kick`.
     pub async fn connections_kick(
         &self,
@@ -205,51 +130,6 @@ impl<'a> AuthRpc<'a> {
             .call_typed::<
                 super::rpc::AuthDeploymentAuthorityGetRpc,
                 super::rpc::AuthDeploymentAuthorityGetError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.GrantOverrides.List`.
-    pub async fn deployment_authority_grant_overrides_list(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityGrantOverridesListRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityGrantOverridesListResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityGrantOverridesListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityGrantOverridesListRpc,
-                super::rpc::AuthDeploymentAuthorityGrantOverridesListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.GrantOverrides.Put`.
-    pub async fn deployment_authority_grant_overrides_put(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityGrantOverridesPutRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityGrantOverridesPutResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityGrantOverridesPutError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityGrantOverridesPutRpc,
-                super::rpc::AuthDeploymentAuthorityGrantOverridesPutError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.GrantOverrides.Remove`.
-    pub async fn deployment_authority_grant_overrides_remove(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityGrantOverridesRemoveRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityGrantOverridesRemoveResponse,
-        crate::generated::CallError<super::rpc::AuthDeploymentAuthorityGrantOverridesRemoveError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityGrantOverridesRemoveRpc,
-                super::rpc::AuthDeploymentAuthorityGrantOverridesRemoveError,
             >(input)
             .await
     }
@@ -561,76 +441,48 @@ impl<'a> AuthRpc<'a> {
             )
             .await
     }
-    /// Call `Auth.EventConsumers.List`.
-    pub async fn event_consumers_list(
+    /// Call `Auth.IdentityAuthority.Get`.
+    pub async fn identity_authority_get(
         &self,
-        input: &super::types::AuthEventConsumersListRequest,
+        input: &super::types::AuthIdentityAuthorityGetRequest,
     ) -> Result<
-        super::types::AuthEventConsumersListResponse,
-        crate::generated::CallError<super::rpc::AuthEventConsumersListError>,
+        super::types::AuthIdentityAuthorityGetResponse,
+        crate::generated::CallError<super::rpc::AuthIdentityAuthorityGetError>,
     > {
         self.inner
             .call_typed::<
-                super::rpc::AuthEventConsumersListRpc,
-                super::rpc::AuthEventConsumersListError,
+                super::rpc::AuthIdentityAuthorityGetRpc,
+                super::rpc::AuthIdentityAuthorityGetError,
             >(input)
             .await
     }
-    /// Call `Auth.Events.Validate`.
-    pub async fn events_validate(
+    /// Call `Auth.IdentityAuthority.List`.
+    pub async fn identity_authority_list(
         &self,
-        input: &super::types::AuthEventsValidateRequest,
+        input: &super::types::AuthIdentityAuthorityListRequest,
     ) -> Result<
-        super::types::AuthEventsValidateResponse,
-        crate::generated::CallError<super::rpc::AuthEventsValidateError>,
-    > {
-        self.inner
-            .call_typed::<super::rpc::AuthEventsValidateRpc, super::rpc::AuthEventsValidateError>(
-                input,
-            )
-            .await
-    }
-    /// Call `Auth.Identities.List`.
-    pub async fn identities_list(
-        &self,
-        input: &super::types::AuthIdentitiesListRequest,
-    ) -> Result<
-        super::types::AuthIdentitiesListResponse,
-        crate::generated::CallError<super::rpc::AuthIdentitiesListError>,
-    > {
-        self.inner
-            .call_typed::<super::rpc::AuthIdentitiesListRpc, super::rpc::AuthIdentitiesListError>(
-                input,
-            )
-            .await
-    }
-    /// Call `Auth.IdentityGrants.List`.
-    pub async fn identity_grants_list(
-        &self,
-        input: &super::types::AuthIdentityGrantsListRequest,
-    ) -> Result<
-        super::types::AuthIdentityGrantsListResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityGrantsListError>,
+        super::types::AuthIdentityAuthorityListResponse,
+        crate::generated::CallError<super::rpc::AuthIdentityAuthorityListError>,
     > {
         self.inner
             .call_typed::<
-                super::rpc::AuthIdentityGrantsListRpc,
-                super::rpc::AuthIdentityGrantsListError,
+                super::rpc::AuthIdentityAuthorityListRpc,
+                super::rpc::AuthIdentityAuthorityListError,
             >(input)
             .await
     }
-    /// Call `Auth.IdentityGrants.Revoke`.
-    pub async fn identity_grants_revoke(
+    /// Call `Auth.IdentityAuthority.Revoke`.
+    pub async fn identity_authority_revoke(
         &self,
-        input: &super::types::AuthIdentityGrantsRevokeRequest,
+        input: &super::types::AuthIdentityAuthorityRevokeRequest,
     ) -> Result<
-        super::types::AuthIdentityGrantsRevokeResponse,
-        crate::generated::CallError<super::rpc::AuthIdentityGrantsRevokeError>,
+        super::types::AuthIdentityAuthorityRevokeResponse,
+        crate::generated::CallError<super::rpc::AuthIdentityAuthorityRevokeError>,
     > {
         self.inner
             .call_typed::<
-                super::rpc::AuthIdentityGrantsRevokeRpc,
-                super::rpc::AuthIdentityGrantsRevokeError,
+                super::rpc::AuthIdentityAuthorityRevokeRpc,
+                super::rpc::AuthIdentityAuthorityRevokeError,
             >(input)
             .await
     }
@@ -744,21 +596,6 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
-    /// Call `Auth.Requests.Validate`.
-    pub async fn requests_validate(
-        &self,
-        input: &super::types::AuthRequestsValidateRequest,
-    ) -> Result<
-        super::types::AuthRequestsValidateResponse,
-        crate::generated::CallError<super::rpc::AuthRequestsValidateError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthRequestsValidateRpc,
-                super::rpc::AuthRequestsValidateError,
-            >(input)
-            .await
-    }
     /// Call `Auth.ServiceInstances.Disable`.
     pub async fn service_instances_disable(
         &self,
@@ -849,13 +686,14 @@ impl<'a> AuthRpc<'a> {
     /// Call `Auth.Sessions.Logout`.
     pub async fn sessions_logout(
         &self,
+        input: &super::types::AuthSessionsLogoutRequest,
     ) -> Result<
         super::types::AuthSessionsLogoutResponse,
         crate::generated::CallError<super::rpc::AuthSessionsLogoutError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsLogoutRpc, super::rpc::AuthSessionsLogoutError>(
-                &super::rpc::Empty {},
+                input,
             )
             .await
     }

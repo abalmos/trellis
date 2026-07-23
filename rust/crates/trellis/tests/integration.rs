@@ -33,27 +33,6 @@ mod health;
 #[path = "integration/runtime_ownership.rs"]
 mod runtime_ownership;
 
-#[path = "integration/authority_plan.rs"]
-mod authority_plan;
-
-#[path = "integration/outbox.rs"]
-mod outbox;
-
-#[path = "integration/service_approval.rs"]
-mod service_approval;
-
-#[path = "integration/app_identity_approval.rs"]
-mod app_identity_approval;
-
-#[path = "integration/device_activation.rs"]
-mod device_activation;
-
-#[path = "integration/control_plane.rs"]
-mod control_plane;
-
-#[path = "integration/control_plane_jobs_admin.rs"]
-mod control_plane_jobs_admin;
-
 #[path = "integration/event_consumers.rs"]
 mod event_consumers;
 

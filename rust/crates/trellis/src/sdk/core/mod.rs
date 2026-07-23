@@ -1,6 +1,6 @@
 //! Generated Rust SDK crate for one Trellis contract.
 const _: () = crate::generated::assert_abi(1);
-/// Typed outbound contract adapters.
+/// Typed outbound adapters.
 pub mod client;
 /// Embedded contract identity and manifest.
 pub mod contract;

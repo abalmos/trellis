@@ -1,5 +1,5 @@
 import { assertExists } from "@std/assert";
-import { jsIntegrationCases } from "./_support/cases.ts";
+import { allJsIntegrationCases } from "./_support/cases.ts";
 import {
   loadClientTestMatrix,
   type MatrixCase,
@@ -10,7 +10,7 @@ Deno.test("JS integration manifest conforms to shared matrix", async () => {
   const matrix = await loadClientTestMatrix();
 
   const matrixIds = matrixCaseIds(matrix);
-  const localIds = jsIntegrationCases.map((caseEntry) => caseEntry.id)
+  const localIds = allJsIntegrationCases.map((caseEntry) => caseEntry.id)
     .toSorted();
   const report = buildConformanceReport(matrix.cases, matrixIds, localIds);
 
@@ -18,7 +18,7 @@ Deno.test("JS integration manifest conforms to shared matrix", async () => {
     throw new Error(report);
   }
 
-  for (const caseEntry of jsIntegrationCases) {
+  for (const caseEntry of allJsIntegrationCases) {
     const stat = await Deno.stat(new URL(caseEntry.file, import.meta.url));
     assertExists(stat);
 

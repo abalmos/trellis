@@ -54,15 +54,10 @@ pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
 /// Remove the stored admin session and related local credential files.
 #[doc = concat!("Trellis API operation `", stringify!(clear_admin_session), "`.")]
 pub fn clear_admin_session() -> Result<bool, TrellisAuthError> {
-    let mut removed = false;
-    for path in [
-        admin_session_state_path(),
-        cli_config_dir().join("admin-sentinel.creds"),
-    ] {
-        if path.exists() {
-            fs::remove_file(path)?;
-            removed = true;
-        }
+    let path = admin_session_state_path();
+    if path.exists() {
+        fs::remove_file(path)?;
+        return Ok(true);
     }
-    Ok(removed)
+    Ok(false)
 }
