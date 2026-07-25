@@ -25,7 +25,11 @@
     "test:integration": "deno run -A -c integration/deno.json integration/all_runner.ts",
     "test:contracts": "deno task prepare && deno test -A packages/trellis/contract_support/source_emission_test.ts packages/trellis/contract_support/conformance_test.ts services/trellis/catalog/store.test.ts services/trellis/catalog/permissions.test.ts",
     "test:auth": "deno task prepare && deno test -A packages/trellis/auth/conformance_test.ts packages/trellis/auth/session_auth_test.ts services/trellis",
-    "test:prepared:packages": "deno test -A packages/result packages/trellis packages/trellis-svelte packages/trellis-test",
+    "test:prepared:result": "deno test -A packages/result",
+    "test:prepared:trellis": "deno test -A packages/trellis",
+    "test:prepared:trellis-svelte": "deno test -A packages/trellis-svelte",
+    "test:prepared:trellis-test": "deno test -A packages/trellis-test",
+    "test:prepared:packages": "deno task test:prepared:result && deno task test:prepared:trellis && deno task test:prepared:trellis-svelte && deno task test:prepared:trellis-test",
     "test:prepared:service:catalog-state": "deno test -A services/trellis/bootstrap services/trellis/catalog services/trellis/contracts services/trellis/state services/trellis/storage services/trellis/config.test.ts services/trellis/manifest_conformance_test.ts services/trellis/version.test.ts",
     "test:prepared:service:auth": "deno test -A services/trellis/auth",
     "test:prepared:ui-tools": "deno test -A portals/login tools",
@@ -106,6 +110,7 @@
     "openid-client": "npm:openid-client@^6.8.3",
     "pino": "npm:pino@^10.3.1",
     "playwright": "npm:playwright@1.59.1",
+    "fake-indexeddb": "npm:fake-indexeddb@6.2.5",
     "serialize-error": "npm:serialize-error@^13.0.1",
     "set-cookie-parser": "npm:set-cookie-parser@^3.1.0",
     "sigma": "npm:sigma@^3.0.2",
@@ -135,7 +140,16 @@
     ],
     "verbatimModuleSyntax": true
   },
+  "fmt": {
+    "exclude": [
+      "packages/trellis-test/fixtures/authorization-trust",
+      "packages/trellis/auth/protocol_wasm"
+    ]
+  },
   "lint": {
+    "exclude": [
+      "packages/trellis/auth/protocol_wasm"
+    ],
     "rules": {
       "exclude": [
         "import-map-remap"

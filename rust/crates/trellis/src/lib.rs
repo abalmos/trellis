@@ -31,7 +31,8 @@
 //! authority-pending state according to its connect options.
 //!
 //! ```no_run
-//! use trellis_rs::service::ServiceConnectOptions;
+//! use std::sync::Arc;
+//! use trellis_rs::{client::FileAuthorizationContextStore, service::ServiceConnectOptions};
 //!
 //! let _options = ServiceConnectOptions::new(
 //!     "http://localhost:3000",
@@ -42,6 +43,7 @@
 //!     "participant-needs-digest",
 //!     "base64url-identity-seed",
 //!     "base64url-session-seed",
+//!     Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
 //! )
 //! .with_timeout_ms(10_000);
 //! ```
@@ -123,6 +125,7 @@ mod tests {
             "participant-needs-digest",
             "identity-seed",
             "session-seed",
+            std::sync::Arc::new(crate::client::MemoryAuthorizationContextStore::default()),
         );
         let _state = crate::jobs::JobState::Pending;
     }

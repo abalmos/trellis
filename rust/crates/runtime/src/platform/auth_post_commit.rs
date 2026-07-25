@@ -5,9 +5,10 @@ use time::OffsetDateTime;
 use trellis_rs::client::SessionAuth;
 
 use super::auth::{
-    AuthConnectionPresence, AuthEphemeralRepository, AuthorizationStateError, EvidenceRepository,
-    NatsAuthEphemeralRepository, PostCommitActionKind, PostCommitActionRecord,
-    PostCommitActionRepository, SessionRepository, SqliteAuthorizationStore,
+    AuthConnectionPresence, AuthEphemeralRepository, AuthorizationContextService,
+    AuthorizationStateError, EvidenceRepository, NatsAuthEphemeralRepository, PostCommitActionKind,
+    PostCommitActionRecord, PostCommitActionRepository, SessionRepository,
+    SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -22,6 +23,7 @@ pub(crate) struct AuthPostCommitRuntime {
     auth_client: async_nats::Client,
     system_client: async_nats::Client,
     event_session: SessionAuth,
+    contexts: AuthorizationContextService,
 }
 
 impl AuthPostCommitRuntime {
@@ -31,6 +33,7 @@ impl AuthPostCommitRuntime {
         auth_client: async_nats::Client,
         system_client: async_nats::Client,
         event_session: SessionAuth,
+        contexts: AuthorizationContextService,
     ) -> Self {
         Self {
             repository,
@@ -38,6 +41,7 @@ impl AuthPostCommitRuntime {
             auth_client,
             system_client,
             event_session,
+            contexts,
         }
     }
 
@@ -99,7 +103,38 @@ impl AuthPostCommitRuntime {
         match action.kind {
             PostCommitActionKind::Event => self.publish_event(&action.payload).await,
             PostCommitActionKind::Kick => self.kick(&action.payload).await,
+            PostCommitActionKind::ContextPublish => {
+                self.dispatch_context(&action.payload, false).await
+            }
+            PostCommitActionKind::ContextRevoke => {
+                self.dispatch_context(&action.payload, true).await
+            }
         }
+    }
+
+    async fn dispatch_context(
+        &self,
+        payload: &Value,
+        revocation: bool,
+    ) -> Result<(), AuthorizationStateError> {
+        let digest = payload
+            .get("contextDigest")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "context post-commit digest is required".to_owned(),
+                )
+            })?;
+        self.contexts
+            .dispatch_registry_action(digest, revocation, now_millis()? / 1_000)
+            .await?;
+        tracing::debug!(
+            context_digest = digest,
+            revocation,
+            "published authorization context registry action"
+        );
+        Ok(())
     }
 
     async fn publish_event(&self, payload: &Value) -> Result<(), AuthorizationStateError> {

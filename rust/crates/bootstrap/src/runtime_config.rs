@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use trellis_runtime::{
-    AuthConfig, ClientConfig, HttpConfig, LeasesConfig, LocalIdentityConfig, NatsAuthCalloutConfig,
-    NatsConfig, NatsRuntimeConfig, OAuthConfig, PlatformTtlConfig, RuntimeConfig, StorageConfig,
-    SubsystemConfig,
+    AuthConfig, AuthorizationConfig, ClientConfig, HttpConfig, LeasesConfig, LocalIdentityConfig,
+    NatsAuthCalloutConfig, NatsConfig, NatsRuntimeConfig, OAuthConfig, PlatformTtlConfig,
+    RuntimeConfig, StorageConfig, SubsystemConfig,
 };
 
 use crate::types::TrellisBootstrapOptions;
@@ -69,6 +69,27 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             local_identity: Some(LocalIdentityConfig {
                 enabled: Some(true),
                 password_min_length: Some(8),
+            }),
+            authorization: Some(AuthorizationConfig {
+                trust_root_file: PathBuf::from("./auth/authorization-root.json"),
+                issuer_manifest_file: PathBuf::from("./auth/authorization-issuer-manifest.json"),
+                issuer_certificate_files: vec![PathBuf::from(
+                    "./auth/authorization-issuer-certificate.json",
+                )],
+                issuer_signing_seed_file: PathBuf::from("./auth/authorization-issuer.seed"),
+                context_lifetime_seconds: 300,
+                refresh_lead_seconds: 60,
+                refresh_jitter_seconds: 15,
+                minimum_context_lifetime_seconds: 76,
+                maximum_bootstrap_jwt_lifetime_seconds: 3_600,
+                cleanup_grace_seconds: 60,
+                allowed_clock_skew_seconds: 30,
+                maximum_context_bytes: 16_384,
+                maximum_permissions: 4_096,
+                maximum_capabilities: 256,
+                trust_bucket: "trellis_authorization_trust".to_owned(),
+                context_bucket: "trellis_authorization_contexts".to_owned(),
+                registry_replicas: 1,
             }),
         }),
         oauth: Some(OAuthConfig {

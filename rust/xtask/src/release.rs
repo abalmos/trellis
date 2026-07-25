@@ -3,7 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use miette::{miette, IntoDiagnostic, Result, WrapErr};
 
@@ -1259,10 +1259,148 @@ fn run_verify(
         );
     }
 
-    for spec in verify_command_specs(version, since, skip_integration, keep_workdir) {
-        run_checked_command(repo_root, &spec, "release verification command failed")?;
+    let before_prepare = working_tree_snapshot(repo_root)?;
+    let total_started = Instant::now();
+    let mut timings = Vec::new();
+    let specs = verify_command_specs(version, since, skip_integration, keep_workdir);
+    let mut index = 0;
+    while index < specs.len() {
+        let group = specs[index].parallel_group.clone();
+        let end = group.as_ref().map_or(index + 1, |group| {
+            specs[index..]
+                .iter()
+                .take_while(|spec| spec.parallel_group.as_ref() == Some(group))
+                .count()
+                + index
+        });
+        let name = specs[index].stage_name();
+        let started = Instant::now();
+        let result = if group.is_some() {
+            run_parallel_commands(
+                repo_root,
+                &specs[index..end],
+                "release verification command failed",
+            )
+        } else {
+            run_checked_command(
+                repo_root,
+                &specs[index],
+                "release verification command failed",
+            )
+        };
+        let elapsed = started.elapsed();
+        println!("{name:<36} {}", format_elapsed(elapsed));
+        timings.push((name, elapsed));
+        if let Err(error) = result {
+            print_timing_summary(&timings, total_started.elapsed());
+            return Err(error);
+        }
+        if specs[index].stage == "prepare" {
+            let started = Instant::now();
+            let current = working_tree_snapshot(repo_root);
+            let elapsed = started.elapsed();
+            let name = "generated output check".to_owned();
+            println!("{name:<36} {}", format_elapsed(elapsed));
+            timings.push((name, elapsed));
+            let current = match current {
+                Ok(current) => current,
+                Err(error) => {
+                    print_timing_summary(&timings, total_started.elapsed());
+                    return Err(error);
+                }
+            };
+            if current != before_prepare {
+                print_timing_summary(&timings, total_started.elapsed());
+                return Err(miette!(
+                    "repository preparation changed generated output; run prepare and commit the result"
+                ));
+            }
+        }
+        index = end;
     }
+    print_timing_summary(&timings, total_started.elapsed());
     Ok(())
+}
+
+fn working_tree_snapshot(repo_root: &Path) -> Result<Vec<u8>> {
+    let mut snapshot = Command::new("git")
+        .args(["diff", "--binary", "--no-ext-diff", "HEAD"])
+        .current_dir(repo_root)
+        .output()
+        .into_diagnostic()
+        .wrap_err("failed to inspect generated output diff")?;
+    if !snapshot.status.success() {
+        return Err(miette!("git diff failed with {}", snapshot.status));
+    }
+    let status = Command::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all", "-z"])
+        .current_dir(repo_root)
+        .output()
+        .into_diagnostic()
+        .wrap_err("failed to inspect generated output status")?;
+    if !status.status.success() {
+        return Err(miette!("git status failed with {}", status.status));
+    }
+    snapshot.stdout.extend(&status.stdout);
+    for entry in status.stdout.split(|byte| *byte == 0) {
+        let Some(path) = entry.strip_prefix(b"?? ") else {
+            continue;
+        };
+        let path = std::str::from_utf8(path)
+            .into_diagnostic()
+            .wrap_err("untracked generated-output path is not UTF-8")?;
+        let contents = fs::read(repo_root.join(path))
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to read untracked file {path}"))?;
+        snapshot
+            .stdout
+            .extend_from_slice(&(contents.len() as u64).to_le_bytes());
+        snapshot.stdout.extend(contents);
+    }
+    Ok(snapshot.stdout)
+}
+
+fn run_parallel_commands(repo_root: &Path, specs: &[CommandSpec], context: &str) -> Result<()> {
+    if specs.len() > 8 {
+        return Err(miette!("parallel release stage exceeds eight commands"));
+    }
+    let mut children = Vec::with_capacity(specs.len());
+    for spec in specs {
+        println!("$ {}", command_text(spec));
+        let child = Command::new(&spec.program)
+            .args(&spec.args)
+            .current_dir(repo_root)
+            .spawn()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to run {}", command_text(spec)))?;
+        children.push((command_text(spec), child));
+    }
+    let mut failure = None;
+    for (command, mut child) in children {
+        let status = child
+            .wait()
+            .into_diagnostic()
+            .wrap_err_with(|| format!("failed to wait for {command}"))?;
+        if !status.success() && failure.is_none() {
+            failure = Some(miette!("{context}: {command} exited with {status}"));
+        }
+    }
+    failure.map_or(Ok(()), Err)
+}
+
+fn format_elapsed(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn print_timing_summary(timings: &[(String, Duration)], total: Duration) {
+    let mut sorted = timings.to_vec();
+    sorted.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    println!("\nRelease verification timing (slowest first):");
+    for (name, elapsed) in sorted {
+        println!("{name:<36} {}", format_elapsed(elapsed));
+    }
+    println!("{:<36} {}", "total", format_elapsed(total));
 }
 
 const RUST_WORKSPACE_MEMBERS: &[&str] = &[
@@ -1360,7 +1498,8 @@ fn verify_command_specs(
                 "--since",
                 since,
             ],
-        ),
+        )
+        .stage("release metadata"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1370,8 +1509,10 @@ fn verify_command_specs(
                 "--",
                 "prepare",
             ],
-        ),
-        CommandSpec::new("deno", vec!["fmt", "-c", "js/deno.json", "--check"]),
+        )
+        .stage("prepare"),
+        CommandSpec::new("deno", vec!["fmt", "-c", "js/deno.json", "--check"])
+            .stage("Deno formatting"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1381,7 +1522,8 @@ fn verify_command_specs(
                 "--all",
                 "--check",
             ],
-        ),
+        )
+        .stage("Rust workspace formatting"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1390,11 +1532,69 @@ fn verify_command_specs(
                 "rust/tools/generate/Cargo.toml",
                 "--check",
             ],
-        ),
+        )
+        .stage("generator formatting"),
         CommandSpec::new(
             "cargo",
             vec!["fmt", "--manifest-path", "rust/xtask/Cargo.toml", "--check"],
-        ),
+        )
+        .stage("Rust xtask formatting"),
+        CommandSpec::new(
+            "cargo",
+            vec![
+                "clippy",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        )
+        .stage("workspace Clippy"),
+        CommandSpec::new(
+            "cargo",
+            vec![
+                "+1.88.0",
+                "check",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "-p",
+                "trellis-protocol",
+                "-p",
+                "trellis-contracts",
+                "-p",
+                "trellis-rs",
+                "--lib",
+            ],
+        )
+        .stage("Rust 1.88 public API"),
+        CommandSpec::new(
+            "cargo",
+            vec![
+                "+1.88.0",
+                "check",
+                "--manifest-path",
+                "generated/packages/cargo-participants/jobs/Cargo.toml",
+            ],
+        )
+        .stage("Rust 1.88 generated facade"),
+        CommandSpec::new(
+            "cargo",
+            vec![
+                "check",
+                "--manifest-path",
+                "rust/Cargo.toml",
+                "--package",
+                "trellis-protocol-wasm",
+                "--target",
+                "wasm32-unknown-unknown",
+            ],
+        )
+        .stage("protocol WASM"),
+        CommandSpec::new("actionlint", Vec::<String>::new()).stage("actionlint"),
         CommandSpec::new(
             "deno",
             vec![
@@ -1405,19 +1605,43 @@ fn verify_command_specs(
                 "js/packages/trellis-svelte/src/index.ts",
                 "js/packages/trellis-svelte/src/context.svelte.ts",
             ],
-        ),
+        )
+        .stage("TypeScript compile"),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:packages"],
-        ),
+            vec!["task", "-c", "js/deno.json", "test:prepared:result"],
+        )
+        .stage("prepared JavaScript packages")
+        .parallel("prepared-js"),
+        CommandSpec::new(
+            "deno",
+            vec!["task", "-c", "js/deno.json", "test:prepared:trellis"],
+        )
+        .stage("prepared JavaScript packages")
+        .parallel("prepared-js"),
+        CommandSpec::new(
+            "deno",
+            vec!["task", "-c", "js/deno.json", "test:prepared:trellis-svelte"],
+        )
+        .stage("prepared JavaScript packages")
+        .parallel("prepared-js"),
+        CommandSpec::new(
+            "deno",
+            vec!["task", "-c", "js/deno.json", "test:prepared:trellis-test"],
+        )
+        .stage("prepared JavaScript packages")
+        .parallel("prepared-js"),
         CommandSpec::new(
             "deno",
             vec!["task", "-c", "js/deno.json", "test:prepared:ui-tools"],
-        ),
+        )
+        .stage("prepared JavaScript packages")
+        .parallel("prepared-js"),
         CommandSpec::new(
             "deno",
             vec!["task", "-c", "js/deno.json", "packages:build:npm"],
-        ),
+        )
+        .stage("npm package build"),
         CommandSpec::new(
             "deno",
             vec![
@@ -1426,7 +1650,8 @@ fn verify_command_specs(
                 "js/deno.json",
                 "test:prepared:packaging:built",
             ],
-        ),
+        )
+        .stage("npm packaging smoke"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1441,7 +1666,8 @@ fn verify_command_specs(
                 "--exclude",
                 "trellis-service-eventlog",
             ],
-        ),
+        )
+        .stage("workspace non-live tests"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1452,7 +1678,8 @@ fn verify_command_specs(
                 "trellis-service-jobs",
                 "--lib",
             ],
-        ),
+        )
+        .stage("Jobs service tests"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1463,7 +1690,8 @@ fn verify_command_specs(
                 "trellis-service-eventlog",
                 "--lib",
             ],
-        ),
+        )
+        .stage("Event Log service tests"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1474,7 +1702,8 @@ fn verify_command_specs(
                 "trellis-rs",
                 "--lib",
             ],
-        ),
+        )
+        .stage("Rust client tests"),
         CommandSpec::new(
             "env",
             vec![
@@ -1486,7 +1715,8 @@ fn verify_command_specs(
                 "--workspace",
                 "--no-deps",
             ],
-        ),
+        )
+        .stage("Rustdoc"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1496,7 +1726,8 @@ fn verify_command_specs(
                 "--workspace",
                 "--doc",
             ],
-        ),
+        )
+        .stage("doctests"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1507,23 +1738,24 @@ fn verify_command_specs(
                 "trellis-protocol",
                 "--allow-dirty",
             ],
-        ),
+        )
+        .stage("Rust packaging"),
         CommandSpec::new(
             "cargo",
             vec!["test", "--manifest-path", "rust/tools/generate/Cargo.toml"],
-        ),
+        )
+        .stage("generator tests"),
         CommandSpec::new(
             "cargo",
             vec!["test", "--manifest-path", "rust/xtask/Cargo.toml"],
-        ),
-        CommandSpec::new("cargo", vec!["test", "--manifest-path", "xtask/Cargo.toml"]),
+        )
+        .stage("Rust xtask tests"),
+        CommandSpec::new("cargo", vec!["test", "--manifest-path", "xtask/Cargo.toml"])
+            .stage("root xtask tests"),
     ];
 
     if !skip_integration {
-        let js_jobs = std::thread::available_parallelism()
-            .map(|count| count.get().min(8))
-            .unwrap_or(4)
-            .to_string();
+        let js_jobs = "8".to_string();
         let mut js_args = vec![
             "task".to_string(),
             "-c".to_string(),
@@ -1537,9 +1769,9 @@ fn verify_command_specs(
         if keep_workdir {
             js_args.insert(0, "deno".to_string());
             js_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
-            specs.push(CommandSpec::new("env", js_args));
+            specs.push(CommandSpec::new("env", js_args).stage("JavaScript live integration"));
         } else {
-            specs.push(CommandSpec::new("deno", js_args));
+            specs.push(CommandSpec::new("deno", js_args).stage("JavaScript live integration"));
         }
 
         let mut rust_args = vec![
@@ -1562,9 +1794,9 @@ fn verify_command_specs(
         if keep_workdir {
             rust_args.insert(0, "deno".to_string());
             rust_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
-            specs.push(CommandSpec::new("env", rust_args));
+            specs.push(CommandSpec::new("env", rust_args).stage("Rust live integration"));
         } else {
-            specs.push(CommandSpec::new("deno", rust_args));
+            specs.push(CommandSpec::new("deno", rust_args).stage("Rust live integration"));
         }
     }
 
@@ -1686,6 +1918,8 @@ fn shell_word(word: &str) -> String {
 struct CommandSpec {
     program: String,
     args: Vec<String>,
+    stage: String,
+    parallel_group: Option<String>,
 }
 
 impl CommandSpec {
@@ -1697,6 +1931,26 @@ impl CommandSpec {
         Self {
             program: program.to_string(),
             args: args.into_iter().map(Into::into).collect(),
+            stage: String::new(),
+            parallel_group: None,
+        }
+    }
+
+    fn stage(mut self, stage: &str) -> Self {
+        self.stage = stage.to_owned();
+        self
+    }
+
+    fn parallel(mut self, group: &str) -> Self {
+        self.parallel_group = Some(group.to_owned());
+        self
+    }
+
+    fn stage_name(&self) -> String {
+        if self.stage.is_empty() {
+            command_text(self)
+        } else {
+            self.stage.clone()
         }
     }
 }
@@ -1814,13 +2068,14 @@ impl VersionEntry {
 mod tests {
     use super::{
         check_workspace_lint_policy, collect_versions, command_text, extract_changelog_section,
-        parse_release_command, prepare_release, pretag_dispatch_command, pretag_list_command,
-        pretag_watch_command, rewrite_cargo_manifest_versions,
+        format_elapsed, parse_release_command, prepare_release, pretag_dispatch_command,
+        pretag_list_command, pretag_watch_command, rewrite_cargo_manifest_versions,
         rewrite_cargo_manifest_versions_for_release, rewrite_js_internal_npm_dependency_versions,
         rewrite_json_manifest_internal_jsr_dependency_versions, rewrite_json_manifest_version,
         rewrite_json_manifest_version_for_release, verify_command_specs, version_base,
-        ReleaseCommand, ReleaseVersion,
+        working_tree_snapshot, ReleaseCommand, ReleaseVersion,
     };
+    use std::time::Duration;
     use std::{fs, path::Path};
 
     #[test]
@@ -2029,8 +2284,19 @@ mod tests {
             .contains(&"cargo test --manifest-path rust/tools/generate/Cargo.toml".to_string()));
         assert!(commands.contains(&"cargo test --manifest-path rust/xtask/Cargo.toml".to_string()));
         assert!(commands.contains(&"cargo test --manifest-path xtask/Cargo.toml".to_string()));
-        assert!(commands.contains(&"deno task -c js/deno.json test:prepared:packages".to_string()));
-        assert!(commands.contains(&"deno task -c js/deno.json test:prepared:ui-tools".to_string()));
+        for task in [
+            "test:prepared:result",
+            "test:prepared:trellis",
+            "test:prepared:trellis-svelte",
+            "test:prepared:trellis-test",
+            "test:prepared:ui-tools",
+        ] {
+            assert!(commands.contains(&format!("deno task -c js/deno.json {task}")));
+        }
+        assert!(commands.contains(&"cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings".to_string()));
+        assert!(commands.contains(&"cargo '+1.88.0' check --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-contracts -p trellis-rs --lib".to_string()));
+        assert!(commands.contains(&"cargo check --manifest-path rust/Cargo.toml --package trellis-protocol-wasm --target wasm32-unknown-unknown".to_string()));
+        assert!(commands.contains(&"actionlint".to_string()));
         assert!(commands.contains(&"deno task -c js/deno.json packages:build:npm".to_string()));
         assert!(commands
             .contains(&"deno task -c js/deno.json test:prepared:packaging:built".to_string()));
@@ -2057,9 +2323,7 @@ mod tests {
             &"cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty"
                 .to_string()
         ));
-        let expected_js_jobs = std::thread::available_parallelism()
-            .map(|count| count.get().min(8))
-            .unwrap_or(4);
+        let expected_js_jobs = 8;
         assert_eq!(
             &commands[commands.len() - 2],
             &format!(
@@ -2070,6 +2334,60 @@ mod tests {
             commands.last().expect("last release verify command"),
             "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip state:: --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture"
         );
+    }
+
+    #[test]
+    fn verify_prepared_javascript_commands_share_one_bounded_parallel_stage() {
+        let specs = verify_command_specs("0.9.0", "v0.8.2", true, false);
+        let parallel = specs
+            .iter()
+            .filter(|spec| spec.parallel_group.as_deref() == Some("prepared-js"))
+            .collect::<Vec<_>>();
+        assert_eq!(parallel.len(), 5);
+        assert!(parallel.len() <= 8);
+        assert!(parallel
+            .iter()
+            .all(|spec| spec.stage == "prepared JavaScript packages"));
+    }
+
+    #[test]
+    fn release_timing_uses_minute_second_format() {
+        assert_eq!(format_elapsed(Duration::from_secs(0)), "00:00");
+        assert_eq!(format_elapsed(Duration::from_secs(125)), "02:05");
+    }
+
+    #[test]
+    fn working_tree_snapshot_includes_untracked_file_contents() {
+        let root = std::env::temp_dir().join(format!(
+            "trellis-release-snapshot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .status()
+                .unwrap()
+                .success());
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "Trellis Test"]);
+        git(&["config", "user.email", "test@trellis.invalid"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        fs::write(root.join("tracked"), "tracked").unwrap();
+        git(&["add", "tracked"]);
+        git(&["commit", "--quiet", "-m", "initial"]);
+        fs::write(root.join("generated"), "before").unwrap();
+        let before = working_tree_snapshot(&root).unwrap();
+        fs::write(root.join("generated"), "after").unwrap();
+        let after = working_tree_snapshot(&root).unwrap();
+        assert_ne!(before, after);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2088,9 +2406,7 @@ mod tests {
             .map(command_text)
             .collect();
 
-        let expected_js_jobs = std::thread::available_parallelism()
-            .map(|count| count.get().min(8))
-            .unwrap_or(4);
+        let expected_js_jobs = 8;
         assert_eq!(
             &commands[commands.len() - 2],
             &format!(

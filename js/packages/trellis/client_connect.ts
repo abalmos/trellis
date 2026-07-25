@@ -15,6 +15,7 @@ import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   base64urlDecode,
   base64urlEncode,
+  BrowserAuthorizationContextStore,
   getOrCreateSessionKey,
   getPublicSessionKey,
   natsConnectSigForIat,
@@ -22,6 +23,13 @@ import {
   setSessionId,
 } from "./auth/browser.ts";
 import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
+import {
+  AuthorizationContextBundleSchema,
+  AuthorizationContextCache,
+  type AuthorizationContextStore,
+  MemoryAuthorizationContextStore,
+  startAuthorizationContextRefresh,
+} from "./auth/authorization_context.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
   sessionProofRequestDigestV1,
@@ -143,9 +151,10 @@ type BrowserClientAuthOptions = {
   currentUrl?: URL | string | (() => URL | string);
   flowId?: string;
   sessionKey?: SessionKeyOptions;
+  authorizationContextStore?: AuthorizationContextStore;
 };
 
-type SessionKeyClientAuthOptions = {
+type SessionKeyClientAuthOptionsBase = {
   mode: "session_key";
   sessionKeySeed: string;
   sessionId?: string;
@@ -154,6 +163,19 @@ type SessionKeyClientAuthOptions = {
   context?: unknown;
   flowId?: string;
 };
+
+type SessionKeyClientAuthOptions =
+  & SessionKeyClientAuthOptionsBase
+  & (
+    | {
+      authorizationContextStore: AuthorizationContextStore;
+      authorizationContextEphemeral?: never;
+    }
+    | {
+      authorizationContextStore?: never;
+      authorizationContextEphemeral: true;
+    }
+  );
 
 export type ClientAuthOptions =
   | BrowserClientAuthOptions
@@ -250,6 +272,7 @@ type RuntimeTransports = StaticDecode<typeof ClientTransportsSchema>;
 type ClientConnectDeps = {
   loadTransport(): Promise<RuntimeTransport>;
   now(): number;
+  authorizationContextStore?: AuthorizationContextStore;
 };
 
 const ClientBootstrapReadySchema = Type.Object({
@@ -263,7 +286,9 @@ const ClientBootstrapReadySchema = Type.Object({
     transport: Type.Object({
       inboxPrefix: Type.String({ minLength: 1 }),
       jwt: Type.String({ minLength: 1 }),
+      jwtExpiresAt: Type.Integer({ minimum: 1 }),
     }),
+    authorizationContext: AuthorizationContextBundleSchema,
   }),
 }, { additionalProperties: true });
 
@@ -382,8 +407,10 @@ const ClientBootstrapWireSchema = Type.Object({
   participantNeedsDigest: Type.String({ minLength: 1 }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
+    jwtExpiresAt: Type.Integer({ minimum: 1 }),
     servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }),
+  authorizationContext: AuthorizationContextBundleSchema,
 }, { additionalProperties: true });
 const BindWireSchema = Type.Object({
   serverNow: Type.Integer(),
@@ -394,8 +421,10 @@ const BindWireSchema = Type.Object({
   }, { additionalProperties: true }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
+    jwtExpiresAt: Type.Integer({ minimum: 1 }),
     servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }),
+  authorizationContext: AuthorizationContextBundleSchema,
 }, { additionalProperties: true });
 
 async function readJsonResponse(
@@ -660,7 +689,9 @@ async function bindClientFlow(args: {
       transport: {
         inboxPrefix: parsed.session.inboxPrefix,
         jwt: parsed.nats.jwt,
+        jwtExpiresAt: parsed.nats.jwtExpiresAt,
       },
+      authorizationContext: parsed.authorizationContext,
     },
   };
 }
@@ -756,7 +787,12 @@ async function fetchClientBootstrap(args: {
         contractId: args.participant.id,
         contractDigest: wire.participantArtifactDigest,
         transports: { websocket: { natsServers: wire.nats.servers } },
-        transport: { inboxPrefix: wire.inboxPrefix, jwt: wire.nats.jwt },
+        transport: {
+          inboxPrefix: wire.inboxPrefix,
+          jwt: wire.nats.jwt,
+          jwtExpiresAt: wire.nats.jwtExpiresAt,
+        },
+        authorizationContext: wire.authorizationContext,
       },
     };
   }
@@ -839,11 +875,13 @@ async function createRuntimeUserAuthenticator(args: {
   identity: ClientRuntimeIdentity;
   sessionId: string;
   participantDigest: string;
-  jwt: string;
+  contextDigest: string | (() => string);
+  jwt: string | (() => string);
 }): Promise<{ authenticators: Authenticator[]; stop: () => void }> {
   const options = await args.identity.auth.natsConnectOptions({
     sessionId: args.sessionId,
     participantDigest: args.participantDigest,
+    contextDigest: args.contextDigest,
     jwt: args.jwt,
   });
   return {
@@ -1096,10 +1134,46 @@ export async function connectClientWithDeps<
   }
 
   const transport = await deps.loadTransport();
+  const trustScope = new URL(trellisUrl).origin;
+  if (
+    args.auth?.mode === "session_key" &&
+    !args.auth.authorizationContextStore &&
+    args.auth.authorizationContextEphemeral !== true
+  ) {
+    throw new Error(
+      "session-key clients require persistent authorization context storage or explicit ephemeral mode",
+    );
+  }
+  const contextStore = args.auth?.authorizationContextStore ??
+    deps.authorizationContextStore ??
+    (args.auth?.mode === "session_key"
+      ? new MemoryAuthorizationContextStore()
+      : new BrowserAuthorizationContextStore(trustScope));
+  const authorizationContexts = new AuthorizationContextCache(
+    trellisUrl,
+    `installation:${trustScope}`,
+    contextStore,
+    (input, init) => globalThis.fetch(input, init),
+    deps.now,
+  );
+  identity.auth.setServerClockOffsetMs(
+    offsetState.serverClockOffsetMs + deps.now() - Date.now(),
+  );
+  authorizationContexts.setServerClockOffsetMs(
+    offsetState.serverClockOffsetMs,
+  );
+  await authorizationContexts.install(
+    bootstrap.connectInfo.authorizationContext,
+    {
+      bootstrapJwt: bootstrap.connectInfo.transport.jwt,
+      bootstrapJwtExpiresAt: bootstrap.connectInfo.transport.jwtExpiresAt,
+    },
+  );
   const runtimeState = {
     participantDigest: bootstrap.connectInfo.contractDigest,
     sessionId: bootstrap.connectInfo.sessionId,
-    jwt: bootstrap.connectInfo.transport.jwt,
+    jwt: () => authorizationContexts.routingJwt(),
+    contextDigest: () => authorizationContexts.current().contextDigest,
   };
   const handleSessionNotFound = identity.mode === "browser"
     ? async () => {
@@ -1124,6 +1198,7 @@ export async function connectClientWithDeps<
     identity,
     sessionId: runtimeState.sessionId,
     participantDigest: runtimeState.participantDigest,
+    contextDigest: runtimeState.contextDigest,
     jwt: runtimeState.jwt,
   });
   let nc: NatsConnection;
@@ -1134,8 +1209,19 @@ export async function connectClientWithDeps<
         bootstrap.connectInfo.transports,
       ),
       maxReconnectAttempts: DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
+      timeout: args.timeout ?? 10_000,
       inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
       authenticator: runtimeAuth.authenticators,
+    });
+    const stopContextRefresh = startAuthorizationContextRefresh({
+      trellisUrl: args.trellisUrl,
+      sessionId: runtimeState.sessionId,
+      auth: identity.auth,
+      cache: authorizationContexts,
+      onTerminalFailure: () => nc.drain(),
+    });
+    void nc.closed().finally(() => {
+      stopContextRefresh();
     });
     recordTrellisDuration(
       "trellis.connect.duration",

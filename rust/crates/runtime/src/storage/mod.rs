@@ -30,6 +30,29 @@ pub enum StoreError {
         #[source]
         source: std::io::Error,
     },
+    /// A configured SQLite database does not exist.
+    #[error("configured sqlite store does not exist: {path}")]
+    MissingSqlite {
+        /// Missing configured database path.
+        path: PathBuf,
+    },
+    /// Copying a configured SQLite database into a read-only check snapshot failed.
+    #[error("failed to copy sqlite check snapshot from {from} to {to}: {error}")]
+    CopySqliteSnapshot {
+        /// Configured source path.
+        from: PathBuf,
+        /// Temporary destination path.
+        to: PathBuf,
+        /// Underlying filesystem error.
+        #[source]
+        error: std::io::Error,
+    },
+    /// A configured SQLite database changed throughout snapshot retries.
+    #[error("configured sqlite store changed while creating a check snapshot: {path}")]
+    SqliteSnapshotChanged {
+        /// Configured database path.
+        path: PathBuf,
+    },
     /// SQLite connection opening failed.
     #[error("failed to open sqlite store {path}: {source}")]
     OpenSqlite {
@@ -102,8 +125,126 @@ impl SqliteStore {
         migrate_sqlite(self.subsystem, &self.config)
     }
 
+    /// Verify migration compatibility on a temporary copy without changing the database.
+    pub fn check_migrations(&self) -> Result<(), StoreError> {
+        if !self.config.path.exists() {
+            return Err(StoreError::MissingSqlite {
+                path: self.config.path.clone(),
+            });
+        }
+        let runner = match self.subsystem {
+            SubsystemName::Platform => sqlite_migrations::platform::migrations::runner(),
+            SubsystemName::Jobs => sqlite_migrations::jobs::migrations::runner(),
+            SubsystemName::Health => sqlite_migrations::health::migrations::runner(),
+            SubsystemName::Eventlog => sqlite_migrations::eventlog::migrations::runner(),
+        };
+        let temporary_directory = std::env::temp_dir().join(format!(
+            "trellis-migration-check-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let temporary_path = temporary_directory.join("store.sqlite");
+        let result = (|| {
+            fs::create_dir(&temporary_directory).map_err(|source| StoreError::CreateDirectory {
+                path: temporary_directory.clone(),
+                source,
+            })?;
+            let source_paths = ["", "-wal", "-shm"].map(|suffix| {
+                let mut path = self.config.path.as_os_str().to_owned();
+                path.push(suffix);
+                PathBuf::from(path)
+            });
+            let destination_paths = ["", "-wal", "-shm"].map(|suffix| {
+                let mut path = temporary_path.as_os_str().to_owned();
+                path.push(suffix);
+                PathBuf::from(path)
+            });
+            let fingerprint = |paths: &[PathBuf; 3]| -> std::io::Result<_> {
+                paths
+                    .iter()
+                    .map(|path| match fs::metadata(path) {
+                        Ok(metadata) => Ok(Some((metadata.len(), metadata.modified()?))),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                        Err(error) => Err(error),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            };
+            let mut stable = false;
+            for _ in 0..3 {
+                let before =
+                    fingerprint(&source_paths).map_err(|error| StoreError::CopySqliteSnapshot {
+                        from: self.config.path.clone(),
+                        to: temporary_path.clone(),
+                        error,
+                    })?;
+                for (from, to) in source_paths.iter().zip(&destination_paths) {
+                    if from.exists() {
+                        fs::copy(from, to).map_err(|error| StoreError::CopySqliteSnapshot {
+                            from: from.clone(),
+                            to: to.clone(),
+                            error,
+                        })?;
+                    } else {
+                        let _ = fs::remove_file(to);
+                    }
+                }
+                if before
+                    == fingerprint(&source_paths).map_err(|error| {
+                        StoreError::CopySqliteSnapshot {
+                            from: self.config.path.clone(),
+                            to: temporary_path.clone(),
+                            error,
+                        }
+                    })?
+                {
+                    stable = true;
+                    break;
+                }
+            }
+            if !stable {
+                return Err(StoreError::SqliteSnapshotChanged {
+                    path: self.config.path.clone(),
+                });
+            }
+            let mut connection =
+                Connection::open(&temporary_path).map_err(|source| StoreError::OpenSqlite {
+                    path: temporary_path.clone(),
+                    source,
+                })?;
+            runner
+                .set_abort_missing(false)
+                .run(&mut connection)
+                .map_err(|source| StoreError::MigrateSqlite {
+                    path: self.config.path.clone(),
+                    subsystem: self.subsystem.as_str(),
+                    source,
+                })?;
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(temporary_directory);
+        result
+    }
+
     pub(crate) fn open(&self) -> Result<Connection, StoreError> {
         open_sqlite(&self.config)
+    }
+
+    pub(crate) fn open_read_only(&self) -> Result<Connection, StoreError> {
+        Connection::open_with_flags(
+            &self.config.path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .map_err(|source| StoreError::OpenSqlite {
+            path: self.config.path.clone(),
+            source,
+        })
+    }
+
+    pub(crate) fn exists(&self) -> bool {
+        self.config.path.exists()
     }
 }
 
@@ -167,6 +308,16 @@ impl RuntimeStores {
         }
         if let Some(store) = &self.eventlog {
             store.migrate()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_all(&self) -> Result<(), StoreError> {
+        for store in [&self.platform, &self.jobs, &self.health, &self.eventlog]
+            .into_iter()
+            .flatten()
+        {
+            store.check_migrations()?;
         }
         Ok(())
     }

@@ -27,6 +27,14 @@ import {
   type TrellisAuth as SessionAuth,
 } from "../auth.ts";
 import {
+  type AuthorizationContextBundle,
+  AuthorizationContextBundleSchema,
+  AuthorizationContextCache,
+  type AuthorizationContextPersistence,
+  MemoryAuthorizationContextStore,
+  startAuthorizationContextRefresh,
+} from "../auth/authorization_context.ts";
+import {
   ContractResourceBindingsSchema,
   type InferSchemaType,
 } from "../contracts.ts";
@@ -327,11 +335,14 @@ type ServiceBootstrapConnectInfo = {
     websocket?: { natsServers: string[] };
   };
   jwt: string;
+  jwtExpiresAt: number;
+  authorizationContext: AuthorizationContextBundle;
 };
 
 type ServiceBootstrapResponse = {
   status: "ready";
   serverNow: number;
+  serverClockOffsetMs: number;
   connectInfo: ServiceBootstrapConnectInfo;
   binding: {
     contractId: string;
@@ -590,8 +601,10 @@ const ServiceBootstrapReadySchema = Type.Object({
   }, { additionalProperties: true }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
+    jwtExpiresAt: Type.Integer({ minimum: 1 }),
     servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }),
+  authorizationContext: AuthorizationContextBundleSchema,
 }, { additionalProperties: true });
 
 const ServiceBootstrapFailureSchema = Type.Object({
@@ -912,23 +925,17 @@ async function fetchServiceBootstrapInfo(args: {
       ServiceBootstrapReadySchema,
       settled.payload,
     );
-    args.identityAuth.setServerClockOffsetMs(
-      estimateMidpointClockOffsetMs({
-        requestStartedAtMs: settled.requestStartedAtMs,
-        responseReceivedAtMs: settled.responseReceivedAtMs,
-        serverNowSeconds: response.serverNow / 1_000,
-      }),
-    );
-    args.sessionAuth.setServerClockOffsetMs(
-      estimateMidpointClockOffsetMs({
-        requestStartedAtMs: settled.requestStartedAtMs,
-        responseReceivedAtMs: settled.responseReceivedAtMs,
-        serverNowSeconds: response.serverNow / 1_000,
-      }),
-    );
+    const serverClockOffsetMs = estimateMidpointClockOffsetMs({
+      requestStartedAtMs: settled.requestStartedAtMs,
+      responseReceivedAtMs: settled.responseReceivedAtMs,
+      serverNowSeconds: response.serverNow / 1_000,
+    });
+    args.identityAuth.setServerClockOffsetMs(serverClockOffsetMs);
+    args.sessionAuth.setServerClockOffsetMs(serverClockOffsetMs);
     return {
       status: "ready",
       serverNow: response.serverNow / 1_000,
+      serverClockOffsetMs,
       connectInfo: {
         sessionId: response.session.sessionId,
         participantDigest: response.authorization.participantArtifactDigest,
@@ -938,6 +945,8 @@ async function fetchServiceBootstrapInfo(args: {
         contractDigest: args.contractDigest,
         transports: { websocket: { natsServers: response.nats.servers } },
         jwt: response.nats.jwt,
+        jwtExpiresAt: response.nats.jwtExpiresAt,
+        authorizationContext: response.authorizationContext,
       },
       binding: {
         contractId: args.contractId,
@@ -1110,7 +1119,7 @@ export type TrellisServiceConnectOpts<
    */
   telemetry?: TrellisServiceConnectTelemetryOpts;
   server?: TrellisServiceServerOpts;
-};
+} & AuthorizationContextPersistence;
 
 /** Controls automatic telemetry initialization for `TrellisService.connect()`. */
 export type TrellisServiceConnectTelemetryOpts = false | {
@@ -1825,7 +1834,7 @@ export type TrellisServiceConnectArgs<
    */
   telemetry?: TrellisServiceConnectTelemetryOpts;
   server?: TrellisServiceServerOpts;
-};
+} & AuthorizationContextPersistence;
 
 /** Connected provider runtime inferred from a service contract. */
 export type ConnectedTrellisService<
@@ -1853,6 +1862,7 @@ export type TrellisServiceInternalConnectArgs<
   identity?: TrellisServiceConnectOpts["identity"];
   contractId?: string;
   contractDigest: string;
+  authorizationContextDigest: string;
   contractKv?: TKv;
   healthIdentity?: {
     instanceId: string;
@@ -3368,11 +3378,35 @@ export function connectTrellisServiceWithRuntimeDeps<
           outcome: "ok",
         },
       );
+      if (
+        !args.authorizationContextStore &&
+        args.authorizationContextEphemeral !== true
+      ) {
+        throw new Error(
+          "services require persistent authorization context storage or explicit ephemeral mode",
+        );
+      }
+      const authorizationContexts = new AuthorizationContextCache(
+        args.trellisUrl,
+        `service:${args.identity.deploymentId}:${args.identity.instanceId}`,
+        args.authorizationContextStore ?? new MemoryAuthorizationContextStore(),
+      );
+      authorizationContexts.setServerClockOffsetMs(
+        bootstrap.serverClockOffsetMs,
+      );
+      await authorizationContexts.install(
+        bootstrap.connectInfo.authorizationContext,
+        {
+          bootstrapJwt: bootstrap.connectInfo.jwt,
+          bootstrapJwtExpiresAt: bootstrap.connectInfo.jwtExpiresAt,
+        },
+      );
       const { authenticator, inboxPrefix } = await sessionAuth
         .natsConnectOptions({
           sessionId: bootstrap.connectInfo.sessionId,
           participantDigest: bootstrap.connectInfo.participantDigest,
-          jwt: bootstrap.connectInfo.jwt,
+          contextDigest: () => authorizationContexts.current().contextDigest,
+          jwt: () => authorizationContexts.routingJwt(),
         });
 
       let nc: NatsConnection;
@@ -3386,6 +3420,16 @@ export function connectTrellisServiceWithRuntimeDeps<
           waitOnFirstConnect: DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
           inboxPrefix,
           authenticator,
+        });
+        const stopContextRefresh = startAuthorizationContextRefresh({
+          trellisUrl: args.trellisUrl,
+          sessionId: bootstrap.connectInfo.sessionId,
+          auth: sessionAuth,
+          cache: authorizationContexts,
+          onTerminalFailure: () => nc.drain(),
+        });
+        void nc.closed().finally(() => {
+          stopContextRefresh();
         });
         recordTrellisDuration(
           "trellis.connect.duration",

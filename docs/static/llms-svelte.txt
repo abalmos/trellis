@@ -1,6 +1,6 @@
 # Trellis AI guidance for Svelte browser apps
 
-Last verified against Trellis main (2026-06-14).
+Last verified against Trellis main (2026-07-25).
 
 Use this file for AI coding agents working in a Svelte or SvelteKit browser app
 repository that consumes Trellis. The language-neutral guide is:
@@ -35,6 +35,14 @@ Rules:
 
 - `createTrellisApp(...)`, `TrellisProvider`, `SvelteTrellisConnection`, and
   browser client auth mode `"browser"` are the intended browser-app wiring.
+- Browser bootstrap verifies and stores the signed authorization context before
+  NATS opens. The origin-scoped IndexedDB record atomically retains the complete
+  root/manifest rollback floor and context across tabs; session clearing retains
+  trust. Reconnect uses the cache's current digest and the server-distributed
+  deterministic refresh time. Use `AuthorizationContextController` only when UI
+  needs explicit reactive loading, ready, refreshing, degraded, expired,
+  auth-required, or failed state; do not implement a second verifier in Svelte
+  or TypeScript code because Rust/WASM is authoritative.
 - Let Trellis-owned browser auth redirects complete through `TrellisProvider` and
   the returned callback URL. A plain callback after an expired login attempt is a
   restart opportunity, not a user-facing error; only explicit callback errors

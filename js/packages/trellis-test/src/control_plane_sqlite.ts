@@ -99,6 +99,18 @@ export class TrellisControlPlaneSqlite {
     );
     const row = rows[0];
     if (!row) return null;
+    if (typeof row.session_id !== "string") {
+      throw new Error("auth session row is missing session_id");
+    }
+    const contextTable = await this.query(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_authorization_contexts'",
+    );
+    if (contextTable.length > 0) {
+      await this.execute(
+        "DELETE FROM auth_authorization_contexts WHERE session_id = ?",
+        [row.session_id],
+      );
+    }
     await this.execute(
       "DELETE FROM auth_sessions WHERE session_public_key = ?",
       [

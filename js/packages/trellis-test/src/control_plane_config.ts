@@ -1,4 +1,4 @@
-import { dirname, join } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
 import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
 
 /** @internal File-backed Trellis control-plane config used by test runtimes. */
@@ -205,6 +205,11 @@ export async function writeTrellisConfig(args: {
     join(args.workdir, "trellis", "config.toml");
   await Deno.mkdir(dirname(configPath), { recursive: true });
   const configDir = dirname(configPath);
+  const trustFixture = fromFileUrl(
+    new URL("../fixtures/authorization-trust", import.meta.url),
+  );
+  const issuerCertificate =
+    "authorization-issuer-certificate.TyWisPUdbGpSYntDMbWQTuQjFhedkbIpHUyeSsUairU.json";
   await Promise.all([
     Deno.writeTextFile(
       join(configDir, "event-session.seed"),
@@ -221,6 +226,24 @@ export async function writeTrellisConfig(args: {
     Deno.writeTextFile(
       join(configDir, "auth-sx.seed"),
       `${args.config.nats.authCallout.sxSeed}\n`,
+    ),
+    Deno.copyFile(
+      join(trustFixture, "authorization-root.json"),
+      join(configDir, "authorization-root.json"),
+    ),
+    Deno.copyFile(
+      join(trustFixture, "authorization-issuer-manifest.json"),
+      join(configDir, "authorization-issuer-manifest.json"),
+    ),
+    Deno.copyFile(
+      join(trustFixture, issuerCertificate),
+      join(configDir, issuerCertificate),
+    ),
+    Deno.copyFile(
+      join(trustFixture, "authorization-issuer.seed"),
+      join(configDir, "authorization-issuer.seed"),
+    ).then(() =>
+      Deno.chmod(join(configDir, "authorization-issuer.seed"), 0o600)
     ),
   ]);
 
@@ -279,6 +302,25 @@ system_creds_path = ${quote(args.config.nats.system.credsPath)}
 issuer_signing_seed_file = "./auth-issuer-signing.seed"
 target_signing_seed_file = "./auth-target-signing.seed"
 xkey_seed_file = "./auth-sx.seed"
+
+[auth.authorization]
+trust_root_file = "./authorization-root.json"
+issuer_manifest_file = "./authorization-issuer-manifest.json"
+issuer_certificate_files = [${quote(`./${issuerCertificate}`)}]
+issuer_signing_seed_file = "./authorization-issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 3600
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
 
 [client]
 ws_nats_servers = ${strings(args.config.client.natsServers)}

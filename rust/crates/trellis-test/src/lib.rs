@@ -630,6 +630,18 @@ impl TrellisControlPlaneSqlite {
         let Some(row) = rows.into_iter().next() else {
             return Ok(None);
         };
+        if let Some(session_id) = row.get("session_id").and_then(Value::as_str) {
+            let context_table = self.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_authorization_contexts'",
+                [],
+            )?;
+            if !context_table.is_empty() {
+                self.execute(
+                    "DELETE FROM auth_authorization_contexts WHERE session_id = ?",
+                    [session_id],
+                )?;
+            }
+        }
         self.execute(
             "DELETE FROM auth_sessions WHERE session_public_key = ?",
             [session_key],
@@ -828,6 +840,10 @@ fn materialize_shared_runtime(
     fs::create_dir_all(local_nats.join("creds"))?;
     fs::create_dir_all(local_nats.join("secrets"))?;
     fs::create_dir_all(workdir.join("trellis/data"))?;
+    trellis_local_bootstrap::generate_local_authorization_trust(
+        &workdir.join("trellis/auth"),
+        "trellis-test",
+    )?;
 
     for (source, target) in [
         (&tenant.paths.nats_config, "nats.conf"),
@@ -914,6 +930,7 @@ fn materialize_shared_runtime(
             nats_manifest: "nats/manifest.json".to_string(),
             trellis_config: "trellis/config.toml".to_string(),
             session_seed: "trellis/session.seed".to_string(),
+            authorization_root_seed: "trust/authorization-root.seed".to_string(),
             trellis_data: "trellis/data".to_string(),
         },
         urls: LocalTrellisBootstrapUrls {
@@ -1312,6 +1329,7 @@ impl TrellisTestRuntime {
             &service_key.participant_needs_digest,
             &service_key.identity_seed,
             &service_key.seed,
+            Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
         )
         .with_session_key_seed(random_session_seed())
     }
@@ -1474,8 +1492,24 @@ impl TrellisTestAdmin {
             let flow_id = flow_id_from_url(challenge.login_url())?;
             perform_local_login(&self.trellis_url, &flow_id, &self.admin_password).await?;
             submit_portal_approval(&self.trellis_url, &flow_id).await?;
-            let outcome = challenge.complete(&self.trellis_url).await?;
-            self.client = Some(trellis_rs::auth::connect_admin_client_async(&outcome.state).await?);
+            let outcome = challenge.complete_ephemeral(&self.trellis_url).await?;
+            let state = outcome.state;
+            self.client = Some(
+                Caller::connect_user(UserConnectOptions::new(
+                    &state.trellis_url,
+                    &state.servers,
+                    &state.bootstrap_jwt,
+                    &state.session_id,
+                    &state.inbox_prefix,
+                    &state.session_seed,
+                    &state.participant_digest,
+                    state.authorization_context,
+                    DEFAULT_ADMIN_RPC_TIMEOUT_MS,
+                    format!("test-admin:{}", state.trellis_url),
+                    Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+                ))
+                .await?,
+            );
         }
         Ok(self
             .client
@@ -2056,6 +2090,7 @@ struct AuthStartResponse {
 struct BindFlowResponse {
     session: BoundSessionRecord,
     nats: BoundNatsRecord,
+    authorization_context: trellis_rs::client::AuthorizationContextBundle,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2074,11 +2109,13 @@ struct BoundNatsRecord {
 
 #[derive(Clone, Debug)]
 struct BoundFlowSession {
+    trellis_url: String,
     nats_servers: String,
     bootstrap_jwt: String,
     session_id: String,
     inbox_prefix: String,
     expires_at: Option<i64>,
+    authorization_context: trellis_rs::client::AuthorizationContextBundle,
 }
 
 #[derive(Debug)]
@@ -2333,11 +2370,13 @@ async fn bind_flow(trellis_url: &str, flow_id: &str) -> Result<BoundFlowSession,
         ));
     }
     Ok(BoundFlowSession {
+        trellis_url: trellis_url.to_owned(),
         nats_servers: response.nats.servers.join(","),
         bootstrap_jwt: response.nats.jwt,
         session_id: response.session.session_id,
         inbox_prefix: response.session.inbox_prefix,
         expires_at: response.session.expires_at,
+        authorization_context: response.authorization_context,
     })
 }
 
@@ -2348,13 +2387,17 @@ async fn connect_bound_user(
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
     Ok(Caller::connect_user(UserConnectOptions::new(
+        &bound.trellis_url,
         &bound.nats_servers,
         &bound.bootstrap_jwt,
         &bound.session_id,
         &bound.inbox_prefix,
         session_seed,
         participant_digest,
+        bound.authorization_context.clone(),
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
+        format!("test-admin:{}", bound.trellis_url),
+        Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
     ))
     .await?)
 }
@@ -2826,6 +2869,25 @@ fn render_test_trellis_config(
         },
         "auth": {
             "local_identity": { "enabled": true },
+            "authorization": {
+                "trust_root_file": "./auth/authorization-root.json",
+                "issuer_manifest_file": "./auth/authorization-issuer-manifest.json",
+                "issuer_certificate_files": ["./auth/authorization-issuer-certificate.json"],
+                "issuer_signing_seed_file": "./auth/authorization-issuer.seed",
+                "context_lifetime_seconds": 300,
+                "refresh_lead_seconds": 60,
+                "refresh_jitter_seconds": 15,
+                "minimum_context_lifetime_seconds": 76,
+                "maximum_bootstrap_jwt_lifetime_seconds": 3600,
+                "cleanup_grace_seconds": 3_600,
+                "allowed_clock_skew_seconds": 30,
+                "maximum_context_bytes": 16_384,
+                "maximum_permissions": 4_096,
+                "maximum_capabilities": 256,
+                "trust_bucket": "trellis_authorization_trust",
+                "context_bucket": "trellis_authorization_contexts",
+                "registry_replicas": 1,
+            },
         },
         "oauth": {
             "redirect_base": format!("{}/auth/callback", options.public_origin.trim_end_matches('/')),
@@ -3391,28 +3453,28 @@ mod tests {
 
         sqlite
             .execute(
-                "create table auth_sessions (session_public_key text primary key, value text)",
+                "create table auth_sessions (session_id text primary key, session_public_key text unique, value text)",
                 [],
             )
             .expect("create test table");
         let inserted = sqlite
             .execute(
-                "insert into auth_sessions (session_public_key, value) values (?, ?)",
-                params!["session-1", "before"],
+                "insert into auth_sessions (session_id, session_public_key, value) values (?, ?, ?)",
+                params!["ses_1", "session-1", "before"],
             )
             .expect("insert test row");
         assert_eq!(inserted.rows_affected, 1);
 
         let rows = sqlite
             .query(
-                "select session_public_key, value from auth_sessions where session_public_key = ?",
+                "select session_id, session_public_key, value from auth_sessions where session_public_key = ?",
                 params!["session-1"],
             )
             .expect("query test row");
         assert_eq!(
             rows,
             vec![
-                json!({ "session_public_key": "session-1", "value": "before" })
+                json!({ "session_id": "ses_1", "session_public_key": "session-1", "value": "before" })
                     .as_object()
                     .expect("object row")
                     .clone()
@@ -3441,7 +3503,7 @@ mod tests {
                 .query("select * from auth_sessions", [])
                 .expect("query restored table"),
             vec![
-                json!({ "session_public_key": "session-1", "value": "before" })
+                json!({ "session_id": "ses_1", "session_public_key": "session-1", "value": "before" })
                     .as_object()
                     .expect("object row")
                     .clone()

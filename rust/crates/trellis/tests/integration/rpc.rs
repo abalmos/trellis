@@ -344,6 +344,11 @@ async fn rpc_client_calls_service_success() {
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust RPC client");
+    let context = client
+        .refresh_authorization_context()
+        .await
+        .expect("refresh and verify live authorization context");
+    assert!(!context.context_digest.is_empty());
     let output = call_entity_get_with_retry(&client, "entity-1").await;
 
     service_task.abort_and_wait().await;
@@ -361,6 +366,83 @@ async fn rpc_client_calls_service_success() {
             found: true,
         }
     );
+    drop(observed_requests);
+
+    let policy = trellis_protocol::AuthorizationVerificationPolicyV1::new(
+        i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_secs(),
+        )
+        .expect("system time fits protocol integer"),
+        context.trust.policy.allowed_clock_skew_seconds,
+        context.trust.policy.maximum_context_lifetime_seconds,
+        context.trust.policy.maximum_context_bytes,
+        context.trust.policy.maximum_permissions,
+        context.trust.policy.maximum_capabilities,
+        context.trust.issuer_manifest_generation,
+    )
+    .expect("context verification policy");
+    let signed = trellis_protocol::parse_authorization_context_token_v1(&context.context, &policy)
+        .expect("parse issued context");
+    let context_digest = context.context_digest.clone();
+    let registry_url = format!(
+        "{}{}{}",
+        runtime.trellis_url().trim_end_matches('/'),
+        context.trust.context_registry_locator,
+        context_digest
+    );
+    let registry_context = reqwest::get(&registry_url)
+        .await
+        .expect("read published context registry entry")
+        .error_for_status()
+        .expect("published context registry status")
+        .text()
+        .await
+        .expect("read published context registry body");
+    assert_eq!(
+        registry_context,
+        trellis_protocol::canonicalize_json(
+            &serde_json::to_value(&signed).expect("serialize signed context")
+        )
+        .expect("canonicalize signed context")
+    );
+    let admin_client = admin
+        .connect_admin(&bootstrap_url)
+        .await
+        .expect("reconnect admin for context revocation");
+    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
+    admin_auth
+        .rpc()
+        .auth()
+        .sessions_revoke(&trellis_rs::sdk::auth::types::AuthSessionsRevokeRequest {
+            expected_version: None,
+            idempotency_key: format!("revoke-{}", signed.unsigned.context_id),
+            reason: Some("integration context revocation".to_owned()),
+            session_id: signed.unsigned.session_id,
+        })
+        .await
+        .expect("revoke context session");
+    assert!(client.refresh_authorization_context().await.is_err());
+    let revocation_url = format!(
+        "{}{}revocation.{}",
+        runtime.trellis_url().trim_end_matches('/'),
+        context.trust.context_registry_locator,
+        context_digest
+    );
+    let mut revocation_published = false;
+    for _ in 0..50 {
+        if reqwest::get(&revocation_url)
+            .await
+            .is_ok_and(|response| response.status().is_success())
+        {
+            revocation_published = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(revocation_published, "context revocation was not published");
 }
 
 #[tokio::test]
@@ -695,12 +777,6 @@ async fn rpc_invalid_mixed_input_validation() {
 
 #[tokio::test]
 async fn rpc_auth_validation_retries_transient_session_not_found() {
-    assert_case_registered(
-        "rpc.auth-validation-retries-transient-session-not-found",
-        "rpc",
-        "rpc",
-    );
-
     let runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
@@ -806,12 +882,6 @@ async fn rpc_auth_validation_retries_transient_session_not_found() {
 
 #[tokio::test]
 async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permissions() {
-    assert_case_registered(
-        "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions",
-        "auth",
-        "rpc",
-    );
-
     let runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await

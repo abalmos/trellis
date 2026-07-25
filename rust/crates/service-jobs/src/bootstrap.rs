@@ -380,6 +380,7 @@ mod tests {
             "participant-needs-digest",
             VALID_SEED_BASE64URL,
             "not-base64url",
+            std::sync::Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
         )
         .with_timeout_ms(1_000);
         let result = connect_service(options).await;
@@ -405,6 +406,7 @@ mod tests {
             "participant-needs-digest",
             VALID_SEED_BASE64URL,
             VALID_SEED_BASE64URL,
+            std::sync::Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
         )
         .with_timeout_ms(1_000);
         let result = connect_service(options).await;
@@ -428,6 +430,7 @@ mod tests {
             "participant-needs-digest",
             VALID_SEED_BASE64URL,
             "not-base64url",
+            std::sync::Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
         )
         .with_timeout_ms(1_000);
         let result = connect_and_run(options).await;

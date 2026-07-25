@@ -48,6 +48,18 @@ pub fn generate_trellis_bootstrap(options: &TrellisBootstrapOptions) -> Result<(
     nats_options.config = options.nats.clone();
 
     generate_nats_bootstrap_inner(&nats_options, &options.runtime.name)?;
+    let authorization_directory = trellis_out.join("auth");
+    trellis_local_bootstrap::generate_local_authorization_trust(
+        &authorization_directory,
+        "trellis.local",
+    )
+    .map_err(|error| BootstrapError::AuthorizationTrust(error.to_string()))?;
+    let offline_trust_directory = options.out.join("trust");
+    fs::create_dir_all(&offline_trust_directory)?;
+    fs::rename(
+        authorization_directory.join("authorization-root.seed"),
+        offline_trust_directory.join("authorization-root.seed"),
+    )?;
     fs::write(
         trellis_out.join("config.toml"),
         render_trellis_config(options),

@@ -165,6 +165,7 @@ export function createAuthLocalLoginFixture(caseId: string) {
       deployment,
     });
     const service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,

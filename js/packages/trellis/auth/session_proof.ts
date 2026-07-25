@@ -23,7 +23,9 @@ export type SessionProofPurposeV1 =
   | "serviceBootstrap"
   | "deviceBootstrap"
   | "natsConnect"
-  | "sessionSelfControl";
+  | "sessionSelfControl"
+  | "authorizationContextRefresh"
+  | "natsConnectContext";
 
 type CommonInput = {
   requestId: string;
@@ -88,6 +90,27 @@ export type SessionProofInputV1 =
     sessionId: string;
     sessionKeyId: string;
     requestDigest: string;
+  }
+  | CommonInput & {
+    purpose: "authorizationContextRefresh";
+    sessionId: string;
+    sessionKeyId: string;
+    currentContextDigest: string | null;
+    expectedParticipantDigest: string | null;
+    expectedNeedsDigest: string | null;
+    knownRootKeyId: string;
+    minimumManifestGeneration: number;
+    requestDigest: string;
+  }
+  | CommonInput & {
+    purpose: "natsConnectContext";
+    sessionId: string;
+    sessionKeyId: string;
+    sessionPublicKey: string;
+    sessionNkey: string;
+    participantDigest: string;
+    contextDigest: string;
+    nonce: string;
   };
 
 /** One strict session-proof signature envelope. */
@@ -234,7 +257,8 @@ function assertSignerPublicKey(
   if (
     (input.purpose === "userAuthRequest" ||
       input.purpose === "clientBootstrap" ||
-      input.purpose === "natsConnect") &&
+      input.purpose === "natsConnect" ||
+      input.purpose === "natsConnectContext") &&
     input.sessionPublicKey !== signerPublicKey
   ) {
     throw new Error(
@@ -375,6 +399,50 @@ export function buildSessionProofTranscriptV1(
         decodeFixed(input.requestDigest, 32, "requestDigest"),
       );
       break;
+    case "authorizationContextRefresh": {
+      if (
+        !Number.isSafeInteger(input.minimumManifestGeneration) ||
+        input.minimumManifestGeneration <= 0
+      ) {
+        throw new Error(
+          "minimumManifestGeneration must be a positive safe integer",
+        );
+      }
+      fields.push(
+        assertText(input.sessionId, "sessionId"),
+        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
+        optionalDigest(input.currentContextDigest, "currentContextDigest"),
+        optionalDigest(
+          input.expectedParticipantDigest,
+          "expectedParticipantDigest",
+        ),
+        optionalDigest(input.expectedNeedsDigest, "expectedNeedsDigest"),
+        decodeFixed(input.knownRootKeyId, 32, "knownRootKeyId"),
+        utf8(String(input.minimumManifestGeneration)),
+        decodeFixed(input.requestDigest, 32, "requestDigest"),
+      );
+      break;
+    }
+    case "natsConnectContext": {
+      const sessionKey = assertPublicKey(
+        input.sessionPublicKey,
+        "sessionPublicKey",
+      );
+      const sessionNkey = assertNkey(
+        input.sessionNkey,
+        sessionKey,
+        "sessionNkey",
+      );
+      fields.push(
+        assertText(input.sessionId, "sessionId"),
+        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
+        sessionNkey,
+        decodeFixed(input.participantDigest, 32, "participantDigest"),
+        decodeFixed(input.contextDigest, 32, "contextDigest"),
+        assertText(input.nonce, "nonce"),
+      );
+      break;
+    }
   }
 
   const parts: Uint8Array[] = [];

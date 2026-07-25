@@ -7,6 +7,7 @@
     ".": "./index.ts",
     "./auth": "./auth.ts",
     "./auth/browser": "./auth/browser.ts",
+    "./auth/file": "./auth/file.ts",
     "./browser": "./browser.ts",
     "./contracts": "./contracts.ts",
     "./device": "./device.ts",

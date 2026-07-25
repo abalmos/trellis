@@ -15,12 +15,15 @@ description: Rust-owned identity, authority, session, and transport architecture
 5. Every principal uses the same session creation and NATS admission path.
 6. Expected failures are typed and fail closed.
 7. State-changing workflows are aggregate, idempotent transactions.
+8. Short-lived signed contexts carry authority snapshots; current state still
+   controls issuance, refresh, NATS admission, and immediate revocation.
 
 ## Ownership
 
 Rust owns browser/account flows, OAuth discovery, first-admin bootstrap,
 provisioning, sessions, authority proposals and reconciliation, HTTP, Auth RPC,
-Auth Callout, connection presence, revocation, and post-commit delivery.
+Auth Callout, authorization-context issuance and registries, connection
+presence, revocation, and post-commit delivery.
 
 TypeScript remains first class for portal source, generated SDKs, WASM proof
 bindings, browser/service/device clients, and integration tests. It does not
@@ -132,6 +135,67 @@ from each session key.
 Revocation commits session state, authored event intent, and connection-kick
 intent together. Connection presence is short-lived KV state, not authority.
 
+## Authorization Trust And Contexts
+
+Each deployment pins one public authorization root. The root private key is
+offline deployment tooling state and is not a `trellis-server` configuration
+field. A root-signed, generation-numbered manifest selects active root-signed
+issuer certificates. The runtime loads only the active issuer seed and rejects
+root mismatch, manifest rollback/equivocation, missing certificates, wrong
+usage, expired trust, and issuer-seed mismatch before auth listeners start.
+
+The platform publishes immutable public trust records to
+`trellis_authorization_trust` and short-lived contexts plus separate revocation
+records to `trellis_authorization_contexts`. Bootstrap returns the pinned root,
+current manifest identity, lazy HTTP registry locators, verification policy, and
+one signed context. It does not return the full trust history or expose NATS KV
+credentials to clients.
+
+Context issuance resolves one coherent `IssuableAuthorizationState`, derives a
+snapshot token that excludes liveness-only timestamps, signs the exact session,
+principal, participant, authority version, materialization version, inbox,
+grants, capabilities, deployment/instance identity, and validity bounds, then
+optimistically commits only if that snapshot is still current. Registry
+publication is required before bootstrap success. Equivalent bootstrap retries
+may reuse a still-pre-refresh context. The reuse decision and commit occur in
+one SQLite transaction, equivalent concurrent requests reuse one record, and a
+session retains at most the current context plus one overlap for reconnect
+handoff. Refresh re-evaluates current state and never mutates authority.
+
+Every client durably pins the complete rollback floor: root key id, canonical
+root digest, minimum manifest generation, and canonical manifest digest at that
+generation. Same-generation manifest equivocation and root replacement fail
+closed. Clearing or replacing a session/context retains that floor; root reset
+is a separate explicit operation. Browser clients commit the floor and current
+context atomically in deployment-origin-scoped IndexedDB. Rust and TypeScript
+service, device, CLI, and non-browser clients require an explicit durable store;
+memory stores are opt-in for tests and deliberately ephemeral processes only.
+
+Rust/WASM is the sole cryptographic verifier for TypeScript consumers. The
+TypeScript cache owns fetching, persistence, timers, and state projection, but
+does not independently parse signed security objects or implement Ed25519/RFC
+8785 verification. Issuance distributes one deterministic `refreshAt` computed
+from context expiry, configured lead, and context-digest-derived earlier-only
+jitter. All clients schedule that exact signed-bundle value rather than deriving
+a local fraction of context lifetime.
+
+Bootstrap and refresh return server time in milliseconds. Clients estimate the
+server offset from the request midpoint and use corrected time for validity,
+refresh scheduling, reconnect proofs, and UI state. An expired context is
+verified at its signed historical window, then cleared while its session binding
+and trust floor remain available for proof-bound `currentContextDigest: null`
+recovery. Refresh atomically installs the returned context and renewed route
+JWT; same-digest success still reschedules.
+
+Authorization-relevant mutations revoke matching active contexts and enqueue
+immutable revocation publication in the same SQLite transaction. This includes
+session expiry/rebind/revoke, credentials and principals, desired authority and
+semantic materialization changes, deployment/instance/device lifecycle, and
+device delegation. Profile/liveness noise and semantic reconciliation no-ops do
+not revoke contexts. Context expiry is the hard cryptographic bound; the janitor
+expires and later removes terminal records only after durable publication work
+is complete.
+
 ## Browser And First-Admin Flows
 
 Browser requests are proof-bound to a session key and exact participant
@@ -160,14 +224,19 @@ that artifact rather than assumed or stored as a mutable group.
 
 ## NATS Auth Callout
 
-Bootstrap or browser bind returns a deny-all Auth-account JWT whose subject is
-the session key encoded as a NATS User NKey. There is no shared sentinel user or
-seed.
+Bootstrap or browser bind returns a deny-all Auth-account JWT and a verified
+authorization-context bundle. The JWT subject is the session key encoded as a
+NATS User NKey. The JWT is route-selection material only: it grants no transport
+authority, is bounded by session/authority/delegation state and the configured
+bootstrap-JWT cap, and is renewed atomically by context refresh. Context expiry
+and revocation govern admission independently. There is no shared sentinel user
+or seed.
 
 Every connect and reconnect uses the same session private key to produce:
 
 - the standard NATS signature over the server challenge nonce
-- a separate nonce-bound `trellis.session-proof.v1` proof
+- a separate `natsConnectContext` `trellis.session-proof.v1` binding the nonce,
+  exact participant digest, and current context digest
 
 The callout pipeline is:
 
@@ -177,16 +246,18 @@ The callout pipeline is:
 3. validate the deny-all bootstrap JWT
 4. verify the standard NATS nonce signature
 5. verify the domain-separated Trellis proof
-6. admit the proof through CAS replay protection
-7. resolve current issuable authorization state
-8. verify the exact participant binding and compile transport permissions
-9. issue the short-lived target-account user JWT
-10. record connection presence
+6. admit the proof through context-purpose CAS replay protection
+7. load the published, active, unrevoked context and verify root, manifest,
+   certificate, signature, policy, and digest
+8. resolve current issuable authorization state and compare every
+   authorization-bearing context field
+9. compile transport permissions from current exact grants and bindings
+10. issue the short-lived target-account user JWT and record connection presence
 
 The outer AuthResponse is signed by the Auth-account signing key. The inner user
 JWT is signed by the target-account signing key. Its expiry is bounded by the
-configured maximum, session expiry, effective authority expiry, and device
-delegation expiry.
+configured maximum, context expiry, session expiry, effective authority expiry,
+and device delegation expiry.
 
 Transport permissions are deterministic projections of exact grants, API
 descriptors, typed resource bindings, the session inbox, and narrow built-in
@@ -214,6 +285,11 @@ companion state stores accounts, credentials, portals, flows, workflows,
 provisioning, activation reviews, replay records, idempotency results, and
 post-commit actions.
 
+V1003 adds trust floors, signed context records, optimistic issuance snapshot
+tokens, publication state, and revocation lifecycle. SQLite is the sole complete
+production-faithful persistence implementation for this milestone; repository
+ports remain backend-neutral for a future PostgreSQL owner.
+
 Accepted migration files are immutable. V1001 remains byte-identical to the
 accepted Milestone 7 migration; V1002 performs M8 evolution and is verified
 against a populated accepted-M7 database, including repeated upgrade and
@@ -233,11 +309,12 @@ context.
 
 ## Trust Evolution
 
-Milestone 8 retains internal request/event validators while Rust owns all auth
-state and admission. Milestone 9 adds issuer trust distribution and signed
-authorization-context issuance. Milestone 10 moves ordinary request-proof v2
-validation local to services and removes `Auth.Requests.Validate` from that
-path.
+Milestone 9 distributes issuer trust, issues and refreshes signed authorization
+contexts, verifies them on every NATS connect/reconnect, and couples revocation
+to authoritative SQLite transactions. Internal request/event validators remain.
+Milestone 10 moves ordinary request-proof v2 validation local to services and
+removes `Auth.Requests.Validate`; Milestone 11 applies context-local validation
+to events and removes `Auth.Events.Validate`.
 
 Those later trust layers must consume the same exact principals, participant
 bindings, grant sets, authority versions, session identity, and inbox prefix;

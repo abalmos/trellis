@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::{AdminSessionState, TrellisAuthError};
+use crate::client::{AuthorizationContextStore as _, FileAuthorizationContextStore};
 
 fn cli_config_dir() -> PathBuf {
     if let Ok(dir) = env::var("XDG_CONFIG_HOME") {
@@ -16,6 +17,10 @@ fn cli_config_dir() -> PathBuf {
 
 fn admin_session_state_path() -> PathBuf {
     cli_config_dir().join("admin-session.json")
+}
+
+pub(crate) fn admin_authorization_context_state_path() -> PathBuf {
+    cli_config_dir().join("authorization-context.json")
 }
 
 fn write_private_file(path: &Path, contents: &str) -> Result<(), TrellisAuthError> {
@@ -54,6 +59,7 @@ pub fn load_admin_session() -> Result<AdminSessionState, TrellisAuthError> {
 /// Remove the stored admin session and related local credential files.
 #[doc = concat!("Trellis API operation `", stringify!(clear_admin_session), "`.")]
 pub fn clear_admin_session() -> Result<bool, TrellisAuthError> {
+    FileAuthorizationContextStore::new(admin_authorization_context_state_path()).clear_context()?;
     let path = admin_session_state_path();
     if path.exists() {
         fs::remove_file(path)?;

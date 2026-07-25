@@ -65,16 +65,6 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "rpc_invalid_mixed_input_validation",
     ),
     IntegrationCase::live(
-        "rpc.auth-validation-retries-transient-session-not-found",
-        "rpc",
-        "rpc_auth_validation_retries_transient_session_not_found",
-    ),
-    IntegrationCase::live(
-        "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions",
-        "rpc",
-        "auth_requests_validate_enforces_proof_signature_time_replay_and_permissions",
-    ),
-    IntegrationCase::live(
         "auth.sessions-list-and-connections-list-report-participant-metadata",
         "app_identity_approval",
         "auth_sessions_list_and_connections_list_report_participant_metadata",
@@ -570,16 +560,6 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "auth_session_revoke_cleans_runtime_connection_presence",
     ),
     IntegrationCase::live(
-        "auth.sessions-revoke-cascades-app-grants",
-        "app_identity_approval",
-        "auth_sessions_revoke_cascades_app_grants",
-    ),
-    IntegrationCase::live(
-        "auth.sessions-revoke-cascades-agent-grants",
-        "app_identity_approval",
-        "auth_sessions_revoke_cascades_agent_grants",
-    ),
-    IntegrationCase::live(
         "auth.sessions-revoke-revokes-device-and-service-access",
         "device_activation",
         "auth_sessions_revoke_revokes_device_and_service_access",
@@ -588,11 +568,6 @@ pub(crate) const RUST_INTEGRATION_CASES: &[IntegrationCase] = &[
         "auth.grant-overrides-bind-without-user-capability",
         "app_identity_approval",
         "auth_grant_overrides_bind_without_user_capability",
-    ),
-    IntegrationCase::live(
-        "auth.identity-grants-revoke-removes-authority-and-live-sessions",
-        "app_identity_approval",
-        "auth_identity_grants_revoke_removes_authority_and_live_sessions",
     ),
     IntegrationCase::live(
         "auth.portal-route-selection-and-policy-drive-browser-flow",

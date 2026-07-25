@@ -1,6 +1,6 @@
 # Trellis AI guidance for TypeScript services
 
-Last verified against Trellis main (2026-07-22).
+Last verified against Trellis main (2026-07-26).
 
 Use this file for AI coding agents working in a TypeScript service repository
 that consumes Trellis. The language-neutral guide is:
@@ -72,9 +72,35 @@ Rules:
 - `TrellisService.connect(...)`, `TrellisClient.connect(...)`, and device helpers
   own session bootstrap and reconnect. They use an immutable provisioned identity
   or browser session key, a session-bound deny-all JWT, and fresh nonce-bound
-  proofs. Service/device bootstrap presents canonical participant and referenced
-  API artifacts inside the signed request. Service repositories do not load
-  shared NATS credentials.
+  `natsConnectContext` proofs. Ready bootstrap includes a pinned trust root and
+  signed short-lived context. TypeScript delegates cryptographic verification to
+  the Rust/WASM verifier. Production service/device clients must provide a
+  durable authorization-context store; browser clients use origin-scoped
+  IndexedDB, while memory is explicit for tests and ephemeral processes. Stores
+  atomically retain the root key id/digest, minimum manifest generation/digest,
+  and current context across restarts. Clearing context retains trust. Clients
+  schedule the distributed deterministic `refreshAt` and atomically use the
+  current digest on reconnect. Bootstrap/refresh server time is converted to a
+  request-midpoint clock offset. After context or route-JWT expiry, clients retain
+  session/trust evidence and use proof-bound `currentContextDigest: null`
+  recovery; same-digest success still reschedules.
+  The TypeScript cache fetches only the connected session's immutable
+  same-origin manifest and certificate locators. Do not add Auth KV watches,
+  arbitrary-context resolution, validator readiness, or registry permissions to
+  client/service code; those are Rust runtime boundaries.
+  Native Deno/Node services can use `FileAuthorizationContextStore` from the
+  explicit `@qlever-llc/trellis/auth/file` subpath; it is intentionally absent
+  from the browser-safe auth graph. Each file path is single-writer and must be
+  private to one active service/client process.
+  Service/device bootstrap presents canonical participant and referenced API
+  artifacts inside the signed request. Service repositories do not load shared
+  NATS credentials or authorization registry KV directly.
+- The deny-all bootstrap JWT grants no authority. Context refresh renews it and
+  installs its exact expiry atomically with the verified context. It only routes
+  Auth Callout and remains bounded by current session, authority, delegation,
+  context, and the configured JWT lifetime cap.
+- `maximumContextBytes` is the canonical complete signed-context JSON UTF-8 byte
+  limit, not the base64url token length.
 - Trellis caches manifests by digest at runtime. If auth/bootstrap reports a
   missing digest after the cache is pruned, regenerate from source and present the
   full source boundary so the client can recompile its protocol artifacts; do not
@@ -135,6 +161,9 @@ An operation or job queue may declare one optional `update` schema. Keep
 live-only, at-most-once content: they are not persisted, replayed, exposed in
 admin/Event Log, or delivered to late subscribers. Prefer cumulative payloads
 and treat terminal output/result as authoritative.
+Operation and job traffic remains bounded by transport permissions compiled from
+the connected service context; declarations and subject names never create
+grants.
 
 ```ts
 // Inside an operation handler:

@@ -7,24 +7,29 @@ Deno.test("TrellisControlPlaneSqlite queries and mutates a runtime database", as
 
   try {
     await sqlite.execute(
-      "create table auth_sessions (session_public_key text primary key, value text)",
+      "create table auth_sessions (session_id text primary key, session_public_key text unique, value text)",
     );
     const inserted = await sqlite.execute(
-      "insert into auth_sessions (session_public_key, value) values (?, ?)",
-      ["session-1", "before"],
+      "insert into auth_sessions (session_id, session_public_key, value) values (?, ?, ?)",
+      ["ses_1", "session-1", "before"],
     );
     assertEquals(inserted.rowsAffected, 1);
 
     const rows = await sqlite.query(
-      "select session_public_key, value from auth_sessions where session_public_key = ?",
+      "select session_id, session_public_key, value from auth_sessions where session_public_key = ?",
       ["session-1"],
     );
-    assertEquals(rows, [{ session_public_key: "session-1", value: "before" }]);
+    assertEquals(rows, [{
+      session_id: "ses_1",
+      session_public_key: "session-1",
+      value: "before",
+    }]);
 
     const snapshot = await sqlite.takeSession("session-1");
     assertEquals(await sqlite.query("select * from auth_sessions"), []);
     assertEquals((await snapshot?.restore())?.rowsAffected, 1);
     assertEquals(await sqlite.query("select * from auth_sessions"), [{
+      session_id: "ses_1",
       session_public_key: "session-1",
       value: "before",
     }]);

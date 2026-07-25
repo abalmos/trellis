@@ -11,6 +11,8 @@ use bytes::Bytes;
 const TEST_NAME: &str = "runtime_ownership::runtime_singleton_ownership_lifecycle";
 const INCOMPATIBLE_BUCKET_TEST_NAME: &str =
     "runtime_ownership::runtime_incompatible_lease_bucket_fails_before_storage_open";
+const MODE_SCOPED_CHECK_TEST_NAME: &str =
+    "runtime_ownership::runtime_check_is_mode_scoped_and_read_only";
 const LEASE_BUCKET: &str = "trellis_runtime_leases";
 
 struct RuntimeProcess {
@@ -308,6 +310,105 @@ async fn runtime_incompatible_lease_bucket_fails_before_storage_open() {
     assert!(blocked_storage.is_dir());
 }
 
+#[tokio::test]
+async fn runtime_check_is_mode_scoped_and_read_only() {
+    trellis_test::set_current_test_tenant(MODE_SCOPED_CHECK_TEST_NAME);
+    let mut runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    runtime
+        .stop_control_plane()
+        .expect("stop default platform owner");
+    let client = ConnectOptions::new()
+        .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load Trellis NATS credentials")
+        .connect(runtime.nats_url())
+        .await
+        .expect("connect mode check client");
+    let jetstream = jetstream::new(client);
+    jetstream
+        .delete_key_value(LEASE_BUCKET)
+        .await
+        .expect("remove fixture lease bucket");
+    let config_path = runtime.workdir().join("mode-check.toml");
+    let mut all = RuntimeProcess::start(&runtime, "all", &config_path, "mode-check-all");
+    all.wait_ready().await;
+    assert!(all.terminate().await.success());
+
+    for stream in ["JOBS", "JOBS_WORK", "JOBS_ADVISORIES"] {
+        jetstream
+            .delete_stream(stream)
+            .await
+            .unwrap_or_else(|error| panic!("delete {stream}: {error}"));
+    }
+    for mode in ["platform", "health", "eventlog"] {
+        let output = runtime_command(mode, &config_path)
+            .arg("--check")
+            .output()
+            .unwrap_or_else(|error| panic!("run {mode} check: {error}"));
+        assert!(
+            output.status.success(),
+            "{mode} check failed without Jobs streams: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert!(jetstream.get_stream("JOBS").await.is_err());
+
+    let failed_jobs = runtime_command("jobs", &config_path)
+        .arg("--check")
+        .output()
+        .expect("run missing Jobs check");
+    assert!(!failed_jobs.status.success());
+    assert!(jetstream.get_stream("JOBS").await.is_err());
+
+    let jobs_config = runtime.workdir().join("mode-check-jobs.toml");
+    let mut jobs = RuntimeProcess::start(&runtime, "jobs", &jobs_config, "mode-check-jobs");
+    jobs.wait_ready().await;
+    assert!(jobs.terminate().await.success());
+    for bucket in [
+        "trellis_authorization_trust",
+        "trellis_authorization_contexts",
+    ] {
+        jetstream
+            .delete_key_value(bucket)
+            .await
+            .unwrap_or_else(|error| panic!("delete {bucket}: {error}"));
+    }
+    let jobs_without_auth = runtime_command("jobs", &config_path)
+        .arg("--check")
+        .output()
+        .expect("run Jobs check without Auth registries");
+    assert!(
+        jobs_without_auth.status.success(),
+        "Jobs check required Platform Auth: {}",
+        String::from_utf8_lossy(&jobs_without_auth.stderr)
+    );
+
+    let platform_config = runtime.workdir().join("mode-check-platform.toml");
+    let mut platform = RuntimeProcess::start(
+        &runtime,
+        "platform",
+        &platform_config,
+        "mode-check-platform",
+    );
+    platform.wait_ready().await;
+    assert!(platform.terminate().await.success());
+    jetstream
+        .delete_stream("JOBS_WORK")
+        .await
+        .expect("delete union Jobs work stream");
+    let all_missing_union = runtime_command("all", &config_path)
+        .arg("--check")
+        .output()
+        .expect("run incomplete all-mode check");
+    assert!(!all_missing_union.status.success());
+    assert!(jetstream.get_stream("JOBS_WORK").await.is_err());
+
+    runtime.stop().expect("stop mode check runtime");
+}
+
 async fn acquire_and_release(leases: &kv::Store, key: &str) {
     let revision = leases
         .create(key, Bytes::from_static(b"fixture-probe"))
@@ -369,10 +470,6 @@ auth_creds_path = "{}"
 trellis_creds_path = "{}"
 system_creds_path = "{}"
 
-[jobs.storage]
-kind = "sqlite"
-path = "{}"
-
 [leases]
 bucket = "{LEASE_BUCKET}"
 replicas = 1
@@ -384,9 +481,18 @@ renew_ms = 500
         toml_path(&nats_dir.join("auth-auth.creds")),
         toml_path(&nats_dir.join("trellis-auth.creds")),
         toml_path(&nats_dir.join("system.creds")),
-        toml_path(&jobs_path),
     );
-    if mode == "all" {
+    if matches!(mode, "jobs" | "all") {
+        config.push_str(&format!(
+            r#"
+[jobs.storage]
+kind = "sqlite"
+path = "{}"
+"#,
+            toml_path(&jobs_path)
+        ));
+    }
+    if matches!(mode, "platform" | "all") {
         config.push_str(&format!(
             r#"
 [nats.auth_callout]
@@ -394,15 +500,26 @@ issuer_signing_seed_file = "{}"
 target_signing_seed_file = "{}"
 xkey_seed_file = "{}"
 
+[auth.authorization]
+trust_root_file = "{}"
+issuer_manifest_file = "{}"
+issuer_certificate_files = ["{}"]
+issuer_signing_seed_file = "{}"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 3600
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
+
 [platform.storage]
-kind = "sqlite"
-path = "{}"
-
-[health.storage]
-kind = "sqlite"
-path = "{}"
-
-[eventlog.storage]
 kind = "sqlite"
 path = "{}"
 "#,
@@ -417,9 +534,47 @@ path = "{}"
                     .join("nats/secrets/auth-target-signing.seed")
             ),
             toml_path(&runtime.workdir().join("nats/secrets/auth-sx.seed")),
-            toml_path(&runtime.workdir().join("all-platform.sqlite")),
-            toml_path(&runtime.workdir().join("all-health.sqlite")),
-            toml_path(&runtime.workdir().join("all-eventlog.sqlite")),
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("trellis/auth/authorization-root.json")
+            ),
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("trellis/auth/authorization-issuer-manifest.json")
+            ),
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("trellis/auth/authorization-issuer-certificate.json")
+            ),
+            toml_path(
+                &runtime
+                    .workdir()
+                    .join("trellis/auth/authorization-issuer.seed")
+            ),
+            toml_path(&runtime.workdir().join(format!("{label}-platform.sqlite"))),
+        ));
+    }
+    if matches!(mode, "health" | "all") {
+        config.push_str(&format!(
+            r#"
+[health.storage]
+kind = "sqlite"
+path = "{}"
+"#,
+            toml_path(&runtime.workdir().join(format!("{label}-health.sqlite")))
+        ));
+    }
+    if matches!(mode, "eventlog" | "all") {
+        config.push_str(&format!(
+            r#"
+[eventlog.storage]
+kind = "sqlite"
+path = "{}"
+"#,
+            toml_path(&runtime.workdir().join(format!("{label}-eventlog.sqlite")))
         ));
     }
     std::fs::write(path, config).expect("write Rust runtime config");

@@ -24,6 +24,9 @@ pub enum BootstrapError {
     /// NATS NKEY generation failed.
     #[error(transparent)]
     Nkey(#[from] nkeys::error::Error),
+    /// Authorization trust generation failed.
+    #[error("failed to generate authorization trust: {0}")]
+    AuthorizationTrust(String),
     /// Filesystem I/O failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),

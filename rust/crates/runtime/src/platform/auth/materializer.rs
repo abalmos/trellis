@@ -532,6 +532,8 @@ fn error_category(error: &AuthorizationStateError) -> &'static str {
         }
         AuthorizationStateError::RequiredResourceUnavailable(_) => "required_resource_unavailable",
         AuthorizationStateError::MaterializationStale => "materialization_stale",
+        AuthorizationStateError::ContextLifetimeUnavailable => "context_lifetime_unavailable",
+        AuthorizationStateError::ContextSnapshotChanged => "context_snapshot_changed",
         AuthorizationStateError::StorageConflict => "storage_conflict",
         AuthorizationStateError::InvalidRecord(_) => "invalid_record",
         AuthorizationStateError::Storage(_) => "storage_error",

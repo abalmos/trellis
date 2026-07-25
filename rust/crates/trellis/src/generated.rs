@@ -16,11 +16,12 @@ pub const fn assert_abi(version: u32) {
 }
 
 pub use crate::client::{
-    AuthErrorPayload, CallError, DeclaredError, DeclaredErrorPayload, DeviceConnectOptions,
-    DownloadTransferGrant, EventDescriptor, FeedDescriptor, MapStateStore, NoDeclaredError,
-    OperationDescriptor, OperationInvoker, OperationRef, OperationTransferStartError,
-    OperationUpdateDescriptor, RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer,
-    TransferOperationDescriptor, TrellisClientError, UserConnectOptions, ValueStateStore,
+    AuthErrorPayload, AuthorizationContextBundle, AuthorizationContextStore, CallError,
+    DeclaredError, DeclaredErrorPayload, DeviceConnectOptions, DownloadTransferGrant,
+    EventDescriptor, FeedDescriptor, MapStateStore, NoDeclaredError, OperationDescriptor,
+    OperationInvoker, OperationRef, OperationTransferStartError, OperationUpdateDescriptor,
+    RemoteErrorPayload, RpcDescriptor, StartedOperationTransfer, TransferOperationDescriptor,
+    TrellisClientError, UserConnectOptions, ValueStateStore,
 };
 
 /// Opaque authenticated caller handle used by generated crates.
@@ -30,6 +31,21 @@ pub struct Caller {
 }
 
 impl Caller {
+    /// Return the signed authorization context currently bound to this connection.
+    pub fn authorization_context(
+        &self,
+    ) -> Result<Option<crate::client::AuthorizationContextBundle>, crate::client::TrellisClientError>
+    {
+        self.client.authorization_context()
+    }
+
+    /// Refresh and verify the current authorization context immediately.
+    pub async fn refresh_authorization_context(
+        &self,
+    ) -> Result<crate::client::AuthorizationContextBundle, crate::client::TrellisClientError> {
+        self.client.refresh_authorization_context().await
+    }
+
     /// Wrap an authenticated runtime client for generated-code integration.
     #[doc(hidden)]
     pub(crate) fn from_client(client: Arc<crate::client::TrellisClient>) -> Self {
@@ -257,6 +273,9 @@ where
             timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
             retry_delay_ms: crate::service::DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: crate::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+            authorization_context_store: Arc::new(
+                crate::client::MemoryAuthorizationContextStore::default(),
+            ),
         },
     )
     .await?;

@@ -115,6 +115,7 @@ export function createServiceApprovalFixture(caseId: string) {
 
   async function connectService(runtime: LiveTrellisRuntime, seed: string) {
     return await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: caseScopedName("service-approval-fixture-service", caseId),

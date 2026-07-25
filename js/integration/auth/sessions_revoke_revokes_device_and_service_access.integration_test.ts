@@ -106,6 +106,7 @@ liveTrellisTest({
       contract: serviceFixture.serviceContract,
     });
     const service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceFixture.serviceContract,
       name: serviceFixture.serviceName,
@@ -139,6 +140,7 @@ liveTrellisTest({
     }
 
     const reconnectService = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceFixture.serviceContract,
       name: serviceFixture.serviceName,

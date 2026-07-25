@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer, stream, AckKind};
+use async_nats::jetstream::{self, consumer, AckKind};
 use async_nats::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -33,13 +33,13 @@ use crate::SubsystemName;
 
 use self::store::{HealthStore, HeartbeatIdentity, ProjectionCommit};
 
-const HEALTH_STREAM: &str = "TRELLIS_HEALTH";
-const HEALTH_SUBJECT: &str = "health.v1.heartbeat.>";
+pub(crate) const HEALTH_STREAM: &str = "TRELLIS_HEALTH";
+pub(crate) const HEALTH_SUBJECT: &str = "health.v1.heartbeat.>";
 const STATUS_CHANGED_SUBJECT: &str = "events.v1.Health.StatusChanged";
 const INVALIDATION_PREFIX: &str = "health.v1.invalidation";
 const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
-const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
-const DEFAULT_TRANSPORT_MAX_BYTES: i64 = 1_073_741_824;
+pub(crate) const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
+pub(crate) const DEFAULT_TRANSPORT_MAX_BYTES: i64 = 1_073_741_824;
 const DEFAULT_HISTORY_RETENTION_DAYS: i64 = 30;
 const AUTH_VALIDATE_TIMEOUT_MS: u64 = 5_000;
 const RPC_SUBJECTS: &[&str] = &[
@@ -90,7 +90,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .projection_id()
         .map_err(|error| RuntimeError::Health(error.to_string()))?;
     let jetstream = jetstream::new(context.trellis_nats.clone());
-    ensure_health_stream(context, &jetstream).await?;
     let owner = context.owner(OwnerGroup::Health)?;
     let invalidation_subject = format!("{INVALIDATION_PREFIX}.{projection_id}");
     let (invalidation_tx, _) = broadcast::channel(256);
@@ -145,59 +144,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         stop,
         join,
     })
-}
-
-async fn ensure_health_stream(
-    context: &RuntimeContext,
-    jetstream: &jetstream::Context,
-) -> Result<(), RuntimeError> {
-    let health = context.config.health.as_ref();
-    let max_age = Duration::from_secs(
-        health
-            .and_then(|health| health.transport_retention_hours)
-            .map(u64::from)
-            .unwrap_or(DEFAULT_TRANSPORT_RETENTION_HOURS)
-            * 60
-            * 60,
-    );
-    let max_bytes = health
-        .and_then(|health| health.transport_max_bytes)
-        .map(|bytes| i64::try_from(bytes).unwrap_or(i64::MAX))
-        .unwrap_or(DEFAULT_TRANSPORT_MAX_BYTES);
-    let config = stream::Config {
-        name: HEALTH_STREAM.to_string(),
-        subjects: vec![HEALTH_SUBJECT.to_string()],
-        retention: stream::RetentionPolicy::Limits,
-        storage: stream::StorageType::File,
-        discard: stream::DiscardPolicy::Old,
-        max_age,
-        max_bytes,
-        ..Default::default()
-    };
-    match jetstream.get_stream(HEALTH_STREAM).await {
-        Ok(mut existing) => {
-            let info = existing
-                .info()
-                .await
-                .map_err(|error| RuntimeError::Health(error.to_string()))?;
-            if info.config.subjects != config.subjects
-                || info.config.max_age != config.max_age
-                || info.config.max_bytes != config.max_bytes
-            {
-                jetstream
-                    .update_stream(config)
-                    .await
-                    .map_err(|error| RuntimeError::Health(error.to_string()))?;
-            }
-        }
-        Err(_) => {
-            jetstream
-                .create_stream(config)
-                .await
-                .map_err(|error| RuntimeError::Health(error.to_string()))?;
-        }
-    }
-    Ok(())
 }
 
 fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidation>) -> Router {

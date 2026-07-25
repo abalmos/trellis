@@ -55,15 +55,19 @@ liveTrellisTest({
           : undefined;
       }, { timeoutMs: 5_000, intervalMs: 100 });
       const now = Date.now();
-      const metrics = await observer.healthMetrics({
-        participantKind: "service",
-        contractId: fixture.serviceContract.CONTRACT_ID,
-        start: new Date(now - 5 * 60_000).toISOString(),
-        end: new Date(now + 1_000).toISOString(),
-        stepMs: 300_000,
-      }).orThrow();
-      assert(metrics.summary.sampleCount >= 2);
-      assert(metrics.summary.transitions >= 1);
+      await runtime.waitFor(async () => {
+        const metrics = await observer.healthMetrics({
+          participantKind: "service",
+          contractId: fixture.serviceContract.CONTRACT_ID,
+          start: new Date(now - 5 * 60_000).toISOString(),
+          end: new Date(now + 1_000).toISOString(),
+          stepMs: 300_000,
+        }).orThrow();
+        return metrics.summary.sampleCount >= 2 &&
+            metrics.summary.transitions >= 1
+          ? metrics
+          : undefined;
+      }, { timeoutMs: 10_000, intervalMs: 100 });
     } finally {
       await service.stop().catch(() => undefined);
     }

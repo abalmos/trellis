@@ -1,7 +1,7 @@
-use std::{env, io};
+use std::{env, io, sync::Arc};
 
 use tracing_subscriber::EnvFilter;
-use trellis_rs::service::ServiceConnectOptions;
+use trellis_rs::{client::FileAuthorizationContextStore, service::ServiceConnectOptions};
 use trellis_service_jobs::{connect_service, JobsServiceMode, SERVICE_NAME};
 
 fn required_env(name: &str) -> Result<String, String> {
@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let participant_id = required_env("TRELLIS_PARTICIPANT_ID")?;
     let participant_digest = required_env("TRELLIS_PARTICIPANT_DIGEST")?;
     let participant_needs_digest = required_env("TRELLIS_PARTICIPANT_NEEDS_DIGEST")?;
+    let authorization_context_file = required_env("TRELLIS_AUTHORIZATION_CONTEXT_FILE")?;
     let timeout_ms = env::var("TRELLIS_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -59,6 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &participant_needs_digest,
         &provisioned_identity_seed_base64url,
         &session_key_seed_base64url,
+        Arc::new(FileAuthorizationContextStore::new(
+            authorization_context_file,
+        )),
     )
     .with_timeout_ms(timeout_ms);
 

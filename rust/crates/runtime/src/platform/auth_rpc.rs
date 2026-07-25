@@ -2717,10 +2717,7 @@ impl AuthRpcProcessor {
         let request_digest = trellis_protocol::digest_json(&input)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let action = |kind, suffix: &str, payload| PostCommitActionRecord {
-            action_id: format!(
-                "act_{}",
-                digest_parts(&[session_id, idempotency_key, suffix])
-            ),
+            action_id: digest_parts(&[session_id, idempotency_key, suffix]),
             kind,
             payload,
             created_at: now,

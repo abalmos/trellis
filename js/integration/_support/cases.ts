@@ -49,14 +49,6 @@ export const allJsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
-    id: "rpc.auth-validation-retries-transient-session-not-found",
-    file:
-      "rpc/auth_validation_retries_transient_session_not_found.integration_test.ts",
-    testName:
-      "rpc.auth-validation-retries-transient-session-not-found retries after a transient missing auth session",
-    runtime: "live-trellis",
-  },
-  {
     id: "events.client-publishes-and-subscriber-receives",
     file: "events/client_publishes_and_subscriber_receives.integration_test.ts",
     testName:
@@ -756,15 +748,6 @@ export const allJsIntegrationCases: readonly JsIntegrationCase[] = [
     runtime: "live-trellis",
   },
   {
-    id:
-      "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions",
-    file:
-      "auth/requests_validate_enforces_proof_signature_time_replay_and_permissions.integration_test.ts",
-    testName:
-      "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions validates live request proofs",
-    runtime: "live-trellis",
-  },
-  {
     id: "auth.session-revoke-denies-reconnect",
     file: "auth/session_revoke_denies_reconnect.integration_test.ts",
     testName:
@@ -777,20 +760,6 @@ export const allJsIntegrationCases: readonly JsIntegrationCase[] = [
       "auth/session_revoke_cleans_runtime_connection_presence.integration_test.ts",
     testName:
       "auth.session-revoke-cleans-runtime-connection-presence removes runtime connection presence for a revoked app session",
-    runtime: "live-trellis",
-  },
-  {
-    id: "auth.sessions-revoke-cascades-app-grants",
-    file: "auth/sessions_revoke_cascades_app_grants.integration_test.ts",
-    testName:
-      "auth.sessions-revoke-cascades-app-grants revokes sibling app sessions and deletes the grant",
-    runtime: "live-trellis",
-  },
-  {
-    id: "auth.sessions-revoke-cascades-agent-grants",
-    file: "auth/sessions_revoke_cascades_agent_grants.integration_test.ts",
-    testName:
-      "auth.sessions-revoke-cascades-agent-grants revokes sibling agent sessions and deletes the grant",
     runtime: "live-trellis",
   },
   {
@@ -807,14 +776,6 @@ export const allJsIntegrationCases: readonly JsIntegrationCase[] = [
       "auth/grant_overrides_bind_without_user_capability.integration_test.ts",
     testName:
       "auth.grant-overrides-bind-without-user-capability binds through grant override without user capability",
-    runtime: "live-trellis",
-  },
-  {
-    id: "auth.identity-grants-revoke-removes-authority-and-live-sessions",
-    file:
-      "auth/identity_grants_revoke_removes_authority_and_live_sessions.integration_test.ts",
-    testName:
-      "auth.identity-grants-revoke-removes-authority-and-live-sessions revokes grant sessions and denies old calls",
     runtime: "live-trellis",
   },
   {

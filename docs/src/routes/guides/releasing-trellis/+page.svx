@@ -35,15 +35,15 @@ named `trellis-test` helper and prove the behavior through a live control plane.
 Before committing or ending an implementation cycle, run the focused checks that match the files touched. If runtime or public behavior changed, also run the full language-owned integration suites:
 
 ```sh
-deno task -c js/deno.json test:integration -- --parallel --jobs 4
+deno task -c js/deno.json test:integration -- --parallel --jobs 8
 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
 ```
 
-Four JS workers are the portable baseline used by release CI. Local
-`cargo xtask release verify` selects the available CPU count capped at eight;
-pass an explicit lower `--jobs` count when running the JS command directly on a
-smaller machine. The complete Rust integration suite uses eight test threads;
-focused Rust integration commands remain single-threaded for isolation.
+Eight workers are the authoritative release baseline for both live suites. A
+developer may pass a lower `--jobs` count when running either command directly
+on a smaller machine, but that lower-resource loop does not replace the
+eight-worker release gate. Focused Rust integration commands remain
+single-threaded for isolation.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
@@ -267,7 +267,12 @@ cargo run --manifest-path xtask/Cargo.toml -- release verify --version "$RELEASE
 
 For emergency focused local verification only, `--skip-integration` skips both language-owned integration suites and prints that release verification is incomplete. A release is not ready until both full integration suites pass in the GitHub release gate.
 
-The command runs this sequence and prints each command before executing it:
+The command prepares once, verifies that preparation did not change the existing
+working-tree diff, reuses prepared output, and prints every command before
+executing it. Read-only prepared JavaScript package groups run concurrently with
+an eight-process ceiling; heavy Cargo stages remain sequential against the shared
+target directory. Every stage prints elapsed time, followed by a slowest-first
+summary on success or failure:
 
 ```sh
 cargo run --manifest-path xtask/Cargo.toml -- release check-metadata --version "$RELEASE_VERSION" --since "$PREVIOUS_TAG"
@@ -276,21 +281,30 @@ deno fmt -c js/deno.json --check
 cargo fmt --manifest-path rust/Cargo.toml --all --check
 cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
 cargo fmt --manifest-path rust/xtask/Cargo.toml --check
-RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps
-cargo test --manifest-path rust/Cargo.toml --workspace --doc
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+cargo +1.88.0 check --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-contracts -p trellis-rs --lib
+cargo +1.88.0 check --manifest-path generated/packages/cargo-participants/jobs/Cargo.toml
+cargo check --manifest-path rust/Cargo.toml --package trellis-protocol-wasm --target wasm32-unknown-unknown
+actionlint
 deno check -c js/deno.json js/packages/trellis/index.ts js/packages/trellis-svelte/src/index.ts js/packages/trellis-svelte/src/context.svelte.ts
-deno task -c js/deno.json test:prepared:packages
-deno task -c js/deno.json test:prepared:ui-tools
+deno task -c js/deno.json test:prepared:result                 # parallel group
+deno task -c js/deno.json test:prepared:trellis                # parallel group
+deno task -c js/deno.json test:prepared:trellis-svelte         # parallel group
+deno task -c js/deno.json test:prepared:trellis-test           # parallel group
+deno task -c js/deno.json test:prepared:ui-tools               # parallel group
 deno task -c js/deno.json packages:build:npm
 deno task -c js/deno.json test:prepared:packaging:built
 cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs --exclude trellis-service-jobs --exclude trellis-service-eventlog
 cargo test --manifest-path rust/Cargo.toml -p trellis-service-jobs --lib
 cargo test --manifest-path rust/Cargo.toml -p trellis-service-eventlog --lib
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
+RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps
+cargo test --manifest-path rust/Cargo.toml --workspace --doc
+cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
 cargo test --manifest-path rust/tools/generate/Cargo.toml
 cargo test --manifest-path rust/xtask/Cargo.toml
 cargo test --manifest-path xtask/Cargo.toml
-deno task -c js/deno.json test:integration -- --parallel --jobs 4
+deno task -c js/deno.json test:integration -- --parallel --jobs 8
 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
 ```
 
@@ -310,7 +324,10 @@ For focused local Deno loops after a single prepare, use the prepared partitions
 
 ```sh
 deno task -c js/deno.json prepare
-deno task -c js/deno.json test:prepared:packages
+deno task -c js/deno.json test:prepared:result
+deno task -c js/deno.json test:prepared:trellis
+deno task -c js/deno.json test:prepared:trellis-svelte
+deno task -c js/deno.json test:prepared:trellis-test
 deno task -c js/deno.json test:prepared:service:auth
 deno task -c js/deno.json test:prepared:ui-tools
 deno task -c js/deno.json packages:build:npm

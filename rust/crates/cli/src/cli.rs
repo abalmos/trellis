@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
+use trellis_runtime::RuntimeMode;
 
 mod auth;
 mod bootstrap;
@@ -57,8 +58,10 @@ pub enum TopLevelCommand {
     Svc(SvcCommand),
     /// Manage device deployments.
     Dev(DevCommand),
-    /// Apply or check shared infrastructure.
+    /// Manage offline authorization trust artifacts.
     Infra(InfraCommand),
+    /// Validate runtime config, NATS, migrations, trust, and registries without mutation.
+    Check(CheckArgs),
     /// Run one-time initialization workflows.
     Init(InitCommand),
     /// Generate or derive Trellis keys.
@@ -69,6 +72,17 @@ pub enum TopLevelCommand {
     Version,
     /// Generate shell completion scripts for Trellis.
     Completion { shell: Shell },
+}
+
+#[derive(Debug, clap::Args)]
+/// Read-only runtime preflight validation.
+pub struct CheckArgs {
+    #[arg(long)]
+    /// Path to the Trellis runtime TOML configuration.
+    pub config: PathBuf,
+    #[arg(long, default_value = "all")]
+    /// Runtime mode whose dependencies must be ready.
+    pub mode: RuntimeMode,
 }
 
 #[derive(Debug, clap::Args)]

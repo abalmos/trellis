@@ -19,6 +19,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 toml = "1.1.2"
 trellis-runtime = { path = "../runtime" }
+trellis-local-bootstrap = { path = "../local-bootstrap" }
 miette.workspace = true
 
 [dev-dependencies]

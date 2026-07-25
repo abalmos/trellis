@@ -5,11 +5,13 @@ import { Type } from "typebox";
 
 import { base64urlEncode } from "./auth/mod.ts";
 import { generateSessionKey, type SessionKeyHandle } from "./auth/browser.ts";
+import { testAuthorizationContext } from "./auth/test_context.ts";
 import {
   ClientAuthHandledError,
   connectClientWithDeps,
   TrellisClient,
 } from "./client_connect.ts";
+import { MemoryAuthorizationContextStore } from "./auth/authorization_context.ts";
 import { defineAppContract, defineServiceContract } from "./contract.ts";
 import { AuthError, TransportError } from "./errors/index.ts";
 
@@ -231,6 +233,7 @@ Deno.test("connectClientWithDeps cleans browser callback URLs without CSP-unsafe
             ),
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: () => {
             throw new Error("transport should not load for auth errors");
           },
@@ -268,11 +271,12 @@ Deno.test("connectClientWithDeps cleans browser callback URLs without CSP-unsafe
   }
 });
 
-Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runtime connect", async () => {
+Deno.test("connectClientWithDeps tolerates additive bootstrap fields and uses reconnect-safe auth", async () => {
   const originalFetch = globalThis.fetch;
   let connectInboxPrefix = "";
   let connectAuthenticator: unknown;
   let maxReconnectAttempts: unknown;
+  let connectTimeout: unknown;
   let nowMs = 1_700_000_000_000;
 
   try {
@@ -280,13 +284,20 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            serverNow: 1_700_000_000,
+            serverNow: 1_700_000_000_000,
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
             participantId: testContract.CONTRACT.id,
             participantArtifactDigest: testContract.CONTRACT_DIGEST,
             participantNeedsDigest: testContract.CONTRACT_DIGEST,
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            authorizationContext: testAuthorizationContext(),
+            futureServerField: { enabled: true },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+              futureNatsField: "ignored",
+            },
           }),
           {
             status: 200,
@@ -304,16 +315,19 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async (options) => {
               connectAuthenticator = options.authenticator;
               connectInboxPrefix = String(options.inboxPrefix ?? "");
               maxReconnectAttempts = options.maxReconnectAttempts;
+              connectTimeout = options.timeout;
               throw new Error("stop-after-connect");
             },
           }),
@@ -339,6 +353,7 @@ Deno.test("connectClientWithDeps uses reconnect-safe iat auth payloads for runti
 
     assertEquals(connectInboxPrefix, "_INBOX.session-key");
     assertEquals(maxReconnectAttempts, -1);
+    assertEquals(connectTimeout, 10_000);
     assertEquals(firstToken.format, "trellis.nats-connect-token.v1");
     assertEquals(firstToken.participantDigest, testContract.CONTRACT_DIGEST);
     assertEquals(firstToken.sessionId, "session-key");
@@ -382,7 +397,12 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -403,11 +423,13 @@ Deno.test("connectClientWithDeps retries bootstrap once after iat_out_of_range u
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -451,12 +473,14 @@ Deno.test("connectClientWithDeps maps callback bind failures to TransportError",
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
             flowId: "flow_123",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("transport should not be used");
@@ -505,6 +529,7 @@ Deno.test("connectClientWithDeps maps malformed bind responses to TransportError
             ),
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -571,6 +596,7 @@ Deno.test("connectClientWithDeps maps insufficient bind capabilities to Transpor
             ),
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -617,11 +643,13 @@ Deno.test("connectClientWithDeps maps invalid login flow responses to TransportE
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("transport should not be used");
@@ -659,11 +687,13 @@ Deno.test("connectClientWithDeps maps invalid bootstrap responses to TransportEr
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("transport should not be used");
@@ -701,11 +731,13 @@ Deno.test("connectClientWithDeps maps malformed bootstrap responses to Transport
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -751,11 +783,13 @@ Deno.test("connectClientWithDeps maps malformed login flow responses to Transpor
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -778,13 +812,18 @@ Deno.test("connectClientWithDeps maps runtime connection failures to TransportEr
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            serverNow: 1_700_000_000,
+            serverNow: 1_700_000_000_000,
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
             participantId: testContract.CONTRACT.id,
             participantArtifactDigest: testContract.CONTRACT_DIGEST,
             participantNeedsDigest: testContract.CONTRACT_DIGEST,
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            authorizationContext: testAuthorizationContext(),
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -802,11 +841,13 @@ Deno.test("connectClientWithDeps maps runtime connection failures to TransportEr
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("connection refused");
@@ -834,13 +875,18 @@ Deno.test("connectClientWithDeps preserves trellisUrl path when calling bootstra
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            serverNow: 1_700_000_000,
+            serverNow: 1_700_000_000_000,
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
             participantId: testContract.CONTRACT.id,
             participantArtifactDigest: testContract.CONTRACT_DIGEST,
             participantNeedsDigest: testContract.CONTRACT_DIGEST,
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            authorizationContext: testAuthorizationContext(),
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -858,11 +904,13 @@ Deno.test("connectClientWithDeps preserves trellisUrl path when calling bootstra
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -894,13 +942,18 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            serverNow: 1_700_000_000,
+            serverNow: 1_700_000_000_000,
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
             participantId: testContract.CONTRACT.id,
             participantArtifactDigest: testContract.CONTRACT_DIGEST,
             participantNeedsDigest: testContract.CONTRACT_DIGEST,
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            authorizationContext: testAuthorizationContext(),
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -921,6 +974,7 @@ Deno.test("connectClientWithDeps precomputes fresh browser-mode runtime auth tok
             handle: handle,
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async (options) => {
               connectAuthenticator = options.authenticator;
@@ -985,13 +1039,18 @@ Deno.test("connectClientWithDeps does not bind browser callbacks from window.loc
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -1012,6 +1071,7 @@ Deno.test("connectClientWithDeps does not bind browser callbacks from window.loc
           participant: TEST_PARTICIPANT,
           auth: { handle },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -1079,6 +1139,7 @@ Deno.test("connectClientWithDeps requires explicit browser redirect state when r
           participant: TEST_PARTICIPANT,
           auth: { handle },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -1168,6 +1229,7 @@ Deno.test("connectClientWithDeps redirects browser to loginUrl using ClientAuthH
             currentUrl: new URL(testWindow.location.href),
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -1339,6 +1401,7 @@ Deno.test("connectClientWithDeps lets auth continuation handle browser login wit
           },
           onAuthRequired: () => ({ status: "handled" }),
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -1371,7 +1434,7 @@ Deno.test("connectClientWithDeps lets auth continuation handle browser login wit
   }
 });
 
-Deno.test("connectClientWithDeps keeps session-bound enrollment after token lookahead", async () => {
+Deno.test("connectClientWithDeps keeps session-bound enrollment during reconnect", async () => {
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
@@ -1395,13 +1458,20 @@ Deno.test("connectClientWithDeps keeps session-bound enrollment after token look
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            serverNow: 1_700_000_000 + (bootstrapCalls - 1) * 301,
+            serverNow: 1_700_000_000_000 + (bootstrapCalls - 1) * 301_000,
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
             participantId: testContract.CONTRACT.id,
             participantArtifactDigest: contractDigest,
             participantNeedsDigest: contractDigest,
-            nats: { jwt: sentinel.jwt, servers: ["nats://127.0.0.1:4222"] },
+            authorizationContext: testAuthorizationContext(
+              1_700_000_002 + (bootstrapCalls - 1) * 301,
+            ),
+            nats: {
+              jwt: sentinel.jwt,
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -1419,6 +1489,7 @@ Deno.test("connectClientWithDeps keeps session-bound enrollment after token look
         handle: handle,
       },
     }, {
+      authorizationContextStore: new MemoryAuthorizationContextStore(),
       loadTransport: async () => ({
         connect: async (options) => {
           connectAuthenticator = options.authenticator;
@@ -1430,7 +1501,7 @@ Deno.test("connectClientWithDeps keeps session-bound enrollment after token look
 
     assertEquals(client.connection.status.kind, "client");
     assertEquals(client.connection.status.phase, "connected");
-    nowMs += 301_000;
+    nowMs += 200_000;
     await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
       await authTokenFromAuthenticator(connectAuthenticator),
@@ -1450,7 +1521,7 @@ Deno.test("connectClientWithDeps keeps session-bound enrollment after token look
   }
 });
 
-Deno.test("connectClientWithDeps does not restart browser auth after token lookahead", async () => {
+Deno.test("connectClientWithDeps does not restart browser auth during reconnect", async () => {
   const originalFetch = globalThis.fetch;
   let connectAuthenticator: unknown;
   let nowMs = 1_700_000_000_000;
@@ -1469,13 +1540,18 @@ Deno.test("connectClientWithDeps does not restart browser auth after token looka
           return Promise.resolve(
             new Response(
               JSON.stringify({
-                serverNow: 1_700_000_000,
+                serverNow: 1_700_000_000_000,
                 sessionId: "session-key",
                 inboxPrefix: "_INBOX.session-key",
                 participantId: testContract.CONTRACT.id,
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
                 participantNeedsDigest: testContract.CONTRACT_DIGEST,
-                nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+                authorizationContext: testAuthorizationContext(),
+                nats: {
+                  jwt: "jwt",
+                  jwtExpiresAt: 2_000_000_000,
+                  servers: ["nats://127.0.0.1:4222"],
+                },
               }),
               { status: 200, headers: { "Content-Type": "application/json" } },
             ),
@@ -1489,13 +1565,18 @@ Deno.test("connectClientWithDeps does not restart browser auth after token looka
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_301,
+              serverNow: 1_700_000_301_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1527,7 +1608,12 @@ Deno.test("connectClientWithDeps does not restart browser auth after token looka
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -1549,6 +1635,7 @@ Deno.test("connectClientWithDeps does not restart browser auth after token looka
       },
       onAuthRequired: async () => ({ status: "bound", flowId: "flow-2" }),
     }, {
+      authorizationContextStore: new MemoryAuthorizationContextStore(),
       loadTransport: async () => ({
         connect: async (options) => {
           connectAuthenticator = options.authenticator;
@@ -1559,7 +1646,7 @@ Deno.test("connectClientWithDeps does not restart browser auth after token looka
     });
 
     currentUrlValue = new URL("https://app.example.com/after");
-    nowMs += 301_000;
+    nowMs += 200_000;
     await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
       await authTokenFromAuthenticator(connectAuthenticator),
@@ -1602,13 +1689,20 @@ Deno.test("connectClientWithDeps does not rebootstrap during NATS reconnect", as
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000 + (bootstrapCalls - 1) * 301,
+              serverNow: 1_700_000_000_000 + (bootstrapCalls - 1) * 301_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: contractId,
               participantArtifactDigest: contractDigest,
               participantNeedsDigest: contractDigest,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(
+                1_700_000_002 + (bootstrapCalls - 1) * 301,
+              ),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1640,7 +1734,12 @@ Deno.test("connectClientWithDeps does not rebootstrap during NATS reconnect", as
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           ),
@@ -1662,6 +1761,7 @@ Deno.test("connectClientWithDeps does not rebootstrap during NATS reconnect", as
         flowId: "flow-wrong-contract",
       }),
     }, {
+      authorizationContextStore: new MemoryAuthorizationContextStore(),
       loadTransport: async () => ({
         connect: async (options) => {
           connectAuthenticator = options.authenticator;
@@ -1671,7 +1771,7 @@ Deno.test("connectClientWithDeps does not rebootstrap during NATS reconnect", as
       now: () => nowMs,
     });
 
-    nowMs += 301_000;
+    nowMs += 200_000;
     await authTokenFromAuthenticator(connectAuthenticator);
     const token = JSON.parse(
       await authTokenFromAuthenticator(connectAuthenticator),
@@ -1714,7 +1814,12 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -1744,13 +1849,18 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -1771,6 +1881,7 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
@@ -1783,6 +1894,7 @@ Deno.test("connectClientWithDeps uses auth continuation when bootstrap requires 
             return { status: "bound", flowId: "flow-1" };
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -1882,6 +1994,7 @@ Deno.test("connectClientWithDeps restarts browser auth after an expired callback
             return { status: "handled" };
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -1955,6 +2068,7 @@ Deno.test("connectClientWithDeps surfaces browser authError callbacks without st
             currentUrl,
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => {
             throw new Error("loadTransport should not be called");
           },
@@ -1997,13 +2111,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: "other.client@v1",
               participantArtifactDigest: "digest-other",
               participantNeedsDigest: "digest-other",
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2022,7 +2141,12 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2052,13 +2176,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2079,12 +2208,14 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves a different con
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
           },
           onAuthRequired: async () => ({ status: "bound", flowId: "flow-3" }),
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -2120,13 +2251,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: "digest-old",
               participantNeedsDigest: "digest-old",
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2145,7 +2281,12 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2175,13 +2316,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2202,6 +2348,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
@@ -2211,6 +2358,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap resolves stale contract 
             flowId: "flow-stale-digest",
           }),
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -2250,7 +2398,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
             JSON.stringify({
               status: "not_ready",
               reason: "insufficient_permissions",
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
             }),
             {
               status: 403,
@@ -2285,7 +2433,12 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2299,13 +2452,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2326,6 +2484,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
@@ -2338,6 +2497,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports insufficient per
             return { status: "bound", flowId: "flow-2" };
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -2371,7 +2531,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
             JSON.stringify({
               status: "not_ready",
               reason: "contract_not_active",
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
             }),
             {
               status: 403,
@@ -2406,7 +2566,12 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
                 inboxPrefix: "_INBOX.session-key",
                 participantArtifactDigest: testContract.CONTRACT_DIGEST,
               },
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2420,13 +2585,18 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
               participantId: testContract.CONTRACT.id,
               participantArtifactDigest: testContract.CONTRACT_DIGEST,
               participantNeedsDigest: testContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2447,6 +2617,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
           participant: TEST_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed: TEST_SEED,
             sessionId: "session-key",
             redirectTo: "https://cli.example.com/callback",
@@ -2459,6 +2630,7 @@ Deno.test("connectClientWithDeps reauths when bootstrap reports contract_not_act
             return { status: "bound", flowId: "flow-4" };
           },
         }, {
+          authorizationContextStore: new MemoryAuthorizationContextStore(),
           loadTransport: async () => ({
             connect: async () => {
               throw new Error("stop-after-connect");
@@ -2490,14 +2662,19 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              serverNow: 1_700_000_000,
+              serverNow: 1_700_000_000_000,
               sessionId: handle.sessionKey,
               inboxPrefix: "_INBOX.session-key",
               participantId: authRequiredRpcContract.CONTRACT.id,
               participantArtifactDigest:
                 authRequiredRpcContract.CONTRACT_DIGEST,
               participantNeedsDigest: authRequiredRpcContract.CONTRACT_DIGEST,
-              nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+              authorizationContext: testAuthorizationContext(),
+              nats: {
+                jwt: "jwt",
+                jwtExpiresAt: 2_000_000_000,
+                servers: ["nats://127.0.0.1:4222"],
+              },
             }),
             {
               status: 200,
@@ -2542,6 +2719,7 @@ Deno.test("browser clients preserve session_not_found auth-required behavior", a
         return { status: "handled" };
       },
     }, {
+      authorizationContextStore: new MemoryAuthorizationContextStore(),
       loadTransport: async () => ({
         connect: async () => nats.connection,
       }),

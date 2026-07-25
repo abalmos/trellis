@@ -8,6 +8,68 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- Added deployment-owned authorization trust initialization and issuer rotation,
+  strict runtime trust-chain startup validation, generation rollback floors, and
+  immutable NATS KV trust/context registries with public lazy HTTP locators.
+- Added snapshot-bound, issuer-signed authorization-context issuance and refresh
+  to browser, client, service, and device bootstrap. Rust, TypeScript, WASM, and
+  Svelte clients verify/cache contexts and refresh before expiry.
+- Added `natsConnectContext` proof admission. NATS Auth Callout now verifies the
+  published context, complete trust chain, current issuable state, and exact
+  context digest on every connect/reconnect, and bounds transport JWTs by
+  context expiry.
+- Added additive V1003 SQLite trust/context state, transactional revocation
+  coupling for authorization-relevant mutations, durable revocation publication,
+  startup repair, expiry/cleanup janitor, and public read-only `trellis check`
+  validation of config, connectivity, migrations, trust, and registries.
+- Added durable complete client trust floors with atomic browser and native
+  persistence, Rust/WASM-authoritative TypeScript verification, deterministic
+  distributed refresh scheduling, and registry publication visibility checks.
+
+### Changed
+
+- Local bootstrap now creates an offline authorization root and online issuer;
+  runtime configuration never references the root seed.
+- Ordinary request and event validation remain on the transitional Auth
+  validators until Milestones 10 and 11 respectively; ordinary messages carry no
+  full context token in this milestone.
+- Clarified that the deny-all bootstrap JWT is route-selection material bounded
+  by session/authority/delegation/context state and a configurable lifetime cap;
+  proof-bound context refresh renews and atomically installs it.
+- Made public Trellis wire DTO and generated client decoding additively tolerant
+  by default while retaining strict signed canonical objects, runtime config,
+  authored source artifacts, and intentional internal persistence boundaries.
+- Increased local-bootstrap NATS authorization timeout to 30 seconds and apply
+  Trellis connection timeouts to initial client dials so the full fail-closed
+  admission pipeline remains reliable under the restored eight-worker gate.
+- Derived runtime convergence and read-only `trellis check` requirements from
+  the selected runtime mode. Removed obsolete public infrastructure apply/check
+  commands; `trellis infra` now contains only offline trust artifact tooling.
+- Kept TypeScript authorization support client-scoped: own-context persistence,
+  Rust/WASM verification, refresh, route-JWT renewal, reconnect, and Svelte
+  state. Arbitrary-context validation, registry watches, and validator readiness
+  remain Rust runtime responsibilities.
+
+### Fixed
+
+- Made trust startup monotonic across configured files, SQLite, immutable NATS
+  KV history, and the CAS-protected current pointer, including atomic
+  removed-issuer context revocation and read-only `trellis check` reporting for
+  every required store, stream, bucket, trust floor, and credential.
+- Added proof-bound nullable context recovery, midpoint server-clock correction,
+  renewed route-JWT expiry tracking, atomic client persistence, same-digest
+  rescheduling, transactional two-context overlap, and strict revocation
+  records.
+- Made the Rust validator cache subscribe and complete initial snapshots before
+  Auth Callout starts, resnapshot after watch or manifest changes, invalidate
+  stale contexts, resolve exact immutable trust/context records lazily, expose
+  cache health, and record admitted context identity in connection presence.
+- Defined context size limits uniformly as canonical complete signed-context
+  JSON UTF-8 bytes and restored eight-worker TypeScript and Rust integration
+  gates.
+
 ## [0.11.0] - 2026-07-23
 
 ### Public Breaking Changes

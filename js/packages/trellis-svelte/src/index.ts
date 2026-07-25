@@ -13,6 +13,10 @@ export type {
 } from "./context.svelte.ts";
 export { createTrellisApp, resolveTrellisAppUrl } from "./context.svelte.ts";
 export {
+  AuthorizationContextController,
+  type AuthorizationContextStatus,
+} from "./authorization_context.svelte.ts";
+export {
   createDeviceActivationController,
   type DeviceActivationAuth,
   type DeviceActivationClient,

@@ -234,6 +234,19 @@ fn trellis_bootstrap_generates_bundle_without_manifest_files() {
     assert!(temp.path().join("nats/nats.conf").is_file());
     assert!(temp.path().join("trellis/config.toml").is_file());
     assert!(temp.path().join("trellis/data").is_dir());
+    assert!(temp
+        .path()
+        .join("trellis/auth/authorization-root.json")
+        .is_file());
+    assert!(temp
+        .path()
+        .join("trellis/auth/authorization-issuer.seed")
+        .is_file());
+    assert!(!temp
+        .path()
+        .join("trellis/auth/authorization-root.seed")
+        .exists());
+    assert!(temp.path().join("trust/authorization-root.seed").is_file());
 }
 
 #[test]
@@ -279,6 +292,9 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(config.contains("[auth.local_identity]"));
     assert!(config.contains("enabled = true"));
     assert!(config.contains("password_min_length = 8"));
+    assert!(config.contains("[auth.authorization]"));
+    assert!(config.contains("trust_root_file = \"./auth/authorization-root.json\""));
+    assert!(!config.contains("authorization-root.seed"));
     assert!(config.contains("[leases]"));
     assert!(config.contains("replicas = 1"));
     assert!(config.contains("ttl_ms = 15000"));
@@ -361,6 +377,7 @@ fn nats_config_uses_rendered_server_name() {
     assert!(config.contains("server_name: trellis"));
     assert!(config.contains("listen: 0.0.0.0:4222"));
     assert!(config.contains("http: 0.0.0.0:8222"));
+    assert!(config.contains("timeout: \"30s\""));
     assert!(config.contains("listen: 0.0.0.0:8080"));
     assert!(config.contains("no_tls: true"));
     assert!(config.contains("store_dir: /data"));

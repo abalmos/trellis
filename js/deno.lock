@@ -65,6 +65,7 @@
     "npm:diff@9": "9.0.0",
     "npm:drizzle-orm@0.44.7": "0.44.7_@libsql+client@0.15.15_@opentelemetry+api@1.9.1_sql.js@1.14.1",
     "npm:esm-env@^1.2.2": "1.2.2",
+    "npm:fake-indexeddb@6.2.5": "6.2.5",
     "npm:graphology-layout-forceatlas2@~0.10.1": "0.10.1_graphology-types@0.24.8",
     "npm:graphology@0.26": "0.26.0_graphology-types@0.24.8",
     "npm:js-sha256@~0.11.1": "0.11.1",
@@ -1391,6 +1392,9 @@
     "extend@3.0.2": {
       "integrity": "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="
     },
+    "fake-indexeddb@6.2.5": {
+      "integrity": "sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w=="
+    },
     "fast-copy@4.0.3": {
       "integrity": "sha512-58apWr0GUiDFM8+3afrO6eYwJBn9ZAhDOzG3L+/9llab/haCARS2UIfffmOurYLwbgDRs8n0rfr6qAAPEAuAQw=="
     },
@@ -2600,6 +2604,7 @@
       "npm:diff@9",
       "npm:drizzle-orm@0.44.7",
       "npm:esm-env@^1.2.2",
+      "npm:fake-indexeddb@6.2.5",
       "npm:graphology-layout-forceatlas2@~0.10.1",
       "npm:graphology@0.26",
       "npm:js-sha256@~0.11.1",

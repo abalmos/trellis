@@ -507,8 +507,8 @@ pub struct AuthorizationVerificationPolicyV1 {
     pub allowed_clock_skew_seconds: u32,
     /// Maximum authorization-context lease duration.
     pub maximum_context_lifetime_seconds: u32,
-    /// Maximum decoded canonical context bytes.
-    pub maximum_context_token_bytes: usize,
+    /// Maximum canonical signed-context JSON size in UTF-8 bytes.
+    pub maximum_context_bytes: usize,
     /// Maximum exact permissions in one context.
     pub maximum_permissions: usize,
     /// Maximum platform capabilities in one context.
@@ -527,7 +527,7 @@ impl AuthorizationVerificationPolicyV1 {
         now_unix_seconds: i64,
         allowed_clock_skew_seconds: u32,
         maximum_context_lifetime_seconds: u32,
-        maximum_context_token_bytes: usize,
+        maximum_context_bytes: usize,
         maximum_permissions: usize,
         maximum_capabilities: usize,
         minimum_manifest_generation: u64,
@@ -536,7 +536,7 @@ impl AuthorizationVerificationPolicyV1 {
             now_unix_seconds,
             allowed_clock_skew_seconds,
             maximum_context_lifetime_seconds,
-            maximum_context_token_bytes,
+            maximum_context_bytes,
             maximum_permissions,
             maximum_capabilities,
             minimum_manifest_generation,
@@ -553,7 +553,7 @@ fn validate_policy(policy: &AuthorizationVerificationPolicyV1) -> Result<(), Pro
         &["minimumManifestGeneration"],
     )?;
     if policy.maximum_context_lifetime_seconds == 0
-        || policy.maximum_context_token_bytes == 0
+        || policy.maximum_context_bytes == 0
         || policy.maximum_permissions == 0
         || policy.maximum_capabilities == 0
     {
@@ -1582,7 +1582,7 @@ pub fn parse_authorization_context_token_v1(
         ));
     }
     let maximum_encoded_bytes = policy
-        .maximum_context_token_bytes
+        .maximum_context_bytes
         .checked_add(2)
         .and_then(|length| length.checked_div(3))
         .and_then(|groups| groups.checked_mul(4))
@@ -1607,7 +1607,7 @@ pub fn parse_authorization_context_token_v1(
             "context token is not unpadded base64url",
         )
     })?;
-    if bytes.len() > policy.maximum_context_token_bytes {
+    if bytes.len() > policy.maximum_context_bytes {
         return Err(authorization_error(
             AuthorizationErrorCodeV1::ContextTokenTooLarge,
             std::iter::empty::<&str>(),
@@ -1638,6 +1638,77 @@ pub fn parse_authorization_context_token_v1(
         ));
     }
     Ok(context)
+}
+
+/// Compute the deterministic refresh time for a signed authorization context.
+///
+/// Jitter is derived from the canonical context digest and can only move the
+/// refresh earlier than the configured safety lead. The same context and policy
+/// therefore produce the same schedule in every runtime.
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::Authorization`] if the digest is malformed, the
+/// signed time window is invalid, or the policy cannot schedule a refresh no
+/// earlier than issuance and strictly before expiry.
+pub fn authorization_context_refresh_at_v1(
+    context_digest: &str,
+    issued_at: i64,
+    not_before: i64,
+    expires_at: i64,
+    refresh_lead_seconds: u32,
+    refresh_jitter_seconds: u32,
+) -> Result<i64, ProtocolError> {
+    validate_safe_i64(issued_at, &["issuedAt"])?;
+    validate_safe_i64(not_before, &["notBefore"])?;
+    validate_safe_i64(expires_at, &["expiresAt"])?;
+    if not_before > issued_at || issued_at >= expires_at || refresh_lead_seconds == 0 {
+        return Err(authorization_error(
+            AuthorizationErrorCodeV1::InvalidFormat,
+            ["refreshAt"],
+            "authorization context cannot be refreshed within its signed window",
+        ));
+    }
+    let digest = decode_base64url::<32>(
+        context_digest,
+        &["contextDigest"],
+        AuthorizationErrorCodeV1::InvalidEncoding,
+    )?;
+    let jitter_range = u64::from(refresh_jitter_seconds) + 1;
+    let jitter = i64::try_from(
+        u64::from_be_bytes(digest[..8].try_into().map_err(|_| {
+            authorization_error(
+                AuthorizationErrorCodeV1::InvalidEncoding,
+                ["contextDigest"],
+                "authorization context digest is invalid",
+            )
+        })?) % jitter_range,
+    )
+    .map_err(|_| {
+        authorization_error(
+            AuthorizationErrorCodeV1::InvalidFormat,
+            ["refreshAt"],
+            "authorization refresh jitter overflows",
+        )
+    })?;
+    let refresh_at = expires_at
+        .checked_sub(i64::from(refresh_lead_seconds))
+        .and_then(|value| value.checked_sub(jitter))
+        .ok_or_else(|| {
+            authorization_error(
+                AuthorizationErrorCodeV1::InvalidFormat,
+                ["refreshAt"],
+                "authorization refresh schedule overflows",
+            )
+        })?;
+    if refresh_at < issued_at || refresh_at >= expires_at {
+        return Err(authorization_error(
+            AuthorizationErrorCodeV1::InvalidFormat,
+            ["refreshAt"],
+            "authorization refresh policy has no usable window",
+        ));
+    }
+    Ok(refresh_at)
 }
 
 /// Authorization context whose complete trust chain and lease have verified.
@@ -1780,7 +1851,7 @@ pub fn verify_authorization_context_v1(
     validate_policy(policy)?;
     validate_context_fields(&context.unsigned, None)?;
     let context_size = canonicalize_json(&serde_json::to_value(context)?)?.len();
-    if context_size > policy.maximum_context_token_bytes {
+    if context_size > policy.maximum_context_bytes {
         return Err(authorization_error(
             AuthorizationErrorCodeV1::ContextTokenTooLarge,
             std::iter::empty::<&str>(),
@@ -2271,7 +2342,7 @@ mod tests {
             base["nowUnixSeconds"].as_i64().unwrap(),
             u32::try_from(base["allowedClockSkewSeconds"].as_u64().unwrap()).unwrap(),
             u32::try_from(base["maximumContextLifetimeSeconds"].as_u64().unwrap()).unwrap(),
-            usize::try_from(base["maximumContextTokenBytes"].as_u64().unwrap()).unwrap(),
+            usize::try_from(base["maximumContextBytes"].as_u64().unwrap()).unwrap(),
             usize::try_from(base["maximumPermissions"].as_u64().unwrap()).unwrap(),
             usize::try_from(base["maximumCapabilities"].as_u64().unwrap()).unwrap(),
             base["minimumManifestGeneration"].as_u64().unwrap(),
@@ -2295,7 +2366,7 @@ mod tests {
             policy["nowUnixSeconds"].as_i64().unwrap(),
             u32::try_from(policy["allowedClockSkewSeconds"].as_u64().unwrap()).unwrap(),
             u32::try_from(policy["maximumContextLifetimeSeconds"].as_u64().unwrap()).unwrap(),
-            usize::try_from(policy["maximumContextTokenBytes"].as_u64().unwrap()).unwrap(),
+            usize::try_from(policy["maximumContextBytes"].as_u64().unwrap()).unwrap(),
             usize::try_from(policy["maximumPermissions"].as_u64().unwrap()).unwrap(),
             usize::try_from(policy["maximumCapabilities"].as_u64().unwrap()).unwrap(),
             policy["minimumManifestGeneration"].as_u64().unwrap(),
@@ -2859,6 +2930,26 @@ mod tests {
         )
         .unwrap();
         (root, certificate, verified_manifest, context, session_key)
+    }
+
+    #[test]
+    fn authorization_context_refresh_schedule_is_deterministic_and_earlier_only() {
+        let first = encode_base64url(&[0; 32]);
+        let second = encode_base64url(&[1; 32]);
+        let first_refresh = authorization_context_refresh_at_v1(&first, 1_000, 970, 1_270, 60, 15)
+            .expect("schedule first context");
+        assert_eq!(
+            first_refresh,
+            authorization_context_refresh_at_v1(&first, 1_000, 970, 1_270, 60, 15)
+                .expect("repeat first schedule")
+        );
+        let second_refresh =
+            authorization_context_refresh_at_v1(&second, 1_000, 970, 1_270, 60, 15)
+                .expect("schedule second context");
+        assert!((1_195..=1_210).contains(&first_refresh));
+        assert!((1_195..=1_210).contains(&second_refresh));
+        assert_ne!(first_refresh, second_refresh);
+        assert!(authorization_context_refresh_at_v1(&first, 1_000, 970, 1_050, 60, 15).is_err());
     }
 
     #[test]
@@ -3608,6 +3699,20 @@ mod tests {
             "",
         );
         let canonical = canonicalize_json(&serde_json::to_value(&context).unwrap()).unwrap();
+        let exact_policy =
+            AuthorizationVerificationPolicyV1::new(1_100, 30, 300, canonical.len(), 16, 16, 7)
+                .unwrap();
+        parse_authorization_context_token_v1(&token, &exact_policy).unwrap();
+        verify_authorization_context_v1(&root, &manifest, &certificate, &context, &exact_policy)
+            .unwrap();
+        let one_byte_short =
+            AuthorizationVerificationPolicyV1::new(1_100, 30, 300, canonical.len() - 1, 16, 16, 7)
+                .unwrap();
+        assert_authorization_error(
+            parse_authorization_context_token_v1(&token, &one_byte_short).unwrap_err(),
+            AuthorizationErrorCodeV1::ContextTokenTooLarge,
+            "",
+        );
         let noncanonical = encode_base64url(format!(" {canonical}").as_bytes());
         assert_authorization_error(
             parse_authorization_context_token_v1(&noncanonical, &fixture_policy(1_100))

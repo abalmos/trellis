@@ -9,6 +9,10 @@ pub fn render_nats_config(server_name: &str) -> String {
 listen: 0.0.0.0:4222
 http: 0.0.0.0:8222
 
+authorization {{
+  timeout: "30s"
+}}
+
 websocket {{
   listen: 0.0.0.0:8080
   no_tls: true

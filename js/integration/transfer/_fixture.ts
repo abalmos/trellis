@@ -210,6 +210,7 @@ export function createTransferFixture(
       contract: serviceContract,
     });
     const service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,

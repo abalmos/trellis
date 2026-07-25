@@ -16,7 +16,7 @@ By the end, you will have:
 - the `trellis` CLI installed (see [Install the Trellis CLI](/guides/install-trellis-cli))
 - `podman` or `docker`
 
-The config init command generates NATS operator, account, credential, signing-key, auth-callout, and resolver files natively. You do not need to configure NATS accounts, credentials, or signing keys by hand.
+The config init command generates NATS operator, account, credential, signing-key, auth-callout, resolver, and authorization-trust files natively. The authorization root seed remains offline in the generated bundle; runtime config references only the online context-issuer seed.
 
 ## 1. Generate the local bundle
 
@@ -31,6 +31,8 @@ This creates a movable init bundle under `~/trellis`:
 | `nats/` | NATS config, resolver data, service credentials, and signing seeds |
 | `trellis/config.toml` | Trellis runtime config using relative file paths |
 | `trellis/data/` | Local Trellis SQLite data directory |
+| `trellis/auth/` | Pinned root, issuer manifest/certificate, and online issuer seed |
+| `trust/authorization-root.seed` | Offline root seed for issuer rotation; never mount this into the runtime |
 
 The generated Trellis config omits `nats.jetstream.replicas`. On startup,
 Trellis probes NATS JetStream topology and uses `1` for this standalone local
@@ -92,29 +94,10 @@ cd trellis
 
 This checks out the release tag that matches your installed CLI. If you already have a checkout, use that directory instead.
 
-## 5. Apply shared infrastructure
+## 5. Start Trellis from source
 
-Create the Trellis event stream and auth-owned KV buckets in NATS:
-
-```sh
-trellis infra apply \
-  --servers 127.0.0.1 \
-  --trellis-creds ~/trellis/nats/creds/trellis-auth.creds \
-  --auth-creds ~/trellis/nats/creds/auth-auth.creds
-```
-
-Verify that the resources are ready:
-
-```sh
-trellis infra check \
-  --servers 127.0.0.1 \
-  --trellis-creds ~/trellis/nats/creds/trellis-auth.creds \
-  --auth-creds ~/trellis/nats/creds/auth-auth.creds
-```
-
-## 6. Start Trellis from source
-
-In the source checkout:
+The runtime safely converges the streams and KV buckets owned by its selected
+mode during startup:
 
 ```sh
 cargo run --manifest-path rust/Cargo.toml \
@@ -123,9 +106,26 @@ cargo run --manifest-path rust/Cargo.toml \
   -- all --config "$HOME/trellis/trellis/config.toml"
 ```
 
-Keep this terminal running. The current Rust runtime starts the runtime process and exposes `/healthz` and `/readyz`; both endpoints return JSON metadata with the runtime version and mode.
+Keep this terminal running. The Rust runtime exposes the embedded portal,
+first-admin and login flows, authorization trust/context registries, `/healthz`,
+and `/readyz`. Startup fails closed if configured trust cannot be verified or
+published.
 
-The current Rust runtime does not provide `/version`, `/_trellis/portal`, first-admin bootstrap, or a Rust-runtime-backed `trellis login` flow yet. Use the supported Deno/service runtime path for end-to-end auth, portal, first-admin, and CLI login flows until the Rust `platform` subsystem includes those services.
+## 6. Check the converged runtime
+
+In another terminal, run the public read-only preflight:
+
+```sh
+trellis check --config "$HOME/trellis/trellis/config.toml"
+```
+
+This validates the complete TOML, all configured NATS credentials and
+connectivity, required streams and KV buckets, migration compatibility on
+temporary copies made without opening configured SQLite paths, the
+root-to-issuer trust chain, and the file/SQLite/registry trust floors without
+mutating production state or opening listeners. Missing required databases,
+streams, buckets, or trust records fail the check. `--mode` can select one split
+runtime mode; the default `all` checks the deduplicated union.
 
 ## 7. Check runtime readiness
 

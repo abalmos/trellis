@@ -19,6 +19,7 @@ liveTrellisTest({
     });
     const connect = () =>
       TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: fixture.serviceContract,
         name: fixture.serviceName,

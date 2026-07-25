@@ -55,7 +55,7 @@ pub struct InitConfigArgs {
 }
 
 #[derive(Debug, Args)]
-/// Apply or check shared infrastructure.
+/// Manage offline infrastructure trust material.
 pub struct InfraCommand {
     #[command(subcommand)]
     pub command: InfraSubcommand,
@@ -64,46 +64,61 @@ pub struct InfraCommand {
 #[derive(Debug, Subcommand)]
 /// Infrastructure bootstrap operations.
 pub enum InfraSubcommand {
-    /// Bootstrap the NATS stream and KV buckets required by Trellis services.
-    Apply(InfraApplyArgs),
-    /// Check shared infrastructure readiness.
-    Check(InfraCheckArgs),
+    /// Generate or rotate file-backed authorization trust material.
+    Trust(InfraTrustCommand),
 }
 
 #[derive(Debug, Args)]
-/// Bootstrap the NATS stream and KV buckets required by Trellis services.
-pub struct InfraApplyArgs {
-    #[arg(long)]
-    /// Trellis service credentials file used to create the shared event stream.
-    pub trellis_creds: PathBuf,
+/// Manage offline authorization root and online issuer artifacts.
+pub struct InfraTrustCommand {
+    #[command(subcommand)]
+    pub command: InfraTrustSubcommand,
+}
 
-    #[arg(long)]
-    /// Auth service credentials file used to create auth-owned KV buckets.
-    pub auth_creds: PathBuf,
-
-    #[arg(long)]
-    /// Direct server list used only for bootstrap-time transport setup.
-    pub servers: Option<String>,
-
-    #[arg(long)]
-    /// JetStream replica count for Trellis-created streams and KV buckets.
-    pub jetstream_replicas: Option<usize>,
+#[derive(Debug, Subcommand)]
+/// Authorization trust artifact operations.
+pub enum InfraTrustSubcommand {
+    /// Initialize a distinct authorization root and online issuer.
+    Init(InfraTrustInitArgs),
+    /// Add a new overlapping issuer or revoke one old issuer.
+    RotateIssuer(InfraTrustRotateIssuerArgs),
 }
 
 #[derive(Debug, Args)]
-/// Check the NATS stream and KV buckets required by Trellis services.
-pub struct InfraCheckArgs {
+/// Initialize file-backed authorization trust.
+pub struct InfraTrustInitArgs {
+    #[arg(long, value_name = "DIR")]
+    /// Output directory for trust artifacts.
+    pub out: PathBuf,
     #[arg(long)]
-    /// Trellis service credentials file used to inspect the shared event stream.
-    pub trellis_creds: PathBuf,
+    /// Stable installation authorization namespace.
+    pub authority: String,
+    #[arg(long, default_value_t = 31_536_000)]
+    /// Issuer-certificate lifetime in seconds.
+    pub certificate_lifetime_seconds: i64,
+    #[arg(long, default_value_t = 2_592_000)]
+    /// Issuer-manifest lifetime in seconds.
+    pub manifest_lifetime_seconds: i64,
+    #[arg(long)]
+    /// Replace existing current files while preserving immutable history files.
+    pub force: bool,
+}
 
+#[derive(Debug, Args)]
+/// Rotate or revoke an authorization context issuer.
+pub struct InfraTrustRotateIssuerArgs {
+    #[arg(long, value_name = "DIR")]
+    /// Directory containing existing trust artifacts.
+    pub dir: PathBuf,
     #[arg(long)]
-    /// Auth service credentials file used to inspect auth-owned KV buckets.
-    pub auth_creds: PathBuf,
-
-    #[arg(long)]
-    /// Direct server list used only for bootstrap-time transport setup.
-    pub servers: Option<String>,
+    /// Revoke this existing issuer instead of generating a new overlapping issuer.
+    pub revoke: Option<String>,
+    #[arg(long, default_value_t = 31_536_000)]
+    /// New issuer-certificate lifetime in seconds.
+    pub certificate_lifetime_seconds: i64,
+    #[arg(long, default_value_t = 2_592_000)]
+    /// New issuer-manifest lifetime in seconds.
+    pub manifest_lifetime_seconds: i64,
 }
 
 #[derive(Debug, Args)]

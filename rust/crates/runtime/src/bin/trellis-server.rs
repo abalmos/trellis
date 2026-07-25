@@ -17,6 +17,9 @@ struct Args {
     /// Replace an existing pending first-administrator bootstrap URL.
     #[arg(long)]
     rotate_first_admin: bool,
+    /// Validate configuration and authorization trust, then exit.
+    #[arg(long)]
+    check: bool,
 }
 
 /// Parses CLI arguments and starts the selected runtime process.
@@ -30,6 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .init();
     let args = Args::parse();
+    if args.check {
+        let report = trellis_runtime::check(args.mode, &args.config).await?;
+        if !report.valid {
+            return Err(format!("runtime preflight checks failed: {:?}", report.checks).into());
+        }
+        return Ok(());
+    }
     trellis_runtime::run(RuntimeOptions {
         mode: args.mode,
         config_path: args.config,

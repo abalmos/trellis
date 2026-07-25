@@ -1,15 +1,9 @@
 use std::env;
 use std::io;
-use std::path::Path;
-use std::time::Duration;
 
 use crate::cli::*;
 use crate::output;
 use crate::self_update::{ReleaseChannel, SelfUpdateTarget};
-use async_nats::jetstream;
-use async_nats::jetstream::kv;
-use async_nats::jetstream::stream;
-use async_nats::ConnectOptions;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use clap::{CommandFactory, Parser};
@@ -27,6 +21,7 @@ mod bootstrap;
 mod deploy;
 mod runtime;
 mod self_cmd;
+mod trust_tooling;
 
 const SELF_UPDATE_TARGET: SelfUpdateTarget = SelfUpdateTarget::new(
     "qlever-llc",
@@ -34,42 +29,6 @@ const SELF_UPDATE_TARGET: SelfUpdateTarget = SelfUpdateTarget::new(
     "trellis",
     env!("CARGO_PKG_VERSION"),
 );
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct KvBucketSpec {
-    pub(crate) name: &'static str,
-    pub(crate) ttl_ms: u64,
-}
-
-pub(crate) const AUTH_BOOTSTRAP_BUCKETS: &[KvBucketSpec] = &[
-    KvBucketSpec {
-        name: "trellis_oauth_states",
-        ttl_ms: 5 * 60_000_u64,
-    },
-    KvBucketSpec {
-        name: "trellis_pending_auth",
-        ttl_ms: 5 * 60_000_u64,
-    },
-    KvBucketSpec {
-        name: "trellis_browser_flows",
-        ttl_ms: 30 * 60_000_u64,
-    },
-    KvBucketSpec {
-        name: "trellis_connections",
-        ttl_ms: 2 * 60 * 60_000_u64,
-    },
-    KvBucketSpec {
-        name: "trellis_state",
-        ttl_ms: 0,
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BucketEnsureStatus {
-    Created,
-    Updated,
-    Exists,
-}
 
 pub async fn run() -> miette::Result<()> {
     let cli = Cli::parse();
@@ -87,6 +46,33 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Svc(command) => deploy::run_svc(format, command).await?,
         TopLevelCommand::Dev(command) => deploy::run_dev(format, command).await?,
         TopLevelCommand::Infra(command) => bootstrap::infra(format, command).await?,
+        TopLevelCommand::Check(args) => {
+            let report = trellis_runtime::check(args.mode, &args.config)
+                .await
+                .into_diagnostic()?;
+            if output::is_json(format) {
+                output::print_json(&report)?;
+            } else {
+                println!(
+                    "{}",
+                    output::table(
+                        &["check", "status", "detail"],
+                        report
+                            .checks
+                            .iter()
+                            .map(|check| vec![
+                                check.name.clone(),
+                                format!("{:?}", check.status).to_ascii_lowercase(),
+                                check.detail.clone(),
+                            ])
+                            .collect(),
+                    ),
+                );
+            }
+            if !report.valid {
+                return Err(miette::miette!("runtime preflight checks failed"));
+            }
+        }
         TopLevelCommand::Init(command) => bootstrap::init(format, command).await?,
         TopLevelCommand::Keys(command) => match command.command {
             KeysSubcommand::New(args) => runtime::keygen_command(format, &args)?,
@@ -249,83 +235,6 @@ async fn complete_admin_reauth(
     Ok(next_state)
 }
 
-pub(crate) async fn connect_with_creds(
-    servers: &str,
-    creds: &Path,
-) -> miette::Result<async_nats::Client> {
-    ConnectOptions::new()
-        .credentials_file(creds)
-        .await
-        .into_diagnostic()?
-        .connect(servers)
-        .await
-        .into_diagnostic()
-}
-
-pub(crate) async fn ensure_stream(
-    servers: &str,
-    creds: &Path,
-    name: &str,
-    subjects: Vec<String>,
-    num_replicas: usize,
-) -> miette::Result<bool> {
-    let client = connect_with_creds(servers, creds).await?;
-    let js = jetstream::new(client);
-    if js.get_stream(name).await.is_ok() {
-        return Ok(false);
-    }
-    js.create_stream(stream::Config {
-        name: name.to_string(),
-        subjects,
-        num_replicas,
-        ..Default::default()
-    })
-    .await
-    .into_diagnostic()?;
-    Ok(true)
-}
-
-pub(crate) async fn ensure_bucket(
-    servers: &str,
-    creds: &Path,
-    bucket: &str,
-    history: i64,
-    ttl_ms: u64,
-    num_replicas: usize,
-) -> miette::Result<BucketEnsureStatus> {
-    let client = connect_with_creds(servers, creds).await?;
-    let js = jetstream::new(client);
-    if let Ok(store) = js.get_key_value(bucket).await {
-        let status = store.status().await.into_diagnostic()?;
-        let current_ttl_ms = status.max_age().as_millis() as u64;
-        if status.history() == history && current_ttl_ms == ttl_ms {
-            return Ok(BucketEnsureStatus::Exists);
-        }
-
-        js.update_key_value(kv::Config {
-            bucket: bucket.to_string(),
-            history,
-            max_age: Duration::from_millis(ttl_ms),
-            num_replicas,
-            ..Default::default()
-        })
-        .await
-        .into_diagnostic()?;
-        return Ok(BucketEnsureStatus::Updated);
-    }
-
-    js.create_key_value(kv::Config {
-        bucket: bucket.to_string(),
-        history,
-        max_age: Duration::from_millis(ttl_ms),
-        num_replicas,
-        ..Default::default()
-    })
-    .await
-    .into_diagnostic()?;
-    Ok(BucketEnsureStatus::Created)
-}
-
 pub(crate) fn generate_session_keypair() -> (String, String) {
     let seed: [u8; 32] = rand::random();
     let signing_key = SigningKey::from_bytes(&seed);
@@ -401,6 +310,29 @@ mod tests {
             session_id: "ses_test".to_string(),
             inbox_prefix: "_INBOX.ses_test".to_string(),
             bootstrap_jwt: "jwt".to_string(),
+            authorization_context: serde_json::from_value(serde_json::json!({
+                "context": "context",
+                "contextDigest": "digest",
+                "refreshAt": 1_767_225_500,
+                "trust": {
+                    "root": {},
+                    "issuerManifestGeneration": 1,
+                    "issuerManifestDigest": "digest",
+                    "issuerManifestLocator": "/manifest",
+                    "issuerCertificateLocator": "/certificate",
+                    "contextRegistryLocator": "/contexts/",
+                    "policy": {
+                        "allowedClockSkewSeconds": 30,
+                        "maximumContextLifetimeSeconds": 300,
+                        "maximumContextBytes": 16384,
+                        "maximumPermissions": 16,
+                        "maximumCapabilities": 16,
+                        "refreshLeadSeconds": 60,
+                        "refreshJitterSeconds": 15
+                    }
+                }
+            }))
+            .expect("context fixture"),
             expires_at: Some(1_767_225_600_000),
         }
     }

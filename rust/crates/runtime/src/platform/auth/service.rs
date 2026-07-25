@@ -134,7 +134,7 @@ where
     }
 }
 
-fn resolve_snapshot(
+pub(super) fn resolve_snapshot(
     snapshot: IssuanceSnapshot,
     now: i64,
 ) -> Result<IssuableAuthorizationState, AuthorizationStateError> {

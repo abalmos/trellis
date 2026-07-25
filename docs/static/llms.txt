@@ -1,6 +1,6 @@
 # Trellis AI guide
 
-Last verified against Trellis main (2026-07-23).
+Last verified against Trellis main (2026-07-26).
 
 Canonical full guide:
 https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.txt
@@ -16,16 +16,30 @@ commands.
   generated SDKs, clients, proof bindings, and tests, but no auth runtime state.
 - Runtime boundaries use `trellis.api.v1` and `trellis.participant.v1` artifacts.
   TypeScript contracts are compiled to those artifacts before bootstrap.
-- Bootstrap returns a deny-all JWT bound to the session NKey. Every NATS connect
-  and reconnect signs the server nonce and a separate nonce-bound
-  `trellis.session-proof.v1`; there is no shared sentinel credential.
+- Bootstrap returns a deny-all JWT plus a root-pinned, issuer-signed short-lived
+  authorization context. Every NATS connect and reconnect signs the server nonce
+  and a separate `natsConnectContext` proof bound to the context digest; there is
+  no shared sentinel credential.
 - Trellis runtime authority comes from deployment authority and identity
   authority.
-- The target ordinary-request trust chain is a pinned root, root-signed current
+- The implemented bootstrap/connect trust chain is a pinned root, root-signed current
   issuer manifest and issuer certificates, issuer-signed short-lived
-  authorization context, and context-bound session-key request proof. Services
-  compute the raw payload hash and enforce exact permission/capability subsets
-  locally; current `Auth.Requests.Validate` use is transitional.
+  authorization context, and context-bound NATS proof. Clients durably pin root
+  and manifest digests, verify TypeScript consumers through the Rust/WASM
+  verifier, and use the server-distributed deterministic `refreshAt`. Clearing a
+  session retains the trust floor. TypeScript clients fetch only their own
+  immutable same-origin manifest/certificate locators; they do not watch Auth KV,
+  resolve arbitrary contexts, or run a validator readiness subsystem. Ordinary request-proof v2 and local
+  permission enforcement remain Milestone 10; current `Auth.Requests.Validate`
+  use is transitional.
+- The deny-all bootstrap JWT only selects the Auth Callout route. Context refresh
+  atomically renews it with the verified context and returns its exact expiry.
+  Clients retain the session/trust floor and send `currentContextDigest: null`
+  for proof-bound recovery after context or route-JWT expiry.
+- Bootstrap and refresh return server time in milliseconds. Clients use a request
+  midpoint offset for validity and refresh scheduling; same-digest refresh success
+  still reschedules. `maximumContextBytes` means canonical complete signed-context
+  JSON UTF-8 bytes, not base64url token length.
 - Signed authorization integers use the JSON safe-integer range, and context
   decisions recheck the current minimum accepted manifest generation.
 - Deployment authority proposal/desired `needs` are grouped by `contracts`,
@@ -96,7 +110,9 @@ commands.
   Use generated surfaces, service resource handles, and `TrellisConnection` for
   lifecycle status and shutdown.
 - Use operations for caller-visible async workflows. Use jobs for service-private
-  background execution.
+  background execution. Both remain inside transport permissions compiled from
+  the connected principal's current authorization context; subject names and
+  operation/job declarations never create grants.
 - Operations and job queues may declare one optional `update` schema. Keep
   `progress` for low-frequency durable telemetry/snapshots; updates are typed
   live-only, at-most-once content with no persistence, replay, admin, or Event

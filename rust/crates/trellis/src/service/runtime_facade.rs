@@ -44,9 +44,9 @@ use crate::auth::{
     AuthRequestsValidateRequest, AuthRequestsValidateResponse,
 };
 use crate::client::{
-    verify_event_proof, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, RpcDescriptor as ClientRpcDescriptor, ServiceConnectWithContractOptions,
-    TrellisClient, TrellisClientError,
+    verify_event_proof, AuthorizationContextStore, EventMessage, EventReplayPolicy,
+    EventSubscribeOptions, EventSubscriptionMode, RpcDescriptor as ClientRpcDescriptor,
+    ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
 use crate::jobs::{
     start_worker_host_from_client, JobDescriptor, JobIdentity, JobManager, JobProcessError, JobRef,
@@ -429,7 +429,7 @@ pub trait GeneratedServiceContract {
 }
 
 /// High-level options for connecting a generated Rust service runtime.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ServiceConnectOptions<'a> {
     /// Base Trellis runtime URL used for HTTP bootstrap.
     trellis_url: &'a str,
@@ -453,6 +453,8 @@ pub struct ServiceConnectOptions<'a> {
     retry_delay_ms: u64,
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
     authority_pending_timeout_ms: Option<u64>,
+    /// Caller-owned durable context and trust-floor storage.
+    authorization_context_store: Arc<dyn AuthorizationContextStore>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
@@ -467,6 +469,7 @@ impl<'a> ServiceConnectOptions<'a> {
         participant_needs_digest: &'a str,
         provisioned_identity_seed_base64url: &'a str,
         session_key_seed_base64url: &'a str,
+        authorization_context_store: Arc<dyn AuthorizationContextStore>,
     ) -> Self {
         Self {
             trellis_url,
@@ -480,6 +483,7 @@ impl<'a> ServiceConnectOptions<'a> {
             timeout_ms: DEFAULT_TIMEOUT_MS,
             retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+            authorization_context_store,
         }
     }
 
@@ -1930,6 +1934,7 @@ where
                 timeout_ms: options.timeout_ms,
                 retry_delay_ms: options.retry_delay_ms,
                 authority_pending_timeout_ms: options.authority_pending_timeout_ms,
+                authorization_context_store: options.authorization_context_store.clone(),
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
@@ -2620,6 +2625,7 @@ mod tests {
             "participant-needs-digest",
             "identity-seed",
             "session-seed",
+            Arc::new(crate::client::MemoryAuthorizationContextStore::default()),
         );
 
         assert_eq!(options.authority_pending_timeout_ms, None);

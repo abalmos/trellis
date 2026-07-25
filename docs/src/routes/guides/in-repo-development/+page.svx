@@ -58,16 +58,7 @@ deno task prepare:watch
 
 The Rust workspace exposes the same workflow as `cargo xtask prepare-watch`.
 
-## 3. Apply shared infrastructure
-
-```sh
-trellis infra apply \
-  --servers 127.0.0.1 \
-  --trellis-creds ~/trellis/nats/creds/trellis-auth.creds \
-  --auth-creds ~/trellis/nats/creds/auth-auth.creds
-```
-
-## 4. Start the Trellis runtime
+## 3. Start the Trellis runtime
 
 ```sh
 cargo run --manifest-path rust/Cargo.toml \
@@ -76,9 +67,12 @@ cargo run --manifest-path rust/Cargo.toml \
   -- all --config "$HOME/trellis/trellis/config.toml"
 ```
 
-The runtime starts on `http://localhost:3000` using the generated TOML config. The current Rust runtime exposes `/healthz` and `/readyz`; both return version and mode metadata.
+The runtime safely converges the streams and KV buckets owned by `all`, then
+starts on `http://localhost:3000` using the generated TOML config. The current
+Rust runtime exposes `/healthz` and `/readyz`; both return version and mode
+metadata.
 
-## 5. Check runtime readiness
+## 4. Check runtime readiness
 
 Query both runtime endpoints:
 
@@ -89,7 +83,7 @@ curl http://localhost:3000/readyz
 
 Use a runtime path that explicitly includes the auth and portal services for end-to-end first-admin, portal, and CLI login flows.
 
-## 6. Start Console
+## 5. Start Console
 
 ```sh
 cd js/apps/console

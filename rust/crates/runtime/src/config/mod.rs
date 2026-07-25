@@ -104,6 +104,9 @@ impl RuntimeConfig {
                 }
             }
         }
+        if matches!(mode, RuntimeMode::All | RuntimeMode::Platform) {
+            self.resolve_authorization()?;
+        }
 
         Ok(())
     }
@@ -162,6 +165,24 @@ impl RuntimeConfig {
             .as_ref()
             .ok_or(ConfigError::MissingSection { section: "leases" })?;
         leases.resolve()
+    }
+
+    /// Resolves and validates authorization trust/context configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] when the authorization section is missing or a
+    /// trust path, policy bound, bucket name, or replica count is invalid.
+    pub fn resolve_authorization(&self) -> Result<&AuthorizationConfig, ConfigError> {
+        let authorization = self
+            .auth
+            .as_ref()
+            .and_then(|auth| auth.authorization.as_ref())
+            .ok_or(ConfigError::MissingSection {
+                section: "auth.authorization",
+            })?;
+        authorization.validate()?;
+        Ok(authorization)
     }
 
     fn validate_subsystem(
@@ -258,6 +279,18 @@ impl RuntimeConfig {
             for provider in oauth.providers.values_mut() {
                 resolve_path(base_dir, &mut provider.client_secret_file);
             }
+        }
+        if let Some(authorization) = self
+            .auth
+            .as_mut()
+            .and_then(|auth| auth.authorization.as_mut())
+        {
+            resolve_required_path(base_dir, &mut authorization.trust_root_file);
+            resolve_required_path(base_dir, &mut authorization.issuer_manifest_file);
+            for path in &mut authorization.issuer_certificate_files {
+                resolve_required_path(base_dir, path);
+            }
+            resolve_required_path(base_dir, &mut authorization.issuer_signing_seed_file);
         }
     }
 }
@@ -503,6 +536,167 @@ pub struct AuthConfig {
     /// Local username/password identity configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_identity: Option<LocalIdentityConfig>,
+    /// Authorization trust and short-lived context runtime configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<AuthorizationConfig>,
+}
+
+/// File-backed authorization trust and context-runtime policy.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizationConfig {
+    /// Public pinned authorization trust-root JSON file.
+    pub trust_root_file: PathBuf,
+    /// Root-signed current issuer-manifest JSON file.
+    pub issuer_manifest_file: PathBuf,
+    /// Root-signed issuer-certificate JSON files referenced by the manifest.
+    pub issuer_certificate_files: Vec<PathBuf>,
+    /// Active issuer's canonical unpadded base64url Ed25519 seed file.
+    pub issuer_signing_seed_file: PathBuf,
+    /// Maximum newly issued context lifetime in seconds.
+    pub context_lifetime_seconds: u64,
+    /// Refresh lead before context expiry in seconds.
+    pub refresh_lead_seconds: u64,
+    /// Maximum deterministic earlier-only refresh jitter in seconds.
+    pub refresh_jitter_seconds: u64,
+    /// Minimum useful context lease in seconds.
+    pub minimum_context_lifetime_seconds: u64,
+    /// Maximum lifetime of a deny-all bootstrap JWT in seconds.
+    pub maximum_bootstrap_jwt_lifetime_seconds: u64,
+    /// Registry retention grace after context expiry in seconds.
+    pub cleanup_grace_seconds: u64,
+    /// Verification clock skew in seconds.
+    pub allowed_clock_skew_seconds: u64,
+    /// Maximum canonical signed-context JSON size in UTF-8 bytes.
+    pub maximum_context_bytes: usize,
+    /// Maximum permission atoms allowed in one context.
+    pub maximum_permissions: usize,
+    /// Maximum capability names allowed in one context.
+    pub maximum_capabilities: usize,
+    /// Trust-distribution KV bucket.
+    pub trust_bucket: String,
+    /// Context/revocation registry KV bucket.
+    pub context_bucket: String,
+    /// Replica count for both registry buckets.
+    pub registry_replicas: usize,
+}
+
+impl AuthorizationConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (field, path) in [
+            ("trust_root_file", &self.trust_root_file),
+            ("issuer_manifest_file", &self.issuer_manifest_file),
+            ("issuer_signing_seed_file", &self.issuer_signing_seed_file),
+        ] {
+            if path.as_os_str().is_empty() {
+                return Err(invalid_authorization(field, "must not be empty"));
+            }
+        }
+        if self.issuer_certificate_files.is_empty()
+            || self
+                .issuer_certificate_files
+                .iter()
+                .any(|path| path.as_os_str().is_empty())
+        {
+            return Err(invalid_authorization(
+                "issuer_certificate_files",
+                "must contain one or more nonempty paths",
+            ));
+        }
+        if self.context_lifetime_seconds == 0 || self.context_lifetime_seconds > 3_600 {
+            return Err(invalid_authorization(
+                "context_lifetime_seconds",
+                "must be between 1 and 3600",
+            ));
+        }
+        let useful_context_lifetime = self
+            .context_lifetime_seconds
+            .saturating_sub(self.allowed_clock_skew_seconds);
+        if self.refresh_lead_seconds >= useful_context_lifetime {
+            return Err(invalid_authorization(
+                "refresh_lead_seconds",
+                "must be less than context_lifetime_seconds minus allowed_clock_skew_seconds",
+            ));
+        }
+        if self.refresh_jitter_seconds > 300
+            || self
+                .refresh_lead_seconds
+                .saturating_add(self.refresh_jitter_seconds)
+                >= useful_context_lifetime
+        {
+            return Err(invalid_authorization(
+                "refresh_jitter_seconds",
+                "must not exceed 300 and must leave a usable context window",
+            ));
+        }
+        if self.minimum_context_lifetime_seconds <= self.allowed_clock_skew_seconds
+            || self.minimum_context_lifetime_seconds > useful_context_lifetime
+            || self.minimum_context_lifetime_seconds
+                <= self
+                    .refresh_lead_seconds
+                    .saturating_add(self.refresh_jitter_seconds)
+        {
+            return Err(invalid_authorization(
+                "minimum_context_lifetime_seconds",
+                "must exceed clock skew and the complete refresh window without exceeding useful lifetime",
+            ));
+        }
+        if !(60..=86_400).contains(&self.maximum_bootstrap_jwt_lifetime_seconds) {
+            return Err(invalid_authorization(
+                "maximum_bootstrap_jwt_lifetime_seconds",
+                "must be between 60 and 86400",
+            ));
+        }
+        if self.cleanup_grace_seconds == 0 || self.cleanup_grace_seconds > 86_400 {
+            return Err(invalid_authorization(
+                "cleanup_grace_seconds",
+                "must be between 1 and 86400",
+            ));
+        }
+        if self.allowed_clock_skew_seconds > 300 {
+            return Err(invalid_authorization(
+                "allowed_clock_skew_seconds",
+                "must not exceed 300",
+            ));
+        }
+        if self.maximum_context_bytes == 0 || self.maximum_context_bytes > 1_048_576 {
+            return Err(invalid_authorization(
+                "maximum_context_bytes",
+                "must be between 1 and 1048576",
+            ));
+        }
+        if self.maximum_permissions == 0 || self.maximum_permissions > 16_384 {
+            return Err(invalid_authorization(
+                "maximum_permissions",
+                "must be between 1 and 16384",
+            ));
+        }
+        if self.maximum_capabilities == 0 || self.maximum_capabilities > 1_024 {
+            return Err(invalid_authorization(
+                "maximum_capabilities",
+                "must be between 1 and 1024",
+            ));
+        }
+        if self.trust_bucket.trim().is_empty() || self.context_bucket.trim().is_empty() {
+            return Err(invalid_authorization(
+                "trust_bucket/context_bucket",
+                "must not be empty",
+            ));
+        }
+        if self.trust_bucket == self.context_bucket {
+            return Err(invalid_authorization(
+                "trust_bucket/context_bucket",
+                "must be distinct",
+            ));
+        }
+        if self.registry_replicas == 0 {
+            return Err(invalid_authorization(
+                "registry_replicas",
+                "must be positive",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Local identity provider configuration.
@@ -765,6 +959,14 @@ pub enum ConfigError {
         /// Validation failure reason.
         reason: &'static str,
     },
+    /// Authorization trust/context runtime configuration is invalid.
+    #[error("invalid runtime config section [auth.authorization]: {field} {reason}")]
+    InvalidAuthorizationConfig {
+        /// Invalid field name.
+        field: &'static str,
+        /// Validation failure reason.
+        reason: &'static str,
+    },
 }
 
 fn resolve_path(base_dir: &Path, path: &mut Option<PathBuf>) {
@@ -774,6 +976,16 @@ fn resolve_path(base_dir: &Path, path: &mut Option<PathBuf>) {
     if value.is_relative() {
         *value = base_dir.join(&value);
     }
+}
+
+fn resolve_required_path(base_dir: &Path, path: &mut PathBuf) {
+    if path.is_relative() {
+        *path = base_dir.join(&*path);
+    }
+}
+
+fn invalid_authorization(field: &'static str, reason: &'static str) -> ConfigError {
+    ConfigError::InvalidAuthorizationConfig { field, reason }
 }
 
 fn storage_section_name(subsystem: SubsystemName) -> &'static str {

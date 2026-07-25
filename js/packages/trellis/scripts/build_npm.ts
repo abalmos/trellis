@@ -679,6 +679,7 @@ await buildDntPackage({
     "./js/packages/trellis/index.ts",
     "./js/packages/trellis/auth.ts",
     "./js/packages/trellis/auth/browser.ts",
+    "./js/packages/trellis/auth/file.ts",
     "./js/packages/trellis/browser.ts",
     "./js/packages/trellis/contracts.ts",
     "./js/packages/trellis/device.ts",
@@ -715,6 +716,8 @@ await buildDntPackage({
     "@nats-io/obj": "^3.3.1",
     "@nats-io/nats-core": "^3.3.1",
     "@nats-io/transport-node": "^3.3.1",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "1.8.0",
     "@qlever-llc/result": "^0.11.0",
     "js-sha256": "^0.11.1",
     pino: "^9.11.0",
@@ -752,6 +755,21 @@ await buildDntPackage({
     result: "@qlever-llc/result",
   },
 });
+
+for (const format of ["esm", "script"]) {
+  const target = new URL(
+    `${format}/auth/protocol_wasm/trellis_protocol_wasm_bg.wasm`,
+    npmDirUrl,
+  );
+  await Deno.mkdir(new URL("./", target), { recursive: true });
+  await Deno.copyFile(
+    new URL(
+      "../auth/protocol_wasm/trellis_protocol_wasm_bg.wasm",
+      import.meta.url,
+    ),
+    target,
+  );
+}
 
 await normalizeModuleSpecifiers();
 await stageCanonicalGeneratedSdkArtifacts();

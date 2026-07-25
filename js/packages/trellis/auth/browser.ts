@@ -49,7 +49,11 @@ export {
   setSessionId,
   signBytes,
 } from "./browser/session.ts";
-export { deleteKeyPair, hasKeyPair } from "./browser/storage.ts";
+export {
+  BrowserAuthorizationContextStore,
+  deleteKeyPair,
+  hasKeyPair,
+} from "./browser/storage.ts";
 export {
   classifyBrowserAuthError,
   isRecoverableBrowserAuthError,

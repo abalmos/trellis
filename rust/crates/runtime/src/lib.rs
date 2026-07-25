@@ -35,6 +35,8 @@ mod ownership;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Platform subsystem scaffold and bootstrap services.
 pub mod platform;
+#[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
+mod resources;
 #[cfg(feature = "sqlite-storage")]
 /// SQLite storage for built-in runtime subsystems.
 pub mod storage;
@@ -43,9 +45,9 @@ pub mod storage;
 pub mod supervisor;
 
 pub use config::{
-    AuthConfig, ClientConfig, ConfigError, HttpConfig, LeasesConfig, LocalIdentityConfig,
-    NatsAuthCalloutConfig, NatsConfig, NatsRuntimeConfig, OAuthConfig, OAuthProviderConfig,
-    PlatformTtlConfig, ResolvedLeasesConfig, ResolvedNatsAuthCalloutConfig,
+    AuthConfig, AuthorizationConfig, ClientConfig, ConfigError, HttpConfig, LeasesConfig,
+    LocalIdentityConfig, NatsAuthCalloutConfig, NatsConfig, NatsRuntimeConfig, OAuthConfig,
+    OAuthProviderConfig, PlatformTtlConfig, ResolvedLeasesConfig, ResolvedNatsAuthCalloutConfig,
     ResolvedRuntimeNatsConfig, RuntimeConfig, SqliteStorageConfig, StorageBackend, StorageConfig,
     SubsystemConfig,
 };
@@ -54,3 +56,6 @@ pub use server::{build_version_info, run_http_server, ServerError, VersionInfo};
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 pub use supervisor::{run, RuntimeError, RuntimeOptions};
+
+#[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
+pub use supervisor::check;

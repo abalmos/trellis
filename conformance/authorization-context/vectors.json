@@ -52,7 +52,7 @@
       "nowUnixSeconds": 1100,
       "allowedClockSkewSeconds": 30,
       "maximumContextLifetimeSeconds": 300,
-      "maximumContextTokenBytes": 16384,
+      "maximumContextBytes": 16384,
       "maximumPermissions": 16,
       "maximumCapabilities": 16,
       "minimumManifestGeneration": 7
@@ -1934,7 +1934,7 @@
     {
       "name": "context-token-too-large",
       "operation": "contextToken",
-      "inputs": { "policy": { "maximumContextTokenBytes": 1 } },
+      "inputs": { "policy": { "maximumContextBytes": 1 } },
       "expected": { "valid": false, "code": "ContextTokenTooLarge", "path": "" }
     },
     {

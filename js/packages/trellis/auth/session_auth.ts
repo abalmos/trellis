@@ -1,15 +1,20 @@
 import { type Authenticator, jwtAuthenticator } from "@nats-io/nats-core";
-import { sha256 as sha256Sync } from "@noble/hashes/sha256";
-import { Codec } from "@nats-io/nkeys/lib/codec.js";
 import { fromSeed, Prefix } from "@nats-io/nkeys";
+import { Codec } from "@nats-io/nkeys/lib/codec.js";
+import { sha256 as sha256Sync } from "@noble/hashes/sha256";
 import { ulid } from "ulid";
 
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
-  signEd25519SeedSha256,
 } from "./keys.ts";
 import { createProof } from "./proof.ts";
+import {
+  type SessionProofInputV1,
+  type SessionProofV1,
+  signSessionProofV1,
+  signSessionProofV1Sync,
+} from "./session_proof.ts";
 import { correctedIatSeconds } from "./time.ts";
 import {
   base64urlDecode,
@@ -19,13 +24,6 @@ import {
   toArrayBuffer,
   utf8,
 } from "./utils.ts";
-import type { NatsAuthTokenV1 } from "./types.ts";
-import {
-  type SessionProofInputV1,
-  type SessionProofV1,
-  signSessionProofV1,
-  signSessionProofV1Sync,
-} from "./session_proof.ts";
 
 export type NatsConnectOptions = {
   authenticator: Authenticator | Authenticator[];
@@ -59,7 +57,12 @@ export type TrellisAuth = {
   ) => Promise<string>;
   signSessionProof: (input: SessionProofInputV1) => Promise<SessionProofV1>;
   natsConnectOptions: (
-    opts: { sessionId: string; participantDigest: string; jwt: string },
+    opts: {
+      sessionId: string;
+      participantDigest: string;
+      contextDigest: string | (() => string);
+      jwt: string | (() => string);
+    },
   ) => Promise<NatsConnectOptions>;
 };
 
@@ -118,28 +121,6 @@ export async function createAuth(
     return await signDomainHash("oauth-init", payload);
   };
 
-  const buildServiceNatsAuthToken = (
-    iat: number,
-    contractDigest: string,
-  ): NatsAuthTokenV1 => {
-    return {
-      v: 1,
-      sessionKey,
-      iat,
-      contractDigest,
-      sig: base64urlEncode(
-        signEd25519SeedSha256(
-          seed,
-          utf8(
-            `nats-connect:${
-              buildNatsConnectSignaturePayload(iat, contractDigest)
-            }`,
-          ),
-        ),
-      ),
-    };
-  };
-
   const currentIat = (): number =>
     correctedIatSeconds(Date.now(), serverClockOffsetMs);
 
@@ -158,22 +139,21 @@ export async function createAuth(
         "nats-connect",
         buildNatsConnectSignaturePayload(iat, contractDigest),
       ),
-    createProof: (subject, payloadHash, requestId = ulid(), iat) =>
+    createProof: (subject, payloadHash, requestId, iat) =>
       createProof(privateKey, {
         sessionKey,
         subject,
         payloadHash,
         iat: iat ?? currentIat(),
-        requestId,
+        requestId: requestId ?? ulid(),
       }),
     signSessionProof: (input) =>
       signSessionProofV1(input, privateKey, sessionKey),
-    natsConnectOptions: async (options) => {
-      const nkey = fromSeed(encodedSeed);
+    natsConnectOptions: (options) => {
       const sessionKeyId = base64urlEncode(
         sha256Sync(base64urlDecode(sessionKey)),
       );
-      return {
+      return Promise.resolve({
         authenticator: [
           jwtAuthenticator(options.jwt, encodedSeed),
           (nonce) => {
@@ -182,8 +162,11 @@ export async function createAuth(
               Date.now() + serverClockOffsetMs,
             );
             const requestId = ulid();
+            const contextDigest = typeof options.contextDigest === "function"
+              ? options.contextDigest()
+              : options.contextDigest;
             const input = {
-              purpose: "natsConnect" as const,
+              purpose: "natsConnectContext" as const,
               requestId,
               issuedAt,
               sessionId: options.sessionId,
@@ -191,6 +174,7 @@ export async function createAuth(
               sessionPublicKey: sessionKey,
               sessionNkey,
               participantDigest: options.participantDigest,
+              contextDigest,
               nonce,
             };
             return {
@@ -200,13 +184,14 @@ export async function createAuth(
                 issuedAt,
                 sessionId: options.sessionId,
                 participantDigest: options.participantDigest,
+                contextDigest,
                 proof: signSessionProofV1Sync(input, seed, sessionKey),
               }),
             };
           },
         ],
         inboxPrefix: `_INBOX.${options.sessionId}`,
-      };
+      });
     },
   };
 }

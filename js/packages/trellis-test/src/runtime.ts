@@ -464,6 +464,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     return {
       auth: {
         mode: "session_key",
+        authorizationContextEphemeral: true,
         sessionKeySeed: key.seed,
         redirectTo: `${this.trellisUrl}/_trellis/test/client-auth`,
       },

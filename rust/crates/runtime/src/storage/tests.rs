@@ -1,4 +1,5 @@
 use super::*;
+use sha2::Digest as _;
 
 fn sqlite_config(path: PathBuf) -> SqliteStorageConfig {
     SqliteStorageConfig {
@@ -73,7 +74,28 @@ fn runtime_config() -> RuntimeConfig {
             ttl_ms: None,
             renew_ms: None,
         }),
-        auth: None,
+        auth: Some(crate::AuthConfig {
+            local_identity: None,
+            authorization: Some(crate::AuthorizationConfig {
+                trust_root_file: PathBuf::from("authorization-root.json"),
+                issuer_manifest_file: PathBuf::from("authorization-issuer-manifest.json"),
+                issuer_certificate_files: vec![PathBuf::from("authorization-issuer.json")],
+                issuer_signing_seed_file: PathBuf::from("authorization-issuer.seed"),
+                context_lifetime_seconds: 300,
+                refresh_lead_seconds: 60,
+                refresh_jitter_seconds: 15,
+                minimum_context_lifetime_seconds: 76,
+                maximum_bootstrap_jwt_lifetime_seconds: 3_600,
+                cleanup_grace_seconds: 60,
+                allowed_clock_skew_seconds: 30,
+                maximum_context_bytes: 16_384,
+                maximum_permissions: 4_096,
+                maximum_capabilities: 256,
+                trust_bucket: "trellis_authorization_trust".to_owned(),
+                context_bucket: "trellis_authorization_contexts".to_owned(),
+                registry_replicas: 1,
+            }),
+        }),
         oauth: None,
         platform: None,
         jobs: None,
@@ -145,9 +167,48 @@ fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
     assert_marker(&path, "trellis_platform_store_marker")?;
     assert_migration(&path, 1000, "platform_init")?;
     assert_migration(&path, 1001, "authorization_state")?;
+    assert_migration(&path, 1002, "auth_service_cutover")?;
+    assert_migration(&path, 1003, "authorization_context_runtime")?;
     assert_table(&path, "auth_principals")?;
     assert_table(&path, "auth_sessions")?;
     assert_table(&path, "auth_materialized_authorities")?;
+    assert_table(&path, "auth_authorization_trust_state")?;
+    assert_table(&path, "auth_authorization_contexts")?;
+    Ok(())
+}
+
+#[test]
+fn sqlite_migration_check_rejects_missing_database_without_creating_it(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("platform.sqlite");
+    let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
+
+    assert!(matches!(
+        store.check_migrations(),
+        Err(StoreError::MissingSqlite { .. })
+    ));
+
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn sqlite_migration_check_does_not_modify_configured_database(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("platform.sqlite");
+    let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
+    store.migrate()?;
+    let before = std::fs::read(&path)?;
+    let wal = path.with_file_name("platform.sqlite-wal");
+    let shm = path.with_file_name("platform.sqlite-shm");
+    let sidecars_before = (wal.exists(), shm.exists());
+
+    store.check_migrations()?;
+
+    assert_eq!(std::fs::read(&path)?, before);
+    assert_eq!((wal.exists(), shm.exists()), sidecars_before);
     Ok(())
 }
 
@@ -201,7 +262,7 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003])?;
     let connection = rusqlite::Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let foreign_key_errors = connection
@@ -313,6 +374,117 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
 }
 
 #[test]
+fn accepted_authorization_migrations_remain_byte_identical() {
+    for (migration, expected) in [
+        (
+            include_bytes!("sqlite/platform/V1001__authorization_state.sql").as_slice(),
+            "e816f31d1175c9afd4fa1a70727fea6724bf53751a08f9006788c9de27f97206",
+        ),
+        (
+            include_bytes!("sqlite/platform/V1002__auth_service_cutover.sql").as_slice(),
+            "2043bd42febd7029ca62765ab646336f65f2019ec7fa8089829bd2c673cb30f9",
+        ),
+    ] {
+        let actual = sha2::Sha256::digest(migration)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let path = temp_dir.path().join("platform-m8-upgrade.sqlite");
+    let mut connection = rusqlite::Connection::open(&path)?;
+    let accepted_m8_migrations = [
+        refinery::Migration::unapplied(
+            "V1000__platform_init.sql",
+            include_str!("sqlite/platform/V1000__platform_init.sql"),
+        )?,
+        refinery::Migration::unapplied(
+            "V1001__authorization_state.sql",
+            include_str!("sqlite/platform/V1001__authorization_state.sql"),
+        )?,
+        refinery::Migration::unapplied(
+            "V1002__auth_service_cutover.sql",
+            include_str!("sqlite/platform/V1002__auth_service_cutover.sql"),
+        )?,
+    ];
+    refinery::Runner::new(&accepted_m8_migrations).run(&mut connection)?;
+    for (id, kind) in [
+        ("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "event"),
+        ("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "kick"),
+    ] {
+        connection.execute(
+            "INSERT INTO auth_post_commit_actions (
+                action_id, kind, payload_json, created_at, attempts, next_attempt_at,
+                claimed_until, last_error
+             ) VALUES (?1, ?2, '{}', 1, 2, 3, NULL, 'retry')",
+            rusqlite::params![id, kind],
+        )?;
+    }
+    drop(connection);
+
+    let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
+    store.migrate()?;
+    store.migrate()?;
+
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003])?;
+    let connection = Connection::open(&path)?;
+    connection.pragma_update(None, "foreign_keys", true)?;
+    let actions = connection
+        .prepare(
+            "SELECT action_id, kind, payload_json, created_at, attempts, next_attempt_at,
+                    claimed_until, last_error
+             FROM auth_post_commit_actions ORDER BY action_id",
+        )?
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<i64>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    assert_eq!(actions.len(), 2);
+    assert_eq!(actions[0].1, "event");
+    assert_eq!(actions[1].1, "kick");
+    assert!(actions
+        .iter()
+        .all(|action| action.2 == "{}" && action.3 == 1 && action.4 == 2 && action.5 == 3));
+    assert!(connection
+        .prepare("PRAGMA foreign_key_check")?
+        .query_map([], |_| Ok(()))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .is_empty());
+    for index in [
+        "auth_authorization_contexts_session_idx",
+        "auth_authorization_contexts_principal_idx",
+        "auth_authorization_contexts_authority_idx",
+        "auth_authorization_contexts_deployment_idx",
+        "auth_authorization_contexts_instance_idx",
+        "auth_authorization_contexts_issuer_idx",
+        "auth_authorization_contexts_state_idx",
+    ] {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+            [index],
+            |row| row.get(0),
+        )?;
+        assert!(exists, "missing V1003 index {index}");
+    }
+    Ok(())
+}
+
+#[test]
 fn sqlite_jobs_projection_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let path = temp_dir.path().join("jobs.sqlite");
@@ -400,7 +572,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&path, "trellis_health_projection_store_marker")?;
     assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&path, &[1000, 1001, 1002, 2000, 3000, 3001, 4000])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 2000, 3000, 3001, 4000])?;
     Ok(())
 }
 

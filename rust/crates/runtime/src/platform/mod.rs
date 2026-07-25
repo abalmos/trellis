@@ -1,5 +1,7 @@
 //! Platform subsystem scaffold.
 
+use std::sync::Arc;
+
 /// Rust-owned authorization state and materialization.
 pub mod auth;
 pub mod auth_callout;
@@ -41,6 +43,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .as_millis()
         .try_into()
         .map_err(|_| RuntimeError::Platform("current time exceeds i64 milliseconds".to_owned()))?;
+    let authorization_config = context
+        .config
+        .resolve_authorization()
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let administration = auth::administration_participant_binding(now)
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     auth_store
@@ -64,6 +70,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let ephemeral = auth::NatsAuthEphemeralRepository::ensure(context.trellis_nats.clone())
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let authorization_contexts = auth::AuthorizationContextService::start(
+        Arc::new(auth_store.clone()),
+        context.trellis_nats.clone(),
+        authorization_config.clone(),
+        now / 1_000,
+    )
+    .await
+    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let nats = context
         .config
         .resolve_nats_runtime()
@@ -75,6 +89,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let issuer = auth::NatsBootstrapIssuer::from_files(
         &callout.issuer_signing_seed_file,
         &nats.auth_creds_path,
+        authorization_config.maximum_bootstrap_jwt_lifetime_seconds,
     )
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let auth_nats = async_nats::ConnectOptions::new()
@@ -103,6 +118,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         authorization.clone(),
         auth_store.clone(),
         ephemeral.clone(),
+        authorization_contexts.clone(),
         &callout.issuer_signing_seed_file,
         &callout.target_signing_seed_file,
         &callout.xkey_seed_file,
@@ -117,7 +133,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let auth_service = AuthService::new(auth_store, AuthServiceConfig::default())
+    let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let (auth_event_session, auth_operation_session) =
         ensure_auth_event_session(&auth_service, &authorization, &auth_participant, now).await?;
@@ -161,6 +177,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         post_commit_nats,
         post_commit_system_nats,
         auth_event_session,
+        authorization_contexts.clone(),
     );
     let bootstrap = if context.rotate_first_admin {
         auth_service
@@ -204,15 +221,45 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             );
         }
     }
+    let stop = StopHandle::new();
+    let validator_stop = stop.clone();
+    let validator_contexts = authorization_contexts.clone();
+    let mut validator_join =
+        tokio::spawn(async move { validator_contexts.run_validator_cache(validator_stop).await });
+    tokio::select! {
+        result = authorization_contexts.wait_for_validator_cache() => {
+            if let Err(error) = result {
+                stop.stop();
+                validator_join.abort();
+                return Err(error);
+            }
+        }
+        result = &mut validator_join => {
+            return match result {
+                Ok(result) => result.and_then(|_| Err(RuntimeError::Platform(
+                    "authorization validator cache exited during startup".to_owned(),
+                ))),
+                Err(error) => Err(RuntimeError::Platform(format!(
+                    "authorization validator cache task failed: {error}"
+                ))),
+            };
+        }
+    }
     let http = context.config.http.as_ref();
     let oidc_providers =
-        auth::discover_oidc_providers(context.config.oauth.as_ref(), &public_origin)
-            .await
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let router = auth::auth_http_router(auth::AuthHttpOptions {
+        match auth::discover_oidc_providers(context.config.oauth.as_ref(), &public_origin).await {
+            Ok(providers) => providers,
+            Err(error) => {
+                stop.stop();
+                validator_join.abort();
+                return Err(RuntimeError::Platform(error.to_string()));
+            }
+        };
+    let router = match auth::auth_http_router(auth::AuthHttpOptions {
         service: auth_service,
         ephemeral,
         issuer,
+        authorization_contexts: authorization_contexts.clone(),
         public_origin,
         allowed_origins: http
             .and_then(|http| http.origins.clone())
@@ -224,10 +271,19 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             .and_then(|http| http.rate_limit_window_ms)
             .unwrap_or(60_000),
         portal_override_dir: std::env::var_os("TRELLIS_BUILTIN_PORTAL_DIR").map(Into::into),
-    })
-    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    context.register_http_router(router)?;
-    let stop = StopHandle::new();
+    }) {
+        Ok(router) => router,
+        Err(error) => {
+            stop.stop();
+            validator_join.abort();
+            return Err(RuntimeError::Platform(error.to_string()));
+        }
+    };
+    if let Err(error) = context.register_http_router(router) {
+        stop.stop();
+        validator_join.abort();
+        return Err(error);
+    }
     let task_stop = stop.clone();
     let join = tokio::spawn(async move {
         let _authorization = authorization;
@@ -240,6 +296,15 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             result = auth_rpc.run(task_stop.clone()) => result,
             result = auth_operation.run(task_stop.clone()) => result,
             result = auth_post_commit.run(task_stop.clone()) => result,
+            result = authorization_contexts.clone().run_janitor(task_stop.clone()) => result,
+            result = &mut validator_join => {
+                match result {
+                    Ok(result) => result,
+                    Err(error) => Err(RuntimeError::Platform(format!(
+                        "authorization validator cache task failed: {error}"
+                    ))),
+                }
+            },
         }
     });
 

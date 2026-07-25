@@ -39,6 +39,10 @@ pub struct MaterializationReplacement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthoritySnapshotToken(pub String);
 
+/// Opaque digest of every authorization-relevant input to context issuance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IssuanceSnapshotToken(pub String);
+
 /// Principal or deployment record that owns one authority-level materialization.
 #[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "record")]
@@ -91,6 +95,38 @@ pub struct IssuanceSnapshot {
     pub authority: Option<DesiredAuthorityRecord>,
     /// Current shared authority materialization.
     pub materialization: Option<MaterializationReplacement>,
+}
+
+/// Compute the semantic token used to guard an authorization-context commit.
+///
+/// Session liveness and participant resolution timestamps are deliberately
+/// excluded because they do not change authorization semantics.
+pub(super) fn issuance_snapshot_token(
+    snapshot: &IssuanceSnapshot,
+) -> Result<IssuanceSnapshotToken, AuthorizationStateError> {
+    let mut session = snapshot.session.clone();
+    if let Some(session) = &mut session {
+        session.last_seen_at = 0;
+    }
+    let mut participant = snapshot.participant.clone();
+    if let Some(participant) = &mut participant {
+        participant.resolved_at = 0;
+    }
+    let value = serde_json::json!({
+        "session": session,
+        "principal": snapshot.principal,
+        "participant": participant,
+        "runtime": snapshot.runtime,
+        "deployment": snapshot.deployment,
+        "authority": snapshot.authority,
+        "materialization": snapshot.materialization,
+    });
+    let canonical = trellis_protocol::canonicalize_json(&value).map_err(|error| {
+        AuthorizationStateError::Storage(format!("cannot encode issuance snapshot: {error}"))
+    })?;
+    Ok(IssuanceSnapshotToken(
+        URL_SAFE_NO_PAD.encode(Sha256::digest(canonical.as_bytes())),
+    ))
 }
 
 /// Result of one coherent authority reconciliation transaction.
@@ -196,6 +232,7 @@ pub trait SessionRepository: Send + Sync {
         id: &str,
         expected_version: u64,
         participant: &ParticipantBindingRecord,
+        changed_at: i64,
     ) -> Result<SessionRecord, AuthorizationStateError>;
 
     /// List sessions for one stable principal.
@@ -737,6 +774,7 @@ impl SessionRepository for InMemoryAuthorizationStore {
         id: &str,
         expected_version: u64,
         participant: &ParticipantBindingRecord,
+        _changed_at: i64,
     ) -> Result<SessionRecord, AuthorizationStateError> {
         participant.resolve()?;
         let mut state = self.state()?;
@@ -1405,7 +1443,7 @@ fn memory_runtime_evidence(
     }
 }
 
-fn memory_issuance_snapshot(
+pub(super) fn memory_issuance_snapshot(
     state: &MemoryState,
     session_id: &str,
 ) -> Result<IssuanceSnapshot, AuthorizationStateError> {

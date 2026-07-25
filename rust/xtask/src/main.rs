@@ -74,7 +74,43 @@ fn usage_text() -> &'static str {
 }
 
 fn run_prepare() -> Result<()> {
-    run_generate_prepare(&[])
+    run_generate_prepare(&[])?;
+    generate_protocol_wasm()
+}
+
+fn generate_protocol_wasm() -> Result<()> {
+    let root = repo_root()?;
+    let rust = root.join("rust");
+    let status = Command::new("cargo")
+        .current_dir(&rust)
+        .args([
+            "build",
+            "-p",
+            "trellis-protocol-wasm",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--release",
+        ])
+        .status()
+        .into_diagnostic()
+        .wrap_err("failed to build protocol WASM")?;
+    if !status.success() {
+        return Err(miette::miette!("protocol WASM build failed with {status}"));
+    }
+    let input = rust.join("target/wasm32-unknown-unknown/release/trellis_protocol_wasm.wasm");
+    let output = root.join("js/packages/trellis/auth/protocol_wasm");
+    std::fs::create_dir_all(&output).into_diagnostic()?;
+    let mut bindgen = wasm_bindgen_cli_support::Bindgen::new();
+    bindgen
+        .input_path(input)
+        .web(true)
+        .map_err(|error| miette::miette!(error.to_string()))?
+        .typescript(true)
+        .omit_default_module_path(true)
+        .out_name("trellis_protocol_wasm")
+        .generate(&output)
+        .map_err(|error| miette::miette!(error.to_string()))?;
+    Ok(())
 }
 
 fn run_prepare_watch() -> Result<()> {

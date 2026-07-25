@@ -10,6 +10,7 @@ publish = false
 clap = { version = "4.6.0", features = ["derive"] }
 miette = { version = "7.6.0", features = ["fancy"] }
 trellis-generate-runner = { path = "../rust/crates/generate-runner" }
+wasm-bindgen-cli-support = "=0.2.125"
 
 [[bin]]
 name = "xtask-shim"

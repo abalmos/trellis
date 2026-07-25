@@ -86,6 +86,7 @@ export function createFeedsFixture(caseId: string) {
       contract: serviceContract,
     });
     return await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: caseScopedName("feeds-fixture-service", caseId),

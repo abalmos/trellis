@@ -1105,6 +1105,12 @@ pub enum AuthorizationStateError {
     /// Materialized authority is absent, unavailable, or no longer current.
     #[error("materialized authority is stale")]
     MaterializationStale,
+    /// Current authority cannot provide the configured minimum context lifetime.
+    #[error("authorization context lifetime is unavailable")]
+    ContextLifetimeUnavailable,
+    /// A context could not be committed after bounded coherent-snapshot retries.
+    #[error("authorization context snapshot changed")]
+    ContextSnapshotChanged,
     /// An optimistic version guard failed.
     #[error("authorization storage conflict")]
     StorageConflict,

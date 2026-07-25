@@ -16,6 +16,7 @@ const runtimeImports = [
   "@qlever-llc/trellis",
   "@qlever-llc/trellis/auth",
   "@qlever-llc/trellis/auth/browser",
+  "@qlever-llc/trellis/auth/file",
   "@qlever-llc/trellis/browser",
   "@qlever-llc/trellis/contracts",
   "@qlever-llc/trellis/errors",
@@ -246,6 +247,29 @@ async function assertNoGeneratedBuildReferences(projectDir: string) {
 }
 
 async function writeConsumerProject(projectDir: string) {
+  const esmWasmSmoke = `
+const contextAuth = await import("@qlever-llc/trellis/auth");
+try {
+  const cache = new contextAuth.AuthorizationContextCache(
+    "https://trellis.test",
+    "smoke:test",
+    new contextAuth.MemoryAuthorizationContextStore(),
+    async () => Response.json({}),
+  );
+  await cache.install(
+    { context: "invalid", contextDigest: "invalid", refreshAt: 1, trust: { root: {}, issuerManifestGeneration: 1, issuerManifestDigest: "invalid", issuerManifestLocator: "/.well-known/trellis/authorization/trust/manifest.1", issuerCertificateLocator: "/.well-known/trellis/authorization/trust/certificate.key.digest", policy: { allowedClockSkewSeconds: 0, maximumContextLifetimeSeconds: 1, maximumContextBytes: 1, maximumPermissions: 1, maximumCapabilities: 1, refreshLeadSeconds: 1, refreshJitterSeconds: 0 } } },
+    { bootstrapJwt: "route", bootstrapJwtExpiresAt: 2 },
+    1,
+  );
+  throw new Error("invalid authorization context unexpectedly verified");
+} catch (error) {
+  if (/ENOENT|authorization protocol WASM returned HTTP/.test(String(error))) throw error;
+}
+`;
+  const cjsWasmSmoke = esmWasmSmoke.replace(
+    'const contextAuth = await import("@qlever-llc/trellis/auth");',
+    'const contextAuth = require("@qlever-llc/trellis/auth");',
+  );
   await Deno.writeTextFile(
     join(projectDir, "package.json"),
     JSON.stringify({ type: "module", private: true }, null, 2) + "\n",
@@ -255,12 +279,13 @@ async function writeConsumerProject(projectDir: string) {
     runtimeImports.map((specifier) =>
       `await import(${JSON.stringify(specifier)});`
     )
-      .join("\n") + '\nconsole.log("ESM imports ok");\n',
+      .join("\n") + esmWasmSmoke + '\nconsole.log("ESM imports ok");\n',
   );
   await Deno.writeTextFile(
     join(projectDir, "smoke.cjs"),
     runtimeImports.map((specifier) => `require(${JSON.stringify(specifier)});`)
-      .join("\n") + '\nconsole.log("CJS imports ok");\n',
+      .join("\n") +
+      `\n(async () => {${cjsWasmSmoke}\nconsole.log("CJS imports ok");})().catch((error) => { console.error(error); process.exit(1); });\n`,
   );
   await Deno.writeTextFile(
     join(projectDir, "tsconfig.json"),

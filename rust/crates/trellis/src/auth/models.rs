@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use super::AuthenticatedUser;
-use crate::client::SessionAuth;
+use crate::client::{AuthorizationContextBundle, SessionAuth};
 
 /// Persisted admin session details for the CLI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +33,8 @@ pub struct AdminSessionState {
     /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
     #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
     pub bootstrap_jwt: String,
+    /// Signed authorization context and minimal trust metadata for reconnect and refresh.
+    pub authorization_context: AuthorizationContextBundle,
     /// Session expiry in Unix milliseconds, when bounded.
     #[doc = concat!("The `", stringify!(expires_at), "` value.")]
     pub expires_at: Option<i64>,
@@ -59,15 +61,20 @@ pub struct BoundSession {
     /// Deny-all Auth-account JWT used to enter NATS Auth Callout.
     #[doc = concat!("The `", stringify!(bootstrap_jwt), "` value.")]
     pub bootstrap_jwt: String,
+    /// Signed authorization context and minimal trust metadata.
+    pub authorization_context: AuthorizationContextBundle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(BindResponseBound), "`.")]
 pub struct BindResponseBound {
     #[doc = concat!("The `", stringify!(session), "` value.")]
     pub session: BoundSessionRecord,
     #[doc = concat!("The `", stringify!(nats), "` value.")]
     pub nats: BoundNatsRecord,
+    #[doc = concat!("The `", stringify!(authorization_context), "` value.")]
+    pub authorization_context: AuthorizationContextBundle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -126,6 +133,7 @@ pub struct AdminLoginOutcome {
 
 /// Result of starting admin reauthentication for a changed contract.
 #[doc = concat!("Public Trellis value set `", stringify!(AdminReauthOutcome), "`.")]
+#[allow(clippy::large_enum_variant)]
 pub enum AdminReauthOutcome {
     /// Contract change was auto-approved and the session was rebound immediately.
     Bound(AdminLoginOutcome),

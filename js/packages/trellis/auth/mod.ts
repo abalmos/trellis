@@ -5,6 +5,24 @@
  */
 
 export {
+  type AuthorizationClientState,
+  type AuthorizationContextBundle,
+  AuthorizationContextBundleSchema,
+  AuthorizationContextCache,
+  type AuthorizationContextPersistence,
+  AuthorizationContextRefreshError,
+  type AuthorizationContextStore,
+  type AuthorizationRoutingMaterial,
+  type AuthorizationSessionBinding,
+  type AuthorizationTrustBundle,
+  AuthorizationTrustBundleSchema,
+  type AuthorizationTrustState,
+  MemoryAuthorizationContextStore,
+  refreshAuthorizationContext,
+  startAuthorizationContextRefresh,
+  type VerifiedAuthorizationContext,
+} from "./authorization_context.ts";
+export {
   clearSessionKey,
   generateSessionKey,
   getOrCreateSessionKey,
@@ -41,7 +59,7 @@ export type {
 export type {
   AuthDeviceUserAuthoritiesResolveOutput,
   AuthDeviceUserAuthoritiesResolveProgress,
-} from "../sdk/_generated/auth/types.ts";
+} from "../sdk/auth.ts";
 // Transitional proof-v1 helpers are removed with local proof-v2 validation in Milestone 10.
 export {
   buildEventProofInput,

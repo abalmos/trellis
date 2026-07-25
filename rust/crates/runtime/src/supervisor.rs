@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinHandle;
 use ulid::Ulid;
@@ -17,6 +18,7 @@ const NATS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 use crate::leases::{LeaseError, LeaseKey};
 use crate::ownership::{OwnerContext, OwnerGroup, RuntimeOwnership};
+use crate::resources::{stream_is_compatible, ExpectedRuntimeResources};
 use crate::shutdown::StopHandle;
 use crate::storage::{RuntimeStores, StoreError};
 use crate::{
@@ -32,6 +34,317 @@ pub struct RuntimeOptions {
     pub config_path: PathBuf,
     /// Explicitly rotate an unexpired pending first-administrator bootstrap flow.
     pub rotate_first_admin: bool,
+}
+
+/// Status of one read-only runtime preflight check.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCheckStatus {
+    /// The required condition is satisfied.
+    Ok,
+    /// The condition is safe but needs operator attention.
+    Warning,
+    /// A required resource does not exist.
+    Missing,
+    /// Existing state is incompatible with this runtime.
+    Incompatible,
+    /// Trust material has expired.
+    Expired,
+    /// A monotonic trust floor would move backwards.
+    Rollback,
+    /// Validation could not complete.
+    Error,
+}
+
+/// Result of one named runtime preflight check.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCheckResult {
+    /// Stable check name.
+    pub name: String,
+    /// Machine-readable status.
+    pub status: RuntimeCheckStatus,
+    /// Operator-readable result without secrets.
+    pub detail: String,
+}
+
+/// Complete structured report returned by [`check`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeCheckReport {
+    /// Whether every required check succeeded.
+    pub valid: bool,
+    /// Runtime mode that was checked.
+    pub mode: String,
+    /// Configuration path that was checked.
+    pub config: PathBuf,
+    /// Ordered per-check results.
+    pub checks: Vec<RuntimeCheckResult>,
+}
+
+impl RuntimeCheckReport {
+    fn push(&mut self, name: &str, status: RuntimeCheckStatus, detail: impl Into<String>) {
+        if !matches!(status, RuntimeCheckStatus::Ok | RuntimeCheckStatus::Warning) {
+            self.valid = false;
+        }
+        self.checks.push(RuntimeCheckResult {
+            name: name.to_owned(),
+            status,
+            detail: detail.into(),
+        });
+    }
+}
+
+/// Validate configuration, migrations, NATS connectivity, trust, and registry compatibility.
+pub async fn check(
+    mode: RuntimeMode,
+    config_path: impl AsRef<std::path::Path>,
+) -> Result<RuntimeCheckReport, RuntimeError> {
+    let config_path = config_path.as_ref().to_path_buf();
+    let mut report = RuntimeCheckReport {
+        valid: true,
+        mode: mode.to_string(),
+        config: config_path.clone(),
+        checks: Vec::new(),
+    };
+    let config = match RuntimeConfig::load_from_path(&config_path).and_then(|config| {
+        config.validate_for_mode(mode)?;
+        Ok(config)
+    }) {
+        Ok(config) => {
+            report.push("config", RuntimeCheckStatus::Ok, "configuration is valid");
+            config
+        }
+        Err(error) => {
+            report.push("config", RuntimeCheckStatus::Error, error.to_string());
+            return Ok(report);
+        }
+    };
+    let stores = match RuntimeStores::from_config(&config, mode) {
+        Ok(stores) => stores,
+        Err(error) => {
+            report.push("migrations", RuntimeCheckStatus::Error, error.to_string());
+            return Ok(report);
+        }
+    };
+    match stores.check_all() {
+        Ok(()) => report.push(
+            "migrations",
+            RuntimeCheckStatus::Ok,
+            "configured databases accept all pending migrations on temporary copies",
+        ),
+        Err(error) => {
+            let status = match error {
+                StoreError::MissingSqlite { .. } => RuntimeCheckStatus::Missing,
+                StoreError::SqliteSnapshotChanged { .. } => RuntimeCheckStatus::Error,
+                _ => RuntimeCheckStatus::Incompatible,
+            };
+            report.push("migrations", status, error.to_string());
+            return Ok(report);
+        }
+    }
+    let nats = match config.resolve_nats_runtime() {
+        Ok(nats) => nats,
+        Err(error) => {
+            report.push("nats.config", RuntimeCheckStatus::Error, error.to_string());
+            return Ok(report);
+        }
+    };
+    let trellis_nats = match check_nats_connection(&nats.servers, &nats.trellis_creds_path).await {
+        Ok(client) => {
+            report.push(
+                "nats.trellis",
+                RuntimeCheckStatus::Ok,
+                "connection and flush succeeded",
+            );
+            client
+        }
+        Err(error) => {
+            report.push("nats.trellis", RuntimeCheckStatus::Error, error.to_string());
+            return Ok(report);
+        }
+    };
+    let jetstream = async_nats::jetstream::new(trellis_nats.clone());
+    let expected_resources = ExpectedRuntimeResources::for_mode(mode, &config);
+    for expected in expected_resources.streams() {
+        let check_name = format!("nats.stream.{}", expected.name.to_ascii_lowercase());
+        match jetstream.get_stream(&expected.name).await {
+            Ok(mut stream) => match stream.info().await {
+                Ok(info) if stream_is_compatible(&info.config, expected) => report.push(
+                    &check_name,
+                    RuntimeCheckStatus::Ok,
+                    "stream exists with compatible Trellis-owned policy",
+                ),
+                Ok(_) => report.push(
+                    &check_name,
+                    RuntimeCheckStatus::Incompatible,
+                    "stream policy differs from the selected runtime mode",
+                ),
+                Err(error) => {
+                    report.push(&check_name, RuntimeCheckStatus::Error, error.to_string())
+                }
+            },
+            Err(error) => report.push(&check_name, RuntimeCheckStatus::Missing, error.to_string()),
+        }
+    }
+    let leases = config.resolve_leases()?;
+    match jetstream.get_key_value(&leases.bucket).await {
+        Ok(store) => match store.status().await {
+            Ok(status)
+                if status.history() == 1
+                    && status.max_age() == Duration::from_millis(leases.ttl_ms)
+                    && (leases.replicas == 0
+                        || status.info.config.num_replicas == usize::from(leases.replicas)) =>
+            {
+                report.push(
+                    "nats.kv.leases",
+                    RuntimeCheckStatus::Ok,
+                    "lease bucket exists with compatible history, TTL, and replicas",
+                );
+            }
+            Ok(_) => report.push(
+                "nats.kv.leases",
+                RuntimeCheckStatus::Incompatible,
+                "lease bucket settings differ from runtime configuration",
+            ),
+            Err(error) => report.push(
+                "nats.kv.leases",
+                RuntimeCheckStatus::Error,
+                error.to_string(),
+            ),
+        },
+        Err(error) => report.push(
+            "nats.kv.leases",
+            RuntimeCheckStatus::Missing,
+            error.to_string(),
+        ),
+    }
+    if expected_resources.requires(SubsystemName::Platform) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?
+            .as_secs();
+        let now = i64::try_from(now)
+            .map_err(|_| RuntimeError::Platform("current time exceeds i64 seconds".to_owned()))?;
+        let authorization = config.resolve_authorization()?;
+        let trust = match crate::platform::auth::context::trust::VerifiedTrustMaterial::load(
+            authorization,
+            now,
+        ) {
+            Ok(trust) => {
+                report.push(
+                    "trust.files",
+                    RuntimeCheckStatus::Ok,
+                    "configured trust chain is valid",
+                );
+                trust
+            }
+            Err(error) => {
+                let detail = error.to_string();
+                let status = if detail.contains("expired") {
+                    RuntimeCheckStatus::Expired
+                } else {
+                    RuntimeCheckStatus::Error
+                };
+                report.push("trust.files", status, detail);
+                return Ok(report);
+            }
+        };
+        let sqlite_floor = if stores.platform()?.exists() {
+            let auth_store = crate::platform::auth::SqliteAuthorizationStore::open_read_only(
+                stores.platform()?,
+            )?;
+            crate::platform::auth::context::AuthorizationContextRepository::get_trust_state(
+                &auth_store,
+            )
+            .await
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?
+        } else {
+            None
+        };
+        match crate::platform::auth::NatsAuthEphemeralRepository::check(trellis_nats.clone()).await
+        {
+            Ok(()) => report.push(
+                "nats.auth_kv",
+                RuntimeCheckStatus::Ok,
+                "all required auth KV buckets exist with compatible limits",
+            ),
+            Err(error) => {
+                let detail = error.to_string();
+                let status = if detail.contains("missing") {
+                    RuntimeCheckStatus::Missing
+                } else {
+                    RuntimeCheckStatus::Incompatible
+                };
+                report.push("nats.auth_kv", status, detail);
+            }
+        }
+        match crate::platform::auth::context::AuthorizationContextRegistry::check(
+            trellis_nats.clone(),
+            authorization,
+            &trust,
+            sqlite_floor.as_ref(),
+        )
+        .await
+        {
+            Ok(()) => report.push(
+                "trust.registry",
+                RuntimeCheckStatus::Ok,
+                "SQLite floor, immutable history, and current pointer are monotonic",
+            ),
+            Err(error) => {
+                let detail = error.to_string();
+                let status = if detail.contains("does not exist") || detail.contains("not found") {
+                    RuntimeCheckStatus::Missing
+                } else if detail.contains("rollback") {
+                    RuntimeCheckStatus::Rollback
+                } else {
+                    RuntimeCheckStatus::Incompatible
+                };
+                report.push("trust.registry", status, detail);
+            }
+        }
+        for (name, credentials) in [
+            ("nats.auth", &nats.auth_creds_path),
+            ("nats.system", &nats.system_creds_path),
+        ] {
+            match check_nats_connection(&nats.servers, credentials).await {
+                Ok(client) => {
+                    let _ = client.drain().await;
+                    report.push(
+                        name,
+                        RuntimeCheckStatus::Ok,
+                        "connection and flush succeeded",
+                    );
+                }
+                Err(error) => report.push(name, RuntimeCheckStatus::Error, error.to_string()),
+            }
+        }
+    }
+    trellis_nats
+        .drain()
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    Ok(report)
+}
+
+async fn check_nats_connection(
+    servers: &str,
+    credentials: &std::path::Path,
+) -> Result<async_nats::Client, RuntimeError> {
+    let options = async_nats::ConnectOptions::new()
+        .credentials_file(credentials)
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    let client = tokio::time::timeout(Duration::from_secs(10), options.connect(servers))
+        .await
+        .map_err(|_| RuntimeError::Nats("connection timed out".to_owned()))?
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    client
+        .flush()
+        .await
+        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+    Ok(client)
 }
 
 /// Error returned while starting or running the Trellis runtime.
@@ -331,6 +644,9 @@ async fn run_owned(
     trellis_nats: async_nats::Client,
     ownership: &mut RuntimeOwnership,
 ) -> Result<(), RuntimeError> {
+    ExpectedRuntimeResources::for_mode(mode, &config)
+        .converge_streams(trellis_nats.clone())
+        .await?;
     let stores = RuntimeStores::from_config(&config, mode)?;
     stores.migrate_all()?;
     let context = RuntimeContext {

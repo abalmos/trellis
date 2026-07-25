@@ -6,6 +6,7 @@
 //! small local wrappers.
 
 mod auth;
+mod authorization_context;
 #[expect(
     clippy::module_inception,
     reason = "the public client module keeps its core implementation in client.rs"
@@ -21,6 +22,12 @@ mod subject;
 mod transfer;
 
 pub use auth::SessionAuth;
+pub use authorization_context::{
+    AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
+    AuthorizationContextCache, AuthorizationContextStore, AuthorizationRoutingMaterial,
+    AuthorizationSessionBinding, AuthorizationTrustBundle, AuthorizationTrustPolicy,
+    FileAuthorizationContextStore, MemoryAuthorizationContextStore,
+};
 pub(crate) use client::ServiceConnectWithContractOptions;
 pub(crate) use client::TrellisClient;
 pub use client::{

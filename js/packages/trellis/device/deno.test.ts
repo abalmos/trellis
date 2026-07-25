@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 
+import { testAuthorizationContext } from "../auth/test_context.ts";
 import { defineDeviceContract } from "../contract.ts";
 import { checkDeviceActivation } from "./deno.ts";
 
@@ -62,18 +63,25 @@ Deno.test("checkDeviceActivation reports an already active device", async () => 
   const originalFetch = globalThis.fetch;
   try {
     globalThis.fetch = (() =>
-      Promise.resolve(Response.json({
-        state: "ready",
-        serverNow: Date.now(),
-        session: {
-          sessionId: "session_123",
-          inboxPrefix: "_INBOX.session_123",
-        },
-        authorization: {
-          participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
-        },
-        nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
-      }))) as typeof fetch;
+      Promise.resolve(
+        Response.json({
+          state: "ready",
+          authorizationContext: testAuthorizationContext(),
+          serverNow: Date.now(),
+          session: {
+            sessionId: "session_123",
+            inboxPrefix: "_INBOX.session_123",
+          },
+          authorization: {
+            participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
+          },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
+        }),
+      )) as typeof fetch;
 
     assertEquals(
       await checkDeviceActivation({

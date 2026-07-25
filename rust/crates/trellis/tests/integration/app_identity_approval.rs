@@ -1630,12 +1630,6 @@ async fn auth_session_revoke_cleans_runtime_connection_presence() {
 
 #[tokio::test]
 async fn auth_sessions_revoke_cascades_app_grants() {
-    assert_case_registered(
-        "auth.sessions-revoke-cascades-app-grants",
-        "auth",
-        "app_identity_approval",
-    );
-
     let mut fixture = setup_app_identity_environment().await;
     let client_contract = auth_local_login_client_contract()
         .expect("build auth sessions revoke cascade client contract");
@@ -2342,12 +2336,6 @@ async fn auth_users_identities_admin_surfaces_page_and_scope() {
 
 #[tokio::test]
 async fn auth_sessions_revoke_cascades_agent_grants() {
-    assert_case_registered(
-        "auth.sessions-revoke-cascades-agent-grants",
-        "auth",
-        "app_identity_approval",
-    );
-
     let mut fixture = setup_app_identity_environment().await;
     let agent_contract = auth_local_login_agent_contract()
         .expect("build auth sessions revoke agent cascade contract");

@@ -50,6 +50,9 @@ Rules:
 - resolved service resource bindings are runtime internals; service authors use
   the handles returned by `TrellisService.connect(...)` rather than fetching,
   constructing, or passing binding payloads themselves
+- operation and service-private job traffic inherits the connected principal's
+  context-derived transport permissions; operation declarations and job subject
+  names never create grants or widen those permissions
 
 ### Directory structure
 

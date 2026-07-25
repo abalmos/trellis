@@ -325,6 +325,7 @@ export function createJobsFixture(caseId: string) {
       contract: serviceContract,
     });
     return await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,

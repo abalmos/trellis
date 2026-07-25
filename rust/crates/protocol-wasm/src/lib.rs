@@ -5,7 +5,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    session_proof_request_digest_v1, session_proof_signing_digest_v1, verify_session_proof_v1,
+    authorization_context_refresh_at_v1, parse_authorization_context_token_v1,
+    parse_issuer_certificate_v1, parse_issuer_manifest_v1, session_proof_request_digest_v1,
+    session_proof_signing_digest_v1, verify_authorization_context_v1, verify_issuer_manifest_v1,
+    verify_session_proof_v1, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
     ProtocolError, SessionProofInputV1, SessionProofPolicyV1, SessionProofV1,
 };
 use wasm_bindgen::prelude::*;
@@ -86,6 +89,29 @@ enum WireSessionProofInputV1 {
         session_id: String,
         session_key_id: String,
         request_digest: String,
+    },
+    AuthorizationContextRefresh {
+        request_id: String,
+        issued_at: i64,
+        session_id: String,
+        session_key_id: String,
+        current_context_digest: RequiredNullable<String>,
+        expected_participant_digest: RequiredNullable<String>,
+        expected_needs_digest: RequiredNullable<String>,
+        known_root_key_id: String,
+        minimum_manifest_generation: i64,
+        request_digest: String,
+    },
+    NatsConnectContext {
+        request_id: String,
+        issued_at: i64,
+        session_id: String,
+        session_key_id: String,
+        session_public_key: String,
+        session_nkey: String,
+        participant_digest: String,
+        context_digest: String,
+        nonce: String,
     },
 }
 
@@ -214,6 +240,50 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 session_key_id,
                 request_digest,
             ),
+            WireSessionProofInputV1::AuthorizationContextRefresh {
+                request_id,
+                issued_at,
+                session_id,
+                session_key_id,
+                current_context_digest,
+                expected_participant_digest,
+                expected_needs_digest,
+                known_root_key_id,
+                minimum_manifest_generation,
+                request_digest,
+            } => Self::authorization_context_refresh(
+                request_id,
+                issued_at,
+                session_id,
+                session_key_id,
+                current_context_digest.0,
+                expected_participant_digest.0,
+                expected_needs_digest.0,
+                known_root_key_id,
+                minimum_manifest_generation,
+                request_digest,
+            ),
+            WireSessionProofInputV1::NatsConnectContext {
+                request_id,
+                issued_at,
+                session_id,
+                session_key_id,
+                session_public_key,
+                session_nkey,
+                participant_digest,
+                context_digest,
+                nonce,
+            } => Self::nats_connect_context(
+                request_id,
+                issued_at,
+                session_id,
+                session_key_id,
+                session_public_key,
+                session_nkey,
+                participant_digest,
+                context_digest,
+                nonce,
+            ),
         }
     }
 }
@@ -286,6 +356,101 @@ pub fn verify_session_proof(
     .map_err(|error| JsError::new(&error.to_string()))
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireAuthorizationVerificationPolicyV1 {
+    now_unix_seconds: f64,
+    allowed_clock_skew_seconds: u32,
+    maximum_context_lifetime_seconds: u32,
+    maximum_context_bytes: usize,
+    maximum_permissions: usize,
+    maximum_capabilities: usize,
+    minimum_manifest_generation: f64,
+    refresh_lead_seconds: u32,
+    refresh_jitter_seconds: u32,
+}
+
+fn authorization_verification_policy(
+    policy_json: &str,
+) -> Result<
+    (
+        WireAuthorizationVerificationPolicyV1,
+        AuthorizationVerificationPolicyV1,
+    ),
+    JsError,
+> {
+    let wire: WireAuthorizationVerificationPolicyV1 =
+        serde_json::from_str(policy_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let policy = AuthorizationVerificationPolicyV1::new(
+        safe_integer(wire.now_unix_seconds, "nowUnixSeconds")?,
+        wire.allowed_clock_skew_seconds,
+        wire.maximum_context_lifetime_seconds,
+        wire.maximum_context_bytes,
+        wire.maximum_permissions,
+        wire.maximum_capabilities,
+        u64::try_from(safe_integer(
+            wire.minimum_manifest_generation,
+            "minimumManifestGeneration",
+        )?)
+        .map_err(|_| JsError::new("minimumManifestGeneration must be positive"))?,
+    )
+    .map_err(|error| JsError::new(&error.to_string()))?;
+    Ok((wire, policy))
+}
+
+/// Verify a complete authorization token and trust chain, returning its compact projection.
+#[wasm_bindgen]
+pub fn verify_authorization_context_token(
+    root_json: &str,
+    manifest_json: &str,
+    certificate_json: &str,
+    context_token: &str,
+    policy_json: &str,
+) -> Result<String, JsError> {
+    let (wire_policy, policy) = authorization_verification_policy(policy_json)?;
+    let root_value: Value =
+        serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let root = AuthorizationTrustRootV1::parse(&root_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest_value: Value =
+        serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest = parse_issuer_manifest_v1(&manifest_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let certificate_value: Value =
+        serde_json::from_str(certificate_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let certificate = parse_issuer_certificate_v1(&certificate_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let context = parse_authorization_context_token_v1(context_token, &policy)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let verified =
+        verify_authorization_context_v1(&root, &verified_manifest, &certificate, &context, &policy)
+            .map_err(|error| JsError::new(&error.to_string()))?;
+    let context_digest = verified.context_digest();
+    let signed = verified.signed_context();
+    let refresh_at = authorization_context_refresh_at_v1(
+        context_digest,
+        signed.unsigned.issued_at,
+        signed.unsigned.not_before,
+        signed.unsigned.expires_at,
+        wire_policy.refresh_lead_seconds,
+        wire_policy.refresh_jitter_seconds,
+    )
+    .map_err(|error| JsError::new(&error.to_string()))?;
+    serde_json::to_string(&json!({
+        "authority": root.authority(),
+        "rootKeyId": root.key_id(),
+        "rootDigest": root.digest().map_err(|error| JsError::new(&error.to_string()))?,
+        "manifestDigest": verified_manifest.digest().map_err(|error| JsError::new(&error.to_string()))?,
+        "contextDigest": context_digest,
+        "context": signed,
+        "manifestGeneration": verified_manifest.generation(),
+        "refreshAt": refresh_at,
+    }))
+    .map_err(|error| JsError::new(&error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,16 +511,39 @@ mod tests {
                 "nonce",
             ],
             "sessionSelfControl" => &["sessionId", "sessionKeyId"],
+            "authorizationContextRefresh" => &[
+                "sessionId",
+                "sessionKeyId",
+                "currentContextDigest",
+                "expectedParticipantDigest",
+                "expectedNeedsDigest",
+                "knownRootKeyId",
+                "minimumManifestGeneration",
+            ],
+            "natsConnectContext" => &[
+                "sessionId",
+                "sessionKeyId",
+                "sessionNkey",
+                "participantDigest",
+                "contextDigest",
+                "nonce",
+            ],
             purpose => panic!("unknown vector purpose {purpose}"),
         };
         for name in fields {
             input.insert((*name).to_owned(), value[*name].clone());
         }
-        if matches!(field(case, "purpose"), "clientBootstrap" | "natsConnect") {
+        if matches!(
+            field(case, "purpose"),
+            "clientBootstrap" | "natsConnect" | "natsConnectContext"
+        ) {
             input.insert(
                 "sessionPublicKey".to_owned(),
                 fixture["identityPublicKey"].clone(),
             );
+        }
+        if field(case, "purpose") == "authorizationContextRefresh" {
+            input.insert("sessionKeyId".to_owned(), fixture["identityKeyId"].clone());
         }
         if !case["requestDigest"].is_null() {
             input.insert("requestDigest".to_owned(), case["requestDigest"].clone());

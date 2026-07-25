@@ -26,6 +26,9 @@ use super::companion_repository::{
     PortalRouteMutation, PortalRouteRemoval, ProvisionedInstanceMutation,
     ServiceIdentityProvisioning, SessionCreation, SessionRevocation, UserAccountMutation,
 };
+use super::context::{
+    revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
+};
 use super::materializer::{materialize_authority, transition_for_change};
 use super::repository::{
     deployment_enforceability_equal, identity_enforceability_equal,
@@ -64,13 +67,19 @@ use crate::storage::{SqliteStore, StoreError};
 /// Owner-scoped SQLite implementation of every authorization repository port.
 #[derive(Clone, Debug)]
 pub struct SqliteAuthorizationStore {
-    connection: Arc<Mutex<Connection>>,
+    pub(super) connection: Arc<Mutex<Connection>>,
 }
 
 impl SqliteAuthorizationStore {
     pub(crate) fn open(store: &SqliteStore) -> Result<Self, StoreError> {
         Ok(Self {
             connection: Arc::new(Mutex::new(store.open()?)),
+        })
+    }
+
+    pub(crate) fn open_read_only(store: &SqliteStore) -> Result<Self, StoreError> {
+        Ok(Self {
+            connection: Arc::new(Mutex::new(store.open_read_only()?)),
         })
     }
 
@@ -103,7 +112,7 @@ impl SqliteAuthorizationStore {
         })
     }
 
-    async fn run<T, F>(&self, operation: F) -> Result<T, AuthorizationStateError>
+    pub(super) async fn run<T, F>(&self, operation: F) -> Result<T, AuthorizationStateError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, AuthorizationStateError> + Send + 'static,
@@ -129,6 +138,10 @@ fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationState
         (
             "auth_user_profiles",
             include_str!("../../storage/sqlite/platform/V1002__auth_service_cutover.sql"),
+        ),
+        (
+            "auth_authorization_contexts",
+            include_str!("../../storage/sqlite/platform/V1003__authorization_context_runtime.sql"),
         ),
     ] {
         let migrated = connection
@@ -197,7 +210,8 @@ impl PrincipalRepository for SqliteAuthorizationStore {
         super::domain::require_protocol_timestamp("changedAt", change.changed_at)?;
         let id = id.to_owned();
         self.run(move |connection| {
-            let current = load_principal(connection, &id)?
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let current = load_principal(&transaction, &id)?
                 .ok_or(AuthorizationStateError::PrincipalMissing)?;
             if current.version != expected_version {
                 return Err(AuthorizationStateError::StorageConflict);
@@ -214,7 +228,7 @@ impl PrincipalRepository for SqliteAuthorizationStore {
             let disabled_at =
                 (change.state == PrincipalState::Disabled).then_some(change.changed_at);
             let revoked_at = (change.state == PrincipalState::Revoked).then_some(change.changed_at);
-            let changed = connection
+            let changed = transaction
                 .execute(
                     "UPDATE auth_principals SET
                         state = ?1, updated_at = ?2, version = ?3,
@@ -234,7 +248,18 @@ impl PrincipalRepository for SqliteAuthorizationStore {
             if changed != 1 {
                 return Err(AuthorizationStateError::StorageConflict);
             }
-            load_principal(connection, &id)?.ok_or(AuthorizationStateError::PrincipalMissing)
+            if change.state != PrincipalState::Active {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Principal(id.clone()),
+                    AuthorizationContextRevocationReason::PrincipalChanged,
+                    change.changed_at.div_euclid(1_000),
+                )?;
+            }
+            let result = load_principal(&transaction, &id)?
+                .ok_or(AuthorizationStateError::PrincipalMissing)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(result)
         })
         .await
     }
@@ -625,6 +650,34 @@ impl AccountRepository for SqliteAuthorizationStore {
                     ],
                 )
                 .map_err(map_write_error)?;
+            let mut statement = transaction
+                .prepare(
+                    "SELECT session_id FROM auth_sessions
+                     WHERE principal_id = ?1 AND session_id <> ?2 AND state = 'revoked'
+                       AND revoked_at = ?3",
+                )
+                .map_err(sql_error)?;
+            let revoked_sessions = statement
+                .query_map(
+                    params![
+                        command.principal_id,
+                        command.current_session_id,
+                        command.changed_at
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(sql_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(sql_error)?;
+            drop(statement);
+            for session_id in revoked_sessions {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Session(session_id),
+                    AuthorizationContextRevocationReason::CredentialChanged,
+                    command.changed_at.div_euclid(1_000),
+                )?;
+            }
             command.idempotency.result = json!({
                 "changedAt": command.changed_at,
                 "revokedSessionCount": revoked,
@@ -908,6 +961,20 @@ impl DeploymentProfileRepository for SqliteAuthorizationStore {
                 )
                 .map_err(map_write_error)?;
             upsert_deployment_profile_evidence(&transaction, &command.profile)?;
+            if current.participant_id != command.profile.participant_id
+                || current.requires_device_delegation != command.profile.requires_device_delegation
+                || current.expires_at != command.profile.expires_at
+                || current.state != command.profile.state
+            {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Deployment(
+                        command.profile.deployment_id.clone(),
+                    ),
+                    AuthorizationContextRevocationReason::DeploymentChanged,
+                    command.profile.updated_at.div_euclid(1_000),
+                )?;
+            }
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
@@ -1160,6 +1227,12 @@ impl AccountFlowRepository for SqliteAuthorizationStore {
                  WHERE principal_id = ?2 AND state = 'active'",
                 params![command.consumed_at, principal_id],
             ).map_err(map_write_error)?;
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Principal(principal_id.clone()),
+                AuthorizationContextRevocationReason::CredentialChanged,
+                command.consumed_at.div_euclid(1_000),
+            )?;
             let completed = consume_sql_flow(&transaction, &flow, command.consumed_at)?;
             insert_sql_idempotency_and_actions(&transaction, &command.idempotency, &command.actions)?;
             transaction.commit().map_err(sql_error)?;
@@ -1482,6 +1555,17 @@ impl AuthorityProposalRepository for SqliteAuthorizationStore {
             ).map_err(map_write_error)?;
             if changed != 1 { return Err(AuthorizationStateError::StorageConflict); }
             let result = load_authority_proposal(&transaction, &command.proposal_id)?.map(|value| value.0).ok_or(AuthorizationStateError::StorageConflict)?;
+            if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Authority(
+                        current.authority_kind,
+                        current.authority_id.clone(),
+                    ),
+                    AuthorizationContextRevocationReason::AuthorityChanged,
+                    command.decision.decided_at.div_euclid(1_000),
+                )?;
+            }
             insert_sql_idempotency_and_actions(&transaction, &command.idempotency, &command.actions)?;
             transaction.commit().map_err(sql_error)?;
             Ok(IdempotentOutcome::Applied(result))
@@ -1881,6 +1965,12 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                     )
                     .map_err(map_write_error)?;
             }
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Instance(command.instance.instance_id.clone()),
+                AuthorizationContextRevocationReason::InstanceChanged,
+                command.instance.updated_at.div_euclid(1_000),
+            )?;
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
@@ -1952,6 +2042,19 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                     ],
                 )
                 .map_err(map_write_error)?;
+            let reason = if current_delegation.state != command.delegation.state
+                || current_delegation.expires_at != command.delegation.expires_at
+            {
+                AuthorizationContextRevocationReason::DelegationChanged
+            } else {
+                AuthorizationContextRevocationReason::DeviceChanged
+            };
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Principal(command.device.principal_id.clone()),
+                reason,
+                command.device.updated_at.div_euclid(1_000),
+            )?;
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
@@ -2296,6 +2399,12 @@ impl AuthSessionRepository for SqliteAuthorizationStore {
             }
             let result = load_session(&transaction, &command.session_id)?
                 .ok_or(AuthorizationStateError::SessionMissing)?;
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Session(command.session_id.clone()),
+                AuthorizationContextRevocationReason::SessionRevoked,
+                command.revoked_at.div_euclid(1_000),
+            )?;
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
@@ -2437,10 +2546,11 @@ impl SessionRepository for SqliteAuthorizationStore {
         super::domain::require_protocol_timestamp("expiredAt", expired_at)?;
         let id = id.to_owned();
         self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
             let next = expected_version.checked_add(1).ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("session version overflow".to_owned())
             })?;
-            let changed = connection
+            let changed = transaction
                 .execute(
                     "UPDATE auth_sessions
                      SET state = 'expired', version = ?1
@@ -2457,7 +2567,16 @@ impl SessionRepository for SqliteAuthorizationStore {
             if changed != 1 {
                 return Err(AuthorizationStateError::StorageConflict);
             }
-            load_session(connection, &id)?.ok_or(AuthorizationStateError::SessionMissing)
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Session(id.clone()),
+                AuthorizationContextRevocationReason::SessionExpired,
+                expired_at.div_euclid(1_000),
+            )?;
+            let result =
+                load_session(&transaction, &id)?.ok_or(AuthorizationStateError::SessionMissing)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(result)
         })
         .await
     }
@@ -2467,8 +2586,10 @@ impl SessionRepository for SqliteAuthorizationStore {
         id: &str,
         expected_version: u64,
         participant: &ParticipantBindingRecord,
+        changed_at: i64,
     ) -> Result<SessionRecord, AuthorizationStateError> {
         participant.resolve()?;
+        super::domain::require_protocol_timestamp("changedAt", changed_at)?;
         let principal_kind = self
             .get_session(id)
             .await?
@@ -2481,10 +2602,11 @@ impl SessionRepository for SqliteAuthorizationStore {
         let id = id.to_owned();
         let participant = participant.clone();
         self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
             let next = expected_version.checked_add(1).ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("session version overflow".to_owned())
             })?;
-            let changed = connection
+            let changed = transaction
                 .execute(
                     "UPDATE auth_sessions SET
                         participant_id = ?1, participant_kind = ?2,
@@ -2505,7 +2627,16 @@ impl SessionRepository for SqliteAuthorizationStore {
             if changed != 1 {
                 return Err(AuthorizationStateError::StorageConflict);
             }
-            load_session(connection, &id)?.ok_or(AuthorizationStateError::SessionMissing)
+            revoke_sql_contexts(
+                &transaction,
+                &AuthorizationContextSelector::Session(id.clone()),
+                AuthorizationContextRevocationReason::SessionRebound,
+                changed_at.div_euclid(1_000),
+            )?;
+            let result =
+                load_session(&transaction, &id)?.ok_or(AuthorizationStateError::SessionMissing)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(result)
         })
         .await
     }
@@ -2580,7 +2711,28 @@ impl IdentityAuthorityRepository for SqliteAuthorizationStore {
     ) -> Result<IdentityAuthorityRecord, AuthorizationStateError> {
         validate_identity_authority(&mut record)?;
         self.run(move |connection| {
-            put_identity_authority(connection, &mut record, expected_version)?;
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let previous = load_identity_authority(
+                &transaction,
+                &record.principal_id,
+                &record.participant_id,
+            )?;
+            put_identity_authority(&transaction, &mut record, expected_version)?;
+            if previous
+                .as_ref()
+                .is_some_and(|value| !identity_enforceability_equal(value, &record))
+            {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Authority(
+                        AuthorityKind::Identity,
+                        record.authority_id.clone(),
+                    ),
+                    AuthorizationContextRevocationReason::AuthorityChanged,
+                    record.updated_at.div_euclid(1_000),
+                )?;
+            }
+            transaction.commit().map_err(sql_error)?;
             Ok(record)
         })
         .await
@@ -2634,7 +2786,28 @@ impl DeploymentAuthorityRepository for SqliteAuthorizationStore {
     ) -> Result<DeploymentAuthorityRecord, AuthorizationStateError> {
         validate_deployment_authority(&mut record)?;
         self.run(move |connection| {
-            put_deployment_authority(connection, &mut record, expected_version)?;
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let previous = load_deployment_authority(
+                &transaction,
+                &record.deployment_id,
+                &record.participant_id,
+            )?;
+            put_deployment_authority(&transaction, &mut record, expected_version)?;
+            if previous
+                .as_ref()
+                .is_some_and(|value| !deployment_enforceability_equal(value, &record))
+            {
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Authority(
+                        AuthorityKind::Deployment,
+                        record.authority_id.clone(),
+                    ),
+                    AuthorizationContextRevocationReason::AuthorityChanged,
+                    record.updated_at.div_euclid(1_000),
+                )?;
+            }
+            transaction.commit().map_err(sql_error)?;
             Ok(record)
         })
         .await
@@ -3121,6 +3294,15 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
                         ],
                     )
                     .map_err(map_write_error)?;
+                revoke_sql_contexts(
+                    &transaction,
+                    &AuthorizationContextSelector::Authority(
+                        target.kind,
+                        target.authority_id.clone(),
+                    ),
+                    AuthorizationContextRevocationReason::MaterializationChanged,
+                    now.div_euclid(1_000),
+                )?;
             }
             transaction.commit().map_err(sql_error)?;
             Ok(AuthorityReconciliationOutcome {
@@ -3680,7 +3862,7 @@ fn sqlite_materialization_snapshot(
     })
 }
 
-fn sqlite_issuance_snapshot(
+pub(super) fn sqlite_issuance_snapshot(
     connection: &Connection,
     session_id: &str,
 ) -> Result<IssuanceSnapshot, AuthorizationStateError> {
@@ -4069,7 +4251,7 @@ fn insert_account_flow(
     Ok(())
 }
 
-fn sqlite_idempotency_replay(
+pub(super) fn sqlite_idempotency_replay(
     connection: &Connection,
     input: &IdempotencyResultRecord,
 ) -> Result<Option<serde_json::Value>, AuthorizationStateError> {
@@ -4098,7 +4280,7 @@ fn sqlite_idempotency_replay(
     Ok(None)
 }
 
-fn insert_sql_idempotency_and_actions(
+pub(super) fn insert_sql_idempotency_and_actions(
     connection: &Connection,
     idempotency: &IdempotencyResultRecord,
     actions: &[PostCommitActionRecord],

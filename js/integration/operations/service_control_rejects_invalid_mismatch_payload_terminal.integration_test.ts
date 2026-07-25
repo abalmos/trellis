@@ -26,6 +26,7 @@ liveTrellisTest({
       contract: fixture.serviceContract,
     });
     const service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: fixture.serviceContract,
       name: fixture.serviceName,
@@ -96,6 +97,7 @@ liveTrellisTest({
       assertInstanceOf(wrongRemoteOperation.error, OperationMismatchError);
 
       otherService = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: fixture.serviceContract,
         name: fixture.otherServiceName,

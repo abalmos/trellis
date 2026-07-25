@@ -22,6 +22,7 @@ async function emptyDir(path: string): Promise<void> {
 const sourceFiles = [
   "src/index.ts",
   "src/context.svelte.ts",
+  "src/authorization_context.svelte.ts",
   "src/portal_flow.svelte.ts",
   "src/device_activation.svelte.ts",
   "src/device_activation_controller.ts",

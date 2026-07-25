@@ -537,6 +537,14 @@ Keepalive rules:
 
 Operations eliminate the need for a global end-user jobs-read capability.
 
+The context-bound NATS credential remains the outer transport boundary: its
+publish/subscribe subjects are compiled from current accepted grants and
+resource evidence, never inferred from operation or job subject strings. The
+operation checks below are an additional owning-service decision and cannot
+expand transport authority. Service-private jobs used to implement an operation
+run under the service principal's independently derived context authority; a
+caller's operation authority never grants direct jobs access.
+
 Authorization rules:
 
 - invocation is gated by authentication plus the operation's declared

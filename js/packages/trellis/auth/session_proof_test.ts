@@ -96,7 +96,7 @@ function vectorInput(
         ...common,
         purpose: vector.purpose,
         sessionId: field(value, "sessionId"),
-        sessionKeyId: field(value, "sessionKeyId"),
+        sessionKeyId: fixture.identityKeyId,
         sessionPublicKey: fixture.identityPublicKey,
         sessionNkey: field(value, "sessionNkey"),
         expectedParticipantDigest: optional(value, "expectedParticipantDigest"),
@@ -148,6 +148,31 @@ function vectorInput(
         sessionId: field(value, "sessionId"),
         sessionKeyId: field(value, "sessionKeyId"),
         requestDigest: vector.requestDigest ?? "",
+      };
+    case "authorizationContextRefresh":
+      return {
+        ...common,
+        purpose: vector.purpose,
+        sessionId: field(value, "sessionId"),
+        sessionKeyId: fixture.identityKeyId,
+        currentContextDigest: optional(value, "currentContextDigest"),
+        expectedParticipantDigest: optional(value, "expectedParticipantDigest"),
+        expectedNeedsDigest: optional(value, "expectedNeedsDigest"),
+        knownRootKeyId: field(value, "knownRootKeyId"),
+        minimumManifestGeneration: value.minimumManifestGeneration as number,
+        requestDigest: vector.requestDigest ?? "",
+      };
+    case "natsConnectContext":
+      return {
+        ...common,
+        purpose: vector.purpose,
+        sessionId: field(value, "sessionId"),
+        sessionKeyId: field(value, "sessionKeyId"),
+        sessionPublicKey: fixture.identityPublicKey,
+        sessionNkey: field(value, "sessionNkey"),
+        participantDigest: field(value, "participantDigest"),
+        contextDigest: field(value, "contextDigest"),
+        nonce: field(value, "nonce"),
       };
   }
 }

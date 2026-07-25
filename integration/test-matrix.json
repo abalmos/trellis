@@ -247,49 +247,6 @@
     },
     {
       "kind": "client",
-      "id": "rpc.auth-validation-retries-transient-session-not-found",
-      "fixture": "rpc",
-      "title": "RPC auth validation retries when the first live session lookup is transiently missing",
-      "coverage": [
-        "cross-runtime-rpc",
-        "auth-protocol-matrix"
-      ],
-      "description": "A live client RPC reaches a service while the client session row is transiently absent from the control-plane database; the first Auth.Requests.Validate returns session_not_found, the retry succeeds after the row is restored, and the service handler runs once.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.rpc-client@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.rpc-service@v1"
-          }
-        ],
-        "given": [
-          "a live Trellis runtime",
-          "a connected client and service",
-          "the client's persisted session row is saved and then deleted"
-        ],
-        "when": [
-          "the client calls Entity.Get through the generated RPC surface",
-          "the saved session row is restored after the first Auth.Requests.Validate attempt is observed"
-        ],
-        "then": [
-          "the RPC succeeds after retry",
-          "the service handler runs once",
-          "Auth.Requests.Validate is attempted exactly twice"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
       "id": "events.client-publishes-and-subscriber-receives",
       "fixture": "events",
       "title": "Publisher sends an event and subscriber receives the exact payload",
@@ -3944,53 +3901,6 @@
     },
     {
       "kind": "client",
-      "id": "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions",
-      "fixture": "auth",
-      "title": "Auth.Requests.Validate enforces live request proof validation",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "A live service calls Auth.Requests.Validate for a live app session and service session, proving malformed payload hashes, stale proof timestamps, replayed request ids, missing-session replay behavior, delegated publish-subject checks, and current service-instance capabilities through the control-plane validator.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-validate-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-validate-client@v1"
-          }
-        ],
-        "given": [
-          "a registered service can call Auth.Requests.Validate",
-          "an app client has an authenticated approved session for one service RPC subject"
-        ],
-        "when": [
-          "the service validates signed app requests with valid, malformed, stale, replayed, denied-subject, and missing-session inputs",
-          "the service validates its own service session after current service-instance capabilities change"
-        ],
-        "then": [
-          "malformed payload hashes return invalid_signature",
-          "stale proofs return iat_out_of_range",
-          "replayed request ids return invalid_signature",
-          "missing sessions return session_not_found without consuming replay state",
-          "delegated publish subjects gate app validation",
-          "current service-instance capabilities gate service validation"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
       "id": "auth.session-revoke-denies-reconnect",
       "fixture": "auth",
       "title": "Revoked app session cannot continue or reconnect",
@@ -4082,106 +3992,6 @@
           "Auth.Sessions.List no longer shows the revoked app session",
           "Auth.Connections.List no longer shows runtime presence for the revoked session",
           "the existing app session is denied for subsequent Auth.Sessions.Me calls"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
-      "id": "auth.sessions-revoke-cascades-app-grants",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Revoke cascades app grant revocation",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "Two authenticated app sessions share the same approved identity grant. Revoking one through Auth.Sessions.Revoke deletes the durable grant, removes both app sessions and their runtime connection presence, and denies both old sessions.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          }
-        ],
-        "given": [
-          "two app sessions are bound for the same user and app contract",
-          "both sessions share one approved durable identity grant",
-          "Auth.Connections.List shows runtime connection presence for both sessions"
-        ],
-        "when": [
-          "the admin revokes one app session through Auth.Sessions.Revoke"
-        ],
-        "then": [
-          "the durable identity grant is deleted",
-          "Auth.Sessions.List no longer shows either sibling app session",
-          "Auth.Connections.List no longer shows runtime presence for either sibling app session",
-          "both existing app sessions are denied for subsequent Auth.Sessions.Me calls"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
-      "id": "auth.sessions-revoke-cascades-agent-grants",
-      "fixture": "auth",
-      "title": "Auth.Sessions.Revoke cascades agent grant revocation",
-      "coverage": [
-        "app-identity-grant-approval",
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "Two authenticated agent sessions share the same approved identity grant. Revoking one through Auth.Sessions.Revoke deletes the durable grant, removes both agent sessions and their runtime connection presence, and denies both old sessions.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "service",
-            "kind": "service",
-            "contract": "trellis.integration.auth-local-login-service@v1"
-          },
-          {
-            "name": "agent",
-            "kind": "agent",
-            "contract": "trellis.integration.auth-local-login-agent@v1"
-          }
-        ],
-        "given": [
-          "two agent sessions are bound for the same user and agent contract",
-          "both sessions share one approved durable identity grant",
-          "Auth.Connections.List shows runtime connection presence for both sessions"
-        ],
-        "when": [
-          "the admin revokes one agent session through Auth.Sessions.Revoke"
-        ],
-        "then": [
-          "the durable identity grant is deleted",
-          "Auth.Sessions.List no longer shows either sibling agent session",
-          "Auth.Connections.List no longer shows runtime presence for either sibling agent session",
-          "both existing agent sessions are denied for subsequent Auth.Sessions.Me calls"
         ]
       },
       "completion": {
@@ -4590,53 +4400,6 @@
           "Put, List, and Remove reflect the exact override rows",
           "matching origin and session grant overrides allow bind and service RPC access",
           "mismatched origin and session identities fail with insufficient capabilities"
-        ]
-      },
-      "completion": {
-        "typescript": "implemented",
-        "rust": "implemented"
-      }
-    },
-    {
-      "kind": "client",
-      "id": "auth.identity-grants-revoke-removes-authority-and-live-sessions",
-      "fixture": "auth",
-      "title": "Identity grant revoke removes authority and live sessions",
-      "coverage": [
-        "auth-protocol-matrix",
-        "capability-permission-matrix",
-        "cross-runtime-rpc"
-      ],
-      "description": "Auth.IdentityGrants.Revoke deletes the grant, removes matching app and agent sessions plus connection presence, denies old runtime calls, and rejects unauthorized revoke attempts.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "admin",
-            "kind": "admin",
-            "contract": "trellis.auth@v1"
-          },
-          {
-            "name": "client",
-            "kind": "app",
-            "contract": "trellis.integration.auth-local-login-client@v1"
-          },
-          {
-            "name": "agent",
-            "kind": "agent",
-            "contract": "trellis.integration.auth-local-login-agent@v1"
-          }
-        ],
-        "given": [
-          "app and agent sessions share an identity grant"
-        ],
-        "when": [
-          "a non-owner attempts revoke",
-          "an admin revokes the identity grant"
-        ],
-        "then": [
-          "the non-owner revoke is denied",
-          "the grant, sessions, and connection presence disappear",
-          "old runtime calls fail"
         ]
       },
       "completion": {

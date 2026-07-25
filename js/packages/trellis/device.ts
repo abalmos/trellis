@@ -53,6 +53,14 @@ import { TransferError, TransportError } from "./errors/index.ts";
 import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
 import { observeNatsTrellisConnection } from "./connection.ts";
+import {
+  type AuthorizationContextBundle,
+  AuthorizationContextBundleSchema,
+  AuthorizationContextCache,
+  type AuthorizationContextPersistence,
+  MemoryAuthorizationContextStore,
+  startAuthorizationContextRefresh,
+} from "./auth/authorization_context.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   type ContractWithRuntime,
@@ -121,6 +129,7 @@ type DeviceConnectTransport = {
     authenticator?: unknown;
     inboxPrefix?: string;
     maxReconnectAttempts?: number;
+    timeout?: number;
   }): Promise<NatsConnection>;
 };
 
@@ -231,7 +240,7 @@ export type TrellisDeviceConnectArgs<
   rootSecret: Uint8Array | string;
   identity: TrellisDeviceProvisionedIdentity;
   log?: LoggerLike | false;
-};
+} & AuthorizationContextPersistence;
 
 const DeviceBootstrapReadySchema = Type.Object({
   state: Type.Literal("ready"),
@@ -245,8 +254,10 @@ const DeviceBootstrapReadySchema = Type.Object({
   }, { additionalProperties: true }),
   nats: Type.Object({
     jwt: Type.String({ minLength: 1 }),
+    jwtExpiresAt: Type.Integer({ minimum: 1 }),
     servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
   }),
+  authorizationContext: AuthorizationContextBundleSchema,
 });
 
 const DeviceBootstrapActivationRequiredSchema = Type.Object({
@@ -281,7 +292,8 @@ type DeviceBootstrapReady = {
     contractId: string;
     contractDigest: string;
     transports: { websocket: { natsServers: string[] } };
-    transport: { jwt: string; inboxPrefix: string };
+    transport: { jwt: string; jwtExpiresAt: number; inboxPrefix: string };
+    authorizationContext: AuthorizationContextBundle;
   };
   sessionAuth: Awaited<ReturnType<typeof createAuth>>;
 };
@@ -755,12 +767,13 @@ async function fetchDeviceBootstrap(args: {
     }
     if (Value.Check(DeviceBootstrapReadySchema, payload)) {
       const ready = payload as StaticDecode<typeof DeviceBootstrapReadySchema>;
+      args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
+        requestStartedAtMs,
+        responseReceivedAtMs,
+        serverNowSeconds: ready.serverNow / 1_000,
+      });
       sessionAuth.setServerClockOffsetMs(
-        estimateMidpointClockOffsetMs({
-          requestStartedAtMs,
-          responseReceivedAtMs,
-          serverNowSeconds: ready.serverNow / 1_000,
-        }),
+        args.offsetState.serverClockOffsetMs + args.now() - Date.now(),
       );
       return {
         status: "ready",
@@ -774,8 +787,10 @@ async function fetchDeviceBootstrap(args: {
           transports: { websocket: { natsServers: ready.nats.servers } },
           transport: {
             jwt: ready.nats.jwt,
+            jwtExpiresAt: ready.nats.jwtExpiresAt,
             inboxPrefix: ready.session.inboxPrefix,
           },
+          authorizationContext: ready.authorizationContext,
         },
       };
     }
@@ -946,18 +961,52 @@ export async function connectDeviceWithDeps<
   });
 
   const transport = await deps.loadTransport();
+  if (
+    !args.authorizationContextStore &&
+    args.authorizationContextEphemeral !== true
+  ) {
+    throw new Error(
+      "devices require persistent authorization context storage or explicit ephemeral mode",
+    );
+  }
+  const authorizationContexts = new AuthorizationContextCache(
+    args.trellisUrl,
+    `device:${identity.publicIdentityKey}`,
+    args.authorizationContextStore ?? new MemoryAuthorizationContextStore(),
+    (input, init) => globalThis.fetch(input, init),
+    deps.now,
+  );
+  authorizationContexts.setServerClockOffsetMs(
+    offsetState.serverClockOffsetMs,
+  );
+  await authorizationContexts.install(connectInfo.authorizationContext, {
+    bootstrapJwt: connectInfo.transport.jwt,
+    bootstrapJwtExpiresAt: connectInfo.transport.jwtExpiresAt,
+  });
   const sessionOptions = await bootstrap.sessionAuth.natsConnectOptions({
     sessionId: connectInfo.sessionId,
     participantDigest: connectInfo.contractDigest,
-    jwt: connectInfo.transport.jwt,
+    contextDigest: () => authorizationContexts.current().contextDigest,
+    jwt: () => authorizationContexts.routingJwt(),
   });
   let nc: NatsConnection;
   try {
     nc = await transport.connect({
       servers: selectRuntimeTransportServers(connectInfo.transports),
       maxReconnectAttempts: DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
+      timeout: 10_000,
       inboxPrefix: connectInfo.transport.inboxPrefix,
       authenticator: sessionOptions.authenticator,
+    });
+    const stopContextRefresh = startAuthorizationContextRefresh({
+      trellisUrl: args.trellisUrl,
+      sessionId: connectInfo.sessionId,
+      auth: bootstrap.sessionAuth,
+      cache: authorizationContexts,
+      onTerminalFailure: () => nc.drain(),
+    });
+    void nc.closed().finally(() => {
+      stopContextRefresh();
     });
   } catch (cause) {
     throw createTransportError({

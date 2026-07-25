@@ -164,6 +164,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
   const seed = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const auth = await createAuth({ sessionKeySeed: seed });
   const participantDigest = base64urlEncode(await sha256(utf8("participant")));
+  const contextDigest = base64urlEncode(await sha256(utf8("context")));
   const originalNow = Date.now;
 
   try {
@@ -173,6 +174,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
     const options = await auth.natsConnectOptions({
       sessionId: "ses_test",
       participantDigest,
+      contextDigest,
       jwt: "deny-all-jwt",
     });
     const authenticators = Array.isArray(options.authenticator)
@@ -190,6 +192,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
       issuedAt: number;
       sessionId: string;
       participantDigest: string;
+      contextDigest: string;
       proof: { format: "trellis.session-proof.v1"; signature: string };
     };
 
@@ -204,6 +207,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
     assertEquals(firstToken.format, "trellis.nats-connect-token.v1");
     assertEquals(firstToken.sessionId, "ses_test");
     assertEquals(firstToken.participantDigest, participantDigest);
+    assertEquals(firstToken.contextDigest, contextDigest);
     assertEquals(secondToken.issuedAt - firstToken.issuedAt, 31_000);
     assertNotEquals(firstToken.proof.signature, secondToken.proof.signature);
     const sessionKeyId = base64urlEncode(
@@ -211,7 +215,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
     );
     await verifySessionProofV1(
       {
-        purpose: "natsConnect",
+        purpose: "natsConnectContext",
         requestId: firstToken.requestId,
         issuedAt: firstToken.issuedAt,
         sessionId: firstToken.sessionId,
@@ -219,6 +223,7 @@ Deno.test("natsConnectOptions signs nonce-bound reconnect proofs", async () => {
         sessionPublicKey: auth.sessionKey,
         sessionNkey: jwt.nkey,
         participantDigest: firstToken.participantDigest,
+        contextDigest: firstToken.contextDigest,
         nonce: "nonce-a",
       },
       firstToken.proof,
@@ -234,6 +239,7 @@ Deno.test("createAuth applies server clock offsets to current iat and reconnect 
   const seed = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const auth = await createAuth({ sessionKeySeed: seed });
   const participantDigest = base64urlEncode(await sha256(utf8("participant")));
+  const contextDigest = base64urlEncode(await sha256(utf8("context")));
   const originalNow = Date.now;
 
   try {
@@ -245,6 +251,7 @@ Deno.test("createAuth applies server clock offsets to current iat and reconnect 
     const options = await auth.natsConnectOptions({
       sessionId: "ses_test",
       participantDigest,
+      contextDigest,
       jwt: "deny-all-jwt",
     });
     const authenticators = Array.isArray(options.authenticator)

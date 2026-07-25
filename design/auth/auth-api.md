@@ -30,6 +30,7 @@ The Rust platform runtime is the sole owner of:
 - authority proposals, decisions, and reconciliation
 - provisioning and device activation reviews
 - NATS Auth Callout
+- authorization trust distribution, context issuance, refresh, and revocation
 - Auth RPC, operation, and event surfaces
 
 TypeScript owns portal source, generated SDK consumption, session-proof
@@ -54,6 +55,10 @@ Current public routes:
 - `POST /auth/flow/:flowId/approval`
 - `POST /auth/flow/:flowId/bind`
 - `POST /auth/sessions/logout`
+- `POST /auth/context/refresh`
+- `GET /.well-known/trellis/authorization/trust/:key`
+- `GET /.well-known/trellis/authorization/contexts/:digest`
+- `GET /.well-known/trellis/authorization/revocations`
 - `GET /auth/account-flow/:flowToken`
 - `POST /auth/account-flow/:flowToken/local-password`
 - `GET /auth/account-flow/:flowToken/login/:provider`
@@ -89,8 +94,17 @@ Successful bootstrap or bind returns:
 - effective grants and structured resource evidence when applicable
 - current NATS endpoints
 - a deny-all Auth-account JWT bound to the session NKey
+- the route JWT's exact expiry
+- a signed authorization context plus pinned root, current manifest identity,
+  lazy trust/context locators, and bounded verification policy
 
-No route returns a shared sentinel seed or reusable shared credential.
+No route returns a shared sentinel seed or reusable shared credential. Non-ready
+proposal and activation states return no context. Refresh is session-key
+proof-bound, requires nullable `currentContextDigest`, re-evaluates current
+issuable state, enforces the client's root pin and manifest floor, and returns
+`serverNow`, a context, and renewed route JWT material atomically. A null digest
+recovers a retained valid session after context or route-JWT expiry; stale,
+revoked, or otherwise terminal session state remains fail-closed.
 
 ## Browser And Account Flows
 
@@ -200,7 +214,7 @@ failure retries after commit and never rolls the authoritative mutation back.
 ## Non-Goals
 
 - PostgreSQL and federation
-- Milestone 9 trust distribution and authorization-context issuance
 - Milestone 10 ordinary request-proof v2 local validation cutover
+- Milestone 11 event-context local validation cutover
 - compatibility adapters for retired TypeScript auth, sentinel credentials,
   capability groups, grant overrides, or legacy binding RPCs

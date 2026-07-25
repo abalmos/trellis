@@ -17,6 +17,7 @@ liveTrellisTest({
       contract: fixture.serviceContract,
     });
     let service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: fixture.serviceContract,
       name: fixture.serviceName,
@@ -46,6 +47,7 @@ liveTrellisTest({
 
       await service.stop();
       service = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: fixture.serviceContract,
         name: fixture.serviceName,

@@ -18,10 +18,11 @@
 mod account;
 mod auth_service;
 mod companion_repository;
+pub(crate) mod context;
 mod domain;
 mod ephemeral;
 mod http;
-pub(super) use ephemeral::{
+pub(crate) use ephemeral::{
     AuthConnectionPresence, AuthEphemeralRepository, ConnectReplayRecord,
     NatsAuthEphemeralRepository,
 };
@@ -189,6 +190,7 @@ pub use companion_repository::{
     ProvisionedInstanceMutation, ProvisioningRepository, ServiceIdentityProvisioning,
     SessionCreation, SessionRevocation, UserAccountMutation,
 };
+pub(crate) use context::*;
 pub use domain::{
     AuthorityDecision, AuthorityEvidenceScope, AuthorityKind, AuthorityState, AuthorityTarget,
     AuthorizationStateError, AuthorizationTransition, AuthorizationTransitionKind,

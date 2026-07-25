@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-22).
+Last verified against Trellis main (2026-07-26).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -31,7 +31,23 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - Service connect options carry the immutable provisioned identity binding.
   User/device connect options carry the session-bound bootstrap JWT, session id,
   inbox prefix, session seed, and participant digest. No shared sentinel
-  credential is configured or accepted.
+  credential is configured or accepted. Ready bootstrap also carries a signed
+  authorization-context bundle. The shared Rust cache verifies the root,
+  manifest generation/digest, certificate, signature, policy, and context digest,
+  consumes the distributed deterministic refresh time, and supplies the current
+  digest to every reconnect. Production user/service/device options require a
+  durable authorization-context store containing the complete root/manifest
+  rollback floor and current context; memory stores are explicit for tests and
+  ephemeral processes. Clearing context retains trust. Bootstrap/refresh server
+  time is converted to a request-midpoint offset. Expired context or route-JWT
+  state recovers with a retained session/trust floor and proof-bound null current
+  digest; same-digest success still reschedules. Manifest and certificate
+  locators are accepted only as canonical immutable paths on the configured
+  Trellis HTTP(S) origin; redirects to another origin fail closed.
+- The deny-all bootstrap JWT grants no authority. Context refresh renews it and
+  installs its exact expiry atomically with the verified context. It only routes
+  Auth Callout and remains bounded by current session, authority, delegation,
+  context, and the configured JWT lifetime cap.
 - Generated service/device clients present their embedded canonical participant
   and exact referenced API artifacts during bootstrap. Runtime planning parses
   and resolves them through the same semantic proposal path as admin planning.
@@ -73,10 +89,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   `iat`, must remain within `-(2^53 - 1)..=(2^53 - 1)`. Context verification
   rechecks the current minimum manifest generation even for an already verified
   or cloned manifest handle.
-- Ordinary target request authorization validates the signed context and session
-  possession locally. Do not add new service-repository dependencies on
-  `Auth.Requests.Validate`; current runtime use is transitional until integration
-  completes.
+- `maximum_context_bytes` is the canonical complete signed-context JSON UTF-8
+  byte limit, not the base64url token length.
+- NATS admission already validates the signed context and fresh issuable state.
+  Ordinary target request authorization remains transitional through
+  `Auth.Requests.Validate` until Milestone 10; do not add new service-repository
+  dependencies on it.
 - Event subject, Jobs key, and operation-transfer pointers must be guaranteed to
   resolve for every schema-valid payload. Every object step must be required and
   every array index must be covered by `minItems`; optional fields are invalid
@@ -134,6 +152,9 @@ let terminal = operation.wait().await?;
 ```
 
 Operations are caller-visible workflows; Jobs are service-private execution.
+Both remain bounded by transport permissions compiled from the connected
+principal's current authorization context; declarations and subject strings
+never create grants.
 An operation or queue may declare one typed live update schema. Updates are
 at-most-once, not persisted or replayed, and may be missed by late subscribers.
 Prefer cumulative updates and treat terminal output/result as authoritative.

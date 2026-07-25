@@ -175,6 +175,7 @@ Deno.test({
         contract: runtimeProcessContract,
       });
       const service = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: runtimeProcessContract,
         name: SERVICE_NAME,
@@ -216,6 +217,7 @@ Deno.test({
         contract: entityContract,
       });
       const service = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: entityContract,
         name: "entity-live",
@@ -362,6 +364,7 @@ Deno.test({
         contract: entityContract,
       });
       const entity = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: entityContract,
         name: "entity-live-source",
@@ -374,6 +377,7 @@ Deno.test({
         contract: entitySubscriberContract,
       });
       const subscriber = await TrellisService.connect({
+        authorizationContextEphemeral: true,
         trellisUrl: runtime.trellisUrl,
         contract: entitySubscriberContract,
         name: "entity-live-subscriber",

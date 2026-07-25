@@ -35,6 +35,7 @@ export function createHealthFixture(caseId: string) {
       contract: serviceContract,
     });
     const service = await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,

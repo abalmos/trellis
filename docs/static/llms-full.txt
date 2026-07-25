@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-07-22).
+Last verified against Trellis main (2026-07-26).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -102,15 +102,38 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   server-owned consent proposal is immutable across browser-flow transitions.
 - Bootstrap replays rerun current issuance and generate fresh credentials.
   Public HTTP/RPC/operation/callout errors use stable redacted codes.
-- Bootstrap and browser bind return a deny-all JWT bound to the session NKey.
-  Every NATS connect signs the server nonce and a separate nonce-bound
-  `trellis.session-proof.v1`; shared sentinel credentials are retired.
-- The target ordinary-request trust chain is a pinned authorization root,
+- Bootstrap and browser bind return a deny-all JWT and signed authorization
+  context. Every NATS connect signs the server nonce and a separate
+  `natsConnectContext` proof over the context digest; shared sentinel credentials
+  are retired.
+- The implemented bootstrap/connect trust chain is a pinned authorization root,
   root-signed current generation-numbered issuer manifest and issuer
-  certificates, issuer-signed short-lived context, and context-bound session-key
-  request proof. Services compute the raw payload hash and enforce exact signed
-  permission/capability subsets locally. Current `Auth.Requests.Validate` use is
-  transitional; do not add new service dependencies on it.
+  certificates and issuer-signed short-lived context. Clients durably retain the
+  root key id/digest and minimum manifest generation/digest across session clears
+  and restarts. TypeScript and Svelte delegate cryptographic verification to the
+  authoritative Rust/WASM verifier. All runtimes schedule the distributed,
+  digest-jittered `refreshAt`; they do not derive a local lifetime fraction.
+  TypeScript fetches only its own immutable same-origin manifest/certificate
+  locators and does not watch Auth KV, resolve arbitrary caller contexts, or
+  maintain a runtime validator-readiness cache. Native file context-store paths
+  are single-writer and private to one active client process.
+  Ordinary context-bound request proof v2 and local
+  permission/capability checks remain Milestone 10. Current
+  `Auth.Requests.Validate` use is transitional; do not add new dependencies on it.
+- The deny-all bootstrap JWT grants no authority and only selects the Auth
+  Callout route. Context refresh atomically renews it with the verified context
+  and returns its exact expiry. Clients whose context or route JWT expired retain
+  the session/trust floor and send proof-bound `currentContextDigest: null`
+  recovery rather than restarting enrollment.
+- Bootstrap and refresh return server time in milliseconds. Clients estimate a
+  request-midpoint offset and use corrected time for validity, reconnect proofs,
+  UI state, and scheduling. Same-digest refresh success still reschedules.
+  `maximumContextBytes` means canonical complete signed-context JSON UTF-8 bytes,
+  not base64url token length.
+- Authorization-relevant session, principal, credential, authority,
+  materialization, deployment, instance, device, and delegation mutations revoke
+  matching contexts transactionally. Liveness/profile noise and semantic
+  reconciliation no-ops do not.
 - Signed contexts distinguish the stable principal from participant evidence and
   bind the exact participant/needs digests, source authority version, session
   key, reply-inbox prefix, exact grant set, and platform capabilities.
@@ -118,7 +141,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   range. Each context decision rechecks the caller-supplied minimum manifest
   generation so stale verified handles cannot bypass rollback protection.
 - Use operations for caller-visible async workflows. Use jobs for service-private
-  background work.
+  background work. Both inherit transport permissions compiled from the
+  connected principal's current context; operation/job declarations and subject
+  strings never create or widen grants.
 - Operations and job queues may declare one optional `update` schema. Keep
   `progress` for low-frequency durable telemetry/snapshots; updates are typed
   live-only, at-most-once content with no persistence, replay, admin, or Event

@@ -325,7 +325,7 @@ pub(crate) struct ConnectReplayRecord {
 impl ConnectReplayRecord {
     fn validate(&self) -> Result<(), AuthorizationStateError> {
         require_format("format", &self.format, "trellis.session-proof-replay.v1")?;
-        require_format("purpose", &self.purpose, "natsConnect")?;
+        require_format("purpose", &self.purpose, "natsConnectContext")?;
         require_digest("signerKeyId", &self.signer_key_id)?;
         require_nonempty("requestId", &self.request_id)?;
         require_digest("transcriptDigest", &self.transcript_digest)?;
@@ -344,6 +344,8 @@ pub(crate) struct AuthConnectionPresence {
     pub format: String,
     pub connection_id: String,
     pub session_id: String,
+    pub context_id: String,
+    pub context_digest: String,
     pub server_id: String,
     pub client_id: String,
     pub user_nkey: String,
@@ -362,6 +364,8 @@ impl AuthConnectionPresence {
         )?;
         require_digest("connectionId", &self.connection_id)?;
         require_nonempty("sessionId", &self.session_id)?;
+        require_nonempty("contextId", &self.context_id)?;
+        require_digest("contextDigest", &self.context_digest)?;
         require_nonempty("serverId", &self.server_id)?;
         require_nonempty("clientId", &self.client_id)?;
         require_nonempty("userNkey", &self.user_nkey)?;
@@ -830,6 +834,31 @@ mod nats {
                 connect_replays,
                 connections,
             })
+        }
+
+        /// Validates all required auth-owned KV buckets without creating or updating them.
+        pub(crate) async fn check(
+            client: async_nats::Client,
+        ) -> Result<(), AuthorizationStateError> {
+            let jetstream = jetstream::new(client);
+            for (bucket, max_age, max_value_size) in [
+                (
+                    BROWSER_FLOW_BUCKET,
+                    Duration::from_millis(86_400_000),
+                    65_536,
+                ),
+                (OAUTH_STATE_BUCKET, Duration::from_millis(900_000), 16_384),
+                (CONNECT_REPLAY_BUCKET, Duration::from_millis(660_000), 4_096),
+                (CONNECTIONS_BUCKET, Duration::from_millis(120_000), 16_384),
+            ] {
+                let store = jetstream.get_key_value(bucket).await.map_err(|error| {
+                    storage(format!(
+                        "required auth KV bucket {bucket} is missing: {error}"
+                    ))
+                })?;
+                validate_bucket(&store, max_age, max_value_size).await?;
+            }
+            Ok(())
         }
     }
 
@@ -1393,7 +1422,7 @@ mod tests {
 
         let replay = ConnectReplayRecord {
             format: "trellis.session-proof-replay.v1".to_owned(),
-            purpose: "natsConnect".to_owned(),
+            purpose: "natsConnectContext".to_owned(),
             signer_key_id: DIGEST.to_owned(),
             request_id: "01J00000000000000000000000".to_owned(),
             transcript_digest: DIGEST.to_owned(),
@@ -1412,6 +1441,8 @@ mod tests {
                 format: "trellis.auth-connection-presence.v1".to_owned(),
                 connection_id: DIGEST.to_owned(),
                 session_id: "ses_01".to_owned(),
+                context_id: "ctx_01".to_owned(),
+                context_digest: DIGEST.to_owned(),
                 server_id: "server-1".to_owned(),
                 client_id: "42".to_owned(),
                 user_nkey: "user-nkey".to_owned(),

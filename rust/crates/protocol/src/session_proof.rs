@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{canonicalize_json, ProtocolError, SessionProofErrorCodeV1};
 
-/// Strict wire format for Milestone 8 bootstrap, session-control, and NATS connect proofs.
+/// Strict wire format for bootstrap, session-control, refresh, and NATS connect proofs.
 pub const SESSION_PROOF_FORMAT_V1: &str = "trellis.session-proof.v1";
 
 const MAXIMUM_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
@@ -33,6 +33,10 @@ pub enum SessionProofPurposeV1 {
     NatsConnect,
     /// Revoke or end the signing session itself before ordinary request auth is available.
     SessionSelfControl,
+    /// Refresh an authorization context using the durable session key.
+    AuthorizationContextRefresh,
+    /// Authenticate one NATS connection with a bound authorization context.
+    NatsConnectContext,
 }
 
 impl SessionProofPurposeV1 {
@@ -44,6 +48,8 @@ impl SessionProofPurposeV1 {
             Self::DeviceBootstrap => "deviceBootstrap",
             Self::NatsConnect => "natsConnect",
             Self::SessionSelfControl => "sessionSelfControl",
+            Self::AuthorizationContextRefresh => "authorizationContextRefresh",
+            Self::NatsConnectContext => "natsConnectContext",
         }
     }
 }
@@ -337,6 +343,117 @@ impl SessionProofInputV1 {
                 digest(&session_key_id, &["sessionKeyId"])?,
                 session_nkey_bytes.to_vec(),
                 digest(&participant_digest, &["participantDigest"])?,
+                text(&nonce, &["nonce"])?,
+            ],
+            Some(NkeyBinding::Signer(session_nkey)),
+        )
+    }
+
+    /// Build a proof input for refreshing the current authorization context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
+    /// unsafe, empty, or malformed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn authorization_context_refresh(
+        request_id: impl Into<String>,
+        issued_at: i64,
+        session_id: impl Into<String>,
+        session_key_id: impl Into<String>,
+        current_context_digest: Option<String>,
+        expected_participant_digest: Option<String>,
+        expected_needs_digest: Option<String>,
+        known_root_key_id: impl Into<String>,
+        minimum_manifest_generation: i64,
+        request_digest: impl Into<String>,
+    ) -> Result<Self, ProtocolError> {
+        let request_id = request_id.into();
+        let session_id = session_id.into();
+        let session_key_id = session_key_id.into();
+        let known_root_key_id = known_root_key_id.into();
+        let request_digest = request_digest.into();
+        validate_key_id(&session_key_id, &["sessionKeyId"])?;
+        validate_key_id(&known_root_key_id, &["knownRootKeyId"])?;
+        if minimum_manifest_generation <= 0 {
+            return Err(proof_error(
+                SessionProofErrorCodeV1::InvalidFormat,
+                ["minimumManifestGeneration"],
+                "minimum manifest generation must be positive",
+            ));
+        }
+        validate_safe_integer(minimum_manifest_generation, &["minimumManifestGeneration"])?;
+
+        Self::new(
+            SessionProofPurposeV1::AuthorizationContextRefresh,
+            request_id,
+            issued_at,
+            session_key_id.clone(),
+            vec![
+                text(&session_id, &["sessionId"])?,
+                digest(&session_key_id, &["sessionKeyId"])?,
+                optional_digest(current_context_digest.as_deref(), &["currentContextDigest"])?,
+                optional_digest(
+                    expected_participant_digest.as_deref(),
+                    &["expectedParticipantDigest"],
+                )?,
+                optional_digest(expected_needs_digest.as_deref(), &["expectedNeedsDigest"])?,
+                digest(&known_root_key_id, &["knownRootKeyId"])?,
+                minimum_manifest_generation.to_string().into_bytes(),
+                digest(&request_digest, &["requestDigest"])?,
+            ],
+            None,
+        )
+    }
+
+    /// Build a nonce-bound NATS connect proof input tied to an authorization context.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
+    /// unsafe, empty, malformed, or the NKey does not encode `session_public_key`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn nats_connect_context(
+        request_id: impl Into<String>,
+        issued_at: i64,
+        session_id: impl Into<String>,
+        session_key_id: impl Into<String>,
+        session_public_key: impl Into<String>,
+        session_nkey: impl Into<String>,
+        participant_digest: impl Into<String>,
+        context_digest: impl Into<String>,
+        nonce: impl Into<String>,
+    ) -> Result<Self, ProtocolError> {
+        let request_id = request_id.into();
+        let session_id = session_id.into();
+        let session_key_id = session_key_id.into();
+        let session_public_key = session_public_key.into();
+        let session_nkey = session_nkey.into();
+        let participant_digest = participant_digest.into();
+        let context_digest = context_digest.into();
+        let nonce = nonce.into();
+        let session_key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
+        if session_key_id != derived_key_id(&session_key) {
+            return Err(proof_error(
+                SessionProofErrorCodeV1::InvalidKeyId,
+                ["sessionKeyId"],
+                "session key id does not match the session public key",
+            ));
+        }
+        let session_nkey_bytes =
+            validate_nkey_binding(&session_nkey, &session_key, &["sessionNkey"])?;
+
+        Self::new(
+            SessionProofPurposeV1::NatsConnectContext,
+            request_id,
+            issued_at,
+            session_key_id.clone(),
+            vec![
+                text(&session_id, &["sessionId"])?,
+                digest(&session_key_id, &["sessionKeyId"])?,
+                session_nkey_bytes.to_vec(),
+                digest(&participant_digest, &["participantDigest"])?,
+                digest(&context_digest, &["contextDigest"])?,
                 text(&nonce, &["nonce"])?,
             ],
             Some(NkeyBinding::Signer(session_nkey)),
@@ -1098,6 +1215,59 @@ mod tests {
     }
 
     #[test]
+    fn context_purposes_bind_context_and_manifest_floor() -> Result<(), ProtocolError> {
+        let key = key();
+        let key_id = derived_key_id(&key.verifying_key());
+        let public_key = encode_base64url(key.verifying_key().as_bytes());
+        let input = SessionProofInputV1::nats_connect_context(
+            "req_connect_context_1",
+            1_735_689_600_000,
+            "ses_1",
+            key_id.clone(),
+            public_key.clone(),
+            nkey(),
+            DIGEST,
+            DIGEST,
+            "server-nonce",
+        )?;
+        let proof = sign_session_proof_v1(&input, &key)?;
+        let changed = SessionProofInputV1::nats_connect_context(
+            "req_connect_context_1",
+            1_735_689_600_000,
+            "ses_1",
+            key_id.clone(),
+            public_key.clone(),
+            nkey(),
+            DIGEST,
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            "server-nonce",
+        )?;
+        assert!(verify_session_proof_v1(
+            &changed,
+            &proof,
+            &public_key,
+            1_735_689_600_000,
+            SessionProofPolicyV1::default(),
+        )
+        .is_err());
+
+        assert!(SessionProofInputV1::authorization_context_refresh(
+            "req_refresh_1",
+            1_735_689_600_000,
+            "ses_1",
+            key_id,
+            None,
+            None,
+            None,
+            DIGEST,
+            0,
+            DIGEST,
+        )
+        .is_err());
+        Ok(())
+    }
+
+    #[test]
     fn canonical_request_digest_removes_only_signature() -> Result<(), ProtocolError> {
         let first = json!({
             "requestId": "req_1",
@@ -1265,6 +1435,36 @@ mod tests {
                 vector_field(value, "sessionId"),
                 vector_field(value, "sessionKeyId"),
                 request_digest.expect("self-control request digest"),
+            ),
+            "authorizationContextRefresh" => SessionProofInputV1::authorization_context_refresh(
+                vector_field(value, "requestId"),
+                vector_time(value),
+                vector_field(value, "sessionId"),
+                derived_key_id(&decode_public_key(
+                    vector_field(case, "signerPublicKey"),
+                    &["signerPublicKey"],
+                )?),
+                value["currentContextDigest"].as_str().map(str::to_owned),
+                value["expectedParticipantDigest"]
+                    .as_str()
+                    .map(str::to_owned),
+                value["expectedNeedsDigest"].as_str().map(str::to_owned),
+                vector_field(value, "knownRootKeyId"),
+                value["minimumManifestGeneration"]
+                    .as_i64()
+                    .expect("minimum manifest generation"),
+                request_digest.expect("context refresh request digest"),
+            ),
+            "natsConnectContext" => SessionProofInputV1::nats_connect_context(
+                vector_field(value, "requestId"),
+                vector_time(value),
+                vector_field(value, "sessionId"),
+                vector_field(value, "sessionKeyId"),
+                vector_field(case, "signerPublicKey"),
+                vector_field(value, "sessionNkey"),
+                vector_field(value, "participantDigest"),
+                vector_field(value, "contextDigest"),
+                vector_field(value, "nonce"),
             ),
             purpose => panic!("unknown vector purpose {purpose}"),
         }

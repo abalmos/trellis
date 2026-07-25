@@ -1,5 +1,22 @@
 use super::*;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+
+#[test]
+fn parses_public_check_with_all_mode_default() {
+    let cli = Cli::parse_from(["trellis", "check", "--config", "config.toml"]);
+    let TopLevelCommand::Check(args) = cli.command else {
+        panic!("expected check command");
+    };
+    assert_eq!(args.config, PathBuf::from("config.toml"));
+    assert_eq!(args.mode, RuntimeMode::All);
+}
+
+#[test]
+fn infra_help_describes_offline_trust_tooling() {
+    let help = Cli::command().render_long_help().to_string();
+    assert!(help.contains("Manage offline authorization trust artifacts"));
+    assert!(!help.contains("Apply or check shared infrastructure"));
+}
 
 #[test]
 fn parses_login_logout_and_whoami_top_level_commands() {
@@ -535,54 +552,8 @@ fn parses_init_config_infra_init_keys_upgrade_version_and_completion() {
         other => panic!("unexpected top-level command: {other:?}"),
     }
 
-    let cli = Cli::parse_from([
-        "trellis",
-        "infra",
-        "apply",
-        "--trellis-creds",
-        "./trellis.creds",
-        "--auth-creds",
-        "./auth.creds",
-        "--jetstream-replicas",
-        "3",
-    ]);
-    match cli.command {
-        TopLevelCommand::Infra(command) => match command.command {
-            InfraSubcommand::Apply(args) => {
-                assert_eq!(
-                    args.trellis_creds,
-                    std::path::PathBuf::from("./trellis.creds")
-                );
-                assert_eq!(args.auth_creds, std::path::PathBuf::from("./auth.creds"));
-                assert_eq!(args.jetstream_replicas, Some(3));
-            }
-            other => panic!("unexpected infra command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "infra",
-        "check",
-        "--trellis-creds",
-        "./trellis.creds",
-        "--auth-creds",
-        "./auth.creds",
-    ]);
-    match cli.command {
-        TopLevelCommand::Infra(command) => match command.command {
-            InfraSubcommand::Check(args) => {
-                assert_eq!(
-                    args.trellis_creds,
-                    std::path::PathBuf::from("./trellis.creds")
-                );
-                assert_eq!(args.auth_creds, std::path::PathBuf::from("./auth.creds"));
-            }
-            other => panic!("unexpected infra command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
+    assert!(Cli::try_parse_from(["trellis", "infra", "apply"]).is_err());
+    assert!(Cli::try_parse_from(["trellis", "infra", "check"]).is_err());
 
     let cli = Cli::parse_from([
         "trellis",

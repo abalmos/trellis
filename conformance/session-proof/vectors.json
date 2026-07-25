@@ -125,6 +125,50 @@
       "signature": "JS2QtO0Wq21u950jc5mV70E6GF7rff5bq05t2R1pxq-sSIxSHn_xQBTQj8tWRJW0sQZlwpBNEeLC07HhFL_WBA"
     },
     {
+      "name": "authorization-context-refresh",
+      "purpose": "authorizationContextRefresh",
+      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      "request": {
+        "requestId": "req_context_refresh_01",
+        "issuedAt": 1735689600000,
+        "sessionId": "ses_example_01",
+        "currentContextDigest": null,
+        "expectedParticipantDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expectedNeedsDigest": null,
+        "knownRootKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+        "minimumManifestGeneration": 12,
+        "proof": {
+          "format": "trellis.session-proof.v1",
+          "signature": "goPQThcdHbevPYZmUnHbE5Sqv883G1haeSVJlyXUHZS55pdIzPqQi6HZI25NHcdgtp6yCS_6BJ585i1mA_UzAg"
+        }
+      },
+      "requestDigest": "JGJBtn3sPyPJ_mGY-T3y5x5TdMAKg8_TL6G7ppDAcgE",
+      "transcriptDigest": "4iJPr8V9QuQxDFix6eSZKkHfElgAELHDMszUU8bMYEQ",
+      "signature": "goPQThcdHbevPYZmUnHbE5Sqv883G1haeSVJlyXUHZS55pdIzPqQi6HZI25NHcdgtp6yCS_6BJ585i1mA_UzAg"
+    },
+    {
+      "name": "nats-connect-context",
+      "purpose": "natsConnectContext",
+      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      "input": {
+        "requestId": "req_nats_context_01",
+        "issuedAt": 1735689600000,
+        "sessionId": "ses_example_01",
+        "sessionKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+        "sessionNkey": "UAB2CB576PHBBPQ5ODORRZ2LYCMWPZGWGCN2KDK7DXOIMZASKUY3RLKK",
+        "participantDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "contextDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        "nonce": "NATS-SERVER-NONCE-CONTEXT-01",
+        "proof": {
+          "format": "trellis.session-proof.v1",
+          "signature": "9SwiD_uuf8cd1EjsAXj1QHY2sy_oM3Oe01xgmHaZMW3yta6_9HUvcZgn5bRb3Wyx1gGbHbiDm_4HSjGATfV1BQ"
+        }
+      },
+      "requestDigest": null,
+      "transcriptDigest": "BYS-ZPWDwqOJBH6qc2t7mBoezLmBynIkUL_2EEL9H-I",
+      "signature": "9SwiD_uuf8cd1EjsAXj1QHY2sy_oM3Oe01xgmHaZMW3yta6_9HUvcZgn5bRb3Wyx1gGbHbiDm_4HSjGATfV1BQ"
+    },
+    {
       "name": "session-self-control",
       "purpose": "sessionSelfControl",
       "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",

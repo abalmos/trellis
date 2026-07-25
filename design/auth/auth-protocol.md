@@ -184,10 +184,12 @@ Rules:
 - `OPERATION_RESPONSE_MAX` MUST be greater than `1` and SHOULD default to
   `65535`
 
-## Target 0.11 Local Request Authorization
+## Authorization Context And Local Request Authorization
 
-Ordinary authenticated runtime requests use two independent proofs and do not
-call `Auth.Requests.Validate` in the target 0.11 protocol:
+Milestone 9 implements the authority proof below for bootstrap, refresh, and
+every NATS connect/reconnect. Ordinary authenticated runtime requests continue
+to use transitional `Auth.Requests.Validate` until Milestone 10, when they will
+use the second proof locally:
 
 1. **Authority proof:** a pinned authorization root verifies a current
    generation-numbered issuer manifest and a directly root-signed issuer
@@ -214,17 +216,51 @@ canonical unsigned JSON. Key ids are derived as unpadded base64url SHA-256
 digests of the raw 32-byte Ed25519 public key.
 
 The root-signed manifest is the authoritative current issuer registry. Consumers
-explicitly supply their minimum accepted generation, preventing rollback when
-distribution storage returns an older valid manifest. Multiple active issuers
-permit overlap during key rotation. A revoked or omitted issuer is untrusted,
-and each entry binds the exact complete signed certificate digest. A writable
-distribution store therefore cannot create issuer authority without a root
-signature.
+durably supply the root key id, canonical root digest, minimum accepted
+generation, and canonical manifest digest at that generation. This rejects an
+older valid manifest, same-generation equivocation, and root replacement across
+process restarts. Clearing a session or context retains the floor; changing the
+root requires an explicit trust reset. Multiple active issuers permit overlap
+during key rotation. A revoked or omitted issuer is untrusted, and each entry
+binds the exact complete signed certificate digest. A writable distribution
+store therefore cannot create issuer authority without a root signature.
+
+Server startup creates or exact-confirms the root, active certificate, and
+generation-addressed manifest before advancing SQLite or `manifest.current`.
+SQLite acceptance and removed-issuer context revocation commit together;
+`manifest.current` is the final CAS-protected step. Startup and `trellis check`
+reconcile the configured file generation and digest against both the durable
+SQLite floor and the highest verified immutable registry history, so an expired
+historical manifest still prevents rollback.
 
 A previously verified manifest remains subject to the policy supplied for each
 context decision. Raising the durable minimum generation invalidates stale
 verified or cloned handles immediately; context verification rechecks the
 manifest generation and returns `ManifestRollback` at `/generation`.
+
+Context issuance computes and distributes `refreshAt = expiresAt - refreshLead
+
+- jitter(contextDigest)`, where jitter is deterministic, bounded, and can only
+  move refresh earlier. The protocol implementation owns this calculation.
+  Client runtimes consume the distributed value directly, so restart and
+  reconnect do not produce refresh storms or repeatedly call a server that is
+  not yet willing to replace the context.
+
+The refresh request always contains `currentContextDigest`, but the value is
+nullable. A client with a valid context sends its digest; a client whose context
+or route JWT has expired sends `null` while proving possession of the retained
+session key and pinned trust floor. Success returns `serverNow`, a context, and
+a renewed deny-all route JWT plus its expiry as one atomic installation. Clients
+derive a midpoint clock offset from `serverNow`, schedule against corrected
+server-relative time, and reschedule even when refresh validly returns the same
+context digest. Only terminal session/authority failures clear session recovery
+state.
+
+The issuer decides reuse inside the same SQLite transaction that commits the
+context. Equivalent concurrent requests reuse one record, and each session has
+at most two active overlapping contexts: the current lease and one replacement
+for reconnect handoff. Publication actions are keyed by immutable context digest
+and deduplicated transactionally.
 
 The signed context binds the stable principal, exact participant artifact and
 accepted-needs digests, durable identity/deployment authority record and
@@ -233,6 +269,11 @@ version, session id and public key, reply-inbox prefix, exact
 short-lived and entirely contained by both the issuer certificate and current
 manifest. Capabilities may authorize built-in/platform surfaces during
 migration, but never expand exact permission atoms.
+
+`maximum_context_bytes` and `maximumContextBytes` always mean the UTF-8 byte
+length of canonical complete signed-context JSON. Issuance, protocol parsing,
+WASM verification, and the context-registry value limit enforce that same unit;
+the base64url transport token length is not the configured unit.
 
 Verified caller metadata exposes the source authority record and version,
 deployment and instance ids, participant artifact and needs digests, context and
@@ -258,10 +299,17 @@ atoms and platform capabilities as subsets of the signed context. It then
 inserts `(contextId, requestId)` into a local replay cache until context expiry.
 Replay cache storage and runtime integration follow the pure protocol milestone.
 
-NATS authentication, transport JWT permissions, and connection kicking remain
-separate. Short context expiry bounds already-issued authority; immediate
-session/authority revocation also refuses refresh and kicks current transport
-connections.
+NATS authentication verifies `natsConnectContext`, the complete trust chain, the
+immutable registry record, and fresh issuable state before compiling a transport
+JWT. Short context expiry bounds already-issued authority; immediate
+session/authority revocation atomically publishes a separate revocation record,
+refuses refresh and reconnect, and kicks current transport connections.
+Validators subscribe before loading complete manifest-pointer and revocation
+snapshots, become healthy only after both snapshots succeed, and gate Auth
+Callout startup on that readiness. They resnapshot after watch or manifest
+changes, invalidate stale verified contexts, and resolve exact manifest,
+certificate, context, and revocation records lazily by immutable key. Connection
+presence records the context id and digest used for admission.
 
 ## Transitional RPC Message Signing
 

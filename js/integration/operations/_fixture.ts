@@ -166,6 +166,7 @@ export function createOperationsFixture(
       contract: serviceContract,
     });
     return await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: serviceName,

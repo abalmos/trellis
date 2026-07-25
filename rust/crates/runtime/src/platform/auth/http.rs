@@ -4,11 +4,12 @@ use std::path::{Component, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::Query;
 use axum::extract::{Path, State};
 use axum::http::header::{
-    CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, ORIGIN, REFERRER_POLICY, SET_COOKIE,
-    STRICT_TRANSPORT_SECURITY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, COOKIE, ORIGIN, REFERRER_POLICY,
+    SET_COOKIE, STRICT_TRANSPORT_SECURITY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{self, Next};
@@ -235,6 +236,7 @@ pub(super) struct AuthHttpState<R, E> {
     service: AuthService<R>,
     ephemeral: E,
     issuer: NatsBootstrapIssuer,
+    authorization_contexts: super::AuthorizationContextService,
     public_origin: String,
     allowed_redirect_origins: Vec<String>,
     websocket_nats_servers: Vec<String>,
@@ -247,6 +249,7 @@ pub(crate) struct AuthHttpOptions<R, E> {
     pub service: AuthService<R>,
     pub ephemeral: E,
     pub issuer: NatsBootstrapIssuer,
+    pub authorization_contexts: super::AuthorizationContextService,
     pub public_origin: String,
     pub allowed_origins: Vec<String>,
     pub websocket_nats_servers: Vec<String>,
@@ -260,12 +263,14 @@ pub(crate) struct AuthHttpOptions<R, E> {
 pub(crate) struct NatsBootstrapIssuer {
     signing_key: Arc<KeyPair>,
     auth_account: String,
+    maximum_lifetime_seconds: i64,
 }
 
 impl NatsBootstrapIssuer {
     pub(crate) fn from_files(
         signing_seed_file: &std::path::Path,
         auth_user_creds_file: &std::path::Path,
+        maximum_lifetime_seconds: u64,
     ) -> Result<Self, AuthorizationStateError> {
         let seed = fs::read_to_string(signing_seed_file).map_err(|error| {
             AuthorizationStateError::Storage(format!(
@@ -304,6 +309,11 @@ impl NatsBootstrapIssuer {
         Ok(Self {
             signing_key: Arc::new(signing_key),
             auth_account,
+            maximum_lifetime_seconds: i64::try_from(maximum_lifetime_seconds).map_err(|_| {
+                AuthorizationStateError::InvalidRecord(
+                    "maximum bootstrap JWT lifetime is too large".to_owned(),
+                )
+            })?,
         })
     }
 
@@ -311,7 +321,8 @@ impl NatsBootstrapIssuer {
         &self,
         session_nkey: &str,
         expires_at_seconds: i64,
-    ) -> Result<String, AuthorizationStateError> {
+        now_seconds: i64,
+    ) -> Result<IssuedBootstrapJwt, AuthorizationStateError> {
         let (kind, _) = nkeys::from_public_key(session_nkey).map_err(|_| {
             AuthorizationStateError::InvalidRecord(
                 "sessionNkey is not a canonical NATS public key".to_owned(),
@@ -327,7 +338,16 @@ impl NatsBootstrapIssuer {
             deny: vec![">".to_owned()],
         };
         let mut claims = User::new_claims("trellis-session".to_owned(), session_nkey.to_owned());
-        claims.exp = Some(expires_at_seconds);
+        let expires_at = expires_at_seconds.min(
+            now_seconds
+                .checked_add(self.maximum_lifetime_seconds)
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "bootstrap JWT expiry overflows".to_owned(),
+                    )
+                })?,
+        );
+        claims.exp = Some(expires_at);
         let user = claims.payload_mut();
         user.issuer_account = Some(self.auth_account.clone());
         user.permissions.permissions = Permissions {
@@ -335,12 +355,18 @@ impl NatsBootstrapIssuer {
             subscribe: deny,
             resp: None,
         };
-        claims.encode(&self.signing_key).map_err(|error| {
+        let jwt = claims.encode(&self.signing_key).map_err(|error| {
             AuthorizationStateError::Storage(format!(
                 "failed to sign session bootstrap JWT: {error}"
             ))
-        })
+        })?;
+        Ok(IssuedBootstrapJwt { jwt, expires_at })
     }
+}
+
+struct IssuedBootstrapJwt {
+    jwt: String,
+    expires_at: i64,
 }
 
 pub(crate) fn router<R, E>(
@@ -395,6 +421,7 @@ where
         service: options.service,
         ephemeral: options.ephemeral,
         issuer: options.issuer,
+        authorization_contexts: options.authorization_contexts,
         public_origin: options.public_origin,
         allowed_redirect_origins,
         websocket_nats_servers: options.websocket_nats_servers,
@@ -411,6 +438,19 @@ where
             post(wait_for_device_activation::<R, E>),
         )
         .route("/bootstrap/client", post(client_bootstrap::<R, E>))
+        .route("/auth/context/refresh", post(refresh_context::<R, E>))
+        .route(
+            "/.well-known/trellis/authorization/trust/:key",
+            get(read_trust_registry::<R, E>),
+        )
+        .route(
+            "/.well-known/trellis/authorization/contexts/:digest",
+            get(read_context_registry::<R, E>),
+        )
+        .route(
+            "/.well-known/trellis/authorization/revocations",
+            get(read_revocation_snapshot::<R, E>),
+        )
         .route("/auth/flow/:flow_id", get(get_flow::<R, E>))
         .route("/auth/login/local", post(local_login::<R, E>))
         .route("/auth/sessions/logout", post(logout_session::<R, E>))
@@ -468,7 +508,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct AuthStartRequest {
     request_id: String,
     issued_at: i64,
@@ -830,7 +870,7 @@ fn device_activation_url(
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct ServiceBootstrapRequest {
     request_id: String,
     issued_at: i64,
@@ -848,7 +888,7 @@ struct ServiceBootstrapRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DeviceBootstrapRequest {
     request_id: String,
     issued_at: i64,
@@ -901,6 +941,7 @@ struct BootstrapResponse {
     session: Option<SessionRecord>,
     authorization: Option<BootstrapAuthorization>,
     nats: Option<NatsBootstrapResponse>,
+    authorization_context: Option<super::AuthorizationContextBundle>,
     activation: Option<BootstrapActivation>,
     proposal: Option<BootstrapProposal>,
 }
@@ -914,7 +955,7 @@ struct BootstrapProposal {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct BootstrapAuthorization {
     participant_id: String,
     participant_artifact_digest: String,
@@ -927,7 +968,7 @@ struct BootstrapAuthorization {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct ClientBootstrapRequest {
     request_id: String,
     issued_at: i64,
@@ -939,7 +980,7 @@ struct ClientBootstrapRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct ClientBootstrapResponse {
     server_now: i64,
     session_id: String,
@@ -954,6 +995,7 @@ struct ClientBootstrapResponse {
     resource_runtime: ServiceResourceBindings,
     effective_authority_expires_at: Option<i64>,
     nats: NatsBootstrapResponse,
+    authorization_context: super::AuthorizationContextBundle,
 }
 
 async fn client_bootstrap<R, E>(
@@ -1067,6 +1109,23 @@ where
     .flatten()
     .min()
     .ok_or_else(|| HttpError::internal("credential_expiry_missing"))?;
+    let authorization_context = state
+        .authorization_contexts
+        .issue(
+            super::AuthorizationContextIssueRequest {
+                session_id: request.session_id.clone(),
+                request_id: request.request_id.clone(),
+                request_digest: request_digest.clone(),
+            },
+            now / 1_000,
+        )
+        .await
+        .map_err(map_issuance_error)?;
+    let route = state.issuer.deny_all_user_jwt(
+        &request.session_nkey,
+        credential_expires_at / 1_000,
+        now / 1_000,
+    )?;
     let response = ClientBootstrapResponse {
         server_now: now,
         session_id: issuance.session_id.clone(),
@@ -1085,11 +1144,11 @@ where
         )?,
         effective_authority_expires_at: issuance.effective_authority_expires_at,
         nats: NatsBootstrapResponse {
-            jwt: state
-                .issuer
-                .deny_all_user_jwt(&request.session_nkey, credential_expires_at / 1_000)?,
+            jwt: route.jwt,
+            jwt_expires_at: route.expires_at,
             servers: state.websocket_nats_servers.clone(),
         },
+        authorization_context,
     };
     let outcome = state
         .service
@@ -1118,7 +1177,251 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+struct ContextRefreshRequest {
+    request_id: String,
+    issued_at: i64,
+    session_id: String,
+    session_nkey: String,
+    current_context_digest: RequiredNullableString,
+    expected_participant_digest: Option<String>,
+    expected_needs_digest: Option<String>,
+    known_root_key_id: String,
+    minimum_manifest_generation: i64,
+    proof: Value,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(transparent)]
+struct RequiredNullableString(Option<String>);
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextRefreshResponse {
+    server_now: i64,
+    authorization_context: super::AuthorizationContextBundle,
+    bootstrap_jwt: String,
+    bootstrap_jwt_expires_at: i64,
+}
+
+async fn read_trust_registry<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+    Path(key): Path<String>,
+) -> Result<Response, HttpError>
+where
+    R: AuthHttpRepository,
+    E: AuthEphemeralRepository + Clone,
+{
+    registry_response(
+        &key,
+        state
+            .authorization_contexts
+            .read_trust_registry(&key)
+            .await?,
+    )
+}
+
+async fn read_context_registry<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+    Path(digest): Path<String>,
+) -> Result<Response, HttpError>
+where
+    R: AuthHttpRepository,
+    E: AuthEphemeralRepository + Clone,
+{
+    registry_response(
+        &digest,
+        state
+            .authorization_contexts
+            .read_context_registry(&digest)
+            .await?,
+    )
+}
+
+async fn read_revocation_snapshot<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+) -> Result<Response, HttpError>
+where
+    R: AuthHttpRepository,
+    E: AuthEphemeralRepository + Clone,
+{
+    let records = state
+        .authorization_contexts
+        .read_revocation_snapshot()
+        .await?;
+    let payload = canonicalize_json(
+        &serde_json::to_value(records)
+            .map_err(|_| HttpError::internal("registry_response_failed"))?,
+    )
+    .map_err(|_| HttpError::internal("registry_response_failed"))?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .header(CACHE_CONTROL, "no-store")
+        .body(Body::from(payload))
+        .map_err(|_| HttpError::internal("registry_response_failed"))
+}
+
+fn registry_response(key: &str, value: Option<bytes::Bytes>) -> Result<Response, HttpError> {
+    if key.is_empty()
+        || !key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(HttpError::bad_request("invalid_registry_key"));
+    }
+    let value = value.ok_or_else(|| HttpError::not_found("registry_entry_not_found"))?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .header(CACHE_CONTROL, "public, max-age=60")
+        .body(Body::from(value))
+        .map_err(|_| HttpError::internal("registry_response_failed"))
+}
+
+async fn refresh_context<R, E>(
+    State(state): State<AuthHttpState<R, E>>,
+    Json(request): Json<ContextRefreshRequest>,
+) -> Result<Json<ContextRefreshResponse>, HttpError>
+where
+    R: AuthHttpRepository,
+    E: AuthEphemeralRepository + Clone,
+{
+    let now = now_ms()?;
+    let session = state
+        .service
+        .repository()
+        .get_session(&request.session_id)
+        .await?
+        .ok_or_else(|| HttpError::unauthorized("auth_required"))?;
+    let session_nkey = KeyPair::from_public_key(&request.session_nkey)
+        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    let (_, session_nkey_bytes) = nkeys::from_public_key(&request.session_nkey)
+        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    let session_public_key = URL_SAFE_NO_PAD
+        .decode(&session.session_public_key)
+        .map_err(|_| HttpError::internal("invalid_session_key"))?;
+    if session_nkey.key_pair_type() != KeyPairType::User
+        || session_nkey_bytes
+            .as_slice()
+            .ct_eq(&session_public_key)
+            .unwrap_u8()
+            != 1
+    {
+        return Err(HttpError::unauthorized("invalid_proof"));
+    }
+    let digest_value = serde_json::to_value(&request)
+        .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
+    let request_digest = session_proof_request_digest_v1(&digest_value)
+        .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
+    let input = SessionProofInputV1::authorization_context_refresh(
+        &request.request_id,
+        request.issued_at,
+        &request.session_id,
+        &session.session_key_id,
+        request.current_context_digest.0.clone(),
+        request.expected_participant_digest.clone(),
+        request.expected_needs_digest.clone(),
+        &request.known_root_key_id,
+        request.minimum_manifest_generation,
+        &request_digest,
+    )
+    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    verify_session_proof_v1(
+        &input,
+        &parse_session_proof_v1(&request.proof)
+            .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
+        &session.session_public_key,
+        now,
+        state.proof_policy,
+    )
+    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    if request.known_root_key_id != state.authorization_contexts.root_key_id()
+        || u64::try_from(request.minimum_manifest_generation)
+            .ok()
+            .is_none_or(|minimum| minimum > state.authorization_contexts.manifest_generation())
+    {
+        return Err(HttpError::conflict("context_refresh_mismatch"));
+    }
+    if let Some(current_digest) = request.current_context_digest.0.as_deref() {
+        let current = state
+            .authorization_contexts
+            .require_current_context(&request.session_id, current_digest, now / 1_000)
+            .await
+            .map_err(map_issuance_error)?;
+        if request
+            .expected_participant_digest
+            .as_deref()
+            .is_some_and(|expected| expected != current.participant_artifact_digest)
+            || request
+                .expected_needs_digest
+                .as_deref()
+                .is_some_and(|expected| expected != current.participant_needs_digest)
+        {
+            return Err(HttpError::conflict("context_refresh_mismatch"));
+        }
+    }
+    let authorization_context = state
+        .authorization_contexts
+        .issue(
+            super::AuthorizationContextIssueRequest {
+                session_id: request.session_id.clone(),
+                request_id: request.request_id,
+                request_digest,
+            },
+            now / 1_000,
+        )
+        .await
+        .map_err(map_issuance_error)?;
+    let issued = state
+        .authorization_contexts
+        .require_current_context(
+            &request.session_id,
+            &authorization_context.context_digest,
+            now / 1_000,
+        )
+        .await
+        .map_err(map_issuance_error)?;
+    if request
+        .expected_participant_digest
+        .as_deref()
+        .is_some_and(|expected| expected != issued.participant_artifact_digest)
+        || request
+            .expected_needs_digest
+            .as_deref()
+            .is_some_and(|expected| expected != issued.participant_needs_digest)
+    {
+        return Err(HttpError::conflict("context_refresh_mismatch"));
+    }
+    let issuance = state
+        .service
+        .authorization()
+        .resolve_issuable_state(&request.session_id, now)
+        .await
+        .map_err(map_issuance_error)?;
+    let expires_at = [
+        issuance.session_expires_at,
+        issuance.effective_authority_expires_at,
+        issuance.delegation_expires_at,
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+    .ok_or_else(|| HttpError::internal("credential_expiry_missing"))?;
+    let route =
+        state
+            .issuer
+            .deny_all_user_jwt(&request.session_nkey, expires_at / 1_000, now / 1_000)?;
+    Ok(Json(ContextRefreshResponse {
+        server_now: now,
+        authorization_context,
+        bootstrap_jwt: route.jwt,
+        bootstrap_jwt_expires_at: route.expires_at,
+    }))
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct LogoutRequest {
     request_id: String,
     issued_at: i64,
@@ -1128,7 +1431,7 @@ struct LogoutRequest {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct LogoutResponse {
     session_id: String,
     state: &'static str,
@@ -1331,7 +1634,7 @@ fn device_bootstrap_input(
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DeviceActivationWaitRequest {
     review_id: String,
     wait_ms: Option<u64>,
@@ -1435,6 +1738,7 @@ where
                 session: None,
                 authorization: None,
                 nats: None,
+                authorization_context: None,
                 activation: Some(BootstrapActivation {
                     state: "pending",
                     activation_url: device_activation_url(
@@ -1455,6 +1759,7 @@ where
             session: None,
             authorization: None,
             nats: None,
+            authorization_context: None,
             activation: None,
             proposal: None,
         })),
@@ -1713,6 +2018,7 @@ where
                 session: None,
                 authorization: None,
                 nats: None,
+                authorization_context: None,
                 activation: Some(BootstrapActivation {
                     state: "pending",
                     activation_url: device_activation_url(
@@ -1801,6 +2107,22 @@ where
     .flatten()
     .min()
     .ok_or_else(|| HttpError::internal("credential_expiry_missing"))?;
+    let authorization_context = state
+        .authorization_contexts
+        .issue(
+            super::AuthorizationContextIssueRequest {
+                session_id: session.session_id.clone(),
+                request_id: replay.request_id().to_owned(),
+                request_digest: input.request_digest.clone(),
+            },
+            now / 1_000,
+        )
+        .await
+        .map_err(map_issuance_error)?;
+    let route =
+        state
+            .issuer
+            .deny_all_user_jwt(&input.new_session_nkey, expires_at / 1_000, now / 1_000)?;
     Ok(BootstrapResponse {
         server_now: now,
         state: "ready",
@@ -1820,11 +2142,11 @@ where
             effective_authority_expires_at: issuance.effective_authority_expires_at,
         }),
         nats: Some(NatsBootstrapResponse {
-            jwt: state
-                .issuer
-                .deny_all_user_jwt(&input.new_session_nkey, expires_at / 1_000)?,
+            jwt: route.jwt,
+            jwt_expires_at: route.expires_at,
             servers: state.websocket_nats_servers.clone(),
         }),
+        authorization_context: Some(authorization_context),
         activation,
         proposal: None,
     })
@@ -1938,6 +2260,7 @@ fn bootstrap_state(
         session: None,
         authorization: None,
         nats: None,
+        authorization_context: None,
         activation: None,
         proposal,
     }
@@ -2019,7 +2342,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct LocalLoginRequest {
     flow_id: String,
     username: String,
@@ -2066,7 +2389,7 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct FirstAdminRequest {
     username: Option<String>,
     password: String,
@@ -2255,7 +2578,7 @@ where
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct LocalRegistrationRequest {
     username: String,
     password: String,
@@ -2348,7 +2671,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct OidcStartQuery {
     flow_id: String,
 }
@@ -2517,7 +2840,6 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct OidcCallbackQuery {
     code: Option<String>,
     state: String,
@@ -2956,7 +3278,7 @@ async fn mark_oauth_restart_required(
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct ApprovalRequest {
     approved: bool,
     consent_view_digest: String,
@@ -3181,7 +3503,7 @@ where
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct BindRequest {
     idempotency_key: String,
 }
@@ -3192,6 +3514,7 @@ struct BindResponse {
     server_now: i64,
     session: SessionRecord,
     nats: NatsBootstrapResponse,
+    authorization_context: super::AuthorizationContextBundle,
     redirect_target: Option<String>,
 }
 
@@ -3199,6 +3522,7 @@ struct BindResponse {
 #[serde(rename_all = "camelCase")]
 struct NatsBootstrapResponse {
     jwt: String,
+    jwt_expires_at: i64,
     servers: Vec<String>,
 }
 
@@ -3308,16 +3632,31 @@ where
     .flatten()
     .min()
     .ok_or_else(|| HttpError::internal("credential_expiry_missing"))?;
-    let jwt = state
-        .issuer
-        .deny_all_user_jwt(&flow.session_nkey, expires_at / 1_000)?;
+    let route =
+        state
+            .issuer
+            .deny_all_user_jwt(&flow.session_nkey, expires_at / 1_000, now / 1_000)?;
+    let authorization_context = state
+        .authorization_contexts
+        .issue(
+            super::AuthorizationContextIssueRequest {
+                session_id: session.session_id.clone(),
+                request_id: request.idempotency_key,
+                request_digest: digest,
+            },
+            now / 1_000,
+        )
+        .await
+        .map_err(map_issuance_error)?;
     Ok(Json(BindResponse {
         server_now: now,
         session,
         nats: NatsBootstrapResponse {
-            jwt,
+            jwt: route.jwt,
+            jwt_expires_at: route.expires_at,
             servers: state.websocket_nats_servers,
         },
+        authorization_context,
         redirect_target: flow.redirect_target,
     }))
 }
@@ -3639,7 +3978,7 @@ fn session_revocation_actions(
     ]
     .into_iter()
     .map(|(kind, suffix)| PostCommitActionRecord {
-        action_id: format!("act_{}", digest_parts(&[scope, request_id, suffix])),
+        action_id: digest_parts(&[scope, request_id, suffix]),
         kind,
         payload: payload.clone(),
         created_at: now,
@@ -4146,7 +4485,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_approval_wire_rejects_caller_authored_machine_authority() {
+    fn browser_approval_wire_ignores_caller_authored_machine_authority() {
         for atom in [
             permission(
                 PermissionTargetV1::api_surface("unrelated.api@v1", ApiSurfaceKindV1::Rpc, "Admin")
@@ -4181,7 +4520,7 @@ mod tests {
                 PermissionActionV1::Write,
             ),
         ] {
-            assert!(
+            assert_eq!(
                 serde_json::from_value::<ApprovalRequest>(serde_json::json!({
                     "approved": true,
                     "consentViewDigest": DIGEST,
@@ -4189,7 +4528,9 @@ mod tests {
                     "idempotencyKey": "request-1",
                     "grantSet": GrantSetV1::new(vec![atom]),
                 }))
-                .is_err()
+                .unwrap()
+                .selected_optional_bundles,
+                Vec::<String>::new(),
             );
         }
         assert!(
@@ -4200,7 +4541,7 @@ mod tests {
                 "idempotencyKey": "request-1",
                 "capabilities": ["admin"],
             }))
-            .is_err()
+            .is_ok()
         );
     }
 
@@ -4374,14 +4715,17 @@ mod tests {
         let issuer = NatsBootstrapIssuer {
             signing_key: Arc::new(signing_key),
             auth_account: auth_account.clone(),
+            maximum_lifetime_seconds: 300,
         };
-        let jwt = issuer.deny_all_user_jwt(&session_key, 10_000).unwrap();
-        let claims = Claims::<User>::decode(&jwt).unwrap();
+        let jwt = issuer.deny_all_user_jwt(&session_key, 10_000, 100).unwrap();
+        assert_eq!(jwt.expires_at, 400);
+        let claims = Claims::<User>::decode(&jwt.jwt).unwrap();
         assert_eq!(
             claims.payload().issuer_account.as_deref(),
             Some(auth_account.as_str())
         );
         assert_eq!(serde_json::to_value(&claims).unwrap()["sub"], session_key);
+        assert_eq!(claims.exp, Some(400));
         assert!(claims
             .payload()
             .permissions

@@ -52,6 +52,7 @@ struct NatsConnectToken {
     issued_at: i64,
     session_id: String,
     participant_digest: String,
+    context_digest: String,
     proof: SessionProofV1,
 }
 
@@ -192,18 +193,18 @@ impl CalloutKeys {
 }
 
 /// Runtime-owned NATS authorization callout processor.
-#[derive(Debug)]
 pub(crate) struct AuthCallout {
     subscriber: async_nats::Subscriber,
     disconnect_subscriber: async_nats::Subscriber,
     processor: CalloutProcessor,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct CalloutProcessor {
     client: async_nats::Client,
     authorization: AuthorizationStateService<SqliteAuthorizationStore>,
     repository: SqliteAuthorizationStore,
+    contexts: super::auth::AuthorizationContextService,
     replay: NatsAuthEphemeralRepository,
     keys: CalloutKeys,
     user_jwt_ttl_ms: i64,
@@ -264,6 +265,7 @@ impl AuthCallout {
         authorization: AuthorizationStateService<SqliteAuthorizationStore>,
         repository: SqliteAuthorizationStore,
         replay: NatsAuthEphemeralRepository,
+        contexts: super::auth::AuthorizationContextService,
         auth_signing_seed_file: &Path,
         target_signing_seed_file: &Path,
         xkey_seed_file: &Path,
@@ -286,6 +288,11 @@ impl AuthCallout {
                     "failed to subscribe to NATS authorization callout: {error}"
                 ))
             })?;
+        client.flush().await.map_err(|error| {
+            AuthorizationStateError::Storage(format!(
+                "failed to activate NATS authorization callout subscription: {error}"
+            ))
+        })?;
         let disconnect_subscriber =
             system_client
                 .subscribe(DISCONNECT_SUBJECT)
@@ -295,6 +302,11 @@ impl AuthCallout {
                         "failed to subscribe to NATS disconnect events: {error}"
                     ))
                 })?;
+        system_client.flush().await.map_err(|error| {
+            AuthorizationStateError::Storage(format!(
+                "failed to activate NATS disconnect subscription: {error}"
+            ))
+        })?;
         let user_jwt_ttl_ms = user_jwt_ttl_ms
             .unwrap_or(DEFAULT_USER_JWT_TTL_MS as u64)
             .try_into()
@@ -313,6 +325,7 @@ impl AuthCallout {
                 client,
                 authorization,
                 repository,
+                contexts,
                 replay,
                 keys,
                 user_jwt_ttl_ms,
@@ -447,7 +460,12 @@ impl CalloutProcessor {
                 AuthorizationStateError::Storage(format!(
                     "failed to publish NATS authorization response: {error}"
                 ))
-            })
+            })?;
+        self.client.flush().await.map_err(|error| {
+            AuthorizationStateError::Storage(format!(
+                "failed to flush NATS authorization response: {error}"
+            ))
+        })
     }
 
     async fn authorize(&self, request: &AuthRequest) -> Result<String, AuthorizationStateError> {
@@ -493,7 +511,7 @@ impl CalloutProcessor {
         if token.participant_digest != session.participant_artifact_digest {
             return Err(denied("participant binding does not match the session"));
         }
-        let input = SessionProofInputV1::nats_connect(
+        let input = SessionProofInputV1::nats_connect_context(
             token.request_id,
             token.issued_at,
             &token.session_id,
@@ -501,6 +519,7 @@ impl CalloutProcessor {
             &session.session_public_key,
             session_nkey,
             &token.participant_digest,
+            &token.context_digest,
             &request.client_info.nonce,
         )
         .map_err(|error| denied(error.to_string()))?;
@@ -518,6 +537,10 @@ impl CalloutProcessor {
         let state = self
             .authorization
             .resolve_issuable_state(&token.session_id, now)
+            .await?;
+        let context = self
+            .contexts
+            .require_issuable_context(&state, &token.context_digest, now_seconds)
             .await?;
         let replay_key = verified.replay_key();
         let admitted = self
@@ -550,6 +573,7 @@ impl CalloutProcessor {
             state.session_expires_at,
             state.effective_authority_expires_at,
             state.delegation_expires_at,
+            Some(context.expires_at.saturating_mul(1_000)),
             Some(
                 now.checked_add(self.user_jwt_ttl_ms)
                     .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
@@ -586,8 +610,10 @@ impl CalloutProcessor {
         self.replay
             .put_connection_presence(AuthConnectionPresence {
                 format: "trellis.auth-connection-presence.v1".to_owned(),
-                connection_id,
-                session_id: token.session_id,
+                connection_id: connection_id.clone(),
+                session_id: token.session_id.clone(),
+                context_id: context.context_id.clone(),
+                context_digest: context.context_digest.clone(),
                 server_id: request.server.id.clone(),
                 client_id,
                 user_nkey: request.user_nkey.clone(),
@@ -597,6 +623,30 @@ impl CalloutProcessor {
                 version: 1,
             })
             .await?;
+        let final_state = self
+            .authorization
+            .resolve_issuable_state(&token.session_id, now)
+            .await;
+        let final_check = match final_state {
+            Ok(final_state) if final_state == state => self
+                .contexts
+                .require_issuable_context(&final_state, &token.context_digest, now_seconds)
+                .await
+                .map(|_| ()),
+            Ok(_) => Err(AuthorizationStateError::ContextSnapshotChanged),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = final_check {
+            self.replay
+                .delete_connection_presence(&request.user_nkey)
+                .await?;
+            return Err(error);
+        }
+        tracing::debug!(
+            session_id = %token.session_id,
+            context_digest = %token.context_digest,
+            "NATS authorization callout admitted"
+        );
         Ok(jwt)
     }
 }
@@ -638,7 +688,9 @@ fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
         | AuthorizationStateError::AuthorityExpired
         | AuthorizationStateError::RequiredDependencyUnavailable(_)
         | AuthorizationStateError::RequiredResourceUnavailable(_)
-        | AuthorizationStateError::MaterializationStale => "authority_unavailable",
+        | AuthorizationStateError::MaterializationStale
+        | AuthorizationStateError::ContextLifetimeUnavailable
+        | AuthorizationStateError::ContextSnapshotChanged => "authority_unavailable",
         AuthorizationStateError::DeploymentInactive => "deployment_inactive",
         AuthorizationStateError::InstanceInactive => "instance_inactive",
         AuthorizationStateError::DeviceInactive => "device_inactive",

@@ -17,6 +17,7 @@ import { type BaseError, isErr, Result } from "@qlever-llc/result";
 import { trellisCore as core } from "../../../services/trellis/contracts/trellis_core.ts";
 import { Type } from "typebox";
 
+import { testAuthorizationContext } from "../auth/test_context.ts";
 import type { LoggerLike } from "../globals.ts";
 import { TransportError } from "../errors/index.ts";
 import { defineServiceContract, jobs } from "../contract.ts";
@@ -173,7 +174,8 @@ async function connectJobsHandlerTestService(opts?: {
       new Response(
         JSON.stringify({
           state: "ready",
-          serverNow: 1_700_000_120,
+          authorizationContext: testAuthorizationContext(),
+          serverNow: 1_700_000_120_000,
           session: {
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
@@ -210,7 +212,11 @@ async function connectJobsHandlerTestService(opts?: {
               },
             },
           },
-          nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
         }),
         {
           status: 200,
@@ -226,6 +232,7 @@ async function connectJobsHandlerTestService(opts?: {
       jetstreamJobs: opts?.jetstreamJobs,
     });
     const service = await connectTrellisServiceWithRuntimeDeps({
+      authorizationContextEphemeral: true,
       trellisUrl: "https://trellis.example.com",
       contract: jobsHandlerTestContract,
       name: "svc",
@@ -260,7 +267,8 @@ async function connectHandlerSurfaceTestService(opts?: {
       new Response(
         JSON.stringify({
           state: "ready",
-          serverNow: 1_700_000_120,
+          authorizationContext: testAuthorizationContext(),
+          serverNow: 1_700_000_120_000,
           session: {
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
@@ -275,7 +283,11 @@ async function connectHandlerSurfaceTestService(opts?: {
               store: {},
             },
           },
-          nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
         }),
         {
           status: 200,
@@ -291,6 +303,7 @@ async function connectHandlerSurfaceTestService(opts?: {
       subscriptions: opts?.subscriptions,
     });
     const service = await connectTrellisServiceWithRuntimeDeps({
+      authorizationContextEphemeral: true,
       trellisUrl: "https://trellis.example.com",
       contract: handlerSurfaceTestContract,
       name: "svc",
@@ -761,7 +774,8 @@ function installCoreBootstrapFetch(): () => void {
       new Response(
         JSON.stringify({
           state: "ready",
-          serverNow: 1_700_000_120,
+          authorizationContext: testAuthorizationContext(),
+          serverNow: 1_700_000_120_000,
           session: {
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
@@ -772,7 +786,11 @@ function installCoreBootstrapFetch(): () => void {
             participantNeedsDigest: core.CONTRACT_DIGEST,
             resourceRuntime: { kv: {}, store: {} },
           },
-          nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
         }),
         {
           status: 200,
@@ -842,6 +860,7 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
         new Response(
           JSON.stringify({
             state: "ready",
+            authorizationContext: testAuthorizationContext(),
             serverNow: 1_700_000_120_000,
             session: {
               sessionId: "session-key",
@@ -860,7 +879,11 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
                 },
               },
             },
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
             requestId: "req_123",
           }),
           {
@@ -874,6 +897,7 @@ Deno.test("TrellisService.connect uses bootstrap response transport details", as
     const error = await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -908,6 +932,7 @@ Deno.test("TrellisService.connect initializes telemetry by default", async () =>
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -938,6 +963,7 @@ Deno.test("TrellisService.connect skips telemetry when disabled", async () => {
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -999,6 +1025,7 @@ Deno.test("TrellisService.connect retries once on iat_out_of_range using server 
       return new Response(
         JSON.stringify({
           state: "ready",
+          authorizationContext: testAuthorizationContext(),
           serverNow: 1_700_000_120_000,
           session: {
             sessionId: "session-key",
@@ -1012,7 +1039,11 @@ Deno.test("TrellisService.connect retries once on iat_out_of_range using server 
               kv: {},
             },
           },
-          nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
         }),
         {
           status: 200,
@@ -1024,6 +1055,7 @@ Deno.test("TrellisService.connect retries once on iat_out_of_range using server 
     const error = await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1067,7 +1099,8 @@ Deno.test("TrellisService.connect retries bootstrap with manifest when required"
       return new Response(
         JSON.stringify({
           state: "ready",
-          serverNow: 1_700_000_120,
+          authorizationContext: testAuthorizationContext(),
+          serverNow: 1_700_000_120_000,
           session: {
             sessionId: "session-key",
             inboxPrefix: "_INBOX.session-key",
@@ -1078,7 +1111,11 @@ Deno.test("TrellisService.connect retries bootstrap with manifest when required"
             participantNeedsDigest: core.CONTRACT_DIGEST,
             resourceRuntime: { kv: {} },
           },
-          nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+          nats: {
+            jwt: "jwt",
+            jwtExpiresAt: 2_000_000_000,
+            servers: ["nats://127.0.0.1:4222"],
+          },
         }),
         {
           status: 200,
@@ -1090,6 +1127,7 @@ Deno.test("TrellisService.connect retries bootstrap with manifest when required"
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1131,7 +1169,8 @@ Deno.test("TrellisService.connect retries when bootstrap endpoint is unavailable
         new Response(
           JSON.stringify({
             state: "ready",
-            serverNow: 1_700_000_120,
+            authorizationContext: testAuthorizationContext(),
+            serverNow: 1_700_000_120_000,
             session: {
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
@@ -1142,7 +1181,11 @@ Deno.test("TrellisService.connect retries when bootstrap endpoint is unavailable
               participantNeedsDigest: core.CONTRACT_DIGEST,
               resourceRuntime: { kv: {} },
             },
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -1155,6 +1198,7 @@ Deno.test("TrellisService.connect retries when bootstrap endpoint is unavailable
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1202,6 +1246,7 @@ Deno.test("internal service connect uses a reconnect-safe auth token authenticat
         connectTrellisServiceInternal("svc", {
           identity: TEST_IDENTITY,
           contractDigest: core.CONTRACT_DIGEST,
+          authorizationContextDigest: core.CONTRACT_DIGEST,
           nats: {
             servers: "nats://127.0.0.1:4222",
             authenticator: () => ({ jwt: "sentinel-jwt" }),
@@ -1268,6 +1313,7 @@ Deno.test("internal service connect preserves explicit reconnect attempt overrid
       connectTrellisServiceInternal("svc", {
         identity: TEST_IDENTITY,
         contractDigest: core.CONTRACT_DIGEST,
+        authorizationContextDigest: core.CONTRACT_DIGEST,
         nats: {
           servers: "nats://127.0.0.1:4222",
           authenticator: {},
@@ -1316,6 +1362,7 @@ Deno.test("TrellisService.connect surfaces bootstrap failure reasons", async () 
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1366,7 +1413,8 @@ Deno.test("TrellisService.connect waits for pending authority update", async () 
         new Response(
           JSON.stringify({
             state: "ready",
-            serverNow: 1_700_000_120,
+            authorizationContext: testAuthorizationContext(),
+            serverNow: 1_700_000_120_000,
             session: {
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
@@ -1377,7 +1425,11 @@ Deno.test("TrellisService.connect waits for pending authority update", async () 
               participantNeedsDigest: core.CONTRACT_DIGEST,
               resourceRuntime: { kv: {} },
             },
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -1390,6 +1442,7 @@ Deno.test("TrellisService.connect waits for pending authority update", async () 
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1448,6 +1501,7 @@ Deno.test("TrellisService.connect treats failed authority reconciliation as term
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1502,7 +1556,8 @@ Deno.test("TrellisService.connect waits for pending contract activation", async 
         new Response(
           JSON.stringify({
             state: "ready",
-            serverNow: 1_700_000_120,
+            authorizationContext: testAuthorizationContext(),
+            serverNow: 1_700_000_120_000,
             session: {
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
@@ -1513,7 +1568,11 @@ Deno.test("TrellisService.connect waits for pending contract activation", async 
               participantNeedsDigest: core.CONTRACT_DIGEST,
               resourceRuntime: { kv: {} },
             },
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -1526,6 +1585,7 @@ Deno.test("TrellisService.connect waits for pending contract activation", async 
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1598,7 +1658,8 @@ Deno.test("TrellisService.connect waits for pending contract catalog issue", asy
         new Response(
           JSON.stringify({
             state: "ready",
-            serverNow: 1_700_000_120,
+            authorizationContext: testAuthorizationContext(),
+            serverNow: 1_700_000_120_000,
             session: {
               sessionId: "session-key",
               inboxPrefix: "_INBOX.session-key",
@@ -1609,7 +1670,11 @@ Deno.test("TrellisService.connect waits for pending contract catalog issue", asy
               participantNeedsDigest: core.CONTRACT_DIGEST,
               resourceRuntime: { kv: {} },
             },
-            nats: { jwt: "jwt", servers: ["nats://127.0.0.1:4222"] },
+            nats: {
+              jwt: "jwt",
+              jwtExpiresAt: 2_000_000_000,
+              servers: ["nats://127.0.0.1:4222"],
+            },
           }),
           {
             status: 200,
@@ -1622,6 +1687,7 @@ Deno.test("TrellisService.connect waits for pending contract catalog issue", asy
     await assertRejects(
       () =>
         connectTrellisServiceWithRuntimeDeps({
+          authorizationContextEphemeral: true,
           trellisUrl: "https://trellis.example.com",
           contract: core,
           name: "svc",
@@ -1658,6 +1724,7 @@ Deno.test("internal service connect accepts log false", async () => {
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: core.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -1684,6 +1751,7 @@ Deno.test("internal service connect uses the provided logger", async () => {
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: core.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -1707,6 +1775,7 @@ Deno.test("internal service connect logs explicit service NATS lifecycle events"
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: core.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -1788,6 +1857,7 @@ Deno.test("internal service connect logs service NATS errors at error severity",
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: core.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -1845,6 +1915,7 @@ Deno.test("internal service connect keeps final closed logging explicit", async 
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: core.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -1900,6 +1971,7 @@ Deno.test("service heartbeat publishing stops after terminal NATS close", async 
   const service = await connectTrellisServiceInternal("svc", {
     identity: TEST_IDENTITY,
     contractDigest: heartbeatTestContract.CONTRACT_DIGEST,
+    authorizationContextDigest: core.CONTRACT_DIGEST,
     nats: {
       servers: "nats://127.0.0.1:4222",
       authenticator: {},
@@ -2051,6 +2123,7 @@ Deno.test({
     const service = await connectTrellisServiceInternal("svc", {
       identity: TEST_IDENTITY,
       contractDigest: core.CONTRACT_DIGEST,
+      authorizationContextDigest: core.CONTRACT_DIGEST,
       nats: {
         servers: "nats://127.0.0.1:4222",
         authenticator: {},

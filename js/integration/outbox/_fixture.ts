@@ -263,6 +263,7 @@ export function createOutboxFixture(caseId: string) {
       contract: serviceContract,
     });
     return await TrellisService.connect({
+      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       contract: serviceContract,
       name: runtimeName,

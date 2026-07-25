@@ -26,6 +26,25 @@ issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
 target_signing_seed_file = "./nats/trellis-target-signing.seed"
 xkey_seed_file = "./nats/auth-callout-xkey.seed"
 
+[auth.authorization]
+trust_root_file = "./auth/authorization-root.json"
+issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
+issuer_certificate_files = ["./auth/authorization-issuer-certificate.json"]
+issuer_signing_seed_file = "./auth/authorization-issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
+
 [platform.storage]
 kind = "sqlite"
 path = "./data/platform.sqlite"
@@ -173,6 +192,25 @@ renew_ms = 5000
 enabled = true
 password_min_length = 8
 
+[auth.authorization]
+trust_root_file = "./auth/authorization-root.json"
+issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
+issuer_certificate_files = ["./auth/authorization-issuer-certificate.json"]
+issuer_signing_seed_file = "./auth/authorization-issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
+
 [oauth]
 redirect_base = "http://localhost:3000/auth/callback"
 always_show_provider_chooser = false
@@ -293,6 +331,25 @@ auth_creds_path = "./nats/auth.creds"
 type = "oidc"
 client_secret_file = "./secrets/google"
 
+[auth.authorization]
+trust_root_file = "./auth/root.json"
+issuer_manifest_file = "./auth/manifest.json"
+issuer_certificate_files = ["./auth/issuer.json"]
+issuer_signing_seed_file = "./auth/issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
+
 [platform.storage]
 kind = "sqlite"
 path = "./data/platform.sqlite"
@@ -327,6 +384,75 @@ path = "./data/platform.sqlite"
             .and_then(|google| google.client_secret_file.as_ref()),
         Some(&directory.path().join("./secrets/google"))
     );
+    let authorization = config.resolve_authorization().expect("authorization");
+    assert_eq!(
+        authorization.trust_root_file,
+        directory.path().join("./auth/root.json")
+    );
+    assert_eq!(
+        authorization.issuer_certificate_files,
+        vec![directory.path().join("./auth/issuer.json")]
+    );
+}
+
+#[test]
+fn authorization_config_rejects_root_seed_and_invalid_policy() {
+    let unknown = RuntimeConfig::from_toml_str(
+        r#"
+[auth.authorization]
+trust_root_file = "root.json"
+issuer_manifest_file = "manifest.json"
+issuer_certificate_files = ["issuer.json"]
+issuer_signing_seed_file = "issuer.seed"
+root_signing_seed_file = "root.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trust"
+context_bucket = "contexts"
+registry_replicas = 1
+"#,
+    )
+    .expect_err("root seed is not a runtime field");
+    assert!(unknown.to_string().contains("root_signing_seed_file"));
+
+    let config = RuntimeConfig::from_toml_str(
+        r#"
+[auth.authorization]
+trust_root_file = "root.json"
+issuer_manifest_file = "manifest.json"
+issuer_certificate_files = ["issuer.json"]
+issuer_signing_seed_file = "issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 300
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trust"
+context_bucket = "contexts"
+registry_replicas = 1
+"#,
+    )
+    .expect("parse authorization config");
+    assert!(matches!(
+        config.resolve_authorization(),
+        Err(ConfigError::InvalidAuthorizationConfig {
+            field: "refresh_lead_seconds",
+            ..
+        })
+    ));
 }
 
 #[test]

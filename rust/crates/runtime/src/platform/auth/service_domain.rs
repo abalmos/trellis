@@ -485,6 +485,10 @@ pub enum PostCommitActionKind {
     Event,
     /// Kick exact active NATS connections.
     Kick,
+    /// Publish one immutable authorization-context registry entry.
+    ContextPublish,
+    /// Publish one authorization-context revocation entry.
+    ContextRevoke,
 }
 
 /// Durable post-commit event or connection-kick intent.

@@ -64,6 +64,7 @@ export async function connectTrellisServiceInternal<
     .natsConnectOptions({
       sessionId: name,
       participantDigest: opts.contractDigest,
+      contextDigest: opts.authorizationContextDigest,
       jwt: "retired-control-plane-test",
     });
 

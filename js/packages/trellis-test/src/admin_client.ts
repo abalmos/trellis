@@ -297,6 +297,7 @@ export class TrellisTestAdminAutomation {
           participant: ADMIN_PARTICIPANT,
           auth: {
             mode: "session_key",
+            authorizationContextEphemeral: true,
             sessionKeySeed,
             redirectTo: `${this.#trellisUrl}/_trellis/test/admin-auth`,
           },
