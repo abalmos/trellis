@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -22,7 +22,7 @@ use async_nats::jetstream::{self, stream};
 use async_nats::ConnectOptions;
 use futures_util::StreamExt;
 use rusqlite::{params_from_iter, types::Value as SqliteValue, Connection, Params};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Map, Number, Value};
 use tempfile::TempDir;
 use tokio::task::JoinHandle;
@@ -43,6 +43,29 @@ const DEFAULT_ADMIN_RPC_TIMEOUT_MS: u64 = 5_000;
 const NATS_IMAGE: &str = "docker.io/library/nats:2-alpine";
 const NATS_CONTAINER_PREFIX: &str = "trellis-test-nats-";
 const WORKDIR_OWNER_MARKER: &str = ".trellis-test-owner";
+const TRELLIS_TEST_METRICS_ENV: &str = "TRELLIS_TEST_METRICS_PATH";
+
+/// Records a process start in the active integration metrics stream.
+#[doc(hidden)]
+pub fn record_test_process_start(process: &str, detail: impl fmt::Display) -> io::Result<()> {
+    let Some(path) = std::env::var_os(TRELLIS_TEST_METRICS_ENV) else {
+        return Ok(());
+    };
+    let mut output = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = format!(
+        "{}\n",
+        json!({
+            "event": "process-start",
+            "process": process,
+            "detail": detail.to_string(),
+            "pid": std::process::id(),
+        })
+    );
+    output.write_all(line.as_bytes())
+}
 const SHARED_RUNTIME_ENV: &str = "TRELLIS_TEST_SHARED_RUNTIME";
 const ADMIN_USERNAME: &str = "admin";
 thread_local! {
@@ -52,10 +75,32 @@ thread_local! {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedRuntimeManifest {
+    version: u8,
+    trellis_url: String,
     nats_url: String,
     websocket_url: String,
     workdir: PathBuf,
+    admin_password: String,
+    admin_rpc_url: String,
+    admin_rpc_token: String,
     tenants: BTreeMap<String, SharedTenantManifest>,
+    assignments: BTreeMap<String, SharedRuntimeAssignment>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedRuntimeAssignment {
+    mode: String,
+    namespace: String,
+    tenant_id: String,
+    scope: SharedRuntimeScope,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedRuntimeScope {
+    run_token: String,
+    case_token: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -159,6 +204,10 @@ pub enum TrellisTestError {
     /// Contract manifest parsing or digesting failed.
     #[error(transparent)]
     Contract(#[from] trellis_rs::contracts::ContractsError),
+
+    /// Integration-test namespace construction failed.
+    #[error(transparent)]
+    IntegrationScope(#[from] trellis_rs::integration_test_scoping::IntegrationTestScopeError),
 
     /// Protocol artifact or proof construction failed.
     #[error(transparent)]
@@ -326,6 +375,22 @@ where
     C: trellis_rs::service::GeneratedServiceContract,
 {
     let session_seed = random_session_seed();
+    let scoped_contract_json = key
+        .integration_test_scope
+        .as_ref()
+        .map(|scope| {
+            let manifest = serde_json::from_str(contract_json)?;
+            Ok::<_, TrellisTestError>(serde_json::to_string(&scope_contract_manifest(
+                manifest, scope,
+            )?)?)
+        })
+        .transpose()
+        .map_err(|error| {
+            trellis_rs::service::ServiceRuntimeError::Client(TrellisClientError::Bootstrap(
+                error.to_string(),
+            ))
+        })?;
+    let contract_json = scoped_contract_json.as_deref().unwrap_or(contract_json);
     trellis_rs::generated::test_connect_service_runtime(
         trellis_url,
         &key.participant_id,
@@ -336,6 +401,7 @@ where
         &key.identity_seed,
         &key.participant_needs_digest,
         &session_seed,
+        key.integration_test_scope.clone(),
     )
     .await
 }
@@ -513,6 +579,9 @@ pub struct TrellisTestRuntime {
     startup_timeout: Duration,
     shutdown_timeout: Duration,
     trellis_command: TrellisProcessCommand,
+    admin_rpc: Option<AdminRpcProxy>,
+    attached: bool,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
 /// Row returned by a control-plane SQLite query.
@@ -807,8 +876,14 @@ impl Drop for TrellisNatsMessageObserver {
     }
 }
 
-fn shared_runtime_assignment(
-) -> Result<Option<(SharedRuntimeManifest, SharedTenantManifest)>, TrellisTestError> {
+fn shared_runtime_assignment() -> Result<
+    Option<(
+        SharedRuntimeManifest,
+        SharedTenantManifest,
+        SharedRuntimeAssignment,
+    )>,
+    TrellisTestError,
+> {
     let Some(path) = std::env::var_os(SHARED_RUNTIME_ENV) else {
         return Ok(None);
     };
@@ -821,12 +896,32 @@ fn shared_runtime_assignment(
             )
         })?;
     let manifest: SharedRuntimeManifest = serde_json::from_slice(&fs::read(path)?)?;
-    let tenant = manifest.tenants.get(&tenant_id).cloned().ok_or_else(|| {
-        TrellisTestError::UnexpectedResponse(format!(
-            "shared Rust integration runtime has no tenant for {tenant_id}"
-        ))
-    })?;
-    Ok(Some((manifest, tenant)))
+    if manifest.version != 3 {
+        return Err(TrellisTestError::UnexpectedResponse(format!(
+            "unsupported shared Rust integration runtime manifest version {}",
+            manifest.version
+        )));
+    }
+    let assignment = manifest
+        .assignments
+        .get(&tenant_id)
+        .cloned()
+        .ok_or_else(|| {
+            TrellisTestError::UnexpectedResponse(format!(
+                "shared Rust integration runtime has no assignment for {tenant_id}"
+            ))
+        })?;
+    let tenant = manifest
+        .tenants
+        .get(&assignment.tenant_id)
+        .cloned()
+        .ok_or_else(|| {
+            TrellisTestError::UnexpectedResponse(format!(
+                "shared Rust integration runtime has no tenant {}",
+                assignment.tenant_id
+            ))
+        })?;
+    Ok(Some((manifest, tenant, assignment)))
 }
 
 fn materialize_shared_runtime(
@@ -967,6 +1062,15 @@ impl TrellisTestRuntime {
         let resolved_runtime = options.container_runtime.resolve()?;
         let workdir = IntegrationWorkdir::create(options.keep_workdir)?;
         let shared_runtime = shared_runtime_assignment()?;
+        let integration_test_scope = shared_runtime
+            .as_ref()
+            .map(|(_, _, assignment)| {
+                trellis_rs::integration_test_scoping::IntegrationTestScope::new(
+                    assignment.scope.run_token.clone(),
+                    assignment.scope.case_token.clone(),
+                )
+            })
+            .transpose()?;
 
         let port = reserve_local_port()?;
         let trellis_url = format!("http://127.0.0.1:{port}");
@@ -975,7 +1079,7 @@ impl TrellisTestRuntime {
         bootstrap_options.container_runtime = options.container_runtime.to_bootstrap();
         bootstrap_options.trellis_port = port;
         bootstrap_options.public_origin = trellis_url.clone();
-        if let Some((shared, _)) = &shared_runtime {
+        if let Some((shared, _, _)) = &shared_runtime {
             bootstrap_options
                 .nats_server_url
                 .clone_from(&shared.nats_url);
@@ -984,7 +1088,7 @@ impl TrellisTestRuntime {
                 .clone_from(&shared.websocket_url);
         }
         let manifest = match &shared_runtime {
-            Some((shared, tenant)) => {
+            Some((shared, tenant, _)) => {
                 materialize_shared_runtime(workdir.path(), shared, tenant, &bootstrap_options)?
             }
             None => trellis_local_bootstrap::generate_local_trellis_bootstrap(&bootstrap_options)?,
@@ -993,6 +1097,33 @@ impl TrellisTestRuntime {
             workdir.path().join(WORKDIR_OWNER_MARKER),
             format!("{}\n", std::process::id()),
         )?;
+
+        if let Some((shared, _, assignment)) = &shared_runtime {
+            if assignment.mode == "shared" {
+                return Ok(Self {
+                    workdir,
+                    nats: None,
+                    trellis: None,
+                    trellis_url: shared.trellis_url.clone(),
+                    nats_url: shared.nats_url.clone(),
+                    nats_websocket_url: shared.websocket_url.clone(),
+                    manifest,
+                    admin_password: shared.admin_password.clone(),
+                    default_deployment: format!("{}-deployment", assignment.namespace),
+                    default_mutable_dev: options.default_mutable_dev,
+                    reconciliation_timeout: options.reconciliation_timeout,
+                    startup_timeout: options.startup_timeout,
+                    shutdown_timeout: options.shutdown_timeout,
+                    trellis_command: options.trellis_command,
+                    admin_rpc: Some(AdminRpcProxy {
+                        url: shared.admin_rpc_url.clone(),
+                        token: shared.admin_rpc_token.clone(),
+                    }),
+                    attached: true,
+                    integration_test_scope,
+                });
+            }
+        }
 
         let mut nats = None;
         let mut trellis = None;
@@ -1062,6 +1193,9 @@ impl TrellisTestRuntime {
             startup_timeout: options.startup_timeout,
             shutdown_timeout: options.shutdown_timeout,
             trellis_command: options.trellis_command,
+            admin_rpc: None,
+            attached: false,
+            integration_test_scope,
         })
     }
 
@@ -1069,6 +1203,19 @@ impl TrellisTestRuntime {
     #[must_use]
     pub fn trellis_url(&self) -> &str {
         &self.trellis_url
+    }
+
+    /// Resolve a descriptor subject through this case's integration-test scope.
+    #[doc(hidden)]
+    pub fn integration_test_descriptor_subject(&self, subject: &str) -> String {
+        self.integration_test_scope.as_ref().map_or_else(
+            || subject.to_string(),
+            |scope| {
+                scope
+                    .descriptor_subject(subject)
+                    .expect("generated descriptor subject is valid")
+            },
+        )
     }
 
     /// Return the native NATS URL.
@@ -1281,6 +1428,9 @@ impl TrellisTestRuntime {
 
     /// Return the first admin bootstrap URL observed in Trellis stdout, if present.
     pub fn bootstrap_url(&self) -> Result<Option<String>, TrellisTestError> {
+        if self.attached {
+            return Ok(Some(self.trellis_url.clone()));
+        }
         let Some(trellis) = &self.trellis else {
             return Ok(None);
         };
@@ -1293,6 +1443,9 @@ impl TrellisTestRuntime {
         &self,
         timeout: Duration,
     ) -> Result<String, TrellisTestError> {
+        if self.attached {
+            return Ok(self.trellis_url.clone());
+        }
         let Some(trellis) = &self.trellis else {
             return Err(TrellisTestError::UnexpectedResponse(
                 "Trellis process is not running".to_string(),
@@ -1310,6 +1463,8 @@ impl TrellisTestRuntime {
             default_deployment: self.default_deployment.clone(),
             default_mutable_dev: self.default_mutable_dev,
             reconciliation_timeout: self.reconciliation_timeout,
+            admin_rpc: self.admin_rpc.clone(),
+            integration_test_scope: self.integration_test_scope.clone(),
         })
     }
 
@@ -1320,7 +1475,7 @@ impl TrellisTestRuntime {
         _name: &'a str,
         service_key: &'a TrellisTestServiceKey,
     ) -> trellis_rs::service::ServiceConnectOptions<'a> {
-        trellis_rs::service::ServiceConnectOptions::new(
+        let options = trellis_rs::service::ServiceConnectOptions::new(
             &self.trellis_url,
             &service_key.instance_id,
             &service_key.deployment_id,
@@ -1332,10 +1487,18 @@ impl TrellisTestRuntime {
             Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
         )
         .with_session_key_seed(random_session_seed())
+        .with_timeout_ms(30_000);
+        match self.integration_test_scope.clone() {
+            Some(scope) => options.with_integration_test_scope(scope),
+            None => options,
+        }
     }
 
     /// Complete first-admin bootstrap through the public Trellis HTTP surface.
     pub async fn complete_bootstrap(&self) -> Result<(), TrellisTestError> {
+        if self.attached {
+            return Ok(());
+        }
         let bootstrap_url = self
             .wait_for_bootstrap_url(self.reconciliation_timeout)
             .await?;
@@ -1414,6 +1577,8 @@ pub struct TrellisTestAdminOptions {
     pub default_mutable_dev: bool,
     /// Timeout for deployment-authority reconciliation polling.
     pub reconciliation_timeout: Duration,
+    admin_rpc: Option<AdminRpcProxy>,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
 /// Public-surface admin automation for live Trellis integration tests.
@@ -1428,6 +1593,67 @@ pub struct TrellisTestAdmin {
     created_deployments: HashMap<String, String>,
     deployment_authorities: std::collections::HashMap<String, String>,
     api_artifacts: std::collections::BTreeMap<String, Value>,
+    admin_rpc: Option<AdminRpcProxy>,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+}
+
+#[derive(Clone, Debug)]
+struct AdminRpcProxy {
+    url: String,
+    token: String,
+}
+
+impl AdminRpcProxy {
+    async fn call<T: Serialize + ?Sized, R: DeserializeOwned>(
+        &self,
+        method: &str,
+        input: &T,
+    ) -> Result<R, TrellisTestError> {
+        #[derive(Deserialize)]
+        struct Response {
+            ok: bool,
+            output: Option<Value>,
+            error: Option<String>,
+        }
+
+        let response = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(190))
+            .build()?
+            .post(&self.url)
+            .bearer_auth(&self.token)
+            .json(&json!({ "method": method, "input": input }))
+            .send()
+            .await?;
+        let status = response.status();
+        let response: Response = response.json().await?;
+        if !status.is_success() || !response.ok {
+            return Err(TrellisTestError::UnexpectedResponse(
+                response
+                    .error
+                    .unwrap_or_else(|| format!("shared admin RPC {method} failed with {status}")),
+            ));
+        }
+        serde_json::from_value(response.output.unwrap_or(Value::Null)).map_err(Into::into)
+    }
+
+    async fn complete_client_auth(
+        &self,
+        trellis_url: &str,
+        flow_id: &str,
+        session_key: &str,
+    ) -> Result<(), TrellisTestError> {
+        let login_url = format!("{trellis_url}/_trellis/test?flowId={flow_id}");
+        self.call::<_, Value>(
+            "completeClientAuth",
+            &json!({
+                "loginUrl": login_url,
+                "sessionKey": session_key,
+                "mode": "session_key",
+            }),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 impl fmt::Debug for TrellisTestAdmin {
@@ -1455,11 +1681,13 @@ impl TrellisTestAdmin {
             default_deployment: options.default_deployment,
             default_mutable_dev: options.default_mutable_dev,
             reconciliation_timeout: options.reconciliation_timeout,
-            bootstrap_complete: false,
+            bootstrap_complete: options.admin_rpc.is_some(),
             client: None,
             created_deployments: HashMap::new(),
             deployment_authorities: std::collections::HashMap::new(),
             api_artifacts: builtin_api_artifacts(),
+            admin_rpc: options.admin_rpc,
+            integration_test_scope: options.integration_test_scope,
         }
     }
 
@@ -1482,6 +1710,11 @@ impl TrellisTestAdmin {
         &mut self,
         bootstrap_url: &str,
     ) -> Result<&trellis_rs::generated::Caller, TrellisTestError> {
+        if self.admin_rpc.is_some() {
+            return Err(TrellisTestError::UnexpectedResponse(
+                "shared test runtime admin access must use the typed admin adapter".to_string(),
+            ));
+        }
         if self.client.is_none() {
             self.complete_bootstrap(bootstrap_url).await?;
             let challenge =
@@ -1524,25 +1757,49 @@ impl TrellisTestAdmin {
         deployment: Option<&str>,
         mutable_dev: Option<bool>,
     ) -> Result<String, TrellisTestError> {
-        let deployment_name = deployment.unwrap_or(&self.default_deployment).to_string();
+        let deployment_name = deployment.unwrap_or(&self.default_deployment);
+        let deployment_name = self.integration_test_scope.as_ref().map_or_else(
+            || deployment_name.to_string(),
+            |scope| scope.identifier(deployment_name),
+        );
         let mutable_dev = mutable_dev.unwrap_or(self.default_mutable_dev);
         if let Some(deployment_id) = self.created_deployments.get(&deployment_name) {
             return Ok(deployment_id.clone());
         }
-        let client = self.connect_admin(bootstrap_url).await?;
-        let auth = GeneratedAuthClient::new(client);
-        let created = auth
-            .rpc()
-            .auth()
-            .deployments_create(&auth_deployments_create_request_shape(
-                &deployment_name,
-                mutable_dev,
-            )?)
-            .await?;
+        let request = auth_deployments_create_request_shape(&deployment_name, mutable_dev)?;
+        let created: auth_sdk::types::AuthDeploymentsCreateResponse =
+            if let Some(proxy) = &self.admin_rpc {
+                proxy.call("authDeploymentsCreate", &request).await?
+            } else {
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .deployments_create(&request)
+                    .await?
+            };
         let deployment_id = created.deployment.deployment_id;
         self.created_deployments
             .insert(deployment_name, deployment_id.clone());
         Ok(deployment_id)
+    }
+
+    /// Revoke one session through `Auth.Sessions.Revoke`.
+    pub async fn revoke_session(
+        &mut self,
+        bootstrap_url: &str,
+        request: &auth_sdk::types::AuthSessionsRevokeRequest,
+    ) -> Result<auth_sdk::types::AuthSessionsRevokeResponse, TrellisTestError> {
+        if let Some(proxy) = &self.admin_rpc {
+            proxy.call("authSessionsRevoke", request).await
+        } else {
+            Ok(
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .sessions_revoke(request)
+                    .await?,
+            )
+        }
     }
 
     /// Plan, accept, reconcile, and wait for a service contract authority update.
@@ -1556,7 +1813,8 @@ impl TrellisTestAdmin {
         let deployment_name = deployment
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{}-{}", self.default_deployment, &contract.digest[..8]));
-        let compiled = compile_test_contract(contract, &mut self.api_artifacts)?;
+        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+        let compiled = compile_test_contract(&contract, &mut self.api_artifacts)?;
         let participant_artifact = value_map(&compiled.participant, "participant artifact")?;
         let mut referenced_api_artifacts = self
             .api_artifacts
@@ -1567,19 +1825,25 @@ impl TrellisTestAdmin {
         let deployment = self
             .create_deployment(bootstrap_url, Some(&deployment_name), None)
             .await?;
-        let client = self.connect_admin(bootstrap_url).await?;
-        let auth = GeneratedAuthClient::new(client);
-        let planned = auth
-            .rpc()
-            .auth()
-            .deployment_authority_plan(&auth_sdk::types::AuthDeploymentAuthorityPlanRequest {
-                deployment_id: deployment.clone(),
-                participant_artifact,
-                referenced_api_artifacts,
-                expires_at: None,
-                idempotency_key: random_session_seed(),
-            })
-            .await?;
+        let plan_request = auth_sdk::types::AuthDeploymentAuthorityPlanRequest {
+            deployment_id: deployment.clone(),
+            participant_artifact,
+            referenced_api_artifacts,
+            expires_at: None,
+            idempotency_key: random_session_seed(),
+        };
+        let planned: auth_sdk::types::AuthDeploymentAuthorityPlanResponse =
+            if let Some(proxy) = &self.admin_rpc {
+                proxy
+                    .call("authDeploymentAuthorityPlan", &plan_request)
+                    .await?
+            } else {
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .deployment_authority_plan(&plan_request)
+                    .await?
+            };
         let plan = AuthorityPlanSummary::from_value(&serde_json::to_value(&planned.proposal)?)?;
         let allowed = if allow_plan_classifications.is_empty() {
             vec![AuthorityPlanClassification::Update]
@@ -1596,36 +1860,49 @@ impl TrellisTestAdmin {
                     .join(", "),
             });
         }
-        let accepted = match plan.classification {
+        let accepted: auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateResponse = match plan
+            .classification
+        {
             AuthorityPlanClassification::Update => {
-                auth.rpc()
-                    .auth()
-                    .deployment_authority_accept_update(
-                        &auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateRequest {
-                            proposal_id: plan.plan_id.clone(),
-                            expected_base_authority_version: None,
-                            reason: None,
-                            idempotency_key: random_session_seed(),
-                        },
-                    )
-                    .await?
+                let request = auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateRequest {
+                    proposal_id: plan.plan_id.clone(),
+                    expected_base_authority_version: None,
+                    reason: None,
+                    idempotency_key: random_session_seed(),
+                };
+                if let Some(proxy) = &self.admin_rpc {
+                    proxy
+                        .call("authDeploymentAuthorityAcceptUpdate", &request)
+                        .await?
+                } else {
+                    GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                        .rpc()
+                        .auth()
+                        .deployment_authority_accept_update(&request)
+                        .await?
+                }
             }
             AuthorityPlanClassification::Migration => {
-                let accepted = auth
-                    .rpc()
-                    .auth()
-                    .deployment_authority_accept_migration(
-                        &auth_sdk::types::AuthDeploymentAuthorityAcceptMigrationRequest {
-                            proposal_id: plan.plan_id.clone(),
-                            expected_base_authority_version: None,
-                            reason: Some(
-                                "Approved by trellis-test for an isolated integration test."
-                                    .to_string(),
-                            ),
-                            idempotency_key: random_session_seed(),
-                        },
-                    )
-                    .await?;
+                let request = auth_sdk::types::AuthDeploymentAuthorityAcceptMigrationRequest {
+                    proposal_id: plan.plan_id.clone(),
+                    expected_base_authority_version: None,
+                    reason: Some(
+                        "Approved by trellis-test for an isolated integration test.".to_string(),
+                    ),
+                    idempotency_key: random_session_seed(),
+                };
+                let accepted: auth_sdk::types::AuthDeploymentAuthorityAcceptMigrationResponse =
+                    if let Some(proxy) = &self.admin_rpc {
+                        proxy
+                            .call("authDeploymentAuthorityAcceptMigration", &request)
+                            .await?
+                    } else {
+                        GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                            .rpc()
+                            .auth()
+                            .deployment_authority_accept_migration(&request)
+                            .await?
+                    };
                 serde_json::from_value(serde_json::to_value(accepted)?)?
             }
         };
@@ -1684,18 +1961,22 @@ impl TrellisTestAdmin {
                     "deployment '{deployment}' has no accepted authority"
                 ))
             })?;
-        let client = self.connect_admin(bootstrap_url).await?;
-        let auth = GeneratedAuthClient::new(client);
-        auth.rpc()
-            .auth()
-            .deployment_authority_reconcile(
-                &auth_sdk::types::AuthDeploymentAuthorityReconcileRequest {
-                    authority_id,
-                    expected_version: None,
-                    idempotency_key: random_session_seed(),
-                },
-            )
-            .await?;
+        let request = auth_sdk::types::AuthDeploymentAuthorityReconcileRequest {
+            authority_id,
+            expected_version: None,
+            idempotency_key: random_session_seed(),
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: auth_sdk::types::AuthDeploymentAuthorityReconcileResponse = proxy
+                .call("authDeploymentAuthorityReconcile", &request)
+                .await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .deployment_authority_reconcile(&request)
+                .await?;
+        }
         Ok(())
     }
 
@@ -1721,15 +2002,19 @@ impl TrellisTestAdmin {
             })?;
         let deadline = Instant::now() + self.reconciliation_timeout;
         loop {
-            let client = self.connect_admin(bootstrap_url).await?;
-            let auth = GeneratedAuthClient::new(client);
-            let result = auth
-                .rpc()
-                .auth()
-                .deployment_authority_get(&auth_sdk::types::AuthDeploymentAuthorityGetRequest {
-                    authority_id: authority_id.clone(),
-                })
-                .await?;
+            let request = auth_sdk::types::AuthDeploymentAuthorityGetRequest {
+                authority_id: authority_id.clone(),
+            };
+            let result: auth_sdk::types::AuthDeploymentAuthorityGetResponse =
+                if let Some(proxy) = &self.admin_rpc {
+                    proxy.call("authDeploymentAuthorityGet", &request).await?
+                } else {
+                    GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                        .rpc()
+                        .auth()
+                        .deployment_authority_get(&request)
+                        .await?
+                };
             let authority = serde_json::to_value(&result.authority)?;
             let materialized_authority = authority
                 .get("materialization")
@@ -1780,8 +2065,6 @@ impl TrellisTestAdmin {
         let auth_material = SessionAuth::from_seed_base64url(&seed)?;
         let participant_id = Some(approval.participant_id.clone());
         let instance_id = format!("inst_{}", &auth_material.session_key[..16]);
-        let client = self.connect_admin(bootstrap_url).await?;
-        let auth = GeneratedAuthClient::new(client);
         let request = auth_sdk::types::AuthServiceInstancesProvisionRequest {
             deployment_id: approval.deployment_id.clone(),
             instance_id: Some(instance_id.clone()),
@@ -1790,21 +2073,27 @@ impl TrellisTestAdmin {
             idempotency_key: random_session_seed(),
         };
         for attempt in 0..3 {
-            match auth
-                .rpc()
-                .auth()
-                .service_instances_provision(&request)
-                .await
-            {
+            let result: Result<auth_sdk::types::AuthServiceInstancesProvisionResponse, _> =
+                if let Some(proxy) = &self.admin_rpc {
+                    proxy.call("authServiceInstancesProvision", &request).await
+                } else {
+                    GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                        .rpc()
+                        .auth()
+                        .service_instances_provision(&request)
+                        .await
+                        .map_err(Into::into)
+                };
+            match result {
                 Ok(_) => break,
                 Err(error) if attempt < 2 && error.to_string().contains("WebSocket closed") => {
                     tokio::time::sleep(Duration::from_millis(100 * (attempt + 1))).await;
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
         }
         Ok(TrellisTestServiceKey {
-            seed: seed.clone(),
+            seed: random_session_seed(),
             identity_seed: seed,
             deployment_id: approval.deployment_id,
             instance_id,
@@ -1812,6 +2101,7 @@ impl TrellisTestAdmin {
             participant_id: approval.participant_id,
             participant_digest: approval.participant_digest,
             participant_needs_digest: approval.participant_needs_digest,
+            integration_test_scope: self.integration_test_scope.clone(),
         })
     }
 
@@ -1848,7 +2138,8 @@ impl TrellisTestAdmin {
         self.complete_bootstrap(bootstrap_url).await?;
         let session_seed = session_seed.into();
         let auth = SessionAuth::from_seed_base64url(&session_seed)?;
-        let compiled = compile_test_contract(contract, &mut self.api_artifacts)?;
+        let contract = contract.scoped(self.integration_test_scope.as_ref())?;
+        let compiled = compile_test_contract(&contract, &mut self.api_artifacts)?;
         let mut referenced_api_artifacts = self.api_artifacts.values().cloned().collect::<Vec<_>>();
         referenced_api_artifacts.push(compiled.api.clone());
         let redirect_to = format!("{}/_trellis/test/client-auth", self.trellis_url);
@@ -1861,8 +2152,14 @@ impl TrellisTestAdmin {
         )
         .await?;
         let flow_id = started.flow_id;
-        perform_local_login(&self.trellis_url, &flow_id, &self.admin_password).await?;
-        submit_portal_approval(&self.trellis_url, &flow_id).await?;
+        if let Some(proxy) = &self.admin_rpc {
+            proxy
+                .complete_client_auth(&self.trellis_url, &flow_id, &auth.session_key)
+                .await?;
+        } else {
+            perform_local_login(&self.trellis_url, &flow_id, &self.admin_password).await?;
+            submit_portal_approval(&self.trellis_url, &flow_id).await?;
+        }
         let bound = bind_flow(&self.trellis_url, &flow_id).await?;
         self.api_artifacts.insert(
             compiled.api["id"]
@@ -1876,11 +2173,13 @@ impl TrellisTestAdmin {
             bound: bound.clone(),
             session_seed,
             participant_digest: compiled.participant_digest,
+            integration_test_scope: self.integration_test_scope.clone(),
         };
         let client = connect_bound_user(
             &bound,
             &reconnect.session_seed,
             &reconnect.participant_digest,
+            reconnect.integration_test_scope.clone(),
         )
         .await?;
         Ok((client, reconnect))
@@ -1893,12 +2192,19 @@ pub struct TrellisTestClientReconnect {
     bound: BoundFlowSession,
     session_seed: String,
     participant_digest: String,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
 impl TrellisTestClientReconnect {
     /// Reconnect the already-bound session without starting or completing a fresh auth flow.
     pub async fn connect_bound_only(&self) -> Result<Caller, TrellisTestError> {
-        connect_bound_user(&self.bound, &self.session_seed, &self.participant_digest).await
+        connect_bound_user(
+            &self.bound,
+            &self.session_seed,
+            &self.participant_digest,
+            self.integration_test_scope.clone(),
+        )
+        .await
     }
 }
 
@@ -1934,6 +2240,261 @@ impl TrellisTestContract {
     pub fn digest(&self) -> &str {
         &self.digest
     }
+
+    fn scoped(
+        &self,
+        scope: Option<&trellis_rs::integration_test_scoping::IntegrationTestScope>,
+    ) -> Result<Self, TrellisTestError> {
+        let Some(scope) = scope else {
+            return Ok(self.clone());
+        };
+        let manifest = scope_contract_manifest(self.manifest.clone(), scope)?;
+        Self::from_manifest_value(manifest)
+    }
+}
+
+fn scope_contract_manifest(
+    mut manifest: Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+) -> Result<Value, TrellisTestError> {
+    if !manifest
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.starts_with("trellis.integration."))
+    {
+        return Ok(manifest);
+    }
+    let mut contract_ids = Vec::new();
+    collect_contract_ids(&manifest, &mut contract_ids);
+    let action_names = ["rpc", "operations", "events", "feeds"]
+        .into_iter()
+        .flat_map(|key| {
+            manifest
+                .get(key)
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|actions| actions.keys().cloned())
+        })
+        .collect::<Vec<_>>();
+    let capability_names = manifest
+        .get("capabilities")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|capabilities| capabilities.keys().cloned())
+        .collect::<Vec<_>>();
+    scope_manifest_value(
+        &mut manifest,
+        scope,
+        &contract_ids,
+        &action_names,
+        &capability_names,
+    )?;
+    if let Some(uses) = manifest.get_mut("uses") {
+        scope_use_selectors(uses, scope);
+    }
+    if let Some(event_consumers) = manifest.get_mut("eventConsumers") {
+        scope_event_consumer_events(event_consumers, scope);
+    }
+    for key in ["rpc", "operations", "events", "feeds"] {
+        if let Some(actions) = manifest.get_mut(key).and_then(Value::as_object_mut) {
+            let scoped = std::mem::take(actions)
+                .into_iter()
+                .map(|(name, value)| (scope.logical_name(&name), value))
+                .collect();
+            *actions = scoped;
+        }
+    }
+    Ok(manifest)
+}
+
+fn scope_use_selectors(
+    value: &mut Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+) {
+    match value {
+        Value::Object(fields) => {
+            if fields
+                .get("contract")
+                .and_then(Value::as_str)
+                .is_some_and(|contract| contract.starts_with("trellis.integration."))
+            {
+                scope_selector_value(value, scope);
+                return;
+            }
+            for value in fields.values_mut() {
+                scope_use_selectors(value, scope);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                scope_use_selectors(value, scope);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scope_selector_value(
+    value: &mut Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if matches!(
+                    key.as_str(),
+                    "call"
+                        | "serve"
+                        | "start"
+                        | "watch"
+                        | "cancel"
+                        | "control"
+                        | "publish"
+                        | "subscribe"
+                ) {
+                    if let Value::Array(names) = value {
+                        for name in names {
+                            if let Value::String(name) = name {
+                                *name = scope.logical_name(name);
+                            }
+                        }
+                    }
+                } else {
+                    scope_selector_value(value, scope);
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                scope_selector_value(value, scope);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scope_event_consumer_events(
+    value: &mut Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if matches!(key.as_str(), "uses" | "self") {
+                    scope_logical_name_values(value, scope);
+                } else {
+                    scope_event_consumer_events(value, scope);
+                }
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                scope_event_consumer_events(value, scope);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn scope_logical_name_values(
+    value: &mut Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+) {
+    match value {
+        Value::String(name) => *name = scope.logical_name(name),
+        Value::Object(fields) => {
+            for value in fields.values_mut() {
+                scope_logical_name_values(value, scope);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                scope_logical_name_values(value, scope);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_contract_ids(value: &Value, ids: &mut Vec<String>) {
+    match value {
+        Value::Object(fields) => {
+            for (key, value) in fields {
+                if matches!(key.as_str(), "id" | "contract")
+                    && value
+                        .as_str()
+                        .is_some_and(|id| id.starts_with("trellis.integration."))
+                {
+                    ids.push(value.as_str().expect("checked contract id").to_string());
+                }
+                collect_contract_ids(value, ids);
+            }
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_contract_ids(value, ids);
+            }
+        }
+        _ => {}
+    }
+    ids.sort();
+    ids.dedup();
+}
+
+fn scope_manifest_value(
+    value: &mut Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+    contract_ids: &[String],
+    action_names: &[String],
+    capability_names: &[String],
+) -> Result<(), TrellisTestError> {
+    match value {
+        Value::Object(fields) => {
+            for value in fields.values_mut() {
+                scope_manifest_value(value, scope, contract_ids, action_names, capability_names)?;
+            }
+            let old = std::mem::take(fields);
+            *fields = old
+                .into_iter()
+                .map(|(key, value)| {
+                    let key = contract_ids
+                        .iter()
+                        .find_map(|id| {
+                            key.strip_prefix(&format!("{id}::"))
+                                .map(|tail| format!("{}::{tail}", scope.contract_id(id)))
+                        })
+                        .unwrap_or(key);
+                    let key = if capability_names.contains(&key) {
+                        scope.capability(&key)
+                    } else {
+                        key
+                    };
+                    (key, value)
+                })
+                .collect();
+        }
+        Value::Array(values) => {
+            for value in values {
+                scope_manifest_value(value, scope, contract_ids, action_names, capability_names)?;
+            }
+        }
+        Value::String(text) => {
+            if let Some(id) = contract_ids.iter().find(|id| text.as_str() == id.as_str()) {
+                *text = scope.contract_id(id);
+            } else if let Some((id, tail)) = contract_ids
+                .iter()
+                .find_map(|id| text.strip_prefix(&format!("{id}::")).map(|tail| (id, tail)))
+            {
+                *text = format!("{}::{tail}", scope.contract_id(id));
+            } else if action_names.iter().any(|name| name == text) {
+                *text = scope.logical_name(text);
+            } else if capability_names.iter().any(|capability| capability == text) {
+                *text = scope.capability(text);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
@@ -2065,6 +2626,7 @@ pub struct TrellisTestServiceKey {
     pub participant_digest: String,
     /// Exact participant needs digest accepted for this deployment.
     pub participant_needs_digest: String,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2384,9 +2946,10 @@ async fn connect_bound_user(
     bound: &BoundFlowSession,
     session_seed: &str,
     participant_digest: &str,
+    integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
-    Ok(Caller::connect_user(UserConnectOptions::new(
+    let options = UserConnectOptions::new(
         &bound.trellis_url,
         &bound.nats_servers,
         &bound.bootstrap_jwt,
@@ -2398,8 +2961,12 @@ async fn connect_bound_user(
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
         format!("test-admin:{}", bound.trellis_url),
         Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
-    ))
-    .await?)
+    );
+    let options = match integration_test_scope {
+        Some(scope) => options.with_integration_test_scope(scope),
+        None => options,
+    };
+    Ok(Caller::connect_user(options).await?)
 }
 
 fn materialized_authority_is_current(
@@ -2637,6 +3204,7 @@ impl NatsContainer {
             let websocket_port = inspect_container_port(runtime, &name, 8080)?;
             wait_for_tcp_ready(nats_port, Duration::from_secs(30))?;
             wait_for_tcp_ready(websocket_port, Duration::from_secs(30))?;
+            record_test_process_start("nats", &name)?;
             Ok::<_, TrellisTestError>(Self {
                 runtime,
                 name: name.clone(),
@@ -2719,6 +3287,7 @@ impl TrellisProcess {
             }
             return Err(error);
         }
+        record_test_process_start("trellis", process.child.id())?;
         Ok(process)
     }
 
@@ -2893,24 +3462,24 @@ fn render_test_trellis_config(
             "redirect_base": format!("{}/auth/callback", options.public_origin.trim_end_matches('/')),
             "providers": runtime_options.oauth_providers,
         },
-        "platform": { "storage": test_storage_config() },
-        "jobs": { "storage": test_storage_config() },
+        "platform": { "storage": test_storage_config("./data/platform.sqlite") },
+        "jobs": { "storage": test_storage_config("./data/jobs.sqlite") },
         "health": {
-            "storage": test_storage_config(),
+            "storage": test_storage_config("./data/health.sqlite"),
             "transport_retention_hours": 1,
             "transport_max_bytes": 16_777_216,
         },
-        "eventlog": { "storage": test_storage_config() },
+        "eventlog": { "storage": test_storage_config("./data/eventlog.sqlite") },
     });
     toml::to_string_pretty(&config).expect("serialize Rust test runtime config")
 }
 
-fn test_storage_config() -> Value {
+fn test_storage_config(path: &str) -> Value {
     json!({
         "kind": "sqlite",
-        "path": "./data/trellis.sqlite",
+        "path": path,
         "journal_mode": "wal",
-        "busy_timeout_ms": 5_000,
+        "busy_timeout_ms": 30_000,
         "single_writer": true,
     })
 }
@@ -2924,7 +3493,7 @@ fn auth_creds_path(workdir: &Path) -> PathBuf {
 }
 
 fn control_plane_sqlite_path(workdir: &Path) -> PathBuf {
-    workdir.join("trellis/data/trellis.sqlite")
+    workdir.join("trellis/data/platform.sqlite")
 }
 
 fn sqlite_value_to_json(value: SqliteValue) -> Value {
@@ -3359,13 +3928,29 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        remove_stale_marked_workdirs, repo_trellis_command, AuthorityPlanClassification,
-        AuthorityPlanSummary, ContainerRuntime, MountMode, ResolvedContainerRuntime,
-        TrellisControlPlaneSqlite, WORKDIR_OWNER_MARKER,
+        remove_stale_marked_workdirs, repo_trellis_command, scope_contract_manifest,
+        AuthorityPlanClassification, AuthorityPlanSummary, ContainerRuntime, MountMode,
+        ResolvedContainerRuntime, TrellisControlPlaneSqlite, WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
     use std::fs;
+
+    #[test]
+    fn integration_scope_leaves_trellis_owned_contracts_unchanged() {
+        let manifest = json!({
+            "format": "trellis.contract.v1",
+            "id": "trellis.jobs@v1",
+            "rpc": { "Jobs.Cancel": { "version": "v1" } }
+        });
+        let scope =
+            trellis_rs::integration_test_scoping::IntegrationTestScope::new("run", "case").unwrap();
+
+        assert_eq!(
+            scope_contract_manifest(manifest.clone(), &scope).unwrap(),
+            manifest
+        );
+    }
 
     #[test]
     fn container_mount_relabels_podman_volumes() {

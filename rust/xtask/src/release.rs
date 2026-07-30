@@ -12,6 +12,7 @@ const RELEASE_JS_INTERNAL_NPM_VERSION_FILES: &[&str] = &[
     "js/packages/trellis-svelte/scripts/build_npm.ts",
     "js/packages/trellis/tests/publishing_targets_test.ts",
 ];
+const INTEGRATION_LIVE_ARTIFACTS_MANIFEST: &str = "dist/integration-runtime/manifest.json";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum ReleaseCommand {
@@ -39,12 +40,22 @@ pub(crate) enum ReleaseCommand {
         tag: String,
         git_ref: String,
     },
+    Lane(ReleaseLane),
     Verify {
         version: String,
         since: String,
         skip_integration: bool,
         keep_workdir: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ReleaseLane {
+    Static,
+    Rust,
+    JavaScript,
+    LiveBuild,
+    Live,
 }
 
 pub(crate) fn parse_release_command<I>(mut args: I) -> Result<ReleaseCommand>
@@ -61,6 +72,7 @@ where
         Some("write-notes") => parse_write_notes(args),
         Some("check-metadata") => parse_check_metadata(args),
         Some("pretag-check") => parse_pretag_check(args),
+        Some("lane") => parse_release_lane(args),
         Some("verify") => parse_verify(args),
         Some(command) => Err(miette!(
             "unsupported release command `{command}`\n{}",
@@ -71,7 +83,7 @@ where
 }
 
 pub(crate) fn release_usage_text() -> &'static str {
-    "usage: cargo xtask release check-versions | cargo xtask release prepare [--tag <tag>] | cargo xtask release bump --from <version> --to <version> | cargo xtask release changelog-check --version <version> [--since <tag>] | cargo xtask release write-notes --tag <tag> --output <path> | cargo xtask release check-metadata [--version <version>] [--since <tag>] | cargo xtask release pretag-check --tag <tag> [--ref <ref>] | cargo xtask release verify --version <version> --since <tag> [--skip-integration] [--keep-workdir]"
+    "usage: cargo xtask release check-versions | cargo xtask release prepare [--tag <tag>] | cargo xtask release bump --from <version> --to <version> | cargo xtask release changelog-check --version <version> [--since <tag>] | cargo xtask release write-notes --tag <tag> --output <path> | cargo xtask release check-metadata [--version <version>] [--since <tag>] | cargo xtask release pretag-check --tag <tag> [--ref <ref>] | cargo xtask release lane <static|rust|javascript|live-build|live> | cargo xtask release verify --version <version> --since <tag> [--skip-integration] [--keep-workdir]"
 }
 
 pub(crate) fn run_release(repo_root: &Path, command: ReleaseCommand) -> Result<()> {
@@ -141,6 +153,7 @@ pub(crate) fn run_release(repo_root: &Path, command: ReleaseCommand) -> Result<(
             Ok(())
         }
         ReleaseCommand::PretagCheck { tag, git_ref } => run_pretag_check(repo_root, &tag, &git_ref),
+        ReleaseCommand::Lane(lane) => run_release_lane(repo_root, lane, false),
         ReleaseCommand::Verify {
             version,
             since,
@@ -148,6 +161,23 @@ pub(crate) fn run_release(repo_root: &Path, command: ReleaseCommand) -> Result<(
             keep_workdir,
         } => run_verify(repo_root, &version, &since, skip_integration, keep_workdir),
     }
+}
+
+fn parse_release_lane<I>(mut args: I) -> Result<ReleaseCommand>
+where
+    I: Iterator<Item = String>,
+{
+    let lane = match args.next().as_deref() {
+        Some("static") => ReleaseLane::Static,
+        Some("rust") => ReleaseLane::Rust,
+        Some("javascript") => ReleaseLane::JavaScript,
+        Some("live-build") => ReleaseLane::LiveBuild,
+        Some("live") => ReleaseLane::Live,
+        Some(value) => return Err(miette!("unsupported release lane `{value}`")),
+        None => return Err(miette!("release lane requires a lane name")),
+    };
+    reject_extra(args, "release lane")?;
+    Ok(ReleaseCommand::Lane(lane))
 }
 
 fn parse_prepare<I>(args: I) -> Result<ReleaseCommand>
@@ -730,7 +760,6 @@ fn internal_js_package_names() -> &'static [&'static str] {
     &[
         "@qlever-llc/result",
         "@qlever-llc/trellis",
-        "@qlever-llc/trellis-control-plane",
         "@qlever-llc/trellis-svelte",
         "@qlever-llc/trellis-test",
     ]
@@ -1261,8 +1290,80 @@ fn run_verify(
 
     let before_prepare = working_tree_snapshot(repo_root)?;
     let total_started = Instant::now();
-    let mut timings = Vec::new();
     let specs = verify_command_specs(version, since, skip_integration, keep_workdir);
+    for stage in ["release metadata", "prepare"] {
+        let spec = specs
+            .iter()
+            .find(|spec| spec.stage == stage)
+            .ok_or_else(|| miette!("release command graph is missing the {stage} stage"))?;
+        run_checked_command(repo_root, spec, "release verification command failed")?;
+    }
+    if working_tree_snapshot(repo_root)? != before_prepare {
+        return Err(miette!(
+            "repository preparation changed generated output; run prepare and commit the result"
+        ));
+    }
+
+    for lanes in verify_lane_schedule(skip_integration) {
+        run_release_lanes_parallel(repo_root, &lanes, keep_workdir)?;
+    }
+    println!(
+        "Release verification passed in {}.",
+        format_elapsed(total_started.elapsed())
+    );
+    Ok(())
+}
+
+fn verify_lane_schedule(skip_integration: bool) -> Vec<Vec<ReleaseLane>> {
+    if skip_integration {
+        vec![vec![
+            ReleaseLane::Static,
+            ReleaseLane::JavaScript,
+            ReleaseLane::Rust,
+        ]]
+    } else {
+        vec![
+            vec![
+                ReleaseLane::Static,
+                ReleaseLane::JavaScript,
+                ReleaseLane::LiveBuild,
+            ],
+            vec![ReleaseLane::Live, ReleaseLane::Rust],
+        ]
+    }
+}
+
+fn run_release_lanes_parallel(
+    repo_root: &Path,
+    lanes: &[ReleaseLane],
+    keep_workdir: bool,
+) -> Result<()> {
+    std::thread::scope(|scope| {
+        let handles = lanes
+            .iter()
+            .copied()
+            .map(|lane| scope.spawn(move || run_release_lane(repo_root, lane, keep_workdir)))
+            .collect::<Vec<_>>();
+        let mut failure = None;
+        for handle in handles {
+            let result = handle
+                .join()
+                .map_err(|_| miette!("release lane panicked"))
+                .and_then(|result| result);
+            if failure.is_none() {
+                failure = result.err();
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    })
+}
+
+fn run_release_lane(repo_root: &Path, lane: ReleaseLane, keep_workdir: bool) -> Result<()> {
+    let specs = verify_command_specs("0.0.0", "v0.0.0", lane != ReleaseLane::Live, keep_workdir)
+        .into_iter()
+        .filter(|spec| release_lane_for_stage(&spec.stage) == Some(lane))
+        .collect::<Vec<_>>();
+    let started = Instant::now();
     let mut index = 0;
     while index < specs.len() {
         let group = specs[index].parallel_group.clone();
@@ -1273,53 +1374,58 @@ fn run_verify(
                 .count()
                 + index
         });
-        let name = specs[index].stage_name();
-        let started = Instant::now();
-        let result = if group.is_some() {
-            run_parallel_commands(
-                repo_root,
-                &specs[index..end],
-                "release verification command failed",
-            )
+        if group.is_some() {
+            run_parallel_commands(repo_root, &specs[index..end], "release lane command failed")?;
         } else {
-            run_checked_command(
-                repo_root,
-                &specs[index],
-                "release verification command failed",
-            )
-        };
-        let elapsed = started.elapsed();
-        println!("{name:<36} {}", format_elapsed(elapsed));
-        timings.push((name, elapsed));
-        if let Err(error) = result {
-            print_timing_summary(&timings, total_started.elapsed());
-            return Err(error);
-        }
-        if specs[index].stage == "prepare" {
-            let started = Instant::now();
-            let current = working_tree_snapshot(repo_root);
-            let elapsed = started.elapsed();
-            let name = "generated output check".to_owned();
-            println!("{name:<36} {}", format_elapsed(elapsed));
-            timings.push((name, elapsed));
-            let current = match current {
-                Ok(current) => current,
-                Err(error) => {
-                    print_timing_summary(&timings, total_started.elapsed());
-                    return Err(error);
-                }
-            };
-            if current != before_prepare {
-                print_timing_summary(&timings, total_started.elapsed());
-                return Err(miette!(
-                    "repository preparation changed generated output; run prepare and commit the result"
-                ));
-            }
+            run_checked_command(repo_root, &specs[index], "release lane command failed")?;
         }
         index = end;
     }
-    print_timing_summary(&timings, total_started.elapsed());
+    println!(
+        "{} release lane passed in {}.",
+        release_lane_name(lane),
+        format_elapsed(started.elapsed())
+    );
     Ok(())
+}
+
+fn release_lane_for_stage(stage: &str) -> Option<ReleaseLane> {
+    match stage {
+        "Deno formatting"
+        | "Rust workspace formatting"
+        | "generator formatting"
+        | "Rust xtask formatting"
+        | "actionlint"
+        | "TypeScript compile" => Some(ReleaseLane::Static),
+        "workspace Clippy"
+        | "generated Rust facade"
+        | "protocol WASM"
+        | "workspace test compile coverage"
+        | "curated pure Rust tests"
+        | "Rustdoc"
+        | "doctests"
+        | "Rust packaging"
+        | "generator tests"
+        | "Rust xtask tests"
+        | "root xtask tests" => Some(ReleaseLane::Rust),
+        "prepared JavaScript packages"
+        | "npm package build"
+        | "npm packaging smoke"
+        | "package publication dry runs" => Some(ReleaseLane::JavaScript),
+        "live build" => Some(ReleaseLane::LiveBuild),
+        "shared live integration" => Some(ReleaseLane::Live),
+        _ => None,
+    }
+}
+
+const fn release_lane_name(lane: ReleaseLane) -> &'static str {
+    match lane {
+        ReleaseLane::Static => "static",
+        ReleaseLane::Rust => "rust",
+        ReleaseLane::JavaScript => "javascript",
+        ReleaseLane::LiveBuild => "live-build",
+        ReleaseLane::Live => "live",
+    }
 }
 
 fn working_tree_snapshot(repo_root: &Path) -> Result<Vec<u8>> {
@@ -1391,16 +1497,6 @@ fn run_parallel_commands(repo_root: &Path, specs: &[CommandSpec], context: &str)
 fn format_elapsed(elapsed: Duration) -> String {
     let seconds = elapsed.as_secs();
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn print_timing_summary(timings: &[(String, Duration)], total: Duration) {
-    let mut sorted = timings.to_vec();
-    sorted.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    println!("\nRelease verification timing (slowest first):");
-    for (name, elapsed) in sorted {
-        println!("{name:<36} {}", format_elapsed(elapsed));
-    }
-    println!("{:<36} {}", "total", format_elapsed(total));
 }
 
 const RUST_WORKSPACE_MEMBERS: &[&str] = &[
@@ -1557,30 +1653,12 @@ fn verify_command_specs(
         CommandSpec::new(
             "cargo",
             vec![
-                "+1.88.0",
-                "check",
-                "--manifest-path",
-                "rust/Cargo.toml",
-                "-p",
-                "trellis-protocol",
-                "-p",
-                "trellis-contracts",
-                "-p",
-                "trellis-rs",
-                "--lib",
-            ],
-        )
-        .stage("Rust 1.88 public API"),
-        CommandSpec::new(
-            "cargo",
-            vec![
-                "+1.88.0",
                 "check",
                 "--manifest-path",
                 "generated/packages/cargo-participants/jobs/Cargo.toml",
             ],
         )
-        .stage("Rust 1.88 generated facade"),
+        .stage("generated Rust facade"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1652,6 +1730,8 @@ fn verify_command_specs(
             ],
         )
         .stage("npm packaging smoke"),
+        CommandSpec::new("bash", vec!["scripts/release-js-dry-run.sh"])
+            .stage("package publication dry runs"),
         CommandSpec::new(
             "cargo",
             vec![
@@ -1659,51 +1739,36 @@ fn verify_command_specs(
                 "--manifest-path",
                 "rust/Cargo.toml",
                 "--workspace",
-                "--exclude",
-                "trellis-rs",
-                "--exclude",
-                "trellis-service-jobs",
-                "--exclude",
-                "trellis-service-eventlog",
+                "--no-run",
             ],
         )
-        .stage("workspace non-live tests"),
+        .stage("workspace test compile coverage"),
         CommandSpec::new(
             "cargo",
             vec![
                 "test",
                 "--manifest-path",
                 "rust/Cargo.toml",
-                "-p",
-                "trellis-service-jobs",
                 "--lib",
+                "-p",
+                "trellis-protocol",
+                "-p",
+                "trellis-contracts",
+                "-p",
+                "trellis-codegen-ts",
+                "-p",
+                "trellis-codegen-rust",
+                "-p",
+                "trellis-bootstrap",
+                "-p",
+                "trellis-local-bootstrap",
+                "-p",
+                "trellis-generate-runner",
+                "-p",
+                "trellis-cli",
             ],
         )
-        .stage("Jobs service tests"),
-        CommandSpec::new(
-            "cargo",
-            vec![
-                "test",
-                "--manifest-path",
-                "rust/Cargo.toml",
-                "-p",
-                "trellis-service-eventlog",
-                "--lib",
-            ],
-        )
-        .stage("Event Log service tests"),
-        CommandSpec::new(
-            "cargo",
-            vec![
-                "test",
-                "--manifest-path",
-                "rust/Cargo.toml",
-                "-p",
-                "trellis-rs",
-                "--lib",
-            ],
-        )
-        .stage("Rust client tests"),
+        .stage("curated pure Rust tests"),
         CommandSpec::new(
             "env",
             vec![
@@ -1752,51 +1817,39 @@ fn verify_command_specs(
         .stage("Rust xtask tests"),
         CommandSpec::new("cargo", vec!["test", "--manifest-path", "xtask/Cargo.toml"])
             .stage("root xtask tests"),
+        CommandSpec::new(
+            "deno",
+            vec![
+                "run",
+                "-A",
+                "-c",
+                "js/deno.json",
+                "integration/live_runner.ts",
+                "--build-only",
+                "--artifacts-manifest",
+                INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
+            ],
+        )
+        .stage("live build"),
     ];
 
     if !skip_integration {
-        let js_jobs = "8".to_string();
-        let mut js_args = vec![
-            "task".to_string(),
-            "-c".to_string(),
-            "js/deno.json".to_string(),
-            "test:integration".to_string(),
-            "--".to_string(),
-            "--parallel".to_string(),
-            "--jobs".to_string(),
-            js_jobs,
-        ];
-        if keep_workdir {
-            js_args.insert(0, "deno".to_string());
-            js_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
-            specs.push(CommandSpec::new("env", js_args).stage("JavaScript live integration"));
-        } else {
-            specs.push(CommandSpec::new("deno", js_args).stage("JavaScript live integration"));
-        }
-
-        let mut rust_args = vec![
+        let mut live_args = vec![
             "run".to_string(),
             "-A".to_string(),
             "-c".to_string(),
             "js/deno.json".to_string(),
-            "rust/crates/trellis-test/integration_runner.ts".to_string(),
-            "--jobs".to_string(),
-            "8".to_string(),
-            "--skip".to_string(),
-            "state::".to_string(),
-            "--skip".to_string(),
-            "jobs::jobs_admin_list_services_filters_stale_worker_heartbeats".to_string(),
-            "--skip".to_string(),
-            "jobs::jobs_failed_job_retries_then_dead".to_string(),
-            "--".to_string(),
-            "--nocapture".to_string(),
+            "integration/live_runner.ts".to_string(),
+            "--prebuilt-only".to_string(),
+            "--artifacts-manifest".to_string(),
+            INTEGRATION_LIVE_ARTIFACTS_MANIFEST.to_string(),
         ];
         if keep_workdir {
-            rust_args.insert(0, "deno".to_string());
-            rust_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
-            specs.push(CommandSpec::new("env", rust_args).stage("Rust live integration"));
+            live_args.insert(0, "deno".to_string());
+            live_args.insert(0, "TRELLIS_TEST_KEEP_WORKDIR=1".to_string());
+            specs.push(CommandSpec::new("env", live_args).stage("shared live integration"));
         } else {
-            specs.push(CommandSpec::new("deno", rust_args).stage("Rust live integration"));
+            specs.push(CommandSpec::new("deno", live_args).stage("shared live integration"));
         }
     }
 
@@ -1945,14 +1998,6 @@ impl CommandSpec {
         self.parallel_group = Some(group.to_owned());
         self
     }
-
-    fn stage_name(&self) -> String {
-        if self.stage.is_empty() {
-            command_text(self)
-        } else {
-            self.stage.clone()
-        }
-    }
 }
 
 fn require_stable_version(version: &str, label: &str) -> Result<()> {
@@ -2073,7 +2118,7 @@ mod tests {
         rewrite_cargo_manifest_versions_for_release, rewrite_js_internal_npm_dependency_versions,
         rewrite_json_manifest_internal_jsr_dependency_versions, rewrite_json_manifest_version,
         rewrite_json_manifest_version_for_release, verify_command_specs, version_base,
-        working_tree_snapshot, ReleaseCommand, ReleaseVersion,
+        working_tree_snapshot, ReleaseCommand, ReleaseLane, ReleaseVersion,
     };
     use std::time::Duration;
     use std::{fs, path::Path};
@@ -2230,6 +2275,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_named_release_lane() {
+        assert_eq!(
+            parse_release_command(["lane", "live-build"].into_iter().map(str::to_owned)).unwrap(),
+            ReleaseCommand::Lane(ReleaseLane::LiveBuild)
+        );
+    }
+
+    #[test]
     fn parse_release_verify_requires_release_tag_since() {
         let error = parse_release_command(
             ["verify", "--version", "0.9.0", "--since", "0.8.2"]
@@ -2294,25 +2347,22 @@ mod tests {
             assert!(commands.contains(&format!("deno task -c js/deno.json {task}")));
         }
         assert!(commands.contains(&"cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings".to_string()));
-        assert!(commands.contains(&"cargo '+1.88.0' check --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-contracts -p trellis-rs --lib".to_string()));
         assert!(commands.contains(&"cargo check --manifest-path rust/Cargo.toml --package trellis-protocol-wasm --target wasm32-unknown-unknown".to_string()));
         assert!(commands.contains(&"actionlint".to_string()));
         assert!(commands.contains(&"deno task -c js/deno.json packages:build:npm".to_string()));
         assert!(commands
             .contains(&"deno task -c js/deno.json test:prepared:packaging:built".to_string()));
         assert!(commands.contains(
-            &"cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs --exclude trellis-service-jobs --exclude trellis-service-eventlog".to_string()
+            &"cargo test --manifest-path rust/Cargo.toml --workspace --no-run".to_string()
         ));
         assert!(commands.contains(
-            &"cargo test --manifest-path rust/Cargo.toml -p trellis-service-jobs --lib".to_string()
+            &"cargo test --manifest-path rust/Cargo.toml --lib -p trellis-protocol -p trellis-contracts -p trellis-codegen-ts -p trellis-codegen-rust -p trellis-bootstrap -p trellis-local-bootstrap -p trellis-generate-runner -p trellis-cli".to_string()
         ));
-        assert!(commands.contains(
-            &"cargo test --manifest-path rust/Cargo.toml -p trellis-service-eventlog --lib"
-                .to_string()
-        ));
-        assert!(commands.contains(
-            &"cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib".to_string()
-        ));
+        assert!(!commands.iter().any(|command| {
+            command.contains("trellis-service-jobs --lib")
+                || command.contains("trellis-service-eventlog --lib")
+                || command == "cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib"
+        }));
         assert!(commands.contains(
             &"env 'RUSTDOCFLAGS=-D warnings' cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps"
                 .to_string()
@@ -2323,17 +2373,11 @@ mod tests {
             &"cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty"
                 .to_string()
         ));
-        let expected_js_jobs = 8;
-        assert_eq!(
-            &commands[commands.len() - 2],
-            &format!(
-                "deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
-            )
-        );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip state:: --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture"
+            "deno run -A -c js/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
         );
+        assert!(commands.contains(&"deno run -A -c js/deno.json integration/live_runner.ts --build-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
     }
 
     #[test]
@@ -2348,6 +2392,47 @@ mod tests {
         assert!(parallel
             .iter()
             .all(|spec| spec.stage == "prepared JavaScript packages"));
+    }
+
+    #[test]
+    fn verify_lane_schedule_orders_cargo_and_live_dependencies() {
+        assert_eq!(
+            super::verify_lane_schedule(false),
+            vec![
+                vec![
+                    ReleaseLane::Static,
+                    ReleaseLane::JavaScript,
+                    ReleaseLane::LiveBuild,
+                ],
+                vec![ReleaseLane::Live, ReleaseLane::Rust],
+            ]
+        );
+    }
+
+    #[test]
+    fn verify_lane_schedule_skips_both_live_phases() {
+        assert_eq!(
+            super::verify_lane_schedule(true),
+            vec![vec![
+                ReleaseLane::Static,
+                ReleaseLane::JavaScript,
+                ReleaseLane::Rust,
+            ]]
+        );
+    }
+
+    #[test]
+    fn every_post_prepare_stage_belongs_to_one_named_lane() {
+        for spec in verify_command_specs("0.9.0", "v0.8.2", false, false) {
+            if matches!(spec.stage.as_str(), "release metadata" | "prepare") {
+                continue;
+            }
+            assert!(
+                super::release_lane_for_stage(&spec.stage).is_some(),
+                "unassigned release stage: {}",
+                spec.stage
+            );
+        }
     }
 
     #[test]
@@ -2400,38 +2485,29 @@ mod tests {
     }
 
     #[test]
-    fn verify_command_specs_keep_workdir_sets_js_and_rust_integration_env() {
+    fn verify_command_specs_keep_workdir_sets_shared_live_env() {
         let commands: Vec<_> = verify_command_specs("0.9.0", "v0.8.2", false, true)
             .iter()
             .map(command_text)
             .collect();
 
-        let expected_js_jobs = 8;
-        assert_eq!(
-            &commands[commands.len() - 2],
-            &format!(
-                "env TRELLIS_TEST_KEEP_WORKDIR=1 deno task -c js/deno.json test:integration -- --parallel --jobs {expected_js_jobs}"
-            )
-        );
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip state:: --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
         );
     }
 
     #[test]
     fn verify_command_specs_skip_integration() {
-        let commands: Vec<_> = verify_command_specs("0.9.0", "v0.8.2", true, true)
-            .iter()
-            .map(command_text)
-            .collect();
+        let specs = verify_command_specs("0.9.0", "v0.8.2", true, true);
+        let commands: Vec<_> = specs.iter().map(command_text).collect();
 
         assert!(!commands
             .iter()
             .any(|command| command.contains("test:integration")));
-        assert!(!commands
+        assert!(!specs
             .iter()
-            .any(|command| command.contains("integration_runner.ts")));
+            .any(|spec| spec.stage == "shared live integration"));
     }
 
     #[test]

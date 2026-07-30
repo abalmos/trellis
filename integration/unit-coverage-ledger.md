@@ -1,12 +1,10 @@
 # Unit Coverage Replacement Ledger
 
-This ledger tracks how unit-style coverage is replaced, temporarily blocked, or
-retained as complementary deterministic coverage as the integration replacement
-plan moves forward. It is a guardrail: do not delete or shrink a unit-test file
-or group unless this document records the replacement live case id,
-complementary keep rationale for a pure algorithm/invariant, duplicate-coverage
-note, or `[blocked]` gap for intended live behavior that still needs
-implementation, harness, or product work.
+This is the historical ledger from the test-gate recovery. Paths and commands in
+completed shrink packets record the evidence used at the time and may name the
+now-deleted TypeScript runtime. Current executable truth lives in
+`client-test-matrix.json`, `rust-runtime-test-matrix.json`, and the release DAG;
+this file is not an active test inventory or command reference.
 
 Phase 0 only freezes the classification structure and ledger template. It does
 not retire any unit-test files.
@@ -92,9 +90,6 @@ specific case ids or group note that proves equivalent coverage.
 - Server/service runtime: `js/packages/trellis/server/**/*_test.ts`,
   `js/packages/trellis/tests/operations*`, `rpc_integration_test.ts`,
   `trellis_api_guard_test.ts`, and `state_runtime_facade_test.ts`.
-- Trellis control plane: `js/services/trellis/**/**/*.test.ts` covering config,
-  storage, state, catalog, auth bootstrap/admin/session/http/callout/providers,
-  reconciliation, resources, and manifest conformance.
 - UI/state tools: `js/packages/trellis-svelte/**/*.test.ts`,
   `js/apps/console/**/*.test.ts`, and `js/portals/login/**/*.test.ts`.
 - Tools/demos: package-build release version, docs vocabulary guard, and demo
@@ -196,13 +191,10 @@ itself.
   invariants, or migration invariants. These may remain only as complements, not
   substitutes for live Trellis behavior.
 
-Parity correction: historical rows classified as `*-control-plane`, rows whose
-language column is only `ts/deno`, and rows that cite only
-`js/services/trellis/integration/**` or `test:service-integration` are
-incomplete until Rust parity is added or confirmed. Do not use those rows as
-precedent for new retirements without a matching Rust live case. Existing
-shrinks that relied on TypeScript-only live evidence must be completed with Rust
-live coverage or corrected by restoring/reclassifying the unit coverage.
+Historical rows classified as `*-control-plane`, rows whose language column is
+only `ts/deno`, and rows that cite the removed TypeScript runtime are migration
+records only. They do not satisfy current coverage or justify restoring that
+runtime.
 
 ### Parity Debt Audit
 
@@ -231,12 +223,12 @@ Catalog force-replace Rust parity verification passed with
 `cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration control_plane_catalog_force_replace_resolves_catalog_issue -- --nocapture`
 and both Rust matrix conformance tests.
 
-Service-integration registry status: the `kind: "service"` cases in
-`integration/test-matrix.json` now own all 32 service-integration cases from the
-`control-plane`, `event-consumers`, and `prepared-events` fixtures. The
-TypeScript runner manifest is derived from that registry, and the service matrix
-conformance test enforces ID parity, file/test-name linkage, case-scoped runtime
-usage, and Rust completion metadata. Rust completion is implemented for
+Historical service-integration registry status: the former combined matrix owned
+all 32 service-integration cases from the `control-plane`, `event-consumers`,
+and `prepared-events` fixtures. The TypeScript runner manifest is derived from
+that registry, and the service matrix conformance test enforces ID parity,
+file/test-name linkage, case-scoped runtime usage, and Rust completion metadata.
+Rust completion is implemented for
 `control-plane.admin-bootstrap-creates-first-local-admin`,
 `control-plane.password-reset-change-invalidates-old-password`, and
 `control-plane.http-route-security-requires-admin-session`,
@@ -800,15 +792,15 @@ Worker-presence coverage is partial through
 `Jobs.ListServices` assertions; there is no standalone
 `control-plane.jobs-worker-presence-observed-through-public-surface` case.
 
-Rust shared client-matrix parity audit: the Rust registry now exactly matches
-the `kind: "client"` cases in `integration/test-matrix.json` with 71 matrix ids
-and 71 Rust registered ids, with no missing or extra ids. Focused Rust
-verification passed for `rust_integration_manifest_conforms_to_shared_matrix`,
-the full `authority_plan` group, and the full `outbox` group. The fixes were
-harness/fixture-level: the Rust admin contract grants authority-plan list/reject
-RPCs, the mutable-dev migration case mirrors the JS base-service-active flow,
-and the outbox fixture keeps `TrellisTestRuntime` alive for the service/client
-lifetime. No unit files were retired by this parity packet.
+Historical Rust shared client-matrix parity audit: the Rust registry exactly
+matched the former combined matrix with 71 matrix ids and 71 Rust registered
+ids, with no missing or extra ids. Focused Rust verification passed for
+`rust_integration_manifest_conforms_to_shared_matrix`, the full `authority_plan`
+group, and the full `outbox` group. The fixes were harness/fixture-level: the
+Rust admin contract grants authority-plan list/reject RPCs, the mutable-dev
+migration case mirrors the JS base-service-active flow, and the outbox fixture
+keeps `TrellisTestRuntime` alive for the service/client lifetime. No unit files
+were retired by this parity packet.
 
 Use this table during later phases to map each retired or retained unit-test
 file/group to a concrete replacement or rationale. Do not use `retired` until

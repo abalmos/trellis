@@ -76,6 +76,8 @@ async function trellisRepoRunnerConfig(): Promise<
         file: localCase.file,
         testName: localCase.testName,
         coverage: matrixCase.coverage,
+        classification: matrixCase.classification,
+        isolationReason: matrixCase.isolationReason,
       };
     }),
     conformance: runMatrixConformance,

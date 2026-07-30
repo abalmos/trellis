@@ -528,37 +528,19 @@ fn sqlite_eventlog_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
 }
 
 #[test]
-fn sqlite_subsystem_migrations_can_share_one_database() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::tempdir()?;
-    let path = temp_dir.path().join("shared.sqlite");
-
-    SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone())).migrate()?;
-    SqliteStore::new(SubsystemName::Jobs, sqlite_config(path.clone())).migrate()?;
-    SqliteStore::new(SubsystemName::Health, sqlite_config(path.clone())).migrate()?;
-    SqliteStore::new(SubsystemName::Eventlog, sqlite_config(path.clone())).migrate()?;
-
-    assert_marker(&path, "trellis_platform_store_marker")?;
-    assert_marker(&path, "trellis_jobs_projection_store_marker")?;
-    assert_marker(&path, "trellis_health_projection_store_marker")?;
-    assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration(&path, 1000, "platform_init")?;
-    assert_migration(&path, 2000, "jobs_projection_init")?;
-    assert_migration(&path, 3000, "health_projection_init")?;
-    assert_migration(&path, 4000, "eventlog_init")?;
-    Ok(())
-}
-
-#[test]
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 fn runtime_stores_all_mode_migrates_all_selected_subsystems(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    let path = temp_dir.path().join("runtime.sqlite");
+    let platform_path = temp_dir.path().join("platform.sqlite");
+    let jobs_path = temp_dir.path().join("jobs.sqlite");
+    let health_path = temp_dir.path().join("health.sqlite");
+    let eventlog_path = temp_dir.path().join("eventlog.sqlite");
     let mut config = runtime_config();
-    config.platform = Some(subsystem_config(path.clone()));
-    config.jobs = Some(subsystem_config(path.clone()));
-    config.health = Some(subsystem_config(path.clone()));
-    config.eventlog = Some(subsystem_config(path.clone()));
+    config.platform = Some(subsystem_config(platform_path.clone()));
+    config.jobs = Some(subsystem_config(jobs_path.clone()));
+    config.health = Some(subsystem_config(health_path.clone()));
+    config.eventlog = Some(subsystem_config(eventlog_path.clone()));
 
     config.validate_for_mode(RuntimeMode::All)?;
     let stores = RuntimeStores::from_config(&config, RuntimeMode::All)?;
@@ -568,11 +550,14 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert!(stores.jobs.is_some());
     assert!(stores.health.is_some());
     assert!(stores.eventlog.is_some());
-    assert_marker(&path, "trellis_platform_store_marker")?;
-    assert_marker(&path, "trellis_jobs_projection_store_marker")?;
-    assert_marker(&path, "trellis_health_projection_store_marker")?;
-    assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 2000, 3000, 3001, 4000])?;
+    assert_marker(&platform_path, "trellis_platform_store_marker")?;
+    assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
+    assert_marker(&health_path, "trellis_health_projection_store_marker")?;
+    assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
+    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003])?;
+    assert_migration_order(&jobs_path, &[2000])?;
+    assert_migration_order(&health_path, &[3000, 3001])?;
+    assert_migration_order(&eventlog_path, &[4000])?;
     Ok(())
 }
 

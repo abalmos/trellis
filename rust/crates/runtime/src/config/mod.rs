@@ -81,6 +81,7 @@ impl RuntimeConfig {
     /// Validates that this configuration contains the sections needed by `mode`.
     ///
     pub fn validate_for_mode(&self, mode: RuntimeMode) -> Result<(), ConfigError> {
+        self.validate_distinct_sqlite_paths()?;
         self.validate_oauth_provider_secrets()?;
         self.resolve_nats_runtime()?;
         self.resolve_leases()?;
@@ -108,6 +109,92 @@ impl RuntimeConfig {
             self.resolve_authorization()?;
         }
 
+        Ok(())
+    }
+
+    fn validate_distinct_sqlite_paths(&self) -> Result<(), ConfigError> {
+        let path_identity = |path: &PathBuf| {
+            let mut candidate = path.clone();
+            for _ in 0..40 {
+                if !std::fs::symlink_metadata(&candidate)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                {
+                    break;
+                }
+                let Ok(target) = std::fs::read_link(&candidate) else {
+                    break;
+                };
+                candidate = if target.is_absolute() {
+                    target
+                } else {
+                    candidate
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .join(target)
+                };
+            }
+            let normalized = candidate
+                .canonicalize()
+                .or_else(|_| {
+                    candidate
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new("."))
+                        .canonicalize()
+                        .map(|parent| {
+                            candidate
+                                .file_name()
+                                .map_or(parent.clone(), |name| parent.join(name))
+                        })
+                })
+                .or_else(|_| std::path::absolute(&candidate))
+                .unwrap_or(candidate.clone());
+            #[cfg(unix)]
+            let file_identity = {
+                use std::os::unix::fs::MetadataExt;
+                std::fs::metadata(&candidate)
+                    .ok()
+                    .map(|metadata| (metadata.dev(), metadata.ino()))
+            };
+            #[cfg(not(unix))]
+            let file_identity: Option<()> = None;
+            (normalized, file_identity)
+        };
+        let subsystems = [
+            ("platform", self.platform.as_ref()),
+            ("jobs", self.jobs.as_ref()),
+            ("health", self.health.as_ref()),
+            ("eventlog", self.eventlog.as_ref()),
+        ];
+        for (index, (left_name, left)) in subsystems.iter().enumerate() {
+            let Some(left_path) = left
+                .and_then(|subsystem| subsystem.storage.as_ref())
+                .filter(|storage| storage.kind.trim() == "sqlite")
+                .and_then(|storage| storage.path.as_ref())
+            else {
+                continue;
+            };
+            let left_identity = path_identity(left_path);
+            for (right_name, right) in &subsystems[index + 1..] {
+                if right
+                    .and_then(|subsystem| subsystem.storage.as_ref())
+                    .filter(|storage| storage.kind.trim() == "sqlite")
+                    .and_then(|storage| storage.path.as_ref())
+                    .is_some_and(|right_path| {
+                        let right_identity = path_identity(right_path);
+                        right_identity.0 == left_identity.0
+                            || left_identity
+                                .1
+                                .is_some_and(|identity| right_identity.1 == Some(identity))
+                    })
+                {
+                    return Err(ConfigError::SharedSqlitePath {
+                        path: left_path.clone(),
+                        first: left_name,
+                        second: right_name,
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -920,6 +1007,16 @@ pub enum ConfigError {
         section: &'static str,
         /// Validation failure reason.
         reason: &'static str,
+    },
+    /// Two subsystems were configured to write the same SQLite file.
+    #[error("runtime subsystems [{first}] and [{second}] must use separate SQLite files, but both use {path}")]
+    SharedSqlitePath {
+        /// Duplicated SQLite path.
+        path: PathBuf,
+        /// First subsystem using the path.
+        first: &'static str,
+        /// Second subsystem using the path.
+        second: &'static str,
     },
     /// A known storage backend is planned but not implemented yet.
     #[error("storage backend '{backend}' is not supported yet for [{section}]")]

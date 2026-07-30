@@ -2,13 +2,13 @@
 name = "trellis-rs"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Curated public Rust facade for Trellis clients and services."
 readme = "../../README.md"
 
 [features]
+integration-test-scoping = []
 test-support = []
 
 [dependencies]

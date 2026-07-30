@@ -38,20 +38,39 @@ observe the behavior. Prefer case-scoped helpers in `trellis-test` over generic
 chaos frameworks. Examples include a one-shot failure hook, a control-plane
 SQLite inspection helper, or a JetStream inspection helper.
 
-### Matrix Parity
+### Test Ownership
 
-Runtime behavior that exists in both TypeScript and Rust must have matching live
-coverage in both languages before related unit coverage is deleted or considered
-retired.
+`integration/client-test-matrix.json` owns externally observable client
+interoperability. Every supported client language implements those rows against
+the Rust runtime. `integration/rust-runtime-test-matrix.json` owns Rust runtime
+correctness and does not require TypeScript twins.
 
 Rules:
 
-- add or update `integration/test-matrix.json` for language-neutral behavior
-- register the TypeScript case in the relevant JS integration support registry
-- register the Rust case in the Rust integration support registry
-- mark a row complete only when both TypeScript and Rust live tests pass
-- do not use TypeScript-only service-integration coverage as retirement evidence
-  for Trellis behavior that Rust can observe too
+- derive runner registration from the matrices; do not maintain shadow skip or
+  registration lists
+- compare implemented Rust mappings to the compiled executable list and the
+  executed result stream
+- treat any implemented, uncompiled, or unexecuted case as a release failure
+- keep pending rows explicit with a reason and owner
+- do not use source-text annotations as proof that a test compiled or ran
+
+### Shared Runtime
+
+Normal live cases share one NATS server, one Trellis process, one SQLite set,
+and at most one transitional Jobs or Event Log owner. Cases isolate their
+authored data through run- and case-scoped identifiers, not database resets.
+
+`isolated-process` is reserved for process- or deployment-global behavior such
+as restart, ownership loss, startup migration, destructive trust rotation, or
+malformed global configuration. Every isolated row records its reason and runs
+through the separately bounded isolation queue. Feature area alone is never an
+isolation reason.
+
+Each live run emits machine-readable inventory, result, process-start, and
+duration records. Shared-host duration summaries aggregate count, average, and
+maximum time by operation and phase so gate-performance claims use retained
+measurements rather than terminal-log estimates.
 
 ### Unit Test Boundary
 
@@ -85,12 +104,12 @@ Verification has three explicit tiers:
 - **Tier 2, phase gate:** run preparation when generated artifacts may change,
   workspace formatting, lint and documentation checks, affected package suites,
   and the matching TypeScript and Rust live cases plus matrix conformance.
-- **Tier 3, release gate:** run `cargo xtask release verify` and the release
-  workflow's full unfiltered TypeScript and Rust integration suites, packaging,
-  MSRV, platform checks, workspace Rustdoc with warnings denied, and workspace
-  doctests. Every Rust workspace member must inherit the shared lint policy or
-  have a release-guide exception naming its reason, owner, and removal
-  condition.
+- **Tier 3, release gate:** run `cargo xtask release verify`. The named static,
+  Rust, JavaScript, live-build, and live lanes are shared by local verification
+  and GitHub Actions. The gate compiles all workspace test targets, executes
+  only the curated pure Rust targets, runs doctests exactly once, and runs the
+  complete unfiltered live matrices with no hidden skips. Trellis supports
+  current stable Rust only; no older compiler compatibility is promised.
 
 Tier 1 and Tier 2 results are scoped evidence, not a full verification claim. Do
 not rerun Tier 3 after every implementation track; run it once from the final

@@ -86,8 +86,8 @@ deno task -c js/deno.json test:integration
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
 ```
 
-Both suites conform to client cases in `integration/test-matrix.json`, the
-shared parity contract for supported client languages. Use
+Both suites conform to client cases in `integration/client-test-matrix.json`,
+the shared parity contract for supported client languages. Use
 `cargo xtask prepare-watch` during active contract development. Watch mode
 watches broadly, ignores file changes that are not TypeScript, JavaScript, or
 Rust source unless they are recognized project/discovery inputs, prepares only

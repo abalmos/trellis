@@ -27,7 +27,6 @@ where
     for subject in subjects {
         subscribers.push(subscribe_subject(&client, subject).await?);
     }
-
     run_nats_request_loop(
         client,
         futures_util::stream::select_all(subscribers),

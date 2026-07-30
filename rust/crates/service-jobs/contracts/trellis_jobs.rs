@@ -226,7 +226,7 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         "Jobs.Watch",
         trellis_contracts::feed(
             "v1",
-            "feeds.v1.Jobs.Watch",
+            "feed.v1.Jobs.Watch",
             "JobsWatchRequest",
             "JobsWatchFrame",
         )

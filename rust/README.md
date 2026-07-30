@@ -84,16 +84,4 @@ cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- -
 
 That Rust suite is a peer of the TypeScript/Deno suite
 (`deno task -c js/deno.json test:integration`) and must conform to the shared
-client cases in `integration/test-matrix.json`.
-
-## Known 0.9.x Rust Gaps
-
-The Trellis design docs describe the intended platform semantics. TypeScript
-runtime surfaces currently cover more of that model than Rust in a few areas:
-
-- Rust service operations use process-local `InMemoryOperationRuntime` storage;
-  restart-durable operation storage is planned for a later minor release.
-- Rust operation signal descriptors and validation are narrower than the shared
-  operation model.
-- Rust client operation snapshots expose the fields currently needed by the Rust
-  runtime but are narrower than the full shared snapshot model.
+client cases in `integration/client-test-matrix.json`.

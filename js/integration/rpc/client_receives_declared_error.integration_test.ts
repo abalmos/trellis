@@ -15,15 +15,17 @@ liveTrellisTest({
       name: fixture.serviceName,
       contract: fixture.serviceContract,
     });
-    const service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: fixture.serviceContract,
-      name: fixture.serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    const service = fixture.aliasRuntime(
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: fixture.serviceContract,
+        name: fixture.serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
 
     try {
       await service.handleEntityGet(({ input }) =>
@@ -41,7 +43,7 @@ liveTrellisTest({
       const serialized = result.error.toSerializable();
       assertEquals(serialized.type, "NOT_FOUND");
       assertEquals(serialized.entityId, fixture.entityId);
-      assertEquals(serialized.context?.method, "Entity.Get");
+      assertEquals(serialized.context?.method, fixture.entityGetMethod);
       assertEquals(serialized.context?.service, fixture.serviceName);
       assertEquals(
         serialized.context?.contractId,

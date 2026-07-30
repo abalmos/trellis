@@ -15,9 +15,6 @@ mod operations;
 #[path = "integration/feeds.rs"]
 mod feeds;
 
-#[path = "integration/state.rs"]
-mod state;
-
 #[path = "integration/transfer.rs"]
 mod transfer;
 
@@ -46,14 +43,4 @@ fn generated_caller(client: &trellis_rs::generated::Caller) -> &trellis_rs::gene
 fn wire<T: serde::de::DeserializeOwned, S: serde::Serialize>(value: S) -> T {
     serde_json::from_value(serde_json::to_value(value).expect("serialize test wire value"))
         .expect("deserialize test wire value")
-}
-
-#[test]
-fn rust_integration_manifest_conforms_to_shared_matrix() {
-    support::cases::assert_rust_manifest_conforms_to_matrix();
-}
-
-#[test]
-fn rust_service_integration_manifest_conforms_to_shared_matrix() {
-    support::cases::assert_rust_service_manifest_conforms_to_matrix();
 }

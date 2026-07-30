@@ -218,19 +218,29 @@ async fn runtime_singleton_ownership_lifecycle() {
     let mut all_runtime =
         RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
     all_runtime.wait_ready().await;
-    let jobs_entry = leases
-        .entry("jobs.owner")
-        .await
-        .expect("inspect all-mode Jobs lease")
-        .expect("all-mode Jobs lease exists");
-    let manipulated_revision = leases
-        .update(
-            "jobs.owner",
-            Bytes::from_static(b"fixture-takeover"),
-            jobs_entry.revision,
-        )
-        .await
-        .expect("make all-mode Jobs lease guard stale");
+    let manipulated_revision = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let jobs_entry = leases
+                .entry("jobs.owner")
+                .await
+                .expect("inspect all-mode Jobs lease")
+                .expect("all-mode Jobs lease exists");
+            match leases
+                .update(
+                    "jobs.owner",
+                    Bytes::from_static(b"fixture-takeover"),
+                    jobs_entry.revision,
+                )
+                .await
+            {
+                Ok(revision) => break revision,
+                Err(error) if error.kind() == kv::UpdateErrorKind::WrongLastRevision => {}
+                Err(error) => panic!("make all-mode Jobs lease guard stale: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("make all-mode Jobs lease guard stale before timeout");
 
     let mut fixture_owned = vec![("jobs.owner", manipulated_revision)];
     for key in ["platform.owner", "health.owner", "eventlog.owner"] {
@@ -581,6 +591,8 @@ path = "{}"
 }
 
 fn runtime_command(mode: &str, config_path: &Path) -> Command {
+    trellis_test::record_test_process_start("trellis", mode)
+        .expect("record Rust runtime process start");
     let rust_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)

@@ -7,10 +7,9 @@ use sha2::{Digest, Sha256};
 use trellis_protocol::{parse_api_v1, parse_participant_v1};
 
 use super::{
-    AuthorityEvidenceScope, AuthorityState, AuthorizationStateError, DependencyEvidence,
-    DependencyState, DeploymentAuthorityRepository, EvidenceRepository, ParticipantBindingRecord,
-    ParticipantBindingRepository, ResourceBindingEvidence, ResourceBindingState,
-    ResourceProviderIdentity, RuntimeInstanceState,
+    AuthorityEvidenceScope, AuthorizationStateError, DependencyEvidence, DependencyState,
+    EvidenceRepository, ParticipantBindingRecord, ResourceBindingEvidence, ResourceBindingState,
+    ResourceProviderIdentity,
 };
 
 pub(crate) async fn ensure_authority_dependencies<R>(
@@ -20,7 +19,7 @@ pub(crate) async fn ensure_authority_dependencies<R>(
     now: i64,
 ) -> Result<(), AuthorizationStateError>
 where
-    R: DeploymentAuthorityRepository + EvidenceRepository + ParticipantBindingRepository,
+    R: EvidenceRepository,
 {
     let participant_value: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
@@ -39,36 +38,11 @@ where
     let resolved = trellis_protocol::resolve_participant_v1(&participant, &apis)
         .map_err(|error| invalid(error.to_string()))?;
 
-    let instances = repository.list_runtime_instances().await?;
     let mut providers = Vec::new();
-    for authority in repository
-        .list_deployment_authorities()
-        .await?
-        .into_iter()
-        .filter(|authority| authority.state == AuthorityState::Accepted)
-    {
-        if !repository
-            .get_deployment_evidence(&authority.deployment_id)
-            .await?
-            .is_some_and(|deployment| deployment.active)
-        {
-            continue;
-        }
-        let Some(instance) = instances.iter().find(|instance| {
-            instance.deployment_id == authority.deployment_id
-                && instance.state == RuntimeInstanceState::Active
-        }) else {
-            continue;
-        };
-        let Some(provider_binding) = repository
-            .get_participant_binding(
-                &authority.participant_id,
-                &authority.participant_artifact_digest,
-            )
-            .await?
-        else {
-            continue;
-        };
+    for evidence in repository.list_active_provider_evidence(now).await? {
+        let authority = evidence.authority;
+        let instance = evidence.instance;
+        let provider_binding = evidence.binding;
         let provider_participant_value: Value =
             serde_json::from_str(&provider_binding.participant_json)
                 .map_err(|error| invalid(error.to_string()))?;

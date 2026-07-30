@@ -6,6 +6,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use futures_util::StreamExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -194,7 +195,16 @@ impl AuthRpcProcessor {
             return Ok(());
         };
         let subject = message.subject.as_str();
+        let dispatch_started = Instant::now();
         let result = self.dispatch(subject, &message).await;
+        let dispatch_elapsed = dispatch_started.elapsed();
+        if dispatch_elapsed >= Duration::from_secs(1) {
+            tracing::warn!(
+                subject,
+                duration_ms = dispatch_elapsed.as_millis(),
+                "Auth RPC dispatch exceeded one second"
+            );
+        }
         tracing::debug!(
             subject,
             success = result.is_ok(),
@@ -211,10 +221,19 @@ impl AuthRpcProcessor {
             }
         };
         let payload = payload.map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        let publish_started = Instant::now();
         self.client
             .publish_with_headers(reply, headers, Bytes::from(payload))
             .await
             .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        let publish_elapsed = publish_started.elapsed();
+        if publish_elapsed >= Duration::from_secs(1) {
+            tracing::warn!(
+                subject,
+                duration_ms = publish_elapsed.as_millis(),
+                "Auth RPC reply publish exceeded one second"
+            );
+        }
         tracing::debug!(subject, "published Auth RPC response");
         Ok(())
     }
@@ -473,21 +492,6 @@ impl AuthRpcProcessor {
             .ok_or(AuthorizationStateError::SessionMissing)?;
         tracing::debug!(session_id = %session.session_id, "loaded Auth RPC session");
         verify_request_proof(request)?;
-        {
-            let mut replays = self.request_replays.lock().map_err(|_| {
-                AuthorizationStateError::Storage("request replay lock poisoned".to_owned())
-            })?;
-            replays.retain(|_, expires_at| *expires_at > now);
-            if replays
-                .insert(
-                    (request.session_key.clone(), request.request_id.clone()),
-                    now.saturating_add(REQUEST_MAXIMUM_AGE_SECONDS),
-                )
-                .is_some()
-            {
-                return denied("request proof was already used");
-            }
-        }
         let now_ms = now
             .checked_mul(1_000)
             .ok_or_else(|| AuthorizationStateError::Storage("time overflow".to_owned()))?;
@@ -529,6 +533,24 @@ impl AuthRpcProcessor {
         )?;
         if !allowed {
             return denied("request is not granted by the active authority");
+        }
+        {
+            let mut replays = self.request_replays.lock().map_err(|_| {
+                AuthorizationStateError::Storage("request replay lock poisoned".to_owned())
+            })?;
+            replays.retain(|_, expires_at| *expires_at > now);
+            if replays
+                .insert(
+                    (request.session_key.clone(), request.request_id.clone()),
+                    request
+                        .iat
+                        .saturating_add(REQUEST_MAXIMUM_AGE_SECONDS)
+                        .saturating_add(1),
+                )
+                .is_some()
+            {
+                return denied("request proof was already used");
+            }
         }
         Ok(ValidatedRequest {
             session,
@@ -1781,6 +1803,7 @@ impl AuthRpcProcessor {
             .decide_authority_proposal(DecideAuthorityProposalInput {
                 proposal_id: proposal.proposal_id,
                 expected_version: proposal.version,
+                expected_base_authority_version: None,
                 outcome: AuthorityDecisionOutcome::Accepted,
                 decided_by: caller.session.principal_id.clone(),
                 reason,
@@ -2018,19 +2041,19 @@ impl AuthRpcProcessor {
             .await?
             .into_iter()
             .find(|authority| authority.authority_id == proposal.authority_id);
-        if input
-            .get("expectedBaseAuthorityVersion")
-            .and_then(Value::as_u64)
-            != current.as_ref().map(|authority| authority.version)
-        {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
         let deployment_id = proposal.deployment_id.clone().ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("proposal deploymentId is missing".to_owned())
         })?;
         if proposal.authority_id
             != super::auth::deployment_authority_id(&deployment_id, &proposal.participant_id)?
         {
+            tracing::warn!(
+                proposal_id = %proposal.proposal_id,
+                authority_id = %proposal.authority_id,
+                deployment_id = %deployment_id,
+                participant_id = %proposal.participant_id,
+                "authority proposal identity conflict"
+            );
             return Err(AuthorizationStateError::StorageConflict);
         }
         let binding = self
@@ -2074,6 +2097,22 @@ impl AuthRpcProcessor {
             .decide_authority_proposal(DecideAuthorityProposalInput {
                 proposal_id: proposal_id.to_owned(),
                 expected_version: proposal.version,
+                expected_base_authority_version: Some(
+                    match input.get("expectedBaseAuthorityVersion") {
+                        Some(Value::Null) => None,
+                        Some(value) => Some(value.as_u64().ok_or_else(|| {
+                            AuthorizationStateError::InvalidRecord(
+                            "expectedBaseAuthorityVersion must be a non-negative integer or null"
+                                .to_owned(),
+                        )
+                        })?),
+                        None => {
+                            return Err(AuthorizationStateError::InvalidRecord(
+                                "expectedBaseAuthorityVersion is required".to_owned(),
+                            ));
+                        }
+                    },
+                ),
                 outcome: AuthorityDecisionOutcome::Accepted,
                 decided_by: caller.session.principal_id.clone(),
                 reason,
@@ -2162,6 +2201,7 @@ impl AuthRpcProcessor {
             .decide_authority_proposal(DecideAuthorityProposalInput {
                 proposal_id: proposal_id.to_owned(),
                 expected_version: proposal.version,
+                expected_base_authority_version: None,
                 outcome: AuthorityDecisionOutcome::Rejected,
                 decided_by: caller.session.principal_id.clone(),
                 reason: nullable_string(&input, "reason")?,

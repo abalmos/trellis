@@ -1,6 +1,8 @@
 import { defineAppContract, defineServiceContract } from "@qlever-llc/trellis";
 import { Type } from "typebox";
 import {
+  aliasCaseScopedActions,
+  caseScopedActions,
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,
@@ -22,70 +24,83 @@ export function createEventsFixture(caseId: string) {
     "Entity.Changed",
   );
 
-  const serviceContract = defineServiceContract(
-    { schemas: eventSchemas },
-    (ref) => ({
-      id: caseScopedContractId("trellis.integration.events-service", caseId),
-      displayName: `Trellis Integration Events Service (${slug})`,
-      description: "Exercises generated event publish and subscribe surfaces.",
-      capabilities: {
-        publishRecords: {
-          displayName: "Publish records",
-          description: "Publish entity change records in the events fixture.",
-        },
-        readRecords: {
-          displayName: "Read records",
-          description:
-            "Subscribe to entity change records in the events fixture.",
-        },
-      },
-      events: {
-        "Entity.Changed": {
-          version: "v1",
-          subject: entityChangedSubject,
-          event: ref.schema("EntityChanged"),
-          capabilities: {
-            publish: ["publishRecords"],
-            subscribe: ["readRecords"],
+  const serviceContract = aliasCaseScopedActions(
+    caseId,
+    defineServiceContract(
+      { schemas: eventSchemas },
+      (ref) => ({
+        id: caseScopedContractId("trellis.integration.events-service", caseId),
+        displayName: `Trellis Integration Events Service (${slug})`,
+        description:
+          "Exercises generated event publish and subscribe surfaces.",
+        capabilities: {
+          publishRecords: {
+            displayName: "Publish records",
+            description: "Publish entity change records in the events fixture.",
+          },
+          readRecords: {
+            displayName: "Read records",
+            description:
+              "Subscribe to entity change records in the events fixture.",
           },
         },
-      },
-    }),
+        events: caseScopedActions(caseId, {
+          "Entity.Changed": {
+            version: "v1",
+            subject: entityChangedSubject,
+            event: ref.schema("EntityChanged"),
+            capabilities: {
+              publish: ["publishRecords"],
+              subscribe: ["readRecords"],
+            },
+          },
+        }),
+      }),
+    ),
   );
 
-  const pubSubClientContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.events-pubsub-client",
-      caseId,
-    ),
-    displayName: `Trellis Integration Events PubSub Client (${slug})`,
-    description:
-      "App/client participant with event publish and subscribe authority.",
-    uses: [
-      serviceContract.EntityChanged.publish,
-      serviceContract.EntityChanged.subscribe,
-    ],
-  }));
+  const pubSubClientContract = aliasCaseScopedActions(
+    caseId,
+    defineAppContract(() => ({
+      id: caseScopedContractId(
+        "trellis.integration.events-pubsub-client",
+        caseId,
+      ),
+      displayName: `Trellis Integration Events PubSub Client (${slug})`,
+      description:
+        "App/client participant with event publish and subscribe authority.",
+      uses: [
+        serviceContract.EntityChanged.publish,
+        serviceContract.EntityChanged.subscribe,
+      ],
+    })),
+  );
 
-  const subscribeOnlyClientContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.events-subscribe-only-client",
-      caseId,
-    ),
-    displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
-    description: "App/client participant without event publish authority.",
-    uses: [serviceContract.EntityChanged.subscribe],
-  }));
+  const subscribeOnlyClientContract = aliasCaseScopedActions(
+    caseId,
+    defineAppContract(() => ({
+      id: caseScopedContractId(
+        "trellis.integration.events-subscribe-only-client",
+        caseId,
+      ),
+      displayName: `Trellis Integration Events Subscribe-Only Client (${slug})`,
+      description: "App/client participant without event publish authority.",
+      uses: [serviceContract.EntityChanged.subscribe],
+    })),
+  );
 
-  const publishOnlyClientContract = defineAppContract(() => ({
-    id: caseScopedContractId(
-      "trellis.integration.events-publish-only-client",
-      caseId,
-    ),
-    displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
-    description: "App/client participant without event subscribe authority.",
-    uses: [serviceContract.EntityChanged.publish],
-  }));
+  const publishOnlyClientContract = aliasCaseScopedActions(
+    caseId,
+    defineAppContract(() => ({
+      id: caseScopedContractId(
+        "trellis.integration.events-publish-only-client",
+        caseId,
+      ),
+      displayName: `Trellis Integration Events Publish-Only Client (${slug})`,
+      description: "App/client participant without event subscribe authority.",
+      uses: [serviceContract.EntityChanged.publish],
+    })),
+  );
 
   return {
     slug,

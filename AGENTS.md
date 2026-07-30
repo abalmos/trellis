@@ -77,6 +77,15 @@
   pure parser/codec/crypto/schema/type/export/tooling/UI helper checks. When
   live coverage needs a hook, extend `trellis-test` with the smallest named
   helper rather than enriching a fake.
+- Live integration uses one shared NATS and Trellis host by default. Client
+  interoperability is tracked in `integration/client-test-matrix.json`; Rust
+  runtime correctness is tracked in `integration/rust-runtime-test-matrix.json`.
+  Implemented Rust rows must match the compiled executable and executed result
+  stream exactly. Hidden skips are forbidden, and process-isolated cases require
+  a recorded process-global reason.
+- Local and GitHub release verification use the named Rust xtask release lanes.
+  Rust supports the current stable toolchain; no older compiler compatibility is
+  promised.
 - Release work must keep release-managed Trellis versions consistent through the
   Rust xtask release commands, verify `CHANGELOG.md` against changes since the
   previous release, and run the release verification checklist before the

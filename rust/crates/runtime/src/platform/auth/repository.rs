@@ -308,6 +308,12 @@ pub trait DeploymentAuthorityRepository: Send + Sync {
 /// Narrow runtime evidence repository port used by materialization.
 #[async_trait]
 pub trait EvidenceRepository: Send + Sync {
+    /// List active provider authority, instance, and artifact evidence in one coherent snapshot.
+    async fn list_active_provider_evidence(
+        &self,
+        now: i64,
+    ) -> Result<Vec<ActiveProviderEvidence>, AuthorizationStateError>;
+
     /// List runtime instances in stable ID order.
     async fn list_runtime_instances(
         &self,
@@ -412,6 +418,17 @@ pub trait EvidenceRepository: Send + Sync {
         scope: AuthorityEvidenceScope,
         evidence: Vec<ResourceBindingEvidence>,
     ) -> Result<(), AuthorizationStateError>;
+}
+
+/// Exact active provider evidence used during dependency resolution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActiveProviderEvidence {
+    /// Accepted deployment authority.
+    pub authority: DeploymentAuthorityRecord,
+    /// Stable active runtime instance selected for the deployment.
+    pub instance: RuntimeInstanceRecord,
+    /// Exact participant artifact bound to the authority.
+    pub binding: ParticipantBindingRecord,
 }
 
 /// Coherent materialization, issuance snapshot, and transition-outbox repository port.
@@ -939,6 +956,51 @@ impl DeploymentAuthorityRepository for InMemoryAuthorizationStore {
 
 #[async_trait]
 impl EvidenceRepository for InMemoryAuthorizationStore {
+    async fn list_active_provider_evidence(
+        &self,
+        now: i64,
+    ) -> Result<Vec<ActiveProviderEvidence>, AuthorizationStateError> {
+        let state = self.state()?;
+        let mut evidence = Vec::new();
+        for authority in state.deployment_authorities.values().filter(|authority| {
+            authority.state == AuthorityState::Accepted
+                && authority
+                    .expires_at
+                    .is_none_or(|expires_at| expires_at > now)
+        }) {
+            if !state
+                .deployments
+                .get(&authority.deployment_id)
+                .is_some_and(|deployment| {
+                    deployment.active
+                        && deployment
+                            .expires_at
+                            .is_none_or(|expires_at| expires_at > now)
+                })
+            {
+                continue;
+            }
+            let Some(instance) = state.runtime_instances.values().find(|instance| {
+                instance.deployment_id == authority.deployment_id
+                    && instance.state == RuntimeInstanceState::Active
+            }) else {
+                continue;
+            };
+            let Some(binding) = state.participant_bindings.get(&(
+                authority.participant_id.clone(),
+                authority.participant_artifact_digest.clone(),
+            )) else {
+                continue;
+            };
+            evidence.push(ActiveProviderEvidence {
+                authority: authority.clone(),
+                instance: instance.clone(),
+                binding: binding.clone(),
+            });
+        }
+        Ok(evidence)
+    }
+
     async fn list_runtime_instances(
         &self,
     ) -> Result<Vec<RuntimeInstanceRecord>, AuthorizationStateError> {

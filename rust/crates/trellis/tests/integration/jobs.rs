@@ -20,8 +20,7 @@ use trellis_rs::sdk::jobs::types::{
 };
 use trellis_rs::service::ServerError;
 
-use crate::support::assertions::assert_case_registered;
-use crate::support::jobs_admin::start_rust_jobs_admin;
+use crate::support::assertions::assert_runtime_case_registered;
 
 const JOBS_SERVICE_ID: &str = "trellis.integration.jobs-service@v1";
 const JOBS_CLIENT_ID: &str = "trellis.integration.jobs-client@v1";
@@ -724,7 +723,7 @@ async fn setup_jobs_fixture() -> JobsFixture {
 
 #[tokio::test]
 async fn jobs_live_updates_are_typed_and_stop_at_terminal_state() {
-    assert_case_registered(
+    assert_runtime_case_registered(
         "jobs.live-updates-are-typed-and-stop-at-terminal-state",
         "jobs",
         "jobs",
@@ -774,7 +773,7 @@ impl JobsFixture {
 
 #[tokio::test]
 async fn jobs_service_creates_local_job_from_client_rpc() {
-    assert_case_registered(
+    assert_runtime_case_registered(
         "jobs.service-creates-local-job-from-client-rpc",
         "jobs",
         "jobs",
@@ -796,7 +795,7 @@ async fn jobs_service_creates_local_job_from_client_rpc() {
 
 #[tokio::test]
 async fn jobs_keyed_jobs_serialize_same_key() {
-    assert_case_registered("jobs.keyed-jobs-serialize-same-key", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.keyed-jobs-serialize-same-key", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let first = {
@@ -837,7 +836,7 @@ async fn jobs_keyed_jobs_serialize_same_key() {
 
 #[tokio::test]
 async fn jobs_keyed_active_redelivery_after_restart() {
-    assert_case_registered("jobs.keyed-active-redelivery-after-restart", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.keyed-active-redelivery-after-restart", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let job = fixture
@@ -908,7 +907,7 @@ async fn jobs_keyed_active_redelivery_after_restart() {
 
 #[tokio::test]
 async fn jobs_keyed_jobs_reject_queue_full() {
-    assert_case_registered("jobs.keyed-jobs-reject-queue-full", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.keyed-jobs-reject-queue-full", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let group_key = "same-key-full";
@@ -996,7 +995,7 @@ async fn jobs_keyed_jobs_reject_queue_full() {
 
 #[tokio::test]
 async fn jobs_submitted_job_can_be_cancelled() {
-    assert_case_registered("jobs.submitted-job-can-be-cancelled", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.submitted-job-can-be-cancelled", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let output =
@@ -1010,11 +1009,9 @@ async fn jobs_submitted_job_can_be_cancelled() {
 
 #[tokio::test]
 async fn jobs_failed_job_retries_then_dead() {
-    assert_case_registered("jobs.failed-job-retries-then-dead", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.failed-job-retries-then-dead", "jobs", "jobs");
 
     let mut fixture = setup_jobs_fixture().await;
-    let _jobs_admin_process =
-        start_rust_jobs_admin(&fixture.runtime, &mut fixture.admin, &fixture.bootstrap_url).await;
     let admin_contract = jobs_admin_client_contract().expect("build jobs admin client contract");
     let admin_client = fixture
         .admin
@@ -1044,7 +1041,7 @@ async fn jobs_failed_job_retries_then_dead() {
 
 #[tokio::test]
 async fn jobs_job_progress_and_log_are_published() {
-    assert_case_registered("jobs.job-progress-and-log-are-published", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.job-progress-and-log-are-published", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let output = call_documents_process_with_retry(&fixture.client, "doc-1").await;
@@ -1061,7 +1058,7 @@ async fn jobs_job_progress_and_log_are_published() {
 
 #[tokio::test]
 async fn jobs_job_wait_returns_typed_result() {
-    assert_case_registered("jobs.job-wait-returns-typed-result", "jobs", "jobs");
+    assert_runtime_case_registered("jobs.job-wait-returns-typed-result", "jobs", "jobs");
 
     let fixture = setup_jobs_fixture().await;
     let output = call_documents_process_with_retry(&fixture.client, "doc-1").await;
@@ -1079,7 +1076,7 @@ async fn jobs_job_wait_returns_typed_result() {
 
 #[tokio::test]
 async fn jobs_job_context_propagates_request_and_trace() {
-    assert_case_registered(
+    assert_runtime_case_registered(
         "jobs.job-context-propagates-request-and-trace",
         "jobs",
         "jobs",
@@ -1113,7 +1110,6 @@ async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
-    let _jobs_admin_process = start_rust_jobs_admin(&runtime, &mut admin, &bootstrap_url).await;
     let admin_contract = jobs_admin_client_contract().expect("build jobs admin client contract");
     let admin_client = admin
         .connect_client(&bootstrap_url, &admin_contract)
@@ -1431,19 +1427,24 @@ fn is_retryable_jobs_admin_error<E: std::fmt::Debug>(
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest =
-        trellis_rs::contracts::ContractManifestBuilder::new(
-            JOBS_ADMIN_CLIENT_ID,
-            "Trellis Integration Jobs Admin Client",
-            "Uses Jobs admin ListServices for worker-presence coverage.",
-            trellis_rs::contracts::ContractKind::App,
-        )
-        .use_ref(
-            "jobs",
-            trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-                .with_rpc_call(["Jobs.Cancel", "Jobs.Query", "Jobs.ListServices"]),
-        )
-        .build()?;
+    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+        JOBS_ADMIN_CLIENT_ID,
+        "Trellis Integration Jobs Admin Client",
+        "Uses Jobs admin ListServices for worker-presence coverage.",
+        trellis_rs::contracts::ContractKind::App,
+    )
+    .use_ref(
+        "jobs",
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID).with_rpc_call([
+            "Jobs.GetKey",
+            "Jobs.Inspect",
+            "Jobs.ListDLQ",
+            "Jobs.ListServices",
+            "Jobs.Metrics",
+            "Jobs.Query",
+        ]),
+    )
+    .build()?;
 
     trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
 }

@@ -33,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_key_seed_base64url = required_env("SESSION_KEY_SEED_BASE64URL")?;
     let provisioned_identity_seed_base64url = required_env("PROVISIONED_IDENTITY_SEED_BASE64URL")?;
     let deployment_id = required_env("TRELLIS_DEPLOYMENT_ID")?;
+    let instance_id = required_env("TRELLIS_INSTANCE_ID")?;
     let participant_id = required_env("TRELLIS_PARTICIPANT_ID")?;
     let participant_digest = required_env("TRELLIS_PARTICIPANT_DIGEST")?;
     let participant_needs_digest = required_env("TRELLIS_PARTICIPANT_NEEDS_DIGEST")?;
@@ -53,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let options = ServiceConnectOptions::new(
         &trellis_url,
-        SERVICE_NAME,
+        &instance_id,
         &deployment_id,
         &participant_id,
         &participant_digest,

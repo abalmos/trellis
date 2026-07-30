@@ -8,6 +8,9 @@ import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
+  aliasCaseScopedActions,
+  aliasCaseScopedRuntime,
+  caseScopedActions,
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,
@@ -29,73 +32,79 @@ export function createResourcesFixture(caseId: string) {
     ResourceRecord: Type.Object({ message: Type.String() }),
   } as const;
 
-  const serviceContract = defineServiceContract(
-    { schemas: resourceSchemas },
-    (ref) => ({
-      id: caseScopedContractId(
-        "trellis.integration.resources-service",
-        caseId,
-      ),
-      displayName: `Trellis Integration Resources Service (${slug})`,
-      description: "Exercises service-bound KV and store resource handles.",
-      uses: [
-        kv({
-          records: {
-            purpose: "Store integration resource records",
-            schema: ref.schema("ResourceRecord"),
-            required: true,
-            history: 1,
-            ttlMs: 0,
-          },
-          optionalRecords: {
-            purpose: "Store optional integration resource records",
-            schema: ref.schema("ResourceRecord"),
-            required: false,
-            history: 1,
-            ttlMs: 0,
+  const serviceContract = aliasCaseScopedActions(
+    caseId,
+    defineServiceContract(
+      { schemas: resourceSchemas },
+      (ref) => ({
+        id: caseScopedContractId(
+          "trellis.integration.resources-service",
+          caseId,
+        ),
+        displayName: `Trellis Integration Resources Service (${slug})`,
+        description: "Exercises service-bound KV and store resource handles.",
+        uses: [
+          kv({
+            records: {
+              purpose: "Store integration resource records",
+              schema: ref.schema("ResourceRecord"),
+              required: true,
+              history: 1,
+              ttlMs: 0,
+            },
+            optionalRecords: {
+              purpose: "Store optional integration resource records",
+              schema: ref.schema("ResourceRecord"),
+              required: false,
+              history: 1,
+              ttlMs: 0,
+            },
+          }),
+          store({
+            blobs: {
+              purpose: "Store integration resource blobs",
+              required: true,
+              ttlMs: 0,
+              maxObjectBytes: 1048576,
+              maxTotalBytes: 4194304,
+            },
+            optionalBlobs: {
+              purpose: "Store optional integration resource blobs",
+              required: false,
+              ttlMs: 0,
+              maxObjectBytes: 1048576,
+              maxTotalBytes: 4194304,
+            },
+          }),
+        ],
+        rpc: caseScopedActions(caseId, {
+          "Resources.Exercise": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "rpc.v1.Integration.Resources",
+              caseId,
+              "Exercise",
+            ),
+            input: ref.schema("ResourceExerciseInput"),
+            output: ref.schema("ResourceExerciseOutput"),
+            capabilities: { call: [] },
+            errors: [],
           },
         }),
-        store({
-          blobs: {
-            purpose: "Store integration resource blobs",
-            required: true,
-            ttlMs: 0,
-            maxObjectBytes: 1048576,
-            maxTotalBytes: 4194304,
-          },
-          optionalBlobs: {
-            purpose: "Store optional integration resource blobs",
-            required: false,
-            ttlMs: 0,
-            maxObjectBytes: 1048576,
-            maxTotalBytes: 4194304,
-          },
-        }),
-      ],
-      rpc: {
-        "Resources.Exercise": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "rpc.v1.Integration.Resources",
-            caseId,
-            "Exercise",
-          ),
-          input: ref.schema("ResourceExerciseInput"),
-          output: ref.schema("ResourceExerciseOutput"),
-          capabilities: { call: [] },
-          errors: [],
-        },
-      },
-    }),
+      }),
+    ),
   );
 
-  const clientContract = defineAppContract(() => ({
-    id: caseScopedContractId("trellis.integration.resources-client", caseId),
-    displayName: `Trellis Integration Resources Client (${slug})`,
-    description:
-      "App/client participant for the resources integration fixture.",
-    uses: [serviceContract.ResourcesExercise],
-  }));
+  const clientContract = aliasCaseScopedActions(
+    caseId,
+    defineAppContract(() => ({
+      id: caseScopedContractId("trellis.integration.resources-client", caseId),
+      displayName: `Trellis Integration Resources Client (${slug})`,
+      description:
+        "App/client participant for the resources integration fixture.",
+      uses: [serviceContract.ResourcesExercise],
+    })),
+  );
 
   const serviceName = caseScopedName("resources-fixture-service", caseId);
 
@@ -104,15 +113,18 @@ export function createResourcesFixture(caseId: string) {
       name: serviceName,
       contract: serviceContract,
     });
-    return await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: serviceContract,
-      name: serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    return aliasCaseScopedRuntime(
+      serviceContract,
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: serviceContract,
+        name: serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
   }
 
   return {

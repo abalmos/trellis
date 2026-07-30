@@ -32,26 +32,23 @@ runtime, fake auth, or fake generated-client workflows to prove Trellis behavior
 If live coverage needs a missing failure or inspection surface, add the smallest
 named `trellis-test` helper and prove the behavior through a live control plane.
 
-Before committing or ending an implementation cycle, run the focused checks that match the files touched. If runtime or public behavior changed, also run the full language-owned integration suites:
+Before committing or ending an implementation cycle, run the focused checks that match the files touched. The complete live lane starts one host, runs TypeScript with up to eight case slots, then runs Rust with up to eight case slots against the retained host:
 
 ```sh
-deno task -c js/deno.json test:integration -- --parallel --jobs 8
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
+deno run -A -c js/deno.json integration/live_runner.ts
 ```
 
-Eight workers are the authoritative release baseline for both live suites. A
-developer may pass a lower `--jobs` count when running either command directly
-on a smaller machine, but that lower-resource loop does not replace the
-eight-worker release gate. Focused Rust integration commands remain
-single-threaded for isolation.
+Focused language-only runs may use all eight slots. Process-isolated cases run
+through Rust's separate serial queue after the shared Rust schedule;
+feature-area skip lists are forbidden.
 
 If the full integration suites cannot be run, record the reason and the last focused checks that did run.
 
 ### Targeted integration loops
 
-The `kind: "client"` cases in `integration/test-matrix.json` are the parity contract for Trellis client-library integration coverage. The matrix is a language-neutral list of required semantic cases; it has no per-language feature list, opt-in field, or skip list. Every supported client language suite must register every client matrix case in its local manifest, and a case that fails in one language is a client-library or runtime bug rather than an allowed language exception.
+`integration/client-test-matrix.json` is the cross-language client-interoperability contract. `integration/rust-runtime-test-matrix.json` owns Rust runtime correctness. Implemented Rust mappings must equal the compiled executable list and executed result IDs; source annotations and hidden skips cannot prove conformance.
 
-For focused local debugging, inspect `integration/test-matrix.json` and run the smallest matching fixture, case, or coverage slice. The JS runner supports repeated `--fixture`, `--case`, and `--coverage` filters, and keeps matrix conformance enabled by default:
+For focused local debugging, inspect `integration/client-test-matrix.json` and run the smallest matching fixture, case, or coverage slice. The JS runner supports repeated `--fixture`, `--case`, and `--coverage` filters, and keeps matrix conformance enabled by default:
 
 ```sh
 deno task -c js/deno.json test:integration -- --fixture rpc
@@ -143,13 +140,10 @@ The JSR publish set is:
 
 - `@qlever-llc/result`
 - `@qlever-llc/trellis`
-- `@qlever-llc/trellis-control-plane` from `js/services/trellis`
 - `@qlever-llc/trellis-test`
 - `@qlever-llc/trellis-svelte` from `js/packages/trellis-svelte/jsr`
 
-The workflow runs JSR dry-runs for those packages so package shape issues are caught early, then publishes them after the release gate passes.
-
-The `@qlever-llc/trellis-control-plane` service package is published directly from `js/services/trellis`. The source `@qlever-llc/trellis-svelte` package is still published from its staged JSR package directory because that package shape needs generated or copied publish artifacts.
+The workflow runs JSR dry-runs for the publishable core packages before the release gate. The source `@qlever-llc/trellis-svelte` package is built and smoke-tested before release, then staged and published after the matching core JSR version is available; a prepublication JSR dry-run cannot resolve that unreleased dependency.
 
 ## 1. Pick the release
 
@@ -268,44 +262,16 @@ cargo run --manifest-path xtask/Cargo.toml -- release verify --version "$RELEASE
 For emergency focused local verification only, `--skip-integration` skips both language-owned integration suites and prints that release verification is incomplete. A release is not ready until both full integration suites pass in the GitHub release gate.
 
 The command prepares once, verifies that preparation did not change the existing
-working-tree diff, reuses prepared output, and prints every command before
-executing it. Read-only prepared JavaScript package groups run concurrently with
-an eight-process ceiling; heavy Cargo stages remain sequential against the shared
-target directory. Every stage prints elapsed time, followed by a slowest-first
-summary on success or failure:
+working-tree diff, builds live artifacts early, then runs the independent named
+lanes. GitHub Actions invokes these same lane definitions rather than maintaining
+a second command graph. Rust uses the current stable toolchain only.
 
 ```sh
-cargo run --manifest-path xtask/Cargo.toml -- release check-metadata --version "$RELEASE_VERSION" --since "$PREVIOUS_TAG"
-cargo run --manifest-path xtask/Cargo.toml -- prepare
-deno fmt -c js/deno.json --check
-cargo fmt --manifest-path rust/Cargo.toml --all --check
-cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
-cargo fmt --manifest-path rust/xtask/Cargo.toml --check
-cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-cargo +1.88.0 check --manifest-path rust/Cargo.toml -p trellis-protocol -p trellis-contracts -p trellis-rs --lib
-cargo +1.88.0 check --manifest-path generated/packages/cargo-participants/jobs/Cargo.toml
-cargo check --manifest-path rust/Cargo.toml --package trellis-protocol-wasm --target wasm32-unknown-unknown
-actionlint
-deno check -c js/deno.json js/packages/trellis/index.ts js/packages/trellis-svelte/src/index.ts js/packages/trellis-svelte/src/context.svelte.ts
-deno task -c js/deno.json test:prepared:result                 # parallel group
-deno task -c js/deno.json test:prepared:trellis                # parallel group
-deno task -c js/deno.json test:prepared:trellis-svelte         # parallel group
-deno task -c js/deno.json test:prepared:trellis-test           # parallel group
-deno task -c js/deno.json test:prepared:ui-tools               # parallel group
-deno task -c js/deno.json packages:build:npm
-deno task -c js/deno.json test:prepared:packaging:built
-cargo test --manifest-path rust/Cargo.toml --workspace --exclude trellis-rs --exclude trellis-service-jobs --exclude trellis-service-eventlog
-cargo test --manifest-path rust/Cargo.toml -p trellis-service-jobs --lib
-cargo test --manifest-path rust/Cargo.toml -p trellis-service-eventlog --lib
-cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib
-RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path rust/Cargo.toml --workspace --no-deps
-cargo test --manifest-path rust/Cargo.toml --workspace --doc
-cargo package --manifest-path rust/Cargo.toml --package trellis-protocol --allow-dirty
-cargo test --manifest-path rust/tools/generate/Cargo.toml
-cargo test --manifest-path rust/xtask/Cargo.toml
-cargo test --manifest-path xtask/Cargo.toml
-deno task -c js/deno.json test:integration -- --parallel --jobs 8
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 --skip 'state::' --skip jobs::jobs_admin_list_services_filters_stale_worker_heartbeats --skip jobs::jobs_failed_job_retries_then_dead -- --nocapture
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane static
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane rust
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane javascript
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live-build
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live
 ```
 
 Release verification also checks that each Rust workspace member either inherits
@@ -328,7 +294,6 @@ deno task -c js/deno.json test:prepared:result
 deno task -c js/deno.json test:prepared:trellis
 deno task -c js/deno.json test:prepared:trellis-svelte
 deno task -c js/deno.json test:prepared:trellis-test
-deno task -c js/deno.json test:prepared:service:auth
 deno task -c js/deno.json test:prepared:ui-tools
 deno task -c js/deno.json packages:build:npm
 deno task -c js/deno.json test:prepared:packaging:built
@@ -356,10 +321,8 @@ cargo run --manifest-path xtask/Cargo.toml -- build --workspace --release
 deno task -c js/deno.json build:npm
 (cd js/packages/result && deno publish --dry-run --allow-slow-types --allow-dirty)
 (cd js/packages/trellis && deno publish --dry-run --allow-slow-types --allow-dirty)
-(cd js/services/trellis && deno publish --dry-run --allow-slow-types --allow-dirty)
 (cd js/packages/trellis-test && deno publish --dry-run --allow-slow-types --allow-dirty)
-(cd js/packages/trellis-svelte/jsr && deno publish --dry-run --allow-slow-types --allow-dirty)
-docker build -f js/services/trellis/Containerfile .
+docker build -f rust/crates/runtime/Containerfile .
 docker build -f js/apps/console/Containerfile .
 ```
 
@@ -409,7 +372,8 @@ The unified `Release` workflow publishes in gated stages:
 
 - `resolve-release` derives the final release tag from the `release/v*` branch and rejects already-used tags
 - `prepare-release` rewrites publishable versions, verifies release metadata, generates SDK artifacts, writes release notes, and uploads the prepared workspace
-- `verify-format`, `verify-rust`, `verify-js`, `verify-js-integration`, `verify-rust-integration`, `build-cli`, and `verify-images` validate the release before publication; pull request runs skip the `build-cli` and `verify-images` release artifact matrix jobs while keeping the test jobs
+- `verify-static`, `verify-rust`, `verify-js`, and `verify-live-build` run as peer release lanes; `verify-live` then runs both language schedules against one retained host
+- `build-cli` and `verify-images` validate release artifacts; pull request runs skip those release-only matrix jobs while keeping all five verification lanes
 - `create-release-tag` creates the release tag after the release gate passes
 - `github-release` publishes CLI archives and checksums first
 - `publish-crates`, `publish-npm`, and `publish-images` publish downstream artifacts after the GitHub release exists

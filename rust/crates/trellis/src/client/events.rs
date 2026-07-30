@@ -31,6 +31,10 @@ pub struct PreparedTrellisEvent {
 }
 
 impl PreparedTrellisEvent {
+    pub(crate) fn with_subject(mut self, subject: String) -> Self {
+        self.subject = subject;
+        self
+    }
     /// Build a prepared event from an already encoded JSON body payload.
     ///
     /// The event id and event time are generated as metadata and are not written

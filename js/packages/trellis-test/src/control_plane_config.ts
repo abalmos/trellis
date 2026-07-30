@@ -252,9 +252,9 @@ export async function writeTrellisConfig(args: {
   const storage = (section: string) => `
 [${section}.storage]
 kind = "sqlite"
-path = ${quote(args.config.storage.dbPath)}
+path = ${quote(`${args.config.storage.dbPath}.${section}`)}
 journal_mode = "wal"
-busy_timeout_ms = 5000
+busy_timeout_ms = 30000
 single_writer = true
 `;
   let providers = "";

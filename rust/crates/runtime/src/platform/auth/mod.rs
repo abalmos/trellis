@@ -207,11 +207,12 @@ pub use domain::{
 pub(crate) use reconciliation::authorization_reconciliation_channel;
 pub use reconciliation::{AuthorizationReconciliationHandle, ReconciliationCause};
 pub use repository::{
-    AuthorityMaterializationSnapshot, AuthorityReconciliationOutcome, AuthoritySnapshotToken,
-    AuthoritySubjectRecord, AuthorizationMaterializationRepository, DeploymentAuthorityRepository,
-    EvidenceRepository, IdentityAuthorityRepository, InMemoryAuthorizationStore, IssuanceSnapshot,
-    MaterializationReplacement, ParticipantBindingRepository, PrincipalRepository,
-    ProviderIdentityRepository, SessionRepository,
+    ActiveProviderEvidence, AuthorityMaterializationSnapshot, AuthorityReconciliationOutcome,
+    AuthoritySnapshotToken, AuthoritySubjectRecord, AuthorizationMaterializationRepository,
+    DeploymentAuthorityRepository, EvidenceRepository, IdentityAuthorityRepository,
+    InMemoryAuthorizationStore, IssuanceSnapshot, MaterializationReplacement,
+    ParticipantBindingRepository, PrincipalRepository, ProviderIdentityRepository,
+    SessionRepository,
 };
 pub use service::AuthorizationStateService;
 pub(crate) use service_domain::deployment_authority_id;

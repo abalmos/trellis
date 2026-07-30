@@ -102,6 +102,75 @@ fn loads_toml_config_from_path() {
 }
 
 #[test]
+fn rejects_shared_sqlite_paths_across_subsystems() {
+    let source = COMPLETE_CONFIG.replace("./data/health.sqlite", "./data/platform.sqlite");
+    let config = RuntimeConfig::from_toml_str(&source).expect("parse config");
+
+    assert!(matches!(
+        config.validate_for_mode(RuntimeMode::All),
+        Err(ConfigError::SharedSqlitePath {
+            first: "platform",
+            second: "health",
+            ..
+        })
+    ));
+
+    let source = COMPLETE_CONFIG.replace("./data/health.sqlite", "./data/./platform.sqlite");
+    let config = RuntimeConfig::from_toml_str(&source).expect("parse equivalent path config");
+    assert!(matches!(
+        config.validate_for_mode(RuntimeMode::All),
+        Err(ConfigError::SharedSqlitePath { .. })
+    ));
+}
+
+#[test]
+#[cfg(unix)]
+fn rejects_shared_sqlite_inode_and_dangling_symlink_aliases() {
+    let temp = tempfile::tempdir().expect("create config path tempdir");
+    let target = temp.path().join("platform.sqlite");
+    let alias = temp.path().join("alias.sqlite");
+    std::os::unix::fs::symlink("platform.sqlite", &alias).expect("create dangling symlink");
+
+    let source = COMPLETE_CONFIG
+        .replace(
+            "./data/platform.sqlite",
+            target.to_str().expect("UTF-8 target path"),
+        )
+        .replace(
+            "./data/health.sqlite",
+            alias.to_str().expect("UTF-8 alias path"),
+        );
+    let config = RuntimeConfig::from_toml_str(&source).expect("parse symlink config");
+    assert!(matches!(
+        config.validate_for_mode(RuntimeMode::All),
+        Err(ConfigError::SharedSqlitePath { .. })
+    ));
+
+    let second_alias = temp.path().join("second-alias.sqlite");
+    std::os::unix::fs::symlink("alias.sqlite", &second_alias)
+        .expect("create second dangling symlink");
+    let source_with_chain = source.replace(
+        alias.to_str().expect("UTF-8 alias path"),
+        second_alias.to_str().expect("UTF-8 second alias path"),
+    );
+    let config = RuntimeConfig::from_toml_str(&source_with_chain).expect("parse symlink chain");
+    assert!(matches!(
+        config.validate_for_mode(RuntimeMode::All),
+        Err(ConfigError::SharedSqlitePath { .. })
+    ));
+    std::fs::remove_file(second_alias).expect("remove second symlink");
+
+    std::fs::remove_file(&alias).expect("remove symlink");
+    std::fs::write(&target, []).expect("create target");
+    std::fs::hard_link(&target, &alias).expect("create hard link");
+    let config = RuntimeConfig::from_toml_str(&source).expect("parse hard-link config");
+    assert!(matches!(
+        config.validate_for_mode(RuntimeMode::All),
+        Err(ConfigError::SharedSqlitePath { .. })
+    ));
+}
+
+#[test]
 fn rejects_unknown_runtime_config_fields_with_source_location() {
     for (source, field) in [
         ("unknown_top_level = true\n", "unknown_top_level"),

@@ -338,12 +338,21 @@ async fn rpc_client_calls_service_success() {
         }
     });
 
+    let service_subjects = service
+        .registered_subjects()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
 
     let client = admin
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust RPC client");
+    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
+    let client_capability = client.integration_test_descriptor_capability(RPC_READ_CAPABILITY);
+    assert_eq!(service_subjects, [client_subject.as_str()]);
+    assert_ne!(client_subject, EntityGetRpc::SUBJECT);
     let context = client
         .refresh_authorization_context()
         .await
@@ -354,10 +363,10 @@ async fn rpc_client_calls_service_success() {
     service_task.abort_and_wait().await;
     let observed_requests = observed_requests.lock().await;
     assert_eq!(observed_requests.len(), 1);
-    assert_eq!(observed_requests[0].subject, EntityGetRpc::SUBJECT);
+    assert_eq!(observed_requests[0].subject, client_subject);
     assert_eq!(
         observed_requests[0].required_capabilities,
-        Some(vec![RPC_READ_CAPABILITY.to_string()])
+        Some(vec![client_capability])
     );
     assert_eq!(
         output,
@@ -408,20 +417,16 @@ async fn rpc_client_calls_service_success() {
         )
         .expect("canonicalize signed context")
     );
-    let admin_client = admin
-        .connect_admin(&bootstrap_url)
-        .await
-        .expect("reconnect admin for context revocation");
-    let admin_auth = trellis_rs::sdk::auth::AuthClient::new(crate::generated_caller(admin_client));
-    admin_auth
-        .rpc()
-        .auth()
-        .sessions_revoke(&trellis_rs::sdk::auth::types::AuthSessionsRevokeRequest {
-            expected_version: None,
-            idempotency_key: format!("revoke-{}", signed.unsigned.context_id),
-            reason: Some("integration context revocation".to_owned()),
-            session_id: signed.unsigned.session_id,
-        })
+    admin
+        .revoke_session(
+            &bootstrap_url,
+            &trellis_rs::sdk::auth::types::AuthSessionsRevokeRequest {
+                expected_version: None,
+                idempotency_key: format!("revoke-{}", signed.unsigned.context_id),
+                reason: Some("integration context revocation".to_owned()),
+                session_id: signed.unsigned.session_id,
+            },
+        )
         .await
         .expect("revoke context session");
     assert!(client.refresh_authorization_context().await.is_err());
@@ -559,6 +564,7 @@ async fn rpc_client_receives_declared_error() {
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust RPC client");
+    let client_subject = client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
     let result = call_entity_get_expecting_error(&client, "entity-1").await;
     assert_eq!(result.error_type(), Some("NOT_FOUND"));
     let value = result.value().expect("declared error payload is JSON");
@@ -568,15 +574,15 @@ async fn rpc_client_receives_declared_error() {
         .expect("declared error payload has handler context");
     assert_eq!(
         context.get("method").and_then(Value::as_str),
-        Some("Entity.Get")
+        client_subject.strip_prefix("rpc.v1.")
     );
     assert_eq!(
         context.get("service").and_then(Value::as_str),
-        Some(RPC_SERVICE_ID)
+        Some(service_key.participant_id.as_str())
     );
     assert_eq!(
         context.get("contractId").and_then(Value::as_str),
-        Some(RPC_SERVICE_ID)
+        Some(service_key.participant_id.as_str())
     );
     assert_eq!(
         context.get("contractDigest").and_then(Value::as_str),
@@ -903,10 +909,11 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
     let auth_client = trellis_rs::auth::TransitionalAuthClient::new(service.caller());
 
     let (target_seed, target_session_key) = trellis_rs::auth::generate_session_keypair();
-    let _target_client = admin
+    let target_client = admin
         .connect_client_with_session_seed(&bootstrap_url, &client_contract, target_seed.clone())
         .await
         .expect("connect target app session");
+    let target_subject = target_client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
     let target_auth =
         trellis_rs::client::SessionAuth::from_seed_base64url(&target_seed).expect("target auth");
     let payload = br#"{}"#;
@@ -932,12 +939,7 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
 
     assert!(
         auth_client
-            .validate_request(&request(
-                EntityGetRpc::SUBJECT,
-                "req_allowed",
-                now,
-                Vec::new()
-            ))
+            .validate_request(&request(&target_subject, "req_allowed", now, Vec::new()))
             .await
             .expect("validate allowed request")
             .allowed
@@ -945,7 +947,7 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
 
     let invalid_signature = trellis_rs::auth::AuthRequestsValidateRequest {
         proof: "invalid".to_owned(),
-        ..request(EntityGetRpc::SUBJECT, "req_invalid", now, Vec::new())
+        ..request(&target_subject, "req_invalid", now, Vec::new())
     };
     assert_validator_error(
         auth_client.validate_request(&invalid_signature).await,
@@ -953,12 +955,7 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
     );
     assert_validator_error(
         auth_client
-            .validate_request(&request(
-                EntityGetRpc::SUBJECT,
-                "req_stale",
-                now - 61,
-                Vec::new(),
-            ))
+            .validate_request(&request(&target_subject, "req_stale", now - 61, Vec::new()))
             .await,
         "outside the accepted window",
     );
@@ -976,7 +973,7 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
     assert_validator_error(
         auth_client
             .validate_request(&request(
-                EntityGetRpc::SUBJECT,
+                &target_subject,
                 "req_denied_capability",
                 now,
                 vec!["missing".to_owned()],
@@ -985,7 +982,7 @@ async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permiss
         "capability is not granted",
     );
 
-    let replay = request(EntityGetRpc::SUBJECT, "req_replay", now, Vec::new());
+    let replay = request(&target_subject, "req_replay", now, Vec::new());
     assert!(
         auth_client
             .validate_request(&replay)

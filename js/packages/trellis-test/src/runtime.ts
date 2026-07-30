@@ -12,10 +12,12 @@ import {
   CONTRACT as trellisJobsContract,
   CONTRACT_DIGEST as trellisJobsContractDigest,
 } from "@qlever-llc/trellis/sdk/jobs/manifest";
-import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
+import { recordTrellisDuration as recordOpenTelemetryDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
+import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
+import { aliasCaseScopedRuntime } from "./integration/names.ts";
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
@@ -35,6 +37,19 @@ import {
   type TrellisTestEventSourceContract,
 } from "./event_capture.ts";
 import { NatsTestContainer } from "./nats_container.ts";
+import {
+  recordTrellisTestDuration,
+  recordTrellisTestProcessStart,
+} from "./integration/metrics.ts";
+
+function recordTrellisDuration(
+  name: Parameters<typeof recordOpenTelemetryDuration>[0],
+  durationMs: number,
+  attributes?: Parameters<typeof recordOpenTelemetryDuration>[2],
+): void {
+  recordOpenTelemetryDuration(name, durationMs, attributes);
+  void recordTrellisTestDuration(name, durationMs, attributes);
+}
 import type {
   JetStreamAckObserver,
   NatsMessageObserver,
@@ -72,7 +87,7 @@ type RuntimeTimeouts = {
   shutdownMs: number;
 };
 
-function startServiceProcess(args: {
+async function startServiceProcess(args: {
   command: {
     cmd: string;
     args: readonly string[];
@@ -80,26 +95,51 @@ function startServiceProcess(args: {
     cwd?: string;
   };
   trellisUrl: string;
-  sessionKeySeed: string;
+  key: TrellisTestServiceKey;
   jobsDbPath: string;
   mode: "owner" | "rpc-only";
-}): ServiceProcessHandle {
+}): Promise<ServiceProcessHandle> {
   const child = new Deno.Command(args.command.cmd, {
     args: Array.from(args.command.args),
     cwd: args.command.cwd,
     env: {
       ...args.command.env,
       TRELLIS_URL: args.trellisUrl,
-      SESSION_KEY_SEED_BASE64URL: args.sessionKeySeed,
+      SESSION_KEY_SEED_BASE64URL: args.key.sessionSeed,
+      PROVISIONED_IDENTITY_SEED_BASE64URL: args.key.seed,
+      TRELLIS_DEPLOYMENT_ID: args.key.deploymentId,
+      TRELLIS_INSTANCE_ID: args.key.instanceId,
+      TRELLIS_PARTICIPANT_ID: args.key.participantId,
+      TRELLIS_PARTICIPANT_DIGEST: args.key.participantArtifactDigest,
+      TRELLIS_PARTICIPANT_NEEDS_DIGEST: args.key.participantNeedsDigest,
+      TRELLIS_AUTHORIZATION_CONTEXT_FILE: `${args.jobsDbPath}.context.json`,
       TRELLIS_JOBS_DB_PATH: args.jobsDbPath,
       TRELLIS_JOBS_MODE: args.mode,
+      TRELLIS_TIMEOUT_MS: "30000",
       NO_COLOR: "1",
     },
     stdin: "null",
     stdout: "inherit",
     stderr: "inherit",
   }).spawn();
+  await recordTrellisTestProcessStart("jobs", String(child.pid));
   const status = child.status;
+  let exited: Deno.CommandStatus | undefined;
+  status.then((value) => exited = value);
+  await waitForHelper(async () => {
+    if (exited !== undefined) {
+      throw new Error(
+        `Jobs owner exited during startup with status ${exited.code}`,
+      );
+    }
+    try {
+      await Deno.stat(args.jobsDbPath);
+      return true;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return false;
+      throw error;
+    }
+  }, { timeoutMs: 120_000 });
   let stopped = false;
   return {
     async stop() {
@@ -182,14 +222,15 @@ export class TrellisTestRuntime implements AsyncDisposable {
       expectedDesiredVersion?: number;
     }): Promise<unknown>;
   };
-  readonly controlPlane: TrellisTestControlPlane;
-  #controlPlane: TrellisProcessHandle;
+  readonly controlPlane?: TrellisTestControlPlane;
+  #controlPlane: TrellisProcessHandle | undefined;
   #jobsAdmin: ServiceProcessHandle | undefined;
   #nats: NatsTestContainer;
   #admin: TrellisTestAdminAutomation;
-  #configPath: string;
-  #trellisOptions: TrellisTestRuntimeStartOptions["trellis"];
+  #configPath: string | undefined;
+  #trellisOptions: TrellisTestRuntimeStartOptions["trellis"] | undefined;
   #keepWorkdir: boolean;
+  #ownsWorkdir: boolean;
   #deployment: string;
   #timeouts: RuntimeTimeouts;
   #clients = new Set<ConnectedClient>();
@@ -202,19 +243,21 @@ export class TrellisTestRuntime implements AsyncDisposable {
     deployment: string;
     keepWorkdir: boolean;
     timeouts: RuntimeTimeouts;
-    configPath: string;
-    controlPlaneSqlitePath: string;
-    trellisOptions: TrellisTestRuntimeStartOptions["trellis"];
+    configPath?: string;
+    controlPlaneSqlitePath?: string;
+    trellisOptions?: TrellisTestRuntimeStartOptions["trellis"];
     nats: NatsTestContainer;
-    controlPlane: TrellisProcessHandle;
+    controlPlane?: TrellisProcessHandle;
     jobsAdmin?: ServiceProcessHandle;
     admin: TrellisTestAdminAutomation;
+    ownsWorkdir?: boolean;
   }) {
     this.trellisUrl = args.trellisUrl;
     this.natsUrl = args.nats.natsUrl;
     this.workdir = args.workdir;
     this.#deployment = args.deployment;
     this.#keepWorkdir = args.keepWorkdir;
+    this.#ownsWorkdir = args.ownsWorkdir ?? true;
     this.#timeouts = args.timeouts;
     this.#nats = args.nats;
     this.#controlPlane = args.controlPlane;
@@ -222,9 +265,11 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#configPath = args.configPath;
     this.#trellisOptions = args.trellisOptions;
     this.#admin = args.admin;
-    this.controlPlane = {
-      sqlite: new TrellisControlPlaneSqlite(args.controlPlaneSqlitePath),
-    };
+    if (args.controlPlaneSqlitePath !== undefined) {
+      this.controlPlane = {
+        sqlite: new TrellisControlPlaneSqlite(args.controlPlaneSqlitePath),
+      };
+    }
     this.deployments = {
       create: ({ id, mutableDev }) =>
         this.#admin.createDeployment({
@@ -359,7 +404,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
       });
       const configPath = await writeTrellisConfig({ workdir, config });
       const deployment = options.deployment ?? "test";
-      const adminPassword = `trellis-test-${generateSessionSeed()}`;
+      const adminPassword = options.adminPassword ??
+        `trellis-test-${generateSessionSeed()}`;
       const startedControlPlane = await startTrellisProcess({
         trellisUrl,
         configPath,
@@ -388,10 +434,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
         });
         const jobsDir = join(workdir, "service-jobs");
         await Deno.mkdir(jobsDir, { recursive: true });
-        jobsAdmin = startServiceProcess({
+        jobsAdmin = await startServiceProcess({
           command: options.jobsAdmin.command,
           trellisUrl: startedControlPlane.trellisUrl,
-          sessionKeySeed: key.seed,
+          key,
           jobsDbPath: join(jobsDir, "jobs.sqlite"),
           mode: options.jobsAdmin.mode ?? "owner",
         });
@@ -419,6 +465,59 @@ export class TrellisTestRuntime implements AsyncDisposable {
       }
       throw error;
     }
+  }
+
+  /** Attaches worker-local clients and admin automation to a shared Trellis host. */
+  static async attach(args: {
+    trellisUrl: string;
+    natsUrl: string;
+    websocketUrl: string;
+    workdir: string;
+    manifest: LocalNatsBootstrapManifest;
+    adminPassword: string;
+    adminRpcProxy: { url: string; token: string };
+    deployment: string;
+    timeouts?: TrellisTestRuntimeStartOptions["timeouts"];
+  }): Promise<TrellisTestRuntime> {
+    const timeouts = {
+      startupMs: args.timeouts?.startupMs ?? 30_000,
+      reconciliationMs: args.timeouts?.reconciliationMs ?? 5_000,
+      waitForMs: args.timeouts?.waitForMs ?? 5_000,
+      shutdownMs: args.timeouts?.shutdownMs ?? 5_000,
+    };
+    const nats = await NatsTestContainer.attach({
+      workdir: args.workdir,
+      natsUrl: args.natsUrl,
+      websocketUrl: args.websocketUrl,
+      manifest: args.manifest,
+    });
+    const admin = new TrellisTestAdminAutomation({
+      trellisUrl: args.trellisUrl,
+      adminPassword: args.adminPassword,
+      defaultDeployment: args.deployment,
+      defaultMutableDev: true,
+      reconciliationMs: timeouts.reconciliationMs,
+      autoAccept: ["initial", "update"],
+      getBootstrapUrl: () =>
+        Promise.reject(new Error("shared host is already bootstrapped")),
+      bootstrapComplete: true,
+      rpcProxy: args.adminRpcProxy,
+    });
+    return new TrellisTestRuntime({
+      trellisUrl: args.trellisUrl,
+      workdir: args.workdir,
+      deployment: args.deployment,
+      keepWorkdir: true,
+      ownsWorkdir: false,
+      timeouts,
+      nats,
+      admin,
+    });
+  }
+
+  /** @internal Forwards one low-level Auth RPC over the host admin session. */
+  callAdminRpc(method: string, input: unknown): Promise<unknown> {
+    return this.#admin.callAdminRpc(method, input);
   }
 
   /** Registers a service contract and creates a service instance key. */
@@ -513,7 +612,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
       performance.now() - startedAt,
       { participantKind: "client", phase: "total" },
     );
-    return client as TrellisTestConnectedClient<TContract>;
+    return aliasCaseScopedRuntime(
+      args.contract,
+      client,
+    ) as TrellisTestConnectedClient<TContract>;
   }
 
   /**
@@ -638,6 +740,12 @@ export class TrellisTestRuntime implements AsyncDisposable {
     if (this.#stopped) {
       throw new Error("Cannot restart a stopped Trellis test runtime");
     }
+    if (
+      this.#controlPlane === undefined || this.#configPath === undefined ||
+      this.#trellisOptions === undefined
+    ) {
+      throw new Error("Cannot restart an attached Trellis test runtime");
+    }
 
     await this.#admin.prepareForControlPlaneRestart();
     await this.#controlPlane.stop();
@@ -692,7 +800,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
       failures.push(error);
     }
     try {
-      await this.#controlPlane.stop();
+      await this.#controlPlane?.stop();
     } catch (error) {
       failures.push(error);
     }
@@ -701,7 +809,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
     } catch (error) {
       failures.push(error);
     }
-    if (!this.#keepWorkdir) {
+    if (this.#ownsWorkdir && !this.#keepWorkdir) {
       try {
         await Deno.remove(this.workdir, { recursive: true });
       } catch (error) {
@@ -718,7 +826,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
 
   /** @internal Returns recent control-plane process output for test failures. */
   controlPlaneOutput(): string {
-    return this.#controlPlane.outputTails();
+    return this.#controlPlane?.outputTails() ?? "";
   }
 
   [Symbol.asyncDispose](): Promise<void> {

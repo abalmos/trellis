@@ -266,7 +266,7 @@ export const JobsWatch = feedAction(
   CONTRACT_ID,
   "Jobs.Watch",
   {
-    subject: "feeds.v1.Jobs.Watch",
+    subject: "feed.v1.Jobs.Watch",
     input: schema<Types.JobsWatchInput>(JobsWatchRequestSchema),
     event: schema<Types.JobsWatchEvent>(JobsWatchFrameSchema),
     subscribeCapabilities: ["trellis.jobs::admin.stream"] as const,

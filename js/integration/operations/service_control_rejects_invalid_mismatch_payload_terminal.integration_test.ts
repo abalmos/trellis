@@ -25,15 +25,17 @@ liveTrellisTest({
       name: fixture.serviceName,
       contract: fixture.serviceContract,
     });
-    const service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: fixture.serviceContract,
-      name: fixture.serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    const service = fixture.aliasRuntime(
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: fixture.serviceContract,
+        name: fixture.serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
     let otherService: typeof service | undefined;
 
     try {
@@ -56,8 +58,14 @@ liveTrellisTest({
       ).take();
       assert(isErr(wrongOperation), "wrong operation control should fail");
       assertInstanceOf(wrongOperation.error, OperationMismatchError);
-      assertEquals(wrongOperation.error.expectedOperation, "Entity.Status");
-      assertEquals(wrongOperation.error.actualOperation, "Entity.Process");
+      assertEquals(
+        wrongOperation.error.expectedOperation,
+        fixture.statusOperationName,
+      );
+      assertEquals(
+        wrongOperation.error.actualOperation,
+        fixture.processOperationName,
+      );
 
       const controlled = await service.handleEntityProcess.control(accepted.id)
         .orThrow();
@@ -96,15 +104,17 @@ liveTrellisTest({
       );
       assertInstanceOf(wrongRemoteOperation.error, OperationMismatchError);
 
-      otherService = await TrellisService.connect({
-        authorizationContextEphemeral: true,
-        trellisUrl: runtime.trellisUrl,
-        contract: fixture.serviceContract,
-        name: fixture.otherServiceName,
-        identity: serviceKey,
-        telemetry: false,
-        server: {},
-      }).orThrow();
+      otherService = fixture.aliasRuntime(
+        await TrellisService.connect({
+          authorizationContextEphemeral: true,
+          trellisUrl: runtime.trellisUrl,
+          contract: fixture.serviceContract,
+          name: fixture.otherServiceName,
+          identity: serviceKey,
+          telemetry: false,
+          server: {},
+        }).orThrow(),
+      );
       const wrongService = await otherService.handleEntityProcess.control(
         accepted.id,
       ).take();

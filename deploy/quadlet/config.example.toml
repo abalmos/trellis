@@ -61,7 +61,7 @@ always_show_provider_chooser = false
 
 [platform.storage]
 kind = "sqlite"
-path = "/var/lib/trellis/trellis.sqlite"
+path = "/var/lib/trellis/platform.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
@@ -80,21 +80,21 @@ transport_max_bytes = 1073741824
 
 [health.storage]
 kind = "sqlite"
-path = "/var/lib/trellis/trellis.sqlite"
+path = "/var/lib/trellis/health.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
 
 [jobs.storage]
 kind = "sqlite"
-path = "/var/lib/trellis/trellis.sqlite"
+path = "/var/lib/trellis/jobs.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
 
 [eventlog.storage]
 kind = "sqlite"
-path = "/var/lib/trellis/trellis.sqlite"
+path = "/var/lib/trellis/eventlog.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true

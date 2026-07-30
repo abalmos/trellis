@@ -114,6 +114,8 @@ export type TrellisIntegrationRuntime = {
 
 /** Options accepted by `trellisIntegrationTest`. */
 export type TrellisIntegrationTestOptions = {
+  /** Stable matrix case id reported to the integration runner. */
+  readonly caseId: string;
   /** Deno test name. */
   readonly name: string;
   /** Runtime isolation strategy for the test body. */
@@ -140,4 +142,8 @@ export type TrellisIntegrationCase = {
   readonly testName: string;
   /** Optional coverage tags used by runner filters. */
   readonly coverage?: readonly string[];
+  /** Shared-host behavior or explicit process isolation. */
+  readonly classification?: "shared" | "isolated-process";
+  /** Required rationale for isolated-process cases. */
+  readonly isolationReason?: string;
 };

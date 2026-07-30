@@ -174,8 +174,9 @@ Rules:
 
 - service-local storage is an implementation detail unless the contract exposes
   a public API over it
-- the Trellis control-plane SQLite database defaults to
-  `/var/lib/trellis/trellis.sqlite` and is configurable as `storage.dbPath`
+- each Trellis runtime subsystem owns a separate SQLite file configured through
+  its `[platform|jobs|health|eventlog.storage]` section; runtime configuration
+  rejects sharing one SQLite path across subsystem boundaries
 - Trellis service bootstrap owns opening the database, creating the schema, and
   constructing concrete storage modules
 - prefer concrete storage modules for the service's actual record types rather

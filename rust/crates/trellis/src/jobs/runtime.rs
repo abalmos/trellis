@@ -11,6 +11,9 @@ use crate::client::TrellisClient;
 use crate::jobs::publisher::JobEventHeaders;
 use crate::jobs::types::JobEvent;
 
+const FILTERED_REOPEN_MAX_FAILURES: usize = 40;
+const FILTERED_REOPEN_DELAY: Duration = Duration::from_millis(250);
+
 /// Jobs subsystem runtime transport facade.
 ///
 /// This keeps NATS and JetStream details inside the Trellis library while Jobs
@@ -117,7 +120,110 @@ impl JobsRuntime {
     }
 
     /// Open a pull consumer over a Jobs-owned stream/filter pair.
+    ///
+    /// The stream reopens its durable consumer after transient pull failures. If recovery cannot
+    /// produce another message within the bounded retry budget, it yields one terminal error and
+    /// then ends.
     pub async fn filtered_messages(
+        &self,
+        stream_name: &str,
+        consumer_name: &str,
+        filter_subject: &str,
+    ) -> Result<JobsRuntimeMessageStream, String> {
+        let initial = self
+            .open_filtered_messages(stream_name, consumer_name, filter_subject)
+            .await?;
+        let runtime = self.clone();
+        let stream_name = stream_name.to_owned();
+        let consumer_name = consumer_name.to_owned();
+        let filter_subject = filter_subject.to_owned();
+        Ok(Box::pin(futures_util::stream::unfold(
+            (Some(initial), 0usize),
+            move |(messages, mut consecutive_failures)| {
+                let runtime = runtime.clone();
+                let stream_name = stream_name.clone();
+                let consumer_name = consumer_name.clone();
+                let filter_subject = filter_subject.clone();
+                async move {
+                    let mut messages = messages?;
+                    loop {
+                        let stream_error = match messages.next().await {
+                            Some(Ok(message)) => {
+                                return Some((Ok(message), (Some(messages), 0)));
+                            }
+                            Some(Err(error)) => {
+                                tracing::warn!(
+                                stream = %stream_name,
+                                consumer = %consumer_name,
+                                %error,
+                                "Jobs pull consumer stream failed; reopening durable consumer"
+                                );
+                                error
+                            }
+                            None => {
+                                tracing::warn!(
+                                    stream = %stream_name,
+                                    consumer = %consumer_name,
+                                    "Jobs pull consumer stream ended; reopening durable consumer"
+                                );
+                                "message stream ended".to_owned()
+                            }
+                        };
+                        consecutive_failures += 1;
+                        if consecutive_failures >= FILTERED_REOPEN_MAX_FAILURES {
+                            return Some((
+                                Err(format!(
+                                    "Jobs pull consumer '{consumer_name}' on stream '{stream_name}' failed {consecutive_failures} consecutive times: {stream_error}"
+                                )),
+                                (None, consecutive_failures),
+                            ));
+                        }
+                        tokio::time::sleep(FILTERED_REOPEN_DELAY).await;
+                        loop {
+                            match runtime
+                                .open_filtered_messages(
+                                    &stream_name,
+                                    &consumer_name,
+                                    &filter_subject,
+                                )
+                                .await
+                            {
+                                Ok(reopened) => {
+                                    messages = reopened;
+                                    break;
+                                }
+                                Err(error) => {
+                                    consecutive_failures += 1;
+                                    if consecutive_failures == 2
+                                        || consecutive_failures.is_multiple_of(10)
+                                    {
+                                        tracing::warn!(
+                                            stream = %stream_name,
+                                            consumer = %consumer_name,
+                                            %error,
+                                            consecutive_failures,
+                                            "Jobs durable pull consumer reopen failed"
+                                        );
+                                    }
+                                    if consecutive_failures >= FILTERED_REOPEN_MAX_FAILURES {
+                                        return Some((
+                                            Err(format!(
+                                                "Jobs pull consumer '{consumer_name}' on stream '{stream_name}' could not reopen after {consecutive_failures} consecutive failures: {error}"
+                                            )),
+                                            (None, consecutive_failures),
+                                        ));
+                                    }
+                                    tokio::time::sleep(FILTERED_REOPEN_DELAY).await;
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        )))
+    }
+
+    async fn open_filtered_messages(
         &self,
         stream_name: &str,
         consumer_name: &str,

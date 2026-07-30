@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -42,25 +43,25 @@ use super::repository::{
 };
 use super::{
     AccountFlowRecord, AccountFlowRepository, AccountFlowState, AccountRepository,
-    AuthSessionRepository, AuthorityDecision, AuthorityDecisionOutcome, AuthorityDecisionRecord,
-    AuthorityEvidenceScope, AuthorityKind, AuthorityProposalRecord, AuthorityProposalRepository,
-    AuthorityProposalState, AuthorityTarget, AuthorizationMaterializationRepository,
-    AuthorizationStateError, AuthorizationTransitionOutboxRecord, DelegationEvidence,
-    DependencyEvidence, DeploymentAuthorityRecord, DeploymentAuthorityRepository,
-    DeploymentProfileRecord, DeploymentProfileState, DeploymentRecord, DesiredAuthorityRecord,
-    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationRecord,
-    DeviceDelegationState, DeviceEvidence, DeviceProvisioningSecretRecord, DeviceRecord,
-    DeviceState, EvidenceRepository, IdempotencyRepository, IdempotencyResultRecord,
-    IdentityAuthorityRecord, IdentityAuthorityRepository, LocalCredentialRecord, LoginPortalRecord,
-    LoginPortalRepository, LoginSettingsRecord, MaterializationReplacement,
-    MaterializedAuthorityRecord, ParticipantBindingRecord, ParticipantBindingRepository,
-    PortalRouteRecord, PostCommitActionRecord, PostCommitActionRepository,
-    PrincipalAuthorizationChange, PrincipalKind, PrincipalRecord, PrincipalRepository,
-    PrincipalState, ProviderIdentityLink, ProviderIdentityRepository, ProvisionedIdentityKind,
-    ProvisionedIdentityRecord, ProvisioningRepository, ProvisioningSecretState,
-    ResourceBindingEvidence, RuntimeEvidence, RuntimeInstanceRecord, RuntimeInstanceState,
-    ServiceEvidence, SessionRecord, SessionRepository, SessionRuntimeBinding, SessionState,
-    UserProfileRecord,
+    ActiveProviderEvidence, AuthSessionRepository, AuthorityDecision, AuthorityDecisionOutcome,
+    AuthorityDecisionRecord, AuthorityEvidenceScope, AuthorityKind, AuthorityProposalRecord,
+    AuthorityProposalRepository, AuthorityProposalState, AuthorityTarget,
+    AuthorizationMaterializationRepository, AuthorizationStateError,
+    AuthorizationTransitionOutboxRecord, DelegationEvidence, DependencyEvidence,
+    DeploymentAuthorityRecord, DeploymentAuthorityRepository, DeploymentProfileRecord,
+    DeploymentProfileState, DeploymentRecord, DesiredAuthorityRecord, DeviceActivationReviewRecord,
+    DeviceActivationReviewState, DeviceDelegationRecord, DeviceDelegationState, DeviceEvidence,
+    DeviceProvisioningSecretRecord, DeviceRecord, DeviceState, EvidenceRepository,
+    IdempotencyRepository, IdempotencyResultRecord, IdentityAuthorityRecord,
+    IdentityAuthorityRepository, LocalCredentialRecord, LoginPortalRecord, LoginPortalRepository,
+    LoginSettingsRecord, MaterializationReplacement, MaterializedAuthorityRecord,
+    ParticipantBindingRecord, ParticipantBindingRepository, PortalRouteRecord,
+    PostCommitActionRecord, PostCommitActionRepository, PrincipalAuthorizationChange,
+    PrincipalKind, PrincipalRecord, PrincipalRepository, PrincipalState, ProviderIdentityLink,
+    ProviderIdentityRepository, ProvisionedIdentityKind, ProvisionedIdentityRecord,
+    ProvisioningRepository, ProvisioningSecretState, ResourceBindingEvidence, RuntimeEvidence,
+    RuntimeInstanceRecord, RuntimeInstanceState, ServiceEvidence, SessionRecord, SessionRepository,
+    SessionRuntimeBinding, SessionState, UserProfileRecord,
 };
 use crate::storage::{SqliteStore, StoreError};
 
@@ -117,12 +118,30 @@ impl SqliteAuthorizationStore {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, AuthorizationStateError> + Send + 'static,
     {
+        let queued_at = Instant::now();
         let connection = Arc::clone(&self.connection);
         tokio::task::spawn_blocking(move || {
+            let spawn_delay = queued_at.elapsed();
+            let wait_started = Instant::now();
             let mut connection = connection.lock().map_err(|_| {
                 AuthorizationStateError::Storage("SQLite connection lock poisoned".to_owned())
             })?;
-            operation(&mut connection)
+            let wait_elapsed = wait_started.elapsed();
+            let operation_started = Instant::now();
+            let result = operation(&mut connection);
+            let operation_elapsed = operation_started.elapsed();
+            if spawn_delay >= Duration::from_secs(1)
+                || wait_elapsed >= Duration::from_secs(1)
+                || operation_elapsed >= Duration::from_secs(1)
+            {
+                tracing::warn!(
+                    spawn_delay_ms = spawn_delay.as_millis(),
+                    wait_ms = wait_elapsed.as_millis(),
+                    operation_ms = operation_elapsed.as_millis(),
+                    "Auth SQLite operation exceeded one second"
+                );
+            }
+            result
         })
         .await
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
@@ -721,6 +740,9 @@ impl AccountRepository for SqliteAuthorizationStore {
             let current = load_local_credential(connection, &principal_id)?
                 .ok_or(AuthorizationStateError::StorageConflict)?;
             let next = local_login_attempt_result(&current, &attempt)?;
+            if next == current {
+                return Ok(current);
+            }
             let changed = connection
                 .execute(
                     "UPDATE auth_local_credentials SET failed_attempts = ?1, locked_until = ?2,
@@ -1488,14 +1510,32 @@ impl AuthorityProposalRepository for SqliteAuthorizationStore {
                 return Ok(IdempotentOutcome::Replayed(result));
             }
             validate_proposal_decision(&command.proposal_id, &command.decision)?;
-            let current = load_authority_proposal(&transaction, &command.proposal_id)?.map(|value| value.0).ok_or(AuthorizationStateError::StorageConflict)?;
+            let Some(current) = load_authority_proposal(&transaction, &command.proposal_id)?
+                .map(|value| value.0) else {
+                tracing::warn!(proposal_id = %command.proposal_id, "authority proposal missing during decision");
+                return Err(AuthorizationStateError::StorageConflict);
+            };
             if current.version != command.expected_version || current.state != AuthorityProposalState::Pending
                 || current.expires_at.is_some_and(|expires| command.decision.decided_at >= expires)
                 || command.decision.decided_at < current.created_at
             {
+                tracing::warn!(
+                    proposal_id = %command.proposal_id,
+                    expected_version = command.expected_version,
+                    actual_version = current.version,
+                    state = ?current.state,
+                    "authority proposal decision conflict"
+                );
                 return Err(AuthorizationStateError::StorageConflict);
             }
             if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
+                if let Some(expected_base_authority_version) = command.expected_base_authority_version {
+                    if expected_base_authority_version
+                        != super::companion_repository::proposal_base_authority_version(&current)?
+                    {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                }
                 let table = match current.authority_kind {
                     AuthorityKind::Identity => "auth_identity_authorities",
                     AuthorityKind::Deployment => "auth_deployment_authorities",
@@ -1514,6 +1554,12 @@ impl AuthorityProposalRepository for SqliteAuthorizationStore {
                 if super::companion_repository::proposal_base_authority_version(&current)?
                     != current_authority_version
                 {
+                    tracing::warn!(
+                        proposal_id = %command.proposal_id,
+                        proposal_base_version = ?super::companion_repository::proposal_base_authority_version(&current)?,
+                        current_authority_version = ?current_authority_version,
+                        "authority proposal base conflict"
+                    );
                     return Err(AuthorizationStateError::StorageConflict);
                 }
             }
@@ -2816,6 +2862,84 @@ impl DeploymentAuthorityRepository for SqliteAuthorizationStore {
 
 #[async_trait]
 impl EvidenceRepository for SqliteAuthorizationStore {
+    async fn list_active_provider_evidence(
+        &self,
+        now: i64,
+    ) -> Result<Vec<ActiveProviderEvidence>, AuthorizationStateError> {
+        self.run(move |connection| {
+            let keys = {
+                let mut statement = connection
+                    .prepare(
+                        "SELECT deployment_id, participant_id
+                         FROM auth_deployment_authorities
+                         WHERE state = 'accepted'
+                         ORDER BY deployment_id, participant_id",
+                    )
+                    .map_err(sql_error)?;
+                let keys = statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(sql_error)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(sql_error)?;
+                keys
+            };
+            let mut evidence = Vec::new();
+            for (deployment_id, participant_id) in keys {
+                let Some(authority) =
+                    load_deployment_authority(connection, &deployment_id, &participant_id)?
+                else {
+                    continue;
+                };
+                if authority
+                    .expires_at
+                    .is_some_and(|expires_at| expires_at <= now)
+                    || !load_deployment(connection, &deployment_id)?.is_some_and(|deployment| {
+                        deployment.active
+                            && deployment
+                                .expires_at
+                                .is_none_or(|expires_at| expires_at > now)
+                    })
+                {
+                    continue;
+                }
+                let instance_id = connection
+                    .query_row(
+                        "SELECT instance_id FROM auth_instances
+                         WHERE deployment_id = ?1 AND state = 'active'
+                         ORDER BY instance_id LIMIT 1",
+                        params![deployment_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
+                let Some(instance) = instance_id
+                    .map(|instance_id| load_runtime_instance(connection, &instance_id))
+                    .transpose()?
+                    .flatten()
+                else {
+                    continue;
+                };
+                let Some(binding) = load_participant_binding(
+                    connection,
+                    &authority.participant_id,
+                    &authority.participant_artifact_digest,
+                )?
+                else {
+                    continue;
+                };
+                evidence.push(ActiveProviderEvidence {
+                    authority,
+                    instance,
+                    binding,
+                });
+            }
+            Ok(evidence)
+        })
+        .await
+    }
+
     async fn list_runtime_instances(
         &self,
     ) -> Result<Vec<RuntimeInstanceRecord>, AuthorizationStateError> {
@@ -3232,7 +3356,7 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
         let target = target.clone();
         self.run(move |connection| {
             let transaction = connection
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(sql_error)?;
             let snapshot = sqlite_materialization_snapshot(&transaction, &target)?;
             let token = snapshot.token.clone();
@@ -4263,6 +4387,12 @@ pub(super) fn sqlite_idempotency_replay(
         &input.request_id,
     )? {
         if existing.request_digest != input.request_digest {
+            tracing::warn!(
+                purpose = %input.purpose,
+                signer_id = %input.signer_id,
+                request_id = %input.request_id,
+                "idempotency request digest conflict"
+            );
             return Err(AuthorizationStateError::StorageConflict);
         }
         return Ok(Some(existing.result));
@@ -4275,6 +4405,12 @@ pub(super) fn sqlite_idempotency_replay(
         )
         .map_err(sql_error)?;
     if scope_exists {
+        tracing::warn!(
+            purpose = %input.purpose,
+            signer_id = %input.signer_id,
+            request_id = %input.request_id,
+            "idempotency scope conflict"
+        );
         return Err(AuthorizationStateError::StorageConflict);
     }
     Ok(None)

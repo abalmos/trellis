@@ -6,6 +6,10 @@ import {
 } from "@qlever-llc/trellis";
 import { Type } from "typebox";
 import {
+  aliasCaseScopedActions,
+  aliasCaseScopedRuntime,
+  caseScopedActionName,
+  caseScopedActions,
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,
@@ -61,58 +65,61 @@ export function createRpcFixture(caseId: string) {
     message: ({ entityId }) => `Entity ${entityId} was not found.`,
   });
 
-  const serviceContract = defineServiceContract(
-    { schemas: rpcSchemas, errors: { NotFoundError } },
-    (ref) => ({
-      id: caseScopedContractId("trellis.integration.rpc-service", caseId),
-      displayName: `Trellis Integration RPC Service (${slug})`,
-      description:
-        "Exercises client-to-service RPC through generated surfaces.",
-      capabilities: {
-        read: {
-          displayName: "Read entities",
-          description: "Read entity records in the RPC integration fixture.",
+  const serviceContract = aliasCaseScopedActions(
+    caseId,
+    defineServiceContract(
+      { schemas: rpcSchemas, errors: { NotFoundError } },
+      (ref) => ({
+        id: caseScopedContractId("trellis.integration.rpc-service", caseId),
+        displayName: `Trellis Integration RPC Service (${slug})`,
+        description:
+          "Exercises client-to-service RPC through generated surfaces.",
+        capabilities: {
+          read: {
+            displayName: "Read entities",
+            description: "Read entity records in the RPC integration fixture.",
+          },
         },
-      },
-      rpc: {
-        "Entity.Get": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "rpc.v1.integration.rpc",
-            caseId,
-            "Entity.Get",
-          ),
-          input: ref.schema("EntityGetInput"),
-          output: ref.schema("EntityGetOutput"),
-          capabilities: { call: ["read"] },
-          errors: [ref.error("NotFoundError")],
-        },
-        "Validation.Annotated": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "rpc.v1.integration.rpc",
-            caseId,
-            "Validation.Annotated",
-          ),
-          input: ref.schema("AnnotatedValidationInput"),
-          output: ref.schema("ValidationOutput"),
-          capabilities: { call: ["read"] },
-          errors: [],
-        },
-        "Validation.Mixed": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "rpc.v1.integration.rpc",
-            caseId,
-            "Validation.Mixed",
-          ),
-          input: ref.schema("MixedValidationInput"),
-          output: ref.schema("ValidationOutput"),
-          capabilities: { call: ["read"] },
-          errors: [],
-        },
-      },
-    }),
+        rpc: caseScopedActions(caseId, {
+          "Entity.Get": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "rpc.v1.integration.rpc",
+              caseId,
+              "Entity.Get",
+            ),
+            input: ref.schema("EntityGetInput"),
+            output: ref.schema("EntityGetOutput"),
+            capabilities: { call: ["read"] },
+            errors: [ref.error("NotFoundError")],
+          },
+          "Validation.Annotated": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "rpc.v1.integration.rpc",
+              caseId,
+              "Validation.Annotated",
+            ),
+            input: ref.schema("AnnotatedValidationInput"),
+            output: ref.schema("ValidationOutput"),
+            capabilities: { call: ["read"] },
+            errors: [],
+          },
+          "Validation.Mixed": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "rpc.v1.integration.rpc",
+              caseId,
+              "Validation.Mixed",
+            ),
+            input: ref.schema("MixedValidationInput"),
+            output: ref.schema("ValidationOutput"),
+            capabilities: { call: ["read"] },
+            errors: [],
+          },
+        }),
+      }),
+    ),
   );
 
   const clientContract = defineAppContract(() => ({
@@ -125,6 +132,7 @@ export function createRpcFixture(caseId: string) {
       serviceContract.ValidationMixed,
     ],
   }));
+  const scopedClientContract = aliasCaseScopedActions(caseId, clientContract);
 
   const unauthorizedClientContract = defineAppContract(() => ({
     id: caseScopedContractId(
@@ -138,9 +146,11 @@ export function createRpcFixture(caseId: string) {
   return {
     slug,
     serviceContract,
-    clientContract,
+    clientContract: scopedClientContract,
     unauthorizedClientContract,
     NotFoundError,
+    aliasRuntime: <R extends object>(runtime: R) =>
+      aliasCaseScopedRuntime(serviceContract, runtime),
     serviceName: caseScopedName("rpc-fixture-service", caseId),
     clientName: caseScopedName("rpc-fixture-client", caseId),
     unauthorizedClientName: caseScopedName(
@@ -148,5 +158,6 @@ export function createRpcFixture(caseId: string) {
       caseId,
     ),
     entityId: `entity-${slug}`,
+    entityGetMethod: caseScopedActionName(caseId, "Entity.Get"),
   };
 }

@@ -14,7 +14,7 @@ import {
   type Subscription,
 } from "@nats-io/nats-core";
 import { type BaseError, isErr, Result } from "@qlever-llc/result";
-import { trellisCore as core } from "../../../services/trellis/contracts/trellis_core.ts";
+import { trellisCore as core } from "../tests/fixtures/trellis_core_contract.ts";
 import { Type } from "typebox";
 
 import { testAuthorizationContext } from "../auth/test_context.ts";

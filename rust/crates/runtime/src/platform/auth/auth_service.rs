@@ -271,6 +271,8 @@ pub struct DecideAuthorityProposalInput {
     pub proposal_id: String,
     /// Expected pending proposal version.
     pub expected_version: u64,
+    /// Caller-observed authority version for optimistic acceptance; outer `None` skips the check.
+    pub expected_base_authority_version: Option<Option<u64>>,
     /// Accepted or rejected outcome.
     pub outcome: AuthorityDecisionOutcome,
     /// Stable deciding principal or operator.
@@ -1251,6 +1253,7 @@ where
             .decide_authority_proposal(AuthorityProposalDecision {
                 proposal_id: input.proposal_id,
                 expected_version: input.expected_version,
+                expected_base_authority_version: input.expected_base_authority_version,
                 decision: AuthorityDecisionRecord {
                     proposal_id,
                     outcome: input.outcome,

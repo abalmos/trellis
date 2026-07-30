@@ -6,7 +6,6 @@ import { Type } from "typebox";
 import { getContractRuntime } from "../contract_support/contract_runtime.ts";
 
 import { defineServiceContract } from "../contract.ts";
-import { trellisCore } from "../../../services/trellis/contracts/trellis_core.ts";
 import { AuthError } from "../errors/index.ts";
 import { createTrellisInternal, type TrellisAuth } from "../session.ts";
 

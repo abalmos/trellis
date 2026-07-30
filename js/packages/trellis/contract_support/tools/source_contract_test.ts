@@ -22,7 +22,10 @@ Deno.test("emit-contract writes canonical manifest from source contract module",
         "js/packages/trellis/contract_support/tools/emit_contract.ts",
       ),
       "--source",
-      join(repoRoot, "js/services/trellis/contracts/trellis_core.ts"),
+      join(
+        repoRoot,
+        "js/packages/trellis/tests/fixtures/trellis_core_contract.ts",
+      ),
       "--out",
       outPath,
     ],
@@ -35,7 +38,10 @@ Deno.test("emit-contract writes canonical manifest from source contract module",
   const emitted = (await Deno.readTextFile(outPath)).trim();
   const { CONTRACT } = await import(
     toFileUrl(
-      join(repoRoot, "js/services/trellis/contracts/trellis_core.ts"),
+      join(
+        repoRoot,
+        "js/packages/trellis/tests/fixtures/trellis_core_contract.ts",
+      ),
     ).href
   );
   assertEquals(emitted, canonicalizeJson(CONTRACT as JsonValue));

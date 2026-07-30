@@ -9,7 +9,7 @@ use trellis_rs::service::{
     ServiceEventListenerMode, ServiceRuntimeError,
 };
 
-use crate::support::assertions::assert_service_case_registered;
+use crate::support::assertions::assert_runtime_case_registered;
 
 struct EventConsumerContract;
 
@@ -326,7 +326,7 @@ impl trellis_rs::client::EventDescriptor for SelfPongedEvent {
 
 #[tokio::test]
 async fn event_consumers_durable_listen_without_declared_group_returns_err() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.durable-listen-without-declared-group-returns-err",
         "event-consumers",
         "event_consumers",
@@ -354,11 +354,12 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
         )
         .await;
 
+    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
     assert!(
         matches!(
             result,
             Err(ServiceRuntimeError::MissingEventConsumerGroup { ref subject })
-                if subject == SourcePingedEvent::SUBJECT
+                if subject == &expected_subject
         ),
         "expected missing group error, got {result:?}"
     );
@@ -366,7 +367,7 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
 
 #[tokio::test]
 async fn event_consumers_parallel_group_runs_messages_concurrently() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.parallel-group-runs-messages-concurrently",
         "event-consumers",
         "event_consumers",
@@ -486,7 +487,7 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
 
 #[tokio::test]
 async fn event_consumers_strict_group_rejects_parallel_workers() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.strict-group-rejects-parallel-workers",
         "event-consumers",
         "event_consumers",
@@ -528,7 +529,7 @@ async fn event_consumers_strict_group_rejects_parallel_workers() {
 #[tokio::test]
 async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_specifying_group_works()
 {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.ambiguous-group-without-opts-group-returns-err-and-specifying-group-works",
         "event-consumers",
         "event_consumers",
@@ -555,11 +556,12 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
             ServiceEventListenOptions::default(),
         )
         .await;
+    let expected_subject = _runtime.integration_test_descriptor_subject(SourcePingedEvent::SUBJECT);
     assert!(
         matches!(
             ambiguous,
             Err(ServiceRuntimeError::AmbiguousEventConsumerGroup { ref subject, ref groups })
-                if subject == SourcePingedEvent::SUBJECT
+                if subject == &expected_subject
                     && groups.as_slice() == ["primary", "secondary"]
         ),
         "expected ambiguous group error, got {ambiguous:?}"
@@ -608,7 +610,7 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
 
 #[tokio::test]
 async fn event_consumers_caller_provided_durable_name_returns_err() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.caller-provided-durable-name-returns-err",
         "event-consumers",
         "event_consumers",
@@ -653,7 +655,7 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
 
 #[tokio::test]
 async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_consumer_only() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.bound-dependency-consumer-uses-trellis-provisioned-consumer-only",
         "event-consumers",
         "event_consumers",
@@ -728,7 +730,7 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
 
 #[tokio::test]
 async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.transient-missing-consumer-retries-after-reconcile",
         "event-consumers",
         "event_consumers",
@@ -740,14 +742,19 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
         .expect("approve source contract");
-    let consumer = connect_consumer(
-        &mut admin,
+    let consumer_contract = test_contract(DEPENDENCY_CONSUMER_JSON);
+    let consumer_key = admin
+        .provision_service_instance(&bootstrap_url, &consumer_contract, None, None)
+        .await
+        .expect("provision event consumer service instance");
+    let deployment_id = consumer_key.deployment_id.clone();
+    let consumer = trellis_test::connect_service_runtime::<EventConsumerContract>(
         runtime.trellis_url(),
-        &bootstrap_url,
         DEPENDENCY_CONSUMER_JSON,
-        "event-consumers-dependency-rust",
+        &consumer_key,
     )
-    .await;
+    .await
+    .expect("connect event consumer service runtime");
     let before = matching_consumers(&runtime, SourcePingedEvent::SUBJECT).await;
     assert_eq!(before.len(), 1);
     assert!(
@@ -783,11 +790,11 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
         .expect("start missing durable listener");
 
     admin
-        .reconcile(&bootstrap_url, "test")
+        .reconcile(&bootstrap_url, &deployment_id)
         .await
         .expect("reconcile test deployment");
     admin
-        .wait_ready(&bootstrap_url, "test")
+        .wait_ready(&bootstrap_url, &deployment_id)
         .await
         .expect("wait for test deployment ready");
     wait_for_matching_consumer_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
@@ -817,7 +824,7 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
 
 #[tokio::test]
 async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.readiness-lost-does-not-nak-delivered-group-message",
         "event-consumers",
         "event_consumers",
@@ -964,7 +971,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
 
 #[tokio::test]
 async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstream_consumer() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.ephemeral-listener-avoids-durable-metadata-and-jetstream-consumer",
         "event-consumers",
         "event_consumers",
@@ -1046,7 +1053,7 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
 
 #[tokio::test]
 async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.duplicate-handlers-share-single-group-waiter",
         "event-consumers",
         "event_consumers",
@@ -1139,7 +1146,7 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
 
 #[tokio::test]
 async fn event_consumers_self_owned_durable_consumer_receives_self_published_event() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.self-owned-durable-consumer-receives-self-published-event",
         "event-consumers",
         "event_consumers",
@@ -1213,7 +1220,7 @@ async fn event_consumers_self_owned_durable_consumer_receives_self_published_eve
 
 #[tokio::test]
 async fn event_consumers_abort_re_register_restarts_delivery() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.abort-re-register-restarts-delivery",
         "event-consumers",
         "event_consumers",
@@ -1336,7 +1343,7 @@ async fn event_consumers_abort_re_register_restarts_delivery() {
 
 #[tokio::test]
 async fn event_consumers_stop_teardown_stops_durable_delivery() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.stop-teardown-stops-durable-delivery",
         "event-consumers",
         "event_consumers",
@@ -1412,7 +1419,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
 
 #[tokio::test]
 async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consuming_queued_event() {
-    assert_service_case_registered(
+    assert_runtime_case_registered(
         "event-consumers.grouped-consumer-waits-for-all-handlers-before-consuming-queued-event",
         "event-consumers",
         "event_consumers",
@@ -1498,11 +1505,9 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
 #[tokio::test]
 async fn event_consumers_self_owned_grouped_consumer_waits_for_all_handlers_before_consuming_queued_event(
 ) {
-    assert_service_case_registered(
-        "event-consumers.self-owned-grouped-consumer-waits-for-all-handlers-before-consuming-queued-event",
-        "event-consumers",
-        "event_consumers",
-    );
+    assert_runtime_case_registered("event-consumers.self-owned-grouped-consumer-waits-for-all-handlers-before-consuming-queued-event",
+    "event-consumers",
+    "event_consumers",);
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
     let service = connect_consumer(
@@ -1854,6 +1859,7 @@ async fn matching_consumers(
     runtime: &trellis_test::TrellisTestRuntime,
     subject: &str,
 ) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
+    let subject = runtime.integration_test_descriptor_subject(subject);
     runtime
         .list_trellis_jetstream_consumers()
         .await
@@ -1863,7 +1869,7 @@ async fn matching_consumers(
             consumer
                 .filter_subjects
                 .iter()
-                .any(|filter_subject| filter_subject == subject)
+                .any(|filter_subject| filter_subject == &subject)
         })
         .collect()
 }
@@ -1877,6 +1883,8 @@ async fn matching_grouped_consumers(
     first_subject: &str,
     second_subject: &str,
 ) -> Vec<trellis_test::TrellisJetStreamConsumerInfo> {
+    let first_subject = runtime.integration_test_descriptor_subject(first_subject);
+    let second_subject = runtime.integration_test_descriptor_subject(second_subject);
     runtime
         .list_trellis_jetstream_consumers()
         .await
@@ -1886,11 +1894,11 @@ async fn matching_grouped_consumers(
             consumer
                 .filter_subjects
                 .iter()
-                .any(|filter_subject| filter_subject == first_subject)
+                .any(|filter_subject| filter_subject == &first_subject)
                 && consumer
                     .filter_subjects
                     .iter()
-                    .any(|filter_subject| filter_subject == second_subject)
+                    .any(|filter_subject| filter_subject == &second_subject)
         })
         .collect()
 }

@@ -78,10 +78,12 @@ Deno.test("writeTrellisConfig writes file-backed test control-plane config", asy
 
     assertEquals(configPath, join(workdir, "trellis", "config.toml"));
     assertEquals(config.logLevel, "info");
-    assertStringIncludes(
-      text,
-      `path = "${join(workdir, "trellis", "trellis.sqlite")}"`,
-    );
+    for (const section of ["platform", "jobs", "health", "eventlog"]) {
+      assertStringIncludes(
+        text,
+        `path = "${join(workdir, "trellis", `trellis.sqlite.${section}`)}"`,
+      );
+    }
     assertStringIncludes(
       text,
       `system_creds_path = "${join(workdir, "nats", "creds/system.creds")}"`,

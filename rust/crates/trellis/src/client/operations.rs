@@ -178,6 +178,10 @@ pub trait TransferOperationDescriptor: OperationDescriptor {}
 
 #[doc(hidden)]
 pub trait OperationTransport {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        subject.to_string()
+    }
+
     fn request_json_value<'a>(
         &'a self,
         subject: String,
@@ -354,7 +358,7 @@ where
         validate_operation_schema(D::INPUT_SCHEMA_JSON, &body, "operation input")?;
         let response = self
             .transport
-            .request_json_value(D::SUBJECT.to_string(), body)
+            .request_json_value(self.transport.descriptor_subject(D::SUBJECT), body)
             .await?;
         validate_snapshot_at::<D>(&response, "/snapshot")?;
         let accepted: AcceptedEnvelope<D::Progress, D::Output> = serde_json::from_value(response)?;
@@ -499,7 +503,10 @@ where
         });
         let response = self
             .transport
-            .request_json_value(control_subject(D::SUBJECT), body)
+            .request_json_value(
+                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                body,
+            )
             .await?;
         decode_snapshot_response::<D>(response)
     }
@@ -513,7 +520,10 @@ where
         });
         let response = self
             .transport
-            .request_json_value(control_subject(D::SUBJECT), body)
+            .request_json_value(
+                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                body,
+            )
             .await?;
         let snapshot = decode_snapshot_response::<D>(response)?;
         if !is_terminal_state(&snapshot.state) {
@@ -538,7 +548,10 @@ where
         });
         let response = self
             .transport
-            .request_json_value(control_subject(D::SUBJECT), body)
+            .request_json_value(
+                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                body,
+            )
             .await?;
         decode_snapshot_response::<D>(response)
     }
@@ -570,7 +583,10 @@ where
         }
         let response = self
             .transport
-            .request_json_value(control_subject(D::SUBJECT), body)
+            .request_json_value(
+                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                body,
+            )
             .await?;
         decode_signal_response::<D>(response)
     }
@@ -581,7 +597,7 @@ where
         BoxStream<'a, Result<OperationEvent<D::Progress, D::Output, Value>, TrellisClientError>>,
         TrellisClientError,
     > {
-        let control = control_subject(D::SUBJECT);
+        let control = control_subject(&self.transport.descriptor_subject(D::SUBJECT));
         let body = json!({
             "action": "watch",
             "operationId": self.id(),
@@ -639,7 +655,7 @@ where
         let response = self
             .transport
             .watch_json_value(
-                control_subject(D::SUBJECT),
+                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
                 json!({
                     "action": "watch",
                     "operationId": self.id(),

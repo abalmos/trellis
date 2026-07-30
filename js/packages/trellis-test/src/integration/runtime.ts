@@ -10,6 +10,14 @@ import type {
   TrellisIntegrationTestOptions,
 } from "./types.ts";
 
+export const TRELLIS_TEST_EVENTS_ENV = "TRELLIS_TEST_EVENTS";
+
+type TrellisIntegrationTestStatus =
+  | "registered"
+  | "started"
+  | "passed"
+  | "failed";
+
 /** Returns an isolated runtime scope for a single direct integration test. */
 export function runtimeScopeIsolated(): TrellisIntegrationScope {
   return { kind: "isolated" };
@@ -52,15 +60,17 @@ export async function withTrellisIntegrationRuntime<T>(
  * Direct mode starts a new runtime and requires caller-supplied runtime options,
  * including the Trellis command. Shared-runtime mode is activated by the
  * `TRELLIS_TEST_SHARED_RUNTIME` manifest environment variable and attaches
- * `runtimeScopeForCase(...)` tests to the shared coordinator.
+ * `runtimeScopeForCase(...)` tests to the shared host.
  */
 export function trellisIntegrationTest(
   args: TrellisIntegrationTestOptions,
 ): void {
-  const { name, scope, fn } = args;
+  const { caseId, name, scope, fn } = args;
   const useSharedRuntime = scope.kind === "shared-case" &&
     hasSharedRuntimeManifest();
   const liveRuntimeSanitizers = scope.kind === "shared-case";
+
+  emitIntegrationTestEvent(caseId, name, "registered");
 
   Deno.test({
     name,
@@ -69,35 +79,108 @@ export function trellisIntegrationTest(
     sanitizeOps: args.sanitizeOps ??
       (liveRuntimeSanitizers ? false : undefined),
     async fn() {
-      if (useSharedRuntime) {
-        const manifest = await readSharedRuntimeManifest();
-        const tenant = manifest.tenants[scope.caseId];
-        if (tenant === undefined) {
-          throw new Error(
-            `missing NATS tenant for integration case ${scope.caseId}`,
-          );
+      const startedAt = performance.now();
+      emitIntegrationTestEvent(caseId, name, "started");
+      try {
+        if (useSharedRuntime) {
+          const manifest = await readSharedRuntimeManifest();
+          const assignment = manifest.assignments[scope.caseId];
+          if (assignment === undefined) {
+            throw new Error(
+              `missing shared runtime assignment for integration case ${scope.caseId}`,
+            );
+          }
+          const tenant = manifest.tenants[assignment.tenantId];
+          if (tenant === undefined) {
+            throw new Error(
+              `missing NATS tenant ${assignment.tenantId} for integration case ${scope.caseId}`,
+            );
+          }
+          if (assignment.mode === "shared") {
+            const runtime = await TrellisTestRuntime.attach({
+              trellisUrl: manifest.trellisUrl,
+              natsUrl: manifest.natsUrl,
+              websocketUrl: manifest.websocketUrl,
+              workdir: manifest.workdir,
+              manifest: tenant,
+              adminPassword: manifest.adminPassword,
+              adminRpcProxy: {
+                url: manifest.adminRpcUrl,
+                token: manifest.adminRpcToken,
+              },
+              deployment: assignment.namespace,
+              timeouts: args.runtime?.timeouts,
+            });
+            try {
+              await fn(runtime);
+            } finally {
+              await runtime.stop();
+            }
+          } else {
+            if (args.runtime === undefined) {
+              throw new Error(
+                "isolated-process integration tests require runtime options",
+              );
+            }
+            await withTrellisIntegrationRuntime(fn, {
+              ...args.runtime,
+              deployment: assignment.namespace,
+              nats: {
+                workdir: manifest.workdir,
+                natsUrl: manifest.natsUrl,
+                websocketUrl: manifest.websocketUrl,
+                manifest: tenant,
+              },
+            });
+          }
+        } else {
+          if (args.runtime === undefined) {
+            throw new Error(
+              "trellisIntegrationTest requires runtime options unless a shared runtime manifest is present",
+            );
+          }
+          await withTrellisIntegrationRuntime(fn, args.runtime);
         }
-        if (args.runtime === undefined) {
-          throw new Error("parallel integration tests require runtime options");
-        }
-        await withTrellisIntegrationRuntime(fn, {
-          ...args.runtime,
-          nats: {
-            workdir: manifest.workdir,
-            natsUrl: manifest.natsUrl,
-            websocketUrl: manifest.websocketUrl,
-            manifest: tenant,
-          },
-        });
-        return;
-      }
-
-      if (args.runtime === undefined) {
-        throw new Error(
-          "trellisIntegrationTest requires runtime options unless a shared runtime manifest is present",
+        emitIntegrationTestEvent(
+          caseId,
+          name,
+          "passed",
+          performance.now() - startedAt,
         );
+      } catch (error) {
+        emitIntegrationTestEvent(
+          caseId,
+          name,
+          "failed",
+          performance.now() - startedAt,
+        );
+        throw error;
       }
-      await withTrellisIntegrationRuntime(fn, args.runtime);
     },
   });
+}
+
+function emitIntegrationTestEvent(
+  caseId: string,
+  testName: string,
+  status: TrellisIntegrationTestStatus,
+  durationMs?: number,
+): void {
+  const path = Deno.env.get(TRELLIS_TEST_EVENTS_ENV);
+  if (path === undefined) return;
+  Deno.writeTextFileSync(
+    path,
+    `${
+      JSON.stringify({
+        event: "integration-case",
+        language: "typescript",
+        caseId,
+        testName,
+        status,
+        timestamp: new Date().toISOString(),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      })
+    }\n`,
+    { append: true },
+  );
 }

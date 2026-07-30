@@ -1,3 +1,4 @@
+use trellis_rs::client::FeedDescriptor;
 use trellis_rs::sdk::jobs::contract as generated_contract;
 use trellis_service_jobs as service_contract;
 
@@ -29,6 +30,18 @@ fn rust_builder_manifest_matches_generated_jobs_sdk() {
     assert_eq!(
         jobs_contract_source::contract_manifest().expect("jobs contract builder manifest"),
         generated_contract::contract_manifest()
+    );
+}
+
+#[test]
+fn generated_jobs_watch_subject_matches_canonical_feed_subject() {
+    let contract = generated_contract::contract_manifest();
+    let watch = contract.feeds.get("Jobs.Watch").expect("Jobs.Watch feed");
+
+    assert_eq!(watch.subject, "feed.v1.Jobs.Watch");
+    assert_eq!(
+        trellis_rs::sdk::jobs::feeds::JobsWatchFeedDescriptor::SUBJECT,
+        watch.subject
     );
 }
 

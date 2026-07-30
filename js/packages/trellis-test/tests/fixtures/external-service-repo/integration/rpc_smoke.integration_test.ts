@@ -64,6 +64,7 @@ const serviceName = caseScopedName("external-rpc-service", CASE_ID);
 const clientName = caseScopedName("external-rpc-client", CASE_ID);
 
 trellisIntegrationTest({
+  caseId: CASE_ID,
   name: "external.rpc-smoke calls service RPC through generic runner",
   scope: runtimeScopeForCase(CASE_ID),
   runtime: externalServiceRepoRuntime,

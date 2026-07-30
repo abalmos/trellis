@@ -1,7 +1,43 @@
-import { fromFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join } from "@std/path";
+import clientMatrix from "../../../integration/client-test-matrix.json" with {
+  type: "json",
+};
+import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" with {
+  type: "json",
+};
 import { startTrellisIntegrationSharedRuntimeHost } from "../../../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
+import {
+  summarizeTrellisTestDurations,
+  summarizeTrellisTestProcessStarts,
+} from "../../../js/packages/trellis-test/src/integration/metrics.ts";
+import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../js/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
+const INTEGRATION_BINARY_ENV = "TRELLIS_TEST_INTEGRATION_BIN";
+const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
+export const INTEGRATION_LIVE_ARTIFACTS_MANIFEST =
+  "dist/integration-runtime/manifest.json";
+const INTEGRATION_LIVE_ARTIFACTS_FORMAT =
+  "trellis.integration-live-artifacts.v1";
+const LIVE_EXECUTABLES = {
+  integrationTest: "trellis-integration-test",
+  trellisServer: "trellis-server",
+  trellisServiceJobs: "trellis-service-jobs",
+} as const;
+
+type IntegrationLiveArtifacts = {
+  readonly integrationBinary: string;
+  readonly runtimeBinaries: Record<string, string>;
+};
+
+type IntegrationLiveArtifactsManifest = {
+  readonly format: string;
+  readonly sourceSha: string;
+  readonly executables: Record<keyof typeof LIVE_EXECUTABLES, {
+    readonly path: string;
+    readonly sha256: string;
+  }>;
+};
 
 type CargoArtifact = {
   readonly reason?: string;
@@ -21,27 +57,135 @@ async function main(args: readonly string[]): Promise<number> {
   );
   await Deno.mkdir(tempDir, { recursive: true });
   Deno.env.set("TMPDIR", tempDir);
-  const executable = await buildIntegrationTest();
+  const executable = Deno.env.get(INTEGRATION_BINARY_ENV) ??
+    await buildIntegrationTest();
   const runtimeBinaries = await buildRuntimeBinaries();
+  const compiled = await listTests(executable, []);
+  assertCompiledInventory(compiled);
   const tenantIds = await listTests(executable, testArgs);
-  const host = await startTrellisIntegrationSharedRuntimeHost({
-    runtime: {},
+  const classifications = rustTestClassifications();
+  const { sharedTests, isolatedTests } = partitionRustTests(
     tenantIds,
-  });
+    classifications,
+  );
+  const inheritedManifest = Deno.env.get(TRELLIS_TEST_SHARED_RUNTIME_ENV);
+  const host = inheritedManifest === undefined
+    ? await startTrellisIntegrationSharedRuntimeHost({
+      runtime: {
+        trellis: {
+          command: {
+            cmd: runtimeBinaries.TRELLIS_TEST_SERVER_BIN,
+            args: ["--config", "{config}", "all"],
+          },
+        },
+        ...(tenantIds.some((id) => id.startsWith("jobs::"))
+          ? {
+            jobsAdmin: {
+              command: {
+                cmd: runtimeBinaries.TRELLIS_TEST_JOBS_SERVICE_BIN,
+                args: [],
+                env: { RUST_LOG: "warn" },
+              },
+            },
+          }
+          : {}),
+      },
+      assignments: tenantIds.map((id) => ({
+        id,
+        namespacePrefix: "rs",
+        classification: classifications.get(id) ?? "shared",
+      })),
+    })
+    : {
+      env: { [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest },
+      metrics: async () => [],
+      output: () => "shared host is owned by the live orchestrator",
+      stop: async () => {},
+    };
 
   try {
-    const command = new Deno.Command(executable, {
-      args: [...testArgs, `--test-threads=${jobs}`],
-      cwd: repoRoot,
-      env: { ...host.env, ...runtimeBinaries, TMPDIR: tempDir },
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    return (await command.spawn().status).code;
+    const env = { ...host.env, ...runtimeBinaries, TMPDIR: tempDir };
+    const runs: TestRun[] = [];
+    if (sharedTests.length > 0) {
+      runs.push(
+        await runTests(executable, [
+          ...testArgs,
+          ...isolatedTests.flatMap((name) => ["--skip", name]),
+          `--test-threads=${jobs}`,
+          "--format=pretty",
+        ], env),
+      );
+    }
+    for (const name of isolatedTests) {
+      runs.push(
+        await runTests(executable, [
+          name,
+          "--exact",
+          "--test-threads=1",
+          "--format=pretty",
+        ], env),
+      );
+    }
+    const results = runs.flatMap((run) => rustTestResults(run.stdout));
+    const success = runs.every((run) => run.success);
+    if (success) assertRustExecutionInventory(tenantIds, results);
+    console.log(JSON.stringify({
+      event: "rust-integration-results",
+      registered: expectedRustTests().length,
+      compiled: compiled.length,
+      selected: tenantIds.length,
+      passed: results.filter((result) => result.status === "passed").length,
+      failed: results.filter((result) => result.status === "failed").length,
+      ignored: results.filter((result) => result.status === "ignored").length,
+      tests: results,
+    }));
+    if (!success) {
+      console.error(
+        `shared Trellis output:\n${host.output?.() ?? "<unavailable>"}`,
+      );
+    }
+    return runs.find((run) => !run.success)?.code ?? 0;
   } finally {
-    await host.stop();
+    try {
+      if (inheritedManifest === undefined) {
+        const metrics = host.metrics === undefined ? [] : await host.metrics();
+        console.log(JSON.stringify({
+          event: "integration-process-summary",
+          starts: summarizeTrellisTestProcessStarts(metrics),
+          slowest: summarizeTrellisTestDurations(metrics),
+        }));
+      }
+    } finally {
+      await host.stop();
+    }
   }
+}
+
+type TestRun = {
+  readonly success: boolean;
+  readonly code: number;
+  readonly stdout: string;
+};
+
+async function runTests(
+  executable: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): Promise<TestRun> {
+  const child = new Deno.Command(executable, {
+    args: [...args],
+    cwd: repoRoot,
+    env,
+    stdin: "inherit",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const [status, stdout] = await Promise.all([
+    child.status,
+    teeOutput(child.stdout, Deno.stdout),
+    teeOutput(child.stderr, Deno.stderr),
+  ]).then(([status, stdout]) => [status, stdout] as const);
+  return { success: status.success, code: status.code, stdout };
 }
 
 export function parseIntegrationRunnerArgs(args: readonly string[]): {
@@ -67,6 +211,19 @@ export function parseIntegrationRunnerArgs(args: readonly string[]): {
   return { jobs, testArgs };
 }
 
+export function partitionRustTests(
+  testIds: readonly string[],
+  classifications: ReadonlyMap<string, string>,
+): { readonly sharedTests: string[]; readonly isolatedTests: string[] } {
+  const isolatedTests = testIds.filter((id) =>
+    classifications.get(id) === "isolated-process"
+  );
+  return {
+    sharedTests: testIds.filter((id) => !isolatedTests.includes(id)),
+    isolatedTests,
+  };
+}
+
 function positiveInteger(value: string | undefined, flag: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -75,7 +232,8 @@ function positiveInteger(value: string | undefined, flag: string): number {
   return parsed;
 }
 
-async function buildIntegrationTest(): Promise<string> {
+export async function buildIntegrationTest(): Promise<string> {
+  rejectCargoFallback("Rust integration test executable");
   const output = await new Deno.Command("cargo", {
     args: [
       "test",
@@ -118,7 +276,7 @@ async function buildIntegrationTest(): Promise<string> {
   return executable;
 }
 
-async function buildRuntimeBinaries(): Promise<Record<string, string>> {
+export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
   const jobs = Deno.env.get("TRELLIS_TEST_JOBS_SERVICE_BIN");
   const server = Deno.env.get("TRELLIS_TEST_SERVER_BIN");
   if (jobs !== undefined && server !== undefined) {
@@ -127,6 +285,7 @@ async function buildRuntimeBinaries(): Promise<Record<string, string>> {
       TRELLIS_TEST_SERVER_BIN: server,
     };
   }
+  rejectCargoFallback("Rust integration runtime binaries");
 
   const output = await new Deno.Command("cargo", {
     args: [
@@ -176,6 +335,138 @@ async function buildRuntimeBinaries(): Promise<Record<string, string>> {
   };
 }
 
+export async function buildIntegrationLiveArtifacts(
+  manifestPath = INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
+): Promise<IntegrationLiveArtifacts> {
+  const integrationBinary = await buildIntegrationTest();
+  const runtimeBinaries = await buildRuntimeBinaries();
+  return await writeIntegrationLiveArtifacts(
+    manifestPath,
+    await currentSourceSha(),
+    {
+      integrationTest: integrationBinary,
+      trellisServer: runtimeBinaries.TRELLIS_TEST_SERVER_BIN,
+      trellisServiceJobs: runtimeBinaries.TRELLIS_TEST_JOBS_SERVICE_BIN,
+    },
+  );
+}
+
+export async function writeIntegrationLiveArtifacts(
+  manifestPath: string,
+  sourceSha: string,
+  executables: Readonly<Record<keyof typeof LIVE_EXECUTABLES, string>>,
+): Promise<IntegrationLiveArtifacts> {
+  const artifactDir = dirname(manifestPath);
+  await Deno.mkdir(artifactDir, { recursive: true });
+  const manifestExecutables =
+    {} as IntegrationLiveArtifactsManifest["executables"];
+  for (
+    const name of Object.keys(LIVE_EXECUTABLES) as Array<
+      keyof typeof LIVE_EXECUTABLES
+    >
+  ) {
+    const path = LIVE_EXECUTABLES[name];
+    const destination = join(artifactDir, path);
+    await Deno.copyFile(executables[name], destination);
+    await Deno.chmod(destination, 0o755);
+    manifestExecutables[name] = {
+      path,
+      sha256: await sha256(destination),
+    };
+  }
+  const manifest: IntegrationLiveArtifactsManifest = {
+    format: INTEGRATION_LIVE_ARTIFACTS_FORMAT,
+    sourceSha,
+    executables: manifestExecutables,
+  };
+  await Deno.writeTextFile(
+    manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  return liveArtifactPaths(artifactDir);
+}
+
+export async function loadIntegrationLiveArtifacts(
+  manifestPath = INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
+  expectedSourceSha?: string,
+): Promise<IntegrationLiveArtifacts> {
+  const manifest = JSON.parse(
+    await Deno.readTextFile(manifestPath),
+  ) as Partial<IntegrationLiveArtifactsManifest>;
+  if (manifest.format !== INTEGRATION_LIVE_ARTIFACTS_FORMAT) {
+    throw new Error("unsupported integration live artifacts manifest format");
+  }
+  const sourceSha = expectedSourceSha ?? await currentSourceSha();
+  if (manifest.sourceSha !== sourceSha) {
+    throw new Error(
+      `integration live artifacts source SHA ${manifest.sourceSha} does not match ${sourceSha}`,
+    );
+  }
+  const artifactDir = dirname(manifestPath);
+  for (
+    const name of Object.keys(LIVE_EXECUTABLES) as Array<
+      keyof typeof LIVE_EXECUTABLES
+    >
+  ) {
+    const entry = manifest.executables?.[name];
+    if (
+      entry?.path !== LIVE_EXECUTABLES[name] ||
+      !/^[0-9a-f]{64}$/.test(entry.sha256)
+    ) {
+      throw new Error(`invalid integration live artifact entry ${name}`);
+    }
+    const path = join(artifactDir, entry.path);
+    if (await sha256(path) !== entry.sha256) {
+      throw new Error(
+        `integration live artifact checksum mismatch for ${name}`,
+      );
+    }
+    await Deno.chmod(path, 0o755);
+  }
+  return liveArtifactPaths(artifactDir);
+}
+
+function liveArtifactPaths(artifactDir: string): IntegrationLiveArtifacts {
+  return {
+    integrationBinary: join(artifactDir, LIVE_EXECUTABLES.integrationTest),
+    runtimeBinaries: {
+      TRELLIS_TEST_SERVER_BIN: join(
+        artifactDir,
+        LIVE_EXECUTABLES.trellisServer,
+      ),
+      TRELLIS_TEST_JOBS_SERVICE_BIN: join(
+        artifactDir,
+        LIVE_EXECUTABLES.trellisServiceJobs,
+      ),
+    },
+  };
+}
+
+async function currentSourceSha(): Promise<string> {
+  const githubSha = Deno.env.get("GITHUB_SHA");
+  if (githubSha !== undefined) return githubSha;
+  const output = await new Deno.Command("git", {
+    args: ["rev-parse", "HEAD"],
+    cwd: repoRoot,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!output.success) throw new Error("failed to resolve source SHA");
+  return new TextDecoder().decode(output.stdout).trim();
+}
+
+async function sha256(path: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await Deno.readFile(path),
+  );
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 async function listTests(
   executable: string,
   testArgs: readonly string[],
@@ -203,4 +494,152 @@ export function testNamesFromList(output: string): string[] {
   return output.split("\n")
     .filter((line) => line.endsWith(": test"))
     .map((line) => line.slice(0, -": test".length));
+}
+
+type RustTestResult = {
+  readonly name: string;
+  readonly status: "passed" | "failed" | "ignored";
+};
+
+export function rustTestResults(output: string): RustTestResult[] {
+  const results: RustTestResult[] = [];
+  for (const line of output.split("\n")) {
+    const match = /^test (.+) \.\.\. (ok|FAILED|ignored)$/.exec(line.trim());
+    if (match === null) continue;
+    results.push({
+      name: match[1],
+      status: match[2] === "ok"
+        ? "passed"
+        : match[2] === "FAILED"
+        ? "failed"
+        : "ignored",
+    });
+  }
+  return results;
+}
+
+export function expectedRustTests(): string[] {
+  return [...clientMatrix.cases, ...runtimeMatrix.cases]
+    .filter((entry) => entry.completion.rust === "implemented")
+    .map((entry) => {
+      const implementation = entry.implementations?.rust;
+      if (implementation === undefined) {
+        throw new Error(
+          `implemented Rust matrix case ${entry.id} has no mapping`,
+        );
+      }
+      return `${implementation.module}::${implementation.function}`;
+    })
+    .toSorted();
+}
+
+export function rustTestClassifications(): ReadonlyMap<
+  string,
+  "shared" | "isolated-process"
+> {
+  return new Map(
+    [...clientMatrix.cases, ...runtimeMatrix.cases]
+      .filter((entry) => entry.completion.rust === "implemented")
+      .map((entry) => {
+        const implementation = entry.implementations?.rust;
+        if (implementation === undefined) {
+          throw new Error(
+            `implemented Rust matrix case ${entry.id} has no mapping`,
+          );
+        }
+        const classification = entry.classification ?? "shared";
+        if (
+          classification !== "shared" &&
+          classification !== "isolated-process"
+        ) {
+          throw new Error(
+            `Rust matrix case ${entry.id} has invalid classification ${classification}`,
+          );
+        }
+        return [
+          `${implementation.module}::${implementation.function}`,
+          classification,
+        ] as const;
+      }),
+  );
+}
+
+export async function verifyCompiledRustInventory(
+  executable: string,
+): Promise<void> {
+  assertCompiledInventory(await listTests(executable, []));
+}
+
+function assertCompiledInventory(compiled: readonly string[]): void {
+  assertSameTests(
+    "registered Rust cases",
+    expectedRustTests(),
+    compiled.toSorted(),
+  );
+}
+
+export function assertRustExecutionInventory(
+  expected: readonly string[],
+  results: readonly RustTestResult[],
+): void {
+  const ignored = results.filter((result) => result.status === "ignored");
+  if (ignored.length > 0) {
+    throw new Error(
+      `selected Rust integration tests were ignored: ${
+        ignored.map((result) => result.name).join(", ")
+      }`,
+    );
+  }
+  const executed = results
+    .map((result) => result.name)
+    .toSorted();
+  assertSameTests("executed Rust cases", expected.toSorted(), executed);
+}
+
+function assertSameTests(
+  label: string,
+  expected: readonly string[],
+  actual: readonly string[],
+): void {
+  const missing = expected.filter((name) => !actual.includes(name));
+  const unexpected = actual.filter((name) => !expected.includes(name));
+  if (
+    expected.length !== actual.length || missing.length > 0 ||
+    unexpected.length > 0
+  ) {
+    throw new Error(
+      `${label} differ from expected inventory: missing [${
+        missing.join(", ")
+      }], ` +
+        `unexpected [${unexpected.join(", ")}], ` +
+        `expected ${expected.length}, actual ${actual.length}`,
+    );
+  }
+}
+
+function rejectCargoFallback(label: string): void {
+  if (Deno.env.get(PREBUILT_ONLY_ENV) === "1") {
+    throw new Error(
+      `${label} is missing while ${PREBUILT_ONLY_ENV}=1; refusing Cargo fallback`,
+    );
+  }
+}
+
+async function teeOutput(
+  stream: ReadableStream<Uint8Array>,
+  output: { write(data: Uint8Array): Promise<number> },
+): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+    await output.write(chunk);
+  }
+  const size = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return new TextDecoder().decode(bytes);
 }

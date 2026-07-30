@@ -102,6 +102,33 @@ pub(crate) fn compile_transport_permissions(
         ));
     }
 
+    // ponytail: transitional until the Jobs owner is folded into trellis-server.
+    if state.principal.kind == AuthorizationPrincipalKindV1::Service
+        && state.participant.id == "trellis.jobs@v1"
+    {
+        publish.insert("trellis.jobs.>".to_owned());
+        subscribe.insert("feed.v1.Jobs.Watch".to_owned());
+        for stream in ["JOBS", "JOBS_ADVISORIES"] {
+            publish.insert(format!("$JS.API.STREAM.INFO.{stream}"));
+            publish.insert(format!("$JS.API.CONSUMER.LIST.{stream}"));
+            publish.insert(format!("$JS.API.CONSUMER.NAMES.{stream}"));
+            publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}"));
+            publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
+            publish.insert(format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.>"));
+            publish.insert(format!("$JS.API.CONSUMER.INFO.{stream}.>"));
+            publish.insert(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.>"));
+            publish.insert(format!("$JS.API.CONSUMER.DELETE.{stream}.>"));
+            publish.insert(format!("$JS.ACK.{stream}.>"));
+        }
+        publish.insert("$JS.API.STREAM.MSG.GET.JOBS".to_owned());
+        publish.insert("$JS.API.DIRECT.GET.JOBS".to_owned());
+        publish.insert("$JS.API.DIRECT.GET.JOBS.>".to_owned());
+        publish.insert("$JS.API.STREAM.INFO.JOBS_WORK".to_owned());
+        publish.insert("$JS.API.STREAM.MSG.GET.JOBS_WORK".to_owned());
+        publish.insert("$JS.API.DIRECT.GET.JOBS_WORK".to_owned());
+        publish.insert("$JS.API.DIRECT.GET.JOBS_WORK.>".to_owned());
+    }
+
     for implementation in resolved.implemented_apis() {
         let provided = implementation.provided();
         let api = apis

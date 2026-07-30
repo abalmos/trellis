@@ -1,34 +1,51 @@
 import { dirname, join } from "@std/path";
-import { NatsTestContainer } from "../nats_container.ts";
+import { TransportError } from "@qlever-llc/trellis/errors";
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
 } from "../cleanup.ts";
+import { NatsTestContainer } from "../nats_container.ts";
+import { TrellisTestRuntime } from "../runtime.ts";
+import { readTrellisTestMetrics, TRELLIS_TEST_METRICS_ENV } from "./metrics.ts";
+import { caseScopeToken, integrationSlug } from "./names.ts";
 import {
   TRELLIS_TEST_SHARED_RUNTIME_ENV,
+  type TrellisIntegrationRuntimeAssignment,
   type TrellisIntegrationSharedRuntimeManifest,
 } from "./shared_runtime_protocol.ts";
 import type { TrellisIntegrationRuntimeOptions } from "./types.ts";
 
 const WORKDIR_PREFIX = "trellis-test-pool-";
 const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
+const SHARED_TENANT = "shared";
 
-/** Shared NATS host started for parallel Trellis integration workers. */
+/** Shared NATS/Trellis host started for parallel integration workers. */
 export type TrellisIntegrationSharedRuntimeHost = {
-  /** Path to the manifest file passed to worker processes. */
+  /** Path to the private manifest passed to worker processes. */
   readonly manifestPath: string;
-  /** Environment variables workers need to attach to their tenant. */
+  /** Environment variables workers need to attach to the host. */
   readonly env: Record<string, string>;
-  /** Stops the shared NATS server and removes its workdir. */
+  /** Reads process-start metrics before the host workdir is removed. */
+  metrics?(): Promise<readonly Record<string, unknown>[]>;
+  /** Returns recent shared control-plane output for failed runs. */
+  output?(): string;
+  /** Stops shared Trellis, NATS, and their temporary workdirs. */
   stop(): Promise<void>;
 };
 
-/** Starts one NATS server with an isolated account pair per selected test case. */
+/** Starts one NATS server and one Trellis runtime for ordinary test cases. */
 export async function startTrellisIntegrationSharedRuntimeHost(args: {
   readonly runtime: TrellisIntegrationRuntimeOptions;
-  readonly tenantIds: readonly string[];
+  readonly assignments: readonly {
+    id: string;
+    classification?: "shared" | "isolated-process";
+    namespacePrefix?: string;
+  }[];
 }): Promise<TrellisIntegrationSharedRuntimeHost> {
   const workdir = await Deno.makeTempDir({ prefix: WORKDIR_PREFIX });
+  const metricsPath = join(workdir, "metrics.jsonl");
+  const previousMetricsPath = Deno.env.get(TRELLIS_TEST_METRICS_ENV);
+  Deno.env.set(TRELLIS_TEST_METRICS_ENV, metricsPath);
   await writeTrellisTestOwnerMarker(workdir, WORKDIR_OWNER_MARKER);
   await removeStaleMarkedDirectories({
     parent: dirname(workdir),
@@ -36,32 +53,198 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     markerName: WORKDIR_OWNER_MARKER,
   });
 
+  const runId = integrationSlug(crypto.randomUUID()).slice(0, 12);
+  const hostDeployment = `it-${runId}-host`;
+  const adminPassword = `trellis-test-${crypto.randomUUID()}`;
+  const adminRpcToken = crypto.randomUUID();
+  const assignments: Record<string, TrellisIntegrationRuntimeAssignment> = {};
+  const tenantIds = [SHARED_TENANT];
+  for (const [index, assignment] of args.assignments.entries()) {
+    const isolated = assignment.classification === "isolated-process";
+    const tenantId = isolated ? `isolated-${index}` : SHARED_TENANT;
+    if (isolated) tenantIds.push(tenantId);
+    assignments[assignment.id] = {
+      mode: isolated ? "isolated-process" : "shared",
+      namespace: `it-${runId}-${assignment.namespacePrefix ?? "case"}-${
+        integrationSlug(assignment.id)
+      }`,
+      tenantId,
+      scope: {
+        runToken: caseScopeToken(runId),
+        caseToken: caseScopeToken(assignment.id),
+      },
+    };
+  }
+
   let nats: NatsTestContainer | undefined;
+  let runtime: TrellisTestRuntime | undefined;
+  const adminRpcAbort = new AbortController();
+  let adminRpcFinished: Promise<void> | undefined;
+  const persistRetainedOutput = async () => {
+    if (args.runtime.keepWorkdir === true) {
+      await Deno.writeTextFile(
+        join(workdir, "trellis-output.log"),
+        runtime?.controlPlaneOutput() ?? "",
+      );
+      console.log(
+        JSON.stringify({ event: "integration-workdir", path: workdir }),
+      );
+    }
+  };
   try {
     nats = await NatsTestContainer.start(workdir, {
       startupMs: args.runtime.timeouts?.startupMs,
-      tenantIds: args.tenantIds,
+      tenantIds,
     });
+    runtime = await TrellisTestRuntime.start({
+      ...args.runtime,
+      timeouts: {
+        ...args.runtime.timeouts,
+        reconciliationMs: args.runtime.timeouts?.reconciliationMs ?? 120_000,
+      },
+      adminPassword,
+      deployment: hostDeployment,
+      nats: {
+        workdir,
+        natsUrl: nats.natsUrl,
+        websocketUrl: nats.websocketUrl,
+        manifest: nats.manifests[SHARED_TENANT],
+      },
+    });
+    await runtime.deployments.create({ id: hostDeployment });
+    const adminRpcServer = Deno.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      signal: adminRpcAbort.signal,
+      onListen: () => undefined,
+    }, async (request) => {
+      if (
+        request.method !== "POST" ||
+        request.headers.get("authorization") !== `Bearer ${adminRpcToken}`
+      ) {
+        return Response.json({ ok: false, error: "unauthorized" }, {
+          status: 401,
+        });
+      }
+      try {
+        const body: unknown = await request.json();
+        if (
+          typeof body !== "object" || body === null ||
+          !("method" in body) || typeof body.method !== "string" ||
+          !("input" in body)
+        ) {
+          return Response.json({ ok: false, error: "invalid request" }, {
+            status: 400,
+          });
+        }
+        let output: unknown;
+        if (body.method === "completeClientAuth") {
+          if (
+            typeof body.input !== "object" || body.input === null ||
+            !("loginUrl" in body.input) ||
+            typeof body.input.loginUrl !== "string" ||
+            !("sessionKey" in body.input) ||
+            typeof body.input.sessionKey !== "string" ||
+            !("mode" in body.input) ||
+            (body.input.mode !== "browser" && body.input.mode !== "session_key")
+          ) {
+            return Response.json({ ok: false, error: "invalid auth context" }, {
+              status: 400,
+            });
+          }
+          const authInput = {
+            loginUrl: body.input.loginUrl,
+            sessionKey: body.input.sessionKey,
+            mode: body.input.mode,
+          } as const;
+          output = await runtime?.completeClientAuth(authInput);
+        } else {
+          for (let attempt = 1;; attempt += 1) {
+            try {
+              output = await runtime?.callAdminRpc(body.method, body.input);
+              break;
+            } catch (error) {
+              if (!(error instanceof TransportError) || attempt === 3) {
+                throw error;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+          }
+        }
+        return Response.json({ ok: true, output });
+      } catch (error) {
+        return Response.json({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }, { status: 500 });
+      }
+    });
+    adminRpcFinished = adminRpcServer.finished;
+
     const manifest: TrellisIntegrationSharedRuntimeManifest = {
-      version: 2,
+      version: 3,
+      runId,
+      trellisUrl: runtime.trellisUrl,
       natsUrl: nats.natsUrl,
       websocketUrl: nats.websocketUrl,
       workdir,
+      adminPassword,
+      adminRpcUrl: `http://127.0.0.1:${adminRpcServer.addr.port}`,
+      adminRpcToken,
       tenants: { ...nats.manifests },
+      assignments,
     };
     const manifestPath = join(workdir, "shared-runtime-manifest.json");
-    await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
+    await Deno.writeTextFile(manifestPath, JSON.stringify(manifest), {
+      mode: 0o600,
+    });
     return {
       manifestPath,
-      env: { [TRELLIS_TEST_SHARED_RUNTIME_ENV]: manifestPath },
+      env: {
+        [TRELLIS_TEST_SHARED_RUNTIME_ENV]: manifestPath,
+        [TRELLIS_TEST_METRICS_ENV]: metricsPath,
+      },
+      metrics: () => readTrellisTestMetrics(metricsPath),
+      output: () => runtime?.controlPlaneOutput() ?? "",
       async stop() {
-        await nats?.stop();
-        await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
+        const errors: unknown[] = [];
+        adminRpcAbort.abort();
+        await adminRpcFinished?.catch(() => undefined);
+        await runtime?.stop().catch((error) => errors.push(error));
+        await nats?.stop().catch((error) => errors.push(error));
+        await persistRetainedOutput().catch((error) => errors.push(error));
+        if (args.runtime.keepWorkdir !== true) {
+          await Deno.remove(workdir, { recursive: true }).catch((error) =>
+            errors.push(error)
+          );
+        }
+        restoreMetricsPath(previousMetricsPath);
+        if (errors.length > 0) {
+          throw new AggregateError(
+            errors,
+            "failed to stop shared Trellis test host",
+          );
+        }
       },
     };
   } catch (error) {
+    adminRpcAbort.abort();
+    await adminRpcFinished?.catch(() => undefined);
+    await runtime?.stop().catch(() => undefined);
     await nats?.stop().catch(() => undefined);
-    await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
+    await persistRetainedOutput().catch(() => undefined);
+    if (args.runtime.keepWorkdir !== true) {
+      await Deno.remove(workdir, { recursive: true }).catch(() => undefined);
+    }
+    restoreMetricsPath(previousMetricsPath);
     throw error;
+  }
+}
+
+function restoreMetricsPath(previous: string | undefined): void {
+  if (previous === undefined) {
+    Deno.env.delete(TRELLIS_TEST_METRICS_ENV);
+  } else {
+    Deno.env.set(TRELLIS_TEST_METRICS_ENV, previous);
   }
 }

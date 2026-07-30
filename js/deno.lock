@@ -3,9 +3,7 @@
   "specifiers": {
     "jsr:@david/code-block-writer@^13.0.3": "13.0.3",
     "jsr:@deno/dnt@~0.42.3": "0.42.3",
-    "jsr:@hono-rate-limiter/hono-rate-limiter@~0.4.2": "0.4.2",
     "jsr:@hono/hono@^4.12.15": "4.12.23",
-    "jsr:@hono/hono@^4.6.12": "4.12.23",
     "jsr:@nats-io/nats-core@3.4.0": "3.4.0",
     "jsr:@nats-io/nkeys@2.0.3": "2.0.3",
     "jsr:@nats-io/nuid@3.0.0": "3.0.0",
@@ -14,8 +12,10 @@
     "jsr:@std/assert@^1.0.19": "1.0.19",
     "jsr:@std/bytes@^1.0.5": "1.0.6",
     "jsr:@std/cli@^1.0.29": "1.0.30",
+    "jsr:@std/collections@^1.1.7": "1.2.0",
     "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/fs@1": "1.0.24",
+    "jsr:@std/fs@^1.0.23": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/io@0.225.2": "0.225.2",
@@ -24,7 +24,6 @@
     "jsr:@std/path@^1.1.5": "1.1.5",
     "jsr:@ts-morph/bootstrap@0.27": "0.27.0",
     "jsr:@ts-morph/common@0.27": "0.27.0",
-    "npm:@libsql/client@0.15.15": "0.15.15",
     "npm:@libsql/client@~0.15.15": "0.15.15",
     "npm:@nats-io/jetstream@3.4.0": "3.4.0",
     "npm:@nats-io/jetstream@^3.3.1": "3.4.0",
@@ -75,8 +74,6 @@
     "npm:lucide-svelte@^1.0.1": "1.0.1_svelte@5.55.5",
     "npm:magic-string@~0.30.21": "0.30.21",
     "npm:mrmime@^2.0.1": "2.0.1",
-    "npm:oauth4webapi@^3.8.5": "3.8.6",
-    "npm:openid-client@^6.8.3": "6.8.4",
     "npm:pino@^10.3.1": "10.3.1",
     "npm:playwright@1.59.1": "1.59.1",
     "npm:prismjs@*": "1.30.0",
@@ -112,15 +109,9 @@
       "dependencies": [
         "jsr:@david/code-block-writer",
         "jsr:@std/fmt",
-        "jsr:@std/fs",
+        "jsr:@std/fs@1",
         "jsr:@std/path@1",
         "jsr:@ts-morph/bootstrap"
-      ]
-    },
-    "@hono-rate-limiter/hono-rate-limiter@0.4.2": {
-      "integrity": "028c2ded3d21be30fb787044ddac3e656b24a9d3a06e42241a5a693409210217",
-      "dependencies": [
-        "jsr:@hono/hono@^4.6.12"
       ]
     },
     "@hono/hono@4.12.23": {
@@ -161,6 +152,9 @@
     "@std/cli@1.0.30": {
       "integrity": "769446536522d0417d7127ebcabcafac1ab0ce6766d0eb3fca1d36326fe98d13"
     },
+    "@std/collections@1.2.0": {
+      "integrity": "47627a21d3a13138b77fd0e4d790ba9d2e603c3510b686cde6b132fe9aa98a88"
+    },
     "@std/fmt@1.0.10": {
       "integrity": "90dfba288802ac6de82fb31d0917eb9e4450b9925b954d5e51fc29ac07419db5"
     },
@@ -195,7 +189,7 @@
     "@ts-morph/common@0.27.0": {
       "integrity": "c7b73592d78ce8479b356fd4f3d6ec3c460d77753a8680ff196effea7a939052",
       "dependencies": [
-        "jsr:@std/fs",
+        "jsr:@std/fs@1",
         "jsr:@std/path@1"
       ]
     }
@@ -1654,9 +1648,6 @@
       "integrity": "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==",
       "bin": true
     },
-    "jose@6.2.3": {
-      "integrity": "sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw=="
-    },
     "js-base64@3.7.8": {
       "integrity": "sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow=="
     },
@@ -1942,9 +1933,6 @@
     "non-error@0.1.0": {
       "integrity": "sha512-TMB1uHiGsHRGv1uYclfhivcnf0/PdFp2pNqRxXjncaAsjYMoisaQJI+SSZCqRq+VliwRTC8tsMQfmrWjDMhkPQ=="
     },
-    "oauth4webapi@3.8.6": {
-      "integrity": "sha512-iwemM91xz8nryHti2yTmg5fhyEMVOkOXwHNqbvcATjyajb5oQxCQzrNOA6uElRHuMhQQTKUyFKV9y/CNyg25BQ=="
-    },
     "obug@2.1.3": {
       "integrity": "sha512-9miFgM2OFba7hB+pRgvtV84pYTBaoTHohvmIgiRt6dRIzbwEOIaNaP+dIlGs2fNFoB0SeISs0Jz5WFVRid6Xyg=="
     },
@@ -1960,13 +1948,6 @@
         "oniguruma-parser",
         "regex",
         "regex-recursion"
-      ]
-    },
-    "openid-client@6.8.4": {
-      "integrity": "sha512-QSw0BA08piujetEwfZsHoTrDpMEha7GDZDicQqVwX4u0ChCjefvjDB++TZ8BTg76UpwhzIQgdvvfgfl3HpCSAw==",
-      "dependencies": [
-        "jose",
-        "oauth4webapi"
       ]
     },
     "optionator@0.9.4": {
@@ -2562,7 +2543,6 @@
   "workspace": {
     "dependencies": [
       "jsr:@deno/dnt@~0.42.3",
-      "jsr:@hono-rate-limiter/hono-rate-limiter@~0.4.2",
       "jsr:@hono/hono@^4.12.15",
       "jsr:@nats-io/transport-deno@^3.3.1",
       "jsr:@std/assert@^1.0.19",
@@ -2614,8 +2594,6 @@
       "npm:lucide-svelte@^1.0.1",
       "npm:magic-string@~0.30.21",
       "npm:mrmime@^2.0.1",
-      "npm:oauth4webapi@^3.8.5",
-      "npm:openid-client@^6.8.3",
       "npm:pino@^10.3.1",
       "npm:playwright@1.59.1",
       "npm:serialize-error@^13.0.1",
@@ -2669,29 +2647,12 @@
         "dependencies": [
           "npm:vite@*"
         ]
-      },
-      "services/trellis": {
-        "dependencies": [
-          "npm:@libsql/client@0.15.15",
-          "npm:@noble/hashes@1.8.0",
-          "npm:drizzle-orm@0.44.7",
-          "npm:set-cookie-parser@^3.1.0",
-          "npm:ulid@^3.0.2"
-        ]
-      },
-      "services/trellis/integration": {
-        "dependencies": [
-          "jsr:@std/assert@^1.0.19",
-          "jsr:@std/path@^1.1.4"
-        ]
       }
     },
     "links": {
       "jsr:@qlever-llc/trellis/sdk/auth@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/core@0.11.0": {},
       "jsr:@qlever-llc/trellis/sdk/health@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/jobs@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/state@0.11.0": {}
+      "jsr:@qlever-llc/trellis/sdk/jobs@0.11.0": {}
     }
   }
 }

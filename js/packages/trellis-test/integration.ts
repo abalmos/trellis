@@ -1,5 +1,9 @@
 export {
+  aliasCaseScopedActions,
+  aliasCaseScopedRuntime,
   caseDeploymentId,
+  caseScopedActionName,
+  caseScopedActions,
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,

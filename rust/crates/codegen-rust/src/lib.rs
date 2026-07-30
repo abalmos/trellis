@@ -575,7 +575,7 @@ fn render_cargo_toml(
         ""
     };
     Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nrust-version = \"1.88\"\nlicense = \"Apache-2.0\"\nrepository = \"https://github.com/qlever-llc/trellis\"\ndescription = \"{}\"\nreadme = \"README.md\"\n{}\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
+        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\nrepository = \"https://github.com/qlever-llc/trellis\"\ndescription = \"{}\"\nreadme = \"README.md\"\n{}\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
         opts.crate_name,
         opts.crate_version,
         description,
@@ -1210,7 +1210,7 @@ fn render_participant_cargo_toml(
     dependency_lines.sort();
 
     Ok(format!(
-        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nrust-version = \"1.88\"\nlicense = \"Apache-2.0\"\npublish = false\n\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
+        "[package]\nname = \"{}\"\nversion = \"{}\"\nedition = \"2021\"\nlicense = \"Apache-2.0\"\npublish = false\n\n[dependencies]\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\n{}\n",
         opts.crate_name,
         opts.crate_version,
         dependency_lines.join("\n")

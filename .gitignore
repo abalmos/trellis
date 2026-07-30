@@ -9,6 +9,7 @@ node_modules
 # Output
 coverage/
 **/coverage/
+/dist/integration-runtime/
 .output
 .vercel
 .netlify

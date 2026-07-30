@@ -16,15 +16,17 @@ liveTrellisTest({
       name: fixture.serviceName,
       contract: fixture.serviceContract,
     });
-    let service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: fixture.serviceContract,
-      name: fixture.serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    let service = fixture.aliasRuntime(
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: fixture.serviceContract,
+        name: fixture.serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
 
     try {
       await service.handleEntityProcess(async ({ op }) => {
@@ -46,15 +48,17 @@ liveTrellisTest({
       });
 
       await service.stop();
-      service = await TrellisService.connect({
-        authorizationContextEphemeral: true,
-        trellisUrl: runtime.trellisUrl,
-        contract: fixture.serviceContract,
-        name: fixture.serviceName,
-        identity: serviceKey,
-        telemetry: false,
-        server: {},
-      }).orThrow();
+      service = fixture.aliasRuntime(
+        await TrellisService.connect({
+          authorizationContextEphemeral: true,
+          trellisUrl: runtime.trellisUrl,
+          contract: fixture.serviceContract,
+          name: fixture.serviceName,
+          identity: serviceKey,
+          telemetry: false,
+          server: {},
+        }).orThrow(),
+      );
 
       const controlled = await service.handleEntityProcess.control(ref.id)
         .orThrow();

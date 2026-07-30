@@ -28,6 +28,8 @@ use crate::client::{
     FeedDescriptor, PreparedTrellisEvent, RpcDescriptor, RpcErrorPayload, SessionAuth,
     TrellisClientError,
 };
+#[cfg(feature = "integration-test-scoping")]
+use crate::integration_test_scoping::IntegrationTestScope;
 use crate::service::{BootstrapBinding, CoreBootstrapBinding, ServiceResourceBindings};
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
@@ -88,6 +90,8 @@ pub(crate) struct ServiceConnectWithContractOptions<'a> {
     /// Optional maximum authority-pending wait time. `None` waits until authority is ready.
     pub(crate) authority_pending_timeout_ms: Option<u64>,
     pub(crate) authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    #[cfg(feature = "integration-test-scoping")]
+    pub(crate) integration_test_scope: Option<IntegrationTestScope>,
 }
 
 /// Connection options for an activated device principal.
@@ -103,6 +107,8 @@ pub struct DeviceConnectOptions<'a> {
     session_key_seed_base64url: &'a str,
     timeout_ms: u64,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    #[cfg(feature = "integration-test-scoping")]
+    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> DeviceConnectOptions<'a> {
@@ -133,7 +139,17 @@ impl<'a> DeviceConnectOptions<'a> {
             session_key_seed_base64url,
             timeout_ms,
             authorization_context_store,
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope: None,
         }
+    }
+
+    /// Apply an immutable integration-test contract namespace to this connection.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+        self.integration_test_scope = Some(scope);
+        self
     }
 }
 
@@ -944,6 +960,8 @@ async fn connect_bootstrapped_service(
         health_heartbeat_task,
         authorization_contexts: Some(authorization_contexts),
         authorization_context_refresh_task,
+        #[cfg(feature = "integration-test-scoping")]
+        integration_test_scope: opts.integration_test_scope.clone(),
     })
 }
 
@@ -960,6 +978,8 @@ pub struct UserConnectOptions<'a> {
     timeout_ms: u64,
     authorization_context_binding: String,
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    #[cfg(feature = "integration-test-scoping")]
+    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> UserConnectOptions<'a> {
@@ -990,7 +1010,17 @@ impl<'a> UserConnectOptions<'a> {
             timeout_ms,
             authorization_context_binding: authorization_context_binding.into(),
             authorization_context_store,
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope: None,
         }
+    }
+
+    /// Apply an immutable integration-test contract namespace to this connection.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+        self.integration_test_scope = Some(scope);
+        self
     }
 }
 
@@ -1004,6 +1034,8 @@ pub(crate) struct TrellisClient {
     health_heartbeat_task: Option<JoinHandle<()>>,
     authorization_contexts: Option<AuthorizationContextCache>,
     authorization_context_refresh_task: Option<JoinHandle<()>>,
+    #[cfg(feature = "integration-test-scoping")]
+    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl TrellisClient {
@@ -1022,7 +1054,28 @@ impl TrellisClient {
             health_heartbeat_task: None,
             authorization_contexts: None,
             authorization_context_refresh_task: None,
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope: None,
         }
+    }
+
+    pub(crate) fn descriptor_subject(&self, subject: &str) -> String {
+        #[cfg(feature = "integration-test-scoping")]
+        {
+            crate::integration_test_scoping::resolve_descriptor_subject(
+                self.integration_test_scope.as_ref(),
+                subject,
+            )
+            .expect("generated contract descriptor subjects are valid")
+            .into_owned()
+        }
+        #[cfg(not(feature = "integration-test-scoping"))]
+        subject.to_string()
+    }
+
+    #[cfg(feature = "integration-test-scoping")]
+    pub(crate) fn integration_test_scope(&self) -> Option<&IntegrationTestScope> {
+        self.integration_test_scope.as_ref()
     }
 
     pub(crate) fn nats(&self) -> &async_nats::Client {
@@ -1271,6 +1324,8 @@ impl TrellisClient {
             health_heartbeat_task: None,
             authorization_contexts: Some(authorization_contexts),
             authorization_context_refresh_task,
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope: opts.integration_test_scope.clone(),
         })
     }
 
@@ -1338,7 +1393,9 @@ impl TrellisClient {
         D: RpcDescriptor,
     {
         let value = serde_json::to_value(input)?;
-        let response = self.request_json(D::SUBJECT, value).await?;
+        let response = self
+            .request_json(&self.descriptor_subject(D::SUBJECT), value)
+            .await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -1353,7 +1410,7 @@ impl TrellisClient {
         })?;
         validate_caller_input::<E>(D::INPUT_SCHEMA_JSON, &input)?;
         let output = self
-            .request_json(D::SUBJECT, input)
+            .request_json(&self.descriptor_subject(D::SUBJECT), input)
             .await
             .map_err(CallError::from_client)?;
         crate::service::validate_input_schema(D::OUTPUT_SCHEMA_JSON, &output).map_err(|error| {
@@ -1372,7 +1429,7 @@ impl TrellisClient {
     where
         D: EventDescriptor,
     {
-        let prepared = prepare_event::<D>(event)?;
+        let prepared = prepare_event::<D>(event)?.with_subject(self.descriptor_subject(D::SUBJECT));
         self.publish_prepared(&prepared).await
     }
 
@@ -1381,7 +1438,10 @@ impl TrellisClient {
         &self,
         event: &PreparedTrellisEvent,
     ) -> Result<(), TrellisClientError> {
-        publish_prepared_event(&self.nats, &self.auth, self.timeout_ms, event).await
+        let event = event
+            .clone()
+            .with_subject(self.descriptor_subject(event.subject()));
+        publish_prepared_event(&self.nats, &self.auth, self.timeout_ms, &event).await
     }
 
     /// Subscribe to one descriptor-backed event subject from the default JetStream event stream.
@@ -1434,7 +1494,8 @@ impl TrellisClient {
     {
         let subscriber = timeout(
             std::time::Duration::from_millis(self.timeout_ms),
-            self.nats.subscribe(D::SUBSCRIBE_SUBJECT.to_string()),
+            self.nats
+                .subscribe(self.descriptor_subject(D::SUBSCRIBE_SUBJECT)),
         )
         .await
         .map_err(|_| TrellisClientError::Timeout)?
@@ -1490,7 +1551,7 @@ impl TrellisClient {
             ));
         }
 
-        let config = event_consumer_config::<D>(&options);
+        let config = event_consumer_config(&options, self.descriptor_subject(D::SUBSCRIBE_SUBJECT));
         let durable_name = config.durable_name.clone();
         let consumer = match durable_name.as_deref() {
             Some(name) => timeout(
@@ -1555,7 +1616,8 @@ impl TrellisClient {
             ))
         })?;
         let payload = Bytes::from(serde_json::to_vec(&input)?);
-        let headers = self.signed_headers(D::SUBJECT, &payload);
+        let subject = self.descriptor_subject(D::SUBJECT);
+        let headers = self.signed_headers(&subject, &payload);
 
         let inbox = format!(
             "{}.{}",
@@ -1569,7 +1631,7 @@ impl TrellisClient {
             runtime: tokio::runtime::Handle::current(),
             nats: self.nats.clone(),
             auth: Arc::clone(&self.auth),
-            subject: D::SUBJECT.to_string(),
+            subject: subject.clone(),
             reply: inbox.clone(),
             payload: cancel_payload,
         };
@@ -1583,12 +1645,8 @@ impl TrellisClient {
 
         timeout(
             std::time::Duration::from_millis(self.timeout_ms),
-            self.nats.publish_with_reply_and_headers(
-                D::SUBJECT.to_string(),
-                inbox,
-                headers,
-                payload,
-            ),
+            self.nats
+                .publish_with_reply_and_headers(subject, inbox, headers, payload),
         )
         .await
         .map_err(|_| TrellisClientError::Timeout)?
@@ -1656,6 +1714,10 @@ impl Drop for TrellisClient {
 }
 
 impl OperationTransport for TrellisClient {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        self.descriptor_subject(subject)
+    }
+
     async fn request_json_value(
         &self,
         subject: String,
@@ -1813,6 +1875,11 @@ fn decode_feed_message<D>(
 where
     D: FeedDescriptor,
 {
+    if message.status == Some(async_nats::StatusCode::NO_RESPONDERS) {
+        return Err(TrellisClientError::NatsRequest(
+            "no responders for feed request".to_string(),
+        ));
+    }
     decode_feed_frame::<D>(message.headers.as_ref(), &message.payload)
 }
 
@@ -1857,10 +1924,10 @@ fn is_terminal_event(event: &Value) -> bool {
     )
 }
 
-fn event_consumer_config<D>(options: &EventSubscribeOptions) -> consumer::pull::Config
-where
-    D: EventDescriptor,
-{
+fn event_consumer_config(
+    options: &EventSubscribeOptions,
+    filter_subject: String,
+) -> consumer::pull::Config {
     consumer::pull::Config {
         durable_name: match options.mode {
             EventSubscriptionMode::Durable => options.durable_name.clone(),
@@ -1871,7 +1938,7 @@ where
             EventReplayPolicy::New => consumer::DeliverPolicy::New,
         },
         ack_policy: consumer::AckPolicy::Explicit,
-        filter_subject: D::SUBSCRIBE_SUBJECT.to_string(),
+        filter_subject,
         ..Default::default()
     }
 }

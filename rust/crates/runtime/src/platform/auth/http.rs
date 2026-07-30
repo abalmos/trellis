@@ -3455,6 +3455,7 @@ where
         .decide_authority_proposal(DecideAuthorityProposalInput {
             proposal_id,
             expected_version: proposal.version,
+            expected_base_authority_version: None,
             outcome: AuthorityDecisionOutcome::Accepted,
             decided_by: flow.session_public_key.clone(),
             reason: None,

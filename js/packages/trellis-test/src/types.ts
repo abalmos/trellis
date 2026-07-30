@@ -87,6 +87,8 @@ export type TrellisTestRuntimeStartOptions = {
   };
   keepWorkdir?: boolean;
   deployment?: string;
+  /** Existing or desired local test-admin password. */
+  adminPassword?: string;
   trellis: TrellisTestRuntimeTrellisOptions;
   jobsAdmin?: TrellisTestRuntimeJobsAdminOptions;
   authority?: {
@@ -111,6 +113,7 @@ export type TrellisTestRuntimeStartOptions = {
 /** Session-key material returned for a registered service. */
 export type TrellisTestServiceKey = {
   seed: string;
+  sessionSeed: string;
   sessionKey: string;
   deploymentId: string;
   instanceId: string;

@@ -246,11 +246,15 @@ idempotent.
 
 - Test runtime-observable behavior with live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
-- In the Trellis repository, Rust integration cases run with:
-  `deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 8 -- --nocapture`.
-- Register applicable integration cases in `integration/test-matrix.json`; do not
-  add language-only skips outside explicit blocked rows.
+- In the Trellis repository, the complete TypeScript and Rust live matrices run
+  against one host with `deno run -A -c js/deno.json integration/live_runner.ts`.
+- Register client interoperability in `integration/client-test-matrix.json` and
+  Rust runtime correctness in `integration/rust-runtime-test-matrix.json`.
+  Implemented Rust mappings must match compiled and executed test IDs exactly;
+  hidden skips are forbidden.
 - Format changed Rust files and use focused checks in the inner loop. The release
-  gate runs Clippy, workspace Rustdoc with warnings denied, workspace doctests,
-  MSRV checks, and verifies lint-policy participation for every workspace crate.
+  gate runs Clippy, curated pure tests, workspace Rustdoc with warnings denied,
+  workspace doctests exactly once, and verifies lint-policy participation for
+  every workspace crate. Trellis supports the current stable Rust toolchain; no
+  older compiler compatibility is promised.
   Run `cargo xtask prepare` when generated artifacts change.

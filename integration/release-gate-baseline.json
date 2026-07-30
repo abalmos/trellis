@@ -1,0 +1,39 @@
+{
+  "sourceCommit": "0a42579d1f915dc1cec0d6dd2b8347f2ba636914",
+  "machine": {
+    "rustc": "1.96.0",
+    "cargo": "1.96.0",
+    "deno": "2.8.3",
+    "cpuCount": 22,
+    "memoryGiB": 62
+  },
+  "coldGate": {
+    "stageDurationSeconds": 1590,
+    "note": "Accepted M9 release run before process counters were installed"
+  },
+  "warmGate": {
+    "stageDurationSeconds": 1170,
+    "wallDurationSeconds": 1180.86,
+    "maximumResidentSetKiB": 2100820,
+    "targetSizeBeforeGiB": 31,
+    "targetSizeAfterGiB": 34
+  },
+  "typescriptLive": {
+    "executed": 53,
+    "filtered": 74,
+    "durationSeconds": 233,
+    "natsStarts": 1,
+    "trellisStarts": 54,
+    "jobsStarts": 0,
+    "eventlogStarts": 0
+  },
+  "rustLive": {
+    "executed": 77,
+    "filtered": 12,
+    "durationSeconds": 412,
+    "natsStarts": 1,
+    "trellisStarts": 92,
+    "jobsStarts": 0,
+    "eventlogStarts": 0
+  }
+}

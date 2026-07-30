@@ -1863,6 +1863,7 @@ where
         .decide_authority_proposal(AuthorityProposalDecision {
             proposal_id: proposal.proposal_id.clone(),
             expected_version: 1,
+            expected_base_authority_version: None,
             decision: rejection,
             desired_authority: None,
             deployment: None,
@@ -1971,19 +1972,25 @@ where
         }),
     };
     let proposal_proof = proof(58, "authority-proposal.decide");
+    let decision_command = AuthorityProposalDecision {
+        proposal_id: superseded_proposal.proposal_id.clone(),
+        expected_version: 1,
+        expected_base_authority_version: None,
+        decision,
+        desired_authority: Some(DesiredAuthorityRecord::Deployment(desired.clone())),
+        deployment: None,
+        idempotency: proposal_proof,
+        actions: vec![action(62, "authority.accepted")],
+    };
     assert!(matches!(
         store
-            .decide_authority_proposal(AuthorityProposalDecision {
-                proposal_id: superseded_proposal.proposal_id.clone(),
-                expected_version: 1,
-                decision,
-                desired_authority: Some(DesiredAuthorityRecord::Deployment(desired.clone())),
-                deployment: None,
-                idempotency: proposal_proof.clone(),
-                actions: vec![action(62, "authority.accepted")],
-            })
+            .decide_authority_proposal(decision_command.clone())
             .await?,
         IdempotentOutcome::Applied(_)
+    ));
+    assert!(matches!(
+        store.decide_authority_proposal(decision_command).await?,
+        IdempotentOutcome::Replayed(_)
     ));
     assert_eq!(
         store
@@ -2029,6 +2036,47 @@ where
         Some(desired.clone())
     );
 
+    let mut wrong_expected_base = proposal.clone();
+    wrong_expected_base.proposal_id = "proposal_wrong_expected_base".to_owned();
+    wrong_expected_base.proposal_digest = digest(93);
+    wrong_expected_base.created_at = NOW + 7;
+    wrong_expected_base.expires_at = Some(NOW + 100);
+    wrong_expected_base.payload["baseAuthorityVersion"] = json!(1);
+    store
+        .create_authority_proposal(AuthorityProposalCreation {
+            proposal: wrong_expected_base.clone(),
+            idempotency: proof(240, "authority-proposal.create"),
+            actions: Vec::new(),
+        })
+        .await?;
+    let mut wrong_expected_desired = desired.clone();
+    wrong_expected_desired.version = 2;
+    wrong_expected_desired.updated_at = NOW + 7;
+    assert_eq!(
+        store
+            .decide_authority_proposal(AuthorityProposalDecision {
+                proposal_id: wrong_expected_base.proposal_id.clone(),
+                expected_version: 1,
+                expected_base_authority_version: Some(Some(0)),
+                decision: AuthorityDecisionRecord {
+                    proposal_id: wrong_expected_base.proposal_id,
+                    outcome: AuthorityDecisionOutcome::Accepted,
+                    decided_by: admin.principal_id.clone(),
+                    reason: None,
+                    decided_at: NOW + 7,
+                    decision_digest: digest(94),
+                },
+                desired_authority: Some(
+                    DesiredAuthorityRecord::Deployment(wrong_expected_desired,)
+                ),
+                deployment: None,
+                idempotency: proof(241, "authority-proposal.accept-wrong-base"),
+                actions: Vec::new(),
+            })
+            .await,
+        Err(AuthorizationStateError::StorageConflict)
+    );
+
     let mut stale_initial = proposal.clone();
     stale_initial.proposal_id = "proposal_stale_initial".to_owned();
     stale_initial.created_at = NOW + 7;
@@ -2048,6 +2096,7 @@ where
             .decide_authority_proposal(AuthorityProposalDecision {
                 proposal_id: stale_initial.proposal_id.clone(),
                 expected_version: 1,
+                expected_base_authority_version: Some(None),
                 decision: AuthorityDecisionRecord {
                     proposal_id: stale_initial.proposal_id.clone(),
                     outcome: AuthorityDecisionOutcome::Accepted,
@@ -2068,6 +2117,7 @@ where
         .decide_authority_proposal(AuthorityProposalDecision {
             proposal_id: stale_initial.proposal_id.clone(),
             expected_version: 1,
+            expected_base_authority_version: None,
             decision: AuthorityDecisionRecord {
                 proposal_id: stale_initial.proposal_id,
                 outcome: AuthorityDecisionOutcome::Rejected,

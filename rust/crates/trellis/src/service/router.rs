@@ -57,18 +57,18 @@ struct Route {
     capabilities: RouteCapabilities,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum RouteCapabilities {
-    Static(&'static [&'static str]),
+    Static(Vec<String>),
     OperationControl {
-        observe: &'static [&'static str],
-        cancel: &'static [&'static str],
-        control: &'static [&'static str],
+        observe: Vec<String>,
+        cancel: Vec<String>,
+        control: Vec<String>,
     },
 }
 
 impl RouteCapabilities {
-    fn required_for_payload(self, payload: &[u8]) -> Option<Vec<String>> {
+    fn required_for_payload(&self, payload: &[u8]) -> Option<Vec<String>> {
         let capabilities = match self {
             Self::Static(capabilities) => capabilities,
             Self::OperationControl {
@@ -80,18 +80,13 @@ impl RouteCapabilities {
                     "get" | "wait" | "watch" => observe,
                     "cancel" => cancel,
                     "signal" => control,
-                    _ => &[],
+                    _ => return Some(Vec::new()),
                 },
-                Err(_) => &[],
+                Err(_) => return Some(Vec::new()),
             },
         };
 
-        Some(
-            capabilities
-                .iter()
-                .map(|capability| (*capability).to_string())
-                .collect(),
-        )
+        Some(capabilities.to_vec())
     }
 }
 
@@ -141,12 +136,50 @@ impl Drop for FeedCancellation {
 pub struct Router {
     handlers: HashMap<String, Route>,
     feed_cancellations: FeedCancellations,
+    #[cfg(feature = "integration-test-scoping")]
+    integration_test_scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
 }
 
 impl Router {
     /// Create an empty router.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(feature = "integration-test-scoping")]
+    pub(crate) fn set_integration_test_scope(
+        &mut self,
+        scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
+    ) {
+        self.integration_test_scope = scope;
+    }
+
+    fn descriptor_subject(&self, subject: &str) -> String {
+        #[cfg(feature = "integration-test-scoping")]
+        {
+            crate::integration_test_scoping::resolve_descriptor_subject(
+                self.integration_test_scope.as_ref(),
+                subject,
+            )
+            .expect("generated contract descriptor subjects are valid")
+            .into_owned()
+        }
+        #[cfg(not(feature = "integration-test-scoping"))]
+        subject.to_string()
+    }
+
+    fn descriptor_capabilities(&self, capabilities: &[&str]) -> Vec<String> {
+        #[cfg(feature = "integration-test-scoping")]
+        if let Some(scope) = &self.integration_test_scope {
+            return capabilities
+                .iter()
+                .map(|capability| scope.capability(capability))
+                .collect();
+        }
+        capabilities
+            .iter()
+            .map(|capability| (*capability).to_string())
+            .collect()
     }
 
     /// Register one descriptor-backed handler.
@@ -157,10 +190,11 @@ impl Router {
         Fut: Future<Output = HandlerResult<D::Output>> + Send + 'static,
     {
         let handler = Arc::new(handler);
+        let capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
         self.handlers.insert(
-            D::SUBJECT.to_string(),
+            self.descriptor_subject(D::SUBJECT),
             Route {
-                capabilities: RouteCapabilities::Static(D::CALLER_CAPABILITIES),
+                capabilities: RouteCapabilities::Static(capabilities),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -188,20 +222,24 @@ impl Router {
     {
         let handler = Arc::new(handler);
         let cancellations = Arc::clone(&self.feed_cancellations);
+        let subject = self.descriptor_subject(D::SUBJECT);
+        let handler_subject = subject.clone();
+        let capabilities = self.descriptor_capabilities(D::SUBSCRIBE_CAPABILITIES);
         self.handlers.insert(
-            D::SUBJECT.to_string(),
+            subject,
             Route {
-                capabilities: RouteCapabilities::Static(D::SUBSCRIBE_CAPABILITIES),
+                capabilities: RouteCapabilities::Static(capabilities),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
                     let cancellations = Arc::clone(&cancellations);
+                    let handler_subject = handler_subject.clone();
                     Box::pin(async move {
                         let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
                         let reply_to = ctx.reply_to.clone().ok_or_else(|| {
                             ServerError::Nats("feed request is missing a reply inbox".to_string())
                         })?;
-                        let key = (D::SUBJECT.to_string(), reply_to);
+                        let key = (handler_subject.clone(), reply_to);
                         let (cancel, receiver) = oneshot::channel();
                         let mut states = cancellations
                             .lock()
@@ -328,6 +366,7 @@ impl Router {
         let get = Arc::new(get);
         let watch = Arc::new(watch);
         let cancel = Arc::new(cancel);
+        let subject = self.descriptor_subject(D::SUBJECT);
 
         self.register_operation_with_watch_and_signal::<D, _, _, _, _, _, _, _, _, _>(
             move |ctx, input| {
@@ -343,11 +382,14 @@ impl Router {
                 let cancel = Arc::clone(&cancel);
                 async move { cancel(ctx, operation_id).await }
             },
-            |_ctx, _operation_id, _signal, _input| async move {
-                Err(ServerError::InvalidOperationControlAction {
-                    subject: D::SUBJECT.to_string(),
-                    action: "signal".to_string(),
-                })
+            move |_ctx, _operation_id, _signal, _input| {
+                let subject = subject.clone();
+                async move {
+                    Err(ServerError::InvalidOperationControlAction {
+                        subject,
+                        action: "signal".to_string(),
+                    })
+                }
             },
         );
     }
@@ -514,11 +556,17 @@ impl Router {
         let watch = Arc::new(watch);
         let cancel = Arc::new(cancel);
         let signal = Arc::new(signal);
+        let subject = self.descriptor_subject(D::SUBJECT);
+        let handler_subject = subject.clone();
+        let caller_capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
+        let observe_capabilities = self.descriptor_capabilities(D::OBSERVE_CAPABILITIES);
+        let cancel_capabilities = self.descriptor_capabilities(D::CANCEL_CAPABILITIES);
+        let control_capabilities = self.descriptor_capabilities(D::CONTROL_CAPABILITIES);
 
         self.handlers.insert(
-            D::SUBJECT.to_string(),
+            subject.clone(),
             Route {
-                capabilities: RouteCapabilities::Static(D::CALLER_CAPABILITIES),
+                capabilities: RouteCapabilities::Static(caller_capabilities),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let start = Arc::clone(&start);
@@ -536,12 +584,12 @@ impl Router {
         );
 
         self.handlers.insert(
-            control_subject(D::SUBJECT),
+            control_subject(&subject),
             Route {
                 capabilities: RouteCapabilities::OperationControl {
-                    observe: D::OBSERVE_CAPABILITIES,
-                    cancel: D::CANCEL_CAPABILITIES,
-                    control: D::CONTROL_CAPABILITIES,
+                    observe: observe_capabilities,
+                    cancel: cancel_capabilities,
+                    control: control_capabilities,
                 },
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
@@ -549,12 +597,13 @@ impl Router {
                     let watch = Arc::clone(&watch);
                     let cancel = Arc::clone(&cancel);
                     let signal = Arc::clone(&signal);
+                    let subject = handler_subject.clone();
                     let request = serde_json::from_slice::<OperationControlRequest>(&payload)
                         .map_err(ServerError::Json);
                     Box::pin(async move {
                         let request = request?;
                         tracing::debug!(
-                            subject = D::SUBJECT,
+                            subject = %subject,
                             action = %request.action,
                             operation_id = %request.operation_id,
                             "operation control request"
@@ -587,7 +636,7 @@ impl Router {
                                 let include_updates = request.include_updates.unwrap_or(false);
                                 if include_updates && update_schema_json.is_none() {
                                     return Err(ServerError::InvalidOperationControlAction {
-                                        subject: D::SUBJECT.to_string(),
+                                        subject: subject.clone(),
                                         action: "watch:updates".to_string(),
                                     });
                                 }
@@ -605,7 +654,7 @@ impl Router {
                             "signal" => {
                                 let signal_name = request.signal.ok_or_else(|| {
                                     ServerError::InvalidOperationControlAction {
-                                        subject: D::SUBJECT.to_string(),
+                                        subject: subject.clone(),
                                         action: "signal".to_string(),
                                     }
                                 })?;
@@ -617,7 +666,7 @@ impl Router {
                                 let signal_schema = signal_schemas
                                     .get(&signal_name)
                                     .ok_or_else(|| ServerError::InvalidOperationControlAction {
-                                        subject: D::SUBJECT.to_string(),
+                                        subject: subject.clone(),
                                         action: format!("signal:{signal_name}"),
                                     })?;
                                 let signal_value = request.input.as_ref().unwrap_or(&serde_json::Value::Null);
@@ -633,7 +682,7 @@ impl Router {
                             }
                             action => {
                                 return Err(ServerError::InvalidOperationControlAction {
-                                    subject: D::SUBJECT.to_string(),
+                                    subject,
                                     action: action.to_string(),
                                 })
                             }

@@ -3,7 +3,7 @@ import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.jobs@v1" as const;
 export const CONTRACT_DIGEST =
-  "Kdfzu18EAjSVk1UlsMKMZDgUTkTgbb3x7HihXsmiJCY" as const;
+  "k812MSHFmhUkPEoIph-V4s2seypcNli4FbQ4GKt5W4s" as const;
 export const CONTRACT: TrellisContractV1 = {
   "capabilities": {
     "trellis.jobs::admin.mutate": {
@@ -44,7 +44,7 @@ export const CONTRACT: TrellisContractV1 = {
       },
       "event": { "schema": "JobsWatchFrame" },
       "input": { "schema": "JobsWatchRequest" },
-      "subject": "feeds.v1.Jobs.Watch",
+      "subject": "feed.v1.Jobs.Watch",
       "version": "v1",
     },
   },

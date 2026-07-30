@@ -13,8 +13,8 @@ suite from the repository root with:
 deno task -c js/deno.json test:integration
 ```
 
-Focused runs use the client cases in shared `integration/test-matrix.json`
-metadata:
+Focused runs use the client cases in shared
+`integration/client-test-matrix.json` metadata:
 
 ```sh
 deno task -c js/deno.json test:integration -- --fixture rpc

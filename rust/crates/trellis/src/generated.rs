@@ -56,6 +56,23 @@ impl Caller {
         Self { client }
     }
 
+    /// Resolve a descriptor subject through this connection's integration-test scope.
+    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn integration_test_descriptor_subject(&self, subject: &str) -> String {
+        self.client.descriptor_subject(subject)
+    }
+
+    /// Resolve a capability through this connection's integration-test scope.
+    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+    #[doc(hidden)]
+    pub fn integration_test_descriptor_capability(&self, capability: &str) -> String {
+        self.client.integration_test_scope().map_or_else(
+            || capability.to_string(),
+            |scope| scope.capability(capability),
+        )
+    }
+
     /// Connect a user-authenticated generated participant.
     #[doc(hidden)]
     pub async fn connect_user(
@@ -204,6 +221,10 @@ impl crate::client::StateTransport for Caller {
 }
 
 impl crate::client::OperationTransport for Caller {
+    fn descriptor_subject(&self, subject: &str) -> String {
+        self.client.descriptor_subject(subject)
+    }
+
     fn request_json_value<'a>(
         &'a self,
         subject: String,
@@ -255,6 +276,9 @@ pub async fn test_connect_service_runtime<C>(
     identity_seed: &str,
     participant_needs_digest: &str,
     session_seed: &str,
+    #[cfg(feature = "integration-test-scoping")] integration_test_scope: Option<
+        crate::integration_test_scoping::IntegrationTestScope,
+    >,
 ) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError>
 where
     C: crate::service::GeneratedServiceContract,
@@ -270,12 +294,14 @@ where
             provisioned_identity_seed_base64url: identity_seed,
             participant_needs_digest,
             session_key_seed_base64url: session_seed,
-            timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
+            timeout_ms: 30_000,
             retry_delay_ms: crate::service::DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: crate::service::DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
             authorization_context_store: Arc::new(
                 crate::client::MemoryAuthorizationContextStore::default(),
             ),
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope,
         },
     )
     .await?;

@@ -1,0 +1,47 @@
+FROM docker.io/denoland/deno:2.8.3 AS portal
+
+WORKDIR /src
+
+COPY js /src/js
+COPY generated /src/generated
+
+RUN mkdir -p /src/rust/crates/runtime/generated \
+    && deno install --config js/deno.json --lock js/deno.lock --frozen \
+    && deno task --config js/portals/login/deno.json build:embedded
+
+FROM docker.io/library/rust:bookworm AS build
+
+WORKDIR /src
+
+COPY rust /src/rust
+COPY generated /src/generated
+COPY --from=portal /src/rust/crates/runtime/generated/portal /src/rust/crates/runtime/generated/portal
+
+RUN cargo build --locked --manifest-path rust/Cargo.toml --release \
+    --package trellis-runtime --bin trellis-server
+
+FROM docker.io/library/debian:bookworm-slim AS runtime
+
+ARG TRELLIS_VERSION=dev
+ARG TRELLIS_REVISION=
+
+LABEL org.opencontainers.image.title="trellis" \
+      org.opencontainers.image.description="Trellis Rust runtime" \
+      org.opencontainers.image.version="${TRELLIS_VERSION}" \
+      org.opencontainers.image.revision="${TRELLIS_REVISION}"
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --user-group --uid 10001 --home-dir /var/lib/trellis trellis \
+    && install --directory --owner trellis --group trellis /var/lib/trellis /etc/trellis
+
+COPY --from=build /src/rust/target/release/trellis-server /usr/local/bin/trellis-server
+
+USER trellis
+WORKDIR /var/lib/trellis
+
+EXPOSE 3000
+
+ENTRYPOINT ["trellis-server"]
+CMD ["all", "--config", "/etc/trellis/trellis.toml"]

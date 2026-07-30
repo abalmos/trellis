@@ -8,6 +8,9 @@ import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import type { LiveTrellisRuntime } from "../_support/runtime.ts";
 import {
+  aliasCaseScopedActions,
+  aliasCaseScopedRuntime,
+  caseScopedActions,
   caseScopedContractId,
   caseScopedName,
   caseScopedSubject,
@@ -127,68 +130,78 @@ export function createTransferFixture(
     }),
   } as const;
 
-  const serviceContract = defineServiceContract(
-    { schemas: transferSchemas },
-    (ref) => ({
-      id: caseScopedContractId("trellis.integration.transfer-service", caseId),
-      displayName: `Trellis Integration Transfer Service (${slug})`,
-      description: "Exercises generated operation and RPC transfer surfaces.",
-      uses: [store({
-        uploads: {
-          purpose: "Temporary integration transfer files",
-          required: true,
-          ttlMs: 0,
-          maxObjectBytes,
-          maxTotalBytes: 4194304,
-        },
-      })],
-      operations: {
-        "Files.Upload": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "operations.v1.Integration.Transfer",
-            caseId,
-            "Files.Upload",
-          ),
-          input: ref.schema("UploadInput"),
-          output: ref.schema("UploadOutput"),
-          errors: [ref.error("UnexpectedError")],
-          transfer: {
-            direction: "send",
-            store: "uploads",
-            key: "/key",
-            contentType: "/contentType",
-            expiresInMs: 60000,
-            maxBytes: 1048576,
+  const serviceContract = aliasCaseScopedActions(
+    caseId,
+    defineServiceContract(
+      { schemas: transferSchemas },
+      (ref) => ({
+        id: caseScopedContractId(
+          "trellis.integration.transfer-service",
+          caseId,
+        ),
+        displayName: `Trellis Integration Transfer Service (${slug})`,
+        description: "Exercises generated operation and RPC transfer surfaces.",
+        uses: [store({
+          uploads: {
+            purpose: "Temporary integration transfer files",
+            required: true,
+            ttlMs: 0,
+            maxObjectBytes,
+            maxTotalBytes: 4194304,
           },
-          capabilities: { call: [], observe: [], cancel: [] },
-          cancel: false,
-        },
-      },
-      rpc: {
-        "Files.Download": {
-          version: "v1",
-          subject: caseScopedSubject(
-            "rpc.v1.Integration.Transfer",
-            caseId,
-            "Files.Download",
-          ),
-          input: ref.schema("DownloadInput"),
-          output: ref.schema("DownloadGrant"),
-          transfer: { direction: "receive" },
-          capabilities: { call: [] },
-          errors: [],
-        },
-      },
-    }),
+        })],
+        operations: caseScopedActions(caseId, {
+          "Files.Upload": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "operations.v1.Integration.Transfer",
+              caseId,
+              "Files.Upload",
+            ),
+            input: ref.schema("UploadInput"),
+            output: ref.schema("UploadOutput"),
+            errors: [ref.error("UnexpectedError")],
+            transfer: {
+              direction: "send",
+              store: "uploads",
+              key: "/key",
+              contentType: "/contentType",
+              expiresInMs: 60000,
+              maxBytes: 1048576,
+            },
+            capabilities: { call: [], observe: [], cancel: [] },
+            cancel: false,
+          },
+        }),
+        rpc: caseScopedActions(caseId, {
+          "Files.Download": {
+            version: "v1",
+            subject: caseScopedSubject(
+              "rpc.v1.Integration.Transfer",
+              caseId,
+              "Files.Download",
+            ),
+            input: ref.schema("DownloadInput"),
+            output: ref.schema("DownloadGrant"),
+            transfer: { direction: "receive" },
+            capabilities: { call: [] },
+            errors: [],
+          },
+        }),
+      }),
+    ),
   );
 
-  const clientContract = defineAppContract(() => ({
-    id: caseScopedContractId("trellis.integration.transfer-client", caseId),
-    displayName: `Trellis Integration Transfer Client (${slug})`,
-    description: "App/client participant for the transfer integration fixture.",
-    uses: [serviceContract.FilesUpload, serviceContract.FilesDownload],
-  }));
+  const clientContract = aliasCaseScopedActions(
+    caseId,
+    defineAppContract(() => ({
+      id: caseScopedContractId("trellis.integration.transfer-client", caseId),
+      displayName: `Trellis Integration Transfer Client (${slug})`,
+      description:
+        "App/client participant for the transfer integration fixture.",
+      uses: [serviceContract.FilesUpload, serviceContract.FilesDownload],
+    })),
+  );
 
   const serviceName = caseScopedName("transfer-fixture-service", caseId);
   type ConnectedTransferService = Awaited<
@@ -209,15 +222,18 @@ export function createTransferFixture(
       name: serviceName,
       contract: serviceContract,
     });
-    const service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: serviceContract,
-      name: serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    const service = aliasCaseScopedRuntime(
+      serviceContract,
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: serviceContract,
+        name: serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
 
     try {
       await service.handleFilesUpload(

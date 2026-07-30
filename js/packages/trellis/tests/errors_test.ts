@@ -44,6 +44,21 @@ Deno.test("AuthError", async (t) => {
     assertEquals(serialized.reason, "forbidden");
     assertEquals(serialized.context, { userId: "456" });
   });
+
+  await t.step("decoding tolerates additive reason values", () => {
+    const value = RemoteError.parseJSON(JSON.stringify({
+      id: "err_additive",
+      type: "AuthError",
+      message: "The request conflicts with current authentication state.",
+      reason: "conflict",
+    })).take();
+    assert(!Result.isErr(value), "Expected additive reason to decode");
+    assertEquals(value.type, "AuthError");
+    if (value.type === "AuthError") {
+      assertEquals("reason" in value, true);
+      if ("reason" in value) assertEquals(value.reason, "conflict");
+    }
+  });
 });
 
 Deno.test("ValidationError", async (t) => {

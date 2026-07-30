@@ -7,6 +7,12 @@ import {
 } from "@std/path";
 import { startTrellisIntegrationSharedRuntimeHost } from "./shared_runtime_host.ts";
 import type { TrellisIntegrationSharedRuntimeHost } from "./shared_runtime_host.ts";
+import {
+  summarizeTrellisTestDurations,
+  summarizeTrellisTestProcessStarts,
+} from "./metrics.ts";
+import { TRELLIS_TEST_EVENTS_ENV } from "./runtime.ts";
+import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "./shared_runtime_protocol.ts";
 import type {
   TrellisIntegrationCase,
   TrellisIntegrationRuntimeOptions,
@@ -69,8 +75,11 @@ export type TrellisIntegrationRunnerOptions = {
   readonly sharedRuntimeHostStarter?: (args: {
     /** Runtime options from the loaded runner config. */
     readonly runtime: TrellisIntegrationRuntimeOptions;
-    /** Selected case ids that require isolated NATS tenants. */
-    readonly tenantIds: readonly string[];
+    /** Selected executable cases and their process classification. */
+    readonly assignments: readonly {
+      id: string;
+      classification?: "shared" | "isolated-process";
+    }[];
   }) => Promise<TrellisIntegrationSharedRuntimeHost>;
   /** Output hook used for help text. Defaults to `console`. */
   readonly output?: {
@@ -86,6 +95,7 @@ type ParsedRunnerArgs = {
   readonly coverageFilters: readonly string[];
   readonly coverageDir: string | undefined;
   readonly skipConformance: boolean;
+  readonly inventoryOnly: boolean;
   readonly parallel: boolean;
   readonly jobs: number | undefined;
   readonly denoTestArgs: readonly string[];
@@ -99,8 +109,38 @@ type LoadedRunnerConfig = {
 
 type SelectedCases = {
   readonly caseIds: readonly string[];
+  readonly cases: readonly TypeScriptIntegrationTestIdentity[];
+  readonly registrations: readonly TypeScriptIntegrationTestIdentity[];
   readonly files: readonly string[];
   readonly testNames: readonly string[];
+};
+
+export type TypeScriptIntegrationTestIdentity = {
+  readonly caseId: string;
+  readonly testName: string;
+};
+
+export type TypeScriptIntegrationTestEvent = {
+  readonly event: "integration-case";
+  readonly language: "typescript";
+  readonly caseId: string;
+  readonly testName: string;
+  readonly status: "registered" | "started" | "passed" | "failed" | "ignored";
+  readonly timestamp: string;
+  readonly durationMs?: number;
+};
+
+type TypeScriptIntegrationResults = {
+  readonly event: "typescript-integration-results";
+  readonly registered: number;
+  readonly selected: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly ignored: number;
+  readonly tests: readonly {
+    readonly name: string;
+    readonly status: "passed" | "failed";
+  }[];
 };
 
 /**
@@ -136,8 +176,9 @@ export async function runTrellisIntegrationTests(
   if (selected.files.length === 0) {
     throw new Error("no Trellis integration test cases selected");
   }
+  assertUniqueCaseIds(loaded.config.cases);
 
-  if (!args.skipConformance) {
+  if (!args.skipConformance || args.inventoryOnly) {
     await loaded.config.conformance?.();
   }
 
@@ -147,6 +188,29 @@ export async function runTrellisIntegrationTests(
     ...(options.denoTestArgs ?? []),
     ...args.denoTestArgs,
   ];
+  if (args.inventoryOnly) {
+    const run = await runDenoTestsWithEvents(commandRunner, {
+      executable: Deno.execPath(),
+      args: denoTestArgs({
+        parallel: false,
+        extraArgs: childDenoTestArgs,
+        files: selected.files,
+        filter: "/a^/",
+      }),
+      cwd,
+    });
+    const registrations = reconcileTypeScriptIntegrationInventory(
+      configuredIdentities(loaded.config.cases),
+      selected.registrations,
+      run.events,
+    );
+    output.log(JSON.stringify({
+      event: "typescript-integration-inventory",
+      registered: registrations.length,
+      tests: registrations,
+    }));
+    return run.code;
+  }
   const coverage = args.coverageDir === undefined
     ? undefined
     : coveragePaths(args.coverageDir, cwd);
@@ -157,19 +221,13 @@ export async function runTrellisIntegrationTests(
     childDenoTestArgs.push(`--coverage=${coverage.rawDir}`);
   }
   if (args.parallel) {
-    const startHost = options.sharedRuntimeHostStarter ??
-      startTrellisIntegrationSharedRuntimeHost;
-    const host = await startHost({
-      runtime: loaded.config.runtime,
-      tenantIds: selected.caseIds,
-    });
-    const env = { ...host.env };
-    if (args.jobs !== undefined) {
-      env.DENO_JOBS = String(args.jobs);
-    }
-
-    try {
-      const code = await commandRunner({
+    const inheritedManifest = Deno.env.get(TRELLIS_TEST_SHARED_RUNTIME_ENV);
+    if (inheritedManifest !== undefined) {
+      const env: Record<string, string> = {
+        [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest,
+      };
+      if (args.jobs !== undefined) env.DENO_JOBS = String(args.jobs);
+      const run = await runDenoTestsWithEvents(commandRunner, {
         executable: Deno.execPath(),
         args: denoTestArgs({
           parallel: true,
@@ -181,13 +239,72 @@ export async function runTrellisIntegrationTests(
         env,
       });
       await writeCoverageReport(coverage, options.coverageReporter);
+      return reportTypeScriptResults(
+        output,
+        loaded.config.cases,
+        selected,
+        run,
+      );
+    }
+    const startHost = options.sharedRuntimeHostStarter ??
+      startTrellisIntegrationSharedRuntimeHost;
+    const host = await startHost({
+      runtime: loaded.config.runtime,
+      assignments: selected.caseIds.map((id) => {
+        const integrationCase = loaded.config.cases.find((entry) =>
+          entry.id === id
+        );
+        if (integrationCase === undefined) {
+          throw new Error(`selected integration case ${id} is not registered`);
+        }
+        return {
+          id,
+          namespacePrefix: "ts",
+          classification: integrationCase.classification,
+        };
+      }),
+    });
+    const env = { ...host.env };
+    if (args.jobs !== undefined) {
+      env.DENO_JOBS = String(args.jobs);
+    }
+
+    try {
+      const run = await runDenoTestsWithEvents(commandRunner, {
+        executable: Deno.execPath(),
+        args: denoTestArgs({
+          parallel: true,
+          extraArgs: childDenoTestArgs,
+          files: selected.files,
+          filter: testNameFilter(selected.testNames),
+        }),
+        cwd,
+        env,
+      });
+      await writeCoverageReport(coverage, options.coverageReporter);
+      const code = reportTypeScriptResults(
+        output,
+        loaded.config.cases,
+        selected,
+        run,
+      );
+      if (code !== 0 && host.output !== undefined) output.log(host.output());
       return code;
     } finally {
-      await host.stop();
+      try {
+        const metrics = host.metrics === undefined ? [] : await host.metrics();
+        output.log(JSON.stringify({
+          event: "integration-process-summary",
+          starts: summarizeTrellisTestProcessStarts(metrics),
+          slowest: summarizeTrellisTestDurations(metrics),
+        }));
+      } finally {
+        await host.stop();
+      }
     }
   }
 
-  const code = await commandRunner({
+  const run = await runDenoTestsWithEvents(commandRunner, {
     executable: Deno.execPath(),
     args: denoTestArgs({
       parallel: false,
@@ -198,7 +315,198 @@ export async function runTrellisIntegrationTests(
     cwd,
   });
   await writeCoverageReport(coverage, options.coverageReporter);
-  return code;
+  return reportTypeScriptResults(output, loaded.config.cases, selected, run);
+}
+
+function reportTypeScriptResults(
+  output: { log(message: string): void },
+  cases: readonly TrellisIntegrationCase[],
+  selected: SelectedCases,
+  run: {
+    readonly code: number;
+    readonly events: readonly TypeScriptIntegrationTestEvent[];
+  },
+): number {
+  const results = reconcileTypeScriptIntegrationEvents(
+    configuredIdentities(cases),
+    selected.cases,
+    run.events,
+    selected.registrations,
+  );
+  output.log(JSON.stringify(results));
+  return run.code === 0 && results.failed > 0 ? 1 : run.code;
+}
+
+async function runDenoTestsWithEvents(
+  commandRunner: NonNullable<TrellisIntegrationRunnerOptions["commandRunner"]>,
+  command: Parameters<
+    NonNullable<TrellisIntegrationRunnerOptions["commandRunner"]>
+  >[0],
+): Promise<{
+  readonly code: number;
+  readonly events: readonly TypeScriptIntegrationTestEvent[];
+}> {
+  const eventPath = await Deno.makeTempFile({
+    prefix: "trellis-integration-",
+    suffix: ".jsonl",
+  });
+  try {
+    const code = await commandRunner({
+      ...command,
+      env: { ...command.env, [TRELLIS_TEST_EVENTS_ENV]: eventPath },
+    });
+    return {
+      code,
+      events: parseTypeScriptIntegrationEvents(
+        await Deno.readTextFile(eventPath),
+      ),
+    };
+  } finally {
+    await removeIfExists(eventPath);
+  }
+}
+
+export function parseTypeScriptIntegrationEvents(
+  jsonl: string,
+): TypeScriptIntegrationTestEvent[] {
+  return jsonl.split("\n").filter((line) => line !== "").map((line) => {
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new Error(`invalid TypeScript integration event JSON: ${line}`);
+    }
+    if (!isTypeScriptIntegrationTestEvent(value)) {
+      throw new Error(`invalid TypeScript integration event: ${line}`);
+    }
+    return value;
+  });
+}
+
+export function reconcileTypeScriptIntegrationEvents(
+  configuredCases: readonly TypeScriptIntegrationTestIdentity[],
+  selectedCases: readonly TypeScriptIntegrationTestIdentity[],
+  events: readonly TypeScriptIntegrationTestEvent[],
+  expectedRegistrations: readonly TypeScriptIntegrationTestIdentity[] =
+    selectedCases,
+): TypeScriptIntegrationResults {
+  const configured = identityMap(
+    "registered TypeScript integration cases",
+    configuredCases,
+  );
+  const selected = identityMap(
+    "selected TypeScript integration cases",
+    selectedCases,
+  );
+  const expected = identityMap(
+    "expected TypeScript integration registrations",
+    expectedRegistrations,
+  );
+  const seen = new Map<string, TypeScriptIntegrationTestEvent["status"][]>();
+
+  for (const event of events) {
+    assertConfiguredEvent(configured, event);
+    const statuses = seen.get(event.caseId) ?? [];
+    if (statuses.includes(event.status)) {
+      throw new Error(
+        `duplicate TypeScript integration ${event.status} event: ${event.caseId}`,
+      );
+    }
+    if (event.status === "ignored") {
+      throw new Error(`ignored TypeScript integration case: ${event.caseId}`);
+    }
+    statuses.push(event.status);
+    seen.set(event.caseId, statuses);
+  }
+
+  const observedRegistrations = new Set(
+    events.filter((event) => event.status === "registered").map((event) =>
+      event.caseId
+    ),
+  );
+  assertSameIds(
+    "registered TypeScript integration cases",
+    new Set(expected.keys()),
+    observedRegistrations,
+  );
+
+  const tests: { name: string; status: "passed" | "failed" }[] = [];
+  for (const { caseId } of selectedCases) {
+    const statuses = seen.get(caseId) ?? [];
+    const terminal = statuses.filter((status) =>
+      status === "passed" || status === "failed"
+    );
+    if (
+      statuses[0] !== "registered" || statuses[1] !== "started" ||
+      terminal.length !== 1 || statuses[2] !== terminal[0] ||
+      statuses.length !== 3
+    ) {
+      throw new Error(
+        `incomplete TypeScript integration case ${caseId}: ${
+          statuses.join(", ") || "no events"
+        }`,
+      );
+    }
+    tests.push({ name: caseId, status: terminal[0] });
+  }
+
+  for (const [caseId, statuses] of seen) {
+    if (
+      !selected.has(caseId) &&
+      statuses.some((status) => status !== "registered")
+    ) {
+      throw new Error(`unselected TypeScript integration case ran: ${caseId}`);
+    }
+  }
+
+  return {
+    event: "typescript-integration-results",
+    registered: configuredCases.length,
+    selected: selectedCases.length,
+    passed: tests.filter((test) => test.status === "passed").length,
+    failed: tests.filter((test) => test.status === "failed").length,
+    ignored: 0,
+    tests,
+  };
+}
+
+export function reconcileTypeScriptIntegrationInventory(
+  configuredCases: readonly TypeScriptIntegrationTestIdentity[],
+  expectedRegistrations: readonly TypeScriptIntegrationTestIdentity[],
+  events: readonly TypeScriptIntegrationTestEvent[],
+): TypeScriptIntegrationTestIdentity[] {
+  const configured = identityMap(
+    "registered TypeScript integration cases",
+    configuredCases,
+  );
+  const expected = identityMap(
+    "expected TypeScript integration registrations",
+    expectedRegistrations,
+  );
+  const observed = new Set<string>();
+  for (const event of events) {
+    assertConfiguredEvent(configured, event);
+    if (event.status !== "registered") {
+      throw new Error(
+        `inventory emitted TypeScript integration ${event.status} event: ${event.caseId}`,
+      );
+    }
+    if (observed.has(event.caseId)) {
+      throw new Error(
+        `duplicate TypeScript integration registered event: ${event.caseId}`,
+      );
+    }
+    observed.add(event.caseId);
+  }
+  assertSameIds(
+    "registered TypeScript integration cases",
+    new Set(expected.keys()),
+    observed,
+  );
+  return expectedRegistrations.map(({ caseId, testName }) => ({
+    caseId,
+    testName,
+  }));
 }
 
 /**
@@ -230,6 +538,7 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
   let coverageDir: string | undefined;
   let configPath: string | undefined;
   let skipConformance = false;
+  let inventoryOnly = false;
   let parallel = false;
   let jobs: number | undefined;
   const denoTestArgs: string[] = [];
@@ -240,7 +549,8 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     if (arg === "--") {
       denoTestArgs.push(...args.slice(index + 1));
       break;
-    } else if (arg === "--help" || arg === "-h") {
+    }
+    if (arg === "--help" || arg === "-h") {
       help = true;
     } else if (arg === "--config") {
       configPath = setSingleValue(
@@ -297,6 +607,8 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
       denoTestArgs.push(readInlineFlagValue(arg, "--deno-test-arg"));
     } else if (arg === "--skip-conformance") {
       skipConformance = true;
+    } else if (arg === "--inventory-only") {
+      inventoryOnly = true;
     } else {
       throw new Error(`unknown Trellis integration runner argument: ${arg}`);
     }
@@ -309,6 +621,7 @@ function parseRunnerArgs(args: readonly string[]): ParsedRunnerArgs {
     coverageFilters,
     coverageDir,
     skipConformance,
+    inventoryOnly,
     parallel,
     jobs,
     denoTestArgs,
@@ -484,8 +797,95 @@ function isIntegrationCase(value: unknown): value is TrellisIntegrationCase {
       value.coverage.every((tag) => typeof tag === "string"));
 }
 
+function isTypeScriptIntegrationTestEvent(
+  value: unknown,
+): value is TypeScriptIntegrationTestEvent {
+  if (
+    !isRecord(value) || value.event !== "integration-case" ||
+    value.language !== "typescript" ||
+    typeof value.caseId !== "string" || typeof value.testName !== "string" ||
+    typeof value.timestamp !== "string" ||
+    !Number.isFinite(Date.parse(value.timestamp)) ||
+    !["registered", "started", "passed", "failed", "ignored"].includes(
+      String(value.status),
+    )
+  ) {
+    return false;
+  }
+  const terminal = value.status === "passed" || value.status === "failed";
+  return terminal
+    ? typeof value.durationMs === "number" &&
+      Number.isFinite(value.durationMs) && value.durationMs >= 0
+    : value.durationMs === undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function assertUniqueCaseIds(cases: readonly TrellisIntegrationCase[]): void {
+  assertUniqueIds(
+    "registered TypeScript integration cases",
+    cases.map((entry) => entry.id),
+  );
+}
+
+function configuredIdentities(
+  cases: readonly TrellisIntegrationCase[],
+): TypeScriptIntegrationTestIdentity[] {
+  return cases.map((entry) => ({
+    caseId: entry.id,
+    testName: entry.testName,
+  }));
+}
+
+function identityMap(
+  label: string,
+  identities: readonly TypeScriptIntegrationTestIdentity[],
+): Map<string, string> {
+  assertUniqueIds(label, identities.map((identity) => identity.caseId));
+  return new Map(
+    identities.map(({ caseId, testName }) => [caseId, testName]),
+  );
+}
+
+function assertConfiguredEvent(
+  configured: ReadonlyMap<string, string>,
+  event: TypeScriptIntegrationTestEvent,
+): void {
+  const testName = configured.get(event.caseId);
+  if (testName === undefined) {
+    throw new Error(`unexpected TypeScript integration case: ${event.caseId}`);
+  }
+  if (event.testName !== testName) {
+    throw new Error(
+      `TypeScript integration case ${event.caseId} reported test name ${event.testName}; expected ${testName}`,
+    );
+  }
+}
+
+function assertUniqueIds(label: string, ids: readonly string[]): void {
+  const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index)
+    .toSorted();
+  if (duplicates.length > 0) {
+    throw new Error(`${label} contain duplicates: ${duplicates.join(", ")}`);
+  }
+}
+
+function assertSameIds(
+  label: string,
+  expected: ReadonlySet<string>,
+  actual: ReadonlySet<string>,
+): void {
+  const missing = [...expected].filter((id) => !actual.has(id)).toSorted();
+  const unexpected = [...actual].filter((id) => !expected.has(id)).toSorted();
+  if (missing.length > 0 || unexpected.length > 0) {
+    throw new Error(
+      `${label} differ from config: missing [${
+        missing.join(", ")
+      }], unexpected [${unexpected.join(", ")}]`,
+    );
+  }
 }
 
 function validateFilters(
@@ -548,7 +948,21 @@ function selectCases(
     testNames.push(caseEntry.testName);
   }
 
-  return { caseIds, files, testNames };
+  const selectedFiles = new Set(files);
+  const registrations = cases.filter((entry) =>
+    selectedFiles.has(resolveCaseFile(baseDir, entry.file))
+  ).map((entry) => ({ caseId: entry.id, testName: entry.testName }));
+  const selectedCases = caseIds.map((caseId, index) => ({
+    caseId,
+    testName: testNames[index],
+  }));
+  return {
+    caseIds,
+    cases: selectedCases,
+    registrations,
+    files,
+    testNames,
+  };
 }
 
 function resolveCaseFile(baseDir: string, file: string): string {
@@ -619,6 +1033,7 @@ Options:
   --case <case-id>      Select a case id. May be repeated.
   --coverage <tag>      Select cases by coverage tag. May be repeated.
   --coverage-dir <dir>  Collect Deno coverage under <dir>/raw and write <dir>/lcov.info.
+  --inventory-only      Evaluate selected modules and validate registrations without running tests.
   --parallel            Run selected tests with one shared Trellis runtime.
   --jobs <n>            Max parallel worker count via DENO_JOBS.
   --deno-test-arg <arg> Pass one argument through to child deno test. May be repeated.

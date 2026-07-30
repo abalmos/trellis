@@ -243,6 +243,10 @@ async fn rust_service_jobs_hosts_generated_admin_rpcs() {
         .timeline
         .iter()
         .any(|event| event.r#type == "started"));
+    assert!(
+        !jobs_service_task.is_finished(),
+        "Jobs owner exited before Jobs.Watch"
+    );
 
     let mut watch = jobs_admin
         .feed()
@@ -359,7 +363,18 @@ fn jobs_admin_client_contract(
     .use_ref(
         "jobs",
         trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID)
-            .with_rpc_call(["Jobs.Query", "Jobs.Inspect", "Jobs.Cancel"])
+            .with_rpc_call([
+                "Jobs.ListServices",
+                "Jobs.Query",
+                "Jobs.Metrics",
+                "Jobs.Inspect",
+                "Jobs.GetKey",
+                "Jobs.ListDLQ",
+                "Jobs.Cancel",
+                "Jobs.Retry",
+                "Jobs.ReplayDLQ",
+                "Jobs.DismissDLQ",
+            ])
             .with_feed_subscribe(["Jobs.Watch"]),
     )
     .build()?;

@@ -566,7 +566,7 @@ always_show_provider_chooser = false
 
 [platform.storage]
 kind = "sqlite"
-path = "./data/trellis.sqlite"
+path = "./data/platform.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
@@ -581,7 +581,7 @@ nats_jwt = 3600000
 
 [jobs.storage]
 kind = "sqlite"
-path = "./data/trellis.sqlite"
+path = "./data/jobs.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
@@ -592,14 +592,14 @@ transport_max_bytes = 16777216
 
 [health.storage]
 kind = "sqlite"
-path = "./data/trellis.sqlite"
+path = "./data/health.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
 
 [eventlog.storage]
 kind = "sqlite"
-path = "./data/trellis.sqlite"
+path = "./data/eventlog.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
@@ -1382,7 +1382,14 @@ mod tests {
         let config = render_trellis_config(&options, &nats_manifest);
 
         assert!(config.contains("port = 4242"));
-        assert!(config.contains("path = \"./data/trellis.sqlite\""));
+        for path in [
+            "./data/platform.sqlite",
+            "./data/jobs.sqlite",
+            "./data/health.sqlite",
+            "./data/eventlog.sqlite",
+        ] {
+            assert!(config.contains(&format!("path = \"{path}\"")));
+        }
         assert!(config.contains("[auth.local_identity]"));
         assert!(config.contains("enabled = true"));
         assert!(config.contains("servers = \"nats://nats.example.test:4222\""));

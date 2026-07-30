@@ -37,7 +37,6 @@ resolver = "2"
 [workspace.package]
 version = "0.11.0"
 edition = "2021"
-rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/qlever-llc/trellis"
 
@@ -81,7 +80,7 @@ oauth2 = "5.0.0"
 nats-jwt-rs = "0.1.1"
 tower_governor = "0.5.0"
 tower-http = { version = "0.6.8", features = ["cors", "limit", "set-header", "trace"] }
-time = { version = "=0.3.46", features = ["formatting"] }
+time = { version = "0.3.46", features = ["formatting"] }
 url = "2.5.8"
 self_update = { version = "0.44.0", default-features = false, features = ["archive-tar", "archive-zip", "compression-flate2", "compression-zip-deflate", "rustls", "ureq"] }
 trellis-sdk-auth = { path = "../generated/packages/cargo/auth", version = "0.11.0" }

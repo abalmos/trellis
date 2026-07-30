@@ -26,9 +26,15 @@ function isSharedRuntimeManifest(
 ): value is TrellisIntegrationSharedRuntimeManifest {
   if (typeof value !== "object" || value === null) return false;
   const manifest = value as Record<string, unknown>;
-  return manifest.version === 2 &&
+  return manifest.version === 3 &&
+    typeof manifest.runId === "string" &&
+    typeof manifest.trellisUrl === "string" &&
     typeof manifest.natsUrl === "string" &&
     typeof manifest.websocketUrl === "string" &&
     typeof manifest.workdir === "string" &&
-    typeof manifest.tenants === "object" && manifest.tenants !== null;
+    typeof manifest.adminPassword === "string" &&
+    typeof manifest.adminRpcUrl === "string" &&
+    typeof manifest.adminRpcToken === "string" &&
+    typeof manifest.tenants === "object" && manifest.tenants !== null &&
+    typeof manifest.assignments === "object" && manifest.assignments !== null;
 }

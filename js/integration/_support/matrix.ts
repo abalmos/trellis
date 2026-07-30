@@ -25,6 +25,8 @@ export type MatrixCase = {
   readonly coverage: readonly string[];
   readonly description: string;
   readonly scenario: Scenario;
+  readonly classification: "shared" | "isolated-process";
+  readonly isolationReason?: string;
 };
 
 export type ClientTestMatrix = {
@@ -32,7 +34,7 @@ export type ClientTestMatrix = {
 };
 
 const MATRIX_URL = new URL(
-  "../../../integration/test-matrix.json",
+  "../../../integration/client-test-matrix.json",
   import.meta.url,
 );
 
@@ -69,9 +71,9 @@ function parseClientTestMatrix(value: unknown): ClientTestMatrix {
     throw new Error("client integration matrix cases must be an array");
   }
 
-  const cases = root.cases
-    .filter((caseEntry) => isMatrixCaseKind(caseEntry, "client"))
-    .map((caseEntry, index) => parseMatrixCase(caseEntry, index));
+  const cases = root.cases.map((caseEntry, index) =>
+    parseMatrixCase(caseEntry, index)
+  );
   const duplicateIds = duplicates(cases.map((caseEntry) => caseEntry.id));
   if (duplicateIds.length > 0) {
     throw new Error(
@@ -95,7 +97,6 @@ function parseMatrixCase(
   expectKeys(
     caseEntry,
     [
-      "kind",
       "id",
       "fixture",
       "title",
@@ -103,6 +104,10 @@ function parseMatrixCase(
       "description",
       "scenario",
       "completion",
+      "pending",
+      "classification",
+      "isolationReason",
+      "implementations",
     ],
     context,
   );
@@ -131,6 +136,12 @@ function parseMatrixCase(
       `${context} description`,
     ),
     scenario: parseScenario(caseEntry.scenario, context),
+    classification: caseEntry.classification === "isolated-process"
+      ? "isolated-process"
+      : "shared",
+    isolationReason: typeof caseEntry.isolationReason === "string"
+      ? caseEntry.isolationReason
+      : undefined,
   };
 }
 
@@ -205,10 +216,6 @@ function expectRecord(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isMatrixCaseKind(value: unknown, kind: "client" | "service"): boolean {
-  return isRecord(value) && value.kind === kind;
 }
 
 function expectKeys(

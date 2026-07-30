@@ -11,7 +11,7 @@ use trellis_rs::service::{
     ServiceRuntimeError,
 };
 
-use crate::support::assertions::assert_service_case_registered;
+use crate::support::assertions::assert_runtime_case_registered;
 
 const CASE_ID: &str =
     "prepared-events.prepared-publish-preserves-custom-headers-and-annotates-handler-error";
@@ -110,7 +110,7 @@ impl EventDescriptor for EntityChanged {
 
 #[tokio::test]
 async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates_handler_error() {
-    assert_service_case_registered(CASE_ID, "prepared-events", "prepared_events");
+    assert_runtime_case_registered(CASE_ID, "prepared-events", "prepared_events");
 
     let runtime =
         trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
@@ -156,6 +156,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     .await
     .expect("connect prepared-events listener runtime");
 
+    let raw_subject = runtime.integration_test_descriptor_subject(EntityChanged::SUBJECT);
     let mut raw_observer = async_nats::ConnectOptions::new()
         .credentials_file(runtime.workdir().join("nats/creds/trellis-auth.creds"))
         .await
@@ -163,7 +164,7 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
         .connect(runtime.nats_url())
         .await
         .expect("connect prepared-event observer")
-        .subscribe(EntityChanged::SUBJECT.to_string())
+        .subscribe(raw_subject)
         .await
         .expect("subscribe raw observer");
     let observed = Arc::new(Mutex::new(

@@ -18,7 +18,7 @@ const repoJsRoot = fromFileUrl(new URL("../../", import.meta.url));
 
 const DEFAULT_TIMEOUTS = {
   startupMs: 60_000,
-  reconciliationMs: 15_000,
+  reconciliationMs: 60_000,
   waitForMs: 10_000,
   shutdownMs: 10_000,
 };
@@ -43,29 +43,42 @@ export function trellisRepoRuntimeOptions(
     keepWorkdir: options.keepWorkdir ?? keepWorkdirFromEnv(),
     trellis: {
       mutableDev: options.trellis?.mutableDev ?? true,
-      command: options.trellis?.command ?? {
-        cmd: "cargo",
-        args: [
-          "run",
-          "--manifest-path",
-          "../rust/Cargo.toml",
-          "-p",
-          "trellis-runtime",
-          "--bin",
-          "trellis-server",
-          "--",
-          "--config",
-          "{config}",
-          "all",
-        ],
-        cwd: repoJsRoot,
-      },
+      command: options.trellis?.command ?? repoTrellisCommand(),
     },
     jobsAdmin: options.jobsAdmin,
     timeouts: {
       ...DEFAULT_TIMEOUTS,
       ...options.timeouts,
     },
+  };
+}
+
+function repoTrellisCommand() {
+  const server = Deno.env.get("TRELLIS_TEST_SERVER_BIN");
+  if (server !== undefined) {
+    return { cmd: server, args: ["--config", "{config}", "all"] };
+  }
+  if (Deno.env.get("TRELLIS_TEST_PREBUILT_ONLY") === "1") {
+    throw new Error(
+      "TRELLIS_TEST_SERVER_BIN is required while TRELLIS_TEST_PREBUILT_ONLY=1; refusing Cargo fallback",
+    );
+  }
+  return {
+    cmd: "cargo",
+    args: [
+      "run",
+      "--manifest-path",
+      "../rust/Cargo.toml",
+      "-p",
+      "trellis-runtime",
+      "--bin",
+      "trellis-server",
+      "--",
+      "--config",
+      "{config}",
+      "all",
+    ],
+    cwd: repoJsRoot,
   };
 }
 
@@ -94,8 +107,12 @@ export function liveTrellisTest(args: {
   readonly runtime?: Partial<TrellisTestRuntimeStartOptions>;
   readonly fn: (runtime: LiveTrellisRuntime) => Promise<void>;
 }): void {
+  if (args.scope.kind !== "shared-case") {
+    throw new Error("liveTrellisTest requires a case-scoped runtime");
+  }
   trellisIntegrationTest({
     ...args,
+    caseId: args.scope.caseId,
     runtime: trellisRepoRuntimeOptions(args.runtime),
   });
 }

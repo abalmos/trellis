@@ -48,6 +48,8 @@ use crate::client::{
     EventSubscribeOptions, EventSubscriptionMode, RpcDescriptor as ClientRpcDescriptor,
     ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
+#[cfg(feature = "integration-test-scoping")]
+use crate::integration_test_scoping::IntegrationTestScope;
 use crate::jobs::{
     start_worker_host_from_client, JobDescriptor, JobIdentity, JobManager, JobProcessError, JobRef,
     JobSnapshot, JobsError, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle,
@@ -214,7 +216,7 @@ async fn validate_request_with_session_retry(
         match client.call::<AuthRequestsValidateRpc>(request).await {
             Ok(response) => return Ok(response),
             Err(error)
-                if is_transient_event_validate_error(&error)
+                if is_transient_session_not_found(&error)
                     && attempt + 1 < AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS =>
             {
                 tokio::time::sleep(Duration::from_millis(
@@ -455,6 +457,8 @@ pub struct ServiceConnectOptions<'a> {
     authority_pending_timeout_ms: Option<u64>,
     /// Caller-owned durable context and trust-floor storage.
     authorization_context_store: Arc<dyn AuthorizationContextStore>,
+    #[cfg(feature = "integration-test-scoping")]
+    integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl<'a> ServiceConnectOptions<'a> {
@@ -484,6 +488,8 @@ impl<'a> ServiceConnectOptions<'a> {
             retry_delay_ms: DEFAULT_RETRY_DELAY_MS,
             authority_pending_timeout_ms: DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
             authorization_context_store,
+            #[cfg(feature = "integration-test-scoping")]
+            integration_test_scope: None,
         }
     }
 
@@ -511,6 +517,14 @@ impl<'a> ServiceConnectOptions<'a> {
     /// Limit authority-pending bootstrap wait time, or use `None` to wait indefinitely.
     pub const fn with_authority_pending_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
         self.authority_pending_timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Apply an immutable integration-test contract namespace to this connection.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn with_integration_test_scope(mut self, scope: IntegrationTestScope) -> Self {
+        self.integration_test_scope = Some(scope);
         self
     }
 }
@@ -1222,6 +1236,11 @@ impl<C> ConnectedServiceRuntime<C> {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
         let caller = crate::generated::Caller::new(Arc::clone(&client));
+        let router = Router::new();
+        #[cfg(feature = "integration-test-scoping")]
+        let mut router = router;
+        #[cfg(feature = "integration-test-scoping")]
+        router.set_integration_test_scope(client.integration_test_scope().cloned());
         Self {
             client: Some(client),
             caller: Some(caller),
@@ -1229,7 +1248,7 @@ impl<C> ConnectedServiceRuntime<C> {
             resources,
             event_listeners: Arc::clone(&event_listeners),
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
-            router: Router::new(),
+            router,
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
             job_hosts: Vec::new(),
@@ -1256,6 +1275,13 @@ impl<C> ConnectedServiceRuntime<C> {
         self.client
             .as_ref()
             .expect("connected service runtimes always include a Trellis client")
+    }
+
+    fn descriptor_subject(&self, subject: &str) -> String {
+        self.client.as_ref().map_or_else(
+            || subject.to_owned(),
+            |client| client.descriptor_subject(subject),
+        )
     }
 
     /// Return the opaque caller handle consumed by generated facades.
@@ -1470,7 +1496,8 @@ impl<C> ConnectedServiceRuntime<C> {
         self.router.register_rpc::<D, _, _>(move |request, input| {
             handler(ServiceHandlerContext::new(request, handle.clone()), input)
         });
-        self.registered_subjects.insert(D::SUBJECT.to_string());
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
     }
 
     /// Register one descriptor-backed feed handler and record its subject.
@@ -1484,7 +1511,8 @@ impl<C> ConnectedServiceRuntime<C> {
         self.router.register_feed::<D, _, _>(move |request, input| {
             handler(ServiceHandlerContext::new(request, handle.clone()), input)
         });
-        self.registered_subjects.insert(D::SUBJECT.to_string());
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
     }
 
     /// Register one operation-backed provider and record data/control subjects.
@@ -1499,8 +1527,10 @@ impl<C> ConnectedServiceRuntime<C> {
                 provider,
                 _descriptor: PhantomData,
             });
-        self.registered_subjects.insert(D::SUBJECT.to_string());
-        self.registered_subjects.insert(control_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
     }
 
     /// Register one operation handler with an explicit watch stream and record data/control subjects.
@@ -1569,8 +1599,10 @@ impl<C> ConnectedServiceRuntime<C> {
                     )
                 },
             );
-        self.registered_subjects.insert(D::SUBJECT.to_string());
-        self.registered_subjects.insert(control_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
     }
 
     /// Register one operation handler with a single wait snapshot and record data/control subjects.
@@ -1639,8 +1671,10 @@ impl<C> ConnectedServiceRuntime<C> {
                 )
             },
         );
-        self.registered_subjects.insert(D::SUBJECT.to_string());
-        self.registered_subjects.insert(control_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
     }
 
     /// Register one operation handler with watch and signal control support.
@@ -1728,8 +1762,10 @@ impl<C> ConnectedServiceRuntime<C> {
                     )
                 },
             );
-        self.registered_subjects.insert(D::SUBJECT.to_string());
-        self.registered_subjects.insert(control_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
     }
 
     /// Register one operation handler with typed live updates and signal control support.
@@ -1821,8 +1857,10 @@ impl<C> ConnectedServiceRuntime<C> {
                     )
                 },
             );
-        self.registered_subjects.insert(D::SUBJECT.to_string());
-        self.registered_subjects.insert(control_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(self.descriptor_subject(D::SUBJECT));
+        self.registered_subjects
+            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
     }
 
     /// Run registered subjects using the default NATS request loop.
@@ -1935,6 +1973,8 @@ where
                 retry_delay_ms: options.retry_delay_ms,
                 authority_pending_timeout_ms: options.authority_pending_timeout_ms,
                 authorization_context_store: options.authorization_context_store.clone(),
+                #[cfg(feature = "integration-test-scoping")]
+                integration_test_scope: options.integration_test_scope.clone(),
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
@@ -2175,7 +2215,7 @@ where
     if options.mode == ServiceEventListenerMode::Ephemeral {
         let mut events = client
             .nats()
-            .subscribe(D::SUBJECT.to_string())
+            .subscribe(client.descriptor_subject(D::SUBJECT))
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         client.flush().await?;
@@ -2219,8 +2259,9 @@ where
         ));
     }
 
+    let subject = client.descriptor_subject(D::SUBJECT);
     let (group, binding) =
-        resolve_event_consumer_binding(bindings, D::SUBJECT, options.group.as_deref(), None)?;
+        resolve_event_consumer_binding(bindings, &subject, options.group.as_deref(), None)?;
     validate_event_listener_concurrency(&group, binding.ordering, options.concurrency, None)?;
     let key = DurableEventListenerKey {
         stream: binding.stream.clone(),
@@ -2260,7 +2301,7 @@ where
             )?;
             listener
                 .handlers
-                .entry(D::SUBJECT.to_string())
+                .entry(subject.clone())
                 .or_default()
                 .insert(handler_id, handler);
             return Ok(ServiceEventListenerHandle::new(
@@ -2268,7 +2309,7 @@ where
                 Some(ServiceEventListenerRegistration {
                     event_listeners: Arc::clone(&event_listeners),
                     key,
-                    subject: D::SUBJECT.to_string(),
+                    subject,
                     handler_id,
                 }),
             ));
@@ -2297,10 +2338,7 @@ where
         key.clone(),
         SharedDurableEventListener {
             expected_subjects: binding.filter_subjects.iter().cloned().collect(),
-            handlers: BTreeMap::from([(
-                D::SUBJECT.to_string(),
-                BTreeMap::from([(handler_id, handler)]),
-            )]),
+            handlers: BTreeMap::from([(subject.clone(), BTreeMap::from([(handler_id, handler)]))]),
             concurrency: options.concurrency,
             pull_abort_handles,
         },
@@ -2311,7 +2349,7 @@ where
         Some(ServiceEventListenerRegistration {
             event_listeners,
             key,
-            subject: D::SUBJECT.to_string(),
+            subject,
             handler_id,
         }),
     ))

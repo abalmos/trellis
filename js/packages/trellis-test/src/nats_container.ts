@@ -11,6 +11,7 @@ import {
   resolveContainerRuntime,
 } from "./nats_bootstrap.ts";
 import { removeStalePidNamedResources } from "./cleanup.ts";
+import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
 
 const NATS_IMAGE = "docker.io/library/nats:2-alpine";
 const TRELLIS_STREAM = "trellis";
@@ -306,6 +307,7 @@ export class NatsTestContainer implements AsyncDisposable {
         ),
       });
       await ensureSharedStreams(nc);
+      await recordTrellisTestProcessStart("nats", containerName);
       return new NatsTestContainer({
         runtime,
         containerName,

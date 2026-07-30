@@ -5,10 +5,6 @@ const decoder = new TextDecoder();
 const trellisSelfImportPattern =
   /(?:from\s+|import\()\s*["']@qlever-llc\/trellis(?:\/[^"']*)?["']/;
 
-function countOccurrences(source: string, value: string): number {
-  return source.split(value).length - 1;
-}
-
 async function* walkPublishableSources(
   dir: URL,
 ): AsyncGenerator<URL> {
@@ -55,6 +51,9 @@ Deno.test("workspace npm build task only builds the supported published packages
 
 Deno.test("release workflows use generated package-manager targets", async () => {
   let releaseWorkflow = "";
+  const dryRunScript = await Deno.readTextFile(
+    new URL("../../../../scripts/release-js-dry-run.sh", import.meta.url),
+  );
   for (
     const workflow of [
       "release.yml",
@@ -72,7 +71,11 @@ Deno.test("release workflows use generated package-manager targets", async () =>
 
   assertStringIncludes(
     releaseWorkflow,
-    'npm publish --dry-run --access public --tag "$npm_tag" "$pkg"',
+    "cargo run --manifest-path rust/xtask/Cargo.toml -- release lane javascript",
+  );
+  assertStringIncludes(
+    releaseWorkflow,
+    "cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live",
   );
   assertStringIncludes(
     releaseWorkflow,
@@ -80,7 +83,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   );
   assertStringIncludes(
     releaseWorkflow,
-    'cp "rust/target/${target}/release/trellis-generate"',
+    `cp "rust/target/\${target}/release/trellis-generate"`,
   );
   assertStringIncludes(
     releaseWorkflow,
@@ -100,7 +103,19 @@ Deno.test("release workflows use generated package-manager targets", async () =>
   assertStringIncludes(releaseWorkflow, "publish_or_skip js/packages/trellis");
   assertStringIncludes(
     releaseWorkflow,
-    "publish_or_skip js/services/trellis",
+    "file: rust/crates/runtime/Containerfile",
+  );
+  assertEquals(
+    releaseWorkflow.includes("file: js/services/trellis/Containerfile"),
+    false,
+  );
+  assertEquals(
+    releaseWorkflow.includes("io.trellis.contract.path"),
+    false,
+  );
+  assertEquals(
+    releaseWorkflow.includes("publish_or_skip js/services/trellis"),
+    false,
   );
   assertStringIncludes(
     releaseWorkflow,
@@ -111,22 +126,18 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "publish_or_skip js/packages/trellis-svelte/jsr",
   );
   assertStringIncludes(
-    releaseWorkflow,
-    `js/packages/trellis-test
-          do
-            (cd "$pkg" && time deno publish --dry-run --allow-slow-types --allow-dirty)`,
+    dryRunScript,
+    "deno publish --dry-run --allow-slow-types --allow-dirty",
   );
+  assertStringIncludes(dryRunScript, "js/packages/trellis-test");
   assertStringIncludes(
     releaseWorkflow,
     `TRELLIS_SVELTE_JSR_RUNTIME_DEPENDENCY_VERSION="\${RELEASE_VERSION}" \\
             deno task -c js/packages/trellis-svelte/deno.json build:npm`,
   );
-  assertStringIncludes(
-    releaseWorkflow,
-    `js/packages/trellis \\
-            js/services/trellis \\
-            js/packages/trellis-test`,
-  );
+  assertStringIncludes(dryRunScript, "js/packages/trellis");
+  assertEquals(dryRunScript.includes("js/services/trellis"), false);
+  assertStringIncludes(dryRunScript, "js/packages/trellis-test");
   assertEquals(releaseWorkflow.includes("trellis-svelte-jsr-package"), false);
   assertEquals(
     releaseWorkflow.includes(["services/trellis", "jsr"].join("/")),
@@ -138,7 +149,7 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     false,
   );
   assertStringIncludes(
-    releaseWorkflow,
+    dryRunScript,
     "deno publish --dry-run --allow-slow-types --allow-dirty",
   );
   assertStringIncludes(
@@ -146,32 +157,63 @@ Deno.test("release workflows use generated package-manager targets", async () =>
     "deno publish --allow-slow-types --allow-dirty",
   );
   assertEquals(releaseWorkflow.includes("\n  verify-format:"), false);
-  assertStringIncludes(releaseWorkflow, "\n  verify-js-integration:");
-  assertStringIncludes(releaseWorkflow, "\n  verify-rust-integration:");
-  assertEquals(
-    countOccurrences(releaseWorkflow, "test:integration"),
-    1,
-  );
-  assertEquals(
-    countOccurrences(releaseWorkflow, "--test integration"),
-    0,
+  assertStringIncludes(releaseWorkflow, "\n  verify-static:");
+  assertStringIncludes(releaseWorkflow, "\n  verify-rust:");
+  assertStringIncludes(releaseWorkflow, "\n  verify-js:");
+  assertStringIncludes(releaseWorkflow, "\n  verify-live:");
+  assertEquals(releaseWorkflow.includes("verify-js-integration"), false);
+  assertEquals(releaseWorkflow.includes("verify-rust-integration"), false);
+  assertStringIncludes(
+    releaseWorkflow,
+    "outputs: type=oci,dest=/tmp/$" + "{{ matrix.image }}.tar",
   );
   assertStringIncludes(
     releaseWorkflow,
-    "outputs: type=oci,dest=/tmp/${{ matrix.image }}.tar",
+    "verified-image-$" + "{{ matrix.image }}",
   );
-  assertStringIncludes(releaseWorkflow, "verified-image-${{ matrix.image }}");
-  assertStringIncludes(releaseWorkflow, "integration-runtime-binaries");
-  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_JOBS_SERVICE_BIN");
-  assertStringIncludes(releaseWorkflow, "TRELLIS_TEST_HEALTH_RUNTIME_BIN");
+  assertStringIncludes(releaseWorkflow, "release lane live-build");
   assertStringIncludes(
     releaseWorkflow,
-    "test:integration -- --parallel --jobs 4",
+    "integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json",
   );
+  assertStringIncludes(releaseWorkflow, "name: integration-live-artifacts");
+  assertStringIncludes(releaseWorkflow, "path: dist/integration-runtime");
+  assertStringIncludes(releaseWorkflow, "\n  verify-live-inventory:");
+  assertStringIncludes(
+    releaseWorkflow,
+    "integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json",
+  );
+  const verifyLive = releaseWorkflow.split("\n  verify-live:")[1].split(
+    "\n  release-gate:",
+  )[0];
+  assertStringIncludes(verifyLive, "- prepare-release");
+  assertStringIncludes(verifyLive, "- verify-live-build");
+  assertStringIncludes(verifyLive, "- verify-live-inventory");
+  assertEquals(verifyLive.includes("- verify-static"), false);
+  assertEquals(verifyLive.includes("- verify-rust"), false);
+  assertEquals(verifyLive.includes("- verify-js"), false);
   assertStringIncludes(releaseWorkflow, "skopeo copy --all");
   assertEquals(releaseWorkflow.includes("Build and push image"), false);
-  assertStringIncludes(releaseWorkflow, "needs.rust-msrv.result == 'success'");
+  assertEquals(releaseWorkflow.includes("rust-msrv"), false);
+  assertStringIncludes(
+    releaseWorkflow,
+    "needs.verify-static.result == 'success'",
+  );
   assertEquals(releaseWorkflow.includes("deno eval --allow-read"), false);
+});
+
+Deno.test("runtime image executes only the Rust server", async () => {
+  const containerfile = await Deno.readTextFile(
+    new URL("../../../../rust/crates/runtime/Containerfile", import.meta.url),
+  );
+  const runtimeStage = containerfile.split(
+    "FROM docker.io/library/debian:bookworm-slim AS runtime",
+  )[1];
+
+  assertStringIncludes(containerfile, 'ENTRYPOINT ["trellis-server"]');
+  assertStringIncludes(containerfile, "USER trellis");
+  assertEquals(runtimeStage.includes("deno"), false);
+  assertEquals(containerfile.includes("js/services/trellis"), false);
 });
 
 Deno.test("pages workflow cleans generator fallback temp dirs explicitly", async () => {
@@ -224,7 +266,7 @@ Deno.test("release workflow publishes only public Rust crates", async () => {
     ]
   ) {
     assertEquals(source.includes(`publish_workspace_crate ${crate}`), false);
-    assertEquals(source.includes(`publish_generated_crate`), false);
+    assertEquals(source.includes("publish_generated_crate"), false);
   }
 });
 
@@ -306,33 +348,6 @@ Deno.test("published trellis sources do not self-import package subpaths", async
     const source = await Deno.readTextFile(sourceUrl);
     if (trellisSelfImportPattern.test(source)) {
       offenders.push(sourceUrl.pathname.replace(packageRoot.pathname, ""));
-    }
-  }
-
-  assertEquals(offenders, []);
-});
-
-Deno.test("only platform runtime modules import private Trellis source", async () => {
-  const offenders: string[] = [];
-  const platformInternalImports = new Set([
-    "auth/callout/callout.ts",
-    "auth/registration/types.ts",
-  ]);
-  const packageRoot = new URL("../../../services/trellis/", import.meta.url);
-  const relativePackageImportPattern =
-    /(?:\.\.\/\.\.\/\.\.\/packages\/trellis|\.\.\/\.\.\/\.\.\/\.\.\/packages\/trellis|\.\.\/\.\.\/packages\/trellis)(?:\/|["'])/;
-  const generatedSdkAliasPattern = /#trellis-generated-sdk/;
-
-  for await (const sourceUrl of walkPublishableSources(packageRoot)) {
-    const source = await Deno.readTextFile(sourceUrl);
-    if (
-      relativePackageImportPattern.test(source) ||
-      generatedSdkAliasPattern.test(source)
-    ) {
-      const relativePath = sourceUrl.pathname.replace(packageRoot.pathname, "");
-      if (!platformInternalImports.has(relativePath)) {
-        offenders.push(relativePath);
-      }
     }
   }
 

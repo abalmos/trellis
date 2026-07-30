@@ -315,6 +315,8 @@ pub struct AuthorityProposalDecision {
     pub proposal_id: String,
     /// Expected pending proposal version.
     pub expected_version: u64,
+    /// Caller-observed authority version for optimistic acceptance; outer `None` skips the check.
+    pub expected_base_authority_version: Option<Option<u64>>,
     /// Immutable terminal decision.
     pub decision: AuthorityDecisionRecord,
     /// Accepted desired authority, or `None` for rejection.
@@ -1773,6 +1775,11 @@ impl AuthorityProposalRepository for InMemoryAuthorizationStore {
             return Err(AuthorizationStateError::StorageConflict);
         }
         if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
+            if let Some(expected_base_authority_version) = command.expected_base_authority_version {
+                if expected_base_authority_version != proposal_base_authority_version(&current)? {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+            }
             let current_authority_version = match current.authority_kind {
                 AuthorityKind::Identity => staged
                     .identity_authorities
@@ -2643,6 +2650,9 @@ pub(super) fn local_login_attempt_result(
     require_positive("lockDurationMs", attempt.lock_duration_ms)?;
     if current.principal_id != attempt.principal_id || current.version != attempt.expected_version {
         return Err(AuthorizationStateError::StorageConflict);
+    }
+    if attempt.succeeded && current.failed_attempts == 0 && current.locked_until.is_none() {
+        return Ok(current.clone());
     }
     let mut next = current.clone();
     next.version = next_version(current.version)?;

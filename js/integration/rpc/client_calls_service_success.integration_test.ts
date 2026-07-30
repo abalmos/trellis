@@ -16,15 +16,17 @@ liveTrellisTest({
       name: fixture.serviceName,
       contract: fixture.serviceContract,
     });
-    const service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
-      trellisUrl: runtime.trellisUrl,
-      contract: fixture.serviceContract,
-      name: fixture.serviceName,
-      identity: serviceKey,
-      telemetry: false,
-      server: {},
-    }).orThrow();
+    const service = fixture.aliasRuntime(
+      await TrellisService.connect({
+        authorizationContextEphemeral: true,
+        trellisUrl: runtime.trellisUrl,
+        contract: fixture.serviceContract,
+        name: fixture.serviceName,
+        identity: serviceKey,
+        telemetry: false,
+        server: {},
+      }).orThrow(),
+    );
 
     try {
       await service.handleEntityGet(({ input }) =>

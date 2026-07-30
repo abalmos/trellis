@@ -30,6 +30,10 @@ and this project adheres to
 
 ### Changed
 
+- Replaced the obsolete TypeScript Trellis runtime image with the Rust
+  `trellis-server` image and removed the withdrawn TypeScript runtime source and
+  release path.
+
 - Local bootstrap now creates an offline authorization root and online issuer;
   runtime configuration never references the root seed.
 - Ordinary request and event validation remain on the transitional Auth
@@ -51,6 +55,12 @@ and this project adheres to
   Rust/WASM verification, refresh, route-JWT renewal, reconnect, and Svelte
   state. Arbitrary-context validation, registry watches, and validator readiness
   remain Rust runtime responsibilities.
+- Require Platform, Jobs, Health, and Event Log to use separate SQLite files;
+  runtime config rejects shared subsystem paths and local bootstrap provisions
+  one file per subsystem.
+- Rebuilt the release gate around compiled/executed matrix inventory, one shared
+  live host, explicit process isolation, curated pure tests, stable Rust, named
+  local/CI lanes, and machine-readable process and phase timing.
 
 ### Fixed
 
@@ -204,7 +214,7 @@ and this project adheres to
   support, tagged object unions, and deterministic generation diagnostics.
 - Added portable prepare-time Rust owner/participant crates with relative Cargo
   dependencies, embedded contract metadata, compile fixtures for every
-  participant kind, Rust 1.88 MSRV verification, and enforced Rustdoc coverage.
+  participant kind and enforced Rustdoc coverage.
 
 ### Changed
 

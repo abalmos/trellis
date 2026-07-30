@@ -1,4 +1,6 @@
+import { dirname, join } from "@std/path";
 import type { TrellisTestRuntimeStartOptions } from "./types.ts";
+import { recordTrellisTestProcessStart } from "./integration/metrics.ts";
 
 const DEFAULT_OUTPUT_TAIL_CHARS = 8_192;
 const READINESS_POLL_INTERVAL_MS = 25;
@@ -247,10 +249,12 @@ async function captureProcessOutput(
   stream: ReadableStream<Uint8Array>,
   tail: TextTail,
   onLine: (line: string) => void,
+  log: Deno.FsFile,
 ): Promise<void> {
   const decoder = new TextDecoder();
   let pending = "";
   for await (const chunk of stream) {
+    await log.write(chunk);
     const text = decoder.decode(chunk, { stream: true });
     tail.append(text);
     pending += text;
@@ -375,6 +379,17 @@ export async function startTrellisProcess(
   const command = resolveTrellisProcessCommand(args.options);
   const stdoutTail = new TextTail(DEFAULT_OUTPUT_TAIL_CHARS);
   const stderrTail = new TextTail(DEFAULT_OUTPUT_TAIL_CHARS);
+  const logDir = dirname(args.configPath);
+  const stdoutLog = await Deno.open(join(logDir, "trellis.stdout.log"), {
+    write: true,
+    create: true,
+    truncate: true,
+  });
+  const stderrLog = await Deno.open(join(logDir, "trellis.stderr.log"), {
+    write: true,
+    create: true,
+    truncate: true,
+  });
 
   const child = new Deno.Command(command.cmd, {
     args: command.args.map((arg) =>
@@ -390,6 +405,7 @@ export async function startTrellisProcess(
     stdout: "piped",
     stderr: "piped",
   }).spawn();
+  await recordTrellisTestProcessStart("trellis", String(child.pid));
   const status = child.status;
 
   let handle: StartedTrellisProcess;
@@ -401,15 +417,21 @@ export async function startTrellisProcess(
     child.stdout,
     stdoutTail,
     recordBootstrapLine,
+    stdoutLog,
   ).catch((error) => {
     stdoutTail.append(`\n<failed to read stdout: ${String(error)}>\n`);
+  }).finally(() => {
+    stdoutLog.close();
   });
   const stderrReader = captureProcessOutput(
     child.stderr,
     stderrTail,
     recordBootstrapLine,
+    stderrLog,
   ).catch((error) => {
     stderrTail.append(`\n<failed to read stderr: ${String(error)}>\n`);
+  }).finally(() => {
+    stderrLog.close();
   });
 
   handle = new StartedTrellisProcess({

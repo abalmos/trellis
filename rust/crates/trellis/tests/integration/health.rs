@@ -16,7 +16,7 @@ use trellis_rs::sdk::health::types::{
 };
 use ulid::Ulid;
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::assert_runtime_case_registered;
 
 const CASE_ID: &str = "health.projection-lifecycle-and-recovery";
 const SERVICE_ID: &str = "trellis.integration.health-service@v1";
@@ -155,12 +155,7 @@ impl Drop for HealthRuntimeProcess {
 
 #[tokio::test]
 async fn health_projection_lifecycle_and_recovery() {
-    assert_case_registered(
-        "health.service-publishes-authorized-sample",
-        "health",
-        "health",
-    );
-    assert_case_registered(CASE_ID, "health", "health");
+    assert_runtime_case_registered(CASE_ID, "health", "health");
     let runtime = trellis_test::TrellisTestRuntime::start(
         trellis_test::TrellisTestRuntimeOptions::repo_platform(),
     )
@@ -207,6 +202,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .await
         .expect("flush observer subscriptions");
 
+    let service_id = service_key.participant_id.clone();
     let service_runtime = trellis_test::connect_service_runtime::<HealthFixtureContract>(
         runtime.trellis_url(),
         SERVICE_CONTRACT_JSON,
@@ -220,13 +216,16 @@ async fn health_projection_lifecycle_and_recovery() {
         .expect("heartbeat transport remains open");
     let mut sample: Value =
         serde_json::from_slice(&first_heartbeat.payload).expect("decode automatic heartbeat");
-    assert_eq!(sample["participant"]["contractId"], SERVICE_ID);
+    assert_eq!(sample["participant"]["contractId"], service_id);
     assert_eq!(sample["participant"]["runtime"], "rust");
 
     let health = HealthClient::new(crate::generated_caller(&observer));
-    let initial = wait_for_query(&health, SERVICE_ID, "initial healthy projection", |entry| {
-        entry.online_instances == 1
-    })
+    let initial = wait_for_query(
+        &health,
+        &service_id,
+        "initial healthy projection",
+        |entry| entry.online_instances == 1,
+    )
     .await;
     assert_eq!(initial.entries[0].effective_status, "healthy");
     let initial_revision = initial.projection.revision;
@@ -235,7 +234,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .feed()
         .health()
         .watch(&HealthWatchInput {
-            contract_ids: Some(vec![SERVICE_ID.to_string()]),
+            contract_ids: Some(vec![service_id.clone()]),
             deployment_ids: None,
             instance_ids: None,
             participant_kinds: Some(vec![crate::wire("service")]),
@@ -270,7 +269,7 @@ async fn health_projection_lifecycle_and_recovery() {
 
     let offline = wait_for_query(
         &health,
-        SERVICE_ID,
+        &service_id,
         "offline deadline projection",
         |entry| entry.offline_instances == 1,
     )
@@ -287,7 +286,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .rpc()
         .health()
         .inspect(&HealthInspectRequest {
-            contract_id: SERVICE_ID.to_string(),
+            contract_id: service_id.clone(),
             history_limit: Some(20),
             history_since: None,
             instance_id: None,
@@ -304,7 +303,7 @@ async fn health_projection_lifecycle_and_recovery() {
         .health()
         .metrics(&HealthMetricsRequest {
             check_names: None,
-            contract_id: SERVICE_ID.to_string(),
+            contract_id: service_id.clone(),
             end: (now + time::Duration::seconds(1))
                 .format(&Rfc3339)
                 .expect("format metrics end"),
@@ -333,7 +332,7 @@ async fn health_projection_lifecycle_and_recovery() {
     health_runtime.restart();
     let recovered = wait_for_query(
         &health,
-        SERVICE_ID,
+        &service_id,
         "degraded projection after projector restart",
         |entry| entry.effective_status == "degraded",
     )
@@ -426,6 +425,8 @@ fn rust_dir() -> &'static Path {
 }
 
 fn health_command(rust_dir: &Path, config_path: &Path) -> Command {
+    trellis_test::record_test_process_start("trellis", "health")
+        .expect("record Rust Health process start");
     let mut command = if let Some(binary) = std::env::var_os("TRELLIS_TEST_SERVER_BIN") {
         Command::new(binary)
     } else {

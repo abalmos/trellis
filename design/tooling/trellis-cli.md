@@ -90,8 +90,8 @@ outside `cargo xtask build`: use `deno task -c js/deno.json test:integration`
 for the TypeScript suite and
 `cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
 for the Rust suite. Both suites are governed by the `kind: "client"` cases in
-`integration/test-matrix.json`; every supported client language must cover every
-client matrix case against a live Trellis runtime.
+`integration/client-test-matrix.json`; every supported client language must
+cover every client matrix case against a live Trellis runtime.
 
 `trellis-generate` still owns the explicit source-to-artifact interface for repo
 scripts, wrappers, and CI:

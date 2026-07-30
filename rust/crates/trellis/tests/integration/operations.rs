@@ -16,7 +16,7 @@ use trellis_rs::service::{
     OperationSnapshot, OperationState as ServiceOperationState, ServerError,
 };
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
 const OP_SERVICE_ID: &str = "trellis.integration.operations-service@v1";
 const OP_CLIENT_ID: &str = "trellis.integration.operations-client@v1";
@@ -941,7 +941,6 @@ async fn start_control_operation_fixture(
         .connect_client(&bootstrap_url, &client_contract)
         .await
         .expect("connect live Rust operations client");
-
     ControlOperationFixture {
         runtime,
         service_key,
@@ -1568,6 +1567,8 @@ async fn operations_cancel_uses_cancel_capability() {
         .expect("connect live Rust operations client");
 
     let operation_ref = start_operation_with_retry(&client, "operation-1").await;
+    let control_subject =
+        client.integration_test_descriptor_subject("operations.v1.Entity.Process.control");
     let observer = runtime
         .start_nats_message_observer("rpc.v1.Auth.Requests.Validate")
         .await
@@ -1576,8 +1577,8 @@ async fn operations_cancel_uses_cancel_capability() {
     let cancelled = operation_ref.cancel().await.expect("cancel operation");
     assert_eq!(cancelled.state, ClientOperationState::Cancelled);
 
-    wait_for_observed_auth_capability(&observer, OP_CANCEL_CAPABILITY).await;
-    let capability_sets = observed_auth_capability_sets(&observer);
+    wait_for_observed_auth_capability(&observer, &control_subject, OP_CANCEL_CAPABILITY).await;
+    let capability_sets = observed_auth_capability_sets(&observer, &control_subject);
     assert!(
         !capability_sets
             .iter()
@@ -2108,7 +2109,7 @@ async fn operations_rejects_signal_after_terminal_state() {
 
 #[tokio::test]
 async fn operations_service_attach_job_waits_for_completion() {
-    assert_case_registered(
+    assert_runtime_case_registered(
         "operations.service-attach-job-waits-for-completion",
         "operations",
         "operations",
@@ -2672,11 +2673,12 @@ async fn start_status_operation_with_retry<'a>(
 
 async fn wait_for_observed_auth_capability(
     observer: &trellis_test::TrellisNatsMessageObserver,
+    subject: &str,
     capability: &str,
 ) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let capability_sets = observed_auth_capability_sets(observer);
+        let capability_sets = observed_auth_capability_sets(observer, subject);
         if capability_sets
             .iter()
             .any(|capabilities| capabilities == &[capability.to_string()])
@@ -2693,11 +2695,13 @@ async fn wait_for_observed_auth_capability(
 
 fn observed_auth_capability_sets(
     observer: &trellis_test::TrellisNatsMessageObserver,
+    subject: &str,
 ) -> Vec<Vec<String>> {
     observer
         .frames()
         .into_iter()
         .filter_map(|frame| serde_json::from_str::<Value>(&frame.payload).ok())
+        .filter(|value| value.get("subject").and_then(Value::as_str) == Some(subject))
         .filter_map(|value| {
             value
                 .get("capabilities")
