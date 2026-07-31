@@ -348,10 +348,10 @@ select {
   align-items: start;
   background:
     linear-gradient(
-      135deg,
-      color-mix(in oklab, var(--color-accent) 10%, transparent),
-      transparent 42%
-    ),
+    135deg,
+    color-mix(in oklab, var(--color-accent) 10%, transparent),
+    transparent 42%
+  ),
     color-mix(in oklab, var(--color-base-200) 64%, var(--color-base-100));
   border: 1px solid
     color-mix(in oklab, var(--color-base-300) 76%, var(--color-accent));
@@ -456,8 +456,7 @@ select {
 }
 
 .trellis-dropdown-menu :where(a, button):focus-visible,
-.dropdown-content.menu:not(.trellis-dropdown-menu)
-  :where(a, button):focus-visible {
+.dropdown-content.menu:not(.trellis-dropdown-menu) :where(a, button):focus-visible {
   box-shadow: var(--trellis-focus-ring);
   outline: none;
 }

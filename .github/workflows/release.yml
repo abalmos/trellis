@@ -187,6 +187,9 @@ jobs:
       - name: Generate release SDK artifacts
         run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
+      - name: Build embedded login portal
+        run: deno task -c js/portals/login/deno.json build:embedded
+
       - name: Verify formatting
         run: |
           time deno fmt -c js/deno.json --check

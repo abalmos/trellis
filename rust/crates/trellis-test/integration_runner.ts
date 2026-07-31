@@ -1,15 +1,15 @@
-import { dirname, fromFileUrl, join } from "@std/path";
+import { dirname, fromFileUrl, join, resolve } from "@std/path";
 import clientMatrix from "../../../integration/client-test-matrix.json" with {
   type: "json",
 };
 import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" with {
   type: "json",
 };
-import { startTrellisIntegrationSharedRuntimeHost } from "../../../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
 } from "../../../js/packages/trellis-test/src/integration/metrics.ts";
+import { startTrellisIntegrationSharedRuntimeHost } from "../../../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../js/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
@@ -427,15 +427,19 @@ export async function loadIntegrationLiveArtifacts(
 }
 
 function liveArtifactPaths(artifactDir: string): IntegrationLiveArtifacts {
+  const resolvedArtifactDir = resolve(artifactDir);
   return {
-    integrationBinary: join(artifactDir, LIVE_EXECUTABLES.integrationTest),
+    integrationBinary: join(
+      resolvedArtifactDir,
+      LIVE_EXECUTABLES.integrationTest,
+    ),
     runtimeBinaries: {
       TRELLIS_TEST_SERVER_BIN: join(
-        artifactDir,
+        resolvedArtifactDir,
         LIVE_EXECUTABLES.trellisServer,
       ),
       TRELLIS_TEST_JOBS_SERVICE_BIN: join(
-        artifactDir,
+        resolvedArtifactDir,
         LIVE_EXECUTABLES.trellisServiceJobs,
       ),
     },

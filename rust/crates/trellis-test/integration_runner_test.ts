@@ -4,6 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { isAbsolute, relative } from "@std/path";
 import {
   assertRustExecutionInventory,
   buildIntegrationTest,
@@ -137,7 +138,10 @@ Deno.test("integration live artifacts are deterministic and validated", async ()
         Deno.writeTextFile(path, name)
       ),
     );
-    const manifestPath = `${tempDir}/dist/manifest.json`;
+    const manifestPath = relative(
+      Deno.cwd(),
+      `${tempDir}/dist/manifest.json`,
+    );
     const sourceSha = "0123456789abcdef0123456789abcdef01234567";
     await writeIntegrationLiveArtifacts(manifestPath, sourceSha, executables);
     const firstManifest = await Deno.readTextFile(manifestPath);
@@ -161,6 +165,13 @@ Deno.test("integration live artifacts are deterministic and validated", async ()
     assertEquals(
       Object.keys(artifacts.runtimeBinaries),
       ["TRELLIS_TEST_SERVER_BIN", "TRELLIS_TEST_JOBS_SERVICE_BIN"],
+    );
+    assertEquals(
+      [
+        artifacts.integrationBinary,
+        ...Object.values(artifacts.runtimeBinaries),
+      ].every(isAbsolute),
+      true,
     );
     await Deno.writeTextFile(artifacts.integrationBinary, "tampered");
     await assertRejects(

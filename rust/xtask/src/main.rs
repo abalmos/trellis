@@ -75,7 +75,26 @@ fn usage_text() -> &'static str {
 
 fn run_prepare() -> Result<()> {
     run_generate_prepare(&[])?;
+    build_embedded_login_portal()?;
     generate_protocol_wasm()
+}
+
+fn build_embedded_login_portal() -> Result<()> {
+    let root = repo_root()?;
+    let status = Command::new("deno")
+        .current_dir(root)
+        .args(["task", "-c", "js/portals/login/deno.json", "build:embedded"])
+        .status()
+        .into_diagnostic()
+        .wrap_err("failed to build embedded login portal")?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(miette::miette!(
+            "embedded login portal build failed with {status}"
+        ))
+    }
 }
 
 fn generate_protocol_wasm() -> Result<()> {

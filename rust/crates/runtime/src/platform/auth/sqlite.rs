@@ -7,6 +7,7 @@ use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 
 use super::companion_repository::{
     local_login_attempt_result, next_version, post_commit_action_identity_equal,
@@ -68,20 +69,31 @@ use crate::storage::{SqliteStore, StoreError};
 /// Owner-scoped SQLite implementation of every authorization repository port.
 #[derive(Clone, Debug)]
 pub struct SqliteAuthorizationStore {
-    pub(super) connection: Arc<Mutex<Connection>>,
+    writer: Arc<Mutex<Connection>>,
+    readers: Option<Arc<SqliteConnectionPool>>,
+}
+
+const AUTHORIZATION_CONNECTION_POOL_SIZE: usize = 8;
+
+#[derive(Debug)]
+struct SqliteConnectionPool {
+    available: Mutex<Vec<Connection>>,
+    permits: Arc<Semaphore>,
 }
 
 impl SqliteAuthorizationStore {
     pub(crate) fn open(store: &SqliteStore) -> Result<Self, StoreError> {
-        Ok(Self {
-            connection: Arc::new(Mutex::new(store.open()?)),
-        })
+        let connections = (0..AUTHORIZATION_CONNECTION_POOL_SIZE)
+            .map(|_| store.open())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::from_connections(connections))
     }
 
     pub(crate) fn open_read_only(store: &SqliteStore) -> Result<Self, StoreError> {
-        Ok(Self {
-            connection: Arc::new(Mutex::new(store.open_read_only()?)),
-        })
+        let connections = (0..AUTHORIZATION_CONNECTION_POOL_SIZE)
+            .map(|_| store.open_read_only())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self::from_connections(connections))
     }
 
     /// Create an isolated migrated in-memory store.
@@ -96,9 +108,7 @@ impl SqliteAuthorizationStore {
             .pragma_update(None, "foreign_keys", true)
             .map_err(sql_error)?;
         migrate_test_schema(&connection)?;
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        Ok(Self::from_connections(vec![connection]))
     }
 
     #[cfg(test)]
@@ -108,9 +118,26 @@ impl SqliteAuthorizationStore {
             .pragma_update(None, "foreign_keys", true)
             .map_err(sql_error)?;
         migrate_test_schema(&connection)?;
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
+        Ok(Self::from_connections(vec![connection]))
+    }
+
+    fn from_connections(connections: Vec<Connection>) -> Self {
+        let mut connections = connections.into_iter();
+        let writer = Arc::new(Mutex::new(
+            connections
+                .next()
+                .expect("sqlite store requires a connection"),
+        ));
+        let readers = connections.collect::<Vec<_>>();
+        Self {
+            writer,
+            readers: (!readers.is_empty()).then(|| {
+                Arc::new(SqliteConnectionPool {
+                    permits: Arc::new(Semaphore::new(readers.len())),
+                    available: Mutex::new(readers),
+                })
+            }),
+        }
     }
 
     pub(super) async fn run<T, F>(&self, operation: F) -> Result<T, AuthorizationStateError>
@@ -119,11 +146,11 @@ impl SqliteAuthorizationStore {
         F: FnOnce(&mut Connection) -> Result<T, AuthorizationStateError> + Send + 'static,
     {
         let queued_at = Instant::now();
-        let connection = Arc::clone(&self.connection);
+        let writer = Arc::clone(&self.writer);
         tokio::task::spawn_blocking(move || {
             let spawn_delay = queued_at.elapsed();
             let wait_started = Instant::now();
-            let mut connection = connection.lock().map_err(|_| {
+            let mut connection = writer.lock().map_err(|_| {
                 AuthorizationStateError::Storage("SQLite connection lock poisoned".to_owned())
             })?;
             let wait_elapsed = wait_started.elapsed();
@@ -146,6 +173,71 @@ impl SqliteAuthorizationStore {
         .await
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
     }
+
+    pub(super) async fn run_read<T, F>(&self, operation: F) -> Result<T, AuthorizationStateError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, AuthorizationStateError> + Send + 'static,
+    {
+        let Some(pool) = &self.readers else {
+            return self.run(operation).await;
+        };
+        run_on_pool(Arc::clone(pool), operation).await
+    }
+}
+
+async fn run_on_pool<T, F>(
+    pool: Arc<SqliteConnectionPool>,
+    operation: F,
+) -> Result<T, AuthorizationStateError>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut Connection) -> Result<T, AuthorizationStateError> + Send + 'static,
+{
+    let queued_at = Instant::now();
+    let permit = Arc::clone(&pool.permits)
+        .acquire_owned()
+        .await
+        .map_err(|_| AuthorizationStateError::Storage("SQLite pool closed".to_owned()))?;
+    tokio::task::spawn_blocking(move || {
+        let spawn_delay = queued_at.elapsed();
+        let wait_started = Instant::now();
+        let mut connection = pool
+            .available
+            .lock()
+            .map_err(|_| {
+                AuthorizationStateError::Storage("SQLite connection lock poisoned".to_owned())
+            })?
+            .pop()
+            .ok_or_else(|| {
+                AuthorizationStateError::Storage("SQLite pool permit without connection".to_owned())
+            })?;
+        let wait_elapsed = wait_started.elapsed();
+        let operation_started = Instant::now();
+        let result = operation(&mut connection);
+        let operation_elapsed = operation_started.elapsed();
+        pool.available
+            .lock()
+            .map_err(|_| {
+                AuthorizationStateError::Storage("SQLite connection lock poisoned".to_owned())
+            })?
+            .push(connection);
+        drop(permit);
+        if spawn_delay >= Duration::from_secs(1)
+            || wait_elapsed >= Duration::from_secs(1)
+            || operation_elapsed >= Duration::from_secs(1)
+        {
+            tracing::warn!(
+                spawn_delay_ms = spawn_delay.as_millis(),
+                wait_ms = wait_elapsed.as_millis(),
+                operation_ms = operation_elapsed.as_millis(),
+                "Auth SQLite read operation exceeded one second"
+            );
+        }
+        result
+    })
+    .await
+    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
 }
 
 fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationStateError> {
@@ -187,7 +279,7 @@ impl PrincipalRepository for SqliteAuthorizationStore {
         id: &str,
     ) -> Result<Option<PrincipalRecord>, AuthorizationStateError> {
         let id = id.to_owned();
-        self.run(move |connection| load_principal(connection, &id))
+        self.run_read(move |connection| load_principal(connection, &id))
             .await
     }
 
@@ -293,7 +385,7 @@ impl ProviderIdentityRepository for SqliteAuthorizationStore {
     ) -> Result<Option<ProviderIdentityLink>, AuthorizationStateError> {
         let provider = provider.to_owned();
         let subject = subject.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             connection
                 .query_row(
                     "SELECT provider, provider_subject, principal_id, linked_at, last_seen_at
@@ -353,7 +445,7 @@ impl ProviderIdentityRepository for SqliteAuthorizationStore {
         principal_id: &str,
     ) -> Result<Vec<ProviderIdentityLink>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT provider, provider_subject, principal_id, linked_at, last_seen_at
@@ -487,7 +579,7 @@ impl AccountRepository for SqliteAuthorizationStore {
         principal_id: &str,
     ) -> Result<Option<(PrincipalRecord, UserProfileRecord)>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
-        self.run(move |connection| load_user_account(connection, &principal_id))
+        self.run_read(move |connection| load_user_account(connection, &principal_id))
             .await
     }
 
@@ -498,7 +590,7 @@ impl AccountRepository for SqliteAuthorizationStore {
     ) -> Result<Vec<(PrincipalRecord, UserProfileRecord)>, AuthorizationStateError> {
         validate_account_list(cursor, limit)?;
         let cursor = cursor.map(str::to_owned);
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT p.principal_id, p.kind, p.state, p.created_at, p.updated_at,
@@ -603,7 +695,7 @@ impl AccountRepository for SqliteAuthorizationStore {
         principal_id: &str,
     ) -> Result<Option<UserProfileRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
-        self.run(move |connection| load_user_profile(connection, &principal_id))
+        self.run_read(move |connection| load_user_profile(connection, &principal_id))
             .await
     }
 
@@ -612,7 +704,7 @@ impl AccountRepository for SqliteAuthorizationStore {
         principal_id: &str,
     ) -> Result<Option<LocalCredentialRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
-        self.run(move |connection| load_local_credential(connection, &principal_id))
+        self.run_read(move |connection| load_local_credential(connection, &principal_id))
             .await
     }
 
@@ -717,7 +809,7 @@ impl AccountRepository for SqliteAuthorizationStore {
         normalized_username: &str,
     ) -> Result<Option<LocalCredentialRecord>, AuthorizationStateError> {
         let normalized_username = normalized_username.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             connection
                 .query_row(
                     "SELECT principal_id, normalized_username, password_hash, hash_profile, failed_attempts, locked_until, password_changed_at, updated_at, version
@@ -768,7 +860,7 @@ impl AccountRepository for SqliteAuthorizationStore {
 
     async fn has_active_administrator(&self, now: i64) -> Result<bool, AuthorizationStateError> {
         super::domain::require_protocol_timestamp("now", now)?;
-        self.run(move |connection| sql_has_active_administrator(connection, now))
+        self.run_read(move |connection| sql_has_active_administrator(connection, now))
             .await
     }
 
@@ -877,14 +969,14 @@ impl DeploymentProfileRepository for SqliteAuthorizationStore {
         deployment_id: &str,
     ) -> Result<Option<DeploymentProfileRecord>, AuthorizationStateError> {
         let deployment_id = deployment_id.to_owned();
-        self.run(move |connection| load_deployment_profile(connection, &deployment_id))
+        self.run_read(move |connection| load_deployment_profile(connection, &deployment_id))
             .await
     }
 
     async fn list_deployment_profiles(
         &self,
     ) -> Result<Vec<DeploymentProfileRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT deployment_id, kind, display_name, participant_id, portal_id,
@@ -1012,7 +1104,7 @@ impl DeploymentProfileRepository for SqliteAuthorizationStore {
 #[async_trait]
 impl LoginPortalRepository for SqliteAuthorizationStore {
     async fn list_login_portals(&self) -> Result<Vec<LoginPortalRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare("SELECT portal_id FROM auth_login_portals ORDER BY portal_id")
                 .map_err(sql_error)?;
@@ -1037,7 +1129,7 @@ impl LoginPortalRepository for SqliteAuthorizationStore {
         portal_id: &str,
     ) -> Result<Option<(LoginPortalRecord, LoginSettingsRecord)>, AuthorizationStateError> {
         let portal_id = portal_id.to_owned();
-        self.run(move |connection| load_login_portal(connection, &portal_id))
+        self.run_read(move |connection| load_login_portal(connection, &portal_id))
             .await
     }
 
@@ -1171,7 +1263,7 @@ impl LoginPortalRepository for SqliteAuthorizationStore {
     }
 
     async fn list_portal_routes(&self) -> Result<Vec<PortalRouteRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection.prepare(
                 "SELECT route_id, portal_id, participant_id, origin, deployment_id, priority, created_at, updated_at, version
                  FROM auth_portal_routes ORDER BY priority DESC, route_id",
@@ -1220,7 +1312,7 @@ impl AccountFlowRepository for SqliteAuthorizationStore {
         token_hash: &str,
     ) -> Result<Option<AccountFlowRecord>, AuthorizationStateError> {
         let token_hash = token_hash.to_owned();
-        self.run(move |connection| load_account_flow_by_hash(connection, &token_hash))
+        self.run_read(move |connection| load_account_flow_by_hash(connection, &token_hash))
             .await
     }
 
@@ -1353,7 +1445,7 @@ impl AuthorityProposalRepository for SqliteAuthorizationStore {
         Vec<(AuthorityProposalRecord, Option<AuthorityDecisionRecord>)>,
         AuthorizationStateError,
     > {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare("SELECT proposal_id FROM auth_authority_proposals ORDER BY proposal_id")
                 .map_err(sql_error)?;
@@ -1496,7 +1588,7 @@ impl AuthorityProposalRepository for SqliteAuthorizationStore {
         AuthorizationStateError,
     > {
         let proposal_id = proposal_id.to_owned();
-        self.run(move |connection| load_authority_proposal(connection, &proposal_id))
+        self.run_read(move |connection| load_authority_proposal(connection, &proposal_id))
             .await
     }
 
@@ -1624,7 +1716,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
     async fn list_provisioned_identities(
         &self,
     ) -> Result<Vec<ProvisionedIdentityRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT identity_key_id FROM auth_provisioned_identities ORDER BY identity_key_id",
@@ -1650,7 +1742,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
         identity_key_id: &str,
     ) -> Result<Option<ProvisionedIdentityRecord>, AuthorizationStateError> {
         let identity_key_id = identity_key_id.to_owned();
-        self.run(move |connection| load_provisioned_identity(connection, &identity_key_id))
+        self.run_read(move |connection| load_provisioned_identity(connection, &identity_key_id))
             .await
     }
 
@@ -1723,14 +1815,14 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
         review_id: &str,
     ) -> Result<Option<DeviceActivationReviewRecord>, AuthorizationStateError> {
         let review_id = review_id.to_owned();
-        self.run(move |connection| load_activation_review(connection, &review_id))
+        self.run_read(move |connection| load_activation_review(connection, &review_id))
             .await
     }
 
     async fn list_activation_reviews(
         &self,
     ) -> Result<Vec<DeviceActivationReviewRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare("SELECT review_id FROM auth_activation_reviews ORDER BY review_id")
                 .map_err(sql_error)?;
@@ -2124,7 +2216,7 @@ impl IdempotencyRepository for SqliteAuthorizationStore {
         let purpose = purpose.to_owned();
         let signer_id = signer_id.to_owned();
         let request_id = request_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             load_idempotency_result(connection, &purpose, &signer_id, &request_id)
         })
         .await
@@ -2159,7 +2251,7 @@ impl PostCommitActionRepository for SqliteAuthorizationStore {
         let limit = i64::try_from(limit).map_err(|_| {
             AuthorizationStateError::InvalidRecord("limit exceeds SQLite range".to_owned())
         })?;
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection.prepare(
                 "SELECT action_id, kind, payload_json, created_at, attempts, next_attempt_at, claimed_until, last_error
                  FROM auth_post_commit_actions
@@ -2284,7 +2376,7 @@ impl ParticipantBindingRepository for SqliteAuthorizationStore {
     ) -> Result<Option<ParticipantBindingRecord>, AuthorizationStateError> {
         let participant_id = participant_id.to_owned();
         let artifact_digest = artifact_digest.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             connection
                 .query_row(
                     "SELECT participant_id, participant_kind, artifact_digest, needs_digest,
@@ -2508,7 +2600,7 @@ impl SessionRepository for SqliteAuthorizationStore {
         id: &str,
     ) -> Result<Option<SessionRecord>, AuthorizationStateError> {
         let id = id.to_owned();
-        self.run(move |connection| load_session(connection, &id))
+        self.run_read(move |connection| load_session(connection, &id))
             .await
     }
 
@@ -2517,7 +2609,7 @@ impl SessionRepository for SqliteAuthorizationStore {
         public_key: &str,
     ) -> Result<Option<SessionRecord>, AuthorizationStateError> {
         let public_key = public_key.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let session_id = connection
                 .query_row(
                     "SELECT session_id FROM auth_sessions WHERE session_public_key = ?1",
@@ -2535,7 +2627,7 @@ impl SessionRepository for SqliteAuthorizationStore {
     }
 
     async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare("SELECT session_id FROM auth_sessions ORDER BY session_id")
                 .map_err(sql_error)?;
@@ -2692,7 +2784,7 @@ impl SessionRepository for SqliteAuthorizationStore {
         principal_id: &str,
     ) -> Result<Vec<SessionRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(&format!(
                     "{} WHERE principal_id = ?1 ORDER BY session_id",
@@ -2715,7 +2807,7 @@ impl IdentityAuthorityRepository for SqliteAuthorizationStore {
     async fn list_identity_authorities(
         &self,
     ) -> Result<Vec<IdentityAuthorityRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT authority_id, principal_id, participant_id,
@@ -2744,7 +2836,7 @@ impl IdentityAuthorityRepository for SqliteAuthorizationStore {
     ) -> Result<Option<IdentityAuthorityRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
         let participant_id = participant_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             load_identity_authority(connection, &principal_id, &participant_id)
         })
         .await
@@ -2790,7 +2882,7 @@ impl DeploymentAuthorityRepository for SqliteAuthorizationStore {
     async fn list_deployment_authorities(
         &self,
     ) -> Result<Vec<DeploymentAuthorityRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT authority_id, deployment_id, participant_id, participant_kind,
@@ -2819,7 +2911,7 @@ impl DeploymentAuthorityRepository for SqliteAuthorizationStore {
     ) -> Result<Option<DeploymentAuthorityRecord>, AuthorizationStateError> {
         let deployment_id = deployment_id.to_owned();
         let participant_id = participant_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             load_deployment_authority(connection, &deployment_id, &participant_id)
         })
         .await
@@ -2866,7 +2958,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         &self,
         now: i64,
     ) -> Result<Vec<ActiveProviderEvidence>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let keys = {
                 let mut statement = connection
                     .prepare(
@@ -2943,7 +3035,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
     async fn list_runtime_instances(
         &self,
     ) -> Result<Vec<RuntimeInstanceRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare("SELECT instance_id FROM auth_instances ORDER BY instance_id")
                 .map_err(sql_error)?;
@@ -2963,7 +3055,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
     }
 
     async fn list_devices(&self) -> Result<Vec<DeviceRecord>, AuthorizationStateError> {
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT principal_id, deployment_id, state, created_at, updated_at, version
@@ -2994,7 +3086,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         deployment_id: &str,
     ) -> Result<Option<DeploymentRecord>, AuthorizationStateError> {
         let deployment_id = deployment_id.to_owned();
-        self.run(move |connection| load_deployment(connection, &deployment_id))
+        self.run_read(move |connection| load_deployment(connection, &deployment_id))
             .await
     }
 
@@ -3011,7 +3103,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         session_id: &str,
     ) -> Result<Option<RuntimeEvidence>, AuthorizationStateError> {
         let session_id = session_id.to_owned();
-        self.run(move |connection| load_runtime_evidence(connection, &session_id))
+        self.run_read(move |connection| load_runtime_evidence(connection, &session_id))
             .await
     }
 
@@ -3020,7 +3112,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         instance_id: &str,
     ) -> Result<Option<RuntimeInstanceRecord>, AuthorizationStateError> {
         let instance_id = instance_id.to_owned();
-        self.run(move |connection| load_runtime_instance(connection, &instance_id))
+        self.run_read(move |connection| load_runtime_instance(connection, &instance_id))
             .await
     }
 
@@ -3076,7 +3168,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
     ) -> Result<Option<DeviceRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
         let deployment_id = deployment_id.to_owned();
-        self.run(move |connection| load_device(connection, &principal_id, &deployment_id))
+        self.run_read(move |connection| load_device(connection, &principal_id, &deployment_id))
             .await
     }
 
@@ -3122,7 +3214,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
     ) -> Result<Option<DeviceDelegationRecord>, AuthorizationStateError> {
         let principal_id = principal_id.to_owned();
         let deployment_id = deployment_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             load_device_delegation(connection, &principal_id, &deployment_id)
         })
         .await
@@ -3171,7 +3263,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         session_id: &str,
     ) -> Result<Option<SessionRuntimeBinding>, AuthorizationStateError> {
         let session_id = session_id.to_owned();
-        self.run(move |connection| load_session_runtime_binding(connection, &session_id))
+        self.run_read(move |connection| load_session_runtime_binding(connection, &session_id))
             .await
     }
 
@@ -3225,7 +3317,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         target: &AuthorityTarget,
     ) -> Result<Vec<DependencyEvidence>, AuthorizationStateError> {
         let target = target.clone();
-        self.run(move |connection| load_dependency_evidence(connection, &target))
+        self.run_read(move |connection| load_dependency_evidence(connection, &target))
             .await
     }
 
@@ -3284,7 +3376,7 @@ impl EvidenceRepository for SqliteAuthorizationStore {
         target: &AuthorityTarget,
     ) -> Result<Vec<ResourceBindingEvidence>, AuthorizationStateError> {
         let target = target.clone();
-        self.run(move |connection| load_resource_evidence(connection, &target))
+        self.run_read(move |connection| load_resource_evidence(connection, &target))
             .await
     }
 
@@ -3344,7 +3436,7 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
         authority_id: &str,
     ) -> Result<Option<MaterializationReplacement>, AuthorizationStateError> {
         let authority_id = authority_id.to_owned();
-        self.run(move |connection| load_materialization(connection, kind, &authority_id))
+        self.run_read(move |connection| load_materialization(connection, kind, &authority_id))
             .await
     }
 
@@ -3442,7 +3534,7 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
     async fn list_reconciliation_targets(
         &self,
     ) -> Result<Vec<AuthorityTarget>, AuthorizationStateError> {
-        self.run(|connection| {
+        self.run_read(|connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT authority_kind, authority_id FROM (
@@ -3477,7 +3569,7 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
         session_id: &str,
     ) -> Result<IssuanceSnapshot, AuthorizationStateError> {
         let session_id = session_id.to_owned();
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             let snapshot = sqlite_issuance_snapshot(&transaction, &session_id)?;
             transaction.commit().map_err(sql_error)?;
@@ -3493,7 +3585,7 @@ impl AuthorizationMaterializationRepository for SqliteAuthorizationStore {
         let limit = i64::try_from(limit).map_err(|_| {
             AuthorizationStateError::InvalidRecord("outbox limit exceeds i64".to_owned())
         })?;
-        self.run(move |connection| {
+        self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT event_id, transition_json, created_at
@@ -5573,4 +5665,53 @@ fn map_write_error(error: rusqlite::Error) -> AuthorizationStateError {
 
 fn sql_error(error: rusqlite::Error) -> AuthorizationStateError {
     AuthorizationStateError::Storage(error.to_string())
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    use super::*;
+    use crate::{SqliteStorageConfig, SubsystemName};
+
+    #[tokio::test]
+    async fn file_store_runs_independent_operations_concurrently() {
+        let directory = tempfile::tempdir().expect("create sqlite tempdir");
+        let store = SqliteStore::new(
+            SubsystemName::Platform,
+            SqliteStorageConfig {
+                path: directory.path().join("auth.sqlite"),
+                journal_mode: Some("wal".to_owned()),
+                busy_timeout_ms: Some(2_500),
+                single_writer: Some(true),
+            },
+        );
+        let repository = SqliteAuthorizationStore::open(&store).expect("open sqlite pool");
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let started = Instant::now();
+
+        let operations = (0..4).map(|_| {
+            let repository = repository.clone();
+            let active = Arc::clone(&active);
+            let maximum = Arc::clone(&maximum);
+            async move {
+                repository
+                    .run_read(move |_| {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        maximum.fetch_max(current, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(100));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        Ok(())
+                    })
+                    .await
+            }
+        });
+
+        let results = futures_util::future::join_all(operations).await;
+        assert!(results.into_iter().all(|result| result.is_ok()));
+        assert_eq!(maximum.load(Ordering::SeqCst), 4);
+        assert!(started.elapsed() < Duration::from_millis(300));
+    }
 }

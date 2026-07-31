@@ -1687,6 +1687,11 @@ fn verify_command_specs(
         .stage("TypeScript compile"),
         CommandSpec::new(
             "deno",
+            vec!["task", "-c", "js/deno.json", "packages:build:npm"],
+        )
+        .stage("npm package build"),
+        CommandSpec::new(
+            "deno",
             vec!["task", "-c", "js/deno.json", "test:prepared:result"],
         )
         .stage("prepared JavaScript packages")
@@ -1715,11 +1720,6 @@ fn verify_command_specs(
         )
         .stage("prepared JavaScript packages")
         .parallel("prepared-js"),
-        CommandSpec::new(
-            "deno",
-            vec!["task", "-c", "js/deno.json", "packages:build:npm"],
-        )
-        .stage("npm package build"),
         CommandSpec::new(
             "deno",
             vec![
@@ -2392,6 +2392,13 @@ mod tests {
         assert!(parallel
             .iter()
             .all(|spec| spec.stage == "prepared JavaScript packages"));
+        let npm_build = specs
+            .iter()
+            .position(|spec| spec.stage == "npm package build")
+            .expect("npm package build");
+        assert!(specs.iter().enumerate().all(|(index, spec)| {
+            spec.parallel_group.as_deref() != Some("prepared-js") || npm_build < index
+        }));
     }
 
     #[test]

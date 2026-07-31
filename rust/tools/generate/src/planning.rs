@@ -90,7 +90,7 @@ pub fn build_auto_plan_with_targets(
                             } else {
                                 "generated/contracts/manifests"
                             })
-                            .join(format!("{}.json", &contract_id)),
+                            .join(format!("{}.json", contract_id)),
                     )
                 } else {
                     None
