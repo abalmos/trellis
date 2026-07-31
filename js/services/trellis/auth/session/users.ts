@@ -530,7 +530,12 @@ export function createAuthCapabilityGroupsPutHandler(
       caller: user.userId,
     }, "RPC request");
     if (isBuiltinCapabilityGroup(req.groupKey)) {
-      return Result.err(new AuthError({ reason: "invalid_request" }));
+      return Result.err(
+        new AuthError({
+          reason: "invalid_request",
+          context: { groupKey: req.groupKey, issue: "builtin_group_read_only" },
+        }),
+      );
     }
     const catalogedCapabilities = new Set([
       ...PLATFORM_CAPABILITIES.map((capability) => capability.key),
@@ -545,7 +550,10 @@ export function createAuthCapabilityGroupsPutHandler(
       return Result.err(
         new AuthError({
           reason: "invalid_request",
-          context: { capabilities: unknownCapabilities },
+          context: {
+            capabilities: unknownCapabilities,
+            issue: "unknown_capabilities",
+          },
         }),
       );
     }

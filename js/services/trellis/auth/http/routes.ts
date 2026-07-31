@@ -19,6 +19,8 @@ type RateLimitContext = {
   req?: { header: (name: string) => string | undefined };
 };
 
+const PRIVATE_NETWORK_REQUEST_HEADER = "access-control-request-private-network";
+
 function remoteAddressFromEnv(env: unknown): string | null {
   if (!env || typeof env !== "object") return null;
   if (!("remoteAddr" in env)) return null;
@@ -103,6 +105,39 @@ function setCorsHeaders(
   if (requestHeaders) {
     c.header("Access-Control-Allow-Headers", requestHeaders);
   }
+  if (c.req?.header(PRIVATE_NETWORK_REQUEST_HEADER) === "true") {
+    c.header("Access-Control-Allow-Private-Network", "true");
+  }
+}
+
+function setPrivateNetworkCorsHeader(
+  c: {
+    header: (name: string, value: string) => void;
+    req: RateLimitContext["req"] & { method: string };
+  },
+  origins: readonly string[],
+): void {
+  if (c.req.method !== "OPTIONS") return;
+  const origin = c.req.header("origin");
+  if (
+    origin && c.req.header(PRIVATE_NETWORK_REQUEST_HEADER) === "true" &&
+    (origins.includes("*") || resolveCorsOrigin(origin, origins))
+  ) {
+    c.header("Access-Control-Allow-Private-Network", "true");
+  }
+}
+
+function privateNetworkCors(origins: readonly string[]) {
+  return async (
+    c: {
+      header: (name: string, value: string) => void;
+      req: RateLimitContext["req"] & { method: string };
+    },
+    next: () => Promise<void>,
+  ) => {
+    setPrivateNetworkCorsHeader(c, origins);
+    await next();
+  };
 }
 
 function globalAuthCorsOptions(origins: readonly string[]) {
@@ -243,6 +278,7 @@ export function registerHttpRoutes(
   {
     const corsOptions = globalAuthCorsOptions(config.web.origins);
     const authCors = cors(corsOptions);
+    const authPrivateNetworkCors = privateNetworkCors(config.web.origins);
     app.use(
       "/auth/*",
       async (c, next) => {
@@ -251,11 +287,13 @@ export function registerHttpRoutes(
           await next();
           return;
         }
+        setPrivateNetworkCorsHeader(c, config.web.origins);
         return await authCors(c, next);
       },
     );
     app.use(
       "/bootstrap/*",
+      authPrivateNetworkCors,
       cors(corsOptions),
     );
   }

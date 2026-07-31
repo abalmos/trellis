@@ -9,6 +9,7 @@ import { createKick } from "../callout/kick.ts";
 import type {
   SqlAccountFlowRepository,
   SqlCapabilityGroupRepository,
+  SqlDeploymentAuthorityCapabilityDefinitionRepository,
   SqlDeploymentPortalRouteRepository,
   SqlDeviceActivationRepository,
   SqlDeviceActivationReviewRepository,
@@ -116,6 +117,8 @@ export function registerAuthHttpRoutes(
       accountFlowStorage: SqlAccountFlowRepository;
       loginPortalStorage: SqlLoginPortalRepository;
       capabilityGroupStorage: SqlCapabilityGroupRepository;
+      capabilityDefinitionStorage:
+        SqlDeploymentAuthorityCapabilityDefinitionRepository;
       serviceDeploymentStorage: SqlServiceDeploymentRepository;
       serviceInstanceStorage: SqlServiceInstanceRepository;
     }
@@ -141,6 +144,7 @@ export function registerAuthHttpRoutes(
     loginPortalStorage: deps.loginPortalStorage,
     accountStorage: deps.accountStorage,
     capabilityGroupStorage: deps.capabilityGroupStorage,
+    capabilityDefinitionStorage: deps.capabilityDefinitionStorage,
     userIdentityStorage: deps.userIdentityStorage,
     localCredentialStorage: deps.localCredentialStorage,
     userStorage: deps.userStorage,

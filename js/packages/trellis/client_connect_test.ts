@@ -514,6 +514,93 @@ Deno.test("connectClientWithDeps maps callback bind failures to TransportError",
   }
 });
 
+Deno.test("connectClientWithDeps uses callback bind connect info without starting a new flow", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const handle = await createBrowserHandle();
+  const nats = createControllableNatsConnection();
+  const fetchUrls: string[] = [];
+  let connectOptions:
+    | { servers?: string | string[]; inboxPrefix?: string }
+    | undefined;
+
+  try {
+    Object.defineProperty(globalThis, "window", {
+      value: {
+        history: { replaceState: () => {} },
+      },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "document", {
+      value: {},
+      configurable: true,
+      writable: true,
+    });
+    globalThis.fetch = ((input: URL | Request | string) => {
+      const url = String(input);
+      fetchUrls.push(url);
+      if (url.includes("/auth/flow/flow_123/bind")) {
+        return Promise.resolve(
+          Response.json({
+            status: "bound",
+            inboxPrefix: "_INBOX.bound",
+            expires: "2026-06-27T01:00:00.000Z",
+            sentinel: { jwt: "jwt-bound", seed: "seed-bound" },
+            transports: {
+              websocket: { natsServers: ["wss://nats.example.com"] },
+            },
+          }),
+        );
+      }
+
+      throw new Error(`Unexpected fetch ${url}`);
+    }) as typeof fetch;
+
+    await connectClientWithDeps({
+      trellisUrl: "https://trellis.example.com",
+      contract: testContract,
+      auth: {
+        handle,
+        currentUrl: new URL("https://app.example.com/callback?flowId=flow_123"),
+      },
+    }, {
+      loadTransport: async () => ({
+        connect: async (options) => {
+          connectOptions = {
+            servers: options.servers,
+            inboxPrefix: options.inboxPrefix,
+          };
+          return nats.connection;
+        },
+      }),
+      now: () => 1_700_000_000_000,
+    });
+
+    assertEquals(fetchUrls, [
+      "https://trellis.example.com/auth/flow/flow_123/bind",
+    ]);
+    assertEquals(connectOptions, {
+      servers: ["wss://nats.example.com"],
+      inboxPrefix: "_INBOX.bound",
+    });
+  } finally {
+    await nats.close();
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(globalThis, "window", {
+      value: originalWindow,
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "document", {
+      value: originalDocument,
+      configurable: true,
+      writable: true,
+    });
+  }
+});
+
 Deno.test("connectClientWithDeps maps malformed bind responses to TransportError", async () => {
   const originalFetch = globalThis.fetch;
   const handle = await createBrowserHandle();
@@ -1734,7 +1821,7 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
     currentUrlValue = new URL("https://app.example.com/after");
     nowMs += 301_000;
     authTokenFromAuthenticator(connectAuthenticator);
-    await waitFor(() => bootstrapCalls === 3 && authRequiredCalls === 1);
+    await waitFor(() => bootstrapCalls === 2 && authRequiredCalls === 1);
     await waitFor(() => {
       const token = JSON.parse(
         authTokenFromAuthenticator(connectAuthenticator),
@@ -1751,7 +1838,7 @@ Deno.test("connectClientWithDeps recovers exhausted browser auth through auth co
     };
 
     assertEquals(authRequiredCalls, 1);
-    assertEquals(bootstrapCalls, 3);
+    assertEquals(bootstrapCalls, 2);
     assertEquals(token.bindingToken, undefined);
     assertEquals(token.contractDigest, testContract.CONTRACT_DIGEST);
     await testConnection.close();
@@ -1878,7 +1965,7 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
 
     nowMs += 301_000;
     authTokenFromAuthenticator(connectAuthenticator);
-    await waitFor(() => bootstrapCalls === 3 && authRequiredCalls === 1);
+    await waitFor(() => bootstrapCalls === 2 && authRequiredCalls === 1);
     const token = JSON.parse(
       authTokenFromAuthenticator(connectAuthenticator),
     ) as {
@@ -1886,7 +1973,7 @@ Deno.test("connectClientWithDeps reauths when reconnect bootstrap targets anothe
     };
 
     assertEquals(authRequiredCalls, 1);
-    assertEquals(bootstrapCalls, 3);
+    assertEquals(bootstrapCalls, 2);
     assertEquals(token.contractDigest, testContract.CONTRACT_DIGEST);
     await testConnection.close();
     await new Promise((resolve) => setTimeout(resolve, 20));

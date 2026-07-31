@@ -702,6 +702,8 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
         : {}),
       delegatedCapabilities: approvalCapabilityKeys(
         args.resolution.plan.approval,
+      ).filter((capability) =>
+        args.resolution.effectiveCapabilities.includes(capability)
       ),
       delegatedPublishSubjects: args.resolution.plan.publishSubjects,
       delegatedSubscribeSubjects: args.resolution.plan.subscribeSubjects,

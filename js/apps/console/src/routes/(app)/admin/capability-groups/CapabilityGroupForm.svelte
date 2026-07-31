@@ -224,6 +224,11 @@
       saved = null;
       return;
     }
+    if (groupKey === "admin") {
+      error = "The admin group key is built in and cannot be used for a custom capability group. Use a key like platform-admin instead.";
+      saved = null;
+      return;
+    }
 
     saving = true;
     error = null;

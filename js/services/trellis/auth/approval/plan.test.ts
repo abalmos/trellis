@@ -140,6 +140,82 @@ Deno.test("planUserContractApproval derives exact app capabilities and subjects"
   ]);
 });
 
+Deno.test("planUserContractApproval includes optional app use capabilities as non-blocking grants", async () => {
+  const dependency: TrellisContractV1 = {
+    format: "trellis.contract.v1",
+    id: "example.service@v1",
+    displayName: "Example Service",
+    description: "Example service API",
+    kind: "service",
+    capabilities: {
+      "devices:read": {
+        displayName: "Read devices",
+        description: "Read device data.",
+      },
+      "devices.admin:read": {
+        displayName: "Admin read devices",
+        description: "Read devices across tenants.",
+      },
+    },
+    schemas: {
+      EmptyInput: { type: "object" },
+      EmptyOutput: { type: "object" },
+    },
+    rpc: {
+      "Devices.List": {
+        version: "v1",
+        subject: "rpc.v1.example.Devices.List",
+        input: { schema: "EmptyInput" },
+        output: { schema: "EmptyOutput" },
+        capabilities: { call: ["devices:read"] },
+      },
+      "Admin.Devices.List": {
+        version: "v1",
+        subject: "rpc.v1.example.Admin.Devices.List",
+        input: { schema: "EmptyInput" },
+        output: { schema: "EmptyOutput" },
+        capabilities: { call: ["devices.admin:read"] },
+      },
+    },
+  };
+
+  const store = createTestContracts([{
+    digest: "dep-digest",
+    contract: dependency,
+  }]);
+
+  const plan = await planUserContractApproval(store, {
+    format: "trellis.contract.v1",
+    id: "example.app@v1",
+    displayName: "Example App",
+    description: "Browser app",
+    kind: "app",
+    uses: {
+      required: {
+        devices: {
+          contract: "example.service@v1",
+          rpc: { call: ["Devices.List"] },
+        },
+      },
+      optional: {
+        adminDevices: {
+          contract: "example.service@v1",
+          rpc: { call: ["Admin.Devices.List"] },
+        },
+      },
+    },
+  });
+
+  assertEquals(Object.keys(plan.approval.capabilities).sort(), [
+    "devices.admin:read",
+    "devices:read",
+  ]);
+  assertEquals(plan.publishSubjects, [
+    "rpc.v1.example.Admin.Devices.List",
+    "rpc.v1.example.Devices.List",
+  ]);
+});
+
 Deno.test("planUserContractApproval includes operation observe and declared cancel capabilities", async () => {
   const dependency: TrellisContractV1 = {
     format: "trellis.contract.v1",

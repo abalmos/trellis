@@ -555,7 +555,7 @@ async function bindClientFlow(args: {
   sessionKey: string;
   flowId: string;
   sig: string;
-}): Promise<void> {
+}): Promise<StaticDecode<typeof BindResponseSchema>> {
   const response = await fetch(
     `${args.trellisUrl}/auth/flow/${encodeURIComponent(args.flowId)}/bind`,
     {
@@ -620,6 +620,47 @@ async function bindClientFlow(args: {
       },
     });
   }
+
+  return parsed;
+}
+
+function requestedContractDigest<
+  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+>(args: ClientConnectArgsFor<TContract>): string {
+  return args.contract.CONTRACT_DIGEST ??
+    digestContractManifest(args.contract.CONTRACT);
+}
+
+function bootstrapFromBoundFlow<
+  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+>(args: {
+  bind: StaticDecode<typeof BindResponseSchema>;
+  contractArgs: ClientConnectArgsFor<TContract>;
+  sessionKey: string;
+  serverNow: number;
+}): ClientBootstrapResponse {
+  if (args.bind.status !== "bound") {
+    throw createTransportError({
+      code: "trellis.auth.bind_invalid_response",
+      message: "Trellis returned an invalid sign-in response.",
+      hint: "Start the sign-in flow again.",
+    });
+  }
+
+  return {
+    status: "ready",
+    serverNow: args.serverNow,
+    connectInfo: {
+      sessionKey: args.sessionKey,
+      contractId: args.contractArgs.contract.CONTRACT.id,
+      contractDigest: requestedContractDigest(args.contractArgs),
+      transports: args.bind.transports,
+      transport: {
+        inboxPrefix: args.bind.inboxPrefix,
+        sentinel: args.bind.sentinel,
+      },
+    },
+  };
 }
 
 async function fetchClientBootstrap(args: {
@@ -1090,13 +1131,25 @@ export async function connectClientWithDeps<
 
   if (callbackFlowId) {
     try {
-      await bindClientFlow({
+      const bind = await bindClientFlow({
         trellisUrl,
         sessionKey: identity.sessionKey,
         flowId: callbackFlowId,
         sig: await identity.bindFlowSig(callbackFlowId),
       });
       if (currentUrl) cleanupBrowserCallbackUrl(currentUrl);
+      const bootstrap = bootstrapFromBoundFlow({
+        bind,
+        contractArgs: args,
+        sessionKey: identity.sessionKey,
+        serverNow: correctedIatSeconds(deps.now(), 0),
+      });
+      return await connectWithBootstrap(args, identity, currentUrl, deps, {
+        trellisUrl,
+        offsetState,
+        bootstrap,
+        browserAuth,
+      });
     } catch (error) {
       if (currentUrl && isExpiredBindError(error)) {
         cleanupBrowserCallbackUrl(currentUrl);
@@ -1118,6 +1171,30 @@ export async function connectClientWithDeps<
       !bootstrapTargetsRequestedContract(initialBootstrap, args)
     ? await resolveAuthRequired(args, identity, currentUrl, deps, offsetState)
     : initialBootstrap;
+
+  return await connectWithBootstrap(args, identity, currentUrl, deps, {
+    trellisUrl,
+    offsetState,
+    bootstrap,
+    browserAuth,
+  });
+}
+
+async function connectWithBootstrap<
+  TContract extends ClientContract<TrellisAPI, TrellisContractV1>,
+>(
+  args: ClientConnectArgsFor<TContract>,
+  identity: ClientRuntimeIdentity,
+  currentUrl: URL | null,
+  deps: ClientConnectDeps,
+  connectionArgs: {
+    trellisUrl: string;
+    offsetState: ClockOffsetState;
+    bootstrap: ClientBootstrapResponse;
+    browserAuth?: BrowserClientAuthOptions;
+  },
+): Promise<Trellis<TrellisAPI, "client", RuntimeStateStores>> {
+  const { trellisUrl, offsetState, bootstrap, browserAuth } = connectionArgs;
 
   if (bootstrap.status !== "ready") {
     if (bootstrap.status === "not_ready") {
@@ -1360,18 +1437,20 @@ async function resolveAuthRequired<
   }
 
   if (continuation && continuation.status === "bound") {
-    await bindClientFlow({
+    const bind = await bindClientFlow({
       trellisUrl: normalizeTrellisUrl(args.trellisUrl),
       sessionKey: identity.sessionKey,
       flowId: continuation.flowId,
       sig: await identity.bindFlowSig(continuation.flowId),
     });
-    return await fetchClientBootstrapWithRetry({
-      trellisUrl: normalizeTrellisUrl(args.trellisUrl),
+    return bootstrapFromBoundFlow({
+      bind,
+      contractArgs: args,
       sessionKey: identity.sessionKey,
-      identity,
-      deps,
-      offsetState,
+      serverNow: correctedIatSeconds(
+        deps.now(),
+        offsetState.serverClockOffsetMs,
+      ),
     });
   }
 

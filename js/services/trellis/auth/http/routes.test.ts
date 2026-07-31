@@ -1328,6 +1328,53 @@ Deno.test({
 });
 
 Deno.test({
+  name: "auth HTTP OAuth callback redirects missing cookie to app",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerOAuthCallbackTestRoutes();
+
+    const response = await app.request(
+      "http://trellis/auth/callback/github?state=state-123&code=code-123",
+    );
+
+    assertEquals(response.status, 302);
+    const location = response.headers.get("location") ?? "";
+    assertStringIncludes(
+      location,
+      "http://localhost:5173/callback?redirectTo=%2Fprofile&authError=",
+    );
+    assertEquals(
+      new URL(location).searchParams.get("authError"),
+      "Sign-in session expired or changed. Please try again.",
+    );
+  },
+});
+
+Deno.test({
+  name: "auth HTTP OAuth callback redirects mismatched cookie to app",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerOAuthCallbackTestRoutes();
+
+    const response = await app.request(
+      "http://trellis/auth/callback/github?state=state-123&code=code-123",
+      { headers: { cookie: "trellis_oauth=state-456" } },
+    );
+
+    assertEquals(response.status, 302);
+    const location = response.headers.get("location") ?? "";
+    assertStringIncludes(
+      location,
+      "http://localhost:5173/callback?redirectTo=%2Fprofile&authError=",
+    );
+    assertEquals(
+      new URL(location).searchParams.get("authError"),
+      "Sign-in session expired or changed. Please try again.",
+    );
+  },
+});
+
+Deno.test({
   name:
     "auth HTTP OAuth callback redirects directly to app when approval is satisfied",
   sanitizeResources: false,
@@ -2301,6 +2348,30 @@ Deno.test({
 });
 
 Deno.test({
+  name: "auth HTTP public CORS allows private network preflights",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerTestRoutes();
+
+    const response = await app.request("http://trellis/auth/requests", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://qlever-llc.github.io",
+        "access-control-request-method": "POST",
+        "access-control-request-private-network": "true",
+      },
+    });
+
+    assertEquals(response.status, 204);
+    assertEquals(response.headers.get("access-control-allow-origin"), "*");
+    assertEquals(
+      response.headers.get("access-control-allow-private-network"),
+      "true",
+    );
+  },
+});
+
+Deno.test({
   name: "auth HTTP restricted CORS allows credentials for configured origins",
   sanitizeResources: false,
   fn: async () => {
@@ -2330,6 +2401,49 @@ Deno.test({
     assertEquals(
       response.headers.get("access-control-allow-credentials"),
       "true",
+    );
+  },
+});
+
+Deno.test({
+  name:
+    "auth HTTP restricted CORS limits private network preflights to configured origins",
+  sanitizeResources: false,
+  fn: async () => {
+    const app = await registerTestRoutes({}, {}, {}, {
+      config: {
+        ...config,
+        web: {
+          ...config.web,
+          origins: ["https://app.example"],
+        },
+      },
+    });
+
+    const allowed = await app.request("http://trellis/auth/requests", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://app.example",
+        "access-control-request-method": "POST",
+        "access-control-request-private-network": "true",
+      },
+    });
+    const denied = await app.request("http://trellis/auth/requests", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://third-party.example",
+        "access-control-request-method": "POST",
+        "access-control-request-private-network": "true",
+      },
+    });
+
+    assertEquals(
+      allowed.headers.get("access-control-allow-private-network"),
+      "true",
+    );
+    assertEquals(
+      denied.headers.get("access-control-allow-private-network"),
+      null,
     );
   },
 });

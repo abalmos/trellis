@@ -425,6 +425,12 @@ function storedApprovalCoversPlan(
     );
 }
 
+function requiredCapabilityKeys(needs: AuthorityNeedSet): string[] {
+  return needs.capabilities
+    .filter((capability) => capability.required)
+    .map((capability) => capability.capability);
+}
+
 function authorityNeedSetFromDesiredState(
   authority: DeploymentAuthority,
 ): AuthorityNeedSet {
@@ -522,12 +528,13 @@ export async function getApprovalResolution(
       ...grantOverrideCapabilities,
     ]),
   ].sort();
+  const requiredCapabilities = requiredCapabilityKeys(requestedAuthority);
   const unresolvedGrantCapabilities = missingCapabilities({
     requiredCapabilities: approvalCapabilityKeys(plan.approval),
     effectiveCapabilities: grantOverrideCapabilities,
   });
   const unresolvedCapabilities = missingCapabilities({
-    requiredCapabilities: approvalCapabilityKeys(plan.approval),
+    requiredCapabilities,
     effectiveCapabilities: resolvedCapabilities,
   });
   const resolvedApproval = effectiveApproval({

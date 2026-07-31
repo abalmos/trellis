@@ -1,6 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
   import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
+  import type { AuthSessionsRevokeInput } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import {
@@ -13,6 +14,7 @@
   } from "../../../../lib/auth_display.ts";
   import { errorMessage, formatDate } from "../../../../lib/format";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
+  import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import Icon from "$lib/components/Icon.svelte";
@@ -20,9 +22,11 @@
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
+  import { getNotifications } from "../../../../lib/notifications.svelte";
   import { getTrellis } from "../../../../lib/trellis";
 
   const trellis = getTrellis();
+  const notifications = getNotifications();
 
   let activeTab = $state<"sessions" | "connections">("sessions");
   let loading = $state(true);
@@ -31,6 +35,8 @@
   let sessions = $state<SessionRecord[]>([]);
   let sessionFilterUser = $state("");
   let currentSessionKey = $state<string | null>(null);
+  let revokePending = $state(false);
+  let confirmationModal: ConfirmationModal | undefined = $state();
 
   let connections = $state<ConnectionRecord[]>([]);
   let connFilterUser = $state("");
@@ -83,6 +89,43 @@
     return !!currentSessionKey && session.sessionKey === currentSessionKey;
   }
 
+  async function revokeUserSessions() {
+    if (revokePending) return;
+    const userSessions = sessions.filter((session) => session.principal.type === "user");
+    if (userSessions.length === 0) return;
+    const includesCurrentSession = userSessions.some((session) => isCurrentSession(session));
+    const confirmed = await confirmationModal?.confirm({
+      title: sessionFilterUser.trim() ? "Revoke filtered user sessions?" : "Revoke all user sessions?",
+      message: includesCurrentSession
+        ? "This includes your current console session. Continuing will force this app to sign in again."
+        : `This immediately invalidates ${userSessions.length} active user session${userSessions.length !== 1 ? "s" : ""}.`,
+      confirmLabel: "Revoke sessions",
+      targetLabel: "Scope",
+      targetName: sessionFilterUser.trim() ? `Filter: ${sessionFilterUser.trim()}` : "All listed user sessions",
+      expectedValue: "REVOKE",
+      details: `Type REVOKE to confirm revoking ${userSessions.length} active user session${userSessions.length !== 1 ? "s" : ""}.`,
+    });
+    if (!confirmed) return;
+
+    revokePending = true;
+    try {
+      const orderedSessions = [...userSessions].sort((left, right) => Number(isCurrentSession(left)) - Number(isCurrentSession(right)));
+      for (const session of orderedSessions) {
+        const response = await trellis.request("Auth.Sessions.Revoke", { sessionKey: session.sessionKey } satisfies AuthSessionsRevokeInput).take();
+        if (isErr(response)) {
+          notifications.error(errorMessage(response), "Revoke failed");
+          return;
+        }
+      }
+      notifications.success(`Revoked ${userSessions.length} user session${userSessions.length !== 1 ? "s" : ""}.`, "Sessions revoked");
+      await loadSessions();
+    } catch (e) {
+      notifications.error(errorMessage(e), "Revoke failed");
+    } finally {
+      revokePending = false;
+    }
+  }
+
   onMount(() => { void loadSessions(); });
 </script>
 
@@ -95,6 +138,7 @@
           Actions <Icon name="chevronDown" size={14} />
         {/snippet}
         <li><a href={resolve("/admin/sessions/revoke")}>Revoke a session</a></li>
+        <li><button class="text-error" type="button" onclick={() => void revokeUserSessions()} disabled={activeTab !== "sessions" || loading || revokePending || sessions.every((session) => session.principal.type !== "user")}>Revoke user sessions</button></li>
         <li><a href={resolve("/admin/sessions/kick")}>Kick a connection</a></li>
       </ActionMenu>
     {/snippet}
@@ -134,13 +178,13 @@
       <EmptyState title="No sessions" description="No sessions match the current filter." />
     {:else}
       <Panel title="Sessions" eyebrow="Primary table">
-        <DataTable fixed tableClass="w-full">
+        <DataTable fixed tableClass="sessions-table w-full">
           <colgroup>
-            <col class="w-[42%]" />
-            <col class="w-28" />
-            <col class="w-36" />
-            <col class="w-52" />
-            <col class="w-28" />
+            <col class="w-[44%]" />
+            <col class="w-24" />
+            <col class="w-32" />
+            <col class="w-44" />
+            <col class="w-24" />
           </colgroup>
           <thead>
             <tr>
@@ -148,7 +192,7 @@
               <th>Kind</th>
               <th>Session Key</th>
               <th>Activity</th>
-              <th></th>
+              <th class="sessions-actions-cell text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -171,7 +215,7 @@
                   <div>Last auth {formatDate(session.lastAuth)}</div>
                   <div>Created {formatDate(session.createdAt)}</div>
                 </td>
-                <td class="text-right">
+                <td class="sessions-actions-cell text-right">
                   <div class="flex items-center justify-end gap-2">
                     {#if isCurrentSession(session)}
                       <span class="badge badge-info badge-sm">Current</span>
@@ -253,3 +297,18 @@
     {/if}
   {/if}
 </section>
+
+<ConfirmationModal bind:this={confirmationModal} />
+
+<style>
+  :global(.sessions-table .sessions-actions-cell) {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    background-color: var(--color-base-100);
+  }
+
+  :global(.sessions-table thead .sessions-actions-cell) {
+    z-index: 2;
+  }
+</style>

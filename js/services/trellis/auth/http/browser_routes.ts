@@ -28,6 +28,7 @@ import {
 import { validateRedirectTo } from "../redirect.ts";
 import { getApprovalResolutionErrorMessage } from "./approval_errors.ts";
 import type { AuthHttpRouteContext } from "./route_context.ts";
+import { OIDCUserInfoError } from "../providers/oidc.ts";
 import {
   buildRedirectLocation,
   type CookieContext,
@@ -186,6 +187,15 @@ function oauthAuthorizationErrorMessage(error: unknown): string | null {
     : providerError
     ? `Identity provider rejected sign-in: ${providerError}`
     : "Identity provider rejected sign-in.";
+}
+
+function oauthUserInfoErrorMessage(error: unknown): string | null {
+  if (!(error instanceof OIDCUserInfoError)) return null;
+  return error.providerErrorDescription
+    ? `Identity provider rejected user profile request: ${error.providerErrorDescription}`
+    : error.providerError
+    ? `Identity provider rejected user profile request: ${error.providerError}`
+    : "Identity provider rejected user profile request.";
 }
 
 /** Registers browser login and OAuth callback HTTP endpoints. */
@@ -560,11 +570,6 @@ export function registerBrowserAuthRoutes(
       throw new HTTPException(400, { message: "Missing state parameter" });
     }
 
-    const cookieState = getCookie(c as CookieContext, "trellis_oauth");
-    if (!cookieState || cookieState !== state) {
-      throw new HTTPException(400, { message: "OAuth cookie mismatch" });
-    }
-
     const stateHash = await hashKey(state);
     const oauthStateEntry = await oauthStateKV.get(stateHash).take();
     if (isErr(oauthStateEntry)) {
@@ -573,6 +578,22 @@ export function registerBrowserAuthRoutes(
     const oauthEntry = oauthStateEntry as OAuthStateEntry;
     if (oauthEntry.value.provider !== providerId) {
       throw new HTTPException(400, { message: "OAuth provider mismatch" });
+    }
+
+    const cookieState = getCookie(c as CookieContext, "trellis_oauth");
+    if (!cookieState || cookieState !== state) {
+      logger.warn(
+        { hasCookie: Boolean(cookieState), provider: providerId },
+        "OAuth callback cookie mismatch",
+      );
+      if (oauthEntry.value.kind === "browser_login") {
+        return c.redirect(
+          buildRedirectLocation(oauthEntry.value.redirectTo, {
+            authError: "Sign-in session expired or changed. Please try again.",
+          }),
+        );
+      }
+      throw new HTTPException(400, { message: "OAuth cookie mismatch" });
     }
 
     const oauthDeleted = await oauthEntry.delete(true);
@@ -612,7 +633,23 @@ export function registerBrowserAuthRoutes(
 
     const { accessToken } = tokens;
 
-    const user = await provider.getUserInfo(accessToken);
+    const user = await provider.getUserInfo(accessToken).catch((error) => {
+      const message = oauthUserInfoErrorMessage(error);
+      if (!message) throw error;
+      logger.warn(
+        { error, provider: providerId },
+        "OAuth provider rejected userinfo request",
+      );
+      if (oauthEntry.value.kind === "browser_login") {
+        return c.redirect(
+          buildRedirectLocation(oauthEntry.value.redirectTo, {
+            authError: message,
+          }),
+        );
+      }
+      throw new HTTPException(400, { message });
+    });
+    if (user instanceof Response) return user;
     if (user.provider !== providerId) {
       throw new HTTPException(400, { message: "OAuth provider mismatch" });
     }

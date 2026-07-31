@@ -15,6 +15,28 @@ const OIDCUserInfoSchema = Type.Object({
 
 type FetchImpl = typeof fetch;
 
+/** Error raised when an OIDC provider rejects the userinfo request. */
+export class OIDCUserInfoError extends Error {
+  readonly status: number;
+  readonly providerError?: string;
+  readonly providerErrorDescription?: string;
+
+  constructor(args: {
+    status: number;
+    providerError?: string;
+    providerErrorDescription?: string;
+  }) {
+    super(
+      args.providerErrorDescription ?? args.providerError ??
+        "OIDC userinfo request failed",
+    );
+    this.name = "OIDCUserInfoError";
+    this.status = args.status;
+    this.providerError = args.providerError;
+    this.providerErrorDescription = args.providerErrorDescription;
+  }
+}
+
 let fetchImpl: FetchImpl = fetch;
 
 export const __testing__ = {
@@ -125,7 +147,24 @@ export class OIDC extends OIDCProvider {
     const response = await fetchImpl(userInfoEndpoint, {
       headers: { authorization: `Bearer ${token}` },
     });
-    const payload = Value.Parse(OIDCUserInfoSchema, await response.json());
+    const body = await response.json();
+    if (!response.ok) {
+      const providerError = typeof body === "object" && body !== null &&
+          typeof Reflect.get(body, "error") === "string"
+        ? Reflect.get(body, "error")
+        : undefined;
+      const providerErrorDescription = typeof body === "object" &&
+          body !== null &&
+          typeof Reflect.get(body, "error_description") === "string"
+        ? Reflect.get(body, "error_description")
+        : undefined;
+      throw new OIDCUserInfoError({
+        status: response.status,
+        ...(providerError ? { providerError } : {}),
+        ...(providerErrorDescription ? { providerErrorDescription } : {}),
+      });
+    }
+    const payload = Value.Parse(OIDCUserInfoSchema, body);
 
     return {
       provider: this.name,

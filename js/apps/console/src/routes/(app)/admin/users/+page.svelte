@@ -1,15 +1,18 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type { AuthUsersListOutput } from "@qlever-llc/trellis/sdk/auth";
+  import { loadSessionKey } from "@qlever-llc/trellis/auth/browser";
+  import type { AuthSessionsRevokeInput, AuthUsersListOutput } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
+  import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
+  import { describeSessionPrincipal, formatShortKey, participantKindBadgeClass, participantKindLabel, type SessionRecord } from "../../../../lib/auth_display.ts";
   import { errorMessage, formatDate } from "../../../../lib/format";
   import { getNotifications } from "../../../../lib/notifications.svelte";
   import { getTrellis } from "../../../../lib/trellis";
@@ -71,17 +74,30 @@
     return providers.join(", ");
   }
 
+  function sessionsForUser(userId: string): SessionRecord[] {
+    return sessions.filter((session) => session.principal.type === "user" && session.principal.userId === userId);
+  }
+
   let loading = $state(true);
   let error = $state<string | null>(null);
   let sessionsWarning = $state<string | null>(null);
   let users = $state<UserView[]>([]);
+  let sessions = $state<SessionRecord[]>([]);
   let userLastAuth = $state<Record<string, string>>({});
+  let selectedUserId = $state<string | null>(null);
+  let currentSessionKey = $state<string | null>(null);
+  let revokePending = $state(false);
+  let confirmationModal: ConfirmationModal | undefined = $state();
   let resetPendingUserId = $state<string | null>(null);
   let resetResult = $state<PasswordResetResult | null>(null);
   let resetDialog = $state<HTMLDialogElement | null>(null);
 
   const activeUserCount = $derived(users.filter((user) => user.active).length);
   const inactiveUserCount = $derived(users.length - activeUserCount);
+  const selectedUser = $derived(users.find((user) => user.userId === selectedUserId) ?? null);
+  const selectedUserSessions = $derived(selectedUserId
+    ? sessions.filter((session) => session.principal.type === "user" && session.principal.userId === selectedUserId)
+    : []);
 
   async function load() {
     loading = true;
@@ -91,16 +107,19 @@
       const usersResponse = await trellis.request("Auth.Users.List", { limit: 500, offset: 0 }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       users = usersResponse.entries ?? [];
+      currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
 
       const sessionsResponse = await trellis.request("Auth.Sessions.List", { limit: 500, offset: 0 }).take();
       if (isErr(sessionsResponse)) {
         sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
         userLastAuth = {};
+        sessions = [];
         return;
       }
+      sessions = sessionsResponse.entries ?? [];
 
       const lastAuthByUser: Record<string, string> = {};
-      for (const session of sessionsResponse.entries ?? []) {
+      for (const session of sessions) {
         if (session.principal.type !== "user") continue;
         const key = session.principal.userId;
         if (!lastAuthByUser[key] || session.lastAuth > lastAuthByUser[key]) {
@@ -110,6 +129,43 @@
       userLastAuth = lastAuthByUser;
     } catch (e) { error = errorMessage(e); }
     finally { loading = false; }
+  }
+
+  async function revokeSessions(targetSessions: SessionRecord[], title: string, targetUser = selectedUser) {
+    if (revokePending || targetSessions.length === 0) return;
+    const includesCurrentSession = targetSessions.some((session) => session.sessionKey === currentSessionKey);
+    const confirmed = await confirmationModal?.confirm({
+      title,
+      message: includesCurrentSession
+        ? "This includes your current console session. Continuing will force this app to sign in again."
+        : `This immediately invalidates ${targetSessions.length} active user session${targetSessions.length !== 1 ? "s" : ""}.`,
+      confirmLabel: targetSessions.length === 1 ? "Revoke session" : "Revoke sessions",
+      targetLabel: "User",
+      targetName: targetUser ? identityLabel(targetUser) : undefined,
+      expectedValue: targetSessions.length === 1 ? targetSessions[0].sessionKey : "REVOKE",
+      details: targetSessions.length === 1
+        ? "Type the session key to confirm."
+        : "Type REVOKE to confirm revoking all sessions shown for this user.",
+    });
+    if (!confirmed) return;
+
+    revokePending = true;
+    try {
+      const orderedSessions = [...targetSessions].sort((left, right) => Number(left.sessionKey === currentSessionKey) - Number(right.sessionKey === currentSessionKey));
+      for (const session of orderedSessions) {
+        const response = await trellis.request("Auth.Sessions.Revoke", { sessionKey: session.sessionKey } satisfies AuthSessionsRevokeInput).take();
+        if (isErr(response)) {
+          notifications.error(errorMessage(response), "Revoke failed");
+          return;
+        }
+      }
+      notifications.success(`Revoked ${targetSessions.length} session${targetSessions.length !== 1 ? "s" : ""}.`, "Sessions revoked");
+      await load();
+    } catch (e) {
+      notifications.error(errorMessage(e), "Revoke failed");
+    } finally {
+      revokePending = false;
+    }
   }
 
   async function createPasswordReset(user: UserView) {
@@ -212,7 +268,7 @@
         </thead>
         <tbody>
           {#each users as user (user.userId)}
-            <tr class={["users-row", !user.active && "users-row-inactive"]}>
+            <tr class={["users-row", selectedUserId === user.userId && "users-row-selected", !user.active && "users-row-inactive"]}>
               <td class="max-w-0 align-top">
                 <div class="flex min-w-0 items-start gap-3">
                   <span class={["mt-1.5 size-2 rounded-full", user.active ? "bg-success" : "bg-base-content/25"]} aria-hidden="true"></span>
@@ -246,6 +302,8 @@
               </td>
               <td class="w-24 whitespace-nowrap text-right align-top">
                 <ActionMenu widthClass="w-44">
+                    <li><button type="button" onclick={() => { selectedUserId = user.userId; }}>View sessions</button></li>
+                    <li><button class="text-error" type="button" onclick={() => { selectedUserId = user.userId; void revokeSessions(sessionsForUser(user.userId), "Revoke all sessions for this user?", user); }} disabled={revokePending || sessionsForUser(user.userId).length === 0}>Revoke sessions</button></li>
                     <li><a href={resolve(`/admin/users/edit?userId=${encodeURIComponent(user.userId)}`)}>Edit</a></li>
                     <li><button type="button" onclick={() => void createPasswordReset(user)} disabled={resetPendingUserId !== null}>{resetPendingUserId === user.userId ? "Creating reset..." : "Create reset link"}</button></li>
                 </ActionMenu>
@@ -255,6 +313,67 @@
         </tbody>
       </DataTable>
       <p class="text-xs text-base-content/50">{users.length} user{users.length !== 1 ? "s" : ""}</p>
+
+      {#if selectedUser}
+        <Panel title="Active sessions" eyebrow="Selected user">
+          <div class="space-y-3">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div class="min-w-0">
+                <div class="truncate text-sm font-medium" title={identityLabel(selectedUser)}>{identityLabel(selectedUser)}</div>
+                <div class="trellis-identifier truncate text-xs text-base-content/60" title={selectedUser.userId}>{selectedUser.userId}</div>
+              </div>
+              <button class="btn btn-error btn-sm" type="button" onclick={() => void revokeSessions(selectedUserSessions, "Revoke all sessions for this user?")} disabled={revokePending || selectedUserSessions.length === 0}>{revokePending ? "Revoking..." : "Revoke all sessions"}</button>
+            </div>
+
+            {#if selectedUserSessions.length === 0}
+              <EmptyState title="No active sessions" description="This user does not currently have active sessions." />
+            {:else}
+              <DataTable fixed tableClass="w-full" overflow="visible">
+                <colgroup>
+                  <col class="w-[40%]" />
+                  <col class="w-28" />
+                  <col class="w-36" />
+                  <col class="w-40" />
+                  <col class="w-24" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Principal</th>
+                    <th>Kind</th>
+                    <th>Session Key</th>
+                    <th>Activity</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each selectedUserSessions as session (session.key)}
+                    {@const summary = describeSessionPrincipal(session)}
+                    <tr>
+                      <td class="min-w-0">
+                        <div class="truncate font-medium" title={summary.title}>{summary.title}</div>
+                        {#if summary.details}
+                          <div class="truncate text-xs text-base-content/60" title={summary.details}>{summary.details}</div>
+                        {/if}
+                      </td>
+                      <td>
+                        <span class={["badge badge-sm", participantKindBadgeClass(session.participantKind)]}>{participantKindLabel(session.participantKind)}</span>
+                      </td>
+                      <td class="trellis-identifier text-base-content/60">{formatShortKey(session.sessionKey)}</td>
+                      <td class="text-xs text-base-content/60">
+                        <div>Last auth {formatDate(session.lastAuth)}</div>
+                        <div>Created {formatDate(session.createdAt)}</div>
+                      </td>
+                      <td class="text-right">
+                        <button class="btn btn-ghost btn-xs text-error" type="button" onclick={() => void revokeSessions([session], "Revoke this session?")} disabled={revokePending}>Revoke</button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </DataTable>
+            {/if}
+          </div>
+        </Panel>
+      {/if}
     </div>
   {/if}
 </section>
@@ -297,6 +416,8 @@
   </form>
 </dialog>
 
+<ConfirmationModal bind:this={confirmationModal} />
+
 <style>
   :global(.users-table) {
     min-width: 0;
@@ -320,6 +441,14 @@
     background-color: color-mix(
       in oklab,
       var(--color-base-content) 2.5%,
+      transparent
+    );
+  }
+
+  .users-row-selected {
+    background-color: color-mix(
+      in oklab,
+      var(--color-primary) 8%,
       transparent
     );
   }

@@ -1,6 +1,6 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 
-import { __testing__, OIDC } from "./oidc.ts";
+import { __testing__, OIDC, OIDCUserInfoError } from "./oidc.ts";
 
 function createProvider(opts: {
   logout?: {
@@ -73,6 +73,42 @@ Deno.test("OIDC provider maps userinfo claims using sub as stable id", async () 
     assertEquals(user.email, "ada@example.com");
     assertEquals(user.emailVerified, true);
     assertEquals(user.picture, "https://example.com/avatar.png");
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("OIDC provider maps userinfo error responses", async () => {
+  const provider = createProvider();
+  const restore = __testing__.setFetch(
+    async (input: Request | URL | string) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.href
+        : input.url;
+      if (url.endsWith("/.well-known/openid-configuration")) {
+        return Response.json({
+          userinfo_endpoint: "https://tenant.example.auth0.com/userinfo",
+        });
+      }
+      return Response.json({
+        error: "access_denied",
+        error_description: "Too Many Requests",
+        error_uri: "https://auth0.com/docs/policies/rate-limits",
+      }, { status: 429 });
+    },
+  );
+
+  try {
+    const error = await assertRejects(
+      () => provider.getUserInfo("access-token"),
+      OIDCUserInfoError,
+      "Too Many Requests",
+    );
+    assertEquals(error.status, 429);
+    assertEquals(error.providerError, "access_denied");
+    assertEquals(error.providerErrorDescription, "Too Many Requests");
   } finally {
     restore();
   }

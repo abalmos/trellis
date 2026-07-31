@@ -659,7 +659,7 @@ Deno.test("getApprovalResolution uses injected loaders", async () => {
 
   assertEquals(resolution.userId, expectedUserId);
   assertEquals(resolution.identityId, linkedIdentity.identityId);
-  assertEquals(resolution.missingCapabilities, ["audit"]);
+  assertEquals(resolution.missingCapabilities, []);
   assertEquals(resolution.existingProjection, {
     origin: "account",
     id: linkedUserId,
@@ -927,7 +927,7 @@ Deno.test("getApprovalResolution keeps user approval explicit despite stored den
   });
   assertEquals(resolution.existingCapabilities, []);
   assertEquals(resolution.effectiveCapabilities, []);
-  assertEquals(resolution.missingCapabilities, ["audit"]);
+  assertEquals(resolution.missingCapabilities, []);
   assertEquals(resolution.matchedPolicies, []);
   assertEquals(resolution.effectiveApproval, { answer: "none", kind: "none" });
   assertEquals(resolution.storedApproval, null);
@@ -1437,7 +1437,7 @@ Deno.test("getApprovalResolution does not approve partial or unrelated grant ove
     ],
   });
 
-  assertEquals(resolution.missingCapabilities, ["admin"]);
+  assertEquals(resolution.missingCapabilities, []);
   assertEquals(resolution.effectiveApproval, { answer: "none", kind: "none" });
 });
 
@@ -1565,7 +1565,7 @@ Deno.test("getApprovalResolution does not treat deployment authority capabilitie
   });
 
   assertEquals(resolution.effectiveCapabilities, []);
-  assertEquals(resolution.missingCapabilities, ["audit"]);
+  assertEquals(resolution.missingCapabilities, []);
   assertEquals(resolution.systemAvailabilityAuthority?.capabilities, [{
     capability: "audit",
     required: true,
