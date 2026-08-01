@@ -8,6 +8,28 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.23-rc.2] - 2026-07-31
+
+### Added
+
+- Added Console admin session-management affordances for viewing and revoking
+  user sessions from the sessions and users admin pages.
+
+### Fixed
+
+- Fixed service bootstrap registration so service-owned capability definitions
+  are forwarded into the HTTP bootstrap routes and refreshed for Console
+  capability-group assignment.
+- Fixed browser auth callback handoff to use the bind response connection info
+  directly instead of starting a second bootstrap/auth flow.
+- Fixed optional app-use approval planning so optional capabilities are included
+  as non-blocking grants and only delegated when the user has them.
+- Improved OAuth callback and userinfo error handling so browser login failures
+  return clear app-facing errors instead of terminal callback failures.
+- Added private-network CORS preflight support for browser auth/bootstrap routes.
+- Improved capability-group validation errors for built-in groups and unknown
+  capabilities.
+
 ## [0.10.23-rc.1] - 2026-06-26
 
 ### Changed
