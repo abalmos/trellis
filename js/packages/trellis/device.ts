@@ -1,4 +1,4 @@
-import { type Authenticator, type NatsConnection } from "@nats-io/nats-core";
+import type { NatsConnection } from "@nats-io/nats-core";
 import {
   AsyncResult,
   type BaseError,
@@ -15,26 +15,16 @@ import { compileProtocolArtifacts } from "./contract_support/protocol_artifacts.
 import {
   deriveDeviceIdentity,
   verifyDeviceConfirmationCode,
+  waitForDeviceActivation,
 } from "./auth/device_activation.ts";
-import {
-  importEd25519PrivateKeyFromSeedBase64url,
-  signEd25519SeedSha256,
-} from "./auth/keys.ts";
 import {
   base64urlDecode,
   base64urlEncode,
   sha256,
-  toArrayBuffer,
   utf8,
 } from "./auth/utils.ts";
-import {
-  correctedIatSeconds,
-  estimateMidpointClockOffsetMs,
-} from "./auth/time.ts";
-import {
-  buildNatsConnectSignaturePayload,
-  createAuth,
-} from "./auth/session_auth.ts";
+import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
+import { createAuth } from "./auth/session_auth.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
   sessionProofRequestDigestV1,
@@ -49,7 +39,7 @@ import { type ServiceHealth, ServiceHealthRuntime } from "./server/health.ts";
 import { publishHealthHeartbeatSample } from "./health_transport.ts";
 import { type RuntimeStateStoresForContract, Trellis } from "./session.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
-import { TransferError, TransportError } from "./errors/index.ts";
+import { TransportError } from "./errors/index.ts";
 import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
 import { observeNatsTrellisConnection } from "./connection.ts";
@@ -58,6 +48,7 @@ import {
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
   type AuthorizationContextPersistence,
+  AuthorizationProviderCache,
   MemoryAuthorizationContextStore,
   startAuthorizationContextRefresh,
 } from "./auth/authorization_context.ts";
@@ -137,15 +128,6 @@ type DeviceConnectDeps = {
   loadTransport(): Promise<DeviceConnectTransport>;
   now(): number;
 };
-
-const ClientTransportEndpointsSchema = Type.Object({
-  natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-});
-
-const ClientTransportsSchema = Type.Object({
-  native: Type.Optional(ClientTransportEndpointsSchema),
-  websocket: Type.Optional(ClientTransportEndpointsSchema),
-});
 
 export type TrellisDevicePendingActivationState = {
   status: "pending";
@@ -322,50 +304,6 @@ function normalizeRootSecret(rootSecret: Uint8Array | string): Uint8Array {
   return rootSecret;
 }
 
-async function signIdentityBytes(
-  identitySeed: Uint8Array,
-  data: Uint8Array,
-): Promise<Uint8Array> {
-  const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    base64urlEncode(identitySeed),
-  );
-  return new Uint8Array(
-    await crypto.subtle.sign("Ed25519", privateKey, toArrayBuffer(data)),
-  );
-}
-
-function createDeviceNatsAuthTokenAuthenticator(args: {
-  publicIdentityKey: string;
-  identitySeed: Uint8Array;
-  contractDigest: string;
-  now: () => number;
-  getServerClockOffsetMs: () => number;
-}): Authenticator {
-  return () => {
-    const iat = correctedIatSeconds(
-      args.now(),
-      args.getServerClockOffsetMs(),
-    );
-    const sig = signEd25519SeedSha256(
-      args.identitySeed,
-      new TextEncoder().encode(
-        `nats-connect:${
-          buildNatsConnectSignaturePayload(iat, args.contractDigest)
-        }`,
-      ),
-    );
-    return {
-      auth_token: JSON.stringify({
-        v: 1,
-        sessionKey: args.publicIdentityKey,
-        iat,
-        sig: base64urlEncode(new Uint8Array(sig)),
-        contractDigest: args.contractDigest,
-      }),
-    };
-  };
-}
-
 const defaultDeps: DeviceConnectDeps = {
   loadTransport: loadDefaultRuntimeTransport,
   now: () => Date.now(),
@@ -442,44 +380,12 @@ async function readJsonResponse(
   }
 }
 
-function parseResponseRecord(text: string): Record<string, unknown> | null {
-  if (text.length === 0) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function resolveDeviceLogger(log?: LoggerLike | false): LoggerLike {
   if (log === false) {
     return noopLogger;
   }
 
   return log ?? noopLogger;
-}
-
-async function readResponseReason(response: Response): Promise<string | null> {
-  const text = await response.text();
-  if (!text) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>;
-    if (typeof parsed.reason === "string" && parsed.reason.length > 0) {
-      return parsed.reason;
-    }
-  } catch {
-    return text;
-  }
-
-  return text;
 }
 
 function createActivationRequiredTransportError(
@@ -553,7 +459,7 @@ function assertActivationStateMatchesContract(args: {
   }
 }
 
-async function createActivationSession<
+function createActivationSession<
   TLocalState extends TrellisDeviceLocalActivationState,
 >(args: {
   trellisUrl: string;
@@ -563,7 +469,7 @@ async function createActivationSession<
   contract: DeviceContract;
   now: () => number;
   localState: TLocalState;
-}): Promise<TrellisDeviceActivationSession<TLocalState>> {
+}): TrellisDeviceActivationSession<TLocalState> {
   assertActivationStateMatchesIdentity({
     localState: args.localState,
     publicIdentityKey: args.identity.publicIdentityKey,
@@ -582,28 +488,20 @@ async function createActivationSession<
         return activatedState;
       }
 
-      while (!opts?.signal?.aborted) {
-        const bootstrap = await fetchDeviceBootstrap({
-          trellisUrl: args.trellisUrl,
-          deviceIdentity: args.identity,
-          provisioned: args.provisioned,
-          contract: args.contract,
-          now: args.now,
-          offsetState: { serverClockOffsetMs: 0 },
-          reviewId: args.localState.flowId,
-          signal: opts?.signal,
-        });
-        if (bootstrap.status === "ready") return activatedState;
-        if (bootstrap.status === "not_ready") {
-          throw createTransportError({
-            code: "trellis.auth.device_activation_rejected",
-            message: "Device activation was rejected.",
-            hint: "Request activation again.",
-            context: { reviewId: args.localState.flowId },
-          });
-        }
-      }
-      throw opts?.signal?.reason ?? new DOMException("Aborted", "AbortError");
+      await waitForDeviceActivation({
+        trellisUrl: args.trellisUrl,
+        publicIdentityKey: args.identity.publicIdentityKey,
+        identitySeed: args.identity.identitySeed,
+        deploymentId: args.provisioned.deploymentId,
+        instanceId: args.provisioned.instanceId,
+        principalId: args.provisioned.principalId,
+        participantId: args.provisioned.participantId,
+        participantArtifactDigest: args.provisioned.participantArtifactDigest,
+        participantNeedsDigest: args.provisioned.participantNeedsDigest,
+        nonce: args.localState.nonce,
+        signal: opts?.signal,
+      });
+      return activatedState;
     },
     acceptConfirmationCode: async (code: string) => {
       if (args.localState.status === "activated") {
@@ -635,7 +533,7 @@ async function fetchDeviceBootstrap(args: {
   contract: DeviceContract;
   now: () => number;
   offsetState: DeviceClockOffsetState;
-  reviewId?: string;
+  activationNonce?: string;
   signal?: AbortSignal;
 }): Promise<DeviceBootstrapResponse> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -656,7 +554,9 @@ async function fetchDeviceBootstrap(args: {
       await sha256(base64urlDecode(identityAuth.sessionKey)),
     );
     const challengeDigest = base64urlEncode(
-      await sha256(utf8(`${args.provisioned.principalId}:${requestId}`)),
+      await sha256(utf8(
+        args.activationNonce ?? `${args.provisioned.principalId}:${requestId}`,
+      )),
     );
     const presentation = await compileProtocolArtifacts(args.contract);
     const unsigned = {
@@ -684,57 +584,28 @@ async function fetchDeviceBootstrap(args: {
     };
     const requestDigest = await sessionProofRequestDigestV1(unsigned);
     const response = await fetch(
-      new URL(
-        args.reviewId === undefined
-          ? "/bootstrap/device"
-          : "/auth/devices/activate/wait",
-        args.trellisUrl,
-      ),
+      new URL("/bootstrap/device", args.trellisUrl),
       {
         method: "POST",
         signal: args.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          args.reviewId === undefined
-            ? {
-              ...unsigned,
-              proof: await identityAuth.signSessionProof({
-                purpose: "deviceBootstrap",
-                requestId,
-                issuedAt,
-                deploymentId: args.provisioned.deploymentId,
-                instanceId: args.provisioned.instanceId,
-                deviceIdentityKeyId,
-                newSessionPublicKey: sessionAuth.sessionKey,
-                newSessionNkey: sessionAuth.sessionNkey,
-                participantId: args.provisioned.participantId,
-                participantDigest: args.provisioned.participantArtifactDigest,
-                challengeDigest,
-                requestDigest,
-              }),
-            }
-            : {
-              reviewId: args.reviewId,
-              waitMs: 30_000,
-              bootstrap: {
-                ...unsigned,
-                proof: await identityAuth.signSessionProof({
-                  purpose: "deviceBootstrap",
-                  requestId,
-                  issuedAt,
-                  deploymentId: args.provisioned.deploymentId,
-                  instanceId: args.provisioned.instanceId,
-                  deviceIdentityKeyId,
-                  newSessionPublicKey: sessionAuth.sessionKey,
-                  newSessionNkey: sessionAuth.sessionNkey,
-                  participantId: args.provisioned.participantId,
-                  participantDigest: args.provisioned.participantArtifactDigest,
-                  challengeDigest,
-                  requestDigest,
-                }),
-              },
-            },
-        ),
+        body: JSON.stringify({
+          ...unsigned,
+          proof: await identityAuth.signSessionProof({
+            purpose: "deviceBootstrap",
+            requestId,
+            issuedAt,
+            deploymentId: args.provisioned.deploymentId,
+            instanceId: args.provisioned.instanceId,
+            deviceIdentityKeyId,
+            newSessionPublicKey: sessionAuth.sessionKey,
+            newSessionNkey: sessionAuth.sessionNkey,
+            participantId: args.provisioned.participantId,
+            participantDigest: args.provisioned.participantArtifactDigest,
+            challengeDigest,
+            requestDigest,
+          }),
+        }),
       },
     );
     const responseReceivedAtMs = args.now();
@@ -838,6 +709,7 @@ export async function startDeviceActivationWithDeps<
 > {
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
+  const nonce = ulid();
   const activation = await fetchDeviceBootstrap({
     trellisUrl: args.trellisUrl,
     deviceIdentity: identity,
@@ -845,6 +717,7 @@ export async function startDeviceActivationWithDeps<
     contract: args.contract,
     now: deps.now,
     offsetState: { serverClockOffsetMs: 0 },
+    activationNonce: nonce,
   });
   if (activation.status !== "activation_required") {
     throw createTransportError({
@@ -854,8 +727,6 @@ export async function startDeviceActivationWithDeps<
       context: { status: activation.status },
     });
   }
-  const nonce = ulid();
-
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
     contractDigest: args.contract.CONTRACT_DIGEST,
@@ -985,11 +856,12 @@ export async function connectDeviceWithDeps<
   });
   const sessionOptions = await bootstrap.sessionAuth.natsConnectOptions({
     sessionId: connectInfo.sessionId,
-    participantDigest: connectInfo.contractDigest,
     contextDigest: () => authorizationContexts.current().contextDigest,
     jwt: () => authorizationContexts.routingJwt(),
   });
-  let nc: NatsConnection;
+  let nc: NatsConnection | undefined;
+  let authorizationProviderCache: AuthorizationProviderCache | undefined;
+  let stopContextRefresh: (() => void) | undefined;
   try {
     nc = await transport.connect({
       servers: selectRuntimeTransportServers(connectInfo.transports),
@@ -998,17 +870,29 @@ export async function connectDeviceWithDeps<
       inboxPrefix: connectInfo.transport.inboxPrefix,
       authenticator: sessionOptions.authenticator,
     });
-    const stopContextRefresh = startAuthorizationContextRefresh({
+    const connectedNats = nc;
+    authorizationProviderCache = await AuthorizationProviderCache.attach(
+      connectedNats,
+      authorizationContexts.bundle().trust.authorizationRegistry,
+      authorizationContexts,
+    );
+    authorizationProviderCache.start();
+    await authorizationProviderCache.waitReady();
+    stopContextRefresh = startAuthorizationContextRefresh({
       trellisUrl: args.trellisUrl,
       sessionId: connectInfo.sessionId,
       auth: bootstrap.sessionAuth,
       cache: authorizationContexts,
-      onTerminalFailure: () => nc.drain(),
+      onTerminalFailure: () => connectedNats.drain(),
     });
-    void nc.closed().finally(() => {
-      stopContextRefresh();
+    void connectedNats.closed().finally(() => {
+      stopContextRefresh?.();
+      authorizationProviderCache?.stop();
     });
   } catch (cause) {
+    authorizationProviderCache?.stop();
+    stopContextRefresh?.();
+    if (nc && !nc.isClosed()) await nc.close();
     throw createTransportError({
       code: "trellis.runtime.connect_failed",
       message: "Trellis could not open the device runtime connection.",
@@ -1017,6 +901,10 @@ export async function connectDeviceWithDeps<
       cause,
       context: { contractId: args.contract.CONTRACT_ID },
     });
+  }
+
+  if (!nc || !authorizationProviderCache) {
+    throw new Error("Trellis device runtime connection was not established");
   }
 
   const connection = observeNatsTrellisConnection({
@@ -1028,6 +916,9 @@ export async function connectDeviceWithDeps<
       context: { contractId: args.contract.CONTRACT_ID },
     },
   });
+  connection.subscribe((status) =>
+    authorizationProviderCache.observeConnectionPhase(status.phase)
+  );
 
   const trellis = new Trellis<
     RuntimeApi,
@@ -1039,6 +930,8 @@ export async function connectDeviceWithDeps<
     {
       sessionKey: bootstrap.sessionAuth.sessionKey,
       sign: bootstrap.sessionAuth.sign,
+      contextDigest: () => authorizationContexts.current().contextDigest,
+      authorizationProviderCache,
     },
     {
       log,

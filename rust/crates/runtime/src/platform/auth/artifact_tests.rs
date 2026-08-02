@@ -3,9 +3,10 @@ use trellis_protocol::{
     lint_api_v1_authoring, lint_participant_v1_authoring, parse_api_v1, parse_participant_v1,
 };
 
-const AUTH_API_DIGEST: &str = "nyfMRub9NVIpXgo3CkJZ07_FeMvu599wV3NaXTLrrpQ";
-const AUTH_PARTICIPANT_DIGEST: &str = "U9XsOROqKFKS7uDfCuyJv5xuEeDQxCJco3X2u1F1s1A";
-const ADMIN_PARTICIPANT_DIGEST: &str = "c99Tmz1QGCWU8XxvGgTR93M9vmtALE9d7W9M8tATYv4";
+const AUTH_API_DIGEST: &str = "k-AVuZetf28XCxaYc2HEIzbafPeA63WeRgg0YmHtia0";
+const AUTH_PARTICIPANT_DIGEST: &str = "plMjQVw7Fp3Q5R---qSTLjypJJaUU7A5hT_ayaTpd0k";
+const ADMIN_PARTICIPANT_DIGEST: &str = "lQoimvKOcLmB4Acn3Q5roDNXQe4KlY3RjUvJ10hJ6CY";
+const ADMIN_PARTICIPANT_NEEDS_DIGEST: &str = "bqA3XWyeUSFZUzDOLAjpCODp__crKL4hwd6mVf7nrIU";
 
 #[test]
 fn source_auth_artifacts_are_valid_and_digest_pinned() {
@@ -40,5 +41,15 @@ fn source_auth_artifacts_are_valid_and_digest_pinned() {
     assert_eq!(
         admin.digest().expect("digest admin participant"),
         ADMIN_PARTICIPANT_DIGEST
+    );
+    let auth = parse_api_v1(&api_value).expect("validate auth API");
+    let resolved = trellis_protocol::resolve_participant_v1(
+        &admin,
+        &std::collections::BTreeMap::from([(auth.id().to_owned(), auth)]),
+    )
+    .expect("resolve admin participant");
+    assert_eq!(
+        resolved.needs().digest().expect("digest admin needs"),
+        ADMIN_PARTICIPANT_NEEDS_DIGEST
     );
 }

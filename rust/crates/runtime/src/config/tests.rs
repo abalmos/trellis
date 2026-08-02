@@ -29,7 +29,6 @@ xkey_seed_file = "./nats/auth-callout-xkey.seed"
 [auth.authorization]
 trust_root_file = "./auth/authorization-root.json"
 issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
-issuer_certificate_files = ["./auth/authorization-issuer-certificate.json"]
 issuer_signing_seed_file = "./auth/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
@@ -264,7 +263,6 @@ password_min_length = 8
 [auth.authorization]
 trust_root_file = "./auth/authorization-root.json"
 issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
-issuer_certificate_files = ["./auth/authorization-issuer-certificate.json"]
 issuer_signing_seed_file = "./auth/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
@@ -368,6 +366,23 @@ replicas = 1
         PathBuf::from("./nats/auth-runtime.creds")
     );
 
+    let overridden = config
+        .resolve_nats_runtime_with(Some("nats://127.0.0.1:4223"))
+        .expect("resolve nats with override");
+    assert_eq!(overridden.servers, "nats://127.0.0.1:4223");
+    assert_eq!(
+        overridden.auth_creds_path, nats.auth_creds_path,
+        "override replaces only the server list"
+    );
+    assert_eq!(
+        config
+            .resolve_nats_runtime_with(None)
+            .expect("resolve nats without override")
+            .servers,
+        "nats://127.0.0.1:4222",
+        "None keeps the configured servers"
+    );
+
     let auth_callout = config
         .resolve_nats_auth_callout()
         .expect("resolve auth callout");
@@ -403,7 +418,6 @@ client_secret_file = "./secrets/google"
 [auth.authorization]
 trust_root_file = "./auth/root.json"
 issuer_manifest_file = "./auth/manifest.json"
-issuer_certificate_files = ["./auth/issuer.json"]
 issuer_signing_seed_file = "./auth/issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
@@ -458,10 +472,6 @@ path = "./data/platform.sqlite"
         authorization.trust_root_file,
         directory.path().join("./auth/root.json")
     );
-    assert_eq!(
-        authorization.issuer_certificate_files,
-        vec![directory.path().join("./auth/issuer.json")]
-    );
 }
 
 #[test]
@@ -471,7 +481,6 @@ fn authorization_config_rejects_root_seed_and_invalid_policy() {
 [auth.authorization]
 trust_root_file = "root.json"
 issuer_manifest_file = "manifest.json"
-issuer_certificate_files = ["issuer.json"]
 issuer_signing_seed_file = "issuer.seed"
 root_signing_seed_file = "root.seed"
 context_lifetime_seconds = 300
@@ -497,7 +506,6 @@ registry_replicas = 1
 [auth.authorization]
 trust_root_file = "root.json"
 issuer_manifest_file = "manifest.json"
-issuer_certificate_files = ["issuer.json"]
 issuer_signing_seed_file = "issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 300
@@ -568,6 +576,24 @@ system_creds_path = "./nats/system-runtime.creds"
 issuer_signing_seed_file = "./nats/auth-issuer-signing.seed"
 target_signing_seed_file = "./nats/trellis-target-signing.seed"
 xkey_seed_file = "./nats/auth-callout-xkey.seed"
+
+[auth.authorization]
+trust_root_file = "./auth/root.json"
+issuer_manifest_file = "./auth/manifest.json"
+issuer_signing_seed_file = "./auth/issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
 
 [jobs.storage]
 kind = "sqlite"
@@ -904,6 +930,24 @@ servers = "nats://127.0.0.1:4222"
 auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
+
+[auth.authorization]
+trust_root_file = "./auth/root.json"
+issuer_manifest_file = "./auth/manifest.json"
+issuer_signing_seed_file = "./auth/issuer.seed"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 60
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
 
 [jobs.storage]
 kind = "sqlite"

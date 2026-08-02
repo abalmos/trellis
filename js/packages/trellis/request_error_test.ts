@@ -72,6 +72,7 @@ Deno.test("Trellis.request returns declared RPC errors as Err results", async ()
   const trellis = new Trellis("request-error-test", nc, {
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   }, {
     api: getContractRuntime(contract).ownedApi,
   });
@@ -99,6 +100,7 @@ Deno.test("Trellis.request maps unavailable capability routes to TransportError"
   const trellis = new Trellis("request-error-test", nc, {
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   }, {
     api: getContractRuntime(contract).ownedApi,
     noResponderRetry: { maxAttempts: 0, baseDelayMs: 0 },
@@ -133,6 +135,7 @@ Deno.test("Trellis.request maps denied request routes to TransportError", async 
   const trellis = new Trellis("request-error-test", nc, {
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   }, {
     api: getContractRuntime(contract).ownedApi,
   });
@@ -173,6 +176,7 @@ Deno.test("Trellis.request maps invalid JSON replies to TransportError", async (
   const trellis = new Trellis("request-error-test", nc, {
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   }, {
     api: getContractRuntime(contract).ownedApi,
   });
@@ -201,6 +205,7 @@ Deno.test("Trellis.operation start maps unavailable capability routes to Transpo
   const trellis = new Trellis("request-error-test", nc, {
     sessionKey: "session-key",
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   }, {
     api: getContractRuntime(contract).ownedApi,
     noResponderRetry: { maxAttempts: 0, baseDelayMs: 0 },

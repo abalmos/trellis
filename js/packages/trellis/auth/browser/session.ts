@@ -13,11 +13,6 @@ import {
 } from "../keys.ts";
 import { createProof } from "../proof.ts";
 import {
-  buildLogoutSignaturePayload,
-  type LogoutSignaturePayloadInput,
-} from "../schemas.ts";
-import { buildNatsConnectSignaturePayload } from "../session_auth.ts";
-import {
   deleteKeyPair,
   hasKeyPair,
   loadKeyPair,
@@ -169,42 +164,20 @@ export async function bindFlowSig(
   return base64urlEncode(sig);
 }
 
-export async function natsConnectSigForIat(
-  handle: SessionKeyHandle,
-  iat: number,
-  contractDigest: string,
-): Promise<string> {
-  const digest = await sha256(
-    utf8(
-      `nats-connect:${buildNatsConnectSignaturePayload(iat, contractDigest)}`,
-    ),
-  );
-  const sig = await signBytes(handle, digest);
-  return base64urlEncode(sig);
-}
-
-export async function logoutSessionSig(
-  handle: SessionKeyHandle,
-  input: LogoutSignaturePayloadInput,
-): Promise<string> {
-  const digest = await sha256(
-    utf8(`logout-session:${buildLogoutSignaturePayload(input)}`),
-  );
-  const sig = await signBytes(handle, digest);
-  return base64urlEncode(sig);
-}
-
 export async function createRpcProof(
   handle: SessionKeyHandle,
+  contextDigest: string,
   subject: string,
+  reply: string,
   payload: Uint8Array,
   requestId: string,
   iat: number,
 ): Promise<string> {
   const payloadHash = await sha256(payload);
   return await createProof(handle.privateKey, {
-    sessionKey: handle.sessionKey,
+    contextDigest,
     subject,
+    reply,
     payloadHash,
     iat,
     requestId,

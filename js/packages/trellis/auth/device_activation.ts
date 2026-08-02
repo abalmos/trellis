@@ -2,27 +2,21 @@ import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { BaseError } from "@qlever-llc/result";
-import { AsyncResult } from "@qlever-llc/result";
+import type { AsyncResult } from "@qlever-llc/result";
 import type { OperationRef } from "../operations.ts";
 
 import {
   importEd25519PrivateKeyFromSeedBase64url,
-  importEd25519PublicKeyFromBase64url,
   publicKeyBase64urlFromPrivateKey,
 } from "./keys.ts";
-import type { NatsAuthTokenV1 } from "./schemas.ts";
 import {
-  AuthDevicesConnectInfoGetResponseSchema,
-  AuthDevicesConnectInfoGetSchema,
-  AuthDeviceUserAuthoritiesListResponseSchema,
-  AuthDeviceUserAuthoritiesListSchema,
-  AuthDeviceUserAuthoritiesRevokeResponseSchema,
-  AuthDeviceUserAuthoritiesRevokeSchema,
-  AuthResolveDeviceUserAuthoritiesProgressSchema,
-  AuthResolveDeviceUserAuthoritiesResponseSchema,
-  AuthResolveDeviceUserAuthoritiesSchema,
-  WaitForDeviceActivationRequestSchema,
-  WaitForDeviceActivationResponseSchema,
+  type AuthDeviceUserAuthoritiesListResponseSchema,
+  type AuthDeviceUserAuthoritiesListSchema,
+  type AuthDeviceUserAuthoritiesRevokeResponseSchema,
+  type AuthDeviceUserAuthoritiesRevokeSchema,
+  type AuthResolveDeviceUserAuthoritiesProgressSchema,
+  type AuthResolveDeviceUserAuthoritiesResponseSchema,
+  type AuthResolveDeviceUserAuthoritiesSchema,
 } from "./protocol.ts";
 import {
   base64urlDecode,
@@ -31,7 +25,12 @@ import {
   toArrayBuffer,
   utf8,
 } from "./utils.ts";
-import { buildNatsConnectSignaturePayload } from "./session_auth.ts";
+import { createAuth } from "./session_auth.ts";
+import {
+  SESSION_PROOF_FORMAT_V1,
+  sessionProofRequestDigestV1,
+} from "./session_proof.ts";
+import { ulid } from "ulid";
 
 const DEVICE_IDENTITY_HKDF_INFO = "trellis/device-identity/v1";
 const DEVICE_ACTIVATION_HKDF_INFO = "trellis/device-activate/v1";
@@ -47,17 +46,8 @@ export const DeviceActivationPayloadSchema = Type.Object({
   qrMac: Type.String({ minLength: 1 }),
 });
 
-export const DeviceActivationWaitRequestSchema =
-  WaitForDeviceActivationRequestSchema;
-
 export type DeviceActivationPayload = StaticDecode<
   typeof DeviceActivationPayloadSchema
->;
-export type DeviceActivationWaitRequest = StaticDecode<
-  typeof DeviceActivationWaitRequestSchema
->;
-export type WaitForDeviceActivationResponse = StaticDecode<
-  typeof WaitForDeviceActivationResponseSchema
 >;
 export type AuthResolveDeviceUserAuthoritiesInput = StaticDecode<
   typeof AuthResolveDeviceUserAuthoritiesSchema
@@ -80,13 +70,6 @@ export type AuthDeviceUserAuthoritiesRevokeInput = StaticDecode<
 export type AuthDeviceUserAuthoritiesRevokeResponse = StaticDecode<
   typeof AuthDeviceUserAuthoritiesRevokeResponseSchema
 >;
-export type GetDeviceConnectInfoInput = StaticDecode<
-  typeof AuthDevicesConnectInfoGetSchema
->;
-export type GetDeviceConnectInfoOutput = StaticDecode<
-  typeof AuthDevicesConnectInfoGetResponseSchema
->;
-
 export type DeviceIdentity = {
   identitySeed: Uint8Array;
   identitySeedBase64url: string;
@@ -120,9 +103,6 @@ export type DeviceActivationTransport = {
   authDeviceUserAuthoritiesRevoke(
     input: AuthDeviceUserAuthoritiesRevokeInput,
   ): AsyncResult<AuthDeviceUserAuthoritiesRevokeResponse, BaseError>;
-  authDevicesConnectInfoGet(
-    input: GetDeviceConnectInfoInput,
-  ): AsyncResult<GetDeviceConnectInfoOutput, BaseError>;
 };
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {
@@ -227,18 +207,6 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     }
     signal?.addEventListener("abort", onAbort, { once: true });
   });
-}
-
-function retryAfterDelayMs(response: Response): number | null {
-  const value = response.headers.get("Retry-After");
-  if (!value) return null;
-
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
-
-  const dateMs = Date.parse(value);
-  if (!Number.isFinite(dateMs)) return null;
-  return Math.max(0, dateMs - Date.now());
 }
 
 async function responseErrorDetail(response: Response): Promise<string | null> {
@@ -422,145 +390,89 @@ export async function verifyDeviceConfirmationCode(input: {
     normalizeCrockford(input.confirmationCode);
 }
 
-export function buildDeviceWaitProofInput(
-  flowId: string,
-  publicIdentityKey: string,
-  nonce: string,
-  iat: number,
-  contractDigest: string,
-): Uint8Array {
-  const enc = new TextEncoder();
-  const flowIdBytes = enc.encode(flowId);
-  const publicIdentityKeyBytes = enc.encode(publicIdentityKey);
-  const nonceBytes = enc.encode(nonce);
-  const iatBytes = enc.encode(String(iat));
-  const contractDigestBytes = enc.encode(contractDigest);
-  const buf = new Uint8Array(
-    4 + flowIdBytes.length +
-      4 + publicIdentityKeyBytes.length +
-      4 + nonceBytes.length +
-      4 + iatBytes.length +
-      4 + contractDigestBytes.length,
-  );
-  const view = new DataView(buf.buffer);
-  let offset = 0;
-  view.setUint32(offset, flowIdBytes.length);
-  offset += 4;
-  buf.set(flowIdBytes, offset);
-  offset += flowIdBytes.length;
-  view.setUint32(offset, publicIdentityKeyBytes.length);
-  offset += 4;
-  buf.set(publicIdentityKeyBytes, offset);
-  offset += publicIdentityKeyBytes.length;
-  view.setUint32(offset, nonceBytes.length);
-  offset += 4;
-  buf.set(nonceBytes, offset);
-  offset += nonceBytes.length;
-  view.setUint32(offset, iatBytes.length);
-  offset += 4;
-  buf.set(iatBytes, offset);
-  offset += iatBytes.length;
-  view.setUint32(offset, contractDigestBytes.length);
-  offset += 4;
-  buf.set(contractDigestBytes, offset);
-  return buf;
-}
-
-export async function signDeviceWaitRequest(args: {
-  flowId: string;
-  publicIdentityKey: string;
-  nonce: string;
-  identitySeed: Uint8Array | string;
-  contractDigest: string;
-  iat?: number;
-}): Promise<DeviceActivationWaitRequest> {
-  const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
-  const identityPrivateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    base64urlEncode(identitySeed),
-  );
-  const iat = args.iat ?? Math.floor(Date.now() / 1_000);
-  const proofInput = buildDeviceWaitProofInput(
-    args.flowId,
-    args.publicIdentityKey,
-    args.nonce,
-    iat,
-    args.contractDigest,
-  );
-  const proofHash = await sha256(proofInput);
-  const signature = new Uint8Array(
-    await crypto.subtle.sign(
-      "Ed25519",
-      identityPrivateKey,
-      toArrayBuffer(proofHash),
-    ),
-  );
-  return {
-    flowId: args.flowId,
-    publicIdentityKey: args.publicIdentityKey,
-    nonce: args.nonce,
-    contractDigest: args.contractDigest,
-    iat,
-    sig: base64urlEncode(signature),
-  };
-}
-
-export async function createDeviceNatsAuthToken(args: {
-  publicIdentityKey: string;
-  identitySeed: Uint8Array | string;
-  contractDigest: string;
-  iat?: number;
-}): Promise<NatsAuthTokenV1 & { contractDigest: string }> {
-  const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
-  const identityPrivateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    base64urlEncode(identitySeed),
-  );
-  const iat = args.iat ?? Math.floor(Date.now() / 1_000);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    toArrayBuffer(
-      utf8(
-        `nats-connect:${
-          buildNatsConnectSignaturePayload(iat, args.contractDigest)
-        }`,
-      ),
-    ),
-  );
-  const signature = new Uint8Array(
-    await crypto.subtle.sign("Ed25519", identityPrivateKey, digest),
-  );
-  return {
-    v: 1,
-    sessionKey: args.publicIdentityKey,
-    iat,
-    sig: base64urlEncode(signature),
-    contractDigest: args.contractDigest,
-  };
-}
-
+/**
+ * Retry the proof-bound device bootstrap operation until activation completes.
+ *
+ * Each attempt re-signs the same bootstrap request; the server returns
+ * `activation_pending` with a suggested `retryAfterMs` until the device is
+ * approved, then `ready`.
+ */
 export async function waitForDeviceActivation(args: {
   trellisUrl: string;
-  flowId: string;
   publicIdentityKey: string;
-  nonce: string;
   identitySeed: Uint8Array | string;
-  contractDigest: string;
+  deploymentId: string;
+  instanceId: string;
+  principalId: string;
+  participantId: string;
+  participantArtifactDigest: string;
+  participantNeedsDigest: string;
+  nonce?: string;
   signal?: AbortSignal;
   pollIntervalMs?: number;
-}): Promise<
-  Extract<WaitForDeviceActivationResponse, { status: "activated" }>
-> {
+}): Promise<void> {
   const pollIntervalMs = args.pollIntervalMs ?? DEFAULT_WAIT_POLL_INTERVAL_MS;
+  const nonce = args.nonce ?? ulid();
+  const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
+  const challengeDigest = base64urlEncode(await sha256(utf8(nonce)));
   while (true) {
-    const request = await signDeviceWaitRequest(args);
+    const requestId = ulid();
+    const issuedAt = Date.now();
+    const identityAuth = await createAuth({
+      sessionKeySeed: base64urlEncode(identitySeed),
+    });
+    const sessionAuth = await createAuth({
+      sessionKeySeed: base64urlEncode(
+        crypto.getRandomValues(new Uint8Array(32)),
+      ),
+    });
+    const deviceIdentityKeyId = base64urlEncode(
+      await sha256(base64urlDecode(identityAuth.sessionKey)),
+    );
+    const unsigned = {
+      requestId,
+      issuedAt,
+      deploymentId: args.deploymentId,
+      instanceId: args.instanceId,
+      deviceIdentityKeyId,
+      principalId: args.principalId,
+      identityPublicKey: identityAuth.sessionKey,
+      provisioningSecret: null,
+      expectedSecretVersion: null,
+      newSessionPublicKey: sessionAuth.sessionKey,
+      newSessionNkey: sessionAuth.sessionNkey,
+      participantId: args.participantId,
+      participantArtifactDigest: args.participantArtifactDigest,
+      participantNeedsDigest: args.participantNeedsDigest,
+      challengeDigest,
+      proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+    };
+    const requestDigest = await sessionProofRequestDigestV1(unsigned);
     let response: Response;
     try {
       response = await fetch(
-        new URL("/auth/devices/activate/wait", args.trellisUrl),
+        new URL("/bootstrap/device", args.trellisUrl),
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(request),
           signal: args.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...unsigned,
+            proof: await identityAuth.signSessionProof({
+              purpose: "deviceBootstrap",
+              requestId,
+              issuedAt,
+              deploymentId: args.deploymentId,
+              instanceId: args.instanceId,
+              deviceIdentityKeyId,
+              newSessionPublicKey: sessionAuth.sessionKey,
+              newSessionNkey: sessionAuth.sessionNkey,
+              participantId: args.participantId,
+              participantDigest: args.participantArtifactDigest,
+              challengeDigest,
+              requestDigest,
+            }),
+          }),
         },
       );
     } catch (error) {
@@ -571,77 +483,32 @@ export async function waitForDeviceActivation(args: {
       continue;
     }
     if (!response.ok) {
-      if (response.status === 429) {
-        const retryAfterMs = retryAfterDelayMs(response);
-        await sleep(
-          retryAfterMs === null
-            ? pollIntervalMs
-            : Math.max(pollIntervalMs, retryAfterMs),
-          args.signal,
-        );
-        continue;
-      }
       const detail = await responseErrorDetail(response);
       throw new Error(
         detail
-          ? `device activation wait failed: ${response.status} ${detail}`
-          : `device activation wait failed: ${response.status}`,
+          ? `device activation bootstrap failed: ${response.status} ${detail}`
+          : `device activation bootstrap failed: ${response.status}`,
       );
     }
-    const body = await response.json();
-    if (!Value.Check(WaitForDeviceActivationResponseSchema, body)) {
-      throw new Error("Invalid device activation wait response");
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null) {
+      throw new Error("Invalid device activation bootstrap response");
     }
-    if (body.status === "pending") {
-      await sleep(pollIntervalMs, args.signal);
-      continue;
+    const state = Reflect.get(body, "state") as unknown;
+    if (state === "ready") {
+      return;
     }
-    if (body.status === "rejected") {
-      throw new Error(
-        `device activation rejected: ${body.reason ?? "unknown_reason"}`,
-      );
-    }
-    return body;
+    const activation = Reflect.get(body, "activation") as
+      | Record<
+        string,
+        unknown
+      >
+      | null;
+    const retryAfterMs = typeof activation?.retryAfterMs === "number"
+      ? activation.retryAfterMs
+      : pollIntervalMs;
+    await sleep(Math.max(pollIntervalMs, retryAfterMs), args.signal);
   }
-}
-
-export async function getDeviceConnectInfo(args: {
-  trellisUrl: string;
-  publicIdentityKey: string;
-  identitySeed: Uint8Array | string;
-  contractDigest: string;
-  iat?: number;
-}): Promise<GetDeviceConnectInfoOutput> {
-  const request = await signDeviceWaitRequest({
-    flowId: "connect-info",
-    publicIdentityKey: args.publicIdentityKey,
-    identitySeed: args.identitySeed,
-    contractDigest: args.contractDigest,
-    nonce: "connect-info",
-    iat: args.iat,
-  });
-  const payload: GetDeviceConnectInfoInput = {
-    publicIdentityKey: request.publicIdentityKey,
-    contractDigest: args.contractDigest,
-    iat: request.iat,
-    sig: request.sig,
-  };
-  const response = await fetch(
-    new URL("/auth/devices/connect-info", args.trellisUrl),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`device connect info failed: ${response.status}`);
-  }
-  const body = await response.json();
-  if (!Value.Check(AuthDevicesConnectInfoGetResponseSchema, body)) {
-    throw new Error("Invalid device connect info response");
-  }
-  return body;
 }
 
 export function createDeviceActivationClient(
@@ -657,31 +524,5 @@ export function createDeviceActivationClient(
     revokeDeviceActivation(input: AuthDeviceUserAuthoritiesRevokeInput) {
       return client.authDeviceUserAuthoritiesRevoke(input).orThrow();
     },
-    getDeviceConnectInfo(input: GetDeviceConnectInfoInput) {
-      return client.authDevicesConnectInfoGet(input).orThrow();
-    },
   };
-}
-
-export async function verifyDeviceWaitSignature(
-  input: DeviceActivationWaitRequest,
-): Promise<boolean> {
-  const publicKey = await importEd25519PublicKeyFromBase64url(
-    input.publicIdentityKey,
-  );
-  const proofHash = await sha256(
-    buildDeviceWaitProofInput(
-      input.flowId,
-      input.publicIdentityKey,
-      input.nonce,
-      input.iat,
-      input.contractDigest,
-    ),
-  );
-  return await crypto.subtle.verify(
-    "Ed25519",
-    publicKey,
-    toArrayBuffer(base64urlDecode(input.sig)),
-    toArrayBuffer(proofHash),
-  );
 }

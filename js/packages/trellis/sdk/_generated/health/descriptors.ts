@@ -36,6 +36,13 @@ export const HealthInspect = rpcAction(
   "Health.Inspect",
   {
     subject: "rpc.v1.Health.Inspect",
+    permission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Health.Inspect",
+      action: "call",
+    }),
     input: schema<Types.HealthInspectInput>(HealthInspectRequestSchema),
     output: schema<Types.HealthInspectOutput>(HealthInspectResponseSchema),
     callerCapabilities: ["trellis.health::read"] as const,
@@ -62,6 +69,13 @@ export const HealthMetrics = rpcAction(
   "Health.Metrics",
   {
     subject: "rpc.v1.Health.Metrics",
+    permission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Health.Metrics",
+      action: "call",
+    }),
     input: schema<Types.HealthMetricsInput>(HealthMetricsRequestSchema),
     output: schema<Types.HealthMetricsOutput>(HealthMetricsResponseSchema),
     callerCapabilities: ["trellis.health::read"] as const,
@@ -77,6 +91,13 @@ export const HealthQuery = rpcAction(
   "Health.Query",
   {
     subject: "rpc.v1.Health.Query",
+    permission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Health.Query",
+      action: "call",
+    }),
     input: schema<Types.HealthQueryInput>(HealthQueryRequestSchema),
     output: schema<Types.HealthQueryOutput>(HealthQueryResponseSchema),
     callerCapabilities: ["trellis.health::read"] as const,
@@ -92,6 +113,20 @@ export const HealthStatusChanged = eventActions(
   "Health.StatusChanged",
   {
     subject: "events.v1.Health.StatusChanged",
+    publishPermission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Health.StatusChanged",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Health.StatusChanged",
+      action: "subscribe",
+    }),
     event: schema<Types.HealthStatusChangedEvent>(
       HealthStatusChangedEventSchema,
     ),
@@ -108,6 +143,13 @@ export const HealthWatch = feedAction(
   "Health.Watch",
   {
     subject: "feed.v1.Health.Watch",
+    permission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "feed",
+      surfaceName: "Health.Watch",
+      action: "subscribe",
+    }),
     input: schema<Types.HealthWatchInput>(HealthWatchRequestSchema),
     event: schema<Types.HealthWatchEvent>(HealthWatchFrameSchema),
     subscribeCapabilities: ["trellis.health::read"] as const,

@@ -207,8 +207,8 @@ export const EventLogQueryRequestSchema = {
     "offset": { "minimum": 0, "type": "integer" },
     "ownerContractId": { "type": "string" },
     "ownerEventName": { "type": "string" },
-    "publisherContractId": { "type": "string" },
     "publisherDeploymentId": { "type": "string" },
+    "publisherParticipantId": { "type": "string" },
     "resolution": {
       "items": {
         "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
@@ -221,17 +221,7 @@ export const EventLogQueryRequestSchema = {
     "sort": { "additionalProperties": true, "type": "object" },
     "subject": { "type": "string" },
     "verificationStatus": {
-      "items": {
-        "anyOf": [
-          { "const": "verified" },
-          { "const": "missing-proof" },
-          { "const": "invalid-signature" },
-          { "const": "missing-session" },
-          { "const": "subject-denied" },
-          { "const": "outside-session-window" },
-          { "const": "auth-unavailable" },
-        ],
-      },
+      "items": { "anyOf": [{ "const": "verified" }] },
       "type": "array",
     },
     "window": {

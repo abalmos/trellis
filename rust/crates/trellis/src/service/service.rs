@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use serde_json::Value;
 
+use super::local_validator::VerifiedCaller;
 use super::request_loop::HandlerResponse;
 use super::{RequestContext, Router, ServerError};
 
@@ -12,7 +12,7 @@ pub struct RequestValidation {
     #[doc = concat!("The `", stringify!(allowed), "` value.")]
     pub allowed: bool,
     #[doc = concat!("The `", stringify!(caller), "` value.")]
-    pub caller: Option<Value>,
+    pub caller: Option<VerifiedCaller>,
     /// Server-authorized reply inbox prefix for this session.
     pub inbox_prefix: Option<String>,
 }
@@ -30,7 +30,7 @@ impl RequestValidation {
 
     /// Construct an allowed validation result with caller metadata.
     #[doc = concat!("Trellis API operation `", stringify!(allowed_caller), "`.")]
-    pub fn allowed_caller(caller: Value) -> Self {
+    pub fn allowed_caller(caller: VerifiedCaller) -> Self {
         Self {
             allowed: true,
             caller: Some(caller),
@@ -57,6 +57,39 @@ pub trait RequestValidator: Send + Sync {
         payload: &'a Bytes,
         context: &'a RequestContext,
     ) -> BoxFuture<'a, Result<RequestValidation, ServerError>>;
+
+    /// Verify caller possession for a separately grant-authorized transport request.
+    fn validate_possession<'a>(
+        &'a self,
+        subject: &'a str,
+        payload: &'a Bytes,
+        context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
+        self.validate(subject, payload, context)
+    }
+}
+
+impl<V> RequestValidator for std::sync::Arc<V>
+where
+    V: RequestValidator + ?Sized,
+{
+    fn validate<'a>(
+        &'a self,
+        subject: &'a str,
+        payload: &'a Bytes,
+        context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
+        (**self).validate(subject, payload, context)
+    }
+
+    fn validate_possession<'a>(
+        &'a self,
+        subject: &'a str,
+        payload: &'a Bytes,
+        context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
+        (**self).validate_possession(subject, payload, context)
+    }
 }
 
 /// A router wrapper that enforces auth validation before handler execution.
@@ -241,6 +274,7 @@ where
     ) -> Result<RequestContext, ServerError> {
         Ok(RequestContext {
             required_capabilities: self.router.required_capabilities(subject, payload)?,
+            required_permission: self.router.required_permission(subject, payload)?,
             ..context
         })
     }

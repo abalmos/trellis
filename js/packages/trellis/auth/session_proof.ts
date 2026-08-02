@@ -1,8 +1,8 @@
-import { ed25519 } from "@noble/curves/ed25519.js";
-import { sha256 as sha256Sync } from "@noble/hashes/sha256";
-import { Codec } from "@nats-io/nkeys/lib/codec.js";
 import { Prefix } from "@nats-io/nkeys";
+import { Codec } from "@nats-io/nkeys/lib/codec.js";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
+import { importEd25519PublicKeyFromBase64url } from "./keys.ts";
 import {
   base64urlDecode,
   base64urlEncode,
@@ -11,21 +11,16 @@ import {
   toArrayBuffer,
   utf8,
 } from "./utils.ts";
-import { importEd25519PublicKeyFromBase64url } from "./keys.ts";
 
-/** Strict wire format for bootstrap, session-control, and NATS connect proofs. */
+/** Strict wire format for auth, bootstrap, and authorization-context refresh proofs. */
 export const SESSION_PROOF_FORMAT_V1 = "trellis.session-proof.v1" as const;
 
 /** One fixed session-proof signature domain. */
 export type SessionProofPurposeV1 =
   | "userAuthRequest"
-  | "clientBootstrap"
   | "serviceBootstrap"
   | "deviceBootstrap"
-  | "natsConnect"
-  | "sessionSelfControl"
-  | "authorizationContextRefresh"
-  | "natsConnectContext";
+  | "authorizationContextRefresh";
 
 type CommonInput = {
   requestId: string;
@@ -41,16 +36,6 @@ export type SessionProofInputV1 =
     participantId: string;
     participantDigest: string;
     redirectTarget: string;
-    requestDigest: string;
-  }
-  | CommonInput & {
-    purpose: "clientBootstrap";
-    sessionId: string;
-    sessionKeyId: string;
-    sessionPublicKey: string;
-    sessionNkey: string;
-    expectedParticipantDigest: string | null;
-    expectedNeedsDigest: string | null;
     requestDigest: string;
   }
   | CommonInput & {
@@ -77,21 +62,6 @@ export type SessionProofInputV1 =
     requestDigest: string;
   }
   | CommonInput & {
-    purpose: "natsConnect";
-    sessionId: string;
-    sessionKeyId: string;
-    sessionPublicKey: string;
-    sessionNkey: string;
-    participantDigest: string;
-    nonce: string;
-  }
-  | CommonInput & {
-    purpose: "sessionSelfControl";
-    sessionId: string;
-    sessionKeyId: string;
-    requestDigest: string;
-  }
-  | CommonInput & {
     purpose: "authorizationContextRefresh";
     sessionId: string;
     sessionKeyId: string;
@@ -101,16 +71,6 @@ export type SessionProofInputV1 =
     knownRootKeyId: string;
     minimumManifestGeneration: number;
     requestDigest: string;
-  }
-  | CommonInput & {
-    purpose: "natsConnectContext";
-    sessionId: string;
-    sessionKeyId: string;
-    sessionPublicKey: string;
-    sessionNkey: string;
-    participantDigest: string;
-    contextDigest: string;
-    nonce: string;
   };
 
 /** One strict session-proof signature envelope. */
@@ -123,14 +83,6 @@ export type SessionProofV1 = {
 export type SessionProofPolicyV1 = {
   maximumAgeMs: number;
   maximumFutureSkewMs: number;
-};
-
-/** Stable replay identity returned by successful proof verification. */
-export type SessionProofReplayKeyV1 = {
-  purpose: SessionProofPurposeV1;
-  signerKeyId: string;
-  requestId: string;
-  transcriptDigest: string;
 };
 
 const MAXIMUM_SAFE_INTEGER = 9_007_199_254_740_991;
@@ -255,10 +207,7 @@ function assertSignerPublicKey(
   signerPublicKey: string,
 ): void {
   if (
-    (input.purpose === "userAuthRequest" ||
-      input.purpose === "clientBootstrap" ||
-      input.purpose === "natsConnect" ||
-      input.purpose === "natsConnectContext") &&
+    input.purpose === "userAuthRequest" &&
     input.sessionPublicKey !== signerPublicKey
   ) {
     throw new Error(
@@ -297,29 +246,6 @@ export function buildSessionProofTranscriptV1(
         assertText(input.participantId, "participantId"),
         decodeFixed(input.participantDigest, 32, "participantDigest"),
         assertText(input.redirectTarget, "redirectTarget"),
-        decodeFixed(input.requestDigest, 32, "requestDigest"),
-      );
-      break;
-    }
-    case "clientBootstrap": {
-      const sessionKey = assertPublicKey(
-        input.sessionPublicKey,
-        "sessionPublicKey",
-      );
-      const sessionNkey = assertNkey(
-        input.sessionNkey,
-        sessionKey,
-        "sessionNkey",
-      );
-      fields.push(
-        assertText(input.sessionId, "sessionId"),
-        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
-        sessionNkey,
-        optionalDigest(
-          input.expectedParticipantDigest,
-          "expectedParticipantDigest",
-        ),
-        optionalDigest(input.expectedNeedsDigest, "expectedNeedsDigest"),
         decodeFixed(input.requestDigest, 32, "requestDigest"),
       );
       break;
@@ -373,32 +299,6 @@ export function buildSessionProofTranscriptV1(
       );
       break;
     }
-    case "natsConnect": {
-      const sessionKey = assertPublicKey(
-        input.sessionPublicKey,
-        "sessionPublicKey",
-      );
-      const sessionNkey = assertNkey(
-        input.sessionNkey,
-        sessionKey,
-        "sessionNkey",
-      );
-      fields.push(
-        assertText(input.sessionId, "sessionId"),
-        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
-        sessionNkey,
-        decodeFixed(input.participantDigest, 32, "participantDigest"),
-        assertText(input.nonce, "nonce"),
-      );
-      break;
-    }
-    case "sessionSelfControl":
-      fields.push(
-        assertText(input.sessionId, "sessionId"),
-        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
-        decodeFixed(input.requestDigest, 32, "requestDigest"),
-      );
-      break;
     case "authorizationContextRefresh": {
       if (
         !Number.isSafeInteger(input.minimumManifestGeneration) ||
@@ -420,26 +320,6 @@ export function buildSessionProofTranscriptV1(
         decodeFixed(input.knownRootKeyId, 32, "knownRootKeyId"),
         utf8(String(input.minimumManifestGeneration)),
         decodeFixed(input.requestDigest, 32, "requestDigest"),
-      );
-      break;
-    }
-    case "natsConnectContext": {
-      const sessionKey = assertPublicKey(
-        input.sessionPublicKey,
-        "sessionPublicKey",
-      );
-      const sessionNkey = assertNkey(
-        input.sessionNkey,
-        sessionKey,
-        "sessionNkey",
-      );
-      fields.push(
-        assertText(input.sessionId, "sessionId"),
-        decodeFixed(input.sessionKeyId, 32, "sessionKeyId"),
-        sessionNkey,
-        decodeFixed(input.participantDigest, 32, "participantDigest"),
-        decodeFixed(input.contextDigest, 32, "contextDigest"),
-        assertText(input.nonce, "nonce"),
       );
       break;
     }
@@ -581,42 +461,7 @@ export async function signSessionProofV1(
   };
 }
 
-/** Sign a session proof synchronously for NATS authenticator callbacks. */
-export function signSessionProofV1Sync(
-  input: SessionProofInputV1,
-  seed: Uint8Array,
-  signerPublicKey: string,
-): SessionProofV1 {
-  assertSignerPublicKey(input, signerPublicKey);
-  if (seed.length !== 32) throw new Error("Ed25519 seed must be 32 bytes");
-  const publicBytes = assertPublicKey(signerPublicKey, "signerPublicKey");
-  if (
-    !ed25519.getPublicKey(seed).every((byte, index) =>
-      byte === publicBytes[index]
-    )
-  ) {
-    throw new Error(
-      "private key does not match the declared signer public key",
-    );
-  }
-  const expectedKeyId = base64urlEncode(sha256Sync(publicBytes));
-  const keyId = "sessionKeyId" in input
-    ? input.sessionKeyId
-    : "provisionedIdentityKeyId" in input
-    ? input.provisionedIdentityKeyId
-    : "deviceIdentityKeyId" in input
-    ? input.deviceIdentityKeyId
-    : base64urlEncode(sha256Sync(publicBytes));
-  if (keyId !== expectedKeyId) throw new Error("signer key ID mismatch");
-  return {
-    format: SESSION_PROOF_FORMAT_V1,
-    signature: base64urlEncode(
-      ed25519.sign(sha256Sync(buildSessionProofTranscriptV1(input)), seed),
-    ),
-  };
-}
-
-/** Verify one session proof and return its runtime replay identity. */
+/** Verify one session proof. */
 export async function verifySessionProofV1(
   input: SessionProofInputV1,
   proof: SessionProofV1,
@@ -626,7 +471,7 @@ export async function verifySessionProofV1(
     maximumAgeMs: 30_000,
     maximumFutureSkewMs: 30_000,
   },
-): Promise<SessionProofReplayKeyV1> {
+): Promise<void> {
   const parsedProof = parseSessionProofV1(proof);
   assertSignerPublicKey(input, signerPublicKey);
   if (
@@ -665,11 +510,4 @@ export async function verifySessionProofV1(
   ) {
     throw new Error("session proof signature verification failed");
   }
-
-  return {
-    purpose: input.purpose,
-    signerKeyId: expectedKeyId,
-    requestId: input.requestId,
-    transcriptDigest: base64urlEncode(transcriptDigest),
-  };
 }

@@ -8,11 +8,13 @@ mod auth;
 mod bootstrap;
 mod deploy;
 mod self_cmd;
+mod server;
 
 pub use auth::*;
 pub use bootstrap::*;
 pub use deploy::*;
 pub use self_cmd::*;
+pub use server::*;
 
 #[derive(Debug, Parser)]
 #[command(name = "trellis", version = env!("TRELLIS_BUILD_VERSION"), about = "Trellis CLI")]
@@ -72,6 +74,8 @@ pub enum TopLevelCommand {
     Version,
     /// Generate shell completion scripts for Trellis.
     Completion { shell: Shell },
+    /// Run the Trellis runtime with an auto-managed local NATS server.
+    Server(ServerArgs),
 }
 
 #[derive(Debug, clap::Args)]

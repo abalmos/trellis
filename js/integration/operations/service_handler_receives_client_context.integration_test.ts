@@ -18,7 +18,12 @@ liveTrellisTest({
         assertExists(client);
         assertExists(caller);
         assertEquals(input.message, fixture.message);
-        assert(caller.active, "operation caller should be active");
+        if (caller.type !== "verified") {
+          throw new Error("expected a verified caller");
+        }
+        assertEquals(caller.participant.kind, "app");
+        assertEquals(caller.participant.id, fixture.clientContract.CONTRACT.id);
+        assert(caller.sessionId.length > 0);
         return Result.ok({ message: caller.type, done: true });
       });
 
@@ -33,6 +38,7 @@ liveTrellisTest({
       const terminal = await ref.wait().orThrow();
       assertEquals(terminal.state, "completed");
       assertEquals(terminal.output?.done, true);
+      assertEquals(terminal.output?.message, "verified");
     } finally {
       await service.stop();
     }

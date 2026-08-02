@@ -207,6 +207,7 @@ export type {
   HandlerStoreHandle,
   HandlerTrellis,
   HandlerTrellisForContract,
+  InternalCaller,
   MapStateStoreClient,
   OperationHandlerContext,
   OperationHandlerErrorOf,
@@ -229,5 +230,6 @@ export type {
   TrellisEventHeader,
   TrellisEventMessage,
   ValueStateStoreClient,
+  VerifiedCaller,
 } from "./session.ts";
 export type { TrellisDeviceConnection } from "./device.ts";

@@ -73,6 +73,14 @@ impl Caller {
         )
     }
 
+    /// Return the connected NATS client for live transport-boundary tests.
+    #[cfg(all(feature = "integration-test-scoping", feature = "test-support"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn integration_test_nats(&self) -> async_nats::Client {
+        self.client.integration_test_nats()
+    }
+
     /// Connect a user-authenticated generated participant.
     #[doc(hidden)]
     pub async fn connect_user(
@@ -105,14 +113,6 @@ impl Caller {
         self.client.call::<D>(input).await
     }
 
-    pub(crate) async fn request_json_value(
-        &self,
-        subject: &str,
-        input: &serde_json::Value,
-    ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
-        self.client.request_json_value(subject, input).await
-    }
-
     /// Send deliberately malformed wire input from Trellis integration tests.
     #[cfg(feature = "test-support")]
     #[doc(hidden)]
@@ -131,13 +131,6 @@ impl Caller {
         grant: &crate::client::DownloadTransferGrant,
     ) -> Result<Vec<u8>, crate::client::TrellisClientError> {
         self.client.download_transfer(grant).await
-    }
-
-    /// Flush the authenticated connection from Trellis integration tests.
-    #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub async fn test_flush(&self) -> Result<(), crate::client::TrellisClientError> {
-        self.client.flush().await
     }
 
     /// Call one generated RPC descriptor.

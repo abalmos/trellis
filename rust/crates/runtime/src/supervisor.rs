@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -18,12 +19,24 @@ const NATS_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 
 use crate::leases::{LeaseError, LeaseKey};
 use crate::ownership::{OwnerContext, OwnerGroup, RuntimeOwnership};
+use crate::platform::auth::verifier::RuntimeAuthVerifier;
 use crate::resources::{stream_is_compatible, ExpectedRuntimeResources};
 use crate::shutdown::StopHandle;
 use crate::storage::{RuntimeStores, StoreError};
 use crate::{
     eventlog, health, jobs, platform, RuntimeConfig, RuntimeMode, ServerError, SubsystemName,
 };
+
+/// Replacement for the configured NATS endpoints used by `trellis server`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NatsEndpointOverride {
+    /// Replacement native NATS server URL, used for the runtime connection and the
+    /// advertised native client endpoint.
+    pub servers: String,
+    /// Replacement advertised websocket endpoint. `None` keeps the configured value
+    /// (external `--nats` deployments); managed mode sets it to the local websocket.
+    pub websocket: Option<String>,
+}
 
 /// Runtime startup options for `trellis-server`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,6 +47,9 @@ pub struct RuntimeOptions {
     pub config_path: PathBuf,
     /// Explicitly rotate an unexpired pending first-administrator bootstrap flow.
     pub rotate_first_admin: bool,
+    /// Optional replacement for the configured NATS endpoints (the managed local NATS
+    /// server used by `trellis server`). `None` keeps the configured values.
+    pub nats_override: Option<NatsEndpointOverride>,
 }
 
 /// Status of one read-only runtime preflight check.
@@ -100,6 +116,16 @@ pub async fn check(
     mode: RuntimeMode,
     config_path: impl AsRef<std::path::Path>,
 ) -> Result<RuntimeCheckReport, RuntimeError> {
+    check_with_nats_servers(mode, config_path, None).await
+}
+
+/// Like [`check`], but connects to `nats_servers` instead of the configured server list
+/// (the managed local NATS server used by `trellis server --check`).
+pub async fn check_with_nats_servers(
+    mode: RuntimeMode,
+    config_path: impl AsRef<std::path::Path>,
+    nats_servers: Option<&str>,
+) -> Result<RuntimeCheckReport, RuntimeError> {
     let config_path = config_path.as_ref().to_path_buf();
     let mut report = RuntimeCheckReport {
         valid: true,
@@ -143,7 +169,7 @@ pub async fn check(
             return Ok(report);
         }
     }
-    let nats = match config.resolve_nats_runtime() {
+    let nats = match config.resolve_nats_runtime_with(nats_servers) {
         Ok(nats) => nats,
         Err(error) => {
             report.push("nats.config", RuntimeCheckStatus::Error, error.to_string());
@@ -340,10 +366,6 @@ async fn check_nats_connection(
         .await
         .map_err(|_| RuntimeError::Nats("connection timed out".to_owned()))?
         .map_err(|error| RuntimeError::Nats(error.to_string()))?;
-    client
-        .flush()
-        .await
-        .map_err(|error| RuntimeError::Nats(error.to_string()))?;
     Ok(client)
 }
 
@@ -515,6 +537,8 @@ pub(crate) struct RuntimeContext {
     pub(crate) mode: RuntimeMode,
     /// Whether startup must rotate the pending first-administrator bootstrap flow.
     pub(crate) rotate_first_admin: bool,
+    /// Optional replacement for the configured NATS endpoints (managed local NATS).
+    pub(crate) nats_override: Option<NatsEndpointOverride>,
     /// SQLite stores opened for the selected subsystems.
     pub(crate) stores: RuntimeStores,
     /// Trellis-account runtime NATS client shared by built-in subsystems.
@@ -522,6 +546,9 @@ pub(crate) struct RuntimeContext {
     /// Fixed owner contexts for selected runtime subsystems.
     owners: BTreeMap<OwnerGroup, OwnerContext>,
     http_router: std::sync::Mutex<axum::Router>,
+    /// Runtime-local Auth verifier installed by the platform subsystem once the
+    /// validator cache is ready; absent in platform-less modes (fail closed).
+    pub(crate) platform_verifier: Arc<tokio::sync::OnceCell<RuntimeAuthVerifier>>,
 }
 
 impl RuntimeContext {
@@ -575,7 +602,8 @@ enum RuntimeStopCause {
 pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
     let config = RuntimeConfig::load_from_path(&options.config_path)?;
     config.validate_for_mode(options.mode)?;
-    let nats = config.resolve_nats_runtime()?;
+    let nats = config
+        .resolve_nats_runtime_with(options.nats_override.as_ref().map(|o| o.servers.as_str()))?;
     let leases = config.resolve_leases()?;
     let trellis_nats = async_nats::ConnectOptions::new()
         .credentials_file(&nats.trellis_creds_path)
@@ -595,6 +623,7 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
         config,
         options.mode,
         options.rotate_first_admin,
+        options.nats_override,
         trellis_nats.clone(),
         &mut ownership,
     )
@@ -641,6 +670,7 @@ async fn run_owned(
     config: RuntimeConfig,
     mode: RuntimeMode,
     rotate_first_admin: bool,
+    nats_override: Option<NatsEndpointOverride>,
     trellis_nats: async_nats::Client,
     ownership: &mut RuntimeOwnership,
 ) -> Result<(), RuntimeError> {
@@ -653,10 +683,12 @@ async fn run_owned(
         config,
         mode,
         rotate_first_admin,
+        nats_override,
         stores,
         trellis_nats,
         owners: ownership.contexts(),
         http_router: std::sync::Mutex::new(axum::Router::new()),
+        platform_verifier: Arc::new(tokio::sync::OnceCell::new()),
     };
     let mut handles = start_subsystems(&context).await?;
     let root_stop = StopHandle::new();
@@ -897,9 +929,9 @@ async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandl
     for subsystem in context.mode.subsystems() {
         let result = match subsystem {
             SubsystemName::Platform => platform::start(context).await,
-            SubsystemName::Jobs => jobs::start(context),
+            SubsystemName::Jobs => jobs::start(context).await,
             SubsystemName::Health => health::start(context).await,
-            SubsystemName::Eventlog => eventlog::start(context),
+            SubsystemName::Eventlog => eventlog::start(context).await,
         };
         match result {
             Ok(handle) => handles.push(handle),
@@ -928,6 +960,30 @@ mod tests {
         fn drop(&mut self) {
             self.0.store(true, Ordering::SeqCst);
         }
+    }
+
+    #[test]
+    fn runtime_options_carries_nats_endpoint_override() {
+        let options = RuntimeOptions {
+            mode: RuntimeMode::All,
+            config_path: PathBuf::from("config.toml"),
+            rotate_first_admin: false,
+            nats_override: Some(NatsEndpointOverride {
+                servers: "nats://127.0.0.1:4222".to_string(),
+                websocket: Some("ws://127.0.0.1:8080".to_string()),
+            }),
+        };
+        assert_eq!(
+            options.nats_override.as_ref().map(|o| o.servers.as_str()),
+            Some("nats://127.0.0.1:4222")
+        );
+        assert_eq!(options.clone(), options);
+
+        let plain = RuntimeOptions {
+            nats_override: None,
+            ..options.clone()
+        };
+        assert_eq!(plain.nats_override, None);
     }
 
     #[tokio::test]

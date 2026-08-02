@@ -1,6 +1,6 @@
 # Trellis AI guidance for Rust services
 
-Last verified against Trellis main (2026-07-26).
+Last verified against Trellis main (2026-08-02).
 
 Use this file for AI coding agents working in a Rust service repository that
 consumes Trellis. The language-neutral guide is:
@@ -26,6 +26,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   connection bootstrap, `ConnectedService`, or generic runtime clients.
 - Service participants expose service bootstrap only. Apps and agents expose
   user-session bootstrap only. Devices expose activated-device bootstrap only.
+- HTTP is limited to browser/account flows, initial service/device bootstrap,
+  proof-bound restart recovery, and portal assets. Connected control,
+  including auth control, uses generated RPC, operation, and event APIs over
+  NATS; there is no HTTP context, revocation, logout, or client-bootstrap API.
+  Pending devices retry `/bootstrap/device`; there is no separate wait endpoint.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
 - Service connect options carry the immutable provisioned identity binding.
@@ -33,21 +38,26 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   inbox prefix, session seed, and participant digest. No shared sentinel
   credential is configured or accepted. Ready bootstrap also carries a signed
   authorization-context bundle. The shared Rust cache verifies the root,
-  manifest generation/digest, certificate, signature, policy, and context digest,
-  consumes the distributed deterministic refresh time, and supplies the current
+  direct-key manifest, signature, policy, and context digest, computes the
+  deterministic refresh time, and supplies the current
   digest to every reconnect. Production user/service/device options require a
   durable authorization-context store containing the complete root/manifest
   rollback floor and current context; memory stores are explicit for tests and
   ephemeral processes. Clearing context retains trust. Bootstrap/refresh server
   time is converted to a request-midpoint offset. Expired context or route-JWT
   state recovers with a retained session/trust floor and proof-bound null current
-  digest; same-digest success still reschedules. Manifest and certificate
-  locators are accepted only as canonical immutable paths on the configured
-  Trellis HTTP(S) origin; redirects to another origin fail closed.
-- The deny-all bootstrap JWT grants no authority. Context refresh renews it and
-  installs its exact expiry atomically with the verified context. It only routes
-  Auth Callout and remains bounded by current session, authority, delegation,
-  context, and the configured JWT lifetime cap.
+  digest; same-digest success still reschedules. Context refresh is restart
+  recovery and returns route/session/NATS metadata with the renewed route
+  credential and context. Manifest overlap uses direct issuer public-key entries
+  in the exact accepted generation. An observed `manifest.current` advance is
+  persisted before the live floor advances and wakes the existing own-context
+  refresh task. Connected trust lookup uses exact NATS KV direct reads and fixed
+  manifest/revocation watches, not HTTP or whole-bucket access.
+- The deny-all bootstrap JWT grants no authority. Context refresh is restart
+  recovery: it renews the route credential and installs its exact expiry
+  atomically with the verified context. It only routes Auth Callout and remains
+  bounded by current session, authority, delegation, context, and the configured
+  JWT lifetime cap.
 - Generated service/device clients present their embedded canonical participant
   and exact referenced API artifacts during bootstrap. Runtime planning parses
   and resolves them through the same semantic proposal path as admin planning.
@@ -76,8 +86,8 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   Externally serialized errors use stable redacted codes; internal causes belong
   only in structured logs.
 - Pure protocol/tooling code can use `trellis-protocol` signed authorization
-  types to verify a pinned root, root-signed issuer certificate and current
-  generation-numbered manifest, issuer-signed short-lived context, and
+  types to verify a pinned root, root-signed direct-key issuer manifest,
+  issuer-signed short-lived context, and
   context-bound request proof v2 without NATS, storage, wall-clock, or async
   access. Supply verification time and limits explicitly.
 - Signed contexts bind principal and participant identity separately, exact
@@ -91,10 +101,17 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   or cloned manifest handle.
 - `maximum_context_bytes` is the canonical complete signed-context JSON UTF-8
   byte limit, not the base64url token length.
-- NATS admission already validates the signed context and fresh issuable state.
-  Ordinary target request authorization remains transitional through
-  `Auth.Requests.Validate` until Milestone 10; do not add new service-repository
-  dependencies on it.
+- NATS admission validates the signed context, NKey/session-key binding, and
+  current physical bindings. Target
+  providers then verify request/event proof v2 locally against the presented
+  context, actual transport fields, exact generated permission atom,
+  capabilities and revocation state. Provider
+  authorization evidence comes from the internal NATS KV registry: watches for
+  manifest generation and revocations establish readiness; actual connection or
+  watch failure fails closed, while quiet watches remain healthy. Unknown
+  current digests require one context read; cache hits perform no HTTP,
+  SQLite, Auth RPC, or registry I/O. Registry handles and subjects are not
+  service-author APIs.
 - Event subject, Jobs key, and operation-transfer pointers must be guaranteed to
   resolve for every schema-valid payload. Every object step must be required and
   every array index must be covered by `minItems`; optional fields are invalid
@@ -248,6 +265,33 @@ idempotent.
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
 - In the Trellis repository, the complete TypeScript and Rust live matrices run
   against one host with `deno run -A -c js/deno.json integration/live_runner.ts`.
+  The harness runs NATS as a managed child process from pinned, checksum-verified
+  nats-server and nsc binaries (cached under `TRELLIS_TEST_CACHE_DIR`, default
+  `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh`
+  must be on `PATH`); no container runtime is required.
+- The `trellis` CLI runs the runtime with
+  `trellis server [mode] --config PATH [--nats URL | --nats-binary PATH]
+  [--nats-state-dir PATH] [--check]` (mode defaults to `all`; `--check`
+  validates configuration, trust, stores, streams, and NATS connectivity,
+  then exits). Managed mode (no `--nats`) downloads the pinned nats-server
+  release, verifies its checksum, caches it under `TRELLIS_CACHE_DIR`
+  (default `~/.cache/trellis`), listens on 127.0.0.1 ports 4222 (NATS), 8222
+  (monitoring), and 8080 (websocket), and stops the server when the CLI
+  exits. `--nats URL` runs against an external server; `--nats-binary PATH`
+  manages an existing trusted nats-server binary without re-verifying it;
+  `--nats-state-dir PATH` keeps all mutable managed-NATS files (rendered
+  configs, pid file, resolver JWTs, JetStream data) outside a read-only
+  bundle.
+- The runtime OCI image bakes the `trellis` CLI and the pinned,
+  checksum-verified nats-server at `/usr/local/bin/nats-server`; `nsc` is
+  test-harness-only and not in the image. The entrypoint stays
+  `trellis-server` for external-NATS deployments. For a managed single
+  container, mount the generated bundle read-only from its own named volume
+  and the writable state on a second volume
+  (`trellis-bundle:/etc/trellis:ro,Z`, `trellis-state:/var/lib/trellis:rw,Z`),
+  with the bundle's SQLite store paths rewritten to the state volume, and run
+  `trellis server ... --nats-binary /usr/local/bin/nats-server
+  --nats-state-dir /var/lib/trellis/nats`.
 - Register client interoperability in `integration/client-test-matrix.json` and
   Rust runtime correctness in `integration/rust-runtime-test-matrix.json`.
   Implemented Rust mappings must match compiled and executed test IDs exactly;

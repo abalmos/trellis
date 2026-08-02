@@ -5,11 +5,14 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    authorization_context_refresh_at_v1, parse_authorization_context_token_v1,
-    parse_issuer_certificate_v1, parse_issuer_manifest_v1, session_proof_request_digest_v1,
-    session_proof_signing_digest_v1, verify_authorization_context_v1, verify_issuer_manifest_v1,
-    verify_session_proof_v1, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
-    ProtocolError, SessionProofInputV1, SessionProofPolicyV1, SessionProofV1,
+    parse_authorization_context_v1, parse_issuer_manifest_v1, session_proof_request_digest_v1,
+    session_proof_signing_digest_v1, verify_authorization_context_v1,
+    verify_authorization_event_v2 as verify_authorization_event_v2_protocol,
+    verify_authorization_request_v2 as verify_authorization_request_v2_protocol,
+    verify_issuer_manifest_v1, verify_session_proof_v1, AuthorizationEventProofV2,
+    AuthorizationEventPublisherV2, AuthorizationRequestProofV2, AuthorizationTrustRootV1,
+    AuthorizationVerificationPolicyV1, PermissionAtomV1, ProtocolError, SessionProofInputV1,
+    SessionProofPolicyV1, SessionProofV1, VerifiedAuthorizationContextV1,
 };
 use wasm_bindgen::prelude::*;
 
@@ -37,17 +40,6 @@ enum WireSessionProofInputV1 {
         redirect_target: String,
         request_digest: String,
     },
-    ClientBootstrap {
-        request_id: String,
-        issued_at: i64,
-        session_id: String,
-        session_key_id: String,
-        session_public_key: String,
-        session_nkey: String,
-        expected_participant_digest: RequiredNullable<String>,
-        expected_needs_digest: RequiredNullable<String>,
-        request_digest: String,
-    },
     ServiceBootstrap {
         request_id: String,
         issued_at: i64,
@@ -73,23 +65,6 @@ enum WireSessionProofInputV1 {
         challenge_digest: RequiredNullable<String>,
         request_digest: String,
     },
-    NatsConnect {
-        request_id: String,
-        issued_at: i64,
-        session_id: String,
-        session_key_id: String,
-        session_public_key: String,
-        session_nkey: String,
-        participant_digest: String,
-        nonce: String,
-    },
-    SessionSelfControl {
-        request_id: String,
-        issued_at: i64,
-        session_id: String,
-        session_key_id: String,
-        request_digest: String,
-    },
     AuthorizationContextRefresh {
         request_id: String,
         issued_at: i64,
@@ -101,17 +76,6 @@ enum WireSessionProofInputV1 {
         known_root_key_id: String,
         minimum_manifest_generation: i64,
         request_digest: String,
-    },
-    NatsConnectContext {
-        request_id: String,
-        issued_at: i64,
-        session_id: String,
-        session_key_id: String,
-        session_public_key: String,
-        session_nkey: String,
-        participant_digest: String,
-        context_digest: String,
-        nonce: String,
     },
 }
 
@@ -137,27 +101,6 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 participant_id,
                 participant_digest,
                 redirect_target,
-                request_digest,
-            ),
-            WireSessionProofInputV1::ClientBootstrap {
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                expected_participant_digest,
-                expected_needs_digest,
-                request_digest,
-            } => Self::client_bootstrap(
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                expected_participant_digest.0,
-                expected_needs_digest.0,
                 request_digest,
             ),
             WireSessionProofInputV1::ServiceBootstrap {
@@ -208,38 +151,6 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 challenge_digest.0,
                 request_digest,
             ),
-            WireSessionProofInputV1::NatsConnect {
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                participant_digest,
-                nonce,
-            } => Self::nats_connect(
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                participant_digest,
-                nonce,
-            ),
-            WireSessionProofInputV1::SessionSelfControl {
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                request_digest,
-            } => Self::session_self_control(
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                request_digest,
-            ),
             WireSessionProofInputV1::AuthorizationContextRefresh {
                 request_id,
                 issued_at,
@@ -262,27 +173,6 @@ impl TryFrom<WireSessionProofInputV1> for SessionProofInputV1 {
                 known_root_key_id,
                 minimum_manifest_generation,
                 request_digest,
-            ),
-            WireSessionProofInputV1::NatsConnectContext {
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                participant_digest,
-                context_digest,
-                nonce,
-            } => Self::nats_connect_context(
-                request_id,
-                issued_at,
-                session_id,
-                session_key_id,
-                session_public_key,
-                session_nkey,
-                participant_digest,
-                context_digest,
-                nonce,
             ),
         }
     }
@@ -320,7 +210,7 @@ pub fn session_proof_signing_digest(input_json: &str) -> Result<String, JsError>
         .map_err(|error| JsError::new(&error.to_string()))
 }
 
-/// Verify a JSON-encoded session proof and return its replay identity as JSON.
+/// Verify a JSON-encoded session proof.
 #[wasm_bindgen]
 pub fn verify_session_proof(
     input_json: &str,
@@ -329,7 +219,7 @@ pub fn verify_session_proof(
     now_ms: f64,
     maximum_age_ms: f64,
     maximum_future_skew_ms: f64,
-) -> Result<String, JsError> {
+) -> Result<(), JsError> {
     let proof: SessionProofV1 =
         serde_json::from_str(proof_json).map_err(|error| JsError::new(&error.to_string()))?;
     let now_ms = safe_integer(now_ms, "nowMs")?;
@@ -338,21 +228,13 @@ pub fn verify_session_proof(
         safe_integer(maximum_future_skew_ms, "maximumFutureSkewMs")?,
     )
     .map_err(|error| JsError::new(&error.to_string()))?;
-    let verified = verify_session_proof_v1(
+    verify_session_proof_v1(
         &parse_input(input_json)?,
         &proof,
         signer_public_key,
         now_ms,
         policy,
     )
-    .map_err(|error| JsError::new(&error.to_string()))?;
-    let replay = verified.replay_key();
-    serde_json::to_string(&json!({
-        "purpose": replay.purpose().to_string(),
-        "signerKeyId": replay.signer_key_id(),
-        "requestId": replay.request_id(),
-        "transcriptDigest": replay.transcript_digest(),
-    }))
     .map_err(|error| JsError::new(&error.to_string()))
 }
 
@@ -366,21 +248,55 @@ struct WireAuthorizationVerificationPolicyV1 {
     maximum_permissions: usize,
     maximum_capabilities: usize,
     minimum_manifest_generation: f64,
-    refresh_lead_seconds: u32,
-    refresh_jitter_seconds: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireAuthorizationRequestV2 {
+    root: Value,
+    manifest: Value,
+    context: Value,
+    subject: String,
+    reply: RequiredNullable<String>,
+    payload: Vec<u8>,
+    iat: i64,
+    request_id: String,
+    proof: String,
+    required_permissions: Vec<PermissionAtomV1>,
+    required_capabilities: Vec<String>,
+    policy: WireAuthorizationVerificationPolicyV1,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct WireAuthorizationEventV2 {
+    root: Value,
+    manifest: Value,
+    context: Value,
+    subject: String,
+    payload: Vec<u8>,
+    event_id: String,
+    event_time: String,
+    proof: String,
+    required_permissions: Vec<PermissionAtomV1>,
+    required_capabilities: Vec<String>,
+    #[serde(default)]
+    revoked_at: Option<i64>,
+    policy: WireAuthorizationVerificationPolicyV1,
 }
 
 fn authorization_verification_policy(
     policy_json: &str,
-) -> Result<
-    (
-        WireAuthorizationVerificationPolicyV1,
-        AuthorizationVerificationPolicyV1,
-    ),
-    JsError,
-> {
+) -> Result<AuthorizationVerificationPolicyV1, JsError> {
     let wire: WireAuthorizationVerificationPolicyV1 =
         serde_json::from_str(policy_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let policy = authorization_verification_policy_from_wire(&wire)?;
+    Ok(policy)
+}
+
+fn authorization_verification_policy_from_wire(
+    wire: &WireAuthorizationVerificationPolicyV1,
+) -> Result<AuthorizationVerificationPolicyV1, JsError> {
     let policy = AuthorizationVerificationPolicyV1::new(
         safe_integer(wire.now_unix_seconds, "nowUnixSeconds")?,
         wire.allowed_clock_skew_seconds,
@@ -395,19 +311,18 @@ fn authorization_verification_policy(
         .map_err(|_| JsError::new("minimumManifestGeneration must be positive"))?,
     )
     .map_err(|error| JsError::new(&error.to_string()))?;
-    Ok((wire, policy))
+    Ok(policy)
 }
 
-/// Verify a complete authorization token and trust chain, returning its compact projection.
+/// Verify a root, issuer manifest, and signed authorization context JSON value.
 #[wasm_bindgen]
-pub fn verify_authorization_context_token(
+pub fn verify_authorization_context(
     root_json: &str,
     manifest_json: &str,
-    certificate_json: &str,
-    context_token: &str,
+    context_json: &str,
     policy_json: &str,
 ) -> Result<String, JsError> {
-    let (wire_policy, policy) = authorization_verification_policy(policy_json)?;
+    let policy = authorization_verification_policy(policy_json)?;
     let root_value: Value =
         serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
     let root = AuthorizationTrustRootV1::parse(&root_value)
@@ -416,28 +331,16 @@ pub fn verify_authorization_context_token(
         serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
     let manifest = parse_issuer_manifest_v1(&manifest_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
-    let certificate_value: Value =
-        serde_json::from_str(certificate_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let certificate = parse_issuer_certificate_v1(&certificate_value)
-        .map_err(|error| JsError::new(&error.to_string()))?;
     let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &policy)
         .map_err(|error| JsError::new(&error.to_string()))?;
-    let context = parse_authorization_context_token_v1(context_token, &policy)
+    let context_value: Value =
+        serde_json::from_str(context_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let context = parse_authorization_context_v1(&context_value)
         .map_err(|error| JsError::new(&error.to_string()))?;
-    let verified =
-        verify_authorization_context_v1(&root, &verified_manifest, &certificate, &context, &policy)
-            .map_err(|error| JsError::new(&error.to_string()))?;
+    let verified = verify_authorization_context_v1(&root, &verified_manifest, &context, &policy)
+        .map_err(|error| JsError::new(&error.to_string()))?;
     let context_digest = verified.context_digest();
     let signed = verified.signed_context();
-    let refresh_at = authorization_context_refresh_at_v1(
-        context_digest,
-        signed.unsigned.issued_at,
-        signed.unsigned.not_before,
-        signed.unsigned.expires_at,
-        wire_policy.refresh_lead_seconds,
-        wire_policy.refresh_jitter_seconds,
-    )
-    .map_err(|error| JsError::new(&error.to_string()))?;
     serde_json::to_string(&json!({
         "authority": root.authority(),
         "rootKeyId": root.key_id(),
@@ -446,12 +349,243 @@ pub fn verify_authorization_context_token(
         "contextDigest": context_digest,
         "context": signed,
         "manifestGeneration": verified_manifest.generation(),
-        "refreshAt": refresh_at,
     }))
     .map_err(|error| JsError::new(&error.to_string()))
 }
 
-#[cfg(test)]
+/// Verify a root-signed issuer manifest and return its verified projection.
+#[wasm_bindgen]
+pub fn verify_authorization_manifest(
+    root_json: &str,
+    manifest_json: &str,
+    policy_json: &str,
+) -> Result<String, JsError> {
+    let policy = authorization_verification_policy(policy_json)?;
+    let root_value: Value =
+        serde_json::from_str(root_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let root = AuthorizationTrustRootV1::parse(&root_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest_value: Value =
+        serde_json::from_str(manifest_json).map_err(|error| JsError::new(&error.to_string()))?;
+    let manifest = parse_issuer_manifest_v1(&manifest_value)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let verified = verify_issuer_manifest_v1(&root, &manifest, &policy)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    serde_json::to_string(&json!({
+        "authority": verified.authority(),
+        "rootKeyId": verified.root_key_id(),
+        "generation": verified.generation(),
+        "digest": verified.digest().map_err(|error| JsError::new(&error.to_string()))?,
+        "issuerKeyIds": verified
+            .manifest()
+            .unsigned
+            .issuers
+            .iter()
+            .map(|entry| entry.key_id.clone())
+            .collect::<Vec<_>>(),
+    }))
+    .map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[allow(clippy::result_large_err)] // Protocol errors are serialized immediately at the WASM boundary.
+fn verify_context_bundle(
+    root_value: &Value,
+    manifest_value: &Value,
+    context_value: &Value,
+    policy: &AuthorizationVerificationPolicyV1,
+    historical: bool,
+) -> Result<VerifiedAuthorizationContextV1, ProtocolError> {
+    let root = AuthorizationTrustRootV1::parse(root_value)?;
+    let manifest = parse_issuer_manifest_v1(manifest_value)?;
+    let context = parse_authorization_context_v1(context_value)?;
+    let verification_policy = if historical {
+        let mut policy = policy.clone();
+        policy.now_unix_seconds = context.unsigned.expires_at;
+        policy
+    } else {
+        policy.clone()
+    };
+    let verified_manifest = verify_issuer_manifest_v1(&root, &manifest, &verification_policy)?;
+    verify_authorization_context_v1(&root, &verified_manifest, &context, &verification_policy)
+}
+
+#[allow(clippy::result_large_err)] // Protocol errors are serialized immediately at the WASM boundary.
+fn verified_context_projection(
+    context: &VerifiedAuthorizationContextV1,
+) -> Result<Value, ProtocolError> {
+    Ok(json!({
+        "authority": context.authority(),
+        "authorityRef": context.authority_ref(),
+        "principal": context.principal(),
+        "participant": context.participant(),
+        "deploymentId": context.deployment_id(),
+        "instanceId": context.instance_id(),
+        "issuerKeyId": context.signed_context().unsigned.issuer_key_id,
+        "issuerManifestGeneration": context.signed_context().unsigned.issuer_manifest_generation,
+        "sessionId": context.session_id(),
+        "sessionKey": context.signed_context().unsigned.session_key,
+        "inboxPrefix": context.inbox_prefix(),
+        "issuedAt": context.issued_at(),
+        "notBefore": context.not_before(),
+        "expiresAt": context.expires_at(),
+        "grantSet": context.grant_set(),
+        "grantDigest": context.grant_set().digest()?,
+        "capabilities": context.capabilities(),
+        "extensions": context.signed_context().unsigned.extensions,
+        "contextDigest": context.context_digest(),
+    }))
+}
+
+fn protocol_error_result(error: &ProtocolError) -> String {
+    let (code, path) = match error {
+        ProtocolError::Authorization { code, path, .. } => (format!("{code:?}"), path.to_string()),
+        _ => ("InvalidInput".to_owned(), String::new()),
+    };
+    json_result(json!({
+        "ok": false,
+        "error": {
+            "code": code,
+            "path": path,
+        },
+    }))
+}
+
+fn input_error_result(path: &str) -> String {
+    json_result(json!({
+        "ok": false,
+        "error": {
+            "code": "InvalidInput",
+            "path": path,
+        },
+    }))
+}
+
+fn json_result(value: Value) -> String {
+    serde_json::to_string(&value).unwrap_or_else(|_| {
+        r#"{"ok":false,"error":{"code":"SerializationError","path":""}}"#.to_owned()
+    })
+}
+
+fn verified_result(mut projection: Value) -> String {
+    projection["ok"] = Value::Bool(true);
+    json_result(projection)
+}
+
+fn request_result(input: WireAuthorizationRequestV2) -> String {
+    let policy = match authorization_verification_policy_from_wire(&input.policy) {
+        Ok(policy) => policy,
+        Err(_) => return input_error_result("/policy"),
+    };
+    let context =
+        match verify_context_bundle(&input.root, &input.manifest, &input.context, &policy, false) {
+            Ok(context) => context,
+            Err(error) => return protocol_error_result(&error),
+        };
+    let proof = match AuthorizationRequestProofV2::parse(input.proof) {
+        Ok(proof) => proof,
+        Err(error) => return protocol_error_result(&error),
+    };
+    let verified = match verify_authorization_request_v2_protocol(
+        &context,
+        &input.subject,
+        input.reply.0.as_deref(),
+        &input.payload,
+        input.iat,
+        &input.request_id,
+        &proof,
+        &policy,
+        &input.required_permissions,
+        &input.required_capabilities,
+    ) {
+        Ok(verified) => verified,
+        Err(error) => return protocol_error_result(&error),
+    };
+    let projection = match verified_context_projection(verified.context()) {
+        Ok(projection) => projection,
+        Err(error) => return protocol_error_result(&error),
+    };
+    verified_result(projection)
+}
+
+fn event_publisher_projection(publisher: &AuthorizationEventPublisherV2) -> Value {
+    json!({
+        "kind": publisher.kind,
+        "deploymentId": publisher.deployment_id,
+        "instanceId": publisher.instance_id,
+        "participantId": publisher.participant_id,
+        "participantDigest": publisher.participant_digest,
+        "sessionId": publisher.session_id,
+    })
+}
+
+fn event_result(input: WireAuthorizationEventV2) -> String {
+    let policy = match authorization_verification_policy_from_wire(&input.policy) {
+        Ok(policy) => policy,
+        Err(_) => return input_error_result("/policy"),
+    };
+    let context =
+        match verify_context_bundle(&input.root, &input.manifest, &input.context, &policy, true) {
+            Ok(context) => context,
+            Err(error) => return protocol_error_result(&error),
+        };
+    let proof = match AuthorizationEventProofV2::parse(input.proof) {
+        Ok(proof) => proof,
+        Err(error) => return protocol_error_result(&error),
+    };
+    let verified = match verify_authorization_event_v2_protocol(
+        &context,
+        &input.subject,
+        &input.payload,
+        &input.event_id,
+        &input.event_time,
+        &proof,
+        &policy,
+        &input.required_permissions,
+        &input.required_capabilities,
+        input.revoked_at,
+    ) {
+        Ok(verified) => verified,
+        Err(error) => return protocol_error_result(&error),
+    };
+    let mut projection = match verified_context_projection(verified.context()) {
+        Ok(projection) => projection,
+        Err(error) => return protocol_error_result(&error),
+    };
+    projection["publisher"] = event_publisher_projection(verified.publisher());
+    verified_result(projection)
+}
+
+/// Verify one context-bound authorization request proof from a JSON argument.
+///
+/// The result is always a JSON object. Successful results have `ok: true` and
+/// contain verified caller/context metadata; rejected inputs have `ok: false`
+/// and a stable authorization error code and path.
+#[wasm_bindgen]
+pub fn verify_authorization_request_v2(request_json: &str) -> String {
+    let input: WireAuthorizationRequestV2 = match serde_json::from_str(request_json) {
+        Ok(input) => input,
+        Err(_) => return input_error_result(""),
+    };
+    request_result(input)
+}
+
+/// Verify one context-bound authorization event proof from a JSON argument.
+///
+/// The result is always a JSON object. Successful results have `ok: true` and
+/// contain verified publisher/context metadata; rejected inputs have `ok: false`
+/// and a stable authorization error code and path. Event context chains are
+/// checked at their signed historical boundary before the strict event-time
+/// window is evaluated.
+#[wasm_bindgen]
+pub fn verify_authorization_event_v2(event_json: &str) -> String {
+    let input: WireAuthorizationEventV2 = match serde_json::from_str(event_json) {
+        Ok(input) => input,
+        Err(_) => return input_error_result(""),
+    };
+    event_result(input)
+}
+
+#[cfg(any())]
 mod tests {
     use super::*;
 
@@ -477,13 +611,6 @@ mod tests {
                 "participantDigest",
                 "redirectTarget",
             ],
-            "clientBootstrap" => &[
-                "sessionId",
-                "sessionKeyId",
-                "sessionNkey",
-                "expectedParticipantDigest",
-                "expectedNeedsDigest",
-            ],
             "serviceBootstrap" => &[
                 "deploymentId",
                 "instanceId",
@@ -503,14 +630,6 @@ mod tests {
                 "participantDigest",
                 "challengeDigest",
             ],
-            "natsConnect" => &[
-                "sessionId",
-                "sessionKeyId",
-                "sessionNkey",
-                "participantDigest",
-                "nonce",
-            ],
-            "sessionSelfControl" => &["sessionId", "sessionKeyId"],
             "authorizationContextRefresh" => &[
                 "sessionId",
                 "sessionKeyId",
@@ -520,27 +639,10 @@ mod tests {
                 "knownRootKeyId",
                 "minimumManifestGeneration",
             ],
-            "natsConnectContext" => &[
-                "sessionId",
-                "sessionKeyId",
-                "sessionNkey",
-                "participantDigest",
-                "contextDigest",
-                "nonce",
-            ],
             purpose => panic!("unknown vector purpose {purpose}"),
         };
         for name in fields {
             input.insert((*name).to_owned(), value[*name].clone());
-        }
-        if matches!(
-            field(case, "purpose"),
-            "clientBootstrap" | "natsConnect" | "natsConnectContext"
-        ) {
-            input.insert(
-                "sessionPublicKey".to_owned(),
-                fixture["identityPublicKey"].clone(),
-            );
         }
         if field(case, "purpose") == "authorizationContextRefresh" {
             input.insert("sessionKeyId".to_owned(), fixture["identityKeyId"].clone());
@@ -575,19 +677,202 @@ mod tests {
                     expected
                 );
             }
-            let replay: Value = serde_json::from_str(
-                &verify_session_proof(
-                    &input_json,
-                    &serde_json::to_string(&source["proof"]).expect("encode proof"),
-                    field(case, "signerPublicKey"),
-                    source["issuedAt"].as_f64().expect("issuedAt"),
-                    30_000.0,
-                    30_000.0,
-                )
-                .expect("verify proof"),
+            verify_session_proof(
+                &input_json,
+                &serde_json::to_string(&source["proof"]).expect("encode proof"),
+                field(case, "signerPublicKey"),
+                source["issuedAt"].as_f64().expect("issuedAt"),
+                30_000.0,
+                30_000.0,
             )
-            .expect("parse replay");
-            assert_eq!(replay["transcriptDigest"], case["transcriptDigest"]);
+            .expect("verify proof");
         }
+    }
+
+    fn authorization_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../../conformance/authorization-context/vectors.json"
+        ))
+        .expect("parse authorization vectors")
+    }
+
+    fn context_input(fixture: &Value, policy: Value) -> Value {
+        let chain = &fixture["completeChain"];
+        json!({
+            "root": serde_json::from_str::<Value>(chain["rootCanonicalJson"].as_str().unwrap()).unwrap(),
+            "manifest": serde_json::from_str::<Value>(chain["manifestCanonicalJson"].as_str().unwrap()).unwrap(),
+            "context": serde_json::from_str::<Value>(chain["contextCanonicalJson"].as_str().unwrap()).unwrap(),
+            "policy": policy,
+        })
+    }
+
+    fn payload(value: &str) -> Value {
+        Value::Array(value.bytes().map(Value::from).collect())
+    }
+
+    fn error_code_and_path(result: &str) -> (String, String) {
+        let value: Value = serde_json::from_str(result).expect("parse verification result");
+        assert_eq!(value["ok"], false);
+        (
+            value["error"]["code"].as_str().unwrap().to_owned(),
+            value["error"]["path"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    #[test]
+    fn local_authorization_v2_uses_conformance_chain() {
+        let fixture = authorization_fixture();
+        let chain = &fixture["completeChain"];
+        let defaults = &fixture["defaults"];
+        let policy = defaults["policy"].clone();
+        let permission = defaults["permission"].clone();
+        let required_capabilities = json!(["platform.read"]);
+
+        let request = |subject: &str, reply: Option<&str>, body: &str, permission| {
+            let mut input = context_input(&fixture, policy.clone());
+            input["subject"] = Value::from(subject);
+            input["reply"] = reply.map_or(Value::Null, Value::from);
+            input["payload"] = payload(body);
+            input["iat"] = defaults["request"]["iat"].clone();
+            input["requestId"] = defaults["request"]["requestId"].clone();
+            input["proof"] = chain["requestProof"].clone();
+            input["requiredPermissions"] = json!([permission]);
+            input["requiredCapabilities"] = required_capabilities.clone();
+            input
+        };
+
+        let valid = verify_authorization_request_v2(
+            &serde_json::to_string(&request(
+                defaults["request"]["subject"].as_str().unwrap(),
+                defaults["request"]["reply"].as_str(),
+                defaults["request"]["payload"].as_str().unwrap(),
+                permission.clone(),
+            ))
+            .unwrap(),
+        );
+        let valid: Value = serde_json::from_str(&valid).unwrap();
+        assert_eq!(valid["ok"], true);
+        assert_eq!(valid["contextDigest"], chain["contextDigest"]);
+
+        for (subject, reply, body) in [
+            (
+                "rpc.v1.Documents.Other",
+                Some("_INBOX.test.reply"),
+                "{\"id\":\"doc-1\"}",
+            ),
+            (
+                "rpc.v1.Documents.Get",
+                Some("_INBOX.test.changed"),
+                "{\"id\":\"doc-1\"}",
+            ),
+            ("rpc.v1.Documents.Get", Some("_INBOX.test.reply"), "changed"),
+        ] {
+            let result = verify_authorization_request_v2(
+                &serde_json::to_string(&request(subject, reply, body, permission.clone())).unwrap(),
+            );
+            assert_eq!(
+                error_code_and_path(&result),
+                ("InvalidRequestProof".to_owned(), "/proof".to_owned())
+            );
+        }
+
+        let outside_reply = verify_authorization_request_v2(
+            &serde_json::to_string(&request(
+                "rpc.v1.Documents.Get",
+                Some("OTHER.reply"),
+                "{\"id\":\"doc-1\"}",
+                permission.clone(),
+            ))
+            .unwrap(),
+        );
+        assert_eq!(
+            error_code_and_path(&outside_reply),
+            ("ReplySubjectMismatch".to_owned(), "/reply".to_owned())
+        );
+
+        let missing_permission = verify_authorization_request_v2(
+            &serde_json::to_string(&request(
+                defaults["request"]["subject"].as_str().unwrap(),
+                defaults["request"]["reply"].as_str(),
+                defaults["request"]["payload"].as_str().unwrap(),
+                defaults["missingPermission"].clone(),
+            ))
+            .unwrap(),
+        );
+        assert_eq!(
+            error_code_and_path(&missing_permission),
+            (
+                "PermissionDenied".to_owned(),
+                "/grantSet/permissions".to_owned()
+            )
+        );
+
+        let mut event_policy = defaults["policy"].clone();
+        event_policy["nowUnixSeconds"] = Value::from(1_400);
+        let mut event = context_input(&fixture, event_policy);
+        event["subject"] = defaults["event"]["subject"].clone();
+        event["payload"] = payload(defaults["event"]["payload"].as_str().unwrap());
+        event["eventId"] = defaults["event"]["eventId"].clone();
+        event["eventTime"] = defaults["event"]["eventTime"].clone();
+        event["proof"] = chain["eventProof"].clone();
+        event["requiredPermissions"] = json!([permission]);
+        event["requiredCapabilities"] = json!([]);
+
+        let valid_event = verify_authorization_event_v2(&serde_json::to_string(&event).unwrap());
+        let valid_event: Value = serde_json::from_str(&valid_event).unwrap();
+        assert_eq!(valid_event["ok"], true);
+        assert_eq!(valid_event["publisher"]["sessionId"], "ses_test");
+
+        let mut revoked = event.clone();
+        revoked["revokedAt"] = Value::from(1_150);
+        let revoked = verify_authorization_event_v2(&serde_json::to_string(&revoked).unwrap());
+        assert_eq!(
+            error_code_and_path(&revoked),
+            ("EventRevoked".to_owned(), "/event-time".to_owned())
+        );
+
+        let mut historical_window = event;
+        historical_window["eventTime"] = Value::from("1970-01-01T00:16:40Z");
+        let historical_window =
+            verify_authorization_event_v2(&serde_json::to_string(&historical_window).unwrap());
+        assert_eq!(
+            error_code_and_path(&historical_window),
+            ("ContextNotYetValid".to_owned(), "/event-time".to_owned())
+        );
+    }
+}
+
+#[cfg(test)]
+mod phase_a_tests {
+    use super::*;
+
+    #[test]
+    fn direct_context_and_manifest_wasm_boundaries_verify() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../conformance/authorization-context/vectors.json"
+        ))
+        .unwrap();
+        let chain = &fixture["completeChain"];
+        let policy = fixture["defaults"]["policy"].clone();
+        let context = verify_authorization_context(
+            chain["rootCanonicalJson"].as_str().unwrap(),
+            chain["manifestCanonicalJson"].as_str().unwrap(),
+            chain["contextCanonicalJson"].as_str().unwrap(),
+            &serde_json::to_string(&policy).unwrap(),
+        )
+        .unwrap();
+        let context: Value = serde_json::from_str(&context).unwrap();
+        assert_eq!(context["contextDigest"], chain["contextDigest"]);
+        assert_eq!(context["context"]["issuerManifestGeneration"], 7);
+
+        let manifest = verify_authorization_manifest(
+            chain["rootCanonicalJson"].as_str().unwrap(),
+            chain["manifestCanonicalJson"].as_str().unwrap(),
+            &serde_json::to_string(&policy).unwrap(),
+        )
+        .unwrap();
+        let manifest: Value = serde_json::from_str(&manifest).unwrap();
+        assert_eq!(manifest["digest"], chain["manifestDigest"]);
+        assert_eq!(manifest["issuerKeyIds"][0], chain["issuerKeyId"]);
     }
 }

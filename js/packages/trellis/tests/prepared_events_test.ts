@@ -15,7 +15,11 @@ import { Trellis, type TrellisAuth } from "../session.ts";
 // TS/Rust service-matrix row.
 
 function createMockAuth(): TrellisAuth {
-  return { sessionKey: "test", sign: () => new Uint8Array(64) };
+  return {
+    sessionKey: "test",
+    sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
+  };
 }
 
 function createMockNatsConnection(): NatsConnection {

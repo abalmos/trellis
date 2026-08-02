@@ -38,6 +38,7 @@ import {
 import {
   type ActionDescriptor,
   actionRuntimeDescriptor,
+  type ActionSource,
   type ConnectedActionName,
   type EventActions,
   eventActions,
@@ -56,6 +57,7 @@ import {
   type InferRuntimeRpcError,
   type InferSchemaType,
   type OperationDesc,
+  type PermissionAtomV1,
   type RPCDesc,
   type RpcErrorClass,
   type RuntimeApi,
@@ -1421,6 +1423,7 @@ type ProjectedRpcMethod<
     subject: string;
     input: ResolveSchemaFromMap<TSchemas, TMethod["input"]>;
     output: ResolveSchemaFromMap<TSchemas, TMethod["output"]>;
+    permission: PermissionAtomV1;
     callerCapabilities: readonly string[];
     authRequired?: boolean;
     errors?: TMethod["errors"];
@@ -1440,6 +1443,7 @@ type BuiltRpcDesc = {
   subject: string;
   input: Schema<unknown>;
   output: Schema<unknown>;
+  permission: PermissionAtomV1;
   callerCapabilities: readonly string[];
   transfer?: { direction: "receive" };
   authRequired?: boolean;
@@ -1469,6 +1473,13 @@ function trellisRpcDesc<TInput, TOutput>(
     subject: rpcSubject(name, "v1"),
     input: typedUnknownRuntimeSchema<TInput>(),
     output: typedUnknownRuntimeSchema<TOutput>(),
+    permission: apiPermission(
+      TRELLIS_STATE_CONTRACT_ID,
+      "v1",
+      "rpc",
+      name,
+      "call",
+    ),
     callerCapabilities: [],
   };
 }
@@ -1526,6 +1537,13 @@ type ProjectedRpc<
   }
   : {};
 
+type ProjectedOperationPermissions = Readonly<{
+  invoke: PermissionAtomV1;
+  observe: PermissionAtomV1;
+  cancel: PermissionAtomV1;
+  control: Readonly<Record<string, PermissionAtomV1>>;
+}>;
+
 type ProjectedOperations<
   T,
   TSchemas,
@@ -1544,6 +1562,7 @@ type ProjectedOperations<
       >
       & {
         subject: ProjectedOperationSubject<K, T[K]>;
+        permissions: ProjectedOperationPermissions;
         callerCapabilities: ProjectedOperationCapabilities<
           T[K],
           "call",
@@ -3583,6 +3602,58 @@ export function digestContractManifest(contract: TrellisContractV1): string {
   );
 }
 
+function apiPermission(
+  apiId: string,
+  apiVersion: `v${number}`,
+  surfaceKind: PermissionAtomV1["surfaceKind"],
+  surfaceName: string,
+  action: PermissionAtomV1["action"],
+): PermissionAtomV1 {
+  return Object.freeze({ apiId, apiVersion, surfaceKind, surfaceName, action });
+}
+
+function operationPermissions(
+  apiId: string,
+  apiVersion: `v${number}`,
+  operationName: string,
+  signals: Record<string, ContractSourceOperationSignal> | undefined,
+): OperationDesc["permissions"] {
+  const control: Record<string, PermissionAtomV1> = {};
+  for (const signalName of Object.keys(signals ?? {}).sort()) {
+    control[signalName] = apiPermission(
+      apiId,
+      apiVersion,
+      "operation",
+      `${operationName}.${signalName}`,
+      "control",
+    );
+  }
+  return Object.freeze({
+    invoke: apiPermission(
+      apiId,
+      apiVersion,
+      "operation",
+      operationName,
+      "invoke",
+    ),
+    observe: apiPermission(
+      apiId,
+      apiVersion,
+      "operation",
+      operationName,
+      "observe",
+    ),
+    cancel: apiPermission(
+      apiId,
+      apiVersion,
+      "operation",
+      operationName,
+      "cancel",
+    ),
+    control: Object.freeze(control),
+  });
+}
+
 function rpcSubject(name: string, version: `v${number}`): string {
   return `rpc.${version}.${name}`;
 }
@@ -4249,6 +4320,13 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
           `rpc '${name}' output`,
         ),
       ),
+      permission: apiPermission(
+        source.id,
+        method.version,
+        "rpc",
+        name,
+        "call",
+      ),
       callerCapabilities: projectCapabilities(
         method.capabilities?.call,
         source.id,
@@ -4307,6 +4385,12 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
             ),
           )
           : undefined,
+        permissions: operationPermissions(
+          source.id,
+          operation.version,
+          name,
+          operation.signals,
+        ),
         transfer: operation.transfer
           ? { ...operation.transfer, direction: "send" }
           : undefined,
@@ -4381,6 +4465,20 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
           event: schema(
             resolveSchemaRef(source.schemas, event.event, `event '${name}'`),
           ),
+          publishPermission: apiPermission(
+            source.id,
+            event.version,
+            "event",
+            name,
+            "publish",
+          ),
+          subscribePermission: apiPermission(
+            source.id,
+            event.version,
+            "event",
+            name,
+            "subscribe",
+          ),
           publishCapabilities: projectCapabilities(
             event.capabilities?.publish,
             source.id,
@@ -4408,6 +4506,13 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
         ),
         event: schema(
           resolveSchemaRef(source.schemas, feed.event, `feed '${name}' event`),
+        ),
+        permission: apiPermission(
+          source.id,
+          feed.version,
+          "feed",
+          name,
+          "subscribe",
         ),
         subscribeCapabilities: projectCapabilities(
           feed.capabilities?.subscribe,
@@ -5130,8 +5235,9 @@ function actionExportName(name: string): string {
 }
 
 function buildOwnedActionDescriptors(
-  source: DefineContractSource,
+  source: TrellisContractSource,
   ownedApi: RuntimeApiLike,
+  actionSource: ActionSource,
 ): Record<string, unknown> {
   const actions: Record<string, unknown> = {};
   const add = (
@@ -5155,7 +5261,13 @@ function buildOwnedActionDescriptors(
     }
     add(
       name,
-      rpcAction(source.id, name, ownedApi.rpc[name]!, actionExportName(name)),
+      rpcAction(
+        source.id,
+        name,
+        ownedApi.rpc[name]!,
+        actionExportName(name),
+        actionSource,
+      ),
     );
   }
   for (const name of Object.keys(source.operations ?? {})) {
@@ -5166,6 +5278,7 @@ function buildOwnedActionDescriptors(
         name,
         ownedApi.operations[name]!,
         actionExportName(name),
+        actionSource,
       ),
     );
   }
@@ -5178,6 +5291,7 @@ function buildOwnedActionDescriptors(
         ownedApi.events[name]!,
         actionExportName(name),
         true,
+        actionSource,
       ),
     );
   }
@@ -5189,6 +5303,7 @@ function buildOwnedActionDescriptors(
         name,
         ownedApi.feeds?.[name]!,
         actionExportName(name),
+        actionSource,
       ),
     );
   }
@@ -5309,12 +5424,15 @@ function defineContract(
 
   const CONTRACT = emitContract(emittedSource);
   const ownedApi = buildOwnedApi(emittedSource);
-  const ownedActions = buildOwnedActionDescriptors(source, ownedApi);
+  const CONTRACT_DIGEST = digestContractManifest(CONTRACT);
+  const ownedActions = buildOwnedActionDescriptors(emittedSource, ownedApi, {
+    artifact: CONTRACT,
+    digest: CONTRACT_DIGEST,
+  });
   const trellisApi = mergeDerivedApis(
     ownedApi as RuntimeApiShape & RuntimeApiLike,
     usedApi as RuntimeApiShape & RuntimeApiLike,
   ) as RuntimeApiShape;
-  const CONTRACT_DIGEST = digestContractManifest(CONTRACT);
 
   type ConcreteDefinedContract = DefinedContract<
     RuntimeApiLike,

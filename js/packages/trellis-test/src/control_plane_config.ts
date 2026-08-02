@@ -208,8 +208,6 @@ export async function writeTrellisConfig(args: {
   const trustFixture = fromFileUrl(
     new URL("../fixtures/authorization-trust", import.meta.url),
   );
-  const issuerCertificate =
-    "authorization-issuer-certificate.TyWisPUdbGpSYntDMbWQTuQjFhedkbIpHUyeSsUairU.json";
   await Promise.all([
     Deno.writeTextFile(
       join(configDir, "event-session.seed"),
@@ -234,10 +232,6 @@ export async function writeTrellisConfig(args: {
     Deno.copyFile(
       join(trustFixture, "authorization-issuer-manifest.json"),
       join(configDir, "authorization-issuer-manifest.json"),
-    ),
-    Deno.copyFile(
-      join(trustFixture, issuerCertificate),
-      join(configDir, issuerCertificate),
     ),
     Deno.copyFile(
       join(trustFixture, "authorization-issuer.seed"),
@@ -281,6 +275,7 @@ single_writer = true
     `
 instance_name = ${quote(args.config.instanceName)}
 event_session_seed_file = "./event-session.seed"
+event_context_digest_file = "./event-context.digest"
 
 [http]
 port = ${args.config.port}
@@ -306,7 +301,6 @@ xkey_seed_file = "./auth-sx.seed"
 [auth.authorization]
 trust_root_file = "./authorization-root.json"
 issuer_manifest_file = "./authorization-issuer-manifest.json"
-issuer_certificate_files = [${quote(`./${issuerCertificate}`)}]
 issuer_signing_seed_file = "./authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60

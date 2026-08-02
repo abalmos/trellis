@@ -19,8 +19,8 @@ Common packages are:
 - `@qlever-llc/trellis/service/node`: service runtime entrypoint for Node.js.
 - `@qlever-llc/trellis/service`: service-side helper types and utilities such as
   outbox/inbox repositories.
-- `@qlever-llc/trellis/auth/browser`: browser auth helpers for login, portal, and
-  logout flows.
+- `@qlever-llc/trellis/auth/browser`: browser auth helpers for login and portal
+  flows.
 - `@qlever-llc/trellis/device/deno`: Deno device activation helpers.
 - `@qlever-llc/trellis/sdk/*`: Trellis-owned generated SDK surfaces.
 - `@qlever-llc/trellis/telemetry`: OpenTelemetry helpers for tracing,
@@ -37,6 +37,15 @@ Common packages are:
 Generated SDKs include contract metadata, TypeScript schema-derived types,
 `use(...)` helpers for consumers, concrete handler aliases for extracted service
 handlers, and `client.ts` facade types such as `Client` and `Service`.
+
+HTTP is used for browser flows, initial bootstrap, proof-bound restart recovery,
+and public immutable trust only. Connected control uses generated RPC,
+operation, and event APIs over NATS; application code does not call HTTP context,
+revocation, logout, or client-bootstrap endpoints.
+
+Rust/WASM is authoritative for TypeScript signed-context, issuer, and proof
+verification. TypeScript owns persistence, refresh scheduling, and state
+projection rather than a second security-object verifier.
 
 ## Connect as an app or CLI
 
@@ -93,7 +102,9 @@ Treat those resolved bindings as runtime internals. Service code should use the
 `service.kv`, `service.store`, and `service.jobs` handles returned by
 `TrellisService.connect(...)`; do not import the core SDK to bootstrap a service,
 fetch binding payloads, construct `TrellisService` or `StoreHandle`, or pass
-resource payloads into `Trellis` constructors.
+resource payloads into `Trellis` constructors. Authorization-registry KV handles,
+bucket names, and watch subjects are also runtime-internal and are not service
+author APIs.
 
 ```ts
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
@@ -185,6 +196,11 @@ const device = await TrellisDevice.connect({
   rootSecret: await Deno.readFile("./device-root-secret.bin"),
 }).orThrow();
 ```
+
+Online activation waiting is intentionally retained as a proof-bound, bounded
+pre-auth setup wait. It is not a general control API; after approval the device
+uses the shared initial/reconnect bootstrap path for current session, context,
+route, and NATS metadata.
 
 ## Use generated SDKs in contracts
 

@@ -745,12 +745,6 @@ where
             "failed to subscribe to upload transfer subject '{subject}': {error}"
         ))
     })?;
-    client.flush().await.map_err(|error| {
-        ServerError::Nats(format!(
-            "failed to flush upload transfer subscription '{subject}': {error}"
-        ))
-    })?;
-    tracing::debug!(subject = %subject, "upload transfer subscription flushed");
     tokio::spawn(async move {
         tracing::debug!(subject = %subject, "upload transfer endpoint task started");
         if let Err(error) = run_upload_transfer_endpoint_with_progress(
@@ -811,13 +805,7 @@ where
             "failed to subscribe to upload transfer subject '{subject}': {error}"
         ))
     })?;
-    client.flush().await.map_err(|error| {
-        ServerError::Nats(format!(
-            "failed to flush upload transfer subscription '{subject}': {error}"
-        ))
-    })?;
     let (sender, receiver) = oneshot::channel();
-    tracing::debug!(subject = %subject, "upload transfer subscription flushed");
     tokio::spawn(async move {
         tracing::debug!(subject = %subject, "upload transfer endpoint task started");
         if let Err(error) = run_upload_transfer_endpoint_inner(
@@ -856,12 +844,6 @@ where
             "failed to subscribe to download transfer subject '{subject}': {error}"
         ))
     })?;
-    client.flush().await.map_err(|error| {
-        ServerError::Nats(format!(
-            "failed to flush download transfer subscription '{subject}': {error}"
-        ))
-    })?;
-    tracing::debug!(subject = %subject, "download transfer subscription flushed");
     tokio::spawn(async move {
         tracing::debug!(subject = %subject, "download transfer endpoint task started");
         if let Err(error) =
@@ -936,10 +918,13 @@ fn transfer_request_context(message: &async_nats::Message) -> RequestContext {
         session_key: optional_header(message.headers.as_ref(), "session-key")
             .map(ToString::to_string),
         proof: optional_header(message.headers.as_ref(), "proof").map(ToString::to_string),
+        authorization_context: optional_header(message.headers.as_ref(), "authorization-context")
+            .map(ToString::to_string),
         iat: optional_header(message.headers.as_ref(), "iat").and_then(|value| value.parse().ok()),
         request_id: optional_header(message.headers.as_ref(), "request-id")
             .map(ToString::to_string),
         required_capabilities: None,
+        required_permission: None,
         reply_to: message.reply.as_ref().map(ToString::to_string),
         caller: None,
         traceparent: optional_header(message.headers.as_ref(), "traceparent")
@@ -978,7 +963,11 @@ where
         });
     }
 
-    if validator.validate(subject, payload, context).await?.allowed {
+    if validator
+        .validate_possession(subject, payload, context)
+        .await?
+        .allowed
+    {
         Ok(())
     } else {
         Err(ServerError::RequestDenied {
@@ -1384,9 +1373,11 @@ mod tests {
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: Some("proof".to_string()),
+            authorization_context: None,
             iat: None,
             request_id: None,
             required_capabilities: None,
+            required_permission: None,
             reply_to: None,
             caller: None,
             traceparent: None,
@@ -1422,9 +1413,11 @@ mod tests {
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: Some("wrong-session".to_string()),
             proof: None,
+            authorization_context: None,
             iat: None,
             request_id: None,
             required_capabilities: None,
+            required_permission: None,
             reply_to: None,
             caller: None,
             traceparent: None,
@@ -1456,9 +1449,11 @@ mod tests {
             subject: "transfer.v1.download.session.transfer-1".to_string(),
             session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),
+            authorization_context: None,
             iat: None,
             request_id: None,
             required_capabilities: None,
+            required_permission: None,
             reply_to: None,
             caller: None,
             traceparent: None,

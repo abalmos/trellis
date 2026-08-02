@@ -24,6 +24,7 @@ function createMockAuth(token = "test-token"): TrellisAuth {
   return {
     sessionKey: token,
     sign: () => new Uint8Array(64),
+    contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
   };
 }
 

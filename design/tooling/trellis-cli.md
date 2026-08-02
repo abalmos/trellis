@@ -204,6 +204,7 @@ trellis dev <id> reviews approve <review-id> [--reason <code>]
 trellis dev <id> reviews reject <review-id> [--reason <code>]
 
 trellis init config --out <dir> [--name <name>] [--server-name <name>]
+trellis server [all|platform|jobs|health|eventlog] --config <path> [--nats <url>] [--nats-binary <path>] [--nats-state-dir <dir>] [--rotate-first-admin] [--check] [--cache-dir <dir>]
 trellis check --config <path> [--mode <all|platform|jobs|health|eventlog>]
 trellis infra trust init --out <dir> --authority <authority> [--force]
 trellis infra trust rotate-issuer --dir <dir> [--revoke <issuer-key-id>]
@@ -338,12 +339,85 @@ Operational command behavior:
   generated Trellis display name defaults to `Trellis`; the NATS operator name
   also defaults to `Trellis`; the system account defaults to `SYS`; and the
   generated NATS `server_name` defaults to a slug derived from the Trellis name,
-  with `--server-name` available for an explicit NATS server-name override.
-- `trellis-server <mode> --config <path>` is the canonical runtime process
-  entrypoint. Supported modes are `all`, `platform`, `jobs`, `health`, and
-  `eventlog`; the default production config path is `/etc/trellis/trellis.toml`.
-  Split deployments omit optional runtime work by not running that subsystem
-  process rather than by adding role flags to `trellis`.
+  with `--server-name` available for an explicit NATS server-name override. The
+  generated bundle also includes a private `session.seed` file (32-byte
+  event-session seed) at the bundle root, referenced as `../session.seed` from
+  `trellis/config.toml`.
+- `trellis server <mode> --config <path>` is the single-node runtime entrypoint.
+  With `--nats <url>` it runs against an external NATS server exactly like
+  `trellis-server` (the production pattern). Without `--nats` it auto-manages a
+  local nats-server: it downloads the pinned, checksum-verified nats-server
+  release (version and sha256 in `conformance/nats-binaries.json`, shared with
+  the test harness), caches it under `TRELLIS_CACHE_DIR` or the platform cache
+  directory (`~/.cache/trellis` on Linux), renders a host-path local NATS config
+  from the `trellis init config` bundle (`nats.conf` plus `jwt.conf`), spawns
+  the server, runs the runtime in-process with the same behavior as the
+  `trellis-server` binary, and stops the managed server on exit. The managed
+  server listens on the bundle's native (4222), websocket (8080), and monitoring
+  (8222) ports. `--check` runs the same read-only preflight as `trellis check`;
+  with managed mode the local NATS server is started first so connectivity and
+  resource checks run against it. On a fresh bundle, the first full run boots
+  into first-administrator onboarding (the bootstrap URL warning), and `--check`
+  before any run reports the stores that the first run creates. `--cache-dir`
+  overrides the managed-binary cache location; the cached archive and binary are
+  cryptographically revalidated on every run (archive sha256 against the pin,
+  binary byte-for-byte against a fresh extraction of that verified archive), so
+  a corrupted or replaced cache entry is reinstalled from the pinned source.
+  `--nats-binary <path>` manages an existing nats-server binary instead of
+  downloading one. It is an explicit trusted-operator escape hatch: the binary
+  is NOT re-verified against the Trellis pin or version. The path is
+  canonicalized and must be a regular executable owned by root or the current
+  user, with no group/world-writable bits on the file or any parent directory;
+  no cache directory is used. `--nats-state-dir <dir>` (conflicts with `--nats`)
+  moves ALL mutable managed-NATS files — `nats.local.conf`, `jwt.local.conf`,
+  `nats-server.pid`, the resolver `data/jwt`, and JetStream data — under `dir`
+  while the bundle's `nats/` directory stays read-only; when absent, the state
+  dir defaults to the bundle `nats/` dir (host/dev behavior).
+- `trellis-server <mode> --config <path>` is the canonical production runtime
+  process entrypoint, used by split deployments and container images where NATS
+  is an external server. Supported modes are `all`, `platform`, `jobs`,
+  `health`, and `eventlog`; the default production config path is
+  `/etc/trellis/trellis.toml`. Split deployments omit optional runtime work by
+  not running that subsystem process rather than by adding role flags to
+  `trellis`.
+- the runtime OCI image ships the `trellis` CLI and the pinned nats-server baked
+  in at `/usr/local/bin/nats-server` (downloaded and checksum-verified at image
+  build time against `conformance/nats-binaries.json`, never at container
+  runtime); `nsc` is NOT in the image because the Rust bootstrap generates all
+  NATS material natively. The image's `ENTRYPOINT` stays `trellis-server` for
+  the external-NATS/quadlet deployment path, which is unchanged. Single-
+  container managed deployments override the entrypoint and run the CLI with a
+  read-only bundle and a writable state volume:
+
+  ```sh
+  docker volume create trellis-state
+  # Generate the bundle into the writable volume first (once), as the image's
+  # non-root user:
+  docker run --rm --user 10001:10001 --entrypoint trellis \
+    --volume trellis-state:/var/lib/trellis ghcr.io/qlever-llc/trellis:latest \
+    init config --out /var/lib/trellis/bundle
+  # The bundle's runtime SQLite dir must exist so it can overlay the read-only mount:
+  docker run --rm --user 10001:10001 --entrypoint mkdir \
+    --volume trellis-state:/var/lib/trellis ghcr.io/qlever-llc/trellis:latest \
+    -p /var/lib/trellis/bundle/trellis/data
+  docker run --rm --name trellis --read-only --tmpfs /tmp \
+    --user 10001:10001 --publish 3000:3000 \
+    --volume trellis-state:/var/lib/trellis \
+    --volume trellis-state/bundle:/etc/trellis:ro \
+    --volume trellis-state/bundle/trellis/data:/etc/trellis/trellis/data \
+    --entrypoint trellis ghcr.io/qlever-llc/trellis:latest \
+    server all --config /etc/trellis/trellis/config.toml \
+      --nats-binary /usr/local/bin/nats-server \
+      --nats-state-dir /var/lib/trellis/nats
+  ```
+
+  The bundle is mounted read-only; its generated SQLite paths resolve inside
+  `/etc/trellis/trellis`, so the writable volume overlays `/etc/trellis/trellis/data`
+  for the runtime's databases. All mutable NATS files go to `/var/lib/trellis/nats`
+  via `--nats-state-dir`; the bundle's `nats/` directory (config, credentials,
+  resolver preloads) is only read. The image never downloads nats-server at
+  container runtime. Quadlet/external-NATS deployments keep running
+  `trellis-server` unchanged with their own NATS container.
 - runtime startup safely converges only the Trellis-owned resources selected by
   its mode. Platform owns the canonical event stream and Auth KV registries,
   Jobs owns its three streams, Health owns its transport stream, and Event Log

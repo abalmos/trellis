@@ -1,6 +1,9 @@
 import type { Msg, NatsConnection } from "@nats-io/nats-core";
 import { Pointer } from "typebox/value";
-import type { RuntimeApi } from "./contract_support/runtime.ts";
+import type {
+  PermissionAtomV1,
+  RuntimeApi,
+} from "./contract_support/runtime.ts";
 import {
   AsyncResult,
   BaseError,
@@ -22,7 +25,6 @@ import {
   UnexpectedError,
   ValidationError,
 } from "./errors/index.ts";
-import { RemoteError } from "./errors/RemoteError.ts";
 import type { LoggerLike } from "./globals.ts";
 import { serverLogger } from "./server_logger.ts";
 import {
@@ -32,10 +34,6 @@ import {
 import {
   type AcceptedOperation,
   annotateHandlerBoundaryError,
-  type AuthRequestsValidateResponse,
-  base64urlDecode,
-  base64urlEncode,
-  buildProofInput,
   buildRuntimeOperationSnapshot,
   type HandlerFn,
   isOperationDeferred,
@@ -61,12 +59,12 @@ import {
   type RuntimeOperationSnapshot,
   type RuntimeOperationState,
   safeJson,
-  sha256,
-  toArrayBuffer,
   Trellis,
   type TrellisAuth,
   type TrellisMode,
   type TrellisOpts,
+  type VerifiedCaller,
+  verifyLocalAuthorization,
 } from "./session.ts";
 import type { SendTransferGrant } from "./transfer.ts";
 
@@ -99,7 +97,11 @@ export type TrellisServiceRuntimeFor<TA extends RuntimeApi = RuntimeApi> =
   };
 
 type RegisteredRuntimeOperationDesc = RuntimeOperationDesc & {
+  permissions?: RuntimeApi["operations"][string]["permissions"];
   callerCapabilities?: readonly string[];
+  observeCapabilities?: readonly string[];
+  cancelCapabilities?: readonly string[];
+  controlCapabilities?: readonly string[];
 };
 
 type RuntimeOperationTransferSession = {
@@ -110,6 +112,8 @@ type RuntimeOperationTransferSession = {
 type RuntimeOperationTransferSupport = {
   openOperationTransfer(args: {
     sessionKey: string;
+    permission: PermissionAtomV1 | undefined;
+    requiredCapabilities: readonly string[];
     store: string;
     key: string;
     expiresInMs: number;
@@ -713,17 +717,36 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     };
   }
 
-  #controlAuthContext(
+  #operationAuthRequirements(
     ctx: RegisteredRuntimeOperationDesc,
-    action: RuntimeOperationControlRequest["action"],
-  ): RegisteredRuntimeOperationDesc {
-    if (action === "signal" && ctx.controlCapabilities !== undefined) {
-      return { ...ctx, callerCapabilities: ctx.controlCapabilities };
+    control: RuntimeOperationControlRequest,
+  ): {
+    permission: PermissionAtomV1 | undefined;
+    capabilities: readonly string[];
+  } {
+    switch (control.action) {
+      case "signal":
+        return {
+          permission: ctx.signals?.[control.signal]
+            ? ctx.permissions?.control[control.signal]
+            : undefined,
+          capabilities: ctx.controlCapabilities ?? [],
+        };
+      case "cancel":
+        return {
+          permission: ctx.permissions?.cancel,
+          capabilities: ctx.cancelCapabilities ?? [],
+        };
+      case "get":
+      case "wait":
+      case "watch":
+        return {
+          permission: ctx.permissions?.observe,
+          capabilities: ctx.observeCapabilities ?? [],
+        };
+      default:
+        return { permission: undefined, capabilities: [] };
     }
-    if (action === "cancel" && ctx.cancelCapabilities !== undefined) {
-      return { ...ctx, callerCapabilities: ctx.cancelCapabilities };
-    }
-    return ctx;
   }
 
   #operationNotFoundError(operationId: string): OperationNotFoundError {
@@ -879,13 +902,14 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     msg: Msg,
     ctx: RegisteredRuntimeOperationDesc,
     parseInput: boolean,
+    permission: PermissionAtomV1 | undefined = ctx.permissions?.invoke,
+    requiredCapabilities: readonly string[] = ctx.callerCapabilities ?? [],
   ): Promise<
     Result<{
       input: unknown;
-      caller: AuthRequestsValidateResponse["caller"];
+      caller: VerifiedCaller;
       sessionKey: string;
-      auth: AuthRequestsValidateResponse;
-    }, UnexpectedError | AuthError | ValidationError | RemoteError>
+    }, UnexpectedError | AuthError | ValidationError>
   > {
     const jsonData = safeJson(msg).take();
     if (isErr(jsonData)) return jsonData;
@@ -906,107 +930,20 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       parsedInput = jsonData;
     }
 
-    const sessionKey = msg.headers?.get("session-key");
-    const proof = msg.headers?.get("proof");
-    const iatHeader = msg.headers?.get("iat");
-    const requestId = msg.headers?.get("request-id");
-    if (!sessionKey) {
-      return err(new AuthError({ reason: "missing_session_key" }));
-    }
-    if (!proof) return err(new AuthError({ reason: "missing_proof" }));
-    const iat = Number(iatHeader);
-    if (!Number.isSafeInteger(iat) || !requestId) {
-      return err(new AuthError({ reason: "invalid_signature" }));
-    }
-
-    const payloadBytes = msg.data ?? new Uint8Array();
-    const payloadHash = await sha256(payloadBytes);
-    const proofInput = buildProofInput(
-      sessionKey,
-      msg.subject,
-      payloadHash,
-      iat,
-      requestId,
-    );
-    const digest = await sha256(proofInput);
-
-    const verifyResult = await AsyncResult.try(async () => {
-      const publicKeyRaw = base64urlDecode(sessionKey);
-      const pub = await crypto.subtle.importKey(
-        "raw",
-        toArrayBuffer(publicKeyRaw),
-        { name: "Ed25519" },
-        true,
-        ["verify"],
-      );
-      return crypto.subtle.verify(
-        { name: "Ed25519" },
-        pub,
-        toArrayBuffer(base64urlDecode(proof)),
-        toArrayBuffer(digest),
-      );
+    const auth = await verifyLocalAuthorization({
+      kind: "request",
+      cache: this.auth.authorizationProviderCache,
+      message: msg,
+      permission,
+      requiredCapabilities,
     });
-    const signatureOk = verifyResult.isOk() &&
-      verifyResult.take() === true;
-    if (!signatureOk) {
-      return err(
-        new AuthError({
-          reason: "invalid_signature",
-          context: { sessionKey },
-        }),
-      );
-    }
-
-    const auth = await this.requestAuthValidate({
-      sessionKey,
-      proof,
-      subject: msg.subject,
-      payloadHash: base64urlEncode(payloadHash),
-      iat,
-      requestId,
-      capabilities: ctx.callerCapabilities
-        ? [...ctx.callerCapabilities]
-        : undefined,
-    }).take();
-    if (isErr(auth)) {
-      return err(
-        auth.error as
-          | RemoteError
-          | ValidationError
-          | UnexpectedError
-          | AuthError,
-      );
-    }
-
-    if (!auth.allowed) {
-      return err(
-        new AuthError({
-          reason: "insufficient_permissions",
-          context: {
-            requiredCapabilities: ctx.callerCapabilities,
-            userCapabilities: auth.caller.capabilities,
-          },
-        }),
-      );
-    }
-
-    if (
-      typeof msg.reply !== "string" ||
-      !msg.reply.startsWith(`${auth.inboxPrefix}.`)
-    ) {
-      return err(
-        new AuthError({
-          reason: "reply_subject_mismatch",
-          context: { expected: auth.inboxPrefix, actual: msg.reply },
-        }),
-      );
-    }
+    const authValue = auth.take();
+    if (isErr(authValue)) return err(authValue.error);
 
     return ok({
       input: parsedInput,
-      caller: auth.caller,
-      sessionKey,
-      auth,
+      caller: authValue,
+      sessionKey: authValue.sessionKey,
     });
   }
 
@@ -1072,10 +1009,13 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         }
 
         const control = request as RuntimeOperationControlRequest;
+        const requirements = this.#operationAuthRequirements(ctx, control);
         const validated = await this.#authenticateOperationMessage(
           msg,
-          this.#controlAuthContext(ctx, control.action),
+          ctx,
           false,
+          requirements.permission,
+          requirements.capabilities,
         );
         const value = validated.take();
         if (isErr(value)) {
@@ -1372,137 +1312,8 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           };
         };
 
-        const authenticate = async (msg: Msg, parseInput = true): Promise<
-          Result<{
-            input: unknown;
-            caller: AuthRequestsValidateResponse["caller"];
-            sessionKey: string;
-            auth: AuthRequestsValidateResponse;
-          }, UnexpectedError | AuthError | ValidationError | RemoteError>
-        > => {
-          const jsonData = safeJson(msg).take();
-          if (isErr(jsonData)) return jsonData;
-
-          let parsedInput: unknown;
-          if (parseInput) {
-            const parsedInputResult = parseSchema(
-              ctx.input as Parameters<typeof parseSchema>[0],
-              jsonData,
-            ).take();
-            if (isErr(parsedInputResult)) {
-              return err(
-                parsedInputResult.error as ValidationError | UnexpectedError,
-              );
-            }
-            parsedInput = parsedInputResult;
-          } else {
-            parsedInput = jsonData;
-          }
-
-          const sessionKey = msg.headers?.get("session-key");
-          const proof = msg.headers?.get("proof");
-          const iatHeader = msg.headers?.get("iat");
-          const requestId = msg.headers?.get("request-id");
-          if (!sessionKey) {
-            return err(new AuthError({ reason: "missing_session_key" }));
-          }
-          if (!proof) return err(new AuthError({ reason: "missing_proof" }));
-          const iat = Number(iatHeader);
-          if (!Number.isSafeInteger(iat) || !requestId) {
-            return err(new AuthError({ reason: "invalid_signature" }));
-          }
-
-          const payloadBytes = msg.data ?? new Uint8Array();
-          const payloadHash = await sha256(payloadBytes);
-          const proofInput = buildProofInput(
-            sessionKey,
-            msg.subject,
-            payloadHash,
-            iat,
-            requestId,
-          );
-          const digest = await sha256(proofInput);
-
-          const verifyResult = await AsyncResult.try(async () => {
-            const publicKeyRaw = base64urlDecode(sessionKey);
-            const pub = await crypto.subtle.importKey(
-              "raw",
-              toArrayBuffer(publicKeyRaw),
-              { name: "Ed25519" },
-              true,
-              ["verify"],
-            );
-            return crypto.subtle.verify(
-              { name: "Ed25519" },
-              pub,
-              toArrayBuffer(base64urlDecode(proof)),
-              toArrayBuffer(digest),
-            );
-          });
-          const signatureOk = verifyResult.isOk() &&
-            verifyResult.take() === true;
-          if (!signatureOk) {
-            return err(
-              new AuthError({
-                reason: "invalid_signature",
-                context: { sessionKey },
-              }),
-            );
-          }
-
-          const authResult = await this.requestAuthValidate({
-            sessionKey,
-            proof,
-            subject: msg.subject,
-            payloadHash: base64urlEncode(payloadHash),
-            iat,
-            requestId,
-            capabilities: ctx.callerCapabilities
-              ? [...ctx.callerCapabilities]
-              : undefined,
-          });
-          const auth = authResult.take();
-          if (isErr(auth)) {
-            return err(
-              auth.error as
-                | RemoteError
-                | ValidationError
-                | UnexpectedError
-                | AuthError,
-            );
-          }
-
-          if (!auth.allowed) {
-            return err(
-              new AuthError({
-                reason: "insufficient_permissions",
-                context: {
-                  requiredCapabilities: ctx.callerCapabilities,
-                  userCapabilities: auth.caller.capabilities,
-                },
-              }),
-            );
-          }
-
-          if (
-            typeof msg.reply !== "string" ||
-            !msg.reply.startsWith(`${auth.inboxPrefix}.`)
-          ) {
-            return err(
-              new AuthError({
-                reason: "reply_subject_mismatch",
-                context: { expected: auth.inboxPrefix, actual: msg.reply },
-              }),
-            );
-          }
-
-          return ok({
-            input: parsedInput,
-            caller: auth.caller,
-            sessionKey,
-            auth,
-          });
-        };
+        const authenticate = (msg: Msg, parseInput = true) =>
+          this.#authenticateOperationMessage(msg, ctx, parseInput);
 
         this.#log.info(
           { operation: String(operation) },
@@ -1511,7 +1322,6 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
 
         this.#ensureOperationControlLoop(String(operation), ctx);
         const startSub = this.#nats.subscribe(startSubject);
-        await this.#nats.flush();
 
         void (async () => {
           for await (const msg of startSub) {
@@ -1591,6 +1401,8 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               const openedTransferValue = await this.#transferSupport
                 .openOperationTransfer({
                   sessionKey: value.sessionKey,
+                  permission: ctx.permissions?.invoke,
+                  requiredCapabilities: ctx.callerCapabilities ?? [],
                   store: ctx.transfer.store,
                   key,
                   expiresInMs: ctx.transfer.expiresInMs ?? 60_000,

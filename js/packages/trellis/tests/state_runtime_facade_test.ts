@@ -20,7 +20,11 @@ function createTestCaller<TContract extends TestContract>(contract: TContract) {
   const session = new Trellis(
     contract.CONTRACT_ID,
     { options: { inboxPrefix: "_INBOX.test" } } as never,
-    { sessionKey: "test", sign: () => new Uint8Array(64) },
+    {
+      sessionKey: "test",
+      sign: () => new Uint8Array(64),
+      contextDigest: "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c",
+    },
     {
       api: getContractRuntime(contract).api as RuntimeApi,
       state: contract[CONTRACT_STATE_METADATA],

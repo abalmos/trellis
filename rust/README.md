@@ -11,22 +11,23 @@ behind modules of the public `trellis` facade.
 
 **Crates in this repository:**
 
-| Crate                     | Purpose                                                          |
-| ------------------------- | ---------------------------------------------------------------- |
-| `trellis-auth`            | Unpublished compatibility/test package for auth helpers          |
-| `trellis-auth-adapters`   | Unpublished compatibility/test package for auth adapters         |
-| `trellis`                 | Curated public Rust facade for clients and services              |
-| `trellis-cli`             | Operator CLI crate for the `trellis` binary                      |
-| `trellis-client`          | Unpublished compatibility package for `trellis_rs::client`       |
-| `trellis-codegen-rust`    | Internal Rust SDK code generation                                |
-| `trellis-codegen-ts`      | Internal TypeScript SDK code generation                          |
-| `trellis-contracts`       | Contract manifest model and validation                           |
-| `trellis-core-bootstrap`  | Internal bootstrap helpers for infrastructure state              |
-| `trellis-generate-runner` | Internal helper for invoking the bootstrap-safe generator        |
-| `trellis-jobs`            | Unpublished compatibility/test package for `trellis_rs::jobs`    |
-| `trellis-local-bootstrap` | Internal local Trellis/NATS bootstrap bundle generation          |
-| `trellis-service`         | Unpublished compatibility/test package for `trellis_rs::service` |
-| `trellis-service-jobs`    | Internal service-side jobs integration helpers                   |
+| Crate                      | Purpose                                                          |
+| -------------------------- | ---------------------------------------------------------------- |
+| `trellis-auth`             | Unpublished compatibility/test package for auth helpers          |
+| `trellis-auth-adapters`    | Unpublished compatibility/test package for auth adapters         |
+| `trellis`                  | Curated public Rust facade for clients and services              |
+| `trellis-cli`              | Operator CLI crate for the `trellis` binary                      |
+| `trellis-client`           | Unpublished compatibility package for `trellis_rs::client`       |
+| `trellis-codegen-rust`     | Internal Rust SDK code generation                                |
+| `trellis-codegen-ts`       | Internal TypeScript SDK code generation                          |
+| `trellis-contracts`        | Contract manifest model and validation                           |
+| `trellis-core-bootstrap`   | Internal bootstrap helpers for infrastructure state              |
+| `trellis-generate-runner`  | Internal helper for invoking the bootstrap-safe generator        |
+| `trellis-jobs`             | Unpublished compatibility/test package for `trellis_rs::jobs`    |
+| `trellis-local-bootstrap`  | Internal local Trellis/NATS bootstrap bundle generation          |
+| `trellis-service`          | Unpublished compatibility/test package for `trellis_rs::service` |
+| `trellis-eventlog-runtime` | Internal built-in Event Log runtime                              |
+| `trellis-jobs-runtime`     | Internal built-in Jobs admin runtime                             |
 
 See `../design/tooling/trellis-cli.md` and
 `../design/contracts/trellis-rust-contract-libraries.md`.

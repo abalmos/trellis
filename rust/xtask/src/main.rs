@@ -3,16 +3,35 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use clap::error::ErrorKind;
+use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, Result, WrapErr};
 
 mod release;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
 enum XtaskCommand {
+    #[command(name = "prepare")]
     Prepare,
+    #[command(name = "prepare-watch")]
     PrepareWatch,
-    Build(Vec<String>),
-    Release(release::ReleaseCommand),
+    #[command(name = "build", disable_help_flag = true)]
+    Build {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    #[command(name = "release")]
+    Release {
+        #[command(subcommand)]
+        command: release::ReleaseCommand,
+    },
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "cargo xtask")]
+struct XtaskCli {
+    #[command(subcommand)]
+    command: XtaskCommand,
 }
 
 fn main() -> ExitCode {
@@ -26,51 +45,58 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    match parse_command(env::args().skip(1))? {
+    let Some(command) = parse_command(env::args().skip(1))? else {
+        return Ok(());
+    };
+    match command {
         XtaskCommand::Prepare => run_prepare(),
         XtaskCommand::PrepareWatch => run_prepare_watch(),
-        XtaskCommand::Build(args) => run_build(&args),
-        XtaskCommand::Release(command) => release::run_release(&repo_root()?, command),
+        XtaskCommand::Build { args } => run_build(&args),
+        XtaskCommand::Release { command } => release::run_release(&repo_root()?, command),
     }
 }
 
-fn parse_command<I>(mut args: I) -> Result<XtaskCommand>
+fn parse_command<I>(args: I) -> Result<Option<XtaskCommand>>
 where
     I: Iterator<Item = String>,
 {
-    match args.next().as_deref() {
-        Some("prepare") => {
-            if let Some(extra) = args.next() {
-                Err(miette::miette!(
-                    "unexpected argument `{extra}`\n{}",
-                    usage_text()
-                ))
-            } else {
-                Ok(XtaskCommand::Prepare)
+    let input_args = args.collect::<Vec<_>>();
+    let build_delimiter_index = match input_args.first() {
+        Some(command) if command == "build" => {
+            input_args.iter().skip(1).position(|arg| arg == "--")
+        }
+        _ => None,
+    };
+    let argv = std::iter::once("cargo-xtask".to_string()).chain(input_args.iter().cloned());
+    let mut command = match XtaskCli::try_parse_from(argv) {
+        Ok(cli) => cli.command,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp
+                    | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                    | ErrorKind::DisplayVersion
+            ) =>
+        {
+            error.print().into_diagnostic()?;
+            return Ok(None);
+        }
+        Err(error) => return Err(miette::miette!("{error}")),
+    };
+    if let Some(delimiter_index) = build_delimiter_index {
+        if let XtaskCommand::Build { args } = &mut command {
+            if args.get(delimiter_index).map(String::as_str) != Some("--") {
+                args.insert(delimiter_index, "--".to_string());
             }
         }
-        Some("prepare-watch") => {
-            if let Some(extra) = args.next() {
-                Err(miette::miette!(
-                    "unexpected argument `{extra}`\n{}",
-                    usage_text()
-                ))
-            } else {
-                Ok(XtaskCommand::PrepareWatch)
-            }
-        }
-        Some("build") => Ok(XtaskCommand::Build(args.collect())),
-        Some("release") => release::parse_release_command(args).map(XtaskCommand::Release),
-        Some(command) => Err(miette::miette!(
-            "unsupported xtask command `{command}`\n{}",
-            usage_text()
-        )),
-        None => Err(miette::miette!(usage_text())),
     }
-}
-
-fn usage_text() -> &'static str {
-    "usage: cargo xtask prepare | cargo xtask prepare-watch | cargo xtask build [cargo-build-args...] | cargo xtask release <command>"
+    if let XtaskCommand::Release {
+        command: release_command,
+    } = &command
+    {
+        release::validate_release_command(release_command)?;
+    }
+    Ok(Some(command))
 }
 
 fn run_prepare() -> Result<()> {
@@ -198,14 +224,17 @@ mod tests {
 
     #[test]
     fn parse_prepare_command() {
-        let command = parse_command(["prepare".to_string()].into_iter()).expect("parse prepare");
+        let command = parse_command(["prepare".to_string()].into_iter())
+            .expect("parse prepare")
+            .expect("prepare command");
         assert_eq!(command, XtaskCommand::Prepare);
     }
 
     #[test]
     fn parse_prepare_watch_command() {
-        let command =
-            parse_command(["prepare-watch".to_string()].into_iter()).expect("parse prepare-watch");
+        let command = parse_command(["prepare-watch".to_string()].into_iter())
+            .expect("parse prepare-watch")
+            .expect("prepare-watch command");
         assert_eq!(command, XtaskCommand::PrepareWatch);
     }
 
@@ -216,10 +245,26 @@ mod tests {
                 .into_iter()
                 .map(str::to_string),
         )
-        .expect("parse build");
+        .expect("parse build")
+        .expect("build command");
         assert_eq!(
             command,
-            XtaskCommand::Build(vec!["--workspace".to_string(), "--release".to_string()])
+            XtaskCommand::Build {
+                args: vec!["--workspace".to_string(), "--release".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_build_command_preserves_help_passthrough_arg() {
+        let command = parse_command(["build", "--help"].into_iter().map(str::to_string))
+            .expect("parse build help argument")
+            .expect("build command");
+        assert_eq!(
+            command,
+            XtaskCommand::Build {
+                args: vec!["--help".to_string()],
+            }
         );
     }
 
@@ -230,10 +275,40 @@ mod tests {
                 .into_iter()
                 .map(str::to_string),
         )
-        .expect("parse release command");
+        .expect("parse release command")
+        .expect("release command");
         assert_eq!(
             command,
-            XtaskCommand::Release(ReleaseCommand::CheckVersions)
+            XtaskCommand::Release {
+                command: ReleaseCommand::CheckVersions,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_help_command_succeeds_without_exiting() {
+        let command = parse_command(["--help"].into_iter().map(str::to_string))
+            .expect("help should be handled successfully");
+        assert!(command.is_none());
+    }
+
+    #[test]
+    fn parse_build_command_preserves_argument_delimiter() {
+        let command = parse_command(
+            ["build", "--", "--cfg", "foo"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .expect("parse build")
+        .expect("build command");
+        assert_eq!(
+            command,
+            XtaskCommand::Build {
+                args: vec!["--", "--cfg", "foo"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }
         );
     }
 
@@ -241,9 +316,7 @@ mod tests {
     fn prepare_rejects_extra_args() {
         let error = parse_command(["prepare", "--workspace"].into_iter().map(str::to_string))
             .expect_err("prepare should reject extra args");
-        assert!(error
-            .to_string()
-            .contains("unexpected argument `--workspace`"));
+        assert!(error.to_string().contains("unexpected argument"));
     }
 
     #[test]
@@ -254,8 +327,6 @@ mod tests {
                 .map(str::to_string),
         )
         .expect_err("prepare-watch should reject extra args");
-        assert!(error
-            .to_string()
-            .contains("unexpected argument `--workspace`"));
+        assert!(error.to_string().contains("unexpected argument"));
     }
 }

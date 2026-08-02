@@ -2099,7 +2099,7 @@ impl crate::generated::DeclaredError for AuthSessionsListError {
 /// Descriptor for `Auth.Sessions.Logout`.
 pub struct AuthSessionsLogoutRpc;
 impl RpcDescriptor for AuthSessionsLogoutRpc {
-    type Input = super::types::AuthSessionsLogoutRequest;
+    type Input = Empty;
     type Output = super::types::AuthSessionsLogoutResponse;
     const INPUT_SCHEMA_JSON: &'static str = super::schemas::AUTH_SESSIONS_LOGOUT_INPUT_SCHEMA_JSON;
     const OUTPUT_SCHEMA_JSON: &'static str =

@@ -53,64 +53,84 @@ export function session_proof_signing_digest(input_json) {
 }
 
 /**
- * Verify a complete authorization token and trust chain, returning its compact projection.
+ * Verify a root, issuer manifest, and signed authorization context JSON value.
  * @param {string} root_json
  * @param {string} manifest_json
- * @param {string} certificate_json
- * @param {string} context_token
+ * @param {string} context_json
  * @param {string} policy_json
  * @returns {string}
  */
-export function verify_authorization_context_token(root_json, manifest_json, certificate_json, context_token, policy_json) {
-    let deferred7_0;
-    let deferred7_1;
+export function verify_authorization_context(root_json, manifest_json, context_json, policy_json) {
+    let deferred6_0;
+    let deferred6_1;
     try {
         const ptr0 = passStringToWasm0(root_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passStringToWasm0(manifest_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(certificate_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passStringToWasm0(context_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ptr3 = passStringToWasm0(context_token, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr3 = passStringToWasm0(policy_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len3 = WASM_VECTOR_LEN;
-        const ptr4 = passStringToWasm0(policy_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len4 = WASM_VECTOR_LEN;
-        const ret = wasm.verify_authorization_context_token(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
-        var ptr6 = ret[0];
-        var len6 = ret[1];
+        const ret = wasm.verify_authorization_context(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        var ptr5 = ret[0];
+        var len5 = ret[1];
         if (ret[3]) {
-            ptr6 = 0; len6 = 0;
+            ptr5 = 0; len5 = 0;
             throw takeFromExternrefTable0(ret[2]);
         }
-        deferred7_0 = ptr6;
-        deferred7_1 = len6;
-        return getStringFromWasm0(ptr6, len6);
+        deferred6_0 = ptr5;
+        deferred6_1 = len5;
+        return getStringFromWasm0(ptr5, len5);
     } finally {
-        wasm.__wbindgen_free(deferred7_0, deferred7_1, 1);
+        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
     }
 }
 
 /**
- * Verify a JSON-encoded session proof and return its replay identity as JSON.
- * @param {string} input_json
- * @param {string} proof_json
- * @param {string} signer_public_key
- * @param {number} now_ms
- * @param {number} maximum_age_ms
- * @param {number} maximum_future_skew_ms
+ * Verify one context-bound authorization event proof from a JSON argument.
+ *
+ * The result is always a JSON object. Successful results have `ok: true` and
+ * contain verified publisher/context metadata; rejected inputs have `ok: false`
+ * and a stable authorization error code and path. Event context chains are
+ * checked at their signed historical boundary before the strict event-time
+ * window is evaluated.
+ * @param {string} event_json
  * @returns {string}
  */
-export function verify_session_proof(input_json, proof_json, signer_public_key, now_ms, maximum_age_ms, maximum_future_skew_ms) {
+export function verify_authorization_event_v2(event_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(event_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.verify_authorization_event_v2(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Verify a root-signed issuer manifest and return its verified projection.
+ * @param {string} root_json
+ * @param {string} manifest_json
+ * @param {string} policy_json
+ * @returns {string}
+ */
+export function verify_authorization_manifest(root_json, manifest_json, policy_json) {
     let deferred5_0;
     let deferred5_1;
     try {
-        const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr0 = passStringToWasm0(root_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passStringToWasm0(proof_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr1 = passStringToWasm0(manifest_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len1 = WASM_VECTOR_LEN;
-        const ptr2 = passStringToWasm0(signer_public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const ptr2 = passStringToWasm0(policy_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len2 = WASM_VECTOR_LEN;
-        const ret = wasm.verify_session_proof(ptr0, len0, ptr1, len1, ptr2, len2, now_ms, maximum_age_ms, maximum_future_skew_ms);
+        const ret = wasm.verify_authorization_manifest(ptr0, len0, ptr1, len1, ptr2, len2);
         var ptr4 = ret[0];
         var len4 = ret[1];
         if (ret[3]) {
@@ -122,6 +142,52 @@ export function verify_session_proof(input_json, proof_json, signer_public_key, 
         return getStringFromWasm0(ptr4, len4);
     } finally {
         wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
+ * Verify one context-bound authorization request proof from a JSON argument.
+ *
+ * The result is always a JSON object. Successful results have `ok: true` and
+ * contain verified caller/context metadata; rejected inputs have `ok: false`
+ * and a stable authorization error code and path.
+ * @param {string} request_json
+ * @returns {string}
+ */
+export function verify_authorization_request_v2(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.verify_authorization_request_v2(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Verify a JSON-encoded session proof.
+ * @param {string} input_json
+ * @param {string} proof_json
+ * @param {string} signer_public_key
+ * @param {number} now_ms
+ * @param {number} maximum_age_ms
+ * @param {number} maximum_future_skew_ms
+ */
+export function verify_session_proof(input_json, proof_json, signer_public_key, now_ms, maximum_age_ms, maximum_future_skew_ms) {
+    const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(proof_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(signer_public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.verify_session_proof(ptr0, len0, ptr1, len1, ptr2, len2, now_ms, maximum_age_ms, maximum_future_skew_ms);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
     }
 }
 function __wbg_get_imports() {

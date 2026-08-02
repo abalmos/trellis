@@ -1,10 +1,11 @@
 use ed25519_dalek::{Signature, Signer, SigningKey};
 use nkeys::{KeyPair, KeyPairType};
-use trellis_protocol::{sign_session_proof_v1, SessionProofInputV1, SessionProofV1};
-
-use crate::client::proof::{
-    base64url_decode, base64url_encode, build_event_proof_input, build_proof_input, sha256,
+use trellis_protocol::{
+    sign_authorization_event_v2, sign_authorization_request_v2, sign_session_proof_v1,
+    AuthorizationEventProofV2, AuthorizationRequestProofV2, SessionProofInputV1, SessionProofV1,
 };
+
+use crate::client::proof::{base64url_decode, base64url_encode, sha256};
 use crate::client::TrellisClientError;
 
 /// Session-scoped signing material used for Trellis auth and RPC proofs.
@@ -82,41 +83,55 @@ impl SessionAuth {
         )
     }
 
-    /// Create the `proof` header for a signed RPC request payload.
-    #[doc = concat!("Trellis API operation `", stringify!(create_proof), "`.")]
-    pub fn create_proof(
+    /// Create the context-bound v2 `proof` header for a signed RPC request.
+    ///
+    /// The exact NATS reply inbox must be created before signing and used for
+    /// both the proof input and the publish reply.
+    #[doc = concat!("Trellis API operation `", stringify!(create_request_proof_v2), "`.")]
+    pub fn create_request_proof_v2(
         &self,
+        context_digest: &str,
         subject: &str,
+        reply_subject: &str,
         payload: &[u8],
         iat: i64,
         request_id: &str,
-    ) -> String {
-        let payload_hash = sha256(payload);
-        let input = build_proof_input(&self.session_key, subject, &payload_hash, iat, request_id);
-        let digest = sha256(&input);
-        let signature: Signature = self.signing_key.sign(&digest);
-        base64url_encode(&signature.to_bytes())
+    ) -> Result<AuthorizationRequestProofV2, TrellisClientError> {
+        if reply_subject.is_empty() {
+            return Err(TrellisClientError::Bootstrap(
+                "request reply subject must not be empty".into(),
+            ));
+        }
+        sign_authorization_request_v2(
+            context_digest,
+            subject,
+            Some(reply_subject),
+            payload,
+            iat,
+            request_id,
+            &self.signing_key,
+        )
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 
-    /// Create the `proof` header for a signed event payload.
-    #[doc = concat!("Trellis API operation `", stringify!(create_event_proof), "`.")]
-    pub fn create_event_proof(
+    /// Create the context-bound v2 `proof` header for a signed event.
+    #[doc = concat!("Trellis API operation `", stringify!(create_event_proof_v2), "`.")]
+    pub fn create_event_proof_v2(
         &self,
+        context_digest: &str,
         subject: &str,
         payload: &[u8],
         event_id: &str,
         event_time: &str,
-    ) -> String {
-        let payload_hash = sha256(payload);
-        let input = build_event_proof_input(
-            &self.session_key,
+    ) -> Result<AuthorizationEventProofV2, TrellisClientError> {
+        sign_authorization_event_v2(
+            context_digest,
             subject,
-            &payload_hash,
+            payload,
             event_id,
             event_time,
-        );
-        let digest = sha256(&input);
-        let signature: Signature = self.signing_key.sign(&digest);
-        base64url_encode(&signature.to_bytes())
+            &self.signing_key,
+        )
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 }

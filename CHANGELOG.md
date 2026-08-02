@@ -10,15 +10,15 @@ and this project adheres to
 
 ### Added
 
-- Added deployment-owned authorization trust initialization and issuer rotation,
-  strict runtime trust-chain startup validation, generation rollback floors, and
-  immutable NATS KV trust/context registries with public lazy HTTP locators.
+- Added deployment-owned authorization trust initialization and direct-key
+  issuer rotation, strict startup validation, generation rollback floors, and
+  immutable NATS KV manifest/context history.
 - Added snapshot-bound, issuer-signed authorization-context issuance and refresh
   to browser, client, service, and device bootstrap. Rust, TypeScript, WASM, and
   Svelte clients verify/cache contexts and refresh before expiry.
-- Added `natsConnectContext` proof admission. NATS Auth Callout now verifies the
-  published context, complete trust chain, current issuable state, and exact
-  context digest on every connect/reconnect, and bounds transport JWTs by
+- Added context-bound NATS admission. Auth Callout selects a published context
+  by digest, requires NKey/session-key equality, compiles transport permissions
+  directly from signed grants and current bindings, and bounds transport JWTs by
   context expiry.
 - Added additive V1003 SQLite trust/context state, transactional revocation
   coupling for authorization-relevant mutations, durable revocation publication,
@@ -26,7 +26,11 @@ and this project adheres to
   validation of config, connectivity, migrations, trust, and registries.
 - Added durable complete client trust floors with atomic browser and native
   persistence, Rust/WASM-authoritative TypeScript verification, deterministic
-  distributed refresh scheduling, and registry publication visibility checks.
+  client-computed refresh scheduling, and registry publication visibility
+  checks.
+- Added `trellis server` managed local NATS: when no external `--nats` URL is
+  supplied, Trellis starts a pinned, checksum-verified nats-server binary for
+  local single-node use, with explicit external and baked-binary options.
 
 ### Changed
 
@@ -36,9 +40,8 @@ and this project adheres to
 
 - Local bootstrap now creates an offline authorization root and online issuer;
   runtime configuration never references the root seed.
-- Ordinary request and event validation remain on the transitional Auth
-  validators until Milestones 10 and 11 respectively; ordinary messages carry no
-  full context token in this milestone.
+- Ordinary request and event validation now resolves signed contexts locally by
+  digest and uses generated receiver-owned permission metadata.
 - Clarified that the deny-all bootstrap JWT is route-selection material bounded
   by session/authority/delegation/context state and a configurable lifetime cap;
   proof-bound context refresh renews and atomically installs it.
@@ -51,16 +54,18 @@ and this project adheres to
 - Derived runtime convergence and read-only `trellis check` requirements from
   the selected runtime mode. Removed obsolete public infrastructure apply/check
   commands; `trellis infra` now contains only offline trust artifact tooling.
-- Kept TypeScript authorization support client-scoped: own-context persistence,
-  Rust/WASM verification, refresh, route-JWT renewal, reconnect, and Svelte
-  state. Arbitrary-context validation, registry watches, and validator readiness
-  remain Rust runtime responsibilities.
+- Kept TypeScript cryptography Rust/WASM-authoritative while supporting
+  own-context persistence/refresh/reconnect and the same minimal connected
+  registry watch state for TypeScript service providers.
 - Require Platform, Jobs, Health, and Event Log to use separate SQLite files;
   runtime config rejects shared subsystem paths and local bootstrap provisions
   one file per subsystem.
 - Rebuilt the release gate around compiled/executed matrix inventory, one shared
   live host, explicit process isolation, curated pure tests, stable Rust, named
   local/CI lanes, and machine-readable process and phase timing.
+- Live integration test harnesses no longer require Podman or Docker; they spawn
+  the pinned nats-server binary directly. Trellis OCI images bake the pinned
+  nats-server during image build instead of downloading it at container runtime.
 
 ### Fixed
 
@@ -72,10 +77,10 @@ and this project adheres to
   renewed route-JWT expiry tracking, atomic client persistence, same-digest
   rescheduling, transactional two-context overlap, and strict revocation
   records.
-- Made the Rust validator cache subscribe and complete initial snapshots before
-  Auth Callout starts, resnapshot after watch or manifest changes, invalidate
-  stale contexts, resolve exact immutable trust/context records lazily, expose
-  cache health, and record admitted context identity in connection presence.
+- Made the Rust validator cache establish watches and consume their initial
+  state before Auth Callout starts, recreate them after connection/watch
+  failure, resolve exact immutable trust/context records lazily, expose cache
+  health, and record admitted context digest in connection presence.
 - Defined context size limits uniformly as canonical complete signed-context
   JSON UTF-8 bytes and restored eight-worker TypeScript and Rust integration
   gates.

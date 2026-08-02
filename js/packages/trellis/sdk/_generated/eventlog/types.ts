@@ -107,23 +107,13 @@ export type EventLogQueryInput = {
   offset?: number;
   ownerContractId?: string;
   ownerEventName?: string;
-  publisherContractId?: string;
   publisherDeploymentId?: string;
+  publisherParticipantId?: string;
   resolution?: Array<("resolved" | "unresolved" | "malformed")>;
   search?: string;
   sort?: { [k: string]: unknown };
   subject?: string;
-  verificationStatus?: Array<
-    (
-      | "verified"
-      | "missing-proof"
-      | "invalid-signature"
-      | "missing-session"
-      | "subject-denied"
-      | "outside-session-window"
-      | "auth-unavailable"
-    )
-  >;
+  verificationStatus?: Array<("verified")>;
   window?: "15m" | "1h" | "6h" | "24h" | "7d";
 };
 export type EventLogQueryOutput = {

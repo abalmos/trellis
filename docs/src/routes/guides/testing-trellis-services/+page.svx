@@ -35,6 +35,18 @@ repos, that usually means import-map entries like these:
 
 Use the version range that matches the Trellis runtime your service repo targets.
 
+The harness needs no container runtime. On first use it downloads the pinned
+nats-server and nsc release binaries (checksum-verified against
+`conformance/nats-binaries.json`, shared with the Trellis CLI), caches them
+under `TRELLIS_TEST_CACHE_DIR` (default `~/.cache/trellis-test`), and runs NATS
+as a managed child process; `nsc` runs locally through `sh`. Requirements:
+
+- `sh` on `PATH`
+- network access on first use, to fetch the pinned release assets
+
+Subsequent runs reuse the verified cache without network access. Windows is
+not supported yet.
+
 ## 1. Add `trellis.integration.ts`
 
 Put the runner config at the service repo root, or another stable path you pass
@@ -49,13 +61,13 @@ const keepWorkdir = Deno.env.get("TRELLIS_TEST_KEEP_WORKDIR") === "1";
 export const integrationRuntime = {
   keepWorkdir,
   trellis: {
-    mutableDev: true,
     command: {
       cmd: Deno.execPath(),
       args: ["run", "-A", "./trellis/main.ts"],
       cwd: Deno.cwd(),
     },
   },
+  authority: { autoAccept: ["initial", "update"] },
   timeouts: {
     startupMs: 60_000,
     reconciliationMs: 15_000,
@@ -158,10 +170,10 @@ trellisIntegrationTest({
   scope: runtimeScopeForCase(CASE_ID),
   runtime: integrationRuntime,
   async fn(runtime) {
-    await runtime.deployments.create({ mutableDev: true });
+    await runtime.deployments.create({});
     await runtime.contracts.approve({
       contract: billingServiceContract,
-      allowPlanClassifications: ["update"],
+      allowPlanClassifications: ["initial", "update"],
     });
 
     const serviceKey = await runtime.services.provisionInstanceOnly({});
@@ -265,19 +277,22 @@ debugging predictable.
 change produces an unexpected authority plan, fix the contract or update the test
 expectation instead of bypassing deployment authority.
 
-Use `allowPlanClassifications: ["update"]` for ordinary mutable-dev additions.
-Only include `"migration"` in tests that intentionally exercise migrations. For
-tests that assert review behavior directly, inspect and act on plans through
+Use `allowPlanClassifications: ["initial", "update"]` when a test creates an
+authority and covers ordinary updates. Include `"migration"` only in tests that
+intentionally exercise migrations. Tests that assert review behavior directly
+should inspect and act on plans through
 `runtime.authority.plans.list(...)`, `runtime.authority.acceptUpdate(...)`,
 `runtime.authority.acceptMigration(...)`, and
 `runtime.authority.plans.reject(...)`.
 
 ## Troubleshooting
 
-- **Docker, Podman, or NATS startup fails**: `@qlever-llc/trellis-test` starts an
-  isolated NATS/JetStream container. Ensure `podman` or `docker` is on `PATH` and
-  can run `docker.io/library/nats:2-alpine`. Startup failures before the Trellis
-  URL is printed are usually container or port-publish issues.
+- **NATS or harness startup fails**: `@qlever-llc/trellis-test` runs NATS as a
+  managed child process using pinned, checksum-verified nats-server and nsc
+  binaries cached under `TRELLIS_TEST_CACHE_DIR` (default `~/.cache/trellis-test`).
+  First use downloads those binaries, so it requires network access, and `sh`
+  must be on `PATH`. Startup failures before the Trellis URL is printed are
+  usually download, cache, or port-publish issues.
 - **Need to inspect generated runtime files**: set `TRELLIS_TEST_KEEP_WORKDIR=1`
   and have your config map that environment variable to `runtime.keepWorkdir`, as
   shown above. The workdir contains generated NATS config, Trellis config, logs,

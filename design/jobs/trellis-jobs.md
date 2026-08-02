@@ -1320,20 +1320,20 @@ rust/crates/jobs/
     ├── bindings.rs     # Binding lookup helpers
     └── registry.rs     # Worker heartbeat / cancellation helpers
 
-rust/crates/service-jobs/
+rust/crates/jobs-runtime/
 └── src/
-    ├── lib.rs          # Service library entrypoint
-    ├── main.rs         # Service entrypoint
-    ├── bootstrap.rs    # Service host bootstrap/run orchestration
-    ├── contract.rs     # Contract metadata / generated contract adapter
+    ├── lib.rs          # Runtime-owned implementation library
     ├── projector.rs    # JOBS stream → SQL projection
     ├── janitor.rs      # Business deadline enforcement
     ├── advisory.rs     # MaxDeliver advisory consumer
     ├── query.rs        # SQL-backed query + mutation operations
     ├── query/          # Query resource, state, and wire helpers
     ├── storage/        # SQLite schema and projection store
-    └── router.rs       # Global RPC handlers
+    └── router.rs       # Runtime-owned global RPC handlers
 ```
+
+`trellis-server jobs` (and `trellis-server all`) starts this library directly;
+there is no separately provisioned Jobs participant service.
 
 ### Implementation Notes
 

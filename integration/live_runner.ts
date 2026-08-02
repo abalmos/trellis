@@ -113,17 +113,6 @@ async function main(args: readonly string[]): Promise<number> {
           args: ["--config", "{config}", "all"],
         },
       },
-      ...(rustTests.some((id) => id.startsWith("jobs::"))
-        ? {
-          jobsAdmin: {
-            command: {
-              cmd: runtimeBinaries.TRELLIS_TEST_JOBS_SERVICE_BIN,
-              args: [],
-              env: { RUST_LOG: "warn" },
-            },
-          },
-        }
-        : {}),
     },
     assignments,
   });

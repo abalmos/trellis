@@ -168,6 +168,7 @@ export type {
   HandlerStoreHandle,
   HandlerTrellis,
   HandlerTrellisForContract,
+  InternalCaller,
   MapStateStoreClient,
   OperationHandlerContext,
   OperationHandlerErrorOf,
@@ -188,5 +189,6 @@ export type {
   SessionCaller,
   StateFacade,
   ValueStateStoreClient,
+  VerifiedCaller,
 } from "./session.ts";
 export type { TrellisAuth } from "./session.ts";

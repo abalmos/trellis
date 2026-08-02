@@ -9,21 +9,7 @@ use async_nats::jetstream::{self, consumer};
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 
-use crate::client::{RpcDescriptor, TrellisClient};
-
-struct AuthEventsValidateRpc;
-
-impl RpcDescriptor for AuthEventsValidateRpc {
-    type Input = crate::auth::AuthEventsValidateRequest;
-    type Output = crate::auth::AuthEventsValidateResponse;
-
-    const KEY: &'static str = "Auth.Events.Validate";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &[];
-    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-}
+use crate::client::TrellisClient;
 
 const EVENT_STREAM: &str = "trellis";
 const EVENT_SUBJECT_WILDCARD: &str = "events.v1.>";
@@ -31,19 +17,28 @@ const EVENT_SUBJECT_WILDCARD: &str = "events.v1.>";
 /// Event Log-specific transport over the Trellis event stream.
 #[derive(Clone)]
 pub struct EventLogRuntime {
-    client: Arc<TrellisClient>,
+    nats: async_nats::Client,
 }
 
 impl EventLogRuntime {
     /// Create the Event Log transport from an authenticated Trellis session.
     #[doc(hidden)]
     pub(crate) fn from_client(client: Arc<TrellisClient>) -> Self {
-        Self { client }
+        Self {
+            nats: client.nats().clone(),
+        }
+    }
+
+    /// Create the Event Log runtime facade for a Trellis-owned built-in provider.
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    pub fn from_nats(nats: async_nats::Client) -> Self {
+        Self { nats }
     }
 
     /// Open a new-only ephemeral event stream consumer.
     pub async fn live_events(&self) -> Result<EventLogMessageStream, String> {
-        let stream = jetstream::new(self.client.nats().clone())
+        let stream = jetstream::new(self.nats.clone())
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
@@ -75,7 +70,7 @@ impl EventLogRuntime {
 
     /// Mark shape-matched legacy Event Log watch durables for expiry.
     pub async fn expire_obsolete_watch_consumers(&self) -> Result<usize, String> {
-        let stream = jetstream::new(self.client.nats().clone())
+        let stream = jetstream::new(self.nats.clone())
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
@@ -106,7 +101,7 @@ impl EventLogRuntime {
         consumer_name: &str,
         replay_all: bool,
     ) -> Result<consumer::Consumer<consumer::pull::Config>, String> {
-        let stream = jetstream::new(self.client.nats().clone())
+        let stream = jetstream::new(self.nats.clone())
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
@@ -132,7 +127,7 @@ impl EventLogRuntime {
 
     /// Return Event Log stream consumer metadata.
     pub async fn consumers(&self) -> Result<Vec<consumer::Info>, String> {
-        let stream = jetstream::new(self.client.nats().clone())
+        let stream = jetstream::new(self.nats.clone())
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
@@ -146,7 +141,7 @@ impl EventLogRuntime {
 
     /// Return metadata for one Event Log stream consumer.
     pub async fn consumer(&self, name: &str) -> Result<consumer::Info, String> {
-        let stream = jetstream::new(self.client.nats().clone())
+        let stream = jetstream::new(self.nats.clone())
             .get_stream(EVENT_STREAM)
             .await
             .map_err(|error| error.to_string())?;
@@ -154,14 +149,6 @@ impl EventLogRuntime {
             .consumer_info(name)
             .await
             .map_err(|error| error.to_string())
-    }
-
-    /// Validate one delivered event proof through Auth.
-    pub async fn validate_event(
-        &self,
-        request: &crate::auth::AuthEventsValidateRequest,
-    ) -> Result<crate::auth::AuthEventsValidateResponse, crate::client::TrellisClientError> {
-        self.client.call::<AuthEventsValidateRpc>(request).await
     }
 }
 

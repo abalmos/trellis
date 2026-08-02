@@ -63,7 +63,6 @@ export async function connectTrellisServiceInternal<
   const { authenticator: authTokenAuthenticator, inboxPrefix } = await auth
     .natsConnectOptions({
       sessionId: name,
-      participantDigest: opts.contractDigest,
       contextDigest: opts.authorizationContextDigest,
       jwt: "retired-control-plane-test",
     });
@@ -86,6 +85,7 @@ export async function connectTrellisServiceInternal<
       auth,
       nc,
       inboxPrefix,
+      contextDigest: opts.authorizationContextDigest,
       contractId: opts.contractId,
       contractDigest: opts.contractDigest,
       contractJobs: {},

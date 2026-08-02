@@ -257,7 +257,7 @@ try {
     async () => Response.json({}),
   );
   await cache.install(
-    { context: "invalid", contextDigest: "invalid", refreshAt: 1, trust: { root: {}, issuerManifestGeneration: 1, issuerManifestDigest: "invalid", issuerManifestLocator: "/.well-known/trellis/authorization/trust/manifest.1", issuerCertificateLocator: "/.well-known/trellis/authorization/trust/certificate.key.digest", policy: { allowedClockSkewSeconds: 0, maximumContextLifetimeSeconds: 1, maximumContextBytes: 1, maximumPermissions: 1, maximumCapabilities: 1, refreshLeadSeconds: 1, refreshJitterSeconds: 0 } } },
+     { context: {}, trust: { root: {}, manifest: {}, authorizationRegistry: { trustBucket: "trust", contextBucket: "contexts" }, policy: { allowedClockSkewSeconds: 0, maximumContextLifetimeSeconds: 1, maximumContextBytes: 1, maximumPermissions: 1, maximumCapabilities: 1, refreshLeadSeconds: 1, refreshJitterSeconds: 0 } } },
     { bootstrapJwt: "route", bootstrapJwtExpiresAt: 2 },
     1,
   );

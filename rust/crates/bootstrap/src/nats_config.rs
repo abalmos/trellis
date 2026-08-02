@@ -27,6 +27,40 @@ include ./jwt.conf
     )
 }
 
+/// Render the local development NATS server config with host-path JetStream store and JWT config.
+///
+/// All listeners bind to loopback only; the container-facing [`render_nats_config`] keeps
+/// `0.0.0.0` for quadlet deployments.
+#[must_use]
+pub fn render_local_nats_config(
+    server_name: &str,
+    store_dir: &str,
+    jwt_config_path: &str,
+) -> String {
+    format!(
+        r#"server_name: {server_name}
+
+listen: 127.0.0.1:4222
+http: 127.0.0.1:8222
+
+authorization {{
+  timeout: "30s"
+}}
+
+websocket {{
+  listen: 127.0.0.1:8080
+  no_tls: true
+}}
+
+jetstream {{
+  store_dir: {store_dir}
+}}
+
+include {jwt_config_path}
+"#
+    )
+}
+
 /// Builds the default NATS server-name slug from the Trellis name.
 #[must_use]
 pub fn slug_from_name(trellis_name: &str) -> String {

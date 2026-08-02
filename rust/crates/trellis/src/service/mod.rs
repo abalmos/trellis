@@ -18,13 +18,12 @@ mod core_bootstrap;
 mod descriptor;
 mod error;
 mod eventlog_runtime;
+mod local_validator;
 mod operations;
 #[doc(hidden)]
 mod publisher;
 #[doc(hidden)]
 mod request_loop;
-#[doc(hidden)]
-mod request_validator_adapter;
 mod resources;
 #[doc(hidden)]
 mod router;
@@ -56,6 +55,10 @@ pub use error::{
     DeclaredRpcError, HandlerResult, SchemaValidationIssue, ServerError, ValidationIssue,
 };
 pub use eventlog_runtime::{EventLogMessageStream, EventLogRuntime};
+#[doc(hidden)]
+pub use local_validator::{
+    payload_hash_base64url, EventVerificationFailure, LocalAuthVerifier, VerifiedCaller,
+};
 pub use operations::{
     control_subject, AcceptedOperation, InMemoryOperationRuntime, OperationControl,
     OperationControlRequest, OperationDescriptor, OperationError, OperationFailure,
@@ -65,27 +68,22 @@ pub use operations::{
 };
 #[doc(hidden)]
 pub use publisher::EventPublisher;
-#[doc(hidden)]
-pub use request_validator_adapter::{
-    payload_hash_base64url, AuthRequestValidatorAdapter as DefaultRequestValidator,
-    AuthRequestValidatorClientPort as DefaultRequestValidatorClientPort,
-};
 pub use resources::{
     KvHandle, KvResourceClient, KvResourceEntry, KvResourceHandle, KvResourceOperation,
     StoreHandle, StoreResourceClient, StoreResourceHandle, StoreWaitOptions,
 };
 #[doc(hidden)]
-pub use router::{RequestContext, Router};
+pub use router::{RequestContext, RoutePermission, Router};
 #[doc(hidden)]
 pub use runtime_facade::{
     ConnectedServiceRuntime, CoreBootstrapBinding, GeneratedServiceContract, ServiceHandle,
 };
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
-    ServiceEventListenerHandle, ServiceEventListenerMode, ServiceHandlerContext,
-    ServiceOperationLiveWatch, ServiceOperationProvider, ServiceOperationWatch,
-    ServiceRuntimeError, DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS, DEFAULT_RETRY_DELAY_MS,
-    DEFAULT_TIMEOUT_MS,
+    ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
+    ServiceHandlerContext, ServiceOperationLiveWatch, ServiceOperationProvider,
+    ServiceOperationWatch, ServiceRuntimeError, DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS,
+    DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;
@@ -105,27 +103,27 @@ pub use transfer::{
 
 #[doc(hidden)]
 pub mod internal {
-    use std::sync::Arc;
-
     pub use super::request_loop::{
         dispatch_one, encode_error_reply, encode_success_reply, HandlerResponse, InboundRequest,
         OutboundReply, RequestHandler, ResponseStream,
     };
 
-    /// Run a Trellis-owned built-in router through normal request authentication.
-    pub async fn run_builtin_authenticated_router(
+    /// Run a Trellis-owned built-in router through the supplied local request
+    /// verifier. Built-in runtimes without a verifier deny all requests
+    /// fail-closed; the runtime Auth-side verifier supplies verification in
+    /// platform mode.
+    #[cfg(feature = "runtime-internals")]
+    pub async fn run_builtin_authenticated_router<V>(
         nats: async_nats::Client,
-        auth: Arc<crate::client::SessionAuth>,
-        timeout_ms: u64,
+        api_id: &str,
         subjects: &[&str],
-        router: super::Router,
-    ) -> Result<(), super::ServerError> {
-        let client = Arc::new(crate::client::TrellisClient::from_internal_parts(
-            nats.clone(),
-            auth,
-            timeout_ms,
-        ));
-        let validator = super::request_validator_adapter::AuthRequestValidatorAdapter::new(client);
+        mut router: super::Router,
+        validator: V,
+    ) -> Result<(), super::ServerError>
+    where
+        V: super::RequestValidator + Send + Sync + 'static,
+    {
+        router.set_api_id(api_id);
         let router = super::AuthenticatedRouter::new(router, validator);
         super::runtime::run_multi_subject_service(nats, subjects, router).await
     }

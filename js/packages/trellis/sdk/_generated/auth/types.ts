@@ -2265,12 +2265,7 @@ export type AuthSessionsListOutput = {
   nextCursor: string | null;
 };
 
-export type AuthSessionsLogoutInput = {
-  issuedAt: number;
-  proof: { format: "trellis.session-proof.v1"; signature: string };
-  requestId: string;
-  sessionId: string;
-};
+export type AuthSessionsLogoutInput = {};
 export type AuthSessionsLogoutOutput = {
   kickedConnections: number;
   session: {

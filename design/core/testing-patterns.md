@@ -57,9 +57,10 @@ Rules:
 
 ### Shared Runtime
 
-Normal live cases share one NATS server, one Trellis process, one SQLite set,
-and at most one transitional Jobs or Event Log owner. Cases isolate their
-authored data through run- and case-scoped identifiers, not database resets.
+Normal live cases share one NATS server, one `trellis-server` process, and one
+SQLite set. Built-in Jobs and Event Log run as subsystems of that process. Cases
+isolate their authored data through run- and case-scoped identifiers, not
+database resets.
 
 `isolated-process` is reserved for process- or deployment-global behavior such
 as restart, ownership loss, startup migration, destructive trust rotation, or

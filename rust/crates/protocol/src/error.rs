@@ -52,30 +52,20 @@ pub enum AuthorizationErrorCodeV1 {
     InvalidValidityWindow,
     /// A manifest generation is older than the accepted minimum.
     ManifestRollback,
+    /// The context was issued against a different manifest generation.
+    ManifestGenerationMismatch,
     /// The issuer manifest is not yet valid.
     ManifestNotYetValid,
     /// The issuer manifest has expired.
     ManifestExpired,
     /// The context issuer is absent from the manifest.
     IssuerNotListed,
-    /// The context issuer is explicitly revoked.
-    IssuerRevoked,
-    /// The manifest names another signed certificate digest.
-    CertificateDigestMismatch,
-    /// The issuer certificate is not yet valid.
-    CertificateNotYetValid,
-    /// The issuer certificate has expired.
-    CertificateExpired,
-    /// The issuer certificate lacks authorization-context usage.
-    CertificateUsageMissing,
     /// The authorization context is not yet valid.
     ContextNotYetValid,
     /// The authorization context has expired.
     ContextExpired,
     /// The context lifetime exceeds explicit policy.
     ContextLifetimeExceeded,
-    /// The context validity exceeds its certificate.
-    ContextOutlivesCertificate,
     /// The context validity exceeds its manifest.
     ContextOutlivesManifest,
     /// The session verification key is malformed.
@@ -84,17 +74,23 @@ pub enum AuthorizationErrorCodeV1 {
     PermissionDenied,
     /// One or more platform capability keys are absent.
     CapabilityDenied,
-    /// The encoded context exceeds explicit policy.
-    ContextTokenTooLarge,
+    /// The canonical signed context exceeds explicit policy.
+    ContextTooLarge,
     /// The request issue time is outside the accepted skew.
     ProofIatOutOfRange,
     /// The context-bound request signature is invalid.
     InvalidRequestProof,
     /// The request reply subject is outside the caller inbox prefix.
     ReplySubjectMismatch,
+    /// The event time is not canonical RFC 3339 UTC.
+    InvalidEventTime,
+    /// The context-bound event signature is invalid.
+    InvalidEventProof,
+    /// The event time is at or after the context revocation time.
+    EventRevoked,
 }
 
-/// Stable failure categories for bootstrap, session-control, and NATS connect proofs.
+/// Stable failure categories for bootstrap and authorization-context refresh proofs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionProofErrorCodeV1 {
     /// A value has the wrong protocol format or strict object shape.
@@ -205,7 +201,7 @@ pub enum ProtocolError {
         message: String,
     },
 
-    /// A bootstrap, session-control, or NATS connect proof failed validation.
+    /// A bootstrap or authorization-context refresh proof failed validation.
     #[error("session proof validation failed at '{path}' ({code:?}): {message}")]
     SessionProof {
         /// Stable failure category.

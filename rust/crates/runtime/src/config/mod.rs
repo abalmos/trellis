@@ -16,6 +16,9 @@ pub struct RuntimeConfig {
     /// Session seed used to sign Trellis-owned runtime events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_session_seed_file: Option<PathBuf>,
+    /// Authorization-context digest bound into Trellis-owned runtime event proofs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_context_digest_file: Option<PathBuf>,
     /// HTTP listener configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<HttpConfig>,
@@ -105,7 +108,10 @@ impl RuntimeConfig {
                 }
             }
         }
-        if matches!(mode, RuntimeMode::All | RuntimeMode::Platform) {
+        if matches!(
+            mode,
+            RuntimeMode::All | RuntimeMode::Platform | RuntimeMode::Jobs | RuntimeMode::Eventlog
+        ) {
             self.resolve_authorization()?;
         }
 
@@ -236,6 +242,21 @@ impl RuntimeConfig {
         nats.resolve_runtime()
     }
 
+    /// Resolves runtime NATS connection settings, optionally replacing the configured
+    /// server list with `servers_override` (the managed local NATS server used by
+    /// `trellis server`). Everything else resolves identically to
+    /// [`RuntimeConfig::resolve_nats_runtime`].
+    pub fn resolve_nats_runtime_with(
+        &self,
+        servers_override: Option<&str>,
+    ) -> Result<ResolvedRuntimeNatsConfig, ConfigError> {
+        let mut resolved = self.resolve_nats_runtime()?;
+        if let Some(servers) = servers_override {
+            resolved.servers = servers.to_string();
+        }
+        Ok(resolved)
+    }
+
     /// Resolves NATS auth-callout seed paths into required, non-optional values.
     pub fn resolve_nats_auth_callout(&self) -> Result<ResolvedNatsAuthCalloutConfig, ConfigError> {
         let nats = self
@@ -329,6 +350,7 @@ impl RuntimeConfig {
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         resolve_path(base_dir, &mut self.event_session_seed_file);
+        resolve_path(base_dir, &mut self.event_context_digest_file);
         if let Some(nats) = &mut self.nats {
             if let Some(runtime) = &mut nats.runtime {
                 resolve_path(base_dir, &mut runtime.auth_creds_path);
@@ -374,9 +396,6 @@ impl RuntimeConfig {
         {
             resolve_required_path(base_dir, &mut authorization.trust_root_file);
             resolve_required_path(base_dir, &mut authorization.issuer_manifest_file);
-            for path in &mut authorization.issuer_certificate_files {
-                resolve_required_path(base_dir, path);
-            }
             resolve_required_path(base_dir, &mut authorization.issuer_signing_seed_file);
         }
     }
@@ -636,8 +655,6 @@ pub struct AuthorizationConfig {
     pub trust_root_file: PathBuf,
     /// Root-signed current issuer-manifest JSON file.
     pub issuer_manifest_file: PathBuf,
-    /// Root-signed issuer-certificate JSON files referenced by the manifest.
-    pub issuer_certificate_files: Vec<PathBuf>,
     /// Active issuer's canonical unpadded base64url Ed25519 seed file.
     pub issuer_signing_seed_file: PathBuf,
     /// Maximum newly issued context lifetime in seconds.
@@ -678,17 +695,6 @@ impl AuthorizationConfig {
             if path.as_os_str().is_empty() {
                 return Err(invalid_authorization(field, "must not be empty"));
             }
-        }
-        if self.issuer_certificate_files.is_empty()
-            || self
-                .issuer_certificate_files
-                .iter()
-                .any(|path| path.as_os_str().is_empty())
-        {
-            return Err(invalid_authorization(
-                "issuer_certificate_files",
-                "must contain one or more nonempty paths",
-            ));
         }
         if self.context_lifetime_seconds == 0 || self.context_lifetime_seconds > 3_600 {
             return Err(invalid_authorization(

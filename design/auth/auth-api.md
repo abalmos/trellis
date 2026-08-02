@@ -44,32 +44,26 @@ The Rust auth router is installed only after platform ownership, migrations,
 repository construction, startup reconciliation, and required KV resources are
 ready.
 
-Current public routes:
+HTTP is limited to these boundary families:
 
-- `POST /auth/requests`
-- `GET /auth/login/:provider`
-- `GET /auth/callback/:provider`
-- `POST /auth/login/local`
-- `GET /auth/flow/:flowId`
-- `POST /auth/flow/:flowId/register/local`
-- `POST /auth/flow/:flowId/approval`
-- `POST /auth/flow/:flowId/bind`
-- `POST /auth/sessions/logout`
-- `POST /auth/context/refresh`
-- `GET /.well-known/trellis/authorization/trust/:key`
-- `GET /.well-known/trellis/authorization/contexts/:digest`
-- `GET /.well-known/trellis/authorization/revocations`
-- `GET /auth/account-flow/:flowToken`
-- `POST /auth/account-flow/:flowToken/local-password`
-- `GET /auth/account-flow/:flowToken/login/:provider`
-- `POST /bootstrap/client`
-- `POST /bootstrap/service`
-- `POST /bootstrap/device`
-- `POST /auth/devices/activate/wait`
+- browser/account and portal flows, including auth-request, provider callback,
+  flow, bind, and portal-asset routes
+- initial service and device bootstrap
+- proof-bound context recovery through `/auth/context/refresh`
+
+Pending devices retry `/bootstrap/device` using the returned delay. Trust
+material is returned in bootstrap/refresh responses; there is no public trust
+lookup endpoint.
 
 The built-in portal is served under `/_trellis/portal` and `/_trellis/assets/*`.
 The retired device connect-info preflight route does not exist;
 `POST /bootstrap/device` is the shared initial and reconnect boundary.
+
+There is no HTTP client bootstrap or authorization-registry route, or logout
+endpoint. Connected control uses generated Auth RPC, operation, and event
+surfaces over NATS. Context refresh is the recovery exception, not a general
+connected-control API; it is used after a restart or expired context or route
+credential.
 
 Router-wide controls include strict request body limits, configured-origin CORS,
 security headers, optional HSTS, and Governor rate limiting keyed from the
@@ -95,16 +89,18 @@ Successful bootstrap or bind returns:
 - current NATS endpoints
 - a deny-all Auth-account JWT bound to the session NKey
 - the route JWT's exact expiry
-- a signed authorization context plus pinned root, current manifest identity,
-  lazy trust/context locators, and bounded verification policy
+- a signed authorization context plus pinned root, complete current manifest,
+  internal trust/context bucket names, and bounded verification policy
 
 No route returns a shared sentinel seed or reusable shared credential. Non-ready
 proposal and activation states return no context. Refresh is session-key
 proof-bound, requires nullable `currentContextDigest`, re-evaluates current
 issuable state, enforces the client's root pin and manifest floor, and returns
-`serverNow`, a context, and renewed route JWT material atomically. A null digest
-recovers a retained valid session after context or route-JWT expiry; stale,
-revoked, or otherwise terminal session state remains fail-closed.
+the complete recovery bundle: `serverNow`, the signed context and trust
+material, renewed route JWT material, session metadata, and current NATS
+endpoints atomically. A null digest recovers a retained valid session after
+context or route-JWT expiry; stale, revoked, or otherwise terminal session state
+remains fail-closed.
 
 ## Browser And Account Flows
 
@@ -174,10 +170,25 @@ transaction. A same-digest replay returns the committed result; a conflicting
 digest fails.
 
 Expected caller-visible failures use the typed error codes declared in the API
-artifact. Transitional `Auth.Requests.Validate` and `Auth.Events.Validate`
-surfaces are marked internal and are omitted from generated public Auth SDKs.
-Internal storage, crypto, provider, SQL, and topology causes are logged only;
-HTTP, RPC, operation, and callout payloads expose fixed codes and safe context.
+artifact. Ordinary request and event verification is provider-local and is not
+an Auth API surface. Internal storage, crypto, provider, SQL, and topology
+causes are logged only; HTTP, RPC, operation, and callout payloads expose fixed
+codes and safe context.
+
+Connected Auth control is generated API control over NATS. Session logout,
+session revocation, authority changes, activation review, and other
+caller-visible control do not gain HTTP counterparts. Service authors use the
+generated participant surfaces and returned runtime handles; authorization
+registry KV handles, bucket names, and watch subjects are internal runtime
+material and are not exposed as service APIs.
+
+Provider runtimes resolve authorization evidence from the connected internal
+NATS KV registry. They watch the current manifest generation and revocations,
+load both initial snapshots before becoming ready, fail closed while unready,
+and stop after their bounded staleness limit. Revocations apply immediately in
+memory and are not undone by a deleted record. Unknown context digests resolve
+exact evidence once per digest; ordinary request and event cache hits perform
+zero HTTP, SQLite, Auth RPC, or registry I/O.
 
 ## Authority
 
@@ -203,6 +214,13 @@ are resolved from the locked review record. Start, get, wait, and cancel use the
 standard authenticated operation router. Approval commits activation and
 delegation evidence atomically before the operation reports completion.
 
+The online device wait remains a deliberate bounded pre-auth setup product
+requirement. It is identity/proof-bound to the device activation flow and exact
+contract evidence, is capped by the server, and is not a general pre-auth RPC or
+connected control path. Once approval is observed, the device uses the shared
+`/bootstrap/device` boundary for its session, context, route JWT, and NATS
+metadata.
+
 ## Events And Post-Commit Work
 
 Auth events are declared in `trellis.api.json`; durable actions may publish only
@@ -214,7 +232,6 @@ failure retries after commit and never rolls the authoritative mutation back.
 ## Non-Goals
 
 - PostgreSQL and federation
-- Milestone 10 ordinary request-proof v2 local validation cutover
-- Milestone 11 event-context local validation cutover
 - compatibility adapters for retired TypeScript auth, sentinel credentials,
   capability groups, grant overrides, or legacy binding RPCs
+- HTTP context-registry, revocation, logout, and client-bootstrap APIs

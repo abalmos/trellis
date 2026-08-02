@@ -9,22 +9,24 @@ import { importEd25519PublicKeyFromBase64url } from "./keys.ts";
 import { AsyncResult } from "@qlever-llc/result";
 
 export type ProofParams = {
-  sessionKey: string;
+  contextDigest: string;
   subject: string;
+  reply: string;
   payloadHash: Uint8Array;
   iat: number;
   requestId: string;
 };
 
 export type EventProofParams = {
-  sessionKey: string;
+  contextDigest: string;
   subject: string;
   payloadHash: Uint8Array;
   eventId: string;
   eventTime: string;
 };
 
-const EVENT_PROOF_DOMAIN = utf8("trellis-event-proof-v1");
+const REQUEST_PROOF_DOMAIN = utf8("trellis.authorization-request-proof.v2");
+const EVENT_PROOF_DOMAIN = utf8("trellis.authorization-event-proof.v2");
 
 function appendLengthPrefixed(
   buf: Uint8Array,
@@ -38,73 +40,77 @@ function appendLengthPrefixed(
   return valueOffset + value.length;
 }
 
+function buildLengthPrefixed(
+  components: Uint8Array[],
+): Uint8Array {
+  const total = components.reduce(
+    (sum, value) => sum + 4 + value.length,
+    0,
+  );
+  const buf = new Uint8Array(total);
+  const view = new DataView(buf.buffer);
+
+  let offset = 0;
+  for (const component of components) {
+    offset = appendLengthPrefixed(buf, view, offset, component);
+  }
+  return buf;
+}
+
+/**
+ * Builds the canonical v2 context-bound request proof input bytes.
+ *
+ * The exact NATS reply inbox must be created before signing and is bound into
+ * the proof input, matching the runtime request verifier.
+ */
 export function buildProofInput(
-  sessionKey: string,
+  contextDigest: string,
   subject: string,
+  reply: string,
   payloadHash: Uint8Array,
   iat: number,
   requestId: string,
 ): Uint8Array {
-  const sessionKeyBytes = utf8(sessionKey);
-  const subjectBytes = utf8(subject);
-  const iatBytes = utf8(String(iat));
-  const requestIdBytes = utf8(requestId);
-
-  const buf = new Uint8Array(
-    4 +
-      sessionKeyBytes.length +
-      4 +
-      subjectBytes.length +
-      4 +
-      payloadHash.length +
-      4 +
-      iatBytes.length +
-      4 +
-      requestIdBytes.length,
-  );
-  const view = new DataView(buf.buffer);
-
-  let offset = 0;
-  offset = appendLengthPrefixed(buf, view, offset, sessionKeyBytes);
-  offset = appendLengthPrefixed(buf, view, offset, subjectBytes);
-  offset = appendLengthPrefixed(buf, view, offset, payloadHash);
-  offset = appendLengthPrefixed(buf, view, offset, iatBytes);
-  appendLengthPrefixed(buf, view, offset, requestIdBytes);
-
-  return buf;
+  const contextDigestBytes = base64urlDecode(contextDigest);
+  if (contextDigestBytes.length !== 32) {
+    throw new Error("authorization context digest must encode 32 bytes");
+  }
+  if (reply.length === 0) {
+    throw new Error("request reply subject must not be empty");
+  }
+  return buildLengthPrefixed([
+    REQUEST_PROOF_DOMAIN,
+    contextDigestBytes,
+    utf8(subject),
+    utf8(reply),
+    payloadHash,
+    utf8(String(iat)),
+    utf8(requestId),
+  ]);
 }
 
+/**
+ * Builds the canonical v2 context-bound event proof input bytes.
+ */
 export function buildEventProofInput(
-  sessionKey: string,
+  contextDigest: string,
   subject: string,
   payloadHash: Uint8Array,
   eventId: string,
   eventTime: string,
 ): Uint8Array {
-  const sessionKeyBytes = utf8(sessionKey);
-  const subjectBytes = utf8(subject);
-  const eventIdBytes = utf8(eventId);
-  const eventTimeBytes = utf8(eventTime);
-
-  const buf = new Uint8Array(
-    4 + EVENT_PROOF_DOMAIN.length +
-      4 + sessionKeyBytes.length +
-      4 + subjectBytes.length +
-      4 + payloadHash.length +
-      4 + eventIdBytes.length +
-      4 + eventTimeBytes.length,
-  );
-  const view = new DataView(buf.buffer);
-
-  let offset = 0;
-  offset = appendLengthPrefixed(buf, view, offset, EVENT_PROOF_DOMAIN);
-  offset = appendLengthPrefixed(buf, view, offset, sessionKeyBytes);
-  offset = appendLengthPrefixed(buf, view, offset, subjectBytes);
-  offset = appendLengthPrefixed(buf, view, offset, payloadHash);
-  offset = appendLengthPrefixed(buf, view, offset, eventIdBytes);
-  appendLengthPrefixed(buf, view, offset, eventTimeBytes);
-
-  return buf;
+  const contextDigestBytes = base64urlDecode(contextDigest);
+  if (contextDigestBytes.length !== 32) {
+    throw new Error("authorization context digest must encode 32 bytes");
+  }
+  return buildLengthPrefixed([
+    EVENT_PROOF_DOMAIN,
+    contextDigestBytes,
+    utf8(subject),
+    payloadHash,
+    utf8(eventId),
+    utf8(eventTime),
+  ]);
 }
 
 export async function createProof(
@@ -112,8 +118,9 @@ export async function createProof(
   params: ProofParams,
 ): Promise<string> {
   const input = buildProofInput(
-    params.sessionKey,
+    params.contextDigest,
     params.subject,
+    params.reply,
     params.payloadHash,
     params.iat,
     params.requestId,
@@ -132,7 +139,7 @@ export async function createEventProof(
   params: EventProofParams,
 ): Promise<string> {
   const input = buildEventProofInput(
-    params.sessionKey,
+    params.contextDigest,
     params.subject,
     params.payloadHash,
     params.eventId,
@@ -154,8 +161,9 @@ export async function verifyProof(
 ): Promise<boolean> {
   const result = await AsyncResult.try(async () => {
     const input = buildProofInput(
-      params.sessionKey,
+      params.contextDigest,
       params.subject,
+      params.reply,
       params.payloadHash,
       params.iat,
       params.requestId,
@@ -180,7 +188,7 @@ export async function verifyEventProof(
 ): Promise<boolean> {
   const result = await AsyncResult.try(async () => {
     const input = buildEventProofInput(
-      params.sessionKey,
+      params.contextDigest,
       params.subject,
       params.payloadHash,
       params.eventId,

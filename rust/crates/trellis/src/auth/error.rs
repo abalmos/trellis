@@ -68,10 +68,6 @@ pub enum TrellisAuthError {
     #[error("operation failed: {0}")]
     OperationFailed(String),
 
-    /// A device activation wait request returned a non-success HTTP response.
-    #[error("device activation wait failed: {0} {1}")]
-    DeviceActivationWaitFailure(u16, String),
-
     /// A device activation start request returned a non-success HTTP response.
     #[error("device activation start failed: {0} {1}")]
     DeviceActivationStartFailure(u16, String),
@@ -83,10 +79,6 @@ pub enum TrellisAuthError {
     /// A device connect-info request returned a response status this crate cannot use.
     #[error("unexpected device connect info status: {0}")]
     UnexpectedDeviceConnectInfoStatus(String),
-
-    /// Device activation was explicitly rejected.
-    #[error("device activation rejected{0}")]
-    DeviceActivationRejected(String),
 
     /// The authenticated user completed login successfully but lacks admin capability.
     #[error("logged in user is not an admin")]

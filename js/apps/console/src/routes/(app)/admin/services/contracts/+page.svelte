@@ -1,8 +1,6 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import {
-    TRELLIS_AUTH_CONTRACT,
-    TRELLIS_AUTH_DIGEST,
     TRELLIS_CORE_CONTRACT,
     TRELLIS_CORE_DIGEST,
     TRELLIS_HEALTH_CONTRACT,
@@ -41,7 +39,6 @@
   };
 
   const trellisPlatformContracts: ContractEntry[] = [
-    contractEntry(TRELLIS_AUTH_DIGEST, TRELLIS_AUTH_CONTRACT),
     contractEntry(TRELLIS_CORE_DIGEST, TRELLIS_CORE_CONTRACT),
     contractEntry(TRELLIS_HEALTH_DIGEST, TRELLIS_HEALTH_CONTRACT),
     contractEntry(TRELLIS_STATE_DIGEST, TRELLIS_STATE_CONTRACT),

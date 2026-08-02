@@ -1,4 +1,8 @@
 import type { NatsConnection } from "@nats-io/nats-core";
+import type {
+  AuthorizationContextCache,
+  AuthorizationProviderCache,
+} from "../auth/authorization_context.ts";
 import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../session.ts";
 
 // Keep the public server package runtime-neutral.
@@ -26,4 +30,10 @@ export type TrellisServiceRuntimeDeps = {
   /** @internal Test hook for deterministic durable event readiness interleavings. */
   durableEventConsumerBeforeReadinessCheck?:
     TrellisDurableEventConsumerBeforeReadinessCheckHook;
+  /** @internal Live-test hook for provider I/O and registry permission assertions. */
+  authorizationProviderReady?: (
+    provider: AuthorizationProviderCache,
+    connection: NatsConnection,
+    context: AuthorizationContextCache,
+  ) => void;
 };

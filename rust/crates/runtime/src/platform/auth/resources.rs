@@ -6,10 +6,11 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use trellis_protocol::{parse_api_v1, parse_participant_v1};
 
+use super::authority::{validate_dependency_evidence, validate_resource_evidence};
 use super::{
-    AuthorityEvidenceScope, AuthorizationStateError, DependencyEvidence, DependencyState,
-    EvidenceRepository, ParticipantBindingRecord, ResourceBindingEvidence, ResourceBindingState,
-    ResourceProviderIdentity,
+    AuthorityEvidenceRepository, AuthorityEvidenceScope, AuthorizationStateError,
+    DependencyEvidence, DependencyState, ParticipantBindingRecord, ResourceBindingEvidence,
+    ResourceBindingState, ResourceProviderIdentity,
 };
 
 pub(crate) async fn ensure_authority_dependencies<R>(
@@ -19,7 +20,7 @@ pub(crate) async fn ensure_authority_dependencies<R>(
     now: i64,
 ) -> Result<(), AuthorizationStateError>
 where
-    R: EvidenceRepository,
+    R: AuthorityEvidenceRepository,
 {
     let participant_value: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
@@ -84,24 +85,31 @@ where
                 .map(|dependency| (dependency, false)),
         )
         .filter_map(|(dependency, required)| {
-            providers
-                .iter()
-                .find(|provider| {
-                    provider.0 == dependency.api() && provider.1 == dependency.api_digest()
-                })
-                .map(|provider| DependencyEvidence {
-                    alias: dependency.alias().to_owned(),
-                    required,
-                    api_id: dependency.api().to_owned(),
-                    api_digest: dependency.api_digest().to_owned(),
-                    provider_participant_id: provider.2.clone(),
-                    provider_deployment_id: Some(provider.3.clone()),
-                    provider_instance_id: Some(provider.4.clone()),
-                    state: DependencyState::Available,
-                    observed_at: now,
-                })
+            let provider = providers.iter().find(|provider| {
+                provider.0 == dependency.api() && provider.1 == dependency.api_digest()
+            });
+            if required && provider.is_none() {
+                tracing::warn!(
+                    api_id = %dependency.api(),
+                    api_digest = %dependency.api_digest(),
+                    available_providers = ?providers,
+                    "required authorization dependency has no active provider"
+                );
+            }
+            provider.map(|provider| DependencyEvidence {
+                alias: dependency.alias().to_owned(),
+                required,
+                api_id: dependency.api().to_owned(),
+                api_digest: dependency.api_digest().to_owned(),
+                provider_participant_id: provider.2.clone(),
+                provider_deployment_id: Some(provider.3.clone()),
+                provider_instance_id: Some(provider.4.clone()),
+                state: DependencyState::Available,
+                observed_at: now,
+            })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    validate_dependency_evidence(&dependencies)?;
     repository
         .replace_dependency_evidence(scope, dependencies)
         .await
@@ -116,7 +124,7 @@ pub(crate) async fn ensure_deployment_resources<R>(
     now: i64,
 ) -> Result<(), AuthorizationStateError>
 where
-    R: EvidenceRepository,
+    R: AuthorityEvidenceRepository,
 {
     let participant: Value = serde_json::from_str(&binding.participant_json)
         .map_err(|error| invalid(error.to_string()))?;
@@ -421,6 +429,7 @@ where
         ));
     }
 
+    validate_resource_evidence(&evidence)?;
     repository.replace_resource_evidence(scope, evidence).await
 }
 

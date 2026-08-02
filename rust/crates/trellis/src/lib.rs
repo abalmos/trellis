@@ -150,8 +150,8 @@ mod tests {
             "local-bootstrap/Cargo.toml",
             "protocol-wasm/Cargo.toml",
             "runtime/Cargo.toml",
-            "service-eventlog/Cargo.toml",
-            "service-jobs/Cargo.toml",
+            "eventlog-runtime/Cargo.toml",
+            "jobs-runtime/Cargo.toml",
             "trellis-test/Cargo.toml",
         ] {
             let contents = fs::read_to_string(crates_dir.join(manifest))
@@ -209,10 +209,8 @@ mod tests {
             .expect("trellis crate should live under rust/crates/trellis");
         for manifest in [
             "generated/packages/cargo/auth/Cargo.toml",
-            "generated/packages/cargo/trellis-core/Cargo.toml",
             "generated/packages/cargo/health/Cargo.toml",
             "generated/packages/cargo/jobs/Cargo.toml",
-            "generated/packages/cargo/state/Cargo.toml",
         ] {
             let contents = fs::read_to_string(repo_root.join(manifest))
                 .expect("generated Trellis-owned SDK manifest should be readable");

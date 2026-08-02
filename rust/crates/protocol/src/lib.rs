@@ -283,24 +283,22 @@ pub use api::{
 };
 pub use authorization::{
     authorization_context_refresh_at_v1, authorization_context_signing_digest_v1,
-    build_authorization_request_proof_input_v2, encode_authorization_context_token_v1,
-    issuer_certificate_signing_digest_v1, issuer_manifest_signing_digest_v1,
-    parse_authorization_context_token_v1, parse_authorization_context_v1,
-    parse_issuer_certificate_v1, parse_issuer_manifest_v1, sign_authorization_context_v1,
-    sign_authorization_request_v2, sign_issuer_certificate_v1, sign_issuer_manifest_v1,
-    verify_authorization_context_v1, verify_authorization_request_v2, verify_issuer_certificate_v1,
-    verify_issuer_manifest_v1, AuthorizationAuthorityKindV1, AuthorizationAuthorityRefV1,
-    AuthorizationContextVerificationPolicyV1, AuthorizationIssuerManifestEntryV1,
-    AuthorizationIssuerStatusV1, AuthorizationParticipantV1, AuthorizationPrincipalKindV1,
-    AuthorizationPrincipalV1, AuthorizationReplayKeyV2, AuthorizationRequestProofInputV2,
+    build_authorization_event_proof_input_v2, build_authorization_request_proof_input_v2,
+    issuer_manifest_signing_digest_v1, parse_authorization_context_v1, parse_issuer_manifest_v1,
+    sign_authorization_context_v1, sign_authorization_event_v2, sign_authorization_request_v2,
+    sign_issuer_manifest_v1, verify_authorization_context_v1, verify_authorization_event_v2,
+    verify_authorization_request_v2, verify_issuer_manifest_v1, AuthorizationAuthorityKindV1,
+    AuthorizationAuthorityRefV1, AuthorizationEventProofInputV2, AuthorizationEventProofV2,
+    AuthorizationEventPublisherV2, AuthorizationIssuerManifestEntryV1, AuthorizationParticipantV1,
+    AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, AuthorizationRequestProofInputV2,
     AuthorizationRequestProofV2, AuthorizationTrustRootV1, AuthorizationVerificationPolicyV1,
-    SignedAuthorizationContextV1, SignedAuthorizationIssuerCertificateV1,
-    SignedAuthorizationIssuerManifestV1, UnsignedAuthorizationContextV1,
-    UnsignedAuthorizationIssuerCertificateV1, UnsignedAuthorizationIssuerManifestV1,
-    VerifiedAuthorizationContextV1, VerifiedAuthorizationIssuerManifestV1,
-    VerifiedAuthorizationRequestV2, AUTHORIZATION_CONTEXT_FORMAT_V1,
-    AUTHORIZATION_ISSUER_CERTIFICATE_FORMAT_V1, AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1,
-    AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2, AUTHORIZATION_TRUST_ROOT_FORMAT_V1,
+    SignedAuthorizationContextV1, SignedAuthorizationIssuerManifestV1,
+    UnsignedAuthorizationContextV1, UnsignedAuthorizationIssuerManifestV1,
+    VerifiedAuthorizationContextV1, VerifiedAuthorizationEventV2,
+    VerifiedAuthorizationIssuerManifestV1, VerifiedAuthorizationRequestV2,
+    AUTHORIZATION_CONTEXT_FORMAT_V1, AUTHORIZATION_EVENT_PROOF_DOMAIN_V2,
+    AUTHORIZATION_ISSUER_MANIFEST_FORMAT_V1, AUTHORIZATION_REQUEST_PROOF_DOMAIN_V2,
+    AUTHORIZATION_TRUST_ROOT_FORMAT_V1,
 };
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::{
@@ -325,8 +323,7 @@ pub use resolution::{
 pub use session_proof::{
     parse_session_proof_v1, session_proof_request_digest_v1, session_proof_signing_digest_v1,
     sign_session_proof_v1, verify_session_proof_v1, SessionProofInputV1, SessionProofPolicyV1,
-    SessionProofPurposeV1, SessionProofReplayKeyV1, SessionProofV1, VerifiedSessionProofV1,
-    SESSION_PROOF_FORMAT_V1,
+    SessionProofPurposeV1, SessionProofV1, SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
     derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,

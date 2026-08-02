@@ -25,7 +25,6 @@ xkey_seed_file = "/etc/trellis/secrets/auth-xkey.seed"
 [auth.authorization]
 trust_root_file = "/etc/trellis/trust/authorization-root.json"
 issuer_manifest_file = "/etc/trellis/trust/authorization-issuer-manifest.json"
-issuer_certificate_files = ["/etc/trellis/trust/authorization-issuer-certificate.json"]
 issuer_signing_seed_file = "/etc/trellis/secrets/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60

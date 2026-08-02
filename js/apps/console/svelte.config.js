@@ -58,7 +58,7 @@ const config = {
       ),
       "@qlever-llc/trellis/sdk/core": resolve(
         rootDir,
-        "../../../generated/packages/jsr/trellis-core/mod.ts",
+        "../../packages/trellis/sdk/_generated/core/mod.ts",
       ),
       "@qlever-llc/trellis/sdk/health": resolve(
         rootDir,

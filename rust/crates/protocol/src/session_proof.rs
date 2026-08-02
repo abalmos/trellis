@@ -10,7 +10,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{canonicalize_json, ProtocolError, SessionProofErrorCodeV1};
 
-/// Strict wire format for bootstrap, session-control, refresh, and NATS connect proofs.
+/// Strict wire format for auth, bootstrap, and authorization-context refresh proofs.
 pub const SESSION_PROOF_FORMAT_V1: &str = "trellis.session-proof.v1";
 
 const MAXIMUM_SAFE_JSON_INTEGER: i64 = 9_007_199_254_740_991;
@@ -23,33 +23,21 @@ const MAXIMUM_PROOF_WINDOW_MS: i64 = 5 * 60 * 1_000;
 pub enum SessionProofPurposeV1 {
     /// Start a user app or agent browser-auth request.
     UserAuthRequest,
-    /// Reconnect an existing user app or agent session through client bootstrap.
-    ClientBootstrap,
     /// Bootstrap a provisioned service instance.
     ServiceBootstrap,
     /// Bootstrap a provisioned or activated device.
     DeviceBootstrap,
-    /// Authenticate one NATS connection or reconnection.
-    NatsConnect,
-    /// Revoke or end the signing session itself before ordinary request auth is available.
-    SessionSelfControl,
     /// Refresh an authorization context using the durable session key.
     AuthorizationContextRefresh,
-    /// Authenticate one NATS connection with a bound authorization context.
-    NatsConnectContext,
 }
 
 impl SessionProofPurposeV1 {
     fn as_str(self) -> &'static str {
         match self {
             Self::UserAuthRequest => "userAuthRequest",
-            Self::ClientBootstrap => "clientBootstrap",
             Self::ServiceBootstrap => "serviceBootstrap",
             Self::DeviceBootstrap => "deviceBootstrap",
-            Self::NatsConnect => "natsConnect",
-            Self::SessionSelfControl => "sessionSelfControl",
             Self::AuthorizationContextRefresh => "authorizationContextRefresh",
-            Self::NatsConnectContext => "natsConnectContext",
         }
     }
 }
@@ -73,7 +61,6 @@ pub struct SessionProofInputV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NkeyBinding {
-    Signer(String),
     PublicKey {
         nkey: String,
         public_key: VerifyingKey,
@@ -128,61 +115,6 @@ impl SessionProofInputV1 {
                 nkey: session_nkey,
                 public_key: key,
             }),
-        )
-    }
-
-    /// Build an existing client-session bootstrap proof input.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, or malformed.
-    #[allow(clippy::too_many_arguments)]
-    pub fn client_bootstrap(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_id: impl Into<String>,
-        session_key_id: impl Into<String>,
-        session_public_key: impl Into<String>,
-        session_nkey: impl Into<String>,
-        expected_participant_digest: Option<String>,
-        expected_needs_digest: Option<String>,
-        request_digest: impl Into<String>,
-    ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_id = session_id.into();
-        let session_key_id = session_key_id.into();
-        let session_public_key = session_public_key.into();
-        let session_nkey = session_nkey.into();
-        let request_digest = request_digest.into();
-        let session_key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
-        if session_key_id != derived_key_id(&session_key) {
-            return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidKeyId,
-                ["sessionKeyId"],
-                "session key id does not match the session public key",
-            ));
-        }
-        let session_nkey_bytes =
-            validate_nkey_binding(&session_nkey, &session_key, &["sessionNkey"])?;
-
-        Self::new(
-            SessionProofPurposeV1::ClientBootstrap,
-            request_id,
-            issued_at,
-            session_key_id.clone(),
-            vec![
-                text(&session_id, &["sessionId"])?,
-                digest(&session_key_id, &["sessionKeyId"])?,
-                session_nkey_bytes.to_vec(),
-                optional_digest(
-                    expected_participant_digest.as_deref(),
-                    &["expectedParticipantDigest"],
-                )?,
-                optional_digest(expected_needs_digest.as_deref(), &["expectedNeedsDigest"])?,
-                digest(&request_digest, &["requestDigest"])?,
-            ],
-            Some(NkeyBinding::Signer(session_nkey)),
         )
     }
 
@@ -298,57 +230,6 @@ impl SessionProofInputV1 {
         )
     }
 
-    /// Build a nonce-bound NATS connect proof input.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, or malformed.
-    #[allow(clippy::too_many_arguments)]
-    pub fn nats_connect(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_id: impl Into<String>,
-        session_key_id: impl Into<String>,
-        session_public_key: impl Into<String>,
-        session_nkey: impl Into<String>,
-        participant_digest: impl Into<String>,
-        nonce: impl Into<String>,
-    ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_id = session_id.into();
-        let session_key_id = session_key_id.into();
-        let session_public_key = session_public_key.into();
-        let session_nkey = session_nkey.into();
-        let participant_digest = participant_digest.into();
-        let nonce = nonce.into();
-        let session_key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
-        if session_key_id != derived_key_id(&session_key) {
-            return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidKeyId,
-                ["sessionKeyId"],
-                "session key id does not match the session public key",
-            ));
-        }
-        let session_nkey_bytes =
-            validate_nkey_binding(&session_nkey, &session_key, &["sessionNkey"])?;
-
-        Self::new(
-            SessionProofPurposeV1::NatsConnect,
-            request_id,
-            issued_at,
-            session_key_id.clone(),
-            vec![
-                text(&session_id, &["sessionId"])?,
-                digest(&session_key_id, &["sessionKeyId"])?,
-                session_nkey_bytes.to_vec(),
-                digest(&participant_digest, &["participantDigest"])?,
-                text(&nonce, &["nonce"])?,
-            ],
-            Some(NkeyBinding::Signer(session_nkey)),
-        )
-    }
-
     /// Build a proof input for refreshing the current authorization context.
     ///
     /// # Errors
@@ -406,93 +287,6 @@ impl SessionProofInputV1 {
         )
     }
 
-    /// Build a nonce-bound NATS connect proof input tied to an authorization context.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, malformed, or the NKey does not encode `session_public_key`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn nats_connect_context(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_id: impl Into<String>,
-        session_key_id: impl Into<String>,
-        session_public_key: impl Into<String>,
-        session_nkey: impl Into<String>,
-        participant_digest: impl Into<String>,
-        context_digest: impl Into<String>,
-        nonce: impl Into<String>,
-    ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_id = session_id.into();
-        let session_key_id = session_key_id.into();
-        let session_public_key = session_public_key.into();
-        let session_nkey = session_nkey.into();
-        let participant_digest = participant_digest.into();
-        let context_digest = context_digest.into();
-        let nonce = nonce.into();
-        let session_key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
-        if session_key_id != derived_key_id(&session_key) {
-            return Err(proof_error(
-                SessionProofErrorCodeV1::InvalidKeyId,
-                ["sessionKeyId"],
-                "session key id does not match the session public key",
-            ));
-        }
-        let session_nkey_bytes =
-            validate_nkey_binding(&session_nkey, &session_key, &["sessionNkey"])?;
-
-        Self::new(
-            SessionProofPurposeV1::NatsConnectContext,
-            request_id,
-            issued_at,
-            session_key_id.clone(),
-            vec![
-                text(&session_id, &["sessionId"])?,
-                digest(&session_key_id, &["sessionKeyId"])?,
-                session_nkey_bytes.to_vec(),
-                digest(&participant_digest, &["participantDigest"])?,
-                digest(&context_digest, &["contextDigest"])?,
-                text(&nonce, &["nonce"])?,
-            ],
-            Some(NkeyBinding::Signer(session_nkey)),
-        )
-    }
-
-    /// Build a pre-context session self-control proof input.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProtocolError::SessionProof`] when a field is noncanonical,
-    /// unsafe, empty, or malformed.
-    pub fn session_self_control(
-        request_id: impl Into<String>,
-        issued_at: i64,
-        session_id: impl Into<String>,
-        session_key_id: impl Into<String>,
-        request_digest: impl Into<String>,
-    ) -> Result<Self, ProtocolError> {
-        let request_id = request_id.into();
-        let session_id = session_id.into();
-        let session_key_id = session_key_id.into();
-        let request_digest = request_digest.into();
-        validate_key_id(&session_key_id, &["sessionKeyId"])?;
-
-        Self::new(
-            SessionProofPurposeV1::SessionSelfControl,
-            request_id,
-            issued_at,
-            session_key_id.clone(),
-            vec![
-                text(&session_id, &["sessionId"])?,
-                digest(&session_key_id, &["sessionKeyId"])?,
-                digest(&request_digest, &["requestDigest"])?,
-            ],
-            None,
-        )
-    }
-
     fn new(
         purpose: SessionProofPurposeV1,
         request_id: String,
@@ -519,7 +313,7 @@ impl SessionProofInputV1 {
         self.purpose
     }
 
-    /// Return the caller-generated replay identifier.
+    /// Return the caller-generated request identifier.
     #[must_use]
     pub fn request_id(&self) -> &str {
         &self.request_id
@@ -558,9 +352,6 @@ impl SessionProofInputV1 {
             ));
         }
         match &self.nkey_binding {
-            Some(NkeyBinding::Signer(nkey)) => {
-                validate_nkey_binding(nkey, key, &["sessionNkey"]).map(|_| ())
-            }
             Some(NkeyBinding::PublicKey { nkey, public_key }) => {
                 validate_nkey_binding(nkey, public_key, &["sessionNkey"]).map(|_| ())
             }
@@ -638,7 +429,7 @@ impl SessionProofPolicyV1 {
                 proof_error(
                     SessionProofErrorCodeV1::InvalidFormat,
                     std::iter::empty::<&str>(),
-                    "proof replay window overflows",
+                    "proof validity window overflows",
                 )
             })?;
         Ok(Self {
@@ -658,12 +449,6 @@ impl SessionProofPolicyV1 {
     pub fn maximum_future_skew_ms(self) -> i64 {
         self.maximum_future_skew_ms
     }
-
-    /// Return the minimum replay-record retention after first admission.
-    #[must_use]
-    pub fn replay_retention_ms(self) -> i64 {
-        self.maximum_age_ms + self.maximum_future_skew_ms
-    }
 }
 
 impl Default for SessionProofPolicyV1 {
@@ -672,55 +457,6 @@ impl Default for SessionProofPolicyV1 {
             maximum_age_ms: 30_000,
             maximum_future_skew_ms: 30_000,
         }
-    }
-}
-
-/// Stable replay identity returned by successful proof verification.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionProofReplayKeyV1 {
-    purpose: SessionProofPurposeV1,
-    signer_key_id: String,
-    request_id: String,
-    transcript_digest: String,
-}
-
-impl SessionProofReplayKeyV1 {
-    /// Return the proof purpose that scopes the request ID.
-    #[must_use]
-    pub fn purpose(&self) -> SessionProofPurposeV1 {
-        self.purpose
-    }
-
-    /// Return the verified signer key identifier that scopes the request ID.
-    #[must_use]
-    pub fn signer_key_id(&self) -> &str {
-        &self.signer_key_id
-    }
-
-    /// Return the caller-generated request ID.
-    #[must_use]
-    pub fn request_id(&self) -> &str {
-        &self.request_id
-    }
-
-    /// Return the exact verified transcript digest used for changed-content detection.
-    #[must_use]
-    pub fn transcript_digest(&self) -> &str {
-        &self.transcript_digest
-    }
-}
-
-/// A cryptographically verified session proof and its replay identity.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct VerifiedSessionProofV1 {
-    replay_key: SessionProofReplayKeyV1,
-}
-
-impl VerifiedSessionProofV1 {
-    /// Return the replay identity that must be admitted atomically by runtime storage.
-    #[must_use]
-    pub fn replay_key(&self) -> &SessionProofReplayKeyV1 {
-        &self.replay_key
     }
 }
 
@@ -824,9 +560,6 @@ pub fn sign_session_proof_v1(
 
 /// Verify one session proof against its expected signer and freshness policy.
 ///
-/// Runtime callers must still atomically admit the returned replay key. Pure
-/// protocol verification does not own replay storage.
-///
 /// # Errors
 ///
 /// Returns [`ProtocolError::SessionProof`] when signer identity, proof format,
@@ -837,7 +570,7 @@ pub fn verify_session_proof_v1(
     expected_signer_public_key: &str,
     now_ms: i64,
     policy: SessionProofPolicyV1,
-) -> Result<VerifiedSessionProofV1, ProtocolError> {
+) -> Result<(), ProtocolError> {
     validate_safe_integer(now_ms, &["now"])?;
     if proof.format != SESSION_PROOF_FORMAT_V1 {
         return Err(proof_error(
@@ -887,14 +620,7 @@ pub fn verify_session_proof_v1(
             )
         })?;
 
-    Ok(VerifiedSessionProofV1 {
-        replay_key: SessionProofReplayKeyV1 {
-            purpose: input.purpose,
-            signer_key_id: input.signer_key_id.clone(),
-            request_id: input.request_id.clone(),
-            transcript_digest: encode_base64url(&digest),
-        },
-    })
+    Ok(())
 }
 
 fn parse_wire_proof(wire: WireSessionProofV1) -> Result<SessionProofV1, ProtocolError> {
@@ -1148,114 +874,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const SEED: [u8; 32] = [7; 32];
     const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    fn key() -> SigningKey {
-        SigningKey::from_bytes(&SEED)
-    }
-
-    fn nkey() -> String {
-        nkeys::KeyPair::new_from_raw(KeyPairType::User, SEED)
-            .expect("NKey from seed")
-            .public_key()
-    }
-
     #[test]
-    fn signs_and_verifies_nonce_bound_nats_connect() -> Result<(), ProtocolError> {
-        let key = key();
-        let key_id = derived_key_id(&key.verifying_key());
-        let input = SessionProofInputV1::nats_connect(
-            "req_connect_1",
-            1_735_689_600_000,
-            "ses_1",
-            key_id,
-            encode_base64url(key.verifying_key().as_bytes()),
-            nkey(),
-            DIGEST,
-            "server-nonce",
-        )?;
-        let proof = sign_session_proof_v1(&input, &key)?;
-        let verified = verify_session_proof_v1(
-            &input,
-            &proof,
-            &encode_base64url(key.verifying_key().as_bytes()),
-            1_735_689_600_000,
-            SessionProofPolicyV1::default(),
-        )?;
-        assert_eq!(
-            verified.replay_key().purpose(),
-            SessionProofPurposeV1::NatsConnect
-        );
-
-        let changed = SessionProofInputV1::nats_connect(
-            "req_connect_1",
-            1_735_689_600_000,
-            "ses_1",
-            derived_key_id(&key.verifying_key()),
-            encode_base64url(key.verifying_key().as_bytes()),
-            nkey(),
-            DIGEST,
-            "another-nonce",
-        )?;
-        assert!(matches!(
-            verify_session_proof_v1(
-                &changed,
-                &proof,
-                &encode_base64url(key.verifying_key().as_bytes()),
-                1_735_689_600_000,
-                SessionProofPolicyV1::default(),
-            ),
-            Err(ProtocolError::SessionProof {
-                code: SessionProofErrorCodeV1::InvalidSignature,
-                ..
-            })
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn context_purposes_bind_context_and_manifest_floor() -> Result<(), ProtocolError> {
-        let key = key();
-        let key_id = derived_key_id(&key.verifying_key());
-        let public_key = encode_base64url(key.verifying_key().as_bytes());
-        let input = SessionProofInputV1::nats_connect_context(
-            "req_connect_context_1",
-            1_735_689_600_000,
-            "ses_1",
-            key_id.clone(),
-            public_key.clone(),
-            nkey(),
-            DIGEST,
-            DIGEST,
-            "server-nonce",
-        )?;
-        let proof = sign_session_proof_v1(&input, &key)?;
-        let changed = SessionProofInputV1::nats_connect_context(
-            "req_connect_context_1",
-            1_735_689_600_000,
-            "ses_1",
-            key_id.clone(),
-            public_key.clone(),
-            nkey(),
-            DIGEST,
-            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-            "server-nonce",
-        )?;
-        assert!(verify_session_proof_v1(
-            &changed,
-            &proof,
-            &public_key,
-            1_735_689_600_000,
-            SessionProofPolicyV1::default(),
-        )
-        .is_err());
-
+    fn authorization_context_refresh_requires_positive_manifest_floor() -> Result<(), ProtocolError>
+    {
         assert!(SessionProofInputV1::authorization_context_refresh(
             "req_refresh_1",
             1_735_689_600_000,
             "ses_1",
-            key_id,
+            DIGEST,
             None,
             None,
             None,
@@ -1311,52 +939,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn rejects_wrong_nkey_and_out_of_window_proof() -> Result<(), ProtocolError> {
-        let key = key();
-        let other_nkey = nkeys::KeyPair::new_user().public_key();
-        assert!(matches!(
-            SessionProofInputV1::nats_connect(
-                "req_connect_1",
-                1_735_689_600_000,
-                "ses_1",
-                derived_key_id(&key.verifying_key()),
-                encode_base64url(key.verifying_key().as_bytes()),
-                other_nkey,
-                DIGEST,
-                "server-nonce",
-            )
-            .and_then(|input| sign_session_proof_v1(&input, &key)),
-            Err(ProtocolError::SessionProof {
-                code: SessionProofErrorCodeV1::InvalidNatsKey,
-                ..
-            })
-        ));
-
-        let input = SessionProofInputV1::session_self_control(
-            "req_logout_1",
-            1_735_689_600_000,
-            "ses_1",
-            derived_key_id(&key.verifying_key()),
-            DIGEST,
-        )?;
-        let proof = sign_session_proof_v1(&input, &key)?;
-        assert!(matches!(
-            verify_session_proof_v1(
-                &input,
-                &proof,
-                &encode_base64url(key.verifying_key().as_bytes()),
-                1_735_689_700_000,
-                SessionProofPolicyV1::default(),
-            ),
-            Err(ProtocolError::SessionProof {
-                code: SessionProofErrorCodeV1::ProofIatOutOfRange,
-                ..
-            })
-        ));
-        Ok(())
-    }
-
     fn vector_field<'a>(value: &'a Value, name: &str) -> &'a str {
         value[name]
             .as_str()
@@ -1380,19 +962,6 @@ mod tests {
                 vector_field(value, "participantDigest"),
                 vector_field(value, "redirectTarget"),
                 request_digest.expect("user request digest"),
-            ),
-            "clientBootstrap" => SessionProofInputV1::client_bootstrap(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionId"),
-                vector_field(value, "sessionKeyId"),
-                vector_field(case, "signerPublicKey"),
-                vector_field(value, "sessionNkey"),
-                value["expectedParticipantDigest"]
-                    .as_str()
-                    .map(str::to_owned),
-                value["expectedNeedsDigest"].as_str().map(str::to_owned),
-                request_digest.expect("client request digest"),
             ),
             "serviceBootstrap" => SessionProofInputV1::service_bootstrap(
                 vector_field(value, "requestId"),
@@ -1419,23 +988,6 @@ mod tests {
                 value["challengeDigest"].as_str().map(str::to_owned),
                 request_digest.expect("device request digest"),
             ),
-            "natsConnect" => SessionProofInputV1::nats_connect(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionId"),
-                vector_field(value, "sessionKeyId"),
-                vector_field(case, "signerPublicKey"),
-                vector_field(value, "sessionNkey"),
-                vector_field(value, "participantDigest"),
-                vector_field(value, "nonce"),
-            ),
-            "sessionSelfControl" => SessionProofInputV1::session_self_control(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionId"),
-                vector_field(value, "sessionKeyId"),
-                request_digest.expect("self-control request digest"),
-            ),
             "authorizationContextRefresh" => SessionProofInputV1::authorization_context_refresh(
                 vector_field(value, "requestId"),
                 vector_time(value),
@@ -1454,17 +1006,6 @@ mod tests {
                     .as_i64()
                     .expect("minimum manifest generation"),
                 request_digest.expect("context refresh request digest"),
-            ),
-            "natsConnectContext" => SessionProofInputV1::nats_connect_context(
-                vector_field(value, "requestId"),
-                vector_time(value),
-                vector_field(value, "sessionId"),
-                vector_field(value, "sessionKeyId"),
-                vector_field(case, "signerPublicKey"),
-                vector_field(value, "sessionNkey"),
-                vector_field(value, "participantDigest"),
-                vector_field(value, "contextDigest"),
-                vector_field(value, "nonce"),
             ),
             purpose => panic!("unknown vector purpose {purpose}"),
         }
@@ -1489,7 +1030,7 @@ mod tests {
             let input = vector_input(case)?;
             let proof = parse_session_proof_v1(&value["proof"])?;
             assert_eq!(sign_session_proof_v1(&input, &signing_key)?, proof);
-            let verified = verify_session_proof_v1(
+            verify_session_proof_v1(
                 &input,
                 &proof,
                 vector_field(case, "signerPublicKey"),
@@ -1497,7 +1038,7 @@ mod tests {
                 SessionProofPolicyV1::default(),
             )?;
             assert_eq!(
-                verified.replay_key().transcript_digest(),
+                session_proof_signing_digest_v1(&input)?,
                 vector_field(case, "transcriptDigest")
             );
             assert_eq!(proof.signature(), vector_field(case, "signature"));
@@ -1518,13 +1059,6 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing base vector {name}"))
         };
         let public_key = vector_field(&fixture, "identityPublicKey");
-        let seed = decode_base64url::<32>(
-            vector_field(&fixture, "identitySeed"),
-            &["identitySeed"],
-            SessionProofErrorCodeV1::InvalidEncoding,
-        )?;
-        let signing_key = SigningKey::from_bytes(&seed);
-
         for invalid in fixture["invalidCases"].as_array().expect("invalid cases") {
             let base = find(vector_field(invalid, "base"));
             let value = base.get("request").unwrap_or(&base["input"]);
@@ -1622,17 +1156,6 @@ mod tests {
                     )
                     .expect_err("padded public key must fail")
                 }
-                "sessionPublicKey" => SessionProofInputV1::nats_connect(
-                    vector_field(value, "requestId"),
-                    vector_time(value),
-                    vector_field(value, "sessionId"),
-                    vector_field(value, "sessionKeyId"),
-                    vector_field(&fixture, "sessionPublicKey"),
-                    vector_field(&fixture, "sessionNkey"),
-                    vector_field(value, "participantDigest"),
-                    vector_field(value, "nonce"),
-                )
-                .expect_err("mismatched session public key must fail"),
                 "signature" => {
                     let input = vector_input(base)?;
                     let bad = parse_session_proof_v1(&json!({
@@ -1663,67 +1186,6 @@ mod tests {
                         SessionProofPolicyV1::default(),
                     )
                     .expect_err("out-of-window proof must fail")
-                }
-                "admitTwice" => {
-                    let input = vector_input(base)?;
-                    let first = verify_session_proof_v1(
-                        &input,
-                        &proof,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicyV1::default(),
-                    )?;
-                    let second = verify_session_proof_v1(
-                        &input,
-                        &proof,
-                        public_key,
-                        input.issued_at(),
-                        SessionProofPolicyV1::default(),
-                    )?;
-                    assert_eq!(first.replay_key(), second.replay_key());
-                    continue;
-                }
-                "sameIdDifferentNonce" => {
-                    let original = vector_input(base)?;
-                    let changed = SessionProofInputV1::nats_connect(
-                        original.request_id(),
-                        original.issued_at(),
-                        "ses_example_01",
-                        original.signer_key_id(),
-                        public_key,
-                        vector_field(&fixture, "identityNkey"),
-                        DIGEST,
-                        "NATS-SERVER-NONCE-02",
-                    )?;
-                    let changed_proof = sign_session_proof_v1(&changed, &signing_key)?;
-                    let first = verify_session_proof_v1(
-                        &original,
-                        &proof,
-                        public_key,
-                        original.issued_at(),
-                        SessionProofPolicyV1::default(),
-                    )?;
-                    let second = verify_session_proof_v1(
-                        &changed,
-                        &changed_proof,
-                        public_key,
-                        changed.issued_at(),
-                        SessionProofPolicyV1::default(),
-                    )?;
-                    assert_eq!(first.replay_key().purpose(), second.replay_key().purpose());
-                    assert_eq!(
-                        first.replay_key().signer_key_id(),
-                        second.replay_key().signer_key_id()
-                    );
-                    assert_eq!(
-                        first.replay_key().request_id(),
-                        second.replay_key().request_id()
-                    );
-                    assert_ne!(
-                        first.replay_key().transcript_digest(),
-                        second.replay_key().transcript_digest()
-                    );
-                    continue;
                 }
                 "unknownProofField" => {
                     let mut unknown = value["proof"].clone();

@@ -1309,7 +1309,13 @@ fn render_participant_event_consumers_rs(
             let base = key_to_pascal(key);
             let method = rust_ident(&key_to_snake(key));
             let sdk = crate_ident(owned_sdk_crate_name.expect("self event requires owner SDK"));
-            lines.push(render_event_consumer_method(group, &method, &sdk, &base));
+            lines.push(render_event_consumer_method(
+                group,
+                &method,
+                &sdk,
+                &base,
+                &format!("{sdk}::CONTRACT_ID"),
+            ));
         }
         for (alias, keys) in &spec.uses {
             let mapping = mappings
@@ -1320,7 +1326,18 @@ fn render_participant_event_consumers_rs(
             for key in keys {
                 let base = key_to_pascal(key);
                 let method = rust_ident(&key_to_snake(key));
-                lines.push(render_event_consumer_method(group, &method, &sdk, &base));
+                let api_identity = if mapping.manifest.value["format"] == "trellis.api.v1" {
+                    format!("{sdk}::API_ID")
+                } else {
+                    format!("{sdk}::CONTRACT_ID")
+                };
+                lines.push(render_event_consumer_method(
+                    group,
+                    &method,
+                    &sdk,
+                    &base,
+                    &api_identity,
+                ));
             }
         }
         lines.extend(["}".to_string(), String::new()]);
@@ -1328,8 +1345,14 @@ fn render_participant_event_consumers_rs(
     format!("{}\n", lines.join("\n"))
 }
 
-fn render_event_consumer_method(group: &str, method: &str, sdk: &str, base: &str) -> String {
-    format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.runtime().listen_event::<{sdk}::events::{base}EventDescriptor, _, _>(handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
+fn render_event_consumer_method(
+    group: &str,
+    method: &str,
+    sdk: &str,
+    base: &str,
+    api_identity: &str,
+) -> String {
+    format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.runtime().listen_event_with_api_id::<{sdk}::events::{base}EventDescriptor, _, _>({api_identity}, handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
 }
 
 fn render_participant_jobs_facade_rs(
@@ -2318,14 +2341,33 @@ fn render_contract_rs(
     let contract_name = manifest_display_name(loaded);
     let source_reference =
         manifest_source_reference(&opts.manifest_path, opts.runtime_deps.repo_root.as_deref());
+    let rpc_metadata = loaded
+        .manifest
+        .rpc
+        .keys()
+        .map(|key| {
+            format!(
+                "    router.register_rpc_metadata::<super::rpc::{}Rpc>();",
+                key_to_pascal(key)
+            )
+        })
+        .chain(loaded.manifest.operations.keys().map(|key| {
+            format!(
+                "    router.register_operation_metadata::<super::operations::{}Operation>();",
+                key_to_pascal(key)
+            )
+        }))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
-        "//! Contract metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis contract id.\npub const CONTRACT_ID: &str = {};\n\n/// Stable digest for the canonical manifest JSON.\npub const CONTRACT_DIGEST: &str = {};\n\n/// Human-readable contract name.\npub const CONTRACT_NAME: &str = {};\n\n/// Canonical manifest JSON embedded in the SDK crate.\npub const CONTRACT_JSON: &str = {};\n\n/// Deserialize the embedded contract manifest.\npub fn contract_manifest() -> trellis_contracts::ContractManifest {{\n    serde_json::from_str(CONTRACT_JSON).expect(\"generated manifest json\")\n}}\n",
+        "//! Contract metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis contract id.\npub const CONTRACT_ID: &str = {};\n\n/// Stable digest for the canonical manifest JSON.\npub const CONTRACT_DIGEST: &str = {};\n\n/// Human-readable contract name.\npub const CONTRACT_NAME: &str = {};\n\n/// Canonical manifest JSON embedded in the SDK crate.\npub const CONTRACT_JSON: &str = {};\n\n/// Deserialize the embedded contract manifest.\npub fn contract_manifest() -> trellis_contracts::ContractManifest {{\n    serde_json::from_str(CONTRACT_JSON).expect(\"generated manifest json\")\n}}\n\n/// Register every generated RPC descriptor as router metadata.\npub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {{\n    router.set_api_id(CONTRACT_ID);\n{}\n}}\n",
         loaded.manifest.id,
         source_reference,
         string_literal(&loaded.manifest.id),
         string_literal(&loaded.digest),
         string_literal(&contract_name),
         string_literal(&loaded.canonical),
+        rpc_metadata,
     )
 }
 
@@ -2333,14 +2375,33 @@ fn render_api_rs(opts: &GenerateRustSdkOpts, loaded: &trellis_contracts::LoadedM
     let api_name = manifest_display_name(loaded);
     let source_reference =
         manifest_source_reference(&opts.manifest_path, opts.runtime_deps.repo_root.as_deref());
+    let rpc_metadata = loaded
+        .manifest
+        .rpc
+        .keys()
+        .map(|key| {
+            format!(
+                "    router.register_rpc_metadata::<super::rpc::{}Rpc>();",
+                key_to_pascal(key)
+            )
+        })
+        .chain(loaded.manifest.operations.keys().map(|key| {
+            format!(
+                "    router.register_operation_metadata::<super::operations::{}Operation>();",
+                key_to_pascal(key)
+            )
+        }))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
-        "//! API metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis API id.\npub const API_ID: &str = {};\n\n/// Stable digest for the canonical API JSON.\npub const API_DIGEST: &str = {};\n\n/// Human-readable API name.\npub const API_NAME: &str = {};\n\n/// Canonical API JSON embedded in the SDK crate.\npub const API_JSON: &str = {};\n\n/// Deserialize the embedded API artifact as JSON.\npub fn api_artifact() -> serde_json::Value {{\n    serde_json::from_str(API_JSON).expect(\"generated API JSON\")\n}}\n",
+        "//! API metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis API id.\npub const API_ID: &str = {};\n\n/// Stable digest for the canonical API JSON.\npub const API_DIGEST: &str = {};\n\n/// Human-readable API name.\npub const API_NAME: &str = {};\n\n/// Canonical API JSON embedded in the SDK crate.\npub const API_JSON: &str = {};\n\n/// Deserialize the embedded API artifact as JSON.\npub fn api_artifact() -> serde_json::Value {{\n    serde_json::from_str(API_JSON).expect(\"generated API JSON\")\n}}\n\n/// Register every generated RPC descriptor as router metadata.\npub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {{\n    router.set_api_id(API_ID);\n{}\n}}\n",
         loaded.manifest.id,
         source_reference,
         string_literal(&loaded.manifest.id),
         string_literal(&loaded.digest),
         string_literal(&api_name),
         string_literal(&loaded.canonical),
+        rpc_metadata,
     )
 }
 
@@ -4518,7 +4579,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_api_generation_uses_api_identity_and_hides_internal_rpcs() {
+    fn protocol_api_generation_uses_api_identity() {
         let out_dir = unique_temp_dir("protocol-api");
         generate_rust_sdk(&GenerateRustSdkOpts {
             manifest_path: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -4540,16 +4601,6 @@ mod tests {
         assert!(!out_dir.join("src/contract.rs").exists());
         let api = fs::read_to_string(out_dir.join("src/api.rs")).unwrap();
         assert!(api.contains("pub const API_ID"));
-        for path in [
-            "src/client.rs",
-            "src/rpc.rs",
-            "src/types.rs",
-            "src/schemas.rs",
-        ] {
-            let source = fs::read_to_string(out_dir.join(path)).unwrap();
-            assert!(!source.contains("AuthRequestsValidate"));
-            assert!(!source.contains("AuthEventsValidate"));
-        }
         fs::remove_dir_all(out_dir).unwrap();
     }
 

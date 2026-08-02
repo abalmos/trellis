@@ -7,7 +7,8 @@ This guide owns Trellis testing and release practice. Rust `xtask release ...` c
 - push access to the repository
 - [Deno](https://deno.com) v2+
 - a Rust toolchain (`rustup`)
-- Docker or Podman if you want to locally verify image builds
+- Docker or Podman only if you want to locally verify image builds; the live
+  integration gate runs NATS as a managed binary and needs no container runtime
 
 ## Feature testing policy
 
@@ -279,7 +280,7 @@ the workspace lint policy or appears in this exception registry:
 
 | Crates | Reason | Owner | Removal condition |
 | --- | --- | --- | --- |
-| `trellis-auth-adapters`, `trellis-core-bootstrap`, `trellis-local-bootstrap`, `trellis-jobs`, `trellis-service-jobs`, `trellis-service-eventlog` | Private runtime implementation crates expose cross-crate items that are not supported public APIs. Enforcing `missing_docs` would document internals as user-facing contracts. | Rust runtime maintainers | Remove each exception when the crate is folded behind a documented facade or its cross-crate surface becomes supported API. |
+| `trellis-auth-adapters`, `trellis-core-bootstrap`, `trellis-local-bootstrap`, `trellis-jobs`, `trellis-jobs-runtime`, `trellis-eventlog-runtime` | Private runtime implementation crates expose cross-crate items that are not supported public APIs. Enforcing `missing_docs` would document internals as user-facing contracts. | Rust runtime maintainers | Remove each exception when the crate becomes a supported public API. |
 | `trellis-test` | Test harness internals are intentionally available only to repository live tests. | Integration-test maintainers | Remove when a supported external test API replaces the private harness. |
 | `trellis-codegen-ts`, `trellis-codegen-rust`, `trellis-generate-runner`, `trellis-cli` | Private generator and CLI implementation boundaries are tooling internals, not library APIs. | Tooling maintainers | Remove when a crate becomes publishable or exposes a supported library surface. |
 
@@ -299,7 +300,10 @@ deno task -c js/deno.json packages:build:npm
 deno task -c js/deno.json test:prepared:packaging:built
 ```
 
-The prepared partitions are the non-integration Deno release-test set. Keep JS client-library integration coverage in `deno task -c js/deno.json test:integration` so containerized integration tests run only in the intended integration suite.
+The prepared partitions are the non-integration Deno release-test set. Keep
+JS client-library integration coverage in `deno task -c js/deno.json
+test:integration` so live integration tests (which run NATS as a managed
+binary) run only in the intended integration suite.
 
 Also run generated-artifact preparation when contracts, generated SDKs, runtime surfaces, or release packaging can be affected:
 
@@ -373,7 +377,7 @@ The unified `Release` workflow publishes in gated stages:
 - `resolve-release` derives the final release tag from the `release/v*` branch and rejects already-used tags
 - `prepare-release` rewrites publishable versions, verifies release metadata, generates SDK artifacts, writes release notes, and uploads the prepared workspace
 - `verify-static`, `verify-rust`, `verify-js`, and `verify-live-build` run as peer release lanes; `verify-live` then runs both language schedules against one retained host
-- `build-cli` and `verify-images` validate release artifacts; pull request runs skip those release-only matrix jobs while keeping all five verification lanes
+- `build-cli` and `verify-images` validate release artifacts; pull request runs skip those release-only matrix jobs while keeping all five verification lanes. `verify-images` builds both architectures into OCI archives and, for the `trellis` image, runs a managed-mode smoke on a native linux/amd64 build: it checks the baked nats-server version against `conformance/nats-binaries.json`, starts the image as its non-root user with a read-only bundle and writable state volume (`--entrypoint trellis` with `--nats-binary` and `--nats-state-dir`), waits for runtime readiness, stops it gracefully, and asserts no startup or write errors
 - `create-release-tag` creates the release tag after the release gate passes
 - `github-release` publishes CLI archives and checksums first
 - `publish-crates`, `publish-npm`, and `publish-images` publish downstream artifacts after the GitHub release exists

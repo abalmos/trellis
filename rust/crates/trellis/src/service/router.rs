@@ -11,6 +11,9 @@ use futures_util::{Stream, StreamExt};
 use tokio::sync::oneshot;
 
 use serde_json::Value;
+use trellis_protocol::{
+    ApiSurfaceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1, ProtocolError,
+};
 
 use super::error::ValidationIssue;
 use super::request_loop::{HandlerResponse, ResponseStream};
@@ -30,20 +33,62 @@ pub struct RequestContext {
     pub session_key: Option<String>,
     /// Proof signature from the authenticated request headers.
     pub proof: Option<String>,
+    /// Authorization-context digest bound by the v2 request proof.
+    pub authorization_context: Option<String>,
     /// Proof issued-at timestamp from the authenticated request headers.
     pub iat: Option<i64>,
     /// Unique request id from the authenticated request headers.
     pub request_id: Option<String>,
     /// Capability requirements for this exact routed request.
     pub required_capabilities: Option<Vec<String>>,
+    /// Exact permission surface required for this exact routed request.
+    pub required_permission: Option<RoutePermission>,
     /// NATS reply inbox used for request/reply responses.
     pub reply_to: Option<String>,
-    /// Validated caller metadata returned by `Auth.Requests.Validate`.
-    pub caller: Option<Value>,
+    /// Locally verified caller projection, when the request was authorized.
+    pub caller: Option<super::local_validator::VerifiedCaller>,
     /// W3C trace context header propagated by the caller, if present.
     pub traceparent: Option<String>,
     /// W3C trace state header propagated by the caller, if present.
     pub tracestate: Option<String>,
+}
+
+/// One exact API-surface permission required by a routed request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(RoutePermission), "`.")]
+pub struct RoutePermission {
+    /// Versioned generated API identity that owns the surface.
+    pub api: String,
+    #[doc = concat!("The `", stringify!(surface), "` value.")]
+    pub surface: ApiSurfaceKindV1,
+    #[doc = concat!("The `", stringify!(name), "` value.")]
+    pub name: String,
+    #[doc = concat!("The `", stringify!(action), "` value.")]
+    pub action: PermissionActionV1,
+    /// Operation signal name for a `Control` permission.
+    pub signal: Option<String>,
+}
+
+impl RoutePermission {
+    /// Convert generated route metadata into its exact permission atom.
+    #[allow(clippy::result_large_err)] // Protocol errors are immediately mapped at dispatch.
+    pub fn permission_atom(&self) -> Result<PermissionAtomV1, ProtocolError> {
+        let target = if self.action == PermissionActionV1::Control {
+            PermissionTargetV1::operation_signal(
+                self.api.clone(),
+                self.name.clone(),
+                self.signal
+                    .clone()
+                    .ok_or(ProtocolError::InvalidIdentifier {
+                        field: "signal name",
+                        reason: "control permission is missing its signal name",
+                    })?,
+            )?
+        } else {
+            PermissionTargetV1::api_surface(self.api.clone(), self.surface, self.name.clone())?
+        };
+        PermissionAtomV1::new(target, self.action)
+    }
 }
 
 type BoxedHandler = Box<
@@ -55,6 +100,51 @@ type BoxedHandler = Box<
 struct Route {
     handler: BoxedHandler,
     capabilities: RouteCapabilities,
+    permission: RoutePermissionSpec,
+}
+
+/// Exact permission surface recorded at registration time for one route.
+#[derive(Debug, Clone)]
+enum RoutePermissionSpec {
+    /// One fixed surface for every request on the route.
+    Static(ApiSurfaceKindV1, String, PermissionActionV1),
+    /// Operation control routes resolve the action from the payload.
+    OperationControl(String),
+}
+
+impl RoutePermissionSpec {
+    fn for_payload(&self, api: Option<&str>, payload: &[u8]) -> Option<RoutePermission> {
+        let api = api?.to_string();
+        match self {
+            Self::Static(surface, name, action) => Some(RoutePermission {
+                api,
+                surface: *surface,
+                name: name.clone(),
+                action: *action,
+                signal: None,
+            }),
+            Self::OperationControl(name) => {
+                let request = serde_json::from_slice::<OperationControlRequest>(payload).ok()?;
+                let action = match request.action.as_str() {
+                    "get" | "wait" | "watch" => PermissionActionV1::Observe,
+                    "cancel" => PermissionActionV1::Cancel,
+                    "signal" => PermissionActionV1::Control,
+                    _ => return None,
+                };
+                Some(RoutePermission {
+                    api,
+                    surface: ApiSurfaceKindV1::Operation,
+                    name: name.clone(),
+                    action,
+                    signal: if action == PermissionActionV1::Control {
+                        Some(request.signal?)
+                    } else {
+                        None
+                    },
+                })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -136,6 +226,7 @@ impl Drop for FeedCancellation {
 pub struct Router {
     handlers: HashMap<String, Route>,
     feed_cancellations: FeedCancellations,
+    api_id: Option<String>,
     #[cfg(feature = "integration-test-scoping")]
     integration_test_scope: Option<crate::integration_test_scoping::IntegrationTestScope>,
 }
@@ -144,6 +235,11 @@ impl Router {
     /// Create an empty router.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the generated API or contract id used by route permission metadata.
+    pub fn set_api_id(&mut self, api_id: impl Into<String>) {
+        self.api_id = Some(api_id.into());
     }
 
     #[cfg(feature = "integration-test-scoping")]
@@ -182,6 +278,14 @@ impl Router {
             .collect()
     }
 
+    fn descriptor_name(&self, name: &str) -> String {
+        #[cfg(feature = "integration-test-scoping")]
+        if let Some(scope) = &self.integration_test_scope {
+            return scope.logical_name(name);
+        }
+        name.to_string()
+    }
+
     /// Register one descriptor-backed handler.
     pub fn register_rpc<D, F, Fut>(&mut self, handler: F)
     where
@@ -195,6 +299,11 @@ impl Router {
             self.descriptor_subject(D::SUBJECT),
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
+                permission: RoutePermissionSpec::Static(
+                    ApiSurfaceKindV1::Rpc,
+                    self.descriptor_name(D::KEY),
+                    PermissionActionV1::Call,
+                ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -209,6 +318,81 @@ impl Router {
                     })
                 },
             ),
+            },
+        );
+    }
+
+    /// Register one generated RPC descriptor for routing metadata only.
+    ///
+    /// This is used by runtimes whose handler dispatch predates the typed
+    /// router but still must consume the router's exact permission metadata.
+    pub fn register_rpc_metadata<D>(&mut self)
+    where
+        D: RpcDescriptor + 'static,
+    {
+        let capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
+        self.handlers.insert(
+            self.descriptor_subject(D::SUBJECT),
+            Route {
+                capabilities: RouteCapabilities::Static(capabilities),
+                permission: RoutePermissionSpec::Static(
+                    ApiSurfaceKindV1::Rpc,
+                    self.descriptor_name(D::KEY),
+                    PermissionActionV1::Call,
+                ),
+                handler: Box::new(|_, _| {
+                    Box::pin(async {
+                        Err(ServerError::Nats(
+                            "routing-metadata-only handler cannot execute".to_owned(),
+                        ))
+                    })
+                }),
+            },
+        );
+    }
+
+    /// Register one generated operation descriptor for routing metadata only.
+    pub fn register_operation_metadata<D>(&mut self)
+    where
+        D: OperationDescriptor + 'static,
+    {
+        let subject = self.descriptor_subject(D::SUBJECT);
+        let name = self.descriptor_name(D::KEY);
+        let metadata_handler = || {
+            Box::new(
+                |_, _| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
+                    Box::pin(async {
+                        Err(ServerError::Nats(
+                            "routing-metadata-only handler cannot execute".to_owned(),
+                        ))
+                    })
+                },
+            ) as BoxedHandler
+        };
+        self.handlers.insert(
+            subject.clone(),
+            Route {
+                capabilities: RouteCapabilities::Static(
+                    self.descriptor_capabilities(D::CALLER_CAPABILITIES),
+                ),
+                permission: RoutePermissionSpec::Static(
+                    ApiSurfaceKindV1::Operation,
+                    name.clone(),
+                    PermissionActionV1::Invoke,
+                ),
+                handler: metadata_handler(),
+            },
+        );
+        self.handlers.insert(
+            control_subject(&subject),
+            Route {
+                capabilities: RouteCapabilities::OperationControl {
+                    observe: self.descriptor_capabilities(D::OBSERVE_CAPABILITIES),
+                    cancel: self.descriptor_capabilities(D::CANCEL_CAPABILITIES),
+                    control: self.descriptor_capabilities(D::CONTROL_CAPABILITIES),
+                },
+                permission: RoutePermissionSpec::OperationControl(name),
+                handler: metadata_handler(),
             },
         );
     }
@@ -229,6 +413,11 @@ impl Router {
             subject,
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
+                permission: RoutePermissionSpec::Static(
+                    ApiSurfaceKindV1::Feed,
+                    self.descriptor_name(D::KEY),
+                    PermissionActionV1::Subscribe,
+                ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -567,6 +756,11 @@ impl Router {
             subject.clone(),
             Route {
                 capabilities: RouteCapabilities::Static(caller_capabilities),
+                permission: RoutePermissionSpec::Static(
+                    ApiSurfaceKindV1::Operation,
+                    self.descriptor_name(D::KEY),
+                    PermissionActionV1::Invoke,
+                ),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let start = Arc::clone(&start);
@@ -591,6 +785,7 @@ impl Router {
                     cancel: cancel_capabilities,
                     control: control_capabilities,
                 },
+                permission: RoutePermissionSpec::OperationControl(self.descriptor_name(D::KEY)),
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let get = Arc::clone(&get);
@@ -746,6 +941,24 @@ impl Router {
             .get(subject)
             .ok_or_else(|| ServerError::MissingHandler(subject.to_string()))?;
         Ok(route.capabilities.required_for_payload(payload))
+    }
+
+    /// Return the exact permission surface required for the routed request payload.
+    ///
+    /// `Ok(None)` means no exact permission applies (unknown control action);
+    /// the caller must deny rather than fall back to a weaker check.
+    pub fn required_permission(
+        &self,
+        subject: &str,
+        payload: &[u8],
+    ) -> Result<Option<RoutePermission>, ServerError> {
+        let route = self
+            .handlers
+            .get(subject)
+            .ok_or_else(|| ServerError::MissingHandler(subject.to_string()))?;
+        Ok(route
+            .permission
+            .for_payload(self.api_id.as_deref(), payload))
     }
 
     /// Dispatch one request to the registered handler for its subject.

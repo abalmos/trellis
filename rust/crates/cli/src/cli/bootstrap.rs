@@ -94,9 +94,6 @@ pub struct InfraTrustInitArgs {
     /// Stable installation authorization namespace.
     pub authority: String,
     #[arg(long, default_value_t = 31_536_000)]
-    /// Issuer-certificate lifetime in seconds.
-    pub certificate_lifetime_seconds: i64,
-    #[arg(long, default_value_t = 2_592_000)]
     /// Issuer-manifest lifetime in seconds.
     pub manifest_lifetime_seconds: i64,
     #[arg(long)]
@@ -113,9 +110,6 @@ pub struct InfraTrustRotateIssuerArgs {
     #[arg(long)]
     /// Revoke this existing issuer instead of generating a new overlapping issuer.
     pub revoke: Option<String>,
-    #[arg(long, default_value_t = 31_536_000)]
-    /// New issuer-certificate lifetime in seconds.
-    pub certificate_lifetime_seconds: i64,
     #[arg(long, default_value_t = 2_592_000)]
     /// New issuer-manifest lifetime in seconds.
     pub manifest_lifetime_seconds: i64,

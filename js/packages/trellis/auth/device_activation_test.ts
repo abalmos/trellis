@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { AsyncResult } from "@qlever-llc/result";
 import type {
   OperationEvent,
@@ -18,30 +18,17 @@ import {
   type AuthResolveDeviceUserAuthoritiesOutput,
   type AuthResolveDeviceUserAuthoritiesProgress,
   buildDeviceActivationPayload,
-  buildDeviceWaitProofInput,
   createDeviceActivationClient,
-  createDeviceNatsAuthToken,
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
   type DeviceActivationTransport,
   encodeDeviceActivationPayload,
-  getDeviceConnectInfo,
-  type GetDeviceConnectInfoOutput,
   parseDeviceActivationPayload,
-  signDeviceWaitRequest,
   startDeviceActivationRequest,
   verifyDeviceConfirmationCode,
-  verifyDeviceWaitSignature,
   waitForDeviceActivation,
 } from "./device_activation.ts";
-import { importEd25519PublicKeyFromBase64url } from "./keys.ts";
-import { base64urlDecode, sha256, toArrayBuffer } from "./utils.ts";
-
-function okResult<T>(value: T) {
-  return {
-    take: () => value,
-  };
-}
+const PARTICIPANT_DIGEST = "A".repeat(43);
 
 function unsupportedActivationOperationControl() {
   return AsyncResult.err(
@@ -66,19 +53,21 @@ Deno.test("device activation payload helpers round-trip encoded payloads", async
 Deno.test("device activation start requests return short flow URLs", async () => {
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = (async (_input, _init) =>
-      new Response(
-        JSON.stringify({
-          flowId: "flow_123",
-          instanceId: "dev_123",
-          deploymentId: "reader.default",
-          activationUrl:
-            "https://trellis.example.com/_trellis/portal/devices/activate?flowId=flow_123",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+    globalThis.fetch = ((_input, _init) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            flowId: "flow_123",
+            instanceId: "dev_123",
+            deploymentId: "reader.default",
+            activationUrl:
+              "https://trellis.example.com/_trellis/portal/devices/activate?flowId=flow_123",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       )) as typeof fetch;
 
     const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(7));
@@ -101,36 +90,8 @@ Deno.test("device activation start requests return short flow URLs", async () =>
   }
 });
 
-Deno.test("device wait helpers sign requests and verify confirmation codes", async () => {
+Deno.test("device activation helpers verify confirmation codes", async () => {
   const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(9));
-  const waitRequest = await signDeviceWaitRequest({
-    flowId: "flow_123",
-    publicIdentityKey: identity.publicIdentityKey,
-    nonce: "nonce_123",
-    identitySeed: identity.identitySeed,
-    contractDigest: "digest-a",
-    iat: 123,
-  });
-
-  assertEquals(waitRequest.publicIdentityKey, identity.publicIdentityKey);
-  assertEquals(waitRequest.flowId, "flow_123");
-  assertEquals(waitRequest.nonce, "nonce_123");
-  assertEquals(waitRequest.contractDigest, "digest-a");
-  assertEquals(waitRequest.iat, 123);
-  assert(waitRequest.sig.length > 0);
-  assert(await verifyDeviceWaitSignature(waitRequest));
-  assertFalse(
-    await verifyDeviceWaitSignature({
-      ...waitRequest,
-      flowId: "flow_456",
-    }),
-  );
-  assertFalse(
-    await verifyDeviceWaitSignature({
-      ...waitRequest,
-      contractDigest: "digest-b",
-    }),
-  );
 
   const confirmationCode = await deriveDeviceConfirmationCode({
     activationKey: identity.activationKey,
@@ -146,211 +107,147 @@ Deno.test("device wait helpers sign requests and verify confirmation codes", asy
       confirmationCode: confirmationCode.toLowerCase(),
     }),
   );
-
-  const natsAuthToken = await createDeviceNatsAuthToken({
-    publicIdentityKey: identity.publicIdentityKey,
-    identitySeed: identity.identitySeed,
-    contractDigest: "digest-a",
-    iat: 456,
-  });
-  assertEquals(natsAuthToken.sessionKey, identity.publicIdentityKey);
-  assertEquals(natsAuthToken.iat, 456);
-  assertEquals(natsAuthToken.contractDigest, "digest-a");
-  assert(natsAuthToken.sig.length > 0);
 });
 
-Deno.test("device wait signatures are computed over the hashed proof input", async () => {
-  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(11));
-  const waitRequest = await signDeviceWaitRequest({
-    flowId: "flow_456",
+function bootstrapWaitArgs(
+  identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>,
+) {
+  return {
+    trellisUrl: "https://trellis.example.com",
     publicIdentityKey: identity.publicIdentityKey,
-    nonce: "nonce_456",
     identitySeed: identity.identitySeed,
-    contractDigest: "digest-a",
-    iat: 456,
-  });
+    deploymentId: "reader.default",
+    instanceId: "dev_123",
+    principalId: "device_123",
+    participantId: "acme.reader@v1",
+    participantArtifactDigest: PARTICIPANT_DIGEST,
+    participantNeedsDigest: PARTICIPANT_DIGEST,
+    nonce: "nonce_123",
+  };
+}
 
-  assert(await verifyDeviceWaitSignature(waitRequest));
+function activationPendingBody(): Record<string, unknown> {
+  return {
+    state: "activation_pending",
+    serverNow: Date.now(),
+    activation: {
+      state: "pending",
+      reviewId: "dar_123",
+      activationUrl:
+        "https://trellis.example.com/_trellis/portal/devices/activate?flowId=dar_123",
+      retryAfterMs: 5,
+    },
+  };
+}
 
-  const publicKey = await importEd25519PublicKeyFromBase64url(
-    identity.publicIdentityKey,
-  );
-  const proofInput = buildDeviceWaitProofInput(
-    waitRequest.flowId,
-    identity.publicIdentityKey,
-    waitRequest.nonce,
-    waitRequest.iat,
-    waitRequest.contractDigest,
-  );
-  const hashedProofInput = await sha256(proofInput);
-  const signature = base64urlDecode(waitRequest.sig);
+function bootstrapReadyBody(): Record<string, unknown> {
+  return {
+    state: "ready",
+    serverNow: Date.now(),
+  };
+}
 
-  assert(
-    await crypto.subtle.verify(
-      "Ed25519",
-      publicKey,
-      toArrayBuffer(signature),
-      toArrayBuffer(hashedProofInput),
-    ),
-  );
-  assertFalse(
-    await crypto.subtle.verify(
-      "Ed25519",
-      publicKey,
-      toArrayBuffer(signature),
-      toArrayBuffer(proofInput),
-    ),
-  );
-});
-
-Deno.test("device activation wait and connect-info helpers parse responses", async () => {
+Deno.test("device activation wait retries the bootstrap route until ready", async () => {
   const originalFetch = globalThis.fetch;
   const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(5));
+  const waitArgs = bootstrapWaitArgs(identity);
+  const urls: string[] = [];
+  let calls = 0;
+
+  try {
+    globalThis.fetch =
+      ((input: URL | Request | string, _init?: RequestInit) => {
+        urls.push(String(input));
+        calls += 1;
+        const body = calls === 1
+          ? activationPendingBody()
+          : bootstrapReadyBody();
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(body),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }) as typeof fetch;
+
+    await waitForDeviceActivation({
+      ...waitArgs,
+      pollIntervalMs: 0,
+    });
+
+    assertEquals(calls, 2);
+    assert(urls.every((url) => url.endsWith("/bootstrap/device")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("device activation wait honors retryAfterMs from activation_pending", async () => {
+  const originalFetch = globalThis.fetch;
+  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(6));
+  const waitArgs = bootstrapWaitArgs(identity);
+  let calls = 0;
 
   try {
     globalThis.fetch =
       ((_input: URL | Request | string, _init?: RequestInit) => {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "activated",
-              activatedAt: "2026-04-08T12:00:00Z",
-              connectInfo: {
-                instanceId: "dev_123",
-                deploymentId: "reader.default",
-                contractId: "acme.reader@v1",
-                contractDigest: "digest-a",
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                },
-                transport: {
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-                auth: {
-                  mode: "device_identity",
-                  authority: "user_delegated",
-                  iatSkewSeconds: 30,
-                },
-              },
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-        );
-      }) as typeof fetch;
-
-    const activated = await waitForDeviceActivation({
-      trellisUrl: "https://trellis.example.com",
-      flowId: "flow_123",
-      publicIdentityKey: identity.publicIdentityKey,
-      nonce: "nonce_123",
-      identitySeed: identity.identitySeed,
-      contractDigest: "digest-a",
-    });
-    assertEquals(activated.status, "activated");
-
-    globalThis.fetch =
-      ((_input: URL | Request | string, _init?: RequestInit) => {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              status: "ready",
-              connectInfo: {
-                instanceId: "dev_123",
-                deploymentId: "reader.default",
-                contractId: "acme.reader@v1",
-                contractDigest: "digest-a",
-                transports: {
-                  native: { natsServers: ["nats://127.0.0.1:4222"] },
-                },
-                transport: {
-                  sentinel: { jwt: "jwt", seed: "seed" },
-                },
-                auth: {
-                  mode: "device_identity",
-                  authority: "user_delegated",
-                  iatSkewSeconds: 30,
-                },
-              },
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            },
-          ),
-        );
-      }) as typeof fetch;
-
-    const connectInfo = await getDeviceConnectInfo({
-      trellisUrl: "https://trellis.example.com",
-      publicIdentityKey: identity.publicIdentityKey,
-      identitySeed: identity.identitySeed,
-      contractDigest: "digest-a",
-      iat: 123,
-    });
-    assertEquals(connectInfo.status, "ready");
-
-    let calls = 0;
-    globalThis.fetch =
-      ((_input: URL | Request | string, _init?: RequestInit) => {
         calls += 1;
-        const body = calls === 1 ? { status: "pending" } : {
-          status: "rejected",
-          reason: "policy_denied",
-        };
-        return Promise.resolve(
-          new Response(JSON.stringify(body), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
-        );
-      }) as typeof fetch;
-
-    await assertRejects(
-      () =>
-        waitForDeviceActivation({
-          trellisUrl: "https://trellis.example.com",
-          flowId: "flow_123",
-          publicIdentityKey: identity.publicIdentityKey,
-          nonce: "nonce_123",
-          identitySeed: identity.identitySeed,
-          contractDigest: "digest-a",
-          pollIntervalMs: 0,
-        }),
-      Error,
-      "device activation rejected: policy_denied",
-    );
-
-    globalThis.fetch =
-      ((_input: URL | Request | string, _init?: RequestInit) => {
+        const body = calls === 1
+          ? activationPendingBody()
+          : bootstrapReadyBody();
         return Promise.resolve(
           new Response(
-            JSON.stringify({
-              reason: "contract_digest_not_allowed",
-            }),
+            JSON.stringify(body),
             {
-              status: 403,
+              status: 200,
               headers: { "Content-Type": "application/json" },
             },
           ),
         );
       }) as typeof fetch;
 
+    const startedAt = Date.now();
+    await waitForDeviceActivation({
+      ...waitArgs,
+      pollIntervalMs: 0,
+    });
+    assert(Date.now() - startedAt >= 5);
+    assertEquals(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("device activation wait rejects non-success bootstrap responses", async () => {
+  const originalFetch = globalThis.fetch;
+  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(7));
+  const waitArgs = bootstrapWaitArgs(identity);
+
+  try {
+    globalThis.fetch = ((_input: URL | Request | string, _init?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            reason: "contract_digest_not_allowed",
+          }),
+          {
+            status: 403,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )) as typeof fetch;
+
     await assertRejects(
       () =>
         waitForDeviceActivation({
-          trellisUrl: "https://trellis.example.com",
-          flowId: "flow_123",
-          publicIdentityKey: identity.publicIdentityKey,
-          nonce: "nonce_123",
-          identitySeed: identity.identitySeed,
-          contractDigest: "digest-a",
+          ...waitArgs,
           pollIntervalMs: 0,
         }),
       Error,
-      "device activation wait failed: 403 contract_digest_not_allowed",
+      "device activation bootstrap failed: 403 contract_digest_not_allowed",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -359,7 +256,8 @@ Deno.test("device activation wait and connect-info helpers parse responses", asy
 
 Deno.test("device activation wait retries transient fetch failures", async () => {
   const originalFetch = globalThis.fetch;
-  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(6));
+  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(8));
+  const waitArgs = bootstrapWaitArgs(identity);
   let calls = 0;
 
   try {
@@ -370,27 +268,7 @@ Deno.test("device activation wait retries transient fetch failures", async () =>
       }
       return Promise.resolve(
         new Response(
-          JSON.stringify({
-            status: "activated",
-            activatedAt: "2026-04-08T12:00:00Z",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "acme.reader@v1",
-              contractDigest: "digest-a",
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                authority: "user_delegated",
-                iatSkewSeconds: 30,
-              },
-            },
-          }),
+          JSON.stringify(bootstrapReadyBody()),
           {
             status: 200,
             headers: { "Content-Type": "application/json" },
@@ -399,78 +277,11 @@ Deno.test("device activation wait retries transient fetch failures", async () =>
       );
     }) as typeof fetch;
 
-    const activated = await waitForDeviceActivation({
-      trellisUrl: "https://trellis.example.com",
-      flowId: "flow_123",
-      publicIdentityKey: identity.publicIdentityKey,
-      nonce: "nonce_123",
-      identitySeed: identity.identitySeed,
-      contractDigest: "digest-a",
+    await waitForDeviceActivation({
+      ...waitArgs,
       pollIntervalMs: 0,
     });
 
-    assertEquals(activated.status, "activated");
-    assertEquals(calls, 2);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("device activation wait backs off after rate limiting", async () => {
-  const originalFetch = globalThis.fetch;
-  const identity = await deriveDeviceIdentity(new Uint8Array(32).fill(7));
-  let calls = 0;
-
-  try {
-    globalThis.fetch = ((_: URL | Request | string, _init?: RequestInit) => {
-      calls += 1;
-      if (calls === 1) {
-        return Promise.resolve(
-          new Response("Too many requests", { status: 429 }),
-        );
-      }
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            status: "activated",
-            activatedAt: "2026-04-08T12:00:00Z",
-            connectInfo: {
-              instanceId: "dev_123",
-              deploymentId: "reader.default",
-              contractId: "acme.reader@v1",
-              contractDigest: "digest-a",
-              transports: {
-                native: { natsServers: ["nats://127.0.0.1:4222"] },
-              },
-              transport: {
-                sentinel: { jwt: "jwt", seed: "seed" },
-              },
-              auth: {
-                mode: "device_identity",
-                authority: "user_delegated",
-                iatSkewSeconds: 30,
-              },
-            },
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          },
-        ),
-      );
-    }) as typeof fetch;
-
-    const activated = await waitForDeviceActivation({
-      trellisUrl: "https://trellis.example.com",
-      flowId: "flow_123",
-      publicIdentityKey: identity.publicIdentityKey,
-      nonce: "nonce_123",
-      identitySeed: identity.identitySeed,
-      contractDigest: "digest-a",
-      pollIntervalMs: 0,
-    });
-
-    assertEquals(activated.status, "activated");
     assertEquals(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
@@ -607,11 +418,6 @@ Deno.test("device activation client wrappers hide method strings", async () => {
     _opts?: unknown,
   ): AsyncResult<AuthDeviceUserAuthoritiesRevokeResponse, UnexpectedError>;
   function request(
-    method: "Auth.Devices.ConnectInfo.Get",
-    input: Record<string, unknown>,
-    _opts?: unknown,
-  ): AsyncResult<GetDeviceConnectInfoOutput, UnexpectedError>;
-  function request(
     method: string,
     input: unknown,
   ): AsyncResult<unknown, UnexpectedError> {
@@ -626,27 +432,6 @@ Deno.test("device activation client wrappers hide method strings", async () => {
         });
       case "Auth.DeviceUserAuthorities.Revoke":
         return AsyncResult.ok({ success: true });
-      case "Auth.Devices.ConnectInfo.Get":
-        return AsyncResult.ok({
-          status: "ready",
-          connectInfo: {
-            instanceId: "dev_123",
-            deploymentId: "reader.default",
-            contractId: "acme.reader@v1",
-            contractDigest: "digest-a",
-            transports: {
-              native: { natsServers: ["nats://127.0.0.1:4222"] },
-            },
-            transport: {
-              sentinel: { jwt: "jwt", seed: "seed" },
-            },
-            auth: {
-              mode: "device_identity",
-              authority: "user_delegated",
-              iatSkewSeconds: 30,
-            },
-          },
-        });
       default:
         throw new Error(`Unexpected method ${method}`);
     }
@@ -659,8 +444,6 @@ Deno.test("device activation client wrappers hide method strings", async () => {
       request("Auth.DeviceUserAuthorities.List", input),
     authDeviceUserAuthoritiesRevoke: (input) =>
       request("Auth.DeviceUserAuthorities.Revoke", input),
-    authDevicesConnectInfoGet: (input) =>
-      request("Auth.Devices.ConnectInfo.Get", input),
   };
   const client = createDeviceActivationClient(transport);
 
@@ -713,39 +496,9 @@ Deno.test("device activation client wrappers hide method strings", async () => {
     await client.revokeDeviceActivation({ instanceId: "dev_123" }),
     { success: true },
   );
-  assertEquals(
-    await client.getDeviceConnectInfo({
-      publicIdentityKey: "A".repeat(43),
-      contractDigest: "digest-a",
-      iat: 123,
-      sig: "proof",
-    }),
-    {
-      status: "ready",
-      connectInfo: {
-        instanceId: "dev_123",
-        deploymentId: "reader.default",
-        contractId: "acme.reader@v1",
-        contractDigest: "digest-a",
-        transports: {
-          native: { natsServers: ["nats://127.0.0.1:4222"] },
-        },
-        transport: {
-          sentinel: { jwt: "jwt", seed: "seed" },
-        },
-        auth: {
-          mode: "device_identity",
-          authority: "user_delegated",
-          iatSkewSeconds: 30,
-        },
-      },
-    },
-  );
-
   assertEquals(calls.map((entry) => [entry.kind, entry.method]), [
     ["operation", "Auth.DeviceUserAuthorities.Resolve"],
     ["request", "Auth.DeviceUserAuthorities.List"],
     ["request", "Auth.DeviceUserAuthorities.Revoke"],
-    ["request", "Auth.Devices.ConnectInfo.Get"],
   ]);
 });

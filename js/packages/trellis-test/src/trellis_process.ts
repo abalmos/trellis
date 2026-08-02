@@ -6,7 +6,8 @@ const DEFAULT_OUTPUT_TAIL_CHARS = 8_192;
 const READINESS_POLL_INTERVAL_MS = 25;
 const READINESS_FETCH_TIMEOUT_MS = 250;
 
-type CommandStatus = Awaited<Deno.ChildProcess["status"]>;
+/** @internal Resolved status of a spawned child process. */
+export type CommandStatus = Awaited<Deno.ChildProcess["status"]>;
 
 type BootstrapUrlWaiter = {
   resolve(value: string): void;
@@ -41,7 +42,8 @@ export type StartTrellisProcessArgs = {
   shutdownTimeoutMs: number;
 };
 
-class TextTail {
+/** @internal Bounded text buffer for child process output tails. */
+export class TextTail {
   #text = "";
 
   constructor(private readonly maxChars: number) {}
@@ -182,7 +184,8 @@ function timeoutValue<T>(ms: number, value: T): {
   };
 }
 
-async function settledStatus(
+/** @internal Resolves the status if the child already exited, else undefined. */
+export async function settledStatus(
   status: Promise<CommandStatus>,
 ): Promise<CommandStatus | undefined> {
   const timeout = timeoutValue(0, undefined);
@@ -193,7 +196,8 @@ async function settledStatus(
   }
 }
 
-async function waitForStatus(
+/** @internal Waits up to `timeoutMs` for the child status to resolve. */
+export async function waitForStatus(
   status: Promise<CommandStatus>,
   timeoutMs: number,
 ): Promise<CommandStatus | undefined> {
@@ -205,7 +209,11 @@ async function waitForStatus(
   }
 }
 
-function killProcess(child: Deno.ChildProcess, signal: Deno.Signal): void {
+/** @internal Sends a signal, ignoring races where the child already exited. */
+export function killProcess(
+  child: Deno.ChildProcess,
+  signal: Deno.Signal,
+): void {
   try {
     child.kill(signal);
   } catch {
@@ -213,7 +221,8 @@ function killProcess(child: Deno.ChildProcess, signal: Deno.Signal): void {
   }
 }
 
-function commandStatusText(status: CommandStatus): string {
+/** @internal Human-readable exit description for a resolved child status. */
+export function commandStatusText(status: CommandStatus): string {
   if (status.signal !== null) return `signal ${status.signal}`;
   return `exit code ${status.code}`;
 }
@@ -245,7 +254,8 @@ export function parseTrellisBootstrapUrl(line: string): string | undefined {
   return jsonBootstrapUrl(line) ?? fallbackBootstrapUrl(line);
 }
 
-async function captureProcessOutput(
+/** @internal Pipes child output to a log file while tracking a text tail. */
+export async function captureProcessOutput(
   stream: ReadableStream<Uint8Array>,
   tail: TextTail,
   onLine: (line: string) => void,

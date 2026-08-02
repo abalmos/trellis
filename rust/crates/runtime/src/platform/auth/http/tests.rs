@@ -1,0 +1,368 @@
+use axum::response::IntoResponse;
+
+use super::browser::ApprovalRequest;
+use super::{
+    canonical_origin, first_admin_token_hash, oauth_cookie_header, oauth_cookie_name,
+    oidc_portal_policy_digest, project_service_resource_bindings, require_oauth_browser_binding,
+    select_browser_authority, validate_redirect, NatsBootstrapIssuer, EMBEDDED_PORTAL_ASSETS,
+};
+use crate::platform::auth::AuthorizationStateError;
+use crate::platform::auth::{
+    ephemeral::{AuthOAuthKind, AuthOAuthState, AuthOAuthStatus, BrowserConsentProposal},
+    LoginPortalRecord, LoginSettingsRecord, ResourceBindingEvidence, ResourceBindingState,
+    ResourceProviderIdentity,
+};
+use axum::http::header::COOKIE;
+use axum::http::{HeaderMap, HeaderValue};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
+use nats_jwt_rs::user::User;
+use nats_jwt_rs::Claims;
+use nkeys::KeyPair;
+use sha2::{Digest as _, Sha256};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use trellis_protocol::{
+    ApiSurfaceKindV1, GrantSetV1, ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1,
+    PermissionTargetV1,
+};
+
+const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+fn permission(target: PermissionTargetV1, action: PermissionActionV1) -> PermissionAtomV1 {
+    PermissionAtomV1::new(target, action).unwrap()
+}
+
+fn consent_with_view(view: serde_json::Value) -> BrowserConsentProposal {
+    let required = permission(
+        PermissionTargetV1::api_surface("example.api@v1", ApiSurfaceKindV1::Rpc, "Read").unwrap(),
+        PermissionActionV1::Call,
+    );
+    let optional = permission(
+        PermissionTargetV1::api_surface("example.api@v1", ApiSurfaceKindV1::Event, "Updated")
+            .unwrap(),
+        PermissionActionV1::Subscribe,
+    );
+    BrowserConsentProposal::new(
+        "app-1".to_owned(),
+        DIGEST.to_owned(),
+        DIGEST.to_owned(),
+        view,
+        GrantSetV1::new(vec![required]),
+        BTreeMap::from([("events".to_owned(), GrantSetV1::new(vec![optional]))]),
+        vec!["read".to_owned()],
+        BTreeMap::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn browser_security_boundaries_are_exact() {
+    let allowed = vec!["https://app.example".to_owned()];
+    assert!(validate_redirect("https://app.example/complete", &allowed).is_ok());
+    assert!(validate_redirect("https://evil.example/complete", &allowed).is_err());
+    assert!(validate_redirect("https://app.example/complete#secret", &allowed).is_err());
+    assert_eq!(
+        canonical_origin("https://app.example:443/path").unwrap(),
+        "https://app.example"
+    );
+
+    let token = URL_SAFE_NO_PAD.encode([7_u8; 32]);
+    let digest = first_admin_token_hash(&token).unwrap();
+    assert_eq!(digest.len(), 43);
+    assert!(!digest.contains(&token));
+}
+
+#[test]
+fn browser_approval_accepts_only_server_owned_optional_bundles() {
+    let consent = consent_with_view(serde_json::json!({ "title": "Read data" }));
+    let (required, capabilities, selected) = select_browser_authority(&consent, &[]).unwrap();
+    assert_eq!(required, consent.required_grant_set);
+    assert_eq!(capabilities, vec!["read"]);
+    assert!(selected.is_empty());
+
+    let (with_optional, _, selected) =
+        select_browser_authority(&consent, &["events".to_owned()]).unwrap();
+    assert_eq!(with_optional.permissions().len(), 2);
+    assert!(selected.contains("events"));
+    assert_eq!(
+        select_browser_authority(&consent, &["unknown".to_owned()])
+            .unwrap_err()
+            .code,
+        "unknown_optional_bundle"
+    );
+}
+
+#[test]
+fn browser_approval_wire_ignores_caller_authored_machine_authority() {
+    for atom in [
+        permission(
+            PermissionTargetV1::api_surface("unrelated.api@v1", ApiSurfaceKindV1::Rpc, "Admin")
+                .unwrap(),
+            PermissionActionV1::Call,
+        ),
+        permission(
+            PermissionTargetV1::api_surface(
+                "unrelated.api@v1",
+                ApiSurfaceKindV1::Event,
+                "Published",
+            )
+            .unwrap(),
+            PermissionActionV1::Publish,
+        ),
+        permission(
+            PermissionTargetV1::api_surface("unrelated.api@v1", ApiSurfaceKindV1::State, "records")
+                .unwrap(),
+            PermissionActionV1::Write,
+        ),
+        permission(
+            PermissionTargetV1::participant_resource(
+                "app-1",
+                ParticipantResourceKindV1::Kv,
+                "secrets",
+            )
+            .unwrap(),
+            PermissionActionV1::Write,
+        ),
+    ] {
+        assert_eq!(
+            serde_json::from_value::<ApprovalRequest>(serde_json::json!({
+                "approved": true,
+                "consentViewDigest": DIGEST,
+                "selectedOptionalBundles": [],
+                "idempotencyKey": "request-1",
+                "grantSet": GrantSetV1::new(vec![atom]),
+            }))
+            .unwrap()
+            .selected_optional_bundles,
+            Vec::<String>::new(),
+        );
+    }
+    assert!(
+        serde_json::from_value::<ApprovalRequest>(serde_json::json!({
+            "approved": true,
+            "consentViewDigest": DIGEST,
+            "selectedOptionalBundles": [],
+            "idempotencyKey": "request-1",
+            "capabilities": ["admin"],
+        }))
+        .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn http_errors_never_expose_internal_causes() {
+    let secret = "postgres://admin:secret@internal/auth";
+    let response =
+        super::HttpError::from(AuthorizationStateError::Storage(secret.to_owned())).into_response();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let encoded = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!encoded.contains(secret));
+    assert!(encoded.contains("internal_error"));
+}
+
+#[test]
+fn consent_wording_does_not_change_machine_authority() {
+    let before = consent_with_view(serde_json::json!({ "title": "Read data" }));
+    let after = consent_with_view(serde_json::json!({ "title": "View data" }));
+    assert_eq!(before.proposal_digest, after.proposal_digest);
+    assert_ne!(before.consent_view_digest, after.consent_view_digest);
+}
+
+#[test]
+fn oauth_cookie_binds_one_browser_and_uses_callback_security_policy() {
+    let state_id = "oauth-state";
+    let secret = "browser-secret";
+    let state = AuthOAuthState {
+        format: "trellis.auth-oauth-state.v1".to_owned(),
+        state_id: state_id.to_owned(),
+        provider_id: "provider".to_owned(),
+        kind: AuthOAuthKind::Browser,
+        flow_id: "flow".to_owned(),
+        status: AuthOAuthStatus::Pending,
+        pkce_verifier: "verifier".to_owned(),
+        nonce: "nonce".to_owned(),
+        redirect_uri: "https://auth.example/auth/callback/provider".to_owned(),
+        browser_binding_digest: URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes())),
+        portal_id: Some("builtin".to_owned()),
+        portal_policy_digest: Some(super::digest_parts(&["policy"])),
+        claim_owner: None,
+        result_digest: None,
+        created_at: 1,
+        expires_at: 2,
+        version: 1,
+    };
+    let mut headers = HeaderMap::new();
+    assert!(require_oauth_browser_binding(state_id, &state, &headers).is_err());
+    headers.insert(
+        COOKIE,
+        HeaderValue::from_str(&format!("{}=wrong", oauth_cookie_name(state_id))).unwrap(),
+    );
+    assert!(require_oauth_browser_binding(state_id, &state, &headers).is_err());
+    headers.insert(
+        COOKIE,
+        HeaderValue::from_str(&format!("{}={secret}", oauth_cookie_name(state_id))).unwrap(),
+    );
+    require_oauth_browser_binding(state_id, &state, &headers).unwrap();
+    assert!(require_oauth_browser_binding("another-state", &state, &headers).is_err());
+
+    let cookie = oauth_cookie_header("binding", secret, "provider", true, 900)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(cookie.contains("Path=/auth/callback/provider"));
+    assert!(cookie.contains("Max-Age=900"));
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Lax"));
+    assert!(cookie.contains("Secure"));
+}
+
+#[test]
+fn oauth_portal_policy_digest_tracks_policy_not_wording() {
+    let portal = LoginPortalRecord {
+        portal_id: "builtin".to_owned(),
+        display_name: "Trellis".to_owned(),
+        entry_url: None,
+        builtin: true,
+        disabled: false,
+        removed: false,
+        local_registration_enabled: false,
+        provider_ids: vec!["oidc".to_owned()],
+        created_at: 1,
+        updated_at: 1,
+        version: 1,
+    };
+    let settings = LoginSettingsRecord {
+        portal_id: "builtin".to_owned(),
+        default_provider_id: Some("oidc".to_owned()),
+        local_login_enabled: true,
+        federated_registration_enabled: false,
+        provider_selection_enabled: false,
+        updated_at: 1,
+        version: 1,
+    };
+    let digest = oidc_portal_policy_digest(&portal, &settings).unwrap();
+    let mut wording = portal.clone();
+    wording.display_name = "Renamed portal".to_owned();
+    assert_eq!(
+        oidc_portal_policy_digest(&wording, &settings).unwrap(),
+        digest
+    );
+    let mut registration = settings.clone();
+    registration.federated_registration_enabled = true;
+    registration.version += 1;
+    assert_ne!(
+        oidc_portal_policy_digest(&portal, &registration).unwrap(),
+        digest
+    );
+    let mut provider = portal.clone();
+    provider.provider_ids.clear();
+    provider.version += 1;
+    assert_ne!(
+        oidc_portal_policy_digest(&provider, &settings).unwrap(),
+        digest
+    );
+}
+
+#[test]
+fn embedded_portal_contains_fallback_and_assets() {
+    assert!(EMBEDDED_PORTAL_ASSETS
+        .iter()
+        .any(|(path, bytes)| *path == "200.html" && !bytes.is_empty()));
+    assert!(EMBEDDED_PORTAL_ASSETS
+        .iter()
+        .any(|(path, bytes)| path.starts_with("_trellis/assets/") && !bytes.is_empty()));
+}
+
+#[test]
+fn bootstrap_projects_exact_physical_resource_binding() {
+    let participant = serde_json::json!({
+        "resources": {
+            "kv": {
+                "cache": {
+                    "history": 2,
+                    "ttlMs": 60000,
+                    "maxValueBytes": 4096
+                }
+            }
+        },
+        "jobQueues": {},
+        "eventConsumers": {}
+    });
+    let evidence = ResourceBindingEvidence {
+        resource_kind: "kv".to_owned(),
+        local_name: "cache".to_owned(),
+        binding_id: "bind_cache".to_owned(),
+        owner_participant_id: "example".to_owned(),
+        provider_identity: ResourceProviderIdentity::Kv {
+            bucket: "KV_EXAMPLE_CACHE".to_owned(),
+        },
+        state: ResourceBindingState::Available,
+        materialized_at: 1,
+        error: None,
+    };
+
+    let projected =
+        project_service_resource_bindings(&participant.to_string(), &[evidence], "example")
+            .expect("resource binding");
+    assert_eq!(projected.kv["cache"].bucket, "KV_EXAMPLE_CACHE");
+    assert_eq!(projected.kv["cache"].history, 2);
+}
+
+#[test]
+fn bootstrap_jwt_is_session_keyed_and_deny_all() {
+    let signing_key = KeyPair::new_account();
+    let auth_account = KeyPair::new_account().public_key();
+    let session_key = KeyPair::new_user().public_key();
+    let issuer = NatsBootstrapIssuer {
+        signing_key: Arc::new(signing_key),
+        auth_account: auth_account.clone(),
+        maximum_lifetime_seconds: 300,
+    };
+    let jwt = issuer.deny_all_user_jwt(&session_key, 10_000, 100).unwrap();
+    assert_eq!(jwt.expires_at, 400);
+    let claims = Claims::<User>::decode(&jwt.jwt).unwrap();
+    assert_eq!(
+        claims.payload().issuer_account.as_deref(),
+        Some(auth_account.as_str())
+    );
+    assert_eq!(serde_json::to_value(&claims).unwrap()["sub"], session_key);
+    assert_eq!(claims.exp, Some(400));
+    assert!(claims
+        .payload()
+        .permissions
+        .permissions
+        .publish
+        .allow
+        .is_empty());
+    assert_eq!(
+        claims.payload().permissions.permissions.publish.deny,
+        vec![">".to_owned()]
+    );
+    assert!(claims
+        .payload()
+        .permissions
+        .permissions
+        .subscribe
+        .allow
+        .is_empty());
+}
+
+#[test]
+fn refresh_transport_metadata_omits_unconfigured_native_transport() {
+    let value = serde_json::to_value(super::ContextRefreshTransports {
+        native: None,
+        websocket: Some(super::ContextRefreshTransportRoute {
+            nats_servers: vec!["ws://localhost:8080".to_owned()],
+        }),
+    })
+    .unwrap();
+    assert!(value.get("native").is_none());
+    assert_eq!(
+        value["websocket"]["natsServers"],
+        serde_json::json!(["ws://localhost:8080"])
+    );
+}

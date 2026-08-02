@@ -4349,200 +4349,6 @@
       "isolationReason": "mutates process-global state or process lifecycle"
     },
     {
-      "id": "control-plane.session-logout-deletes-session-and-denies-reuse",
-      "fixture": "control-plane",
-      "title": "HTTP session logout deletes the session and denies reuse",
-      "coverage": [
-        "auth",
-        "sessions",
-        "logout",
-        "session-cleanup"
-      ],
-      "description": "A signed HTTP logout for a live app session deletes the Trellis session and the same session key can no longer bootstrap.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis HTTP session logout route and session storage"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session."
-        ],
-        "when": [
-          "The app sends a signed HTTP session logout request.",
-          "The app attempts to reuse the same session key for /bootstrap/client."
-        ],
-        "then": [
-          "The logout request succeeds.",
-          "The session row is deleted.",
-          "The reused session key receives auth_required."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.session-logout-kicks-runtime-access",
-      "fixture": "control-plane",
-      "title": "HTTP session logout kicks live runtime access",
-      "coverage": [
-        "auth",
-        "sessions",
-        "logout",
-        "runtime-access"
-      ],
-      "description": "A signed HTTP logout for a live app session kicks every active connection using that session key so in-flight clients lose authenticated runtime access.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis HTTP session logout route and auth callout"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "Two live app connections are authenticated with the same session key."
-        ],
-        "when": [
-          "The app sends a signed HTTP session logout request."
-        ],
-        "then": [
-          "Both live app connections lose authenticated Auth.Sessions.Me access."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.session-logout-validates-return-to",
-      "fixture": "control-plane",
-      "title": "HTTP session logout validates returnTo targets",
-      "coverage": [
-        "auth",
-        "sessions",
-        "logout",
-        "http-route-security"
-      ],
-      "description": "A live signed HTTP logout rejects a cross-origin returnTo without deleting the session and accepts a same-origin returnTo.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis HTTP session logout route"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          }
-        ],
-        "given": [
-          "An app has a bound user session whose app origin is known to Trellis."
-        ],
-        "when": [
-          "The app sends a signed logout request with a cross-origin returnTo.",
-          "The app sends a signed logout request with a same-origin returnTo."
-        ],
-        "then": [
-          "The cross-origin returnTo is rejected as invalid_return_to.",
-          "The rejected request preserves the session.",
-          "The same-origin returnTo is accepted and returned as redirectTo."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.session-logout-uses-provider-logout-redirect",
-      "fixture": "control-plane",
-      "title": "HTTP session logout uses provider logout redirect and falls back when no upstream URL exists",
-      "coverage": [
-        "auth",
-        "sessions",
-        "logout",
-        "provider-logout"
-      ],
-      "description": "Live signed HTTP logout returns the upstream provider logout URL when configured, falls back to the validated returnTo when no upstream logout URL exists, and deletes the Trellis session.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis HTTP session logout route and provider registry"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped app auth contract"
-          },
-          {
-            "name": "logout-capable provider",
-            "kind": "service",
-            "contract": "test OIDC provider logout metadata"
-          }
-        ],
-        "given": [
-          "An app has a bound user session associated with a configured logout-capable OIDC provider."
-        ],
-        "when": [
-          "The app sends a signed HTTP session logout request with providerLogout and returnTo."
-        ],
-        "then": [
-          "The response redirectTo is the provider logout URL when available.",
-          "The provider logout URL includes the configured client id and validated return target.",
-          "A providerLogout request without an upstream provider URL redirects to the validated returnTo.",
-          "The Trellis session is deleted."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
       "id": "control-plane.catalog-active-contracts-survive-restart",
       "fixture": "control-plane",
       "title": "Catalog active contracts survive control-plane restart",
@@ -6635,6 +6441,108 @@
       "classification": "shared"
     },
     {
+      "id": "event-consumers.handler-failure-redelivers-same-event",
+      "fixture": "event-consumers",
+      "title": "Handler failure redelivers the same event",
+      "coverage": [
+        "events",
+        "event-consumers",
+        "redelivery",
+        "nak"
+      ],
+      "description": "Fails a durable event handler once, NAKs the delivery, and proves the exact stored event reaches the handler again and succeeds.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "source service",
+            "kind": "service",
+            "contract": "event-consumers source contract"
+          },
+          {
+            "name": "consumer service",
+            "kind": "service",
+            "contract": "event-consumers parallel consumer contract"
+          },
+          {
+            "name": "publisher app",
+            "kind": "app",
+            "contract": "event-consumers publisher app contract"
+          }
+        ],
+        "given": [
+          "A durable group handler fails its first delivery."
+        ],
+        "when": [
+          "The runtime NAKs the stored event."
+        ],
+        "then": [
+          "JetStream redelivers the same event and the handler succeeds on its second attempt."
+        ]
+      },
+      "implementations": {
+        "rust": {
+          "module": "event_consumers",
+          "function": "event_consumers_handler_failure_redelivers_same_event"
+        }
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "event-consumers.authorization-failures-redeliver-or-term",
+      "fixture": "event-consumers",
+      "title": "Authorization availability redelivers and invalid proofs terminate",
+      "coverage": [
+        "events",
+        "event-consumers",
+        "authorization",
+        "redelivery",
+        "nak",
+        "term"
+      ],
+      "description": "Proves provider readiness and one-shot context-read failures NAK durable events for redelivery while an invalid event proof is permanently terminated.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "source service",
+            "kind": "service",
+            "contract": "event-consumers source contract"
+          },
+          {
+            "name": "consumer service",
+            "kind": "service",
+            "contract": "event-consumers parallel consumer contract"
+          },
+          {
+            "name": "publisher app",
+            "kind": "app",
+            "contract": "event-consumers publisher app contract"
+          }
+        ],
+        "given": [
+          "A valid durable event is pending while provider authorization is temporarily unavailable."
+        ],
+        "when": [
+          "Provider readiness or one exact context read fails, then recovers, and a separate event carries an invalid proof."
+        ],
+        "then": [
+          "Transient failures NAK and redeliver the same message; the invalid proof is TERMed without handler invocation."
+        ]
+      },
+      "implementations": {
+        "rust": {
+          "module": "event_consumers",
+          "function": "event_consumers_authorization_failures_redeliver_or_term"
+        }
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "shared"
+    },
+    {
       "id": "event-consumers.strict-group-rejects-parallel-workers",
       "fixture": "event-consumers",
       "title": "Strict group rejects parallel workers",
@@ -6725,6 +6633,48 @@
       "classification": "shared"
     },
     {
+      "id": "auth-post-commit.event-publish-uses-jetstream-puback",
+      "fixture": "auth-post-commit",
+      "title": "Auth post-commit event publication uses JetStream PubAck",
+      "coverage": [
+        "auth",
+        "events",
+        "jetstream",
+        "post-commit"
+      ],
+      "description": "Revoking a live session publishes its durable Auth event through the Trellis event stream and receives the JetStream publication acknowledgement.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "admin",
+            "kind": "admin",
+            "contract": "trellis.auth@v1"
+          }
+        ],
+        "given": [
+          "a second live admin session exists",
+          "a live observer is subscribed to the Trellis event stream and JetStream publication ACK subjects"
+        ],
+        "when": [
+          "the admin revokes the second session"
+        ],
+        "then": [
+          "Auth.Sessions.Revoked is published to the Trellis JetStream stream",
+          "the publisher receives a JetStream PubAck before the post-commit action is acknowledged"
+        ]
+      },
+      "implementations": {
+        "rust": {
+          "module": "rpc",
+          "function": "auth_post_commit_event_publish_uses_jetstream_puback"
+        }
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "classification": "shared"
+    },
+    {
       "id": "runtime.singleton-ownership-lifecycle",
       "fixture": "runtime",
       "title": "Runtime singleton ownership lifecycle",
@@ -6803,53 +6753,41 @@
       }
     },
     {
-      "id": "auth.requests-validate-enforces-proof-signature-time-replay-and-permissions",
-      "fixture": "auth",
-      "title": "Auth request validation enforces proof, time, replay, and permissions",
+      "id": "cli.server-managed-nats",
+      "fixture": "cli",
+      "title": "Trellis server CLI manages an isolated local NATS server",
       "coverage": [
+        "managed-nats",
+        "cli-server",
         "rust-runtime"
       ],
-      "description": "Auth request validation enforces proof, time, replay, and permissions",
+      "description": "The trellis server CLI in managed mode generates a config bundle with init config, runs the full runtime against a CLI-managed local nats-server, stops it cleanly on SIGTERM, and reports a valid preflight result on a follow-up --check run.",
       "scenario": {
         "participants": [],
-        "given": [],
-        "when": [],
-        "then": []
-      },
-      "completion": {
-        "rust": "implemented"
-      },
-      "classification": "shared",
-      "implementations": {
-        "rust": {
-          "module": "rpc",
-          "function": "auth_requests_validate_enforces_proof_signature_time_replay_and_permissions"
-        }
-      }
-    },
-    {
-      "id": "rpc.auth-validation-retries-transient-session-not-found",
-      "fixture": "rpc",
-      "title": "RPC auth validation retries transient missing sessions",
-      "coverage": [
-        "rust-runtime"
-      ],
-      "description": "RPC auth validation retries transient missing sessions",
-      "scenario": {
-        "participants": [],
-        "given": [],
-        "when": [],
-        "then": []
+        "given": [
+          "a config bundle generated by trellis init config",
+          "a CLI-managed nats-server binary cache directory"
+        ],
+        "when": [
+          "trellis server all runs in managed mode and creates the runtime stores",
+          "the CLI process is terminated with SIGTERM",
+          "trellis server all --check runs in managed mode"
+        ],
+        "then": [
+          "the first run creates the runtime stores and shuts down cleanly",
+          "the managed nats-server pid file is removed and the nats-server process exits",
+          "the --check run exits 0 with a valid JSON preflight report"
+        ]
       },
       "completion": {
         "rust": "implemented"
       },
       "classification": "isolated-process",
-      "isolationReason": "fault-injects the runtime SQLite session record",
+      "isolationReason": "CLI managed-NATS case starts its own isolated NATS instance; all other cases share the host NATS. Startup allows a 600s ceiling because the first managed run downloads the pinned nats-server binary into an empty cache.",
       "implementations": {
         "rust": {
-          "module": "rpc",
-          "function": "rpc_auth_validation_retries_transient_session_not_found"
+          "module": "cli",
+          "function": "cli_server_managed_nats"
         }
       }
     }

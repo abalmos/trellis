@@ -12,3 +12,10 @@ pub const CONTRACT_JSON: &str = "{\"capabilities\":{\"trellis.health::read\":{\"
 pub fn contract_manifest() -> crate::contracts::ContractManifest {
     serde_json::from_str(CONTRACT_JSON).expect("generated manifest json")
 }
+/// Register every generated RPC descriptor as router metadata.
+pub fn register_rpc_metadata(router: &mut crate::service::Router) {
+    router.set_api_id(CONTRACT_ID);
+    router.register_rpc_metadata::<super::rpc::HealthInspectRpc>();
+    router.register_rpc_metadata::<super::rpc::HealthMetricsRpc>();
+    router.register_rpc_metadata::<super::rpc::HealthQueryRpc>();
+}

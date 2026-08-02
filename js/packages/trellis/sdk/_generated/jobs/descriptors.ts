@@ -49,6 +49,13 @@ export const JobsCancel = rpcAction(
   "Jobs.Cancel",
   {
     subject: "rpc.v1.Jobs.Cancel",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.Cancel",
+      action: "call",
+    }),
     input: schema<Types.JobsCancelInput>(JobsCancelRequestSchema),
     output: schema<Types.JobsCancelOutput>(JobsCancelResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
@@ -75,6 +82,13 @@ export const JobsDismissDLQ = rpcAction(
   "Jobs.DismissDLQ",
   {
     subject: "rpc.v1.Jobs.DismissDLQ",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.DismissDLQ",
+      action: "call",
+    }),
     input: schema<Types.JobsDismissDLQInput>(JobsDismissDLQRequestSchema),
     output: schema<Types.JobsDismissDLQOutput>(JobsDismissDLQResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
@@ -101,6 +115,13 @@ export const JobsGetKey = rpcAction(
   "Jobs.GetKey",
   {
     subject: "rpc.v1.Jobs.GetKey",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.GetKey",
+      action: "call",
+    }),
     input: schema<Types.JobsGetKeyInput>(JobsGetKeyRequestSchema),
     output: schema<Types.JobsGetKeyOutput>(JobsGetKeyResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
@@ -127,6 +148,13 @@ export const JobsInspect = rpcAction(
   "Jobs.Inspect",
   {
     subject: "rpc.v1.Jobs.Inspect",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.Inspect",
+      action: "call",
+    }),
     input: schema<Types.JobsInspectInput>(JobsInspectRequestSchema),
     output: schema<Types.JobsInspectOutput>(JobsInspectResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
@@ -153,6 +181,13 @@ export const JobsListDLQ = rpcAction(
   "Jobs.ListDLQ",
   {
     subject: "rpc.v1.Jobs.ListDLQ",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.ListDLQ",
+      action: "call",
+    }),
     input: schema<Types.JobsListDLQInput>(JobsListDLQRequestSchema),
     output: schema<Types.JobsListDLQOutput>(JobsListDLQResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
@@ -168,6 +203,13 @@ export const JobsListServices = rpcAction(
   "Jobs.ListServices",
   {
     subject: "rpc.v1.Jobs.ListServices",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.ListServices",
+      action: "call",
+    }),
     input: schema<Types.JobsListServicesInput>(JobsListServicesRequestSchema),
     output: schema<Types.JobsListServicesOutput>(
       JobsListServicesResponseSchema,
@@ -185,6 +227,13 @@ export const JobsMetrics = rpcAction(
   "Jobs.Metrics",
   {
     subject: "rpc.v1.Jobs.Metrics",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.Metrics",
+      action: "call",
+    }),
     input: schema<Types.JobsMetricsInput>(JobsMetricsRequestSchema),
     output: schema<Types.JobsMetricsOutput>(JobsMetricsResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
@@ -200,6 +249,13 @@ export const JobsQuery = rpcAction(
   "Jobs.Query",
   {
     subject: "rpc.v1.Jobs.Query",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.Query",
+      action: "call",
+    }),
     input: schema<Types.JobsQueryInput>(JobsQueryRequestSchema),
     output: schema<Types.JobsQueryOutput>(JobsQueryResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
@@ -215,6 +271,13 @@ export const JobsReplayDLQ = rpcAction(
   "Jobs.ReplayDLQ",
   {
     subject: "rpc.v1.Jobs.ReplayDLQ",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.ReplayDLQ",
+      action: "call",
+    }),
     input: schema<Types.JobsReplayDLQInput>(JobsReplayDLQRequestSchema),
     output: schema<Types.JobsReplayDLQOutput>(JobsReplayDLQResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
@@ -241,6 +304,13 @@ export const JobsRetry = rpcAction(
   "Jobs.Retry",
   {
     subject: "rpc.v1.Jobs.Retry",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.Retry",
+      action: "call",
+    }),
     input: schema<Types.JobsRetryInput>(JobsRetryRequestSchema),
     output: schema<Types.JobsRetryOutput>(JobsRetryResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
@@ -267,6 +337,13 @@ export const JobsWatch = feedAction(
   "Jobs.Watch",
   {
     subject: "feed.v1.Jobs.Watch",
+    permission: Object.freeze({
+      apiId: "trellis.jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "feed",
+      surfaceName: "Jobs.Watch",
+      action: "subscribe",
+    }),
     input: schema<Types.JobsWatchInput>(JobsWatchRequestSchema),
     event: schema<Types.JobsWatchEvent>(JobsWatchFrameSchema),
     subscribeCapabilities: ["trellis.jobs::admin.stream"] as const,

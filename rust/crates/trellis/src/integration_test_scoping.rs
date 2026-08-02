@@ -229,12 +229,6 @@ mod tests {
     fn preserves_platform_descriptor_subjects() {
         let scope = IntegrationTestScope::new("run1", "case2").unwrap();
         assert_eq!(
-            scope
-                .descriptor_subject("rpc.v1.Auth.Requests.Validate")
-                .unwrap(),
-            "rpc.v1.Auth.Requests.Validate"
-        );
-        assert_eq!(
             scope.descriptor_subject("rpc.v1.Jobs.Query").unwrap(),
             "rpc.v1.Jobs.Query"
         );

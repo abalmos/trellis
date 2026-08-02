@@ -30,6 +30,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
     RuntimeConfig {
         instance_name: Some(options.runtime.name.clone()),
         event_session_seed_file: Some(PathBuf::from("../session.seed")),
+        event_context_digest_file: Some(PathBuf::from("./data/session-context.digest")),
         http: Some(HttpConfig {
             port: Some(options.runtime.trellis_port),
             public_origin: Some(options.runtime.public_origin.clone()),
@@ -73,9 +74,6 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             authorization: Some(AuthorizationConfig {
                 trust_root_file: PathBuf::from("./auth/authorization-root.json"),
                 issuer_manifest_file: PathBuf::from("./auth/authorization-issuer-manifest.json"),
-                issuer_certificate_files: vec![PathBuf::from(
-                    "./auth/authorization-issuer-certificate.json",
-                )],
                 issuer_signing_seed_file: PathBuf::from("./auth/authorization-issuer.seed"),
                 context_lifetime_seconds: 300,
                 refresh_lead_seconds: 60,

@@ -686,14 +686,13 @@ impl<'a> AuthRpc<'a> {
     /// Call `Auth.Sessions.Logout`.
     pub async fn sessions_logout(
         &self,
-        input: &super::types::AuthSessionsLogoutRequest,
     ) -> Result<
         super::types::AuthSessionsLogoutResponse,
         crate::generated::CallError<super::rpc::AuthSessionsLogoutError>,
     > {
         self.inner
             .call_typed::<super::rpc::AuthSessionsLogoutRpc, super::rpc::AuthSessionsLogoutError>(
-                input,
+                &super::rpc::Empty {},
             )
             .await
     }

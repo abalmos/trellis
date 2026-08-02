@@ -42,10 +42,8 @@ export function trellisRepoRuntimeOptions(
     ...options,
     keepWorkdir: options.keepWorkdir ?? keepWorkdirFromEnv(),
     trellis: {
-      mutableDev: options.trellis?.mutableDev ?? true,
       command: options.trellis?.command ?? repoTrellisCommand(),
     },
-    jobsAdmin: options.jobsAdmin,
     timeouts: {
       ...DEFAULT_TIMEOUTS,
       ...options.timeouts,

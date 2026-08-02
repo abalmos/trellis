@@ -360,11 +360,6 @@ pub async fn download_transfer(
     caller.download_transfer(grant).await
 }
 
-/// Flush an authenticated test caller's connection.
-pub async fn flush(caller: &Caller) -> Result<(), TrellisClientError> {
-    caller.test_flush().await
-}
-
 /// Connect an ad hoc service runtime through the normal authenticated bootstrap flow.
 pub async fn connect_service_runtime<C>(
     trellis_url: &str,
@@ -523,8 +518,6 @@ pub struct TrellisTestRuntimeOptions {
     pub oauth_providers: Map<String, Value>,
     /// Named fail-once hooks injected into the isolated test control-plane config.
     pub fail_once_hooks: Vec<String>,
-    /// Disable the built-in JS Jobs admin RPC handlers for tests that host Jobs elsewhere.
-    pub disable_jobs_admin: bool,
 }
 
 impl TrellisTestRuntimeOptions {
@@ -543,7 +536,6 @@ impl TrellisTestRuntimeOptions {
             admin_password: None,
             oauth_providers: Map::new(),
             fail_once_hooks: Vec::new(),
-            disable_jobs_admin: false,
         }
     }
 
@@ -1242,6 +1234,32 @@ impl TrellisTestRuntime {
         TrellisControlPlaneSqlite::new(control_plane_sqlite_path(self.workdir.path()))
     }
 
+    /// Publish one synthetic immutable authorization revocation for live watcher tests.
+    pub async fn publish_authorization_revocation(
+        &self,
+        context_digest: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), TrellisTestError> {
+        let client = ConnectOptions::new()
+            .credentials_file(trellis_creds_path(self.workdir.path()))
+            .await?
+            .connect(&self.nats_url)
+            .await
+            .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
+        let store = jetstream::new(client)
+            .get_key_value("trellis_authorization_contexts")
+            .await
+            .map_err(io::Error::other)?;
+        store
+            .put(
+                format!("revocation.{context_digest}"),
+                serde_json::to_vec(value)?.into(),
+            )
+            .await
+            .map_err(io::Error::other)?;
+        Ok(())
+    }
+
     /// List JetStream consumers on the shared Trellis event stream.
     pub async fn list_trellis_jetstream_consumers(
         &self,
@@ -1277,9 +1295,24 @@ impl TrellisTestRuntime {
         Ok(infos)
     }
 
-    /// Start a live NATS observer for JetStream ACK frames on the Trellis event stream.
+    /// Start a live NATS observer for JetStream consumer ACK frames.
     pub async fn start_jetstream_ack_observer(
         &self,
+    ) -> Result<TrellisJetStreamAckObserver, TrellisTestError> {
+        self.start_jetstream_ack_observer_on("$JS.ACK.trellis.>")
+            .await
+    }
+
+    /// Start a live NATS observer for JetStream publisher ACK reply frames.
+    pub async fn start_jetstream_publish_ack_observer(
+        &self,
+    ) -> Result<TrellisJetStreamAckObserver, TrellisTestError> {
+        self.start_jetstream_ack_observer_on("_INBOX.>").await
+    }
+
+    async fn start_jetstream_ack_observer_on(
+        &self,
+        subject: &str,
     ) -> Result<TrellisJetStreamAckObserver, TrellisTestError> {
         let client = ConnectOptions::new()
             .credentials_file(trellis_creds_path(self.workdir.path()))
@@ -1288,7 +1321,7 @@ impl TrellisTestRuntime {
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
         let mut subscription = client
-            .subscribe("$JS.ACK.trellis.>".to_string())
+            .subscribe(subject.to_owned())
             .await
             .map_err(io::Error::other)?;
         client.flush().await.map_err(io::Error::other)?;
@@ -2196,6 +2229,11 @@ pub struct TrellisTestClientReconnect {
 }
 
 impl TrellisTestClientReconnect {
+    /// Return the bound session ID for typed admin assertions.
+    pub fn session_id(&self) -> &str {
+        &self.bound.session_id
+    }
+
     /// Reconnect the already-bound session without starting or completing a fresh auth flow.
     pub async fn connect_bound_only(&self) -> Result<Caller, TrellisTestError> {
         connect_bound_user(
@@ -3405,6 +3443,7 @@ fn render_test_trellis_config(
     let config = json!({
         "instance_name": "trellis-test",
         "event_session_seed_file": "./session.seed",
+        "event_context_digest_file": "./session-context.digest",
         "http": {
             "port": http_port,
             "public_origin": options.public_origin,
@@ -3441,7 +3480,6 @@ fn render_test_trellis_config(
             "authorization": {
                 "trust_root_file": "./auth/authorization-root.json",
                 "issuer_manifest_file": "./auth/authorization-issuer-manifest.json",
-                "issuer_certificate_files": ["./auth/authorization-issuer-certificate.json"],
                 "issuer_signing_seed_file": "./auth/authorization-issuer.seed",
                 "context_lifetime_seconds": 300,
                 "refresh_lead_seconds": 60,

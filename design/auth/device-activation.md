@@ -191,13 +191,13 @@ sequenceDiagram
     participant T as Trellis Auth
     participant P as Portal
 
-    W->>T: POST /auth/devices/activate/requests
+    W->>T: POST /bootstrap/device (proof-bound initial bootstrap)
     T-->>W: Return activationUrl with flowId
     W->>U: Show activation URL or QR payload
     U->>P: Open /_trellis/portal/devices/activate?flowId=...
     U->>P: Authenticate and complete portal business logic
     P->>T: Activate known device instance
-    T-->>W: Wait endpoint resolves with activated status
+    T-->>W: Bounded proof-bound wait resolves with activated status
 ```
 
 If portal-side business logic is long-running, the portal may still use its own
@@ -351,7 +351,9 @@ Rules:
 
 Before a device is activated it cannot use normal authenticated RPCs, but an
 online device may still wait for activation completion by calling the auth wait
-endpoint with an identity-key proof.
+endpoint with an identity-key proof. This bounded wait is deliberately retained
+as a pre-auth setup requirement; it is not a general control or bootstrap
+replacement.
 
 Response model:
 

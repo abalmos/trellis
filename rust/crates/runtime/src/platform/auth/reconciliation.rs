@@ -3,8 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 use super::{
-    AuthorityTarget, AuthorizationMaterializationRepository, AuthorizationStateError,
-    AuthorizationStateService,
+    AuthorityTarget, AuthorizationStateError, AuthorizationStateService, ContextRepository,
 };
 use crate::shutdown::StopHandle;
 
@@ -85,7 +84,7 @@ pub(crate) fn authorization_reconciliation_channel<S>(
 
 impl<S> AuthorizationReconciliationWorker<S>
 where
-    S: AuthorizationMaterializationRepository,
+    S: ContextRepository,
 {
     pub(crate) async fn run(mut self, stop: StopHandle) -> Result<(), AuthorizationStateError> {
         loop {

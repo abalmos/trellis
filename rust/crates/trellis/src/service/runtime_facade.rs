@@ -11,13 +11,10 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_nats::header::HeaderMap;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
@@ -34,19 +31,13 @@ use super::{
     bootstrap_service_host, control_subject, AcceptedOperation, BootstrapBindingInfo,
     DownloadTransferGrantPlan, EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding,
     KvResourceBinding, OperationDescriptor, OperationLiveEvent, OperationProvider,
-    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext,
-    RequestValidation, RequestValidator, Router, RpcDescriptor, ServerError,
-    ServiceResourceBindings, StoreResourceBinding, StoreResourceClient, UploadTransferCompletion,
-    UploadTransferGrantPlan, UploadTransferSession,
-};
-use crate::auth::{
-    AuthEventPublisher, AuthEventsValidateRequest, AuthEventsValidateResponse,
-    AuthRequestsValidateRequest, AuthRequestsValidateResponse,
+    OperationSignalAccepted, OperationSnapshot, OperationTransferProgress, RequestContext, Router,
+    RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
+    UploadTransferCompletion, UploadTransferGrantPlan, UploadTransferSession,
 };
 use crate::client::{
-    verify_event_proof, AuthorizationContextStore, EventMessage, EventReplayPolicy,
-    EventSubscribeOptions, EventSubscriptionMode, RpcDescriptor as ClientRpcDescriptor,
-    ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
+    AuthorizationContextStore, EventMessage, EventReplayPolicy, EventSubscribeOptions,
+    EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
 #[cfg(feature = "integration-test-scoping")]
 use crate::integration_test_scoping::IntegrationTestScope;
@@ -55,37 +46,8 @@ use crate::jobs::{
     JobSnapshot, JobsError, TrellisJobEventPublisher, TrellisJobMetaSource, WorkerHostHandle,
     WorkerHostOptions,
 };
+use crate::service::local_validator::LocalAuthVerifier;
 
-struct AuthRequestsValidateRpc;
-
-impl ClientRpcDescriptor for AuthRequestsValidateRpc {
-    type Input = AuthRequestsValidateRequest;
-    type Output = AuthRequestsValidateResponse;
-
-    const KEY: &'static str = "Auth.Requests.Validate";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Requests.Validate";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &[];
-    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-}
-
-struct AuthEventsValidateRpc;
-
-impl ClientRpcDescriptor for AuthEventsValidateRpc {
-    type Input = AuthEventsValidateRequest;
-    type Output = AuthEventsValidateResponse;
-
-    const KEY: &'static str = "Auth.Events.Validate";
-    const SUBJECT: &'static str = "rpc.v1.Auth.Events.Validate";
-    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
-    const ERRORS: &'static [&'static str] = &[];
-    const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-    const OUTPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-}
-
-const AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS: usize = 3;
-const AUTH_VALIDATE_SESSION_RETRY_MS: u64 = 25;
 const DURABLE_EVENT_CONSUMER_RETRY_MS: u64 = 100;
 static SERVICE_EVENT_HANDLER_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -125,41 +87,6 @@ struct ServiceEventListenerRegistryCleanup {
     event_listeners: SharedDurableEventListeners,
 }
 
-#[derive(Debug, Clone)]
-struct EventProofValidationError {
-    message: String,
-    transient: bool,
-}
-
-impl EventProofValidationError {
-    fn permanent(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            transient: false,
-        }
-    }
-
-    fn transient(error: TrellisClientError) -> Self {
-        Self {
-            message: error.to_string(),
-            transient: true,
-        }
-    }
-
-    fn is_transient(&self) -> bool {
-        self.transient
-    }
-
-    fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EventProofValidation {
-    publisher: Option<ServiceEventPublisherContext>,
-}
-
 impl ServiceEventListenerRegistryCleanup {
     fn new(event_listeners: SharedDurableEventListeners) -> Self {
         Self { event_listeners }
@@ -170,231 +97,6 @@ impl Drop for ServiceEventListenerRegistryCleanup {
     fn drop(&mut self) {
         spawn_service_event_listeners_cleanup(Arc::clone(&self.event_listeners));
     }
-}
-
-#[derive(Clone)]
-struct LocalAuthRequestValidatorAdapter<C> {
-    client: C,
-}
-
-impl<C> LocalAuthRequestValidatorAdapter<C> {
-    fn new(client: C) -> Self {
-        Self { client }
-    }
-}
-
-impl RequestValidator for LocalAuthRequestValidatorAdapter<Arc<TrellisClient>> {
-    fn validate<'a>(
-        &'a self,
-        subject: &'a str,
-        payload: &'a Bytes,
-        context: &'a RequestContext,
-    ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
-        Box::pin(async move {
-            let request = make_validate_request(subject, payload, context)?;
-            let response = validate_request_with_session_retry(&self.client, &request)
-                .await
-                .map_err(|error| map_validate_request_error(subject, error))?;
-            if response.allowed {
-                Ok(RequestValidation {
-                    allowed: true,
-                    caller: Some(serde_json::to_value(response.caller)?),
-                    inbox_prefix: Some(response.inbox_prefix),
-                })
-            } else {
-                Ok(RequestValidation::denied())
-            }
-        })
-    }
-}
-
-async fn validate_request_with_session_retry(
-    client: &Arc<TrellisClient>,
-    request: &AuthRequestsValidateRequest,
-) -> Result<AuthRequestsValidateResponse, TrellisClientError> {
-    for attempt in 0..AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS {
-        match client.call::<AuthRequestsValidateRpc>(request).await {
-            Ok(response) => return Ok(response),
-            Err(error)
-                if is_transient_session_not_found(&error)
-                    && attempt + 1 < AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS =>
-            {
-                tokio::time::sleep(Duration::from_millis(
-                    AUTH_VALIDATE_SESSION_RETRY_MS * (attempt as u64 + 1),
-                ))
-                .await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    unreachable!("retry loop always returns on the final attempt")
-}
-
-fn is_transient_session_not_found(error: &TrellisClientError) -> bool {
-    let TrellisClientError::RpcError(payload) = error else {
-        return false;
-    };
-
-    payload.error_type() == Some("AuthError")
-        && payload
-            .value()
-            .and_then(|value| value.get("reason"))
-            .and_then(serde_json::Value::as_str)
-            == Some("session_not_found")
-}
-
-async fn validate_event_with_session_retry(
-    client: &Arc<TrellisClient>,
-    request: &AuthEventsValidateRequest,
-) -> Result<AuthEventsValidateResponse, TrellisClientError> {
-    for attempt in 0..AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS {
-        match client.call::<AuthEventsValidateRpc>(request).await {
-            Ok(response) => return Ok(response),
-            Err(error)
-                if is_transient_session_not_found(&error)
-                    && attempt + 1 < AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS =>
-            {
-                tokio::time::sleep(Duration::from_millis(
-                    AUTH_VALIDATE_SESSION_RETRY_MS * (attempt as u64 + 1),
-                ))
-                .await;
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    unreachable!("retry loop always returns on the final attempt")
-}
-
-async fn validate_event_message(
-    client: &Arc<TrellisClient>,
-    subject: &str,
-    payload: &[u8],
-    headers: Option<&HeaderMap>,
-) -> Result<EventProofValidation, EventProofValidationError> {
-    let Some(headers) = headers else {
-        return Err(EventProofValidationError::permanent(
-            "missing event proof headers",
-        ));
-    };
-    let session_key = required_event_header(headers, "session-key")?;
-    let proof = required_event_header(headers, "proof")?;
-    let event_id = required_event_header(headers, "Nats-Msg-Id")?;
-    let event_time = required_event_header(headers, "Trellis-Event-Time")?;
-
-    match verify_event_proof(
-        &session_key,
-        subject,
-        payload,
-        &event_id,
-        &event_time,
-        &proof,
-    ) {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err(EventProofValidationError::permanent(
-                "invalid event proof signature",
-            ))
-        }
-        Err(error) => {
-            return Err(EventProofValidationError::permanent(format!(
-                "invalid event proof: {error}"
-            )))
-        }
-    }
-
-    let request = AuthEventsValidateRequest {
-        event_id,
-        event_time,
-        payload_hash: payload_hash_base64url(payload),
-        proof,
-        session_key,
-        subject: subject.to_string(),
-    };
-    let response = validate_event_with_session_retry(client, &request)
-        .await
-        .map_err(|error| {
-            if is_transient_event_validate_error(&error) {
-                EventProofValidationError::transient(error)
-            } else {
-                EventProofValidationError::permanent(format!(
-                    "Auth.Events.Validate failed for {subject}: {error}"
-                ))
-            }
-        })?;
-    if !response.allowed {
-        return Err(EventProofValidationError::permanent(format!(
-            "Auth.Events.Validate rejected event with status {}",
-            response.status.as_str()
-        )));
-    }
-
-    Ok(EventProofValidation {
-        publisher: response.publisher.map(Into::into),
-    })
-}
-
-fn required_event_header(
-    headers: &HeaderMap,
-    name: &str,
-) -> Result<String, EventProofValidationError> {
-    headers
-        .get(name)
-        .map(|value| value.as_str().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| EventProofValidationError::permanent(format!("missing event {name} header")))
-}
-
-fn is_transient_event_validate_error(error: &TrellisClientError) -> bool {
-    is_transient_session_not_found(error)
-        || matches!(
-            error,
-            TrellisClientError::Timeout | TrellisClientError::NatsRequest(_)
-        )
-}
-
-fn make_validate_request(
-    subject: &str,
-    payload: &[u8],
-    context: &RequestContext,
-) -> Result<AuthRequestsValidateRequest, ServerError> {
-    let session_key =
-        context
-            .session_key
-            .clone()
-            .ok_or_else(|| ServerError::MissingSessionKey {
-                subject: subject.to_string(),
-            })?;
-
-    let proof = context
-        .proof
-        .clone()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| ServerError::MissingProof {
-            subject: subject.to_string(),
-        })?;
-
-    Ok(AuthRequestsValidateRequest {
-        capabilities: context.required_capabilities.clone().unwrap_or_default(),
-        iat: context.iat.unwrap_or_default(),
-        payload_hash: payload_hash_base64url(payload),
-        proof,
-        request_id: context.request_id.clone().unwrap_or_default(),
-        session_key,
-        subject: subject.to_string(),
-    })
-}
-
-fn payload_hash_base64url(payload: &[u8]) -> String {
-    let digest = Sha256::digest(payload);
-    URL_SAFE_NO_PAD.encode(digest)
-}
-
-fn map_validate_request_error(subject: &str, error: TrellisClientError) -> ServerError {
-    ServerError::Nats(format!(
-        "Auth.Requests.Validate failed for {subject}: {error}"
-    ))
 }
 
 /// Stream returned by high-level operation watch handlers.
@@ -695,11 +397,15 @@ pub struct ServiceEventListenerContext {
     pub traceparent: Option<String>,
     /// Raw event transport headers delivered with the message.
     pub headers: HeaderMap,
-    /// Verified publisher metadata returned by `Auth.Events.Validate`, when available.
+    /// Verified publisher metadata from local event verification, when available.
     pub publisher: Option<ServiceEventPublisherContext>,
 }
 
-/// Verified event publisher metadata returned by `Auth.Events.Validate`.
+/// Verified event publisher metadata produced by local event verification.
+///
+/// The publisher projection is derived from the verified authorization
+/// context bound into the event proof: principal kind, deployment/instance
+/// identity, participant contract identity, and the active session state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceEventPublisherContext {
     /// Publisher participant kind.
@@ -714,19 +420,6 @@ pub struct ServiceEventPublisherContext {
     pub contract_digest: Option<String>,
     /// Retained session lifecycle status used for validation.
     pub session_status: String,
-}
-
-impl From<AuthEventPublisher> for ServiceEventPublisherContext {
-    fn from(publisher: AuthEventPublisher) -> Self {
-        Self {
-            kind: publisher.kind.as_str().to_string(),
-            deployment_id: publisher.deployment_id,
-            instance_id: publisher.instance_id,
-            contract_id: publisher.contract_id,
-            contract_digest: publisher.contract_digest,
-            session_status: publisher.session_status.as_str().to_string(),
-        }
-    }
 }
 
 /// Event listener delivery mode.
@@ -813,6 +506,7 @@ pub struct ServiceHandle {
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
+    auth: LocalAuthVerifier,
 }
 
 impl std::fmt::Debug for ServiceHandle {
@@ -1020,6 +714,37 @@ impl ServiceHandle {
     {
         listen_event_with_bindings::<D, _, _>(
             self.client(),
+            self.auth.clone(),
+            self.auth.api_id(),
+            &self.resources.event_consumers,
+            Arc::clone(&self.event_listeners),
+            handler,
+            options,
+        )
+        .await
+    }
+
+    /// Start a descriptor-backed event listener with an explicit owning API id.
+    ///
+    /// Use this form for events imported from another participant contract; the
+    /// API id is part of the precompiled event descriptor and is required for
+    /// exact publisher-permission verification.
+    pub async fn listen_event_with_api_id<D, F, Fut>(
+        &self,
+        event_api_id: &str,
+        handler: F,
+        options: ServiceEventListenOptions,
+    ) -> Result<ServiceEventListenerHandle, ServiceRuntimeError>
+    where
+        D: crate::client::EventDescriptor + 'static,
+        D::Event: Send + 'static,
+        F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
+    {
+        listen_event_with_bindings::<D, _, _>(
+            self.client(),
+            self.auth.clone(),
+            event_api_id,
             &self.resources.event_consumers,
             Arc::clone(&self.event_listeners),
             handler,
@@ -1064,7 +789,7 @@ impl ServiceHandle {
             self.client().nats().clone(),
             session,
             store,
-            super::DefaultRequestValidator::new(Arc::clone(self.client())),
+            self.auth.clone(),
             on_progress,
         )
         .await
@@ -1083,7 +808,7 @@ impl ServiceHandle {
             self.client().nats().clone(),
             session,
             store,
-            super::DefaultRequestValidator::new(Arc::clone(self.client())),
+            self.auth.clone(),
         )
         .await
     }
@@ -1101,7 +826,7 @@ impl ServiceHandle {
             self.client().nats().clone(),
             plan,
             store,
-            super::DefaultRequestValidator::new(Arc::clone(self.client())),
+            self.auth.clone(),
         )
         .await
     }
@@ -1208,6 +933,7 @@ pub struct ConnectedServiceRuntime<C> {
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
     event_listeners: SharedDurableEventListeners,
+    auth: LocalAuthVerifier,
     _event_listener_cleanup: ServiceEventListenerRegistryCleanup,
     router: Router,
     service_name: String,
@@ -1227,16 +953,44 @@ impl<C> std::fmt::Debug for ConnectedServiceRuntime<C> {
 }
 
 impl<C> ConnectedServiceRuntime<C> {
+    /// Return the local provider cache for live integration assertions.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn integration_test_authorization_provider(
+        &self,
+    ) -> crate::client::AuthorizationProviderCache {
+        self.client
+            .as_ref()
+            .expect("connected service client is present")
+            .integration_test_authorization_provider()
+            .expect("connected service authorization provider is present")
+    }
+
+    /// Return the connected NATS client for live reconnect assertions.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn integration_test_nats(&self) -> async_nats::Client {
+        self.client
+            .as_ref()
+            .expect("connected service client is present")
+            .integration_test_nats()
+    }
+
     /// Build a connected runtime from an injected client and bootstrap binding.
     pub(crate) fn from_parts(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
         binding: CoreBootstrapBinding,
+        api_id: impl Into<String>,
     ) -> Self {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
+        let api_id = api_id.into();
+        let auth =
+            LocalAuthVerifier::new(client.authorization_context_cache().ok(), api_id.clone());
         let caller = crate::generated::Caller::new(Arc::clone(&client));
-        let router = Router::new();
+        let mut router = Router::new();
+        router.set_api_id(api_id);
         #[cfg(feature = "integration-test-scoping")]
         let mut router = router;
         #[cfg(feature = "integration-test-scoping")]
@@ -1247,6 +1001,7 @@ impl<C> ConnectedServiceRuntime<C> {
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
+            auth,
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router,
             service_name: service_name.into(),
@@ -1265,9 +1020,18 @@ impl<C> ConnectedServiceRuntime<C> {
     pub(crate) fn from_connected_client(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
-    ) -> Result<Self, ServiceRuntimeError> {
+    ) -> Result<Self, ServiceRuntimeError>
+    where
+        C: GeneratedServiceContract,
+    {
         let binding = parse_bootstrap_binding(client.as_ref())?;
-        Ok(Self::from_parts(service_name, client, binding))
+        let service_name = service_name.into();
+        Ok(Self::from_parts(
+            service_name.clone(),
+            client,
+            binding,
+            service_name,
+        ))
     }
 
     /// Return the internal Trellis client owned by this runtime.
@@ -1443,6 +1207,8 @@ impl<C> ConnectedServiceRuntime<C> {
     {
         listen_event_with_bindings::<D, _, _>(
             self.client(),
+            self.auth.clone(),
+            self.auth.api_id(),
             &self.resources.event_consumers,
             Arc::clone(&self.event_listeners),
             handler,
@@ -1483,6 +1249,35 @@ impl<C> ConnectedServiceRuntime<C> {
             .iter()
             .map(String::as_str)
             .collect()
+    }
+
+    /// Start a descriptor-backed event listener with an explicit owning API id.
+    ///
+    /// Use this form for events imported from another participant contract; the
+    /// API id is part of the precompiled event descriptor and is required for
+    /// exact publisher-permission verification.
+    pub async fn listen_event_with_api_id<D, F, Fut>(
+        &self,
+        event_api_id: &str,
+        handler: F,
+        options: ServiceEventListenOptions,
+    ) -> Result<ServiceEventListenerHandle, ServiceRuntimeError>
+    where
+        D: crate::client::EventDescriptor + 'static,
+        D::Event: Send + 'static,
+        F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
+    {
+        listen_event_with_bindings::<D, _, _>(
+            self.client(),
+            self.auth.clone(),
+            event_api_id,
+            &self.resources.event_consumers,
+            Arc::clone(&self.event_listeners),
+            handler,
+            options,
+        )
+        .await
     }
 
     /// Register one descriptor-backed RPC handler and record its subject.
@@ -1875,12 +1670,13 @@ impl<C> ConnectedServiceRuntime<C> {
     {
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
         let job_hosts = self.job_hosts;
+        let auth = self.auth;
         if let Some(client) = self.client {
             let host = bootstrap_service_host(
                 &self.service_name,
                 self.binding.bootstrap_binding(),
                 self.router,
-                LocalAuthRequestValidatorAdapter::new(Arc::clone(&client)),
+                auth,
             );
             if job_hosts.is_empty() {
                 return runner
@@ -1929,21 +1725,31 @@ impl<C> ConnectedServiceRuntime<C> {
             binding: self.binding.clone(),
             resources: self.resources.clone(),
             event_listeners: Arc::clone(&self.event_listeners),
+            auth: self.auth.clone(),
         }
     }
 
     #[cfg(test)]
-    fn from_test_binding(service_name: impl Into<String>, binding: CoreBootstrapBinding) -> Self {
+    fn from_test_binding(service_name: impl Into<String>, binding: CoreBootstrapBinding) -> Self
+    where
+        C: GeneratedServiceContract,
+    {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
+        let auth = LocalAuthVerifier::new(None, C::CONTRACT_ID);
         Self {
             client: None,
             caller: None,
             binding,
             resources,
             event_listeners: Arc::clone(&event_listeners),
+            auth,
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
-            router: Router::new(),
+            router: {
+                let mut router = Router::new();
+                router.set_api_id(C::CONTRACT_ID);
+                router
+            },
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
             job_hosts: Vec::new(),
@@ -1978,7 +1784,12 @@ where
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
-        Ok(Self::from_parts(options.name, Arc::new(client), binding))
+        Ok(Self::from_parts(
+            options.name,
+            Arc::new(client),
+            binding,
+            options.participant_id,
+        ))
     }
 }
 
@@ -2195,6 +2006,8 @@ fn service_event_context_from_headers(
 
 async fn listen_event_with_bindings<D, F, Fut>(
     client: &Arc<TrellisClient>,
+    auth: LocalAuthVerifier,
+    event_api_id: &str,
     bindings: &BTreeMap<String, super::EventConsumerResourceBinding>,
     event_listeners: SharedDurableEventListeners,
     handler: F,
@@ -2206,6 +2019,24 @@ where
     F: Fn(D::Event, ServiceEventListenerContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
 {
+    let event_api_id = event_api_id.to_owned();
+    let event_name = D::KEY.to_owned();
+    let publish_capabilities = D::PUBLISH_CAPABILITIES
+        .iter()
+        .map(|capability| (*capability).to_owned())
+        .collect::<Vec<_>>();
+    #[cfg(feature = "integration-test-scoping")]
+    let (event_api_id, event_name, publish_capabilities) = match client.integration_test_scope() {
+        Some(scope) => (
+            scope.contract_id(&event_api_id),
+            scope.logical_name(&event_name),
+            publish_capabilities
+                .into_iter()
+                .map(|capability| scope.capability(&capability))
+                .collect(),
+        ),
+        None => (event_api_id, event_name, publish_capabilities),
+    };
     if let Some(durable_name) = options.durable_name.as_deref() {
         return Err(ServiceRuntimeError::CallerDurableName {
             durable_name: durable_name.to_string(),
@@ -2218,20 +2049,25 @@ where
             .subscribe(client.descriptor_subject(D::SUBJECT))
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-        client.flush().await?;
-        let event_client = Arc::clone(client);
+        let event_auth = auth.clone();
+        let event_api_id = event_api_id.clone();
+        let event_name = event_name.clone();
+        let publish_capabilities = publish_capabilities.clone();
         return Ok(ServiceEventListenerHandle::new(
             tokio::spawn(async move {
                 while let Some(message) = events.next().await {
-                    let validation = match validate_event_message(
-                        &event_client,
-                        message.subject.as_ref(),
-                        &message.payload,
-                        message.headers.as_ref(),
-                    )
-                    .await
+                    let publisher = match event_auth
+                        .verify_event(
+                            message.subject.as_ref(),
+                            &message.payload,
+                            message.headers.as_ref(),
+                            &event_api_id,
+                            &event_name,
+                            &publish_capabilities,
+                        )
+                        .await
                     {
-                        Ok(validation) => validation,
+                        Ok(publisher) => publisher,
                         Err(error) => {
                             tracing::warn!(
                                 subject = %message.subject,
@@ -2245,7 +2081,7 @@ where
                         ServiceEventListenerMode::Ephemeral,
                         None,
                         message.headers.as_ref(),
-                        validation.publisher,
+                        Some(publisher),
                     );
                     let event = serde_json::from_slice::<D::Event>(&message.payload)
                         .map_err(TrellisClientError::from)?;
@@ -2326,6 +2162,10 @@ where
         .map(|_| {
             tokio::spawn(run_durable_event_pull_loop::<D>(
                 Arc::clone(client),
+                auth.clone(),
+                event_api_id.clone(),
+                event_name.clone(),
+                publish_capabilities.clone(),
                 Arc::clone(&event_listeners),
                 key.clone(),
                 subscribe_options.clone(),
@@ -2424,8 +2264,13 @@ async fn remove_service_event_listeners(event_listeners: SharedDurableEventListe
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Keeps one event-listener task spawn explicit and local.
 async fn run_durable_event_pull_loop<D>(
     client: Arc<TrellisClient>,
+    auth: LocalAuthVerifier,
+    event_api_id: String,
+    event_name: String,
+    publish_capabilities: Vec<String>,
     event_listeners: SharedDurableEventListeners,
     key: DurableEventListenerKey,
     subscribe_options: EventSubscribeOptions,
@@ -2491,25 +2336,31 @@ async fn run_durable_event_pull_loop<D>(
                 .get(&key)
                 .and_then(|listener| listener.handlers.get(message.subject()).cloned())
                 .unwrap_or_default();
-            let validation = match validate_event_message(
-                &client,
-                message.subject(),
-                message.payload(),
-                message.headers(),
-            )
-            .await
+            let publisher = match auth
+                .verify_event(
+                    message.subject(),
+                    message.payload(),
+                    message.headers(),
+                    &event_api_id,
+                    &event_name,
+                    &publish_capabilities,
+                )
+                .await
             {
-                Ok(validation) => validation,
+                Ok(publisher) => publisher,
                 Err(error) => {
                     tracing::warn!(
                         subject = %message.subject(),
                         error = %error.message(),
                         "Event auth validation failed"
                     );
-                    if error.is_transient() {
-                        let _ = message.nak().await;
-                    } else {
-                        let _ = message.term().await;
+                    match error {
+                        super::EventVerificationFailure::Retryable(_) => {
+                            let _ = message.nak_after(Duration::from_secs(5)).await;
+                        }
+                        super::EventVerificationFailure::Rejected(_) => {
+                            let _ = message.term().await;
+                        }
                     }
                     continue;
                 }
@@ -2520,7 +2371,7 @@ async fn run_durable_event_pull_loop<D>(
                     context.mode,
                     context.group.clone(),
                     &message,
-                    validation.publisher.clone(),
+                    Some(publisher.clone()),
                 );
                 if handler(Bytes::copy_from_slice(message.payload()), context)
                     .await

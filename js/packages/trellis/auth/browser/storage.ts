@@ -206,7 +206,7 @@ export class BrowserAuthorizationContextStore
           | undefined;
         if (
           (expectedContextDigest !== undefined &&
-            (current?.context?.contextDigest ?? null) !==
+            (current?.contextDigest ?? null) !==
               expectedContextDigest) ||
           (expectedBootstrapJwt !== undefined &&
             (current?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
@@ -216,6 +216,7 @@ export class BrowserAuthorizationContextStore
           store.put({
             ...current,
             context: null,
+            contextDigest: null,
             contextExpiresAt: null,
             routing: null,
           });

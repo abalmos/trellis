@@ -1,3 +1,4 @@
+use async_nats::jetstream;
 use bytes::Bytes;
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
@@ -5,9 +6,9 @@ use time::OffsetDateTime;
 use trellis_rs::client::SessionAuth;
 
 use super::auth::{
-    AuthConnectionPresence, AuthEphemeralRepository, AuthorizationContextService,
-    AuthorizationStateError, EvidenceRepository, NatsAuthEphemeralRepository, PostCommitActionKind,
-    PostCommitActionRecord, PostCommitActionRepository, SessionRepository,
+    AuthConnectionPresence, AuthEphemeralRepository, AuthorityEvidenceRepository,
+    AuthorizationContextService, AuthorizationStateError, NatsAuthEphemeralRepository,
+    OutboxRepository, PostCommitActionKind, PostCommitActionRecord, SessionRepository,
     SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
@@ -23,6 +24,7 @@ pub(crate) struct AuthPostCommitRuntime {
     auth_client: async_nats::Client,
     system_client: async_nats::Client,
     event_session: SessionAuth,
+    event_context_digest: String,
     contexts: AuthorizationContextService,
 }
 
@@ -33,6 +35,7 @@ impl AuthPostCommitRuntime {
         auth_client: async_nats::Client,
         system_client: async_nats::Client,
         event_session: SessionAuth,
+        event_context_digest: String,
         contexts: AuthorizationContextService,
     ) -> Self {
         Self {
@@ -41,6 +44,7 @@ impl AuthPostCommitRuntime {
             auth_client,
             system_client,
             event_session,
+            event_context_digest,
             contexts,
         }
     }
@@ -187,20 +191,27 @@ impl AuthPostCommitRuntime {
         headers.insert("Nats-Msg-Id", event_id);
         headers.insert("Trellis-Event-Time", event_time.as_str());
         headers.insert("session-key", self.event_session.session_key.as_str());
+        headers.insert("authorization-context", self.event_context_digest.as_str());
         headers.insert(
             "proof",
             self.event_session
-                .create_event_proof(&event_subject, &payload, event_id, &event_time)
+                .create_event_proof_v2(
+                    &self.event_context_digest,
+                    &event_subject,
+                    &payload,
+                    event_id,
+                    &event_time,
+                )
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
                 .as_str(),
         );
-        self.auth_client
+        let ack = jetstream::new(self.auth_client.clone())
             .publish_with_headers(event_subject, headers, payload)
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        self.auth_client
-            .flush()
-            .await
-            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
+        ack.await
+            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+        Ok(())
     }
 
     async fn kick(&self, payload: &Value) -> Result<(), AuthorizationStateError> {

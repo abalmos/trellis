@@ -172,7 +172,8 @@ async fn prepared_events_prepared_publish_preserves_custom_headers_and_annotates
     ));
     let handler_observed = Arc::clone(&observed);
     let listener = listener_service
-        .listen_event::<EntityChanged, _, _>(
+        .listen_event_with_api_id::<EntityChanged, _, _>(
+            "trellis.integration.prepared-events-rust@v1",
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {

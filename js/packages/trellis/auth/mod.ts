@@ -12,6 +12,9 @@ export {
   type AuthorizationContextPersistence,
   AuthorizationContextRefreshError,
   type AuthorizationContextStore,
+  AuthorizationProviderCache,
+  type AuthorizationProviderEventV2,
+  type AuthorizationProviderRequestV2,
   type AuthorizationRoutingMaterial,
   type AuthorizationSessionBinding,
   type AuthorizationTrustBundle,
@@ -19,6 +22,7 @@ export {
   type AuthorizationTrustState,
   MemoryAuthorizationContextStore,
   refreshAuthorizationContext,
+  refreshAuthorizationContextWithMetadata,
   startAuthorizationContextRefresh,
   type VerifiedAuthorizationContext,
 } from "./authorization_context.ts";
@@ -44,6 +48,7 @@ export {
 export {
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
+  waitForDeviceActivation,
 } from "./device_activation.ts";
 export {
   fetchPortalFlowState,
@@ -60,7 +65,7 @@ export type {
   AuthDeviceUserAuthoritiesResolveOutput,
   AuthDeviceUserAuthoritiesResolveProgress,
 } from "../sdk/auth.ts";
-// Transitional proof-v1 helpers are removed with local proof-v2 validation in Milestone 10.
+// Context-bound v2 proof helpers for local signing and signature verification.
 export {
   buildEventProofInput,
   buildProofInput,
@@ -78,11 +83,9 @@ export {
   type SessionProofInputV1,
   type SessionProofPolicyV1,
   type SessionProofPurposeV1,
-  type SessionProofReplayKeyV1,
   sessionProofRequestDigestV1,
   type SessionProofV1,
   signSessionProofV1,
-  signSessionProofV1Sync,
   verifySessionProofV1,
 } from "./session_proof.ts";
 export {

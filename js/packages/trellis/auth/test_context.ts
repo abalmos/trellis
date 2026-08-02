@@ -18,27 +18,6 @@ const ISSUER_SEED = base64urlDecode(
 const SESSION_SEED = base64urlDecode(
   "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
 );
-const registryObjects = new Map<string, string>();
-const registryFetchWrappers = new WeakSet<typeof globalThis.fetch>();
-
-export function testAuthorizationRegistryResponse(
-  input: URL | Request | string,
-): Response | undefined {
-  const url = new URL(input instanceof Request ? input.url : input.toString());
-  const value = registryObjects.get(url.pathname);
-  return value === undefined ? undefined : Response.json(JSON.parse(value));
-}
-
-function installTestAuthorizationRegistryFetch(): void {
-  const current = globalThis.fetch;
-  if (registryFetchWrappers.has(current)) return;
-  const wrapped: typeof globalThis.fetch = (input, init) => {
-    const response = testAuthorizationRegistryResponse(input);
-    return response ? Promise.resolve(response) : current(input, init);
-  };
-  registryFetchWrappers.add(wrapped);
-  globalThis.fetch = wrapped;
-}
 
 export function testAuthorizationContext(
   now = 1_700_000_002,
@@ -53,21 +32,6 @@ export function testAuthorizationContext(
     keyId: rootKeyId,
     publicKey: base64urlEncode(rootPublicKey),
   };
-  const certificate = sign({
-    authority: "trellis-test",
-    critical: [],
-    expiresAt: now + 3_600,
-    extensions: {},
-    format: "trellis.authorization-issuer-certificate.v1",
-    issuedAt: now,
-    keyId: issuerKeyId,
-    notBefore: now - 30,
-    publicKey: base64urlEncode(issuerPublicKey),
-    rootKeyId,
-    serial: "cert_test",
-    usages: ["authorizationContext"],
-  }, ROOT_SEED);
-  const certificateDigest = digest(utf8(canonicalizeJsonValue(certificate)));
   const manifest = sign({
     authority: "trellis-test",
     critical: [],
@@ -77,9 +41,8 @@ export function testAuthorizationContext(
     generation: 1,
     issuedAt: now,
     issuers: [{
-      certificateDigest,
       keyId: issuerKeyId,
-      status: "active",
+      publicKey: base64urlEncode(issuerPublicKey),
     }],
     notBefore: now - 30,
     rootKeyId,
@@ -88,7 +51,6 @@ export function testAuthorizationContext(
     authority: "trellis-test",
     authorityRef: { id: "usr_test", kind: "identity", version: 1 },
     capabilities: [],
-    contextId: "ctx_test",
     critical: [],
     deploymentId: null,
     expiresAt: now + 270,
@@ -99,6 +61,7 @@ export function testAuthorizationContext(
     instanceId: null,
     issuedAt: now,
     issuerKeyId,
+    issuerManifestGeneration: 1,
     notBefore: now - 30,
     participant: {
       artifactDigest: digest(utf8("artifact")),
@@ -111,25 +74,16 @@ export function testAuthorizationContext(
     sessionKey: base64urlEncode(ed25519.getPublicKey(SESSION_SEED)),
   }, ISSUER_SEED);
   const contextJson = canonicalizeJsonValue(context);
-  const contextDigest = digest(utf8(contextJson));
   const manifestJson = canonicalizeJsonValue(manifest);
-  const certificateJson = canonicalizeJsonValue(certificate);
-  const manifestLocator = "/.well-known/trellis/authorization/trust/manifest.1";
-  const certificateLocator =
-    `/.well-known/trellis/authorization/trust/certificate.${issuerKeyId}.${certificateDigest}`;
-  registryObjects.set(manifestLocator, manifestJson);
-  registryObjects.set(certificateLocator, certificateJson);
-  installTestAuthorizationRegistryFetch();
   return {
-    context: base64urlEncode(utf8(contextJson)),
-    contextDigest,
-    refreshAt: now + 270 - 60 - contextJitter(contextDigest, 15),
+    context: JSON.parse(contextJson),
     trust: {
       root,
-      issuerManifestGeneration: 1,
-      issuerManifestDigest: digest(utf8(manifestJson)),
-      issuerManifestLocator: manifestLocator,
-      issuerCertificateLocator: certificateLocator,
+      manifest: JSON.parse(manifestJson),
+      authorizationRegistry: {
+        trustBucket: "trust",
+        contextBucket: "contexts",
+      },
       policy: {
         allowedClockSkewSeconds: 30,
         maximumContextLifetimeSeconds: 300,
@@ -141,13 +95,6 @@ export function testAuthorizationContext(
       },
     },
   };
-}
-
-function contextJitter(contextDigest: string, maximum: number): number {
-  const bytes = base64urlDecode(contextDigest);
-  let value = 0n;
-  for (const byte of bytes.slice(0, 8)) value = (value << 8n) | BigInt(byte);
-  return Number(value % BigInt(maximum + 1));
 }
 
 function sign<T extends Record<string, unknown>>(

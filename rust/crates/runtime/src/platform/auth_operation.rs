@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -14,9 +13,9 @@ use trellis_rs::service::{
 };
 
 use super::auth::{
-    AuthService, DecideActivationReviewInput, DeviceActivationReviewRecord,
-    DeviceActivationReviewState, DeviceDelegationMutation, DeviceDelegationRecord,
-    DeviceDelegationState, EvidenceRepository, IdempotencyResultRecord, PostCommitActionKind,
+    AuthService, AuthorityEvidenceRepository, DecideActivationReviewInput,
+    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationMutation,
+    DeviceDelegationRecord, DeviceDelegationState, IdempotencyResultRecord, PostCommitActionKind,
     PostCommitActionRecord, ProvisioningRepository, SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
@@ -26,15 +25,16 @@ const OPERATION: &str = "Auth.DeviceUserAuthorities.Resolve";
 
 pub(crate) struct AuthOperationRuntime {
     client: async_nats::Client,
-    auth: Arc<SessionAuth>,
     router: Router,
+    verifier: super::auth::verifier::RuntimeAuthVerifier,
 }
 
 impl AuthOperationRuntime {
     pub(crate) fn new(
         client: async_nats::Client,
-        auth: SessionAuth,
+        _auth: SessionAuth,
         service: AuthService<SqliteAuthorizationStore>,
+        verifier: super::auth::verifier::RuntimeAuthVerifier,
     ) -> Self {
         let mut router = Router::new();
         let start_service = service.clone();
@@ -83,8 +83,8 @@ impl AuthOperationRuntime {
         );
         Self {
             client,
-            auth: Arc::new(auth),
             router,
+            verifier,
         }
     }
 
@@ -92,13 +92,13 @@ impl AuthOperationRuntime {
         tokio::select! {
             result = trellis_rs::service::internal::run_builtin_authenticated_router(
                 self.client,
-                self.auth,
-                30_000,
+                "trellis.auth@v1",
                 &[
                     "operations.v1.Auth.DeviceUserAuthorities.Resolve",
                     "operations.v1.Auth.DeviceUserAuthorities.Resolve.>",
                 ],
                 self.router,
+                self.verifier,
             ) => result.map_err(|error| RuntimeError::Platform(error.to_string())),
             () = stop.stopped() => Ok(()),
         }
@@ -332,20 +332,21 @@ fn snapshot(
 
 #[allow(clippy::result_large_err)]
 fn caller_principal_id(context: &RequestContext) -> Result<&str, ServerError> {
-    let principal = context
+    let caller = context
         .caller
         .as_ref()
-        .and_then(|caller| caller.get("principal"))
         .ok_or_else(|| ServerError::Nats("authenticated user principal is missing".to_owned()))?;
-    if principal.get("kind").and_then(Value::as_str) != Some("user") {
+    if caller.principal.kind != trellis_protocol::AuthorizationPrincipalKindV1::User {
         return Err(ServerError::Nats(
             "device activation requires a user principal".to_owned(),
         ));
     }
-    principal
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ServerError::Nats("authenticated user principal is missing".to_owned()))
+    if caller.principal.id.is_empty() {
+        return Err(ServerError::Nats(
+            "authenticated user principal is missing".to_owned(),
+        ));
+    }
+    Ok(&caller.principal.id)
 }
 
 fn resolved_event(review: &DeviceActivationReviewRecord, now: i64) -> PostCommitActionRecord {

@@ -1,13 +1,15 @@
-import { assertEquals, assertNotEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 
 import { importEd25519PrivateKeyFromSeedBase64url } from "./keys.ts";
 import {
+  buildSessionProofTranscriptV1,
   parseSessionProofV1,
   type SessionProofInputV1,
   sessionProofRequestDigestV1,
   signSessionProofV1,
   verifySessionProofV1,
 } from "./session_proof.ts";
+import { base64urlEncode, sha256 } from "./utils.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -91,18 +93,6 @@ function vectorInput(
         redirectTarget: field(value, "redirectTarget"),
         requestDigest: vector.requestDigest ?? "",
       };
-    case "clientBootstrap":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionId: field(value, "sessionId"),
-        sessionKeyId: fixture.identityKeyId,
-        sessionPublicKey: fixture.identityPublicKey,
-        sessionNkey: field(value, "sessionNkey"),
-        expectedParticipantDigest: optional(value, "expectedParticipantDigest"),
-        expectedNeedsDigest: optional(value, "expectedNeedsDigest"),
-        requestDigest: vector.requestDigest ?? "",
-      };
     case "serviceBootstrap":
       return {
         ...common,
@@ -130,25 +120,6 @@ function vectorInput(
         challengeDigest: optional(value, "challengeDigest"),
         requestDigest: vector.requestDigest ?? "",
       };
-    case "natsConnect":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionId: field(value, "sessionId"),
-        sessionKeyId: field(value, "sessionKeyId"),
-        sessionPublicKey: fixture.identityPublicKey,
-        sessionNkey: field(value, "sessionNkey"),
-        participantDigest: field(value, "participantDigest"),
-        nonce: field(value, "nonce"),
-      };
-    case "sessionSelfControl":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionId: field(value, "sessionId"),
-        sessionKeyId: field(value, "sessionKeyId"),
-        requestDigest: vector.requestDigest ?? "",
-      };
     case "authorizationContextRefresh":
       return {
         ...common,
@@ -161,18 +132,6 @@ function vectorInput(
         knownRootKeyId: field(value, "knownRootKeyId"),
         minimumManifestGeneration: value.minimumManifestGeneration as number,
         requestDigest: vector.requestDigest ?? "",
-      };
-    case "natsConnectContext":
-      return {
-        ...common,
-        purpose: vector.purpose,
-        sessionId: field(value, "sessionId"),
-        sessionKeyId: field(value, "sessionKeyId"),
-        sessionPublicKey: fixture.identityPublicKey,
-        sessionNkey: field(value, "sessionNkey"),
-        participantDigest: field(value, "participantDigest"),
-        contextDigest: field(value, "contextDigest"),
-        nonce: field(value, "nonce"),
       };
   }
 }
@@ -207,22 +166,22 @@ Deno.test("shared session-proof vectors match TypeScript", async () => {
       await signSessionProofV1(input, privateKey, vector.signerPublicKey),
       proof,
     );
-    const replay = await verifySessionProofV1(
+    assertEquals(
+      base64urlEncode(await sha256(buildSessionProofTranscriptV1(input))),
+      vector.transcriptDigest,
+    );
+    await verifySessionProofV1(
       input,
       proof,
       vector.signerPublicKey,
       input.issuedAt,
     );
-    assertEquals(replay.transcriptDigest, vector.transcriptDigest);
     assertEquals(proof.signature, vector.signature);
   }
 });
 
 Deno.test("shared invalid session-proof vectors fail safely", async () => {
   const vectors = await fixture();
-  const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    vectors.identitySeed,
-  );
   const find = (name: string): VectorCase => {
     const vector = vectors.cases.find((candidate) => candidate.name === name);
     if (vector === undefined) throw new Error(`missing base vector ${name}`);
@@ -232,54 +191,7 @@ Deno.test("shared invalid session-proof vectors fail safely", async () => {
   for (const invalid of vectors.invalidCases) {
     const base = find(invalid.base);
     const source = proofSource(base);
-    const proof = parseSessionProofV1(source.proof);
 
-    if (invalid.mutation === "admitTwice") {
-      const input = vectorInput(vectors, base);
-      const first = await verifySessionProofV1(
-        input,
-        proof,
-        base.signerPublicKey,
-        input.issuedAt,
-      );
-      const second = await verifySessionProofV1(
-        input,
-        proof,
-        base.signerPublicKey,
-        input.issuedAt,
-      );
-      assertEquals(first, second);
-      continue;
-    }
-    if (invalid.mutation === "sameIdDifferentNonce") {
-      const firstInput = vectorInput(vectors, base);
-      const secondInput = {
-        ...firstInput,
-        nonce: "NATS-SERVER-NONCE-02",
-      } as SessionProofInputV1;
-      const secondProof = await signSessionProofV1(
-        secondInput,
-        privateKey,
-        base.signerPublicKey,
-      );
-      const first = await verifySessionProofV1(
-        firstInput,
-        proof,
-        base.signerPublicKey,
-        firstInput.issuedAt,
-      );
-      const second = await verifySessionProofV1(
-        secondInput,
-        secondProof,
-        base.signerPublicKey,
-        secondInput.issuedAt,
-      );
-      assertEquals(first.purpose, second.purpose);
-      assertEquals(first.signerKeyId, second.signerKeyId);
-      assertEquals(first.requestId, second.requestId);
-      assertNotEquals(first.transcriptDigest, second.transcriptDigest);
-      continue;
-    }
     if (invalid.mutation === "unknownProofField") {
       await assertRejects(async () => {
         parseSessionProofV1({
@@ -314,13 +226,7 @@ Deno.test("shared invalid session-proof vectors fail safely", async () => {
       }
 
       let input: SessionProofInputV1;
-      if (invalid.mutation === "sessionPublicKey") {
-        input = {
-          ...vectorInput(vectors, base),
-          sessionPublicKey: vectors.sessionPublicKey,
-          sessionNkey: vectors.sessionNkey,
-        } as SessionProofInputV1;
-      } else if (invalid.mutation === "devicePurpose") {
+      if (invalid.mutation === "devicePurpose") {
         input = {
           ...vectorInput(vectors, base),
           purpose: "deviceBootstrap",
@@ -348,29 +254,12 @@ Deno.test("shared invalid session-proof vectors fail safely", async () => {
 
 Deno.test("session-proof boundaries reject cross-language asymmetry", async () => {
   const vectors = await fixture();
-  const nats = vectors.cases.find((vector) => vector.name === "nats-connect");
   const service = vectors.cases.find((vector) =>
     vector.name === "service-bootstrap"
   );
-  if (nats === undefined || service === undefined) {
+  if (service === undefined) {
     throw new Error("missing proof vectors");
   }
-
-  const natsInput = vectorInput(vectors, nats);
-  await assertRejects(async () => {
-    await signSessionProofV1(
-      { ...natsInput, sessionNkey: vectors.sessionNkey } as SessionProofInputV1,
-      await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
-      vectors.identityPublicKey,
-    );
-  });
-  await assertRejects(async () => {
-    await signSessionProofV1(
-      natsInput,
-      await importEd25519PrivateKeyFromSeedBase64url(vectors.sessionSeed),
-      vectors.identityPublicKey,
-    );
-  });
 
   const weakSession = vectorInput(vectors, service);
   await assertRejects(async () => {
@@ -392,7 +281,7 @@ Deno.test("session-proof boundaries reject cross-language asymmetry", async () =
 
   await assertRejects(async () => {
     await signSessionProofV1(
-      { ...natsInput, requestId: "\u0085req" } as SessionProofInputV1,
+      { ...weakSession, requestId: "\u0085req" } as SessionProofInputV1,
       await importEd25519PrivateKeyFromSeedBase64url(vectors.identitySeed),
       vectors.identityPublicKey,
     );

@@ -109,7 +109,7 @@ specific case ids or group note that proves equivalent coverage.
   live replacement candidate.
 - `contracts`, `codegen-rust`, `codegen-ts`: manifests, builder DSL,
   canonicalization, and generator output.
-- `jobs`, `service-jobs`: job manager, keyed admission, reducers, projection,
+- `jobs`, `jobs-runtime`: job manager, keyed admission, reducers, projection,
   janitor, worker presence, and SDK alignment.
 - `runtime`: config, storage, and leases.
 - `trellis-test` and `integration-harness`: harness command/runtime parsing.
@@ -241,11 +241,7 @@ Rust completion is implemented for
 `control-plane.sessions-survive-control-plane-restart`,
 `control-plane.state-persists-across-control-plane-restart`, and
 `control-plane.resources-survive-control-plane-restart`,
-`control-plane.outbox-dispatches-after-control-plane-restart`,
-`control-plane.session-logout-deletes-session-and-denies-reuse`, and
-`control-plane.session-logout-kicks-runtime-access`,
-`control-plane.session-logout-validates-return-to`, and
-`control-plane.session-logout-uses-provider-logout-redirect`, and
+`control-plane.outbox-dispatches-after-control-plane-restart`, and
 `control-plane.jobs-admin-lists-and-cancels-job`,
 `event-consumers.durable-listen-without-declared-group-returns-err`,
 `event-consumers.ambiguous-group-without-opts-group-returns-err-and-specifying-group-works`,
@@ -327,21 +323,10 @@ retained rebinding/session-authority/storage-error units is no longer current.
   projection cleanup, clock-skew, invalid-signature, and known inactive app
   digest coverage.
 - HTTP session logout route assertions from
-  `js/services/trellis/auth/http/session_logout_routes.test.ts`:
-  `retired-live-control-plane`, `ts/deno and rust`, shrunk, replaced by
-  `control-plane.session-logout-deletes-session-and-denies-reuse`,
-  `control-plane.session-logout-kicks-runtime-access`,
-  `control-plane.session-logout-validates-return-to`, and
-  `control-plane.session-logout-uses-provider-logout-redirect`. Removed the fake
-  combined delete/kick/provider redirect assertion and the fake safe
-  same-origin/cross-origin `returnTo` assertions. The live replacement covers
-  signed logout session deletion, same-session-key bootstrap reuse denial, two
-  concurrently connected clients losing authenticated runtime access, live
-  provider logout URL construction from configured OIDC metadata, cross-origin
-  `returnTo` rejection, same-origin `returnTo` acceptance, and rejected-request
-  session preservation. Retained unknown additive field, bad signature,
-  stale/future `iat`, missing session, redirect-mode 303, and malformed request
-  units as deterministic parser/crypto/schema/route-shape coverage.
+  `js/services/trellis/auth/http/session_logout_routes.test.ts`: `retired`,
+  `ts/deno and rust`, removed with the HTTP logout boundary. The checked-in HTTP
+  route inventory verifies those routes remain absent; connected session
+  revocation is covered through `Auth.Sessions.Logout` instead.
 - Service deployment admin RPC assertions from
   `js/services/trellis/auth/admin/rpc.test.ts`: `retired-live-control-plane`,
   `ts/deno and rust`, shrunk, replaced by
@@ -528,19 +513,13 @@ passed;
 `deno test --no-check -A -c js/deno.json js/packages/trellis/tests/prepared_events_test.ts js/packages/trellis/tests/schema_validation_error_test.ts`
 passed.
 
-RPC auth-validation retry replacement:
+RPC authorization replacement:
 
-- Fake routed transient `session_not_found` retry assertion from
-  `js/packages/trellis/tests/rpc_integration_test.ts`:
-  `retired-live-shared-matrix`, `ts/deno and rust`, deleted, replaced by
-  `rpc.auth-validation-retries-transient-session-not-found`. The live TS and
-  Rust cases use real clients/services, live control-plane SQLite session
-  deletion and restoration, and raw NATS observation of
-  `rpc.v1.Auth.Requests.Validate` to prove two validation attempts and one
-  service handler call. Production auth validation now records replay state only
-  after session lookup succeeds, so a transient `session_not_found` does not
-  poison retry replay state. Retained no fake-routed RPC behavior in
-  `rpc_integration_test.ts`.
+- The fake routed central-validation retry assertion and its live RPC
+  replacement are retired with the centralized validator. Request proof, exact
+  permission, revocation, replay, cache-hit I/O, and coalesced unknown-context
+  resolution are covered by the pure local-verifier tests in
+  `rust/crates/runtime/src/platform/auth/verifier.rs`.
 
 Rust service-integration parity bundle:
 `control-plane.admin-bootstrap-creates-first-local-admin`,
@@ -687,13 +666,9 @@ Immediate packet mock-shrink notes:
   `rpc.client-receives-declared-error` row now asserts handler context metadata
   and raw subject stripping in both TypeScript and Rust.
 - `js/packages/trellis/tests/rpc_integration_test.ts` no longer retains the fake
-  routed RPC assertion for transient `session_not_found` retry during auth
-  validation. The live TS and Rust row
-  `rpc.auth-validation-retries-transient-session-not-found` now proves the exact
-  retry behavior with real clients/services, the shared `trellis-test`
-  control-plane session snapshot helper, and raw NATS observation of two
-  `Auth.Requests.Validate` attempts. The whole fake routed RPC test file is
-  deleted.
+  routed RPC assertion for transient central-validation failures. The whole fake
+  routed RPC test file and the obsolete live central-validation row are deleted;
+  local verifier behavior is covered at its pure crypto/cache boundary.
 - `js/packages/trellis/server/transfer_test.ts` no longer retains the fake
   subscription-readiness assertions for `ServiceTransfer.initiateUpload` and
   `ServiceTransfer.initiateDownload`. Replaced by TS and Rust live cases
@@ -839,10 +814,10 @@ Packet 12 final verification and retained-unit justification:
   inactive-app digest checks. These are deterministic bootstrap/signature branch
   checks; runtime-observable auth-required and non-client/unknown digest
   failures have TS/Rust live rows.
-- `js/services/trellis/auth/http/session_logout_routes.test.ts` keeps malformed
-  signed request, bad signature, stale/future `iat`, missing-session,
-  redirect-mode 303, and route-shape checks. Session deletion, runtime kick,
-  returnTo, and provider logout behavior have TS/Rust live rows.
+- The removed `js/services/trellis/auth/http/session_logout_routes.test.ts` has
+  no retained route-shape or behavior coverage. The checked-in HTTP inventory
+  enforces route absence, and connected logout behavior is covered through
+  `Auth.Sessions.Logout`.
 - `js/services/trellis/auth/admin/rpc.test.ts` keeps pure normalizers, schemas,
   private authority/staged-validation/rollback/cascade/no-kick ordering, and
   device review operation-completion edges. Runtime-observable admin deployment

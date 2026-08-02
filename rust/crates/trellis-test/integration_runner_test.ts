@@ -4,7 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { isAbsolute, relative } from "@std/path";
+import { isAbsolute, join, relative } from "@std/path";
 import {
   assertRustExecutionInventory,
   buildIntegrationTest,
@@ -12,6 +12,7 @@ import {
   loadIntegrationLiveArtifacts,
   parseIntegrationRunnerArgs,
   partitionRustTests,
+  prebuiltDirtyTreeError,
   rustTestResults,
   testNamesFromList,
   writeIntegrationLiveArtifacts,
@@ -94,12 +95,74 @@ Deno.test("Rust integration runner validates every selected result", () => {
   );
 });
 
+Deno.test("prebuilt artifacts reject dirty working trees", () => {
+  const error = prebuiltDirtyTreeError(" M rust/crates/trellis/src/lib.rs\n");
+  assertStringIncludes(error ?? "", "--prebuilt-only");
+  assertStringIncludes(error ?? "", "--build-only");
+  assertStringIncludes(error ?? "", "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT");
+  assertEquals(prebuiltDirtyTreeError(""), undefined);
+  assertEquals(prebuiltDirtyTreeError("   \n"), undefined);
+});
+
+Deno.test("prebuilt-only live artifacts fail on a dirty tree", async () => {
+  const names = [
+    "TRELLIS_TEST_PREBUILT_ONLY",
+    "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  const dirtyMarker = `.trellis-test-dirty-${crypto.randomUUID()}`;
+  const markerPath = join(Deno.cwd(), dirtyMarker);
+  await Deno.writeTextFile(markerPath, "dirty");
+  try {
+    Deno.env.set("TRELLIS_TEST_PREBUILT_ONLY", "1");
+    Deno.env.delete("TRELLIS_TEST_ALLOW_DIRTY_PREBUILT");
+    await assertRejects(
+      () => loadIntegrationLiveArtifacts("/nonexistent/manifest.json"),
+      Error,
+      "uncommitted changes",
+    );
+  } finally {
+    await Deno.remove(markerPath).catch(() => undefined);
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
+Deno.test("allow-dirty override skips the tree check", async () => {
+  const names = [
+    "TRELLIS_TEST_PREBUILT_ONLY",
+    "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT",
+  ] as const;
+  const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
+  const tempDir = await Deno.makeTempDir({ prefix: "trellis-runner-dirty-" });
+  try {
+    const manifestPath = join(tempDir, "manifest.json");
+    await Deno.writeTextFile(manifestPath, "{}");
+    Deno.env.set("TRELLIS_TEST_PREBUILT_ONLY", "1");
+    Deno.env.set("TRELLIS_TEST_ALLOW_DIRTY_PREBUILT", "1");
+    // The dirty gate is skipped, so the manifest itself is validated instead.
+    await assertRejects(
+      () => loadIntegrationLiveArtifacts(manifestPath),
+      Error,
+      "unsupported integration live artifacts manifest format",
+    );
+  } finally {
+    await Deno.remove(tempDir, { recursive: true }).catch(() => undefined);
+    for (const [name, value] of previous) {
+      if (value === undefined) Deno.env.delete(name);
+      else Deno.env.set(name, value);
+    }
+  }
+});
+
 Deno.test("prebuilt-only Rust runner rejects every Cargo fallback", async () => {
   const names = [
     "TRELLIS_TEST_PREBUILT_ONLY",
     "TRELLIS_TEST_INTEGRATION_BIN",
     "TRELLIS_TEST_SERVER_BIN",
-    "TRELLIS_TEST_JOBS_SERVICE_BIN",
+    "TRELLIS_TEST_CLI_BIN",
   ] as const;
   const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
   try {
@@ -131,7 +194,7 @@ Deno.test("integration live artifacts are deterministic and validated", async ()
     const executables = {
       integrationTest: `${sources}/integration`,
       trellisServer: `${sources}/server`,
-      trellisServiceJobs: `${sources}/jobs`,
+      trellisCli: `${sources}/cli`,
     };
     await Promise.all(
       Object.entries(executables).map(([name, path]) =>
@@ -164,7 +227,10 @@ Deno.test("integration live artifacts are deterministic and validated", async ()
     );
     assertEquals(
       Object.keys(artifacts.runtimeBinaries),
-      ["TRELLIS_TEST_SERVER_BIN", "TRELLIS_TEST_JOBS_SERVICE_BIN"],
+      [
+        "TRELLIS_TEST_SERVER_BIN",
+        "TRELLIS_TEST_CLI_BIN",
+      ],
     );
     assertEquals(
       [

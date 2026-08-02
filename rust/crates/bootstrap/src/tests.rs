@@ -282,6 +282,7 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(config.contains("ws_nats_servers = [\"wss://nats.example.test/ws\"]"));
     assert!(config.contains("nats_servers = [\"nats://nats.example.test:4222\"]"));
     assert!(config.contains("[platform.storage]"));
+    assert!(config.contains("event_context_digest_file = \"./data/session-context.digest\""));
     assert!(config.contains("path = \"./data/platform.sqlite\""));
     assert!(config.contains("path = \"./data/jobs.sqlite\""));
     assert!(config.contains("path = \"./data/health.sqlite\""));
@@ -382,6 +383,71 @@ fn nats_config_uses_rendered_server_name() {
     assert!(config.contains("no_tls: true"));
     assert!(config.contains("store_dir: /data"));
     assert!(config.contains("include ./jwt.conf"));
+}
+
+#[test]
+fn local_nats_config_uses_host_paths() {
+    let config = render_local_nats_config(
+        "trellis",
+        "/tmp/trellis/nats/data",
+        "/tmp/trellis/nats/jwt.local.conf",
+    );
+
+    assert!(config.contains("server_name: trellis"));
+    assert!(config.contains("listen: 127.0.0.1:4222"));
+    assert!(config.contains("http: 127.0.0.1:8222"));
+    assert!(config.contains("timeout: \"30s\""));
+    assert!(config.contains("listen: 127.0.0.1:8080"));
+    assert!(config.contains("no_tls: true"));
+    assert!(config.contains("store_dir: /tmp/trellis/nats/data"));
+    assert!(config.contains("include /tmp/trellis/nats/jwt.local.conf"));
+    assert!(
+        !config.contains("0.0.0.0"),
+        "local render binds loopback only"
+    );
+}
+
+#[test]
+fn container_nats_config_keeps_public_bindings() {
+    let config = render_nats_config("trellis");
+
+    assert!(config.contains("listen: 0.0.0.0:4222"));
+    assert!(config.contains("http: 0.0.0.0:8222"));
+    assert!(config.contains("listen: 0.0.0.0:8080"));
+}
+
+#[test]
+fn trellis_bootstrap_generates_private_session_seed_matching_expected_format() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+
+    let temp = tempfile::tempdir().expect("temp dir");
+    generate_trellis_bootstrap(&trellis_options(temp.path())).expect("generate Trellis");
+
+    let seed_path = temp.path().join("session.seed");
+    let contents = fs::read_to_string(&seed_path).expect("read session seed");
+    assert!(
+        contents.ends_with('\n'),
+        "session seed must end with a newline"
+    );
+    let decoded = URL_SAFE_NO_PAD
+        .decode(contents.trim())
+        .expect("decode session seed");
+    assert_eq!(decoded.len(), 32, "session seed must be 32 bytes");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            fs::metadata(&seed_path)
+                .expect("session seed metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "session seed must be private like the other secret files"
+        );
+    }
 }
 
 fn nats_options(out: impl Into<PathBuf>) -> NatsBootstrapOptions {

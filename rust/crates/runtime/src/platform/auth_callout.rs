@@ -1,6 +1,5 @@
 //! Rust-owned NATS authorization callout.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,16 +16,12 @@ use nats_jwt_rs::user::User;
 use nats_jwt_rs::Claims;
 use nkeys::{KeyPair, KeyPairType, XKey};
 use serde::Deserialize;
-use trellis_protocol::{
-    verify_session_proof_v1, AuthorizationPrincipalKindV1, SessionProofInputV1,
-    SessionProofPolicyV1, SessionProofV1,
-};
+use subtle::ConstantTimeEq;
+use trellis_protocol::{AuthorizationPrincipalKindV1, VerifiedAuthorizationContextV1};
 
 use super::auth::{
-    compile_transport_permissions, AuthConnectionPresence, AuthEphemeralRepository,
-    AuthorizationStateError, AuthorizationStateService, ConnectReplayRecord,
-    NatsAuthEphemeralRepository, ParticipantBindingRepository, SessionRepository,
-    SqliteAuthorizationStore,
+    AuthConnectionPresence, AuthEphemeralRepository, AuthorizationContextService,
+    AuthorizationStateError, NatsAuthEphemeralRepository,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -36,24 +31,15 @@ const AUTH_CALLOUT_QUEUE: &str = "trellis";
 const DISCONNECT_SUBJECT: &str = "$SYS.ACCOUNT.*.DISCONNECT";
 const SERVER_XKEY_HEADER: &str = "Nats-Server-Xkey";
 const CONNECT_TOKEN_FORMAT: &str = "trellis.nats-connect-token.v1";
-const PROOF_MAXIMUM_AGE_MS: i64 = 30_000;
-const PROOF_MAXIMUM_FUTURE_SKEW_MS: i64 = 5_000;
 const DEFAULT_USER_JWT_TTL_MS: i64 = 300_000;
 const MAX_CONCURRENT_REQUESTS: usize = 32;
-const MAX_CONCURRENT_PER_IP: usize = 8;
-const MAX_CONCURRENT_PER_SERVER: usize = 16;
 const SHUTDOWN_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NatsConnectToken {
     format: String,
-    request_id: String,
-    issued_at: i64,
-    session_id: String,
-    participant_digest: String,
     context_digest: String,
-    proof: SessionProofV1,
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,10 +188,8 @@ pub(crate) struct AuthCallout {
 #[derive(Clone)]
 struct CalloutProcessor {
     client: async_nats::Client,
-    authorization: AuthorizationStateService<SqliteAuthorizationStore>,
-    repository: SqliteAuthorizationStore,
-    contexts: super::auth::AuthorizationContextService,
-    replay: NatsAuthEphemeralRepository,
+    contexts: AuthorizationContextService,
+    ephemeral: NatsAuthEphemeralRepository,
     keys: CalloutKeys,
     user_jwt_ttl_ms: i64,
     limiter: Arc<CalloutLimiter>,
@@ -213,47 +197,33 @@ struct CalloutProcessor {
 
 #[derive(Debug, Default)]
 struct CalloutLimiter {
-    state: std::sync::Mutex<CalloutLimitState>,
-}
-
-#[derive(Debug, Default)]
-struct CalloutLimitState {
-    by_ip: BTreeMap<String, usize>,
-    by_server: BTreeMap<String, usize>,
+    in_flight: std::sync::Mutex<usize>,
 }
 
 #[derive(Debug)]
 struct CalloutPermit {
     limiter: Arc<CalloutLimiter>,
-    ip: String,
-    server: String,
 }
 
 impl CalloutLimiter {
-    fn try_acquire(self: &Arc<Self>, ip: &str, server: &str) -> Option<CalloutPermit> {
-        let mut state = self.state.lock().ok()?;
-        if state.by_ip.get(ip).copied().unwrap_or_default() >= MAX_CONCURRENT_PER_IP
-            || state.by_server.get(server).copied().unwrap_or_default() >= MAX_CONCURRENT_PER_SERVER
-        {
+    fn try_acquire(self: &Arc<Self>) -> Option<CalloutPermit> {
+        let mut in_flight = self.in_flight.lock().ok()?;
+        if *in_flight >= MAX_CONCURRENT_REQUESTS {
             return None;
         }
-        *state.by_ip.entry(ip.to_owned()).or_default() += 1;
-        *state.by_server.entry(server.to_owned()).or_default() += 1;
+        *in_flight += 1;
         Some(CalloutPermit {
             limiter: Arc::clone(self),
-            ip: ip.to_owned(),
-            server: server.to_owned(),
         })
     }
 }
 
 impl Drop for CalloutPermit {
     fn drop(&mut self) {
-        let Ok(mut state) = self.limiter.state.lock() else {
+        let Ok(mut in_flight) = self.limiter.in_flight.lock() else {
             return;
         };
-        decrement(&mut state.by_ip, &self.ip);
-        decrement(&mut state.by_server, &self.server);
+        *in_flight -= 1;
     }
 }
 
@@ -262,9 +232,7 @@ impl AuthCallout {
     pub(crate) async fn start(
         client: async_nats::Client,
         system_client: async_nats::Client,
-        authorization: AuthorizationStateService<SqliteAuthorizationStore>,
-        repository: SqliteAuthorizationStore,
-        replay: NatsAuthEphemeralRepository,
+        ephemeral: NatsAuthEphemeralRepository,
         contexts: super::auth::AuthorizationContextService,
         auth_signing_seed_file: &Path,
         target_signing_seed_file: &Path,
@@ -288,11 +256,6 @@ impl AuthCallout {
                     "failed to subscribe to NATS authorization callout: {error}"
                 ))
             })?;
-        client.flush().await.map_err(|error| {
-            AuthorizationStateError::Storage(format!(
-                "failed to activate NATS authorization callout subscription: {error}"
-            ))
-        })?;
         let disconnect_subscriber =
             system_client
                 .subscribe(DISCONNECT_SUBJECT)
@@ -302,11 +265,6 @@ impl AuthCallout {
                         "failed to subscribe to NATS disconnect events: {error}"
                     ))
                 })?;
-        system_client.flush().await.map_err(|error| {
-            AuthorizationStateError::Storage(format!(
-                "failed to activate NATS disconnect subscription: {error}"
-            ))
-        })?;
         let user_jwt_ttl_ms = user_jwt_ttl_ms
             .unwrap_or(DEFAULT_USER_JWT_TTL_MS as u64)
             .try_into()
@@ -323,10 +281,8 @@ impl AuthCallout {
             disconnect_subscriber,
             processor: CalloutProcessor {
                 client,
-                authorization,
-                repository,
                 contexts,
-                replay,
+                ephemeral,
                 keys,
                 user_jwt_ttl_ms,
                 limiter: Arc::new(CalloutLimiter::default()),
@@ -390,7 +346,7 @@ impl CalloutProcessor {
         if user_nkey.is_empty() {
             return Ok(());
         }
-        self.replay.delete_connection_presence(&user_nkey).await
+        self.ephemeral.delete_connection_presence(&user_nkey).await
     }
 
     async fn process(&self, message: async_nats::Message) -> Result<(), AuthorizationStateError> {
@@ -430,12 +386,10 @@ impl CalloutProcessor {
             return Err(denied("authorization request identity is invalid"));
         }
 
-        let permit = self
-            .limiter
-            .try_acquire(&request.client_info.host, &request.server.id);
-        let (user_jwt, denial_code) = match permit {
+        let permit = self.limiter.try_acquire();
+        let (user_jwt, denial_code) = match permit.as_ref() {
             None => (None, Some("rate_limited")),
-            Some(_permit) => match self.authorize(request).await {
+            Some(_) => match self.authorize(request).await {
                 Ok(jwt) => (Some(jwt), None),
                 Err(error) => {
                     tracing::debug!(error = %error, "NATS connection authorization denied");
@@ -460,12 +414,7 @@ impl CalloutProcessor {
                 AuthorizationStateError::Storage(format!(
                     "failed to publish NATS authorization response: {error}"
                 ))
-            })?;
-        self.client.flush().await.map_err(|error| {
-            AuthorizationStateError::Storage(format!(
-                "failed to flush NATS authorization response: {error}"
-            ))
-        })
+            })
     }
 
     async fn authorize(&self, request: &AuthRequest) -> Result<String, AuthorizationStateError> {
@@ -503,77 +452,27 @@ impl CalloutProcessor {
                 .ok_or_else(|| denied("NATS nonce signature is missing"))?,
         )?;
 
-        let session = self
-            .repository
-            .get_session(&token.session_id)
-            .await?
-            .ok_or_else(|| denied("session does not exist"))?;
-        if token.participant_digest != session.participant_artifact_digest {
-            return Err(denied("participant binding does not match the session"));
-        }
-        let input = SessionProofInputV1::nats_connect_context(
-            token.request_id,
-            token.issued_at,
-            &token.session_id,
-            &session.session_key_id,
-            &session.session_public_key,
-            session_nkey,
-            &token.participant_digest,
-            &token.context_digest,
-            &request.client_info.nonce,
-        )
-        .map_err(|error| denied(error.to_string()))?;
-        let policy = SessionProofPolicyV1::new(PROOF_MAXIMUM_AGE_MS, PROOF_MAXIMUM_FUTURE_SKEW_MS)
-            .map_err(|error| denied(error.to_string()))?;
-        let verified = verify_session_proof_v1(
-            &input,
-            &token.proof,
-            &session.session_public_key,
-            now,
-            policy,
-        )
-        .map_err(|error| denied(error.to_string()))?;
-
-        let state = self
-            .authorization
-            .resolve_issuable_state(&token.session_id, now)
-            .await?;
-        let context = self
+        let verified_context = self
             .contexts
-            .require_issuable_context(&state, &token.context_digest, now_seconds)
-            .await?;
-        let replay_key = verified.replay_key();
-        let admitted = self
-            .replay
-            .admit_connect_replay(ConnectReplayRecord {
-                format: "trellis.session-proof-replay.v1".to_owned(),
-                purpose: replay_key.purpose().to_string(),
-                signer_key_id: replay_key.signer_key_id().to_owned(),
-                request_id: replay_key.request_id().to_owned(),
-                transcript_digest: replay_key.transcript_digest().to_owned(),
-                admitted_at: now,
-                expires_at: now
-                    .checked_add(policy.replay_retention_ms())
-                    .ok_or_else(|| denied("connect replay expiry overflowed"))?,
-                version: 1,
-            })
-            .await?;
-        if !admitted {
-            return Err(denied("NATS connect proof was already used"));
-        }
+            .validator_cache()
+            .resolve_admission_context(&token.context_digest, now_seconds)
+            .await
+            .map_err(|error| denied(error.to_string()))?;
+        verify_connect_nkey_matches_context(session_nkey, &verified_context)?;
 
-        let binding = self
-            .repository
-            .get_participant_binding(&state.participant.id, &state.participant.artifact_digest)
-            .await?
-            .ok_or_else(|| denied("participant binding is unavailable"))?;
-        let permissions = compile_transport_permissions(&state, &binding)?;
-        tracing::debug!(subscribe = ?permissions.subscribe, "compiled NATS inbox permissions");
+        let permissions = self
+            .contexts
+            .transport_permissions(&verified_context)
+            .await
+            .map_err(|error| denied(error.to_string()))?;
+        tracing::debug!(subscribe = ?permissions.subscribe, "loaded NATS inbox permissions");
         let expires_at_ms = [
-            state.session_expires_at,
-            state.effective_authority_expires_at,
-            state.delegation_expires_at,
-            Some(context.expires_at.saturating_mul(1_000)),
+            Some(
+                verified_context
+                    .expires_at()
+                    .checked_mul(1_000)
+                    .ok_or_else(|| denied("authorization context expiry overflowed"))?,
+            ),
             Some(
                 now.checked_add(self.user_jwt_ttl_ms)
                     .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
@@ -590,13 +489,10 @@ impl CalloutProcessor {
         if expires_at_seconds <= now_seconds {
             return Err(denied("NATS user JWT expiry is below one second"));
         }
-        self.repository
-            .touch_session(&token.session_id, now)
-            .await?;
         let jwt = self.keys.authorized_user_jwt(
             &request.user_nkey,
-            &token.session_id,
-            state.principal.kind,
+            verified_context.session_id(),
+            verified_context.principal().kind,
             permissions,
             expires_at_seconds,
         )?;
@@ -607,13 +503,12 @@ impl CalloutProcessor {
             "userNkey": request.user_nkey,
         }))
         .map_err(|error| denied(error.to_string()))?;
-        self.replay
+        self.ephemeral
             .put_connection_presence(AuthConnectionPresence {
                 format: "trellis.auth-connection-presence.v1".to_owned(),
                 connection_id: connection_id.clone(),
-                session_id: token.session_id.clone(),
-                context_id: context.context_id.clone(),
-                context_digest: context.context_digest.clone(),
+                session_id: verified_context.session_id().to_owned(),
+                context_digest: verified_context.context_digest().to_owned(),
                 server_id: request.server.id.clone(),
                 client_id,
                 user_nkey: request.user_nkey.clone(),
@@ -623,27 +518,8 @@ impl CalloutProcessor {
                 version: 1,
             })
             .await?;
-        let final_state = self
-            .authorization
-            .resolve_issuable_state(&token.session_id, now)
-            .await;
-        let final_check = match final_state {
-            Ok(final_state) if final_state == state => self
-                .contexts
-                .require_issuable_context(&final_state, &token.context_digest, now_seconds)
-                .await
-                .map(|_| ()),
-            Ok(_) => Err(AuthorizationStateError::ContextSnapshotChanged),
-            Err(error) => Err(error),
-        };
-        if let Err(error) = final_check {
-            self.replay
-                .delete_connection_presence(&request.user_nkey)
-                .await?;
-            return Err(error);
-        }
         tracing::debug!(
-            session_id = %token.session_id,
+            session_id = %verified_context.session_id(),
             context_digest = %token.context_digest,
             "NATS authorization callout admitted"
         );
@@ -696,18 +572,9 @@ fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
         AuthorizationStateError::DeviceInactive => "device_inactive",
         AuthorizationStateError::ActivationMissing => "delegation_missing",
         AuthorizationStateError::DelegationExpired => "delegation_expired",
-        AuthorizationStateError::StorageConflict => "replay",
+        AuthorizationStateError::StorageConflict => "authority_unavailable",
         AuthorizationStateError::Storage(_) => "internal_error",
         AuthorizationStateError::InvalidRecord(_) => "invalid_auth_token",
-    }
-}
-
-fn decrement(counts: &mut BTreeMap<String, usize>, key: &str) {
-    if let Some(count) = counts.get_mut(key) {
-        *count -= 1;
-        if *count == 0 {
-            counts.remove(key);
-        }
     }
 }
 
@@ -735,6 +602,32 @@ fn verify_nats_nonce_signature(
         .map_err(|_| denied("NATS nonce signature is invalid"))?;
     key.verify(nonce.as_bytes(), &signature)
         .map_err(|_| denied("NATS nonce signature is invalid"))
+}
+
+fn verify_connect_nkey_matches_context(
+    session_nkey: &str,
+    context: &VerifiedAuthorizationContextV1,
+) -> Result<(), AuthorizationStateError> {
+    // NATS User NKeys encode the same raw 32-byte Ed25519 public key bound by
+    // the verified authorization context.
+    let key =
+        KeyPair::from_public_key(session_nkey).map_err(|_| denied("session NKey is invalid"))?;
+    if key.key_pair_type() != KeyPairType::User {
+        return Err(denied("session NKey is not a user key"));
+    }
+    let (_, nkey_bytes) =
+        nkeys::from_public_key(session_nkey).map_err(|_| denied("session NKey is invalid"))?;
+    if nkey_bytes
+        .as_slice()
+        .ct_eq(context.session_key().as_bytes())
+        .unwrap_u8()
+        != 1
+    {
+        return Err(denied(
+            "session NKey does not encode the verified context key",
+        ));
+    }
+    Ok(())
 }
 
 fn is_nkey(value: &str, expected: KeyPairType) -> bool {
@@ -842,14 +735,27 @@ mod tests {
         };
         let bootstrap = bootstrap.encode(&auth_signing_key)?;
         keys.validate_bootstrap_jwt(&bootstrap, &session_nkey, 1)?;
+        let mut mismatched_bootstrap = Claims::<User>::decode(&bootstrap)?;
+        mismatched_bootstrap.sub = KeyPair::new_user().public_key();
+        let mismatched_bootstrap = mismatched_bootstrap.encode(&auth_signing_key)?;
+        assert!(keys
+            .validate_bootstrap_jwt(&mismatched_bootstrap, &session_nkey, 1)
+            .is_err());
 
         let nonce = "server-nonce";
         let signature = session.sign(nonce.as_bytes())?;
         verify_nats_nonce_signature(&session_nkey, nonce, &STANDARD.encode(&signature))?;
         verify_nats_nonce_signature(&session_nkey, nonce, &URL_SAFE_NO_PAD.encode(&signature))?;
+        assert!(verify_nats_nonce_signature(
+            &session_nkey,
+            "different-server-nonce",
+            &STANDARD.encode(&signature),
+        )
+        .is_err());
 
+        let issued_user_nkey = KeyPair::new_user().public_key();
         let issued = keys.authorized_user_jwt(
-            &KeyPair::new_user().public_key(),
+            &issued_user_nkey,
             "ses_01",
             AuthorizationPrincipalKindV1::Service,
             TransportPermissions {
@@ -864,6 +770,7 @@ mod tests {
             .ok_or("issued JWT has no payload")?;
         let claims: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?;
         assert_eq!(claims["iss"], target_signing_key.public_key());
+        assert_eq!(claims["sub"], issued_user_nkey);
         assert_eq!(claims["exp"], 200);
         assert_eq!(claims["nats"]["issuer_account"], target_account);
         assert_eq!(
@@ -879,14 +786,32 @@ mod tests {
     }
 
     #[test]
-    fn callout_limiter_bounds_each_source() {
+    fn connect_token_accepts_only_format_and_context_digest() {
+        let source = serde_json::json!({
+            "format": CONNECT_TOKEN_FORMAT,
+            "contextDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        });
+        let token: NatsConnectToken = serde_json::from_value(source.clone()).unwrap();
+        assert_eq!(token.format, CONNECT_TOKEN_FORMAT);
+        assert_eq!(
+            token.context_digest,
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        );
+
+        let mut extra = source;
+        extra["sessionId"] = serde_json::json!("session");
+        assert!(serde_json::from_value::<NatsConnectToken>(extra).is_err());
+    }
+
+    #[test]
+    fn callout_limiter_bounds_total_in_flight() {
         let limiter = Arc::new(CalloutLimiter::default());
-        let permits: Vec<_> = (0..MAX_CONCURRENT_PER_IP)
-            .map(|_| limiter.try_acquire("127.0.0.1", "server-1").unwrap())
+        let permits: Vec<_> = (0..MAX_CONCURRENT_REQUESTS)
+            .map(|_| limiter.try_acquire().unwrap())
             .collect();
-        assert!(limiter.try_acquire("127.0.0.1", "server-2").is_none());
+        assert!(limiter.try_acquire().is_none());
         drop(permits);
-        assert!(limiter.try_acquire("127.0.0.1", "server-2").is_some());
+        assert!(limiter.try_acquire().is_some());
     }
 
     #[test]

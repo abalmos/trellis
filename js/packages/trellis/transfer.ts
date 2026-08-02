@@ -14,7 +14,7 @@ import {
 } from "@nats-io/nats-core";
 import Type, { type Static } from "typebox";
 import { ulid } from "ulid";
-import { buildProofInput, verifyProof } from "./auth/proof.ts";
+import { buildProofInput } from "./auth/proof.ts";
 import { base64urlEncode, sha256 } from "./auth/utils.ts";
 import { TransferError } from "./errors/TransferError.ts";
 import {
@@ -82,6 +82,7 @@ type TrellisTransferAuth = {
   sessionKey: string;
   sign(data: Uint8Array): Promise<Uint8Array> | Uint8Array;
   currentIat?: () => number;
+  contextDigest?: string | (() => string);
 };
 
 type TransferAck =
@@ -91,17 +92,44 @@ type TransferAck =
 async function createTransferProof(
   auth: TrellisTransferAuth,
   subject: string,
+  reply: string,
   payload: Uint8Array,
-): Promise<{ proof: string; iat: number; requestId: string }> {
+): Promise<{
+  proof: string;
+  iat: number;
+  requestId: string;
+  contextDigest: string;
+}> {
+  const contextDigest = typeof auth.contextDigest === "function"
+    ? auth.contextDigest()
+    : auth.contextDigest;
+  if (contextDigest === undefined) {
+    throw new Error("contextDigest is required to sign v2 transfer proofs");
+  }
+  if (reply.length === 0) {
+    throw new Error("transfer reply subject must not be empty");
+  }
   const payloadHash = await sha256(payload);
   const iat = auth.currentIat?.() ?? Math.floor(Date.now() / 1000);
   const requestId = ulid();
   const proofOk = await auth.sign(
     await sha256(
-      buildProofInput(auth.sessionKey, subject, payloadHash, iat, requestId),
+      buildProofInput(
+        contextDigest,
+        subject,
+        reply,
+        payloadHash,
+        iat,
+        requestId,
+      ),
     ),
   );
-  return { proof: base64urlEncode(proofOk), iat, requestId };
+  return {
+    proof: base64urlEncode(proofOk),
+    iat,
+    requestId,
+    contextDigest,
+  };
 }
 
 function expired(expiresAt: string): boolean {
@@ -225,6 +253,36 @@ function recordTransferError(
   return error;
 }
 
+async function requestTransfer(
+  nc: NatsConnection,
+  subject: string,
+  payload: Uint8Array,
+  headers: MsgHdrs,
+  reply: string,
+  timeoutMs: number,
+): Promise<Msg> {
+  const subscription = nc.subscribe(reply, { max: 1 });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    nc.publish(subject, payload, { headers, reply });
+    return await Promise.race([
+      subscription[Symbol.asyncIterator]().next().then((result) => {
+        if (result.done) throw new Error("Transfer reply subscription closed");
+        return result.value;
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Transfer request timed out")),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    subscription.unsubscribe();
+  }
+}
+
 function receiveStream(
   sub: Subscription,
   timeoutMs: number,
@@ -329,19 +387,26 @@ class BaseTransferHandle {
   readonly #nc: NatsConnection;
   readonly #auth: TrellisTransferAuth;
   readonly #timeoutMs: number;
+  readonly #inboxPrefix: string;
 
   protected constructor(
     nc: NatsConnection,
     auth: TrellisTransferAuth,
     timeoutMs: number,
+    inboxPrefix = "_INBOX",
   ) {
     this.#nc = nc;
     this.#auth = auth;
     this.#timeoutMs = timeoutMs;
+    this.#inboxPrefix = inboxPrefix;
   }
 
   protected get nc(): NatsConnection {
     return this.#nc;
+  }
+
+  protected get inboxPrefix(): string {
+    return this.#inboxPrefix;
   }
 
   protected get auth(): TrellisTransferAuth {
@@ -381,13 +446,20 @@ class BaseTransferHandle {
 
   protected async buildHeaders(
     subject: string,
+    reply: string,
     payload: Uint8Array,
     seq?: number,
     eof?: boolean,
   ): Promise<MsgHdrs> {
     const headers = natsHeaders();
-    const authHeaders = await createTransferProof(this.#auth, subject, payload);
+    const authHeaders = await createTransferProof(
+      this.#auth,
+      subject,
+      reply,
+      payload,
+    );
     headers.set("session-key", this.#auth.sessionKey);
+    headers.set("authorization-context", authHeaders.contextDigest);
     headers.set("proof", authHeaders.proof);
     headers.set("iat", String(authHeaders.iat));
     headers.set("request-id", authHeaders.requestId);
@@ -410,8 +482,9 @@ export class SendTransferHandle extends BaseTransferHandle {
     auth: TrellisTransferAuth,
     timeoutMs: number,
     grant: SendTransferGrant,
+    inboxPrefix = "_INBOX",
   ) {
-    super(nc, auth, timeoutMs);
+    super(nc, auth, timeoutMs, inboxPrefix);
     this.#grant = grant;
   }
 
@@ -449,17 +522,23 @@ export class SendTransferHandle extends BaseTransferHandle {
             );
           }
 
+          const reply = createInbox(this.inboxPrefix);
           const headers = await this.buildHeaders(
             this.#grant.subject,
+            reply,
             chunk,
             seq,
             false,
           );
           const response = await AsyncResult.try(() =>
-            this.nc.request(this.#grant.subject, chunk, {
-              timeout: this.timeoutMs,
+            requestTransfer(
+              this.nc,
+              this.#grant.subject,
+              chunk,
               headers,
-            })
+              reply,
+              this.timeoutMs,
+            )
           ).take();
           if (isErr(response)) {
             return Result.err(
@@ -481,17 +560,23 @@ export class SendTransferHandle extends BaseTransferHandle {
           seq += 1;
         }
 
+        const reply = createInbox(this.inboxPrefix);
         const finalHeaders = await this.buildHeaders(
           this.#grant.subject,
+          reply,
           new Uint8Array(),
           seq,
           true,
         );
         const finalResponse = await AsyncResult.try(() =>
-          this.nc.request(this.#grant.subject, new Uint8Array(), {
-            timeout: this.timeoutMs,
-            headers: finalHeaders,
-          })
+          requestTransfer(
+            this.nc,
+            this.#grant.subject,
+            new Uint8Array(),
+            finalHeaders,
+            reply,
+            this.timeoutMs,
+          )
         ).take();
         if (isErr(finalResponse)) {
           return Result.err(
@@ -530,7 +615,6 @@ export class SendTransferHandle extends BaseTransferHandle {
 
 export class ReceiveTransferHandle extends BaseTransferHandle {
   readonly #grant: ReceiveTransferGrant;
-  readonly #inboxPrefix: string;
 
   constructor(
     nc: NatsConnection,
@@ -539,9 +623,8 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
     grant: ReceiveTransferGrant,
     inboxPrefix = "_INBOX",
   ) {
-    super(nc, auth, timeoutMs);
+    super(nc, auth, timeoutMs, inboxPrefix);
     this.#grant = grant;
-    this.#inboxPrefix = inboxPrefix;
   }
 
   stream(): AsyncResult<ReadableStream<Uint8Array>, TransferError> {
@@ -556,17 +639,20 @@ export class ReceiveTransferHandle extends BaseTransferHandle {
           );
         }
 
-        const inbox = createInbox(this.#inboxPrefix);
+        const inbox = createInbox(this.inboxPrefix);
         const sub = this.nc.subscribe(inbox);
         const payload = new Uint8Array();
-        const headers = await this.buildHeaders(this.#grant.subject, payload);
+        const headers = await this.buildHeaders(
+          this.#grant.subject,
+          inbox,
+          payload,
+        );
 
         try {
           this.nc.publish(this.#grant.subject, payload, {
             headers,
             reply: inbox,
           });
-          await this.nc.flush();
         } catch (cause) {
           sub.unsubscribe();
           return Result.err(recordTransferError(
@@ -625,33 +711,6 @@ export function createTransferHandle(
   inboxPrefix = "_INBOX",
 ): TransferHandle {
   return grant.direction === "send"
-    ? new SendTransferHandle(nc, auth, timeoutMs, grant)
+    ? new SendTransferHandle(nc, auth, timeoutMs, grant, inboxPrefix)
     : new ReceiveTransferHandle(nc, auth, timeoutMs, grant, inboxPrefix);
-}
-
-export async function verifyTransferMessage(args: {
-  expectedSessionKey: string;
-  subject: string;
-  payload: Uint8Array;
-  proof?: string | null;
-  sessionKey?: string | null;
-  iat?: string | number | null;
-  requestId?: string | null;
-}): Promise<boolean> {
-  const iat = typeof args.iat === "number" ? args.iat : Number(args.iat);
-  if (
-    !args.proof || !args.sessionKey ||
-    args.sessionKey !== args.expectedSessionKey ||
-    !Number.isSafeInteger(iat) || !args.requestId
-  ) {
-    return false;
-  }
-
-  return await verifyProof(args.expectedSessionKey, {
-    sessionKey: args.sessionKey,
-    subject: args.subject,
-    payloadHash: await sha256(args.payload),
-    iat,
-    requestId: args.requestId,
-  }, args.proof);
 }

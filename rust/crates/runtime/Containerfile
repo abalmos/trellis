@@ -4,6 +4,7 @@ WORKDIR /src
 
 COPY js /src/js
 COPY generated /src/generated
+COPY art /src/art
 
 RUN mkdir -p /src/rust/crates/runtime/generated \
     && deno install --config js/deno.json --lock js/deno.lock --frozen \
@@ -15,10 +16,52 @@ WORKDIR /src
 
 COPY rust /src/rust
 COPY generated /src/generated
+COPY conformance /src/conformance
+COPY js /src/js
 COPY --from=portal /src/rust/crates/runtime/generated/portal /src/rust/crates/runtime/generated/portal
 
 RUN cargo build --locked --manifest-path rust/Cargo.toml --release \
-    --package trellis-runtime --bin trellis-server
+    --package trellis-runtime --bin trellis-server \
+    --package trellis-cli --bin trellis
+
+# Bake the pinned nats-server binary (conformance/nats-binaries.json) so the runtime
+# image never downloads it at container runtime. TARGETARCH is set by buildx
+# (amd64/arm64); it maps directly onto the pin's linux-<arch> keys. The release URL is
+# derived from the pinned version: the pin file stores version + per-platform sha256
+# only, and the build fails when the pin is missing or malformed (sha must be 64
+# lowercase hex digits).
+FROM docker.io/library/debian:bookworm-slim AS nats
+
+ARG TARGETARCH
+
+# The pin file is copied before the RUN so a pin change invalidates this stage's cache.
+COPY conformance /src/conformance
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl jq ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && asset="linux-${TARGETARCH}" \
+    && version="$(jq -r '.["nats-server"].version // empty' /src/conformance/nats-binaries.json)" \
+    && sha="$(jq -r --arg asset "$asset" '.["nats-server"].sha256[$asset] // empty' /src/conformance/nats-binaries.json)" \
+    && if [ -z "$version" ] || [ -z "$sha" ]; then \
+         echo "nats-server pin for ${asset} is missing version or sha256 in conformance/nats-binaries.json" >&2; \
+         exit 1; \
+       fi \
+    && if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{64}$'; then \
+         echo "nats-server sha256 for ${asset} is not 64 lowercase hex digits: ${sha}" >&2; \
+         exit 1; \
+       fi \
+    && url="https://github.com/nats-io/nats-server/releases/download/v${version}/nats-server-v${version}-linux-${TARGETARCH}.tar.gz" \
+    && curl --fail --location --retry 3 --output /tmp/nats-server.tar.gz "$url" \
+    && actual="$(sha256sum /tmp/nats-server.tar.gz | awk '{print $1}')" \
+    && if [ "$actual" != "$sha" ]; then \
+         echo "sha256 mismatch for nats-server ${asset}: expected ${sha}, got ${actual}" >&2; \
+         exit 1; \
+       fi \
+    && mkdir -p /out \
+    && tar -xzf /tmp/nats-server.tar.gz --strip-components=1 --directory /out \
+    && test -x /out/nats-server \
+    && rm /tmp/nats-server.tar.gz
 
 FROM docker.io/library/debian:bookworm-slim AS runtime
 
@@ -37,6 +80,8 @@ RUN apt-get update \
     && install --directory --owner trellis --group trellis /var/lib/trellis /etc/trellis
 
 COPY --from=build /src/rust/target/release/trellis-server /usr/local/bin/trellis-server
+COPY --from=build /src/rust/target/release/trellis /usr/local/bin/trellis
+COPY --from=nats /out/nats-server /usr/local/bin/nats-server
 
 USER trellis
 WORKDIR /var/lib/trellis

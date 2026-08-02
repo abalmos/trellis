@@ -3,7 +3,7 @@ import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.eventlog@v1" as const;
 export const CONTRACT_DIGEST =
-  "gjd2FnnjBOF9y6uj9JGMdtWk5TBrgt9Ua52NdqDSC48" as const;
+  "JyWLu3NvfYDL4YWrDp7fS_CNvzLGaz9My5ZbcoInVM0" as const;
 export const CONTRACT: TrellisContractV1 = {
   "capabilities": {
     "trellis.eventlog::events.read": {
@@ -338,8 +338,8 @@ export const CONTRACT: TrellisContractV1 = {
         "offset": { "minimum": 0, "type": "integer" },
         "ownerContractId": { "type": "string" },
         "ownerEventName": { "type": "string" },
-        "publisherContractId": { "type": "string" },
         "publisherDeploymentId": { "type": "string" },
+        "publisherParticipantId": { "type": "string" },
         "resolution": {
           "items": {
             "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
@@ -352,17 +352,7 @@ export const CONTRACT: TrellisContractV1 = {
         "sort": { "additionalProperties": true, "type": "object" },
         "subject": { "type": "string" },
         "verificationStatus": {
-          "items": {
-            "anyOf": [
-              { "const": "verified" },
-              { "const": "missing-proof" },
-              { "const": "invalid-signature" },
-              { "const": "missing-session" },
-              { "const": "subject-denied" },
-              { "const": "outside-session-window" },
-              { "const": "auth-unavailable" },
-            ],
-          },
+          "items": { "anyOf": [{ "const": "verified" }] },
           "type": "array",
         },
         "window": {
@@ -392,8 +382,6 @@ export const CONTRACT: TrellisContractV1 = {
         "ownerContractId": { "type": "string" },
         "ownerEventName": { "type": "string" },
         "payloadSizeBytes": { "type": "integer" },
-        "publisherContractDigest": { "type": "string" },
-        "publisherContractId": { "type": "string" },
         "publisherDeploymentId": { "type": "string" },
         "publisherInstanceId": { "type": "string" },
         "publisherKind": {
@@ -401,6 +389,8 @@ export const CONTRACT: TrellisContractV1 = {
             "const": "user",
           }],
         },
+        "publisherParticipantDigest": { "type": "string" },
+        "publisherParticipantId": { "type": "string" },
         "resolution": {
           "anyOf": [{ "const": "resolved" }, { "const": "unresolved" }, {
             "const": "malformed",
@@ -409,17 +399,7 @@ export const CONTRACT: TrellisContractV1 = {
         "streamSequence": { "type": "integer" },
         "subject": { "type": "string" },
         "traceId": { "type": "string" },
-        "verificationStatus": {
-          "anyOf": [
-            { "const": "verified" },
-            { "const": "missing-proof" },
-            { "const": "invalid-signature" },
-            { "const": "missing-session" },
-            { "const": "subject-denied" },
-            { "const": "outside-session-window" },
-            { "const": "auth-unavailable" },
-          ],
-        },
+        "verificationStatus": { "anyOf": [{ "const": "verified" }] },
       },
       "required": [
         "eventId",

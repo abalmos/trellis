@@ -39,6 +39,13 @@ export const EventLogConsumersInspect = rpcAction(
   "EventLog.Consumers.Inspect",
   {
     subject: "rpc.v1.EventLog.Consumers.Inspect",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "EventLog.Consumers.Inspect",
+      action: "call",
+    }),
     input: schema<Types.EventLogConsumersInspectInput>(
       EventLogConsumersInspectRequestSchema,
     ),
@@ -69,6 +76,13 @@ export const EventLogConsumersQuery = rpcAction(
   "EventLog.Consumers.Query",
   {
     subject: "rpc.v1.EventLog.Consumers.Query",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "EventLog.Consumers.Query",
+      action: "call",
+    }),
     input: schema<Types.EventLogConsumersQueryInput>(
       EventLogConsumersQueryRequestSchema,
     ),
@@ -88,6 +102,13 @@ export const EventLogInspect = rpcAction(
   "EventLog.Inspect",
   {
     subject: "rpc.v1.EventLog.Inspect",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "EventLog.Inspect",
+      action: "call",
+    }),
     input: schema<Types.EventLogInspectInput>(EventLogInspectRequestSchema),
     output: schema<Types.EventLogInspectOutput>(EventLogInspectResponseSchema),
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
@@ -114,6 +135,13 @@ export const EventLogMetrics = rpcAction(
   "EventLog.Metrics",
   {
     subject: "rpc.v1.EventLog.Metrics",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "EventLog.Metrics",
+      action: "call",
+    }),
     input: schema<Types.EventLogMetricsInput>(EventLogMetricsRequestSchema),
     output: schema<Types.EventLogMetricsOutput>(EventLogMetricsResponseSchema),
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
@@ -129,6 +157,13 @@ export const EventLogQuery = rpcAction(
   "EventLog.Query",
   {
     subject: "rpc.v1.EventLog.Query",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "EventLog.Query",
+      action: "call",
+    }),
     input: schema<Types.EventLogQueryInput>(EventLogQueryRequestSchema),
     output: schema<Types.EventLogQueryOutput>(EventLogQueryResponseSchema),
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
@@ -144,6 +179,13 @@ export const EventLogWatch = feedAction(
   "EventLog.Watch",
   {
     subject: "feeds.v1.EventLog.Watch",
+    permission: Object.freeze({
+      apiId: "trellis.eventlog@v1",
+      apiVersion: "v1",
+      surfaceKind: "feed",
+      surfaceName: "EventLog.Watch",
+      action: "subscribe",
+    }),
     input: schema<Types.EventLogWatchInput>(EventLogWatchRequestSchema),
     event: schema<Types.EventLogWatchEvent>(EventLogWatchFrameSchema),
     subscribeCapabilities: ["trellis.eventlog::events.stream"] as const,

@@ -978,25 +978,6 @@ export const AuthenticatedUserSchema = Type.Object({
 export type AuthenticatedUser = StaticDecode<typeof AuthenticatedUserSchema>;
 
 export const AuthSessionsMeSchema = Type.Object({});
-
-export const AuthRequestsValidateSchema = Type.Object({
-  sessionKey: Type.String({ minLength: 1 }),
-  proof: Type.String({ minLength: 1 }),
-  subject: Type.String({ minLength: 1 }),
-  payloadHash: Type.String({ minLength: 1 }),
-  iat: Type.Integer(),
-  requestId: Type.String({ minLength: 1 }),
-  capabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-});
-
-export const AuthEventsValidateSchema = Type.Object({
-  sessionKey: Type.String({ minLength: 1 }),
-  proof: Type.String({ minLength: 1 }),
-  subject: Type.String({ minLength: 1 }),
-  payloadHash: Type.String({ minLength: 1 }),
-  eventId: Type.String({ minLength: 1 }),
-  eventTime: IsoDateStringSchema,
-});
 export const AuthenticatedServiceSchema = Type.Object({
   type: Type.Literal("service"),
   id: Type.String(),
@@ -1045,66 +1026,6 @@ export const AuthSessionsMeResponseSchema = Type.Object({
 export type AuthSessionsMeResponse = StaticDecode<
   typeof AuthSessionsMeResponseSchema
 >;
-
-export const CallerViewSchema = Type.Union([
-  Type.Object({
-    type: Type.Literal("user"),
-    participantKind: UserParticipantKindSchema,
-    userId: Type.String({ minLength: 1 }),
-    identity: Type.Object({
-      identityId: Type.String({ minLength: 1 }),
-      provider: Type.String({ minLength: 1 }),
-      subject: Type.String({ minLength: 1 }),
-    }),
-    active: Type.Boolean(),
-    name: Type.String(),
-    email: Type.String(),
-    image: Type.Optional(Type.String()),
-    capabilities: Type.Array(Type.String()),
-    lastAuth: IsoDateStringSchema,
-  }),
-  AuthenticatedServiceSchema,
-  AuthenticatedDeviceSchema,
-]);
-
-export const AuthRequestsValidateResponseSchema = Type.Object({
-  allowed: Type.Boolean(),
-  inboxPrefix: Type.String(),
-  caller: CallerViewSchema,
-});
-
-export const AuthEventValidationStatusSchema = Type.Union([
-  Type.Literal("verified"),
-  Type.Literal("missing-session"),
-  Type.Literal("invalid-signature"),
-  Type.Literal("subject-denied"),
-  Type.Literal("outside-session-window"),
-]);
-
-export const AuthEventPublisherSchema = Type.Object({
-  kind: Type.Union([
-    Type.Literal("service"),
-    Type.Literal("device"),
-    Type.Literal("user"),
-  ]),
-  deploymentId: Type.Optional(Type.String({ minLength: 1 })),
-  instanceId: Type.Optional(Type.String({ minLength: 1 })),
-  contractId: Type.Optional(Type.String({ minLength: 1 })),
-  contractDigest: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]+$" })),
-  sessionStatus: Type.Union([
-    Type.Literal("active"),
-    Type.Literal("ended"),
-    Type.Literal("revoked"),
-    Type.Literal("expired"),
-  ]),
-});
-
-export const AuthEventsValidateResponseSchema = Type.Object({
-  allowed: Type.Boolean(),
-  status: AuthEventValidationStatusSchema,
-  caller: Type.Optional(CallerViewSchema),
-  publisher: Type.Optional(AuthEventPublisherSchema),
-});
 
 export const AuthIdentitiesListSchema = Type.Object({
   user: Type.Optional(Type.String({ minLength: 1 })),
@@ -1691,29 +1612,6 @@ export const AuthResolveDeviceUserAuthoritiesResponseSchema = Type.Union([
     reason: Type.Optional(Type.String({ minLength: 1 })),
   }),
 ]);
-
-export const WaitForDeviceActivationResponseSchema = Type.Union([
-  Type.Object({ status: Type.Literal("pending") }),
-  Type.Object({
-    status: Type.Literal("activated"),
-    activatedAt: IsoDateStringSchema,
-    confirmationCode: Type.Optional(Type.String({ minLength: 1 })),
-    connectInfo: DeviceConnectInfoSchema,
-  }),
-  Type.Object({
-    status: Type.Literal("rejected"),
-    reason: Type.Optional(Type.String({ minLength: 1 })),
-  }),
-]);
-
-export const WaitForDeviceActivationRequestSchema = Type.Object({
-  flowId: Type.String({ minLength: 1 }),
-  publicIdentityKey: Type.String({ minLength: 1 }),
-  nonce: Type.String({ minLength: 1 }),
-  contractDigest: DigestSchema,
-  iat: Type.Number(),
-  sig: Type.String({ minLength: 1 }),
-});
 
 export const AuthDevicesConnectInfoGetSchema = Type.Object({
   publicIdentityKey: Type.String({ minLength: 1 }),

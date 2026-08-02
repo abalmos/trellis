@@ -1,0 +1,19 @@
+[package]
+name = "trellis-eventlog-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Internal built-in Event Log runtime for Trellis."
+publish = false
+
+[dependencies]
+async-nats.workspace = true
+futures-util.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+time.workspace = true
+tracing.workspace = true
+trellis-rs = { path = "../trellis", version = "0.11.0" }

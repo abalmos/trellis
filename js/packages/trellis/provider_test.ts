@@ -8,6 +8,13 @@ import { createProviderRuntime, PROVIDER_CALLER } from "./provider.ts";
 const Empty = Type.Object({});
 const ThreadsCreate = rpcAction("ai@v1", "AI.ThreadsCreate", {
   subject: "rpc.v1.AI.ThreadsCreate",
+  permission: Object.freeze({
+    apiId: "ai@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "AI.ThreadsCreate",
+    action: "call",
+  }),
   input: Empty,
   output: Empty,
   callerCapabilities: [],

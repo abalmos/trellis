@@ -44,6 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mode: args.mode,
         config_path: args.config,
         rotate_first_admin: args.rotate_first_admin,
+        nats_override: None,
     })
     .await?;
     Ok(())

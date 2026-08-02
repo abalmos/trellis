@@ -7060,24 +7060,8 @@ export const AuthSessionsListResponseSchema = {
 } as const;
 
 export const AuthSessionsLogoutRequestSchema = {
-  "properties": {
-    "issuedAt": {
-      "maximum": 9007199254740991,
-      "minimum": 0,
-      "type": "integer",
-    },
-    "proof": {
-      "properties": {
-        "format": { "const": "trellis.session-proof.v1" },
-        "signature": { "minLength": 1, "type": "string" },
-      },
-      "required": ["format", "signature"],
-      "type": "object",
-    },
-    "requestId": { "minLength": 1, "type": "string" },
-    "sessionId": { "minLength": 1, "type": "string" },
-  },
-  "required": ["sessionId", "requestId", "issuedAt", "proof"],
+  "properties": {},
+  "required": [],
   "type": "object",
 } as const;
 

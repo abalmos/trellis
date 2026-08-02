@@ -11672,64 +11672,6 @@ pub struct AuthSessionsListResponse {
     #[serde(rename = "nextCursor")]
     pub next_cursor: Option<String>,
 }
-/// Generated schema type `AuthSessionsLogoutRequestProofFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsLogoutRequestProofFormat {
-    /// The `trellis.session-proof.v1` wire value.
-    #[serde(rename = "trellis.session-proof.v1")]
-    TrellisSessionProofV1,
-}
-impl AuthSessionsLogoutRequestProofFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisSessionProofV1 => "trellis.session-proof.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthSessionsLogoutRequestProofFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthSessionsLogoutRequestProofFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthSessionsLogoutRequestProofFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthSessionsLogoutRequestProofFormat> for &str {
-    fn eq(&self, other: &AuthSessionsLogoutRequestProofFormat) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthSessionsLogoutRequestProof`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthSessionsLogoutRequestProof {
-    /// The `format` wire field.
-    pub format: AuthSessionsLogoutRequestProofFormat,
-    /// The `signature` wire field.
-    pub signature: String,
-}
-/// Generated schema type `AuthSessionsLogoutRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthSessionsLogoutRequest {
-    /// The `issuedAt` wire field.
-    #[serde(rename = "issuedAt")]
-    pub issued_at: i64,
-    /// The `proof` wire field.
-    pub proof: AuthSessionsLogoutRequestProof,
-    /// The `requestId` wire field.
-    #[serde(rename = "requestId")]
-    pub request_id: String,
-    /// The `sessionId` wire field.
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-}
 /// Generated schema type `AuthSessionsLogoutResponseSessionParticipantKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthSessionsLogoutResponseSessionParticipantKind {

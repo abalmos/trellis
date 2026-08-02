@@ -21,6 +21,7 @@ mod bootstrap;
 mod deploy;
 mod runtime;
 mod self_cmd;
+mod server;
 mod trust_tooling;
 
 const SELF_UPDATE_TARGET: SelfUpdateTarget = SelfUpdateTarget::new(
@@ -50,30 +51,14 @@ pub async fn run() -> miette::Result<()> {
             let report = trellis_runtime::check(args.mode, &args.config)
                 .await
                 .into_diagnostic()?;
-            if output::is_json(format) {
-                output::print_json(&report)?;
-            } else {
-                println!(
-                    "{}",
-                    output::table(
-                        &["check", "status", "detail"],
-                        report
-                            .checks
-                            .iter()
-                            .map(|check| vec![
-                                check.name.clone(),
-                                format!("{:?}", check.status).to_ascii_lowercase(),
-                                check.detail.clone(),
-                            ])
-                            .collect(),
-                    ),
-                );
-            }
-            if !report.valid {
+            let valid = report.valid;
+            print_check_report(format, &report)?;
+            if !valid {
                 return Err(miette::miette!("runtime preflight checks failed"));
             }
         }
         TopLevelCommand::Init(command) => bootstrap::init(format, command).await?,
+        TopLevelCommand::Server(args) => server::run(format, args).await?,
         TopLevelCommand::Keys(command) => match command.command {
             KeysSubcommand::New(args) => runtime::keygen_command(format, &args)?,
         },
@@ -85,6 +70,32 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Version => runtime::version_command(format)?,
     }
 
+    Ok(())
+}
+
+fn print_check_report(
+    format: OutputFormat,
+    report: &trellis_runtime::RuntimeCheckReport,
+) -> miette::Result<()> {
+    if output::is_json(format) {
+        output::print_json(report)?;
+    } else {
+        println!(
+            "{}",
+            output::table(
+                &["check", "status", "detail"],
+                report
+                    .checks
+                    .iter()
+                    .map(|check| vec![
+                        check.name.clone(),
+                        format!("{:?}", check.status).to_ascii_lowercase(),
+                        check.detail.clone(),
+                    ])
+                    .collect(),
+            ),
+        );
+    }
     Ok(())
 }
 
@@ -311,16 +322,14 @@ mod tests {
             inbox_prefix: "_INBOX.ses_test".to_string(),
             bootstrap_jwt: "jwt".to_string(),
             authorization_context: serde_json::from_value(serde_json::json!({
-                "context": "context",
-                "contextDigest": "digest",
-                "refreshAt": 1_767_225_500,
+                "context": {},
                 "trust": {
                     "root": {},
-                    "issuerManifestGeneration": 1,
-                    "issuerManifestDigest": "digest",
-                    "issuerManifestLocator": "/manifest",
-                    "issuerCertificateLocator": "/certificate",
-                    "contextRegistryLocator": "/contexts/",
+                    "manifest": {},
+                    "authorizationRegistry": {
+                        "trustBucket": "trellis_authorization_trust",
+                        "contextBucket": "trellis_authorization_contexts"
+                    },
                     "policy": {
                         "allowedClockSkewSeconds": 30,
                         "maximumContextLifetimeSeconds": 300,

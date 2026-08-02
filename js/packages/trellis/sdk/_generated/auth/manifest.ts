@@ -2,7 +2,7 @@
 
 export const API_ID = "trellis.auth@v1" as const;
 export const API_DIGEST =
-  "nyfMRub9NVIpXgo3CkJZ07_FeMvu599wV3NaXTLrrpQ" as const;
+  "k-AVuZetf28XCxaYc2HEIzbafPeA63WeRgg0YmHtia0" as const;
 export const API = {
   "capabilities": {
     "admin": {
@@ -957,19 +957,6 @@ export const API = {
       "output": { "schema": "AuthDevicesRemoveResponse" },
       "version": "v1",
     },
-    "Auth.Events.Validate": {
-      "docs": {
-        "markdown":
-          "Transitionally validate an event against retained Rust-owned session evidence.\n",
-        "summary":
-          "Transitionally validate an event against retained Rust-owned session evidence.",
-      },
-      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
-      "input": { "schema": "AuthEventsValidateRequest" },
-      "internal": true,
-      "output": { "schema": "AuthEventsValidateResponse" },
-      "version": "v1",
-    },
     "Auth.IdentityAuthority.Get": {
       "docs": {
         "markdown":
@@ -1092,19 +1079,6 @@ export const API = {
       "errors": ["AuthError", "UnexpectedError", "ValidationError"],
       "input": { "schema": "AuthPortalsRoutesRemoveRequest" },
       "output": { "schema": "AuthPortalsRoutesRemoveResponse" },
-      "version": "v1",
-    },
-    "Auth.Requests.Validate": {
-      "docs": {
-        "markdown":
-          "Transitionally validate an ordinary request against Rust-owned current issuance state.\n",
-        "summary":
-          "Transitionally validate an ordinary request against Rust-owned current issuance state.",
-      },
-      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
-      "input": { "schema": "AuthRequestsValidateRequest" },
-      "internal": true,
-      "output": { "schema": "AuthRequestsValidateResponse" },
       "version": "v1",
     },
     "Auth.ServiceInstances.Disable": {
@@ -6601,63 +6575,6 @@ export const API = {
       "required": ["code", "message", "retryable", "field"],
       "type": "object",
     },
-    "AuthEventsValidateRequest": {
-      "properties": {
-        "eventId": { "minLength": 1, "type": "string" },
-        "eventTime": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "payloadDigest": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
-        "sessionId": { "minLength": 1, "type": "string" },
-        "signature": { "minLength": 1, "type": "string" },
-        "subject": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "sessionId",
-        "subject",
-        "eventId",
-        "eventTime",
-        "payloadDigest",
-        "signature",
-      ],
-      "type": "object",
-    },
-    "AuthEventsValidateResponse": {
-      "properties": {
-        "allowed": { "type": "boolean" },
-        "caller": {
-          "anyOf": [{
-            "properties": {
-              "capabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "enum": ["service", "app", "device", "agent"],
-              },
-              "principalId": { "minLength": 1, "type": "string" },
-              "principalKind": { "enum": ["user", "service", "device"] },
-              "sessionId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "sessionId",
-              "principalId",
-              "principalKind",
-              "participantId",
-              "participantKind",
-              "capabilities",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "denialCode": { "type": ["string", "null"] },
-      },
-      "required": ["allowed", "denialCode", "caller"],
-      "type": "object",
-    },
     "AuthIdentityAuthorityGetRequest": {
       "properties": { "authorityId": { "minLength": 1, "type": "string" } },
       "required": ["authorityId"],
@@ -8214,65 +8131,6 @@ export const API = {
       "required": ["removed"],
       "type": "object",
     },
-    "AuthRequestsValidateRequest": {
-      "properties": {
-        "issuedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "payloadDigest": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
-        "reply": { "type": ["string", "null"] },
-        "requestId": { "minLength": 1, "type": "string" },
-        "sessionId": { "minLength": 1, "type": "string" },
-        "signature": { "minLength": 1, "type": "string" },
-        "subject": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "sessionId",
-        "subject",
-        "reply",
-        "requestId",
-        "issuedAt",
-        "payloadDigest",
-        "signature",
-      ],
-      "type": "object",
-    },
-    "AuthRequestsValidateResponse": {
-      "properties": {
-        "allowed": { "type": "boolean" },
-        "caller": {
-          "anyOf": [{
-            "properties": {
-              "capabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "enum": ["service", "app", "device", "agent"],
-              },
-              "principalId": { "minLength": 1, "type": "string" },
-              "principalKind": { "enum": ["user", "service", "device"] },
-              "sessionId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "sessionId",
-              "principalId",
-              "principalKind",
-              "participantId",
-              "participantKind",
-              "capabilities",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "denialCode": { "type": ["string", "null"] },
-      },
-      "required": ["allowed", "denialCode", "caller"],
-      "type": "object",
-    },
     "AuthServiceInstancesDisableRequest": {
       "properties": {
         "expectedVersion": {
@@ -8721,24 +8579,8 @@ export const API = {
       "type": "object",
     },
     "AuthSessionsLogoutRequest": {
-      "properties": {
-        "issuedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "proof": {
-          "properties": {
-            "format": { "const": "trellis.session-proof.v1" },
-            "signature": { "minLength": 1, "type": "string" },
-          },
-          "required": ["format", "signature"],
-          "type": "object",
-        },
-        "requestId": { "minLength": 1, "type": "string" },
-        "sessionId": { "minLength": 1, "type": "string" },
-      },
-      "required": ["sessionId", "requestId", "issuedAt", "proof"],
+      "properties": {},
+      "required": [],
       "type": "object",
     },
     "AuthSessionsLogoutResponse": {

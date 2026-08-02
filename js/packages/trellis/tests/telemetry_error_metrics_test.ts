@@ -56,13 +56,6 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
     })["trellis.operation"],
     undefined,
   );
-  assertEquals(
-    buildTrellisErrorMetricAttributes(error, {
-      operation: "Auth.Requests.Validate",
-    })["trellis.operation"],
-    "Auth.Requests.Validate",
-  );
-
   const hostileError = Object.defineProperties({}, {
     type: {
       get() {
@@ -92,7 +85,6 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
   recordTrellisError(error, {
     surface: "rpc",
     direction: "client",
-    operation: "Auth.Requests.Validate",
     phase: "remote_error",
   });
   recordTrellisError(hostileError, {
@@ -104,7 +96,7 @@ Deno.test("recordTrellisError emits sanitized low-cardinality attributes", async
 
   const dataPoint = findTrellisErrorDataPoint({
     "trellis.surface": "rpc",
-    "trellis.operation": "Auth.Requests.Validate",
+    "trellis.phase": "remote_error",
   });
   assertExists(dataPoint);
   assertEquals(dataPoint.attributes["trellis.remote_error.type"], "AuthError");
@@ -121,6 +113,13 @@ Deno.test("RPC client template failures record trellis error metric", async () =
     rpc: {
       "Test.Echo": {
         subject: "rpc.v1.Test.Echo.{id}",
+        permission: Object.freeze({
+          apiId: "test@v1",
+          apiVersion: "v1",
+          surfaceKind: "rpc",
+          surfaceName: "Test.Echo",
+          action: "call",
+        }),
         input: Type.Object({}),
         output: Type.Object({ ok: Type.Boolean() }),
         callerCapabilities: [],
@@ -160,6 +159,13 @@ Deno.test("Feed client template failures record trellis error metric", async () 
     feeds: {
       "Test.Stream": {
         subject: "feeds.v1.Test.Stream.{id}",
+        permission: Object.freeze({
+          apiId: "test@v1",
+          apiVersion: "v1",
+          surfaceKind: "feed",
+          surfaceName: "Test.Stream",
+          action: "subscribe",
+        }),
         input: Type.Object({}),
         event: Type.Object({ ok: Type.Boolean() }),
         subscribeCapabilities: [],

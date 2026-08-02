@@ -1,8 +1,4 @@
 export {
-  CONTRACT as TRELLIS_AUTH_CONTRACT,
-  CONTRACT_DIGEST as TRELLIS_AUTH_DIGEST,
-} from "../../../../packages/trellis/sdk/auth_manifest.ts";
-export {
   CONTRACT as TRELLIS_CORE_CONTRACT,
   CONTRACT_DIGEST as TRELLIS_CORE_DIGEST,
 } from "../../../../packages/trellis/sdk/core_manifest.ts";

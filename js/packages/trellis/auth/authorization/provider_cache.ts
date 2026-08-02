@@ -1,0 +1,894 @@
+import type { NatsConnection } from "@nats-io/nats-core";
+import type { KvEntry, KvWatchEntry } from "@nats-io/kv";
+
+import {
+  type AuthorizationContextVerificationPolicyV1,
+  type AuthorizationVerificationErrorCode,
+  type VerifiedAuthorizationContextTokenProjection,
+  verifyAuthorizationContextWasm,
+  type VerifyAuthorizationEventV2Args,
+  type VerifyAuthorizationEventV2Result,
+  verifyAuthorizationEventV2Wasm,
+  verifyAuthorizationManifestWasm,
+  type VerifyAuthorizationRequestV2Args,
+  type VerifyAuthorizationRequestV2Result,
+  verifyAuthorizationRequestV2Wasm,
+} from "../protocol_wasm.ts";
+import { canonicalizeJsonValue } from "../utils.ts";
+import {
+  type AuthorizationContextCache,
+  authorizationContextVerificationPolicy,
+} from "./client_context.ts";
+import {
+  type AuthorizationRegistryIoCounters,
+  AuthorizationRegistryReader,
+  type ManifestPointer,
+  parseManifestPointer,
+  registryWatchEntry,
+} from "./nats_registry.ts";
+import type {
+  AuthorizationProviderEventV2,
+  AuthorizationProviderRequestV2,
+  AuthorizationRegistryBinding,
+  AuthorizationTrustBundle,
+} from "./types.ts";
+
+const REVOCATION_PREFIX = "revocation.";
+
+/** Observable provider registry health. */
+export type AuthorizationProviderCacheHealth = {
+  manifestRevision: number;
+  revocationRevision: number;
+  lastUpdateAt: number;
+  healthy: boolean;
+};
+
+/** Provider I/O counters used by local hot-path tests and diagnostics. */
+export type AuthorizationProviderIoCounters =
+  & AuthorizationRegistryIoCounters
+  & {
+    contextResolves: number;
+  };
+
+/** Internal marker for retryable provider registry or readiness failure. */
+export class AuthorizationProviderUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthorizationProviderUnavailableError";
+  }
+}
+
+/** Provider attach options; the registry binding itself remains internal. */
+export type AuthorizationProviderCacheOptions = {
+  now?: () => number;
+};
+
+type ManifestRecord = {
+  pointer: ManifestPointer;
+  value: Record<string, unknown>;
+};
+
+type ProviderContextEntry = {
+  epoch: number;
+  contextDigest: string;
+  context: Record<string, unknown>;
+  manifestGeneration: number;
+  retainedUntil: number;
+  root: unknown;
+  verified?: VerifiedAuthorizationContextTokenProjection;
+};
+
+type WatchOutcome = "restart" | "stopped";
+
+const integrationTestContexts = new WeakMap<
+  AuthorizationProviderCache,
+  Map<string, ProviderContextEntry>
+>();
+
+/** @internal Returns verified contexts for live integration assertions. */
+export function integrationTestResolvedContexts(
+  cache: AuthorizationProviderCache,
+): Array<{
+  contextDigest: string;
+  context: Record<string, unknown>;
+  manifestGeneration: number;
+}> {
+  return [...(integrationTestContexts.get(cache)?.values() ?? [])].map(
+    (entry) => ({
+      contextDigest: entry.contextDigest,
+      context: structuredClone(entry.context),
+      manifestGeneration: entry.manifestGeneration,
+    }),
+  );
+}
+
+/**
+ * Connected provider-side authorization verifier.
+ *
+ * Unknown contexts resolve only through the connected NATS authorization KV
+ * registry. Once resolved, request and event verification is memory-only apart
+ * from the Rust/WASM verifier call.
+ */
+export class AuthorizationProviderCache {
+  readonly #registry: AuthorizationRegistryReader;
+  readonly #cache: AuthorizationContextCache;
+  readonly #root: unknown;
+  readonly #trust: AuthorizationTrustBundle;
+  readonly #now: () => number;
+  #minimumManifestGeneration: number;
+  #currentManifest?: ManifestRecord;
+  #contexts = new Map<string, ProviderContextEntry>();
+  #inFlight = new Map<string, Promise<ProviderContextEntry>>();
+  #revocations = new Map<string, number>();
+  #revocationRevisions = new Map<string, number>();
+  #health: AuthorizationProviderCacheHealth = {
+    manifestRevision: 0,
+    revocationRevision: 0,
+    lastUpdateAt: 0,
+    healthy: false,
+  };
+  #contextResolves = 0;
+  #stopped = false;
+  #connected = true;
+  #restartWatch?: () => void;
+  #manifestEpoch = 0;
+  #task?: Promise<void>;
+  #readyWaiters = new Set<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }>();
+
+  private constructor(
+    registry: AuthorizationRegistryReader,
+    cache: AuthorizationContextCache,
+    bundle: ReturnType<AuthorizationContextCache["bundle"]>,
+    material: ReturnType<
+      AuthorizationContextCache["installedVerificationMaterial"]
+    >,
+    options: AuthorizationProviderCacheOptions,
+  ) {
+    this.#registry = registry;
+    this.#cache = cache;
+    this.#root = structuredClone(material.root);
+    this.#trust = structuredClone(bundle.trust);
+    this.#minimumManifestGeneration = cache.minimumManifestGeneration();
+    this.#now = options.now ?? cache.correctedNowSeconds.bind(cache);
+    integrationTestContexts.set(this, this.#contexts);
+    {
+      const manifest = parseRecord(
+        structuredClone(material.manifest),
+        "installed authorization issuer manifest",
+      );
+      const context = structuredClone(material.verified.context);
+      const manifestRecord: ManifestRecord = {
+        pointer: {
+          generation: material.verified.manifestGeneration,
+          digest: material.verified.manifestDigest,
+          revision: 0,
+        },
+        value: manifest,
+      };
+      this.#currentManifest = manifestRecord;
+      this.#contexts.set(material.contextDigest, {
+        epoch: this.#manifestEpoch,
+        contextDigest: material.contextDigest,
+        context,
+        manifestGeneration: material.verified.manifestGeneration,
+        retainedUntil: context.expiresAt,
+        root: structuredClone(material.root),
+        verified: structuredClone(material.verified),
+      });
+    }
+  }
+
+  /** Attach to the bootstrap-selected NATS authorization registry. */
+  static async attach(
+    nats: NatsConnection,
+    binding: AuthorizationRegistryBinding,
+    cache: AuthorizationContextCache,
+    options: AuthorizationProviderCacheOptions = {},
+  ): Promise<AuthorizationProviderCache> {
+    const bundle = cache.bundle();
+    const material = cache.installedVerificationMaterial();
+    if (
+      canonicalizeJsonValue(binding) !==
+        canonicalizeJsonValue(bundle.trust.authorizationRegistry) ||
+      canonicalizeJsonValue(material.root) !==
+        canonicalizeJsonValue(bundle.trust.root)
+    ) {
+      throw new Error("authorization trust or registry binding does not match");
+    }
+    const registry = await AuthorizationRegistryReader.open(
+      nats,
+      binding,
+    );
+    return new AuthorizationProviderCache(
+      registry,
+      cache,
+      bundle,
+      material,
+      options,
+    );
+  }
+
+  /** Start the registry watches and initialize their current state. */
+  start(): void {
+    if (this.#task) return;
+    this.#stopped = false;
+    this.#markUnhealthy();
+    this.#task = this.#run();
+  }
+
+  /** Stop watches without closing the caller-owned NATS connection. */
+  stop(): void {
+    this.#stopped = true;
+    this.#health.healthy = false;
+    for (const waiter of this.#readyWaiters) {
+      waiter.reject(
+        new Error("authorization provider stopped before readiness"),
+      );
+    }
+    this.#readyWaiters.clear();
+  }
+
+  /** Wait until current manifest and revocation watch state are initialized. */
+  waitReady(options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {}): Promise<void> {
+    if (this.#stopped) {
+      return Promise.reject(
+        new Error("authorization provider stopped before readiness"),
+      );
+    }
+    if (this.#health.healthy) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const waiter = { resolve, reject };
+      this.#readyWaiters.add(waiter);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const abort = () => {
+        this.#readyWaiters.delete(waiter);
+        if (timer !== undefined) clearTimeout(timer);
+        reject(
+          options.signal?.reason ?? new DOMException("Aborted", "AbortError"),
+        );
+      };
+      if (options.signal) {
+        if (options.signal.aborted) {
+          abort();
+          return;
+        }
+        options.signal.addEventListener("abort", abort, { once: true });
+      }
+      if (options.timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          this.#readyWaiters.delete(waiter);
+          reject(new Error("authorization provider readiness timed out"));
+        }, options.timeoutMs);
+      }
+    });
+  }
+
+  /** Return the current registry-watch health. */
+  health(): AuthorizationProviderCacheHealth {
+    return { ...this.#health };
+  }
+
+  /** Return provider and registry I/O counters. */
+  ioCounters(): AuthorizationProviderIoCounters {
+    return {
+      ...this.#registry.ioCounters(),
+      contextResolves: this.#contextResolves,
+    };
+  }
+
+  /** Apply framework-level NATS lifecycle state to provider readiness. */
+  observeConnectionPhase(
+    phase: "connected" | "disconnected" | "reconnecting" | "error" | "closed",
+  ): void {
+    // NATS reports denied publishes and other request-scoped failures as
+    // `error` while the connection and registry watches remain healthy.
+    if (phase === "error") return;
+    this.#connected = phase === "connected";
+    if (!this.#connected) {
+      this.#markUnhealthy();
+      this.#restartWatch?.();
+    }
+  }
+
+  /** Resolve one context digest through the connected registry. */
+  async resolveContext(
+    contextDigest: string,
+  ): Promise<VerifiedAuthorizationContextTokenProjection> {
+    this.#requireHealthy();
+    const entry = await this.#resolveEntry(contextDigest);
+    return structuredClone(
+      await this.#ensureVerified(entry, false, this.#now()),
+    );
+  }
+
+  /** Verify a presented request-v2 proof with exact route permissions. */
+  async verifyRequestV2(
+    request: AuthorizationProviderRequestV2,
+  ): Promise<VerifyAuthorizationRequestV2Result> {
+    try {
+      this.#requireHealthy();
+      const entry = await this.#resolveEntry(request.contextDigest);
+      const result = await verifyAuthorizationRequestV2Wasm(
+        await this.#requestInput(entry, request),
+      );
+      if (!result.ok) return structuredClone(result);
+      if (this.#revocationEvidence(entry.contextDigest) !== undefined) {
+        return providerRequestFailure(
+          "PermissionDenied",
+          "/authorization-context",
+        );
+      }
+      return structuredClone(result);
+    } catch {
+      return providerRequestFailure("InvalidInput", "/authorization-context");
+    }
+  }
+
+  /** Verify a presented event-v2 proof with exact publish permissions. */
+  async verifyEventV2(
+    event: AuthorizationProviderEventV2,
+  ): Promise<VerifyAuthorizationEventV2Result> {
+    try {
+      this.#requireHealthy();
+      parseEventTime(event.eventTime);
+      const entry = await this.#resolveEntry(event.contextDigest);
+      const revokedAt = this.#revocationEvidence(entry.contextDigest);
+      const result = await verifyAuthorizationEventV2Wasm(
+        await this.#eventInput(
+          entry,
+          event,
+          revokedAt ?? null,
+        ),
+      );
+      if (!result.ok) return structuredClone(result);
+      return structuredClone(result);
+    } catch (error) {
+      if (error instanceof AuthorizationProviderUnavailableError) throw error;
+      return providerEventFailure("InvalidInput", "/authorization-context");
+    }
+  }
+
+  async #run(): Promise<void> {
+    while (!this.#stopped) {
+      try {
+        const outcome = await this.#watchOnce();
+        if (outcome === "stopped") return;
+      } catch {
+        this.#markUnhealthy();
+      }
+      if (this.#stopped) return;
+      await delay(250);
+    }
+  }
+
+  async #watchOnce(): Promise<WatchOutcome> {
+    this.#assertSourceTrust();
+    let requestRestart = () => {};
+    const restart = new Promise<{ kind: "restart" }>((resolve) => {
+      requestRestart = () => resolve({ kind: "restart" });
+    });
+    this.#restartWatch = requestRestart;
+    const manifestWatch = await this.#registry.watchManifestCurrent();
+    const revocations = await this.#registry.watchRevocations();
+    const revocationWatch = revocations.iterator;
+    try {
+      // Watches are established before their initial current state is read.
+      await this.#initializeManifest();
+      for (let index = 0; index < revocations.initialPending; index += 1) {
+        const entry = await revocationWatch.next();
+        if (entry.done) {
+          throw new Error("authorization revocation initial watch ended");
+        }
+        this.#observeRevocation(entry.value);
+      }
+      if (!this.#connected) return "restart";
+      this.#markReady();
+      let manifestNext = manifestWatch.next();
+      let revocationNext = revocationWatch.next();
+      while (!this.#stopped) {
+        const event = await Promise.race([
+          manifestNext.then((result) => ({
+            kind: "manifest" as const,
+            result,
+          })),
+          revocationNext.then((result) => ({
+            kind: "revocation" as const,
+            result,
+          })),
+          restart,
+        ]);
+        if (event.kind === "restart") return "restart";
+        if (event.result.done) {
+          throw new Error(`${event.kind} authorization registry watch ended`);
+        }
+        if (event.kind === "manifest") {
+          manifestNext = manifestWatch.next();
+          this.#markUnhealthy();
+          const pointer = parseManifestPointer(event.result.value.value);
+          await this.#observeManifest(
+            { ...pointer, revision: event.result.value.revision },
+            event.result.value.revision,
+          );
+          return "restart";
+        }
+        revocationNext = revocationWatch.next();
+        this.#observeRevocation(event.result.value);
+      }
+      return "stopped";
+    } finally {
+      if (this.#restartWatch === requestRestart) this.#restartWatch = undefined;
+      await closeIterator(manifestWatch);
+      await closeIterator(revocationWatch);
+    }
+  }
+
+  async #initializeManifest(): Promise<void> {
+    this.#assertSourceTrust();
+    const pointer = await this.#registry.getManifestCurrent();
+    if (!pointer) throw new Error("authorization manifest.current is missing");
+    await this.#observeManifest(pointer, pointer.revision);
+    if (this.#stopped) {
+      throw new Error("authorization provider stopped during initialization");
+    }
+  }
+
+  #markReady(): void {
+    this.#health.healthy = true;
+    this.#health.lastUpdateAt = this.#now();
+    for (const waiter of this.#readyWaiters) waiter.resolve();
+    this.#readyWaiters.clear();
+  }
+
+  async #observeManifest(
+    pointer: ManifestPointer,
+    revision: number,
+  ): Promise<void> {
+    if (revision <= this.#health.manifestRevision) return;
+    const current = this.#currentManifest;
+    if (pointer.generation < this.#minimumManifestGeneration) {
+      throw new Error("authorization manifest.current rolled back");
+    }
+    if (current) {
+      if (pointer.generation < current.pointer.generation) {
+        throw new Error("authorization manifest.current rolled back");
+      }
+      if (
+        pointer.generation === current.pointer.generation &&
+        pointer.digest !== current.pointer.digest
+      ) {
+        throw new Error(
+          "authorization manifest.current equivocates at the accepted generation",
+        );
+      }
+    }
+    if (current && pointer.generation === current.pointer.generation) {
+      this.#health.manifestRevision = revision;
+      this.#health.lastUpdateAt = this.#now();
+      return;
+    }
+
+    const stored = await this.#registry.getManifest(pointer.generation);
+    if (!stored) {
+      throw new Error("authorization issuer manifest is missing");
+    }
+    const value = parseJsonRecord(
+      stored.value,
+      "authorization issuer manifest",
+    );
+    const verifiedManifest = await verifyAuthorizationManifestWasm({
+      root: this.#root,
+      manifest: value,
+      policy: authorizationContextVerificationPolicy(
+        this.#trust.policy,
+        this.#now(),
+        this.#minimumManifestGeneration,
+      ),
+    });
+    if (
+      verifiedManifest.generation !== pointer.generation ||
+      verifiedManifest.digest !== pointer.digest
+    ) {
+      throw new Error("authorization issuer manifest identity mismatch");
+    }
+    await this.#cache.advanceManifestFloor(
+      verifiedManifest.generation,
+      verifiedManifest.digest,
+    );
+    const record: ManifestRecord = {
+      pointer,
+      value,
+    };
+    this.#manifestEpoch += 1;
+    this.#inFlight.clear();
+    this.#minimumManifestGeneration = verifiedManifest.generation;
+    this.#currentManifest = record;
+    this.#contexts.clear();
+    this.#health.manifestRevision = revision;
+    this.#health.lastUpdateAt = this.#now();
+    this.#cache.requestRefresh();
+  }
+
+  #observeRevocation(
+    entry: KvEntry | ReturnType<typeof registryWatchEntry>,
+  ): void {
+    const update = "operation" in entry &&
+        (entry.operation === "PUT" || entry.operation === "DEL" ||
+          entry.operation === "PURGE")
+      ? registryWatchEntry(entry as KvWatchEntry)
+      : entry;
+    const key = update.key;
+    const revision = update.revision;
+    if (revision < (this.#revocationRevisions.get(key) ?? 0)) return;
+    this.#revocationRevisions.set(key, revision);
+    this.#health.revocationRevision = Math.max(
+      this.#health.revocationRevision,
+      revision,
+    );
+    this.#health.lastUpdateAt = this.#now();
+    if (!key.startsWith(REVOCATION_PREFIX)) {
+      throw new Error("authorization revocation key is outside its prefix");
+    }
+    const contextDigest = key.slice(REVOCATION_PREFIX.length);
+    assertDigest(contextDigest);
+    if ("operation" in update && update.operation === "delete") {
+      this.#revocations.delete(contextDigest);
+      return;
+    }
+    const value = "value" in update ? update.value : undefined;
+    if (!value) throw new Error("authorization revocation value is missing");
+    this.#revocations.set(contextDigest, parseRevocation(value));
+  }
+
+  #evictExpiredContexts(): void {
+    const now = this.#now();
+    for (const [digest, entry] of this.#contexts) {
+      if (entry.retainedUntil <= now) this.#contexts.delete(digest);
+    }
+  }
+
+  async #resolveEntry(contextDigest: string): Promise<ProviderContextEntry> {
+    assertDigest(contextDigest);
+    this.#evictExpiredContexts();
+    const known = this.#contexts.get(contextDigest);
+    if (known) return known;
+    const pending = this.#inFlight.get(contextDigest);
+    if (pending) return await pending;
+    const epoch = this.#manifestEpoch;
+    const resolution = this.#resolveUnknown(contextDigest, epoch);
+    this.#inFlight.set(contextDigest, resolution);
+    try {
+      return await resolution;
+    } finally {
+      if (this.#inFlight.get(contextDigest) === resolution) {
+        this.#inFlight.delete(contextDigest);
+      }
+    }
+  }
+
+  async #resolveUnknown(
+    contextDigest: string,
+    epoch: number,
+  ): Promise<ProviderContextEntry> {
+    this.#contextResolves += 1;
+    let contextEntry;
+    try {
+      contextEntry = await this.#registry.getContext(contextDigest);
+    } catch (error) {
+      throw new AuthorizationProviderUnavailableError(String(error));
+    }
+    if (!contextEntry) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization context is missing from the registry",
+      );
+    }
+    const context = parseJsonRecord(
+      contextEntry.value,
+      "authorization context registry value",
+    );
+    const manifestGeneration = providerPositiveInteger(
+      context.issuerManifestGeneration,
+      "issuerManifestGeneration",
+    );
+    const expiresAt = providerPositiveInteger(context.expiresAt, "expiresAt");
+    const entry: ProviderContextEntry = {
+      epoch,
+      contextDigest,
+      context,
+      manifestGeneration,
+      retainedUntil: expiresAt,
+      root: structuredClone(this.#root),
+    };
+    if (epoch !== this.#manifestEpoch) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization manifest advanced during context resolution",
+      );
+    }
+    if (manifestGeneration === this.#currentManifest?.pointer.generation) {
+      this.#contexts.set(contextDigest, entry);
+    }
+    return entry;
+  }
+
+  async #ensureVerified(
+    entry: ProviderContextEntry,
+    historical: boolean,
+    verificationTime: number,
+  ): Promise<VerifiedAuthorizationContextTokenProjection> {
+    if (!historical && entry.epoch !== this.#manifestEpoch) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization manifest advanced during context verification",
+      );
+    }
+    if (
+      !historical &&
+      entry.manifestGeneration !== this.#currentManifest?.pointer.generation
+    ) {
+      throw new Error("authorization context manifest is not current");
+    }
+    const current = entry.manifestGeneration ===
+        this.#currentManifest?.pointer.generation &&
+      entry.epoch === this.#manifestEpoch;
+    const existing = current ? entry.verified : undefined;
+    if (existing) return existing;
+    const chain = await this.#resolveChain(entry);
+    const policy = this.#policyFor(entry, verificationTime, historical);
+    const verified = await verifyAuthorizationContextWasm({
+      root: entry.root,
+      manifest: chain.value,
+      context: entry.context,
+      policy,
+    });
+    if ((!historical && entry.epoch !== this.#manifestEpoch) || this.#stopped) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization registry changed during verification",
+      );
+    }
+    if (
+      verified.contextDigest !== entry.contextDigest ||
+      (chain.pointer.digest !== "" &&
+        verified.manifestDigest !== chain.pointer.digest) ||
+      verified.manifestGeneration !== chain.pointer.generation
+    ) {
+      throw new Error("authorization registry trust identity mismatch");
+    }
+    if (current) entry.verified = verified;
+    return verified;
+  }
+
+  async #resolveChain(
+    entry: ProviderContextEntry,
+  ): Promise<ManifestRecord> {
+    const manifest = await this.#resolveManifest(entry.manifestGeneration);
+    if (manifest.pointer.generation !== entry.manifestGeneration) {
+      throw new Error(
+        "authorization evidence does not match its manifest",
+      );
+    }
+    return manifest;
+  }
+
+  async #resolveManifest(generation: number): Promise<ManifestRecord> {
+    if (this.#currentManifest?.pointer.generation === generation) {
+      return this.#currentManifest;
+    }
+    if (generation >= this.#minimumManifestGeneration) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization context manifest is not current",
+      );
+    }
+    let manifestEntry;
+    try {
+      manifestEntry = await this.#registry.getManifest(generation);
+    } catch (error) {
+      throw new AuthorizationProviderUnavailableError(String(error));
+    }
+    if (!manifestEntry) {
+      throw new AuthorizationProviderUnavailableError(
+        "historical issuer manifest is missing",
+      );
+    }
+    const value = parseJsonRecord(
+      manifestEntry.value,
+      "historical issuer manifest",
+    );
+    const record: ManifestRecord = {
+      pointer: {
+        generation,
+        digest: "",
+        revision: manifestEntry.revision,
+      },
+      value,
+    };
+    return record;
+  }
+
+  async #requestInput(
+    entry: ProviderContextEntry,
+    request: AuthorizationProviderRequestV2,
+  ): Promise<VerifyAuthorizationRequestV2Args> {
+    const chain = await this.#resolveChain(entry);
+    return {
+      root: entry.root,
+      manifest: chain.value,
+      context: entry.context,
+      subject: request.subject,
+      reply: request.reply,
+      payload: new Uint8Array(request.payload),
+      iat: request.iat,
+      requestId: request.requestId,
+      proof: request.proof,
+      requiredPermissions: structuredClone(request.requiredPermissions),
+      requiredCapabilities: [...request.requiredCapabilities],
+      policy: this.#policyFor(entry, this.#now()),
+    };
+  }
+
+  async #eventInput(
+    entry: ProviderContextEntry,
+    event: AuthorizationProviderEventV2,
+    revokedAt: number | null,
+  ): Promise<VerifyAuthorizationEventV2Args> {
+    const chain = await this.#resolveChain(entry);
+    return {
+      root: entry.root,
+      manifest: chain.value,
+      context: entry.context,
+      subject: event.subject,
+      payload: new Uint8Array(event.payload),
+      eventId: event.eventId,
+      eventTime: event.eventTime,
+      proof: event.proof,
+      requiredPermissions: structuredClone(event.requiredPermissions),
+      requiredCapabilities: [...event.requiredCapabilities],
+      policy: this.#policyFor(entry, this.#now(), true),
+      revokedAt,
+    };
+  }
+
+  #policyFor(
+    entry: ProviderContextEntry,
+    nowUnixSeconds: number,
+    historical = false,
+  ): AuthorizationContextVerificationPolicyV1 {
+    if (
+      !historical &&
+      entry.manifestGeneration < this.#minimumManifestGeneration
+    ) {
+      throw new Error(
+        "authorization context manifest is below the trust floor",
+      );
+    }
+    const generation = entry.manifestGeneration;
+    return authorizationContextVerificationPolicy(
+      this.#trust.policy,
+      nowUnixSeconds,
+      generation,
+    );
+  }
+
+  #revocationEvidence(contextDigest: string): number | undefined {
+    return this.#revocations.get(contextDigest);
+  }
+
+  #assertSourceTrust(): void {
+    const currentBundle = this.#cache.bundle();
+    const currentMaterial = this.#cache.installedVerificationMaterial();
+    if (
+      canonicalizeJsonValue(currentMaterial.root) !==
+        canonicalizeJsonValue(this.#root) ||
+      canonicalizeJsonValue(currentBundle.trust.authorizationRegistry) !==
+        canonicalizeJsonValue(this.#trust.authorizationRegistry)
+    ) {
+      throw new Error("authorization provider trust or registry changed");
+    }
+    const minimumManifestGeneration = Math.max(
+      this.#minimumManifestGeneration,
+      this.#cache.minimumManifestGeneration(),
+    );
+    if (minimumManifestGeneration > this.#minimumManifestGeneration) {
+      this.#minimumManifestGeneration = minimumManifestGeneration;
+      for (const entry of this.#contexts.values()) {
+        entry.verified = undefined;
+      }
+    }
+  }
+
+  #requireHealthy(): void {
+    this.#assertSourceTrust();
+    if (!this.#health.healthy || this.#stopped) {
+      throw new AuthorizationProviderUnavailableError(
+        "authorization provider is not healthy",
+      );
+    }
+  }
+
+  #markUnhealthy(): void {
+    this.#health.healthy = false;
+  }
+}
+
+function parseJsonRecord(
+  value: Uint8Array,
+  kind: string,
+): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(value));
+  if (
+    parsed === null || typeof parsed !== "object" || Array.isArray(parsed)
+  ) throw new Error(`${kind} is invalid`);
+  return parsed as Record<string, unknown>;
+}
+
+function parseRevocation(value: Uint8Array): number {
+  const record = parseJsonRecord(value, "authorization context revocation");
+  if (
+    Object.keys(record).length !== 1 ||
+    typeof record.revokedAt !== "number" ||
+    !Number.isSafeInteger(record.revokedAt) ||
+    record.revokedAt <= 0
+  ) {
+    throw new Error("authorization context revocation is invalid");
+  }
+  return record.revokedAt;
+}
+
+function parseRecord(value: unknown, kind: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${kind} is invalid`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function providerPositiveInteger(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} is invalid`);
+  }
+  return value;
+}
+
+function assertDigest(value: string): void {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(value)) {
+    throw new Error("authorization context digest is invalid");
+  }
+}
+
+function parseEventTime(value: string): number {
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) throw new Error("event time is invalid");
+  return Math.floor(milliseconds / 1_000);
+}
+
+async function closeIterator(iterator: AsyncIterator<unknown>): Promise<void> {
+  if (typeof iterator.return === "function") {
+    await Promise.race([iterator.return(), delay(1_000)]);
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function providerRequestFailure(
+  code: AuthorizationVerificationErrorCode,
+  path: string,
+): {
+  ok: false;
+  error: { code: AuthorizationVerificationErrorCode; path: string };
+} {
+  return { ok: false, error: { code, path } };
+}
+
+function providerEventFailure(
+  code: AuthorizationVerificationErrorCode,
+  path: string,
+): {
+  ok: false;
+  error: { code: AuthorizationVerificationErrorCode; path: string };
+} {
+  return { ok: false, error: { code, path } };
+}

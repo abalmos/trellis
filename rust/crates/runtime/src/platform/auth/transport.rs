@@ -6,15 +6,13 @@ use serde_json::Value;
 use trellis_protocol::{
     parse_api_v1, parse_participant_v1, resolve_participant_v1, ApiArtifactV1, ApiSurfaceKindV1,
     AuthorizationPrincipalKindV1, ParticipantResourceKindV1, PermissionActionV1,
+    UnsignedAuthorizationContextV1,
 };
 
 use super::{
-    AuthorizationStateError, IssuableAuthorizationState, ParticipantBindingRecord,
+    AuthorizationRegistryBinding, AuthorizationStateError, ParticipantBindingRecord,
     ResourceBindingEvidence, ResourceProviderIdentity,
 };
-
-const REQUEST_VALIDATE_SUBJECT: &str = "rpc.v1.Auth.Requests.Validate";
-const EVENT_VALIDATE_SUBJECT: &str = "rpc.v1.Auth.Events.Validate";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TransportPermissions {
@@ -23,12 +21,14 @@ pub(crate) struct TransportPermissions {
 }
 
 pub(crate) fn compile_transport_permissions(
-    state: &IssuableAuthorizationState,
+    context: &UnsignedAuthorizationContextV1,
     binding: &ParticipantBindingRecord,
+    resource_bindings: &[ResourceBindingEvidence],
+    registry: &AuthorizationRegistryBinding,
 ) -> Result<TransportPermissions, AuthorizationStateError> {
-    if binding.participant_id != state.participant.id
-        || binding.artifact_digest != state.participant.artifact_digest
-        || binding.needs_digest != state.participant.needs_digest
+    if binding.participant_id != context.participant.id
+        || binding.artifact_digest != context.participant.artifact_digest
+        || binding.needs_digest != context.participant.needs_digest
     {
         return invalid("issuable state does not match participant binding");
     }
@@ -48,28 +48,54 @@ pub(crate) fn compile_transport_permissions(
     }
     let resolved = resolve_participant_v1(&participant, &apis)
         .map_err(|error| invalid_error(error.to_string()))?;
-    if resolved.participant_digest() != state.participant.artifact_digest
+    if resolved.participant_digest() != context.participant.artifact_digest
         || resolved
             .needs()
             .digest()
             .map_err(|error| invalid_error(error.to_string()))?
-            != state.participant.needs_digest
+            != context.participant.needs_digest
     {
         return invalid("resolved participant identity does not match issuable state");
     }
 
-    let mut publish = BTreeSet::from([
-        REQUEST_VALIDATE_SUBJECT.to_owned(),
-        EVENT_VALIDATE_SUBJECT.to_owned(),
-    ]);
-    let mut subscribe = BTreeSet::from([format!("{}.>", state.inbox_prefix)]);
+    let mut publish = BTreeSet::new();
+    let mut subscribe = BTreeSet::from([format!("{}.>", context.inbox_prefix)]);
+
+    // Narrow authorization-registry read/watch binding for every connected
+    // runtime. Direct reads are limited by key token shape, while watch consumer
+    // creation is bound to the two exact filters used by the registry clients.
+    publish.insert("$JS.API.INFO".to_owned());
+    let trust_stream = format!("KV_{}", registry.trust_bucket);
+    let context_stream = format!("KV_{}", registry.context_bucket);
+    publish.insert(format!("$JS.API.STREAM.INFO.{trust_stream}"));
+    publish.insert(format!("$JS.API.STREAM.INFO.{context_stream}"));
+    publish.insert(format!("$JS.FC.{trust_stream}.>"));
+    publish.insert(format!("$JS.FC.{context_stream}.>"));
+    publish.insert(format!(
+        "$JS.API.DIRECT.GET.{trust_stream}.$KV.{}.manifest.*",
+        registry.trust_bucket
+    ));
+    publish.insert(format!(
+        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.*",
+        registry.context_bucket
+    ));
+    publish.insert(format!(
+        "$JS.API.CONSUMER.CREATE.{trust_stream}.*.$KV.{}.manifest.current",
+        registry.trust_bucket
+    ));
+    publish.insert(format!(
+        "$JS.API.CONSUMER.CREATE.{context_stream}.*.$KV.{}.revocation.>",
+        registry.context_bucket
+    ));
+    publish.insert(format!("$JS.API.CONSUMER.INFO.{trust_stream}.*"));
+    publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
     if matches!(
-        state.principal.kind,
+        context.principal.kind,
         AuthorizationPrincipalKindV1::Service | AuthorizationPrincipalKindV1::Device
     ) {
         publish.insert("$JS.API.INFO".to_owned());
-        if state.principal.kind == AuthorizationPrincipalKindV1::Service {
-            let instance_id = state
+        if context.principal.kind == AuthorizationPrincipalKindV1::Service {
+            let instance_id = context
                 .instance_id
                 .as_deref()
                 .ok_or_else(|| invalid_error("service instance is missing"))?;
@@ -81,52 +107,25 @@ pub(crate) fn compile_transport_permissions(
             publish.insert(format!("$JS.API.$KV.{bucket}.>"));
             kv_read(&bucket, &mut publish);
         }
-        let deployment_id = state.deployment_id.as_deref().ok_or_else(|| {
+        let deployment_id = context.deployment_id.as_deref().ok_or_else(|| {
             invalid_error("deployed principal is missing deployment identity".to_owned())
         })?;
-        let instance_id = state.instance_id.as_deref().ok_or_else(|| {
+        let instance_id = context.instance_id.as_deref().ok_or_else(|| {
             invalid_error("deployed principal is missing instance identity".to_owned())
         })?;
-        let kind = match state.principal.kind {
+        let kind = match context.principal.kind {
             AuthorizationPrincipalKindV1::Service => "service",
             AuthorizationPrincipalKindV1::Device => "device",
             AuthorizationPrincipalKindV1::User => unreachable!(),
         };
         publish.insert(format!(
             "health.v1.heartbeat.{kind}.{}.{}.{}.{}.{}",
-            URL_SAFE_NO_PAD.encode(state.participant.id.as_bytes()),
-            URL_SAFE_NO_PAD.encode(state.participant.artifact_digest.as_bytes()),
+            URL_SAFE_NO_PAD.encode(context.participant.id.as_bytes()),
+            URL_SAFE_NO_PAD.encode(context.participant.artifact_digest.as_bytes()),
             URL_SAFE_NO_PAD.encode(deployment_id.as_bytes()),
             URL_SAFE_NO_PAD.encode(instance_id.as_bytes()),
-            state.session_public_key,
+            context.session_key,
         ));
-    }
-
-    // ponytail: transitional until the Jobs owner is folded into trellis-server.
-    if state.principal.kind == AuthorizationPrincipalKindV1::Service
-        && state.participant.id == "trellis.jobs@v1"
-    {
-        publish.insert("trellis.jobs.>".to_owned());
-        subscribe.insert("feed.v1.Jobs.Watch".to_owned());
-        for stream in ["JOBS", "JOBS_ADVISORIES"] {
-            publish.insert(format!("$JS.API.STREAM.INFO.{stream}"));
-            publish.insert(format!("$JS.API.CONSUMER.LIST.{stream}"));
-            publish.insert(format!("$JS.API.CONSUMER.NAMES.{stream}"));
-            publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}"));
-            publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
-            publish.insert(format!("$JS.API.CONSUMER.DURABLE.CREATE.{stream}.>"));
-            publish.insert(format!("$JS.API.CONSUMER.INFO.{stream}.>"));
-            publish.insert(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.>"));
-            publish.insert(format!("$JS.API.CONSUMER.DELETE.{stream}.>"));
-            publish.insert(format!("$JS.ACK.{stream}.>"));
-        }
-        publish.insert("$JS.API.STREAM.MSG.GET.JOBS".to_owned());
-        publish.insert("$JS.API.DIRECT.GET.JOBS".to_owned());
-        publish.insert("$JS.API.DIRECT.GET.JOBS.>".to_owned());
-        publish.insert("$JS.API.STREAM.INFO.JOBS_WORK".to_owned());
-        publish.insert("$JS.API.STREAM.MSG.GET.JOBS_WORK".to_owned());
-        publish.insert("$JS.API.DIRECT.GET.JOBS_WORK".to_owned());
-        publish.insert("$JS.API.DIRECT.GET.JOBS_WORK.>".to_owned());
     }
 
     for implementation in resolved.implemented_apis() {
@@ -137,7 +136,7 @@ pub(crate) fn compile_transport_permissions(
         let api_value = api
             .normalized_value()
             .map_err(|error| invalid_error(error.to_string()))?;
-        let session_prefix = &state.session_public_key[..16.min(state.session_public_key.len())];
+        let session_prefix = &context.session_key[..16.min(context.session_key.len())];
         subscribe.extend(provided.rpc().values().cloned());
         for name in provided.rpc().keys() {
             if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
@@ -156,7 +155,7 @@ pub(crate) fn compile_transport_permissions(
         subscribe.extend(provided.feeds().values().cloned());
     }
 
-    for atom in state.grant_set.permissions() {
+    for atom in context.grant_set.permissions() {
         if let Some((api_id, surface, name)) = atom.target().as_api_surface() {
             let api = apis
                 .get(api_id)
@@ -176,10 +175,10 @@ pub(crate) fn compile_transport_permissions(
             }
             publish.insert(format!("{subject}.control"));
         } else if let Some((participant_id, kind, name)) = atom.target().as_participant_resource() {
-            if participant_id != state.participant.id {
+            if participant_id != context.participant.id {
                 return invalid("resource grant belongs to another participant");
             }
-            let resource = resource_binding(&state.resource_bindings, kind, name)?;
+            let resource = resource_binding(resource_bindings, kind, name)?;
             compile_resource(resource, atom.action(), &mut publish, &mut subscribe)?;
         }
     }
@@ -188,6 +187,36 @@ pub(crate) fn compile_transport_permissions(
         publish: publish.into_iter().collect(),
         subscribe: subscribe.into_iter().collect(),
     })
+}
+
+#[cfg(test)]
+pub(crate) fn compile_test_transport_permissions(
+    state: &super::IssuableAuthorizationState,
+    binding: &ParticipantBindingRecord,
+    registry: &AuthorizationRegistryBinding,
+) -> Result<TransportPermissions, AuthorizationStateError> {
+    let context = UnsignedAuthorizationContextV1 {
+        format: trellis_protocol::AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+        authority: "test".to_owned(),
+        issuer_key_id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+        issuer_manifest_generation: 1,
+        session_id: state.session_id.clone(),
+        session_key: state.session_public_key.clone(),
+        principal: state.principal.clone(),
+        participant: state.participant.clone(),
+        authority_ref: state.authority_ref.clone(),
+        deployment_id: state.deployment_id.clone(),
+        instance_id: state.instance_id.clone(),
+        inbox_prefix: state.inbox_prefix.clone(),
+        issued_at: 1,
+        not_before: 1,
+        expires_at: 2,
+        grant_set: state.grant_set.clone(),
+        capabilities: state.capabilities.clone(),
+        extensions: serde_json::Map::new(),
+        critical: Vec::new(),
+    };
+    compile_transport_permissions(&context, binding, &state.resource_bindings, registry)
 }
 
 fn compile_api_surface(
@@ -430,7 +459,7 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_transport_permissions;
+    use super::compile_test_transport_permissions;
     use crate::platform::auth::{
         AuthorityKind, IssuableAuthorizationState, ParticipantBindingRecord,
         ParticipantBindingState, ResourceBindingEvidence, ResourceBindingState,
@@ -443,6 +472,88 @@ mod tests {
         AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, GrantSetV1,
         ParticipantResourceKindV1, PermissionActionV1, PermissionAtomV1, PermissionTargetV1,
     };
+
+    fn test_registry_binding() -> super::super::context::AuthorizationRegistryBinding {
+        super::super::context::AuthorizationRegistryBinding::test_binding()
+    }
+
+    #[test]
+    fn registry_read_watch_is_granted_and_writes_are_denied() {
+        let (binding, state) = fixture();
+        let permissions =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
+        for bucket in [
+            "KV_trellis_authorization_trust",
+            "KV_trellis_authorization_contexts",
+        ] {
+            assert!(permissions
+                .publish
+                .contains(&format!("$JS.API.STREAM.INFO.{bucket}")));
+            assert!(permissions
+                .publish
+                .contains(&format!("$JS.API.CONSUMER.INFO.{bucket}.*")));
+        }
+        for allowed in [
+            "$JS.API.DIRECT.GET.KV_trellis_authorization_trust.$KV.trellis_authorization_trust.manifest.*",
+            "$JS.API.DIRECT.GET.KV_trellis_authorization_contexts.$KV.trellis_authorization_contexts.*",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_trust.*.$KV.trellis_authorization_trust.manifest.current",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_contexts.*.$KV.trellis_authorization_contexts.revocation.>",
+            "$JS.FC.KV_trellis_authorization_trust.>",
+            "$JS.FC.KV_trellis_authorization_contexts.>",
+        ] {
+            assert!(permissions.publish.contains(&allowed.to_owned()));
+        }
+        assert!(permissions.publish.contains(&"$JS.API.INFO".to_owned()));
+        // KV value writes, registry administration, and stream mutation are denied.
+        for denied in [
+            "$KV.trellis_authorization_trust.>",
+            "$KV.trellis_authorization_contexts.>",
+            "$JS.API.CONSUMER.DELETE.KV_trellis_authorization_trust.*",
+            "$JS.API.CONSUMER.DELETE.KV_trellis_authorization_contexts.*",
+            "$JS.API.STREAM.CREATE.KV_trellis_authorization_trust",
+            "$JS.API.STREAM.UPDATE.KV_trellis_authorization_trust",
+            "$JS.API.STREAM.DELETE.KV_trellis_authorization_trust",
+            "$JS.API.KV.PURGE.trellis_authorization_trust",
+            "$JS.API.CONSUMER.LIST.KV_trellis_authorization_trust",
+            "$JS.API.CONSUMER.DELETE.KV_trellis_authorization_trust.consumer",
+            "$JS.API.CONSUMER.MSG.NEXT.KV_trellis_authorization_trust.consumer",
+            "$JS.ACK.KV_trellis_authorization_trust.consumer.>",
+            "$JS.API.STREAM.MSG.GET.KV_trellis_authorization_trust",
+            "$JS.API.STREAM.MSG.GET.KV_trellis_authorization_contexts",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_trust",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_contexts",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_trust.*.$KV.trellis_authorization_trust.>",
+            "$JS.API.CONSUMER.CREATE.KV_trellis_authorization_contexts.*.$KV.trellis_authorization_contexts.>",
+        ] {
+            assert!(
+                !permissions.publish.contains(&denied.to_owned()),
+                "granted denied registry permission {denied}"
+            );
+        }
+    }
+
+    #[test]
+    fn jobs_participant_has_no_transitional_transport_shortcut() {
+        let (binding, state) = fixture_for("acme.jobs@v1");
+        assert_eq!(state.participant.id, "acme.jobs@v1");
+        // Compile the fixture service identity and assert the transport carries
+        // no Jobs/JetStream shortcut subjects beyond the registry binding.
+        let permissions =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
+        assert!(!permissions
+            .publish
+            .iter()
+            .any(|subject| subject == "trellis.jobs.>"));
+        assert!(!permissions.publish.iter().any(|subject| {
+            (subject.starts_with("$JS.API.STREAM.INFO.JOBS")
+                || subject.starts_with("$JS.API.CONSUMER.")
+                || subject.starts_with("$JS.API.STREAM.MSG.GET.JOBS"))
+                && !subject.contains("KV_")
+        }));
+        assert!(!permissions
+            .subscribe
+            .contains(&"feed.v1.Jobs.Watch".to_owned()));
+    }
 
     #[test]
     fn compiler_is_exact_sorted_and_action_scoped() {
@@ -482,7 +593,8 @@ mod tests {
             error: None,
         }];
 
-        let permissions = compile_transport_permissions(&state, &binding).unwrap();
+        let permissions =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(permissions.publish.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(permissions
             .subscribe
@@ -505,7 +617,7 @@ mod tests {
             .contains(&"_INBOX.session.>".to_owned()));
         assert_eq!(
             permissions,
-            compile_transport_permissions(&state, &binding).unwrap()
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap()
         );
     }
 
@@ -515,14 +627,16 @@ mod tests {
         state.resource_bindings = vec![kv_binding("trellis-auth-runtime")];
 
         state.grant_set = GrantSetV1::new(Vec::new());
-        let none = compile_transport_permissions(&state, &binding).unwrap();
+        let none =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(!none
             .publish
             .iter()
             .any(|subject| subject.contains("AUTH_BROWSER_FLOWS")));
 
         state.grant_set = GrantSetV1::new(vec![kv_atom(PermissionActionV1::Read)]);
-        let read = compile_transport_permissions(&state, &binding).unwrap();
+        let read =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(read
             .publish
             .contains(&"$JS.API.DIRECT.GET.KV_AUTH_BROWSER_FLOWS".to_owned()));
@@ -531,7 +645,8 @@ mod tests {
             .contains(&"$KV.AUTH_BROWSER_FLOWS.>".to_owned()));
 
         state.grant_set = GrantSetV1::new(vec![kv_atom(PermissionActionV1::Write)]);
-        let write = compile_transport_permissions(&state, &binding).unwrap();
+        let write =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(write
             .publish
             .contains(&"$KV.AUTH_BROWSER_FLOWS.>".to_owned()));
@@ -541,7 +656,8 @@ mod tests {
             .any(|subject| subject.starts_with("$JS.API.DIRECT.GET.KV_AUTH_BROWSER_FLOWS")));
 
         state.grant_set = GrantSetV1::new(Vec::new());
-        let reduced = compile_transport_permissions(&state, &binding).unwrap();
+        let reduced =
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).unwrap();
         assert!(!reduced
             .publish
             .iter()
@@ -562,7 +678,9 @@ mod tests {
             PermissionActionV1::Read,
         )
         .unwrap()]);
-        assert!(compile_transport_permissions(&state, &binding).is_err());
+        assert!(
+            compile_test_transport_permissions(&state, &binding, &test_registry_binding()).is_err()
+        );
     }
 
     fn kv_atom(action: PermissionActionV1) -> PermissionAtomV1 {
@@ -594,11 +712,16 @@ mod tests {
     }
 
     fn fixture() -> (ParticipantBindingRecord, IssuableAuthorizationState) {
+        fixture_for("trellis-auth-runtime")
+    }
+
+    fn fixture_for(participant_id: &str) -> (ParticipantBindingRecord, IssuableAuthorizationState) {
         let api_value: Value =
             serde_json::from_str(include_str!("../../../trellis.api.json")).expect("auth API JSON");
-        let participant_value: Value =
+        let mut participant_value: Value =
             serde_json::from_str(include_str!("../../../trellis.participant.json"))
                 .expect("auth participant JSON");
+        participant_value["id"] = Value::String(participant_id.to_owned());
         let api = parse_api_v1(&api_value).expect("auth API");
         let participant = parse_participant_v1(&participant_value).expect("auth participant");
         let apis = std::collections::BTreeMap::from([(api.id().to_owned(), api.clone())]);

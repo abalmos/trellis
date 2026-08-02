@@ -5,7 +5,7 @@ use crate::constants::DEFAULT_TRELLIS_NAME;
 use crate::error::BootstrapError;
 use crate::nats_config::{render_nats_config, resolved_server_name};
 use crate::nats_material::generate_nats_material;
-use crate::output::{create_layout, write_nats_material};
+use crate::output::{create_layout, write_nats_material, write_private_file};
 use crate::runtime_config::render_trellis_config;
 use crate::types::{NatsBootstrapOptions, TrellisBootstrapOptions};
 use crate::validate::{
@@ -63,6 +63,10 @@ pub fn generate_trellis_bootstrap(options: &TrellisBootstrapOptions) -> Result<(
     fs::write(
         trellis_out.join("config.toml"),
         render_trellis_config(options),
+    )?;
+    write_private_file(
+        options.out.join("session.seed"),
+        format!("{}\n", trellis_local_bootstrap::generate_session_seed()),
     )?;
     Ok(())
 }

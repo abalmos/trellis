@@ -12,10 +12,12 @@ import {
 } from "@nats-io/nats-core";
 import { ulid } from "ulid";
 
-import type {
-  OperationTransferHandle,
-  RuntimeOperationTransferProgress,
-  TrellisAuth,
+import type { PermissionAtomV1 } from "../contract_support/runtime.ts";
+import {
+  type OperationTransferHandle,
+  type RuntimeOperationTransferProgress,
+  type TrellisAuth,
+  verifyLocalAuthorization,
 } from "../session.ts";
 import type { StoreError } from "../errors/StoreError.ts";
 import { TransferError } from "../errors/TransferError.ts";
@@ -25,7 +27,6 @@ import type {
   ReceiveTransferGrant,
   SendTransferGrant,
 } from "../transfer.ts";
-import { verifyTransferMessage } from "../transfer.ts";
 
 const UPLOAD_SUBJECT_PREFIX = "transfer.v1.upload";
 const DOWNLOAD_SUBJECT_PREFIX = "transfer.v1.download";
@@ -39,6 +40,8 @@ export type TransferStoreHandle = {
 
 export type InitiateUploadArgs = {
   sessionKey: string;
+  permission: PermissionAtomV1 | undefined;
+  requiredCapabilities: readonly string[];
   store: string;
   key: string;
   expiresInMs: number;
@@ -60,6 +63,8 @@ export type OperationUploadTransfer = {
 
 export type InitiateDownloadArgs = {
   sessionKey: string;
+  permission: PermissionAtomV1;
+  requiredCapabilities?: readonly string[];
   inboxPrefix: string;
   store: string;
   key: string;
@@ -87,6 +92,8 @@ type UploadSession = {
   subject: string;
   transferId: string;
   sessionKey: string;
+  permission: PermissionAtomV1 | undefined;
+  requiredCapabilities: readonly string[];
   expiresAtMs: number;
   store: TypedStore;
   key: string;
@@ -112,6 +119,8 @@ type DownloadSession = {
   subject: string;
   transferId: string;
   sessionKey: string;
+  permission: PermissionAtomV1;
+  requiredCapabilities: readonly string[];
   inboxPrefix: string;
   expiresAtMs: number;
   store: TypedStore;
@@ -429,6 +438,8 @@ export class ServiceTransfer {
       subject,
       transferId,
       sessionKey: args.sessionKey,
+      permission: args.permission,
+      requiredCapabilities: args.requiredCapabilities,
       expiresAtMs,
       store: storeValue,
       key: args.key,
@@ -453,12 +464,6 @@ export class ServiceTransfer {
     this.#uploadSessions.set(subject, session);
     this.#runUploadSession(session);
 
-    const ready = await this.#flushSubscriptionInterest("initiateUpload");
-    const readyValue = ready.take();
-    if (isErr(readyValue)) {
-      this.#expireUploadSession(subject, readyValue.error);
-      return Result.err(readyValue.error);
-    }
     if (!this.#uploadSessions.has(subject)) {
       return Result.err(
         new TransferError({
@@ -577,6 +582,8 @@ export class ServiceTransfer {
       subject,
       transferId,
       sessionKey: args.sessionKey,
+      permission: args.permission,
+      requiredCapabilities: [...(args.requiredCapabilities ?? [])],
       inboxPrefix: args.inboxPrefix,
       expiresAtMs,
       store: storeValue,
@@ -592,12 +599,6 @@ export class ServiceTransfer {
     this.#downloadSessions.set(subject, session);
     this.#runDownloadSession(session);
 
-    const ready = await this.#flushSubscriptionInterest("initiateDownload");
-    const readyValue = ready.take();
-    if (isErr(readyValue)) {
-      this.#cleanupDownloadSession(subject);
-      return Result.err(readyValue.error);
-    }
     if (!this.#downloadSessions.has(subject)) {
       return Result.err(
         new TransferError({
@@ -666,17 +667,6 @@ export class ServiceTransfer {
     return Result.ok(value);
   }
 
-  async #flushSubscriptionInterest(
-    operation: string,
-  ): Promise<ResultType<void, TransferError>> {
-    try {
-      await this.#nc.flush();
-      return Result.ok(undefined);
-    } catch (cause) {
-      return Result.err(new TransferError({ operation, cause }));
-    }
-  }
-
   async #runUploadSession(session: UploadSession): Promise<void> {
     try {
       for await (const msg of session.subscription) {
@@ -701,16 +691,18 @@ export class ServiceTransfer {
       return;
     }
 
-    const authenticated = await verifyTransferMessage({
-      expectedSessionKey: session.sessionKey,
-      subject: msg.subject,
-      payload: msg.data,
-      proof: msg.headers?.get("proof"),
-      sessionKey: msg.headers?.get("session-key"),
-      iat: msg.headers?.get("iat"),
-      requestId: msg.headers?.get("request-id"),
+    const authenticated = await verifyLocalAuthorization({
+      kind: "request",
+      cache: this.#auth.authorizationProviderCache,
+      message: msg,
+      permission: session.permission,
+      requiredCapabilities: session.requiredCapabilities,
     });
-    if (!authenticated) {
+    const authenticatedValue = authenticated.take();
+    if (
+      isErr(authenticatedValue) ||
+      authenticatedValue.sessionKey !== session.sessionKey
+    ) {
       const error = new TransferError({
         operation: "put",
         context: { reason: "invalid_proof" },
@@ -866,16 +858,18 @@ export class ServiceTransfer {
       return;
     }
 
-    const authenticated = await verifyTransferMessage({
-      expectedSessionKey: session.sessionKey,
-      subject: msg.subject,
-      payload: msg.data,
-      proof: msg.headers?.get("proof"),
-      sessionKey: msg.headers?.get("session-key"),
-      iat: msg.headers?.get("iat"),
-      requestId: msg.headers?.get("request-id"),
+    const authenticated = await verifyLocalAuthorization({
+      kind: "request",
+      cache: this.#auth.authorizationProviderCache,
+      message: msg,
+      permission: session.permission,
+      requiredCapabilities: session.requiredCapabilities,
     });
-    if (!authenticated) {
+    const authenticatedValue = authenticated.take();
+    if (
+      isErr(authenticatedValue) ||
+      authenticatedValue.sessionKey !== session.sessionKey
+    ) {
       publishError(
         this.#nc,
         reply,
@@ -921,7 +915,6 @@ export class ServiceTransfer {
       finalHeaders.set(TRANSFER_SEQUENCE_HEADER, String(seq));
       finalHeaders.set(TRANSFER_EOF_HEADER, "true");
       this.#nc.publish(reply, new Uint8Array(), { headers: finalHeaders });
-      await this.#nc.flush();
     } catch (cause) {
       publishError(
         this.#nc,

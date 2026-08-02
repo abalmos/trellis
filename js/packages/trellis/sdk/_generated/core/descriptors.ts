@@ -32,6 +32,13 @@ export const TrellisCatalog = rpcAction(
   "Trellis.Catalog",
   {
     subject: "rpc.v1.Trellis.Catalog",
+    permission: Object.freeze({
+      apiId: "trellis.core@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Trellis.Catalog",
+      action: "call",
+    }),
     input: schema<Types.TrellisCatalogInput>(TrellisCatalogRequestSchema),
     output: schema<Types.TrellisCatalogOutput>(TrellisCatalogResponseSchema),
     callerCapabilities: ["trellis.core::catalog.read"] as const,
@@ -47,6 +54,13 @@ export const TrellisContractGet = rpcAction(
   "Trellis.Contract.Get",
   {
     subject: "rpc.v1.Trellis.Contract.Get",
+    permission: Object.freeze({
+      apiId: "trellis.core@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Trellis.Contract.Get",
+      action: "call",
+    }),
     input: schema<Types.TrellisContractGetInput>(
       TrellisContractGetRequestSchema,
     ),
@@ -66,6 +80,13 @@ export const TrellisSurfaceStatus = rpcAction(
   "Trellis.Surface.Status",
   {
     subject: "rpc.v1.Trellis.Surface.Status",
+    permission: Object.freeze({
+      apiId: "trellis.core@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Trellis.Surface.Status",
+      action: "call",
+    }),
     input: schema<Types.TrellisSurfaceStatusInput>(
       TrellisSurfaceStatusRequestSchema,
     ),

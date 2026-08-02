@@ -62,15 +62,6 @@ pub struct PrincipalRecord {
     pub revoked_at: Option<i64>,
 }
 
-/// Authorization-relevant principal state transition.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PrincipalAuthorizationChange {
-    /// New principal state.
-    pub state: PrincipalState,
-    /// Transition time in Unix milliseconds.
-    pub changed_at: i64,
-}
-
 /// Link from an external provider identity to a stable user principal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

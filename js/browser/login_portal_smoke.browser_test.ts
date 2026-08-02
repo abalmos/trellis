@@ -5,9 +5,6 @@ import {
 } from "@qlever-llc/trellis";
 import {
   base64urlEncode,
-  buildLogoutSignaturePayload,
-  createAuth,
-  getDeviceConnectInfo,
   sha256,
   utf8,
   waitForDeviceActivation,
@@ -76,19 +73,6 @@ const liveSessionRefreshUsername = caseScopedName(
 );
 const liveSessionRefreshPassword =
   `trellis-integration-${liveSessionRefreshCaseId}-password-2026`;
-const liveLogoutCaseId =
-  "browser.login-portal-live-signed-http-logout-cleans-session";
-const liveLogoutFixture = createAuthLocalLoginFixture(liveLogoutCaseId);
-const liveLogoutPortalId = caseScopedName(
-  "browser-login-portal",
-  liveLogoutCaseId,
-);
-const liveLogoutUsername = caseScopedName(
-  "browser-login-portal-user",
-  liveLogoutCaseId,
-);
-const liveLogoutPassword =
-  `trellis-integration-${liveLogoutCaseId}-password-2026`;
 const liveInvalidLocalLoginCaseId =
   "browser.login-portal-live-invalid-local-credentials";
 const liveInvalidLocalLoginFixture = createAuthLocalLoginFixture(
@@ -599,98 +583,6 @@ withLivePortalPage(
     } finally {
       await reboundClient?.connection.close().catch(() => undefined);
       await originalClient?.connection.close().catch(() => undefined);
-      await admin.connection.close().catch(() => undefined);
-      await service.stop();
-    }
-  },
-);
-
-withLivePortalPage(
-  "browser.login-portal live signed HTTP logout cleans session and redirects",
-  async ({ page, portalOrigin, runtime }) => {
-    const fixture = liveLogoutFixture;
-    const service = await fixture.setupService(runtime);
-    const admin = await fixture.setupSessionAdmin(runtime);
-    const { clientKey, clientAuth } = await fixture.setupClientRegistration(
-      runtime,
-    );
-    let client:
-      | CallerRuntime<typeof fixture.clientContract>
-      | undefined;
-
-    try {
-      await setupLocalLoginPortalUser({
-        admin,
-        runtime,
-        fixture,
-        portalOrigin,
-        portalId: liveLogoutPortalId,
-        username: liveLogoutUsername,
-        password: liveLogoutPassword,
-        name: "Browser Login Portal Logout User",
-      });
-
-      client = await TrellisClient.connect({
-        trellisUrl: runtime.trellisUrl,
-        name: fixture.clientName,
-        contract: fixture.clientContract,
-        auth: {
-          ...clientAuth.auth,
-          redirectTo: `${portalOrigin}/_trellis/test/client-auth`,
-        },
-        onAuthRequired: async (ctx) => {
-          const flowId = await completeBrowserLocalLogin({
-            page,
-            loginUrl: ctx.loginUrl,
-            portalOrigin,
-            username: liveLogoutUsername,
-            password: liveLogoutPassword,
-          });
-          return { status: "bound", flowId };
-        },
-      }).orThrow();
-      await client.authSessionsMe({}).orThrow();
-      await singleConnectionFor(admin, clientKey.sessionKey);
-
-      const returnTo = `${portalOrigin}/_trellis/test/signed-out`;
-      const body = await signedLogoutBody(clientKey.seed, {
-        providerLogout: true,
-        returnTo,
-        responseMode: "redirect",
-      });
-      const redirected = await page.evaluate(async ({ body }) => {
-        const response = await fetch("/auth/sessions/logout", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        return {
-          redirected: response.redirected,
-          status: response.status,
-          url: response.url,
-        };
-      }, { body });
-
-      assertEquals(redirected.redirected, true);
-      assertEquals(redirected.status, 200);
-      assertEquals(redirected.url, returnTo);
-      await runtime.waitFor(async () =>
-        (await appSessionsFor(admin, clientKey.sessionKey)).length === 0
-      );
-      await runtime.waitFor(async () => {
-        const connections = await admin.authConnectionsList({
-          sessionKey: clientKey.sessionKey,
-          limit: 500,
-        }).orThrow();
-        return connections.entries.length === 0;
-      });
-      const connectedClient = client;
-      assert(connectedClient, "expected connected client before logout");
-      await runtime.waitFor(async () =>
-        (await connectedClient.authSessionsMe({})).isErr()
-      );
-    } finally {
-      await client?.connection.close().catch(() => undefined);
       await admin.connection.close().catch(() => undefined);
       await service.stop();
     }
@@ -1402,7 +1294,7 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { nonce, flowId } = await fixture.setupActivationRequest(
+      const { flowId } = await fixture.setupActivationRequest(
         runtime,
         identity,
       );
@@ -1435,11 +1327,14 @@ withLivePortalPage(
 
       await waitForDeviceActivation({
         trellisUrl: runtime.trellisUrl,
-        flowId,
         publicIdentityKey: identity.publicIdentityKey,
-        nonce,
         identitySeed: identity.identitySeed,
-        contractDigest: fixture.deviceContract.CONTRACT_DIGEST,
+        deploymentId,
+        instanceId: provisioned.instance.instanceId,
+        principalId: provisioned.instance.principalId,
+        participantId: fixture.deviceContract.CONTRACT.id,
+        participantArtifactDigest: fixture.deviceContract.CONTRACT_DIGEST,
+        participantNeedsDigest: fixture.deviceContract.CONTRACT_DIGEST,
         pollIntervalMs: 25,
       });
       await runtime.waitFor(async () => {
@@ -1542,7 +1437,6 @@ withLivePortalPage(
       });
       await assertDeviceConnectRejected({
         runtime,
-        fixture,
         identity,
         rootSecret,
       });
@@ -1568,7 +1462,7 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { nonce, flowId } = await fixture.setupActivationRequest(
+      const { flowId } = await fixture.setupActivationRequest(
         runtime,
         identity,
       );
@@ -1625,9 +1519,13 @@ withLivePortalPage(
             trellisUrl: runtime.trellisUrl,
             flowId,
             publicIdentityKey: identity.publicIdentityKey,
-            nonce,
             identitySeed: identity.identitySeed,
-            contractDigest: fixture.deviceContract.CONTRACT_DIGEST,
+            deploymentId,
+            instanceId: provisioned.instance.instanceId,
+            principalId: provisioned.instance.principalId,
+            participantId: fixture.deviceContract.CONTRACT.id,
+            participantArtifactDigest: fixture.deviceContract.CONTRACT_DIGEST,
+            participantNeedsDigest: fixture.deviceContract.CONTRACT_DIGEST,
             pollIntervalMs: 25,
           }),
         Error,
@@ -1635,7 +1533,6 @@ withLivePortalPage(
       );
       await assertDeviceConnectRejected({
         runtime,
-        fixture,
         identity,
         rootSecret,
       });
@@ -1788,7 +1685,6 @@ async function serveStatic(
   if (runtimeUrl && shouldProxyToRuntime(url.pathname)) {
     return await fetch(
       new Request(new URL(url.pathname + url.search, runtimeUrl), request),
-      url.pathname === "/auth/sessions/logout" ? { redirect: "manual" } : {},
     );
   }
 
@@ -1809,8 +1705,6 @@ async function serveStatic(
 function shouldProxyToRuntime(pathname: string): boolean {
   return pathname === "/auth/login/local" ||
     pathname === "/auth/requests" ||
-    pathname === "/auth/sessions/logout" ||
-    pathname === "/bootstrap/client" ||
     pathname.startsWith("/auth/account-flow/") ||
     pathname.startsWith("/auth/flow/") ||
     pathname.startsWith("/auth/login/");
@@ -2162,22 +2056,9 @@ async function assertNoActivatedDeviceAuthority(args: {
 
 async function assertDeviceConnectRejected(args: {
   runtime: LiveTrellisRuntime;
-  fixture: DeviceActivationFixture;
   identity: DeviceActivationIdentity;
   rootSecret: Uint8Array;
 }): Promise<void> {
-  await assertRejects(
-    () =>
-      getDeviceConnectInfo({
-        trellisUrl: args.runtime.trellisUrl,
-        publicIdentityKey: args.identity.publicIdentityKey,
-        identitySeed: args.identity.identitySeed,
-        contractDigest: args.fixture.deviceContract.CONTRACT_DIGEST,
-      }),
-    Error,
-    "device connect info failed: 404",
-  );
-
   const connect = await TrellisDevice.connect({
     trellisUrl: args.runtime.trellisUrl,
     contract: args.fixture.deviceContract,
@@ -2238,27 +2119,6 @@ async function completeLocalLoginByFetch(args: {
   } else {
     assertEquals(state.status, "redirect");
   }
-}
-
-async function signedLogoutBody(
-  seed: string,
-  options: {
-    providerLogout?: boolean;
-    returnTo?: string;
-    responseMode?: "json" | "redirect";
-  },
-): Promise<Record<string, boolean | number | string>> {
-  const auth = await createAuth({ sessionKeySeed: seed });
-  const iat = auth.currentIat();
-  const payload = { iat, ...options };
-  const sig = base64urlEncode(
-    await auth.sign(
-      await sha256(
-        utf8(`logout-session:${buildLogoutSignaturePayload(payload)}`),
-      ),
-    ),
-  );
-  return { sessionKey: auth.sessionKey, ...payload, sig };
 }
 
 async function appSessionsFor(

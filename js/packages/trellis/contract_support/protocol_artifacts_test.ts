@@ -1,7 +1,8 @@
-import { assertObjectMatch } from "@std/assert";
+import { assertEquals, assertObjectMatch } from "@std/assert";
+import { Type } from "typebox";
 
 import { HealthQuery } from "../sdk/_generated/health/descriptors.ts";
-import { defineAppContract } from "./mod.ts";
+import { defineAppContract, defineServiceContract } from "./mod.ts";
 import { compileProtocolArtifacts } from "./protocol_artifacts.ts";
 
 Deno.test("generated actions preserve canonical source artifact identity", async () => {
@@ -21,4 +22,37 @@ Deno.test("generated actions preserve canonical source artifact identity", async
       },
     },
   });
+});
+
+Deno.test("inline actions preserve their provider API artifact", async () => {
+  const provider = defineServiceContract(
+    { schemas: { Empty: Type.Object({}) } },
+    (ref) => ({
+      id: "trellis.test.inline-provider@v1",
+      displayName: "Inline provider",
+      description: "Checks inline action source identity.",
+      capabilities: {
+        call: { displayName: "Call", description: "Call the provider." },
+      },
+      rpc: {
+        "Inline.Call": {
+          version: "v1",
+          input: ref.schema("Empty"),
+          output: ref.schema("Empty"),
+          capabilities: { call: ["call"] },
+          errors: [],
+        },
+      },
+    }),
+  );
+  const consumer = defineAppContract(() => ({
+    id: "trellis.test.inline-consumer@v1",
+    displayName: "Inline consumer",
+    description: "Uses the inline provider.",
+    uses: [provider.InlineCall],
+  }));
+
+  const provided = await compileProtocolArtifacts(provider);
+  const consumed = await compileProtocolArtifacts(consumer);
+  assertEquals(consumed.referencedApis, [provided.api]);
 });

@@ -268,6 +268,8 @@ export function createTransferFixture(
             store: "uploads",
             key: input.key,
             sessionKey: context.sessionKey,
+            permission: context.permission,
+            requiredCapabilities: context.requiredCapabilities,
             inboxPrefix: context.inboxPrefix,
             expiresInMs: 60000,
           }).orThrow();

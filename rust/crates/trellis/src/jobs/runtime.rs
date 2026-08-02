@@ -31,6 +31,13 @@ impl JobsRuntime {
         }
     }
 
+    /// Create the Jobs runtime facade for a Trellis-owned built-in provider.
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    pub fn from_nats(nats: async_nats::Client) -> Self {
+        Self { nats }
+    }
+
     /// Open a new-only ephemeral consumer for `Jobs.Watch`.
     pub async fn watch_messages(
         &self,

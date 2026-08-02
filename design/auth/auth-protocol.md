@@ -21,12 +21,12 @@ This document defines the language-neutral Trellis auth protocol.
 It covers:
 
 - cryptographic encodings and signatures
-- pinned authorization roots, issuer certificates, and issuer manifests
+- pinned authorization roots and direct-key issuer manifests
 - signed authorization contexts and context-bound request proofs
 - NATS connect token shapes
 - auth callout behavior
 - RPC proof verification
-- pre-auth device wait verification
+- device activation retry behavior
 - reply-subject validation and streaming reply rules
 - internal auth state records required for protocol behavior
 
@@ -76,36 +76,27 @@ normalization is applied before signing.
 
 After bootstrap or browser binding, every client receives a deny-all
 Auth-account JWT whose subject is the session public key encoded as a NATS User
-NKey. The client uses the same session private key for the standard NATS nonce
-signature and a separately domain-separated Trellis connect proof.
+NKey. The client uses the same session private key for the ordinary NATS nonce
+signature.
 
 The `auth_token` is a `trellis.nats-connect-token.v1` object:
 
 ```ts
 {
   format: "trellis.nats-connect-token.v1",
-  requestId: string,
-  issuedAt: number,
-  sessionId: string,
-  participantDigest: string,
-  proof: SessionProofV1
+  contextDigest: string
 }
 ```
 
 Rules:
 
-- `SessionProofV1` uses the `NatsConnect` purpose and binds the exact server
-  nonce, session id, participant digest, request id, issue time, and session
-  NKey
-- the proof transcript is built from protocol-owned length-prefixed frames; no
-  concatenated-signature format is accepted
-- the standard NATS nonce signature is padded standard Base64; Trellis proof
-  fields use unpadded Base64URL
-- the callout verifies that the bootstrap JWT subject, stored session key, proof
-  signer, and server-supplied `user_nkey` are the same identity
-- each connect or reconnect uses a fresh request id and nonce-bound proof;
-  consumed proof replays fail closed through CAS-backed replay state
-- clients with unstable clocks derive `issuedAt` from bootstrap `serverNow`
+- `contextDigest` is the canonical digest of the complete signed authorization
+  context and the sole context identity
+- NATS verifies the standard nonce signature against the bootstrap JWT subject
+- Auth Callout loads the active context and requires the server-supplied
+  `user_nkey` to encode the context's session public key
+- each reconnect reuses the current context digest but answers a fresh ordinary
+  NATS nonce challenge
 
 ## Auth Callout Behavior
 
@@ -113,14 +104,14 @@ When NATS calls `$SYS.REQ.USER.AUTH`:
 
 1. Decode the encrypted request by requiring `Nats-Server-Xkey`, decrypting the
    payload, and extracting `user_nkey` plus `connect_opts.auth_token`.
-2. Validate the `trellis.nats-connect-token.v1` envelope, deny-all bootstrap
-   JWT, standard nonce signature, and nonce-bound `trellis.session-proof.v1`.
-3. CAS-admit the proof replay key and resolve current issuable session,
-   principal, participant, authority, deployment/instance, and device/delegation
-   state.
-4. Compile permissions from exact `GrantSetV1` atoms plus matching API
-   descriptors and physical resource evidence. A subject or binding never
-   creates an atom.
+2. Validate the minimal `trellis.nats-connect-token.v1` envelope and deny-all
+   bootstrap JWT, then require the NATS user NKey to match the session key in
+   the active context selected by `contextDigest`.
+3. Load the active signed context by `contextDigest`, verify it against the
+   accepted current manifest, and bind `user_nkey` to `context.sessionKey`.
+4. Load the participant and current physical resource bindings needed to compile
+   transport permissions from the context's exact `GrantSetV1`. A subject or
+   binding never creates an atom.
 5. Sign the target-account JWT for the server-generated `user_nkey`, bounded by
    current session, authority, and delegation expiry, then record connection
    presence.
@@ -131,8 +122,10 @@ internally and return only `internal_error`.
 
 ## Server-Relative Time
 
-Bootstrap and connect-info responses that expect `iat`-based runtime auth SHOULD
-return `serverNow`.
+Initial bootstrap and proof-bound context-recovery responses that expect
+`iat`-based runtime auth SHOULD return `serverNow`. Recovery also returns the
+route credential, session metadata, and current NATS metadata needed to rebuild
+the connected runtime.
 
 Clients SHOULD:
 
@@ -159,7 +152,7 @@ auth-callout payloads are not supported.
 
 The auth callout derives permissions from:
 
-- current issuable authorization state
+- verified active signed authorization context
 - the exact `GrantSetV1` accepted for the bound participant
 - exact `trellis.api.v1` descriptors
 - typed materialized resource bindings
@@ -186,24 +179,17 @@ Rules:
 
 ## Authorization Context And Local Request Authorization
 
-Milestone 9 implements the authority proof below for bootstrap, refresh, and
-every NATS connect/reconnect. Ordinary authenticated runtime requests continue
-to use transitional `Auth.Requests.Validate` until Milestone 10, when they will
-use the second proof locally:
-
-1. **Authority proof:** a pinned authorization root verifies a current
-   generation-numbered issuer manifest and a directly root-signed issuer
-   certificate; the active issuer verifies a short-lived authorization context.
-2. **Possession proof:** the session private key bound into that context signs
-   the exact context digest, subject, reply subject, raw payload hash, issue
-   time, and request id.
+The authority proof applies to bootstrap, refresh, every NATS connect/reconnect,
+and local provider authorization. A pinned authorization root verifies a
+generation-numbered manifest containing active issuer public keys. The selected
+issuer key verifies a short-lived context, and the session private key bound
+into that context signs each exact request or event.
 
 The trust hierarchy is:
 
 ```text
 pinned root
   -> root-signed current issuer manifest
-  -> root-signed issuer certificate selected by exact signed digest
   -> issuer-signed short-lived authorization context
   -> session-key-signed request proof v2
 ```
@@ -215,43 +201,47 @@ domain and covers SHA-256 of length-prefixed domain bytes plus RFC 8785
 canonical unsigned JSON. Key ids are derived as unpadded base64url SHA-256
 digests of the raw 32-byte Ed25519 public key.
 
-The root-signed manifest is the authoritative current issuer registry. Consumers
-durably supply the root key id, canonical root digest, minimum accepted
-generation, and canonical manifest digest at that generation. This rejects an
-older valid manifest, same-generation equivocation, and root replacement across
-process restarts. Clearing a session or context retains the floor; changing the
-root requires an explicit trust reset. Multiple active issuers permit overlap
-during key rotation. A revoked or omitted issuer is untrusted, and each entry
-binds the exact complete signed certificate digest. A writable distribution
-store therefore cannot create issuer authority without a root signature.
+The manifest is the complete issuer registry for its generation. Each entry is
+exactly `{keyId, publicKey}`; omission from a later generation removes an
+issuer, while overlapping entries support rotation. Consumers durably pin the
+root and the accepted generation/digest floor, rejecting rollback,
+same-generation equivocation, and root replacement across restarts. Clearing a
+session or context retains that floor.
 
-Server startup creates or exact-confirms the root, active certificate, and
-generation-addressed manifest before advancing SQLite or `manifest.current`.
-SQLite acceptance and removed-issuer context revocation commit together;
-`manifest.current` is the final CAS-protected step. Startup and `trellis check`
-reconcile the configured file generation and digest against both the durable
-SQLite floor and the highest verified immutable registry history, so an expired
-historical manifest still prevents rollback.
+`manifest.current` contains only the current generation and digest. Immutable
+`manifest.<generation>` values preserve trust history. The bounded context
+bucket contains canonical signed context JSON at `<contextDigest>` and
+`{"revokedAt": ...}` at `revocation.<contextDigest>`. The root is supplied by
+configuration/bootstrap and is never stored in NATS. Connected runtimes use
+these two Trellis-owned KV buckets directly; there is no connected HTTP trust
+lookup.
 
-A previously verified manifest remains subject to the policy supplied for each
-context decision. Raising the durable minimum generation invalidates stale
-verified or cloned handles immediately; context verification rechecks the
-manifest generation and returns `ManifestRollback` at `/generation`.
+Startup reconciles only the configured manifest, optional SQLite floor, and
+optional `manifest.current` pointer. It immutable-creates or exact-confirms the
+configured generation, persists an accepted advance, and CAS-updates
+`manifest.current` last. Historical manifests are exact-read only for historical
+event verification.
 
-Context issuance computes and distributes `refreshAt = expiresAt - refreshLead
+A verified `manifest.current` advance durably raises the accepted
+generation/digest floor before it becomes the provider's current manifest.
+Current requests and NATS admission require the context generation to equal that
+current generation and never fetch an older manifest. Raising the floor clears
+only live context-cache entries and wakes the existing own-context refresh task.
+Historical retained-event verification may exact-read the context's older
+manifest without lowering the live floor.
 
-- jitter(contextDigest)`, where jitter is deterministic, bounded, and can only
-  move refresh earlier. The protocol implementation owns this calculation.
-  Client runtimes consume the distributed value directly, so restart and
-  reconnect do not produce refresh storms or repeatedly call a server that is
-  not yet willing to replace the context.
+Clients compute `refreshAt = expiresAt - refreshLead - jitter(contextDigest)`.
+The protocol implementation owns this deterministic, bounded, earlier-only
+calculation; it is not transmitted in the context bundle.
 
 The refresh request always contains `currentContextDigest`, but the value is
 nullable. A client with a valid context sends its digest; a client whose context
 or route JWT has expired sends `null` while proving possession of the retained
-session key and pinned trust floor. Success returns `serverNow`, a context, and
-a renewed deny-all route JWT plus its expiry as one atomic installation. Clients
-derive a midpoint clock offset from `serverNow`, schedule against corrected
+session key and pinned trust floor. Context refresh is restart recovery, not a
+connected-control path. Success returns `serverNow`, the signed context and
+trust material, a renewed deny-all route JWT plus its expiry, session metadata,
+and current NATS metadata as one atomic recovery bundle. Clients derive a
+midpoint clock offset from `serverNow`, schedule against corrected
 server-relative time, and reschedule even when refresh validly returns the same
 context digest. Only terminal session/authority failures clear session recovery
 state.
@@ -262,18 +252,17 @@ at most two active overlapping contexts: the current lease and one replacement
 for reconnect handoff. Publication actions are keyed by immutable context digest
 and deduplicated transactionally.
 
-The signed context binds the stable principal, exact participant artifact and
-accepted-needs digests, durable identity/deployment authority record and
-version, session id and public key, reply-inbox prefix, exact
+The signed context binds its issuer manifest generation, stable principal, exact
+participant artifact and accepted-needs digests, durable identity/deployment
+authority, session id and public key, reply-inbox prefix, exact
 `trellis.grant-set.v1`, and canonical platform capability keys. Its validity is
-short-lived and entirely contained by both the issuer certificate and current
-manifest. Capabilities may authorize built-in/platform surfaces during
-migration, but never expand exact permission atoms.
+short-lived and entirely contained by the named manifest. Its digest over the
+canonical complete signed JSON is its sole identity.
 
 `maximum_context_bytes` and `maximumContextBytes` always mean the UTF-8 byte
 length of canonical complete signed-context JSON. Issuance, protocol parsing,
 WASM verification, and the context-registry value limit enforce that same unit;
-the base64url transport token length is not the configured unit.
+there is no second encoded context representation.
 
 Verified caller metadata exposes the source authority record and version,
 deployment and instance ids, participant artifact and needs digests, context and
@@ -292,217 +281,66 @@ LP(ASCII decimal iat)
 LP(request-id UTF-8)
 ```
 
-The receiver verifies the manifest, certificate, context, and session-key proof
-locally; computes the raw payload hash locally; validates a nonempty reply
-subject against the signed inbox prefix; and enforces required exact permission
-atoms and platform capabilities as subsets of the signed context. It then
-inserts `(contextId, requestId)` into a local replay cache until context expiry.
-Replay cache storage and runtime integration follow the pure protocol milestone.
+The receiver verifies root, manifest, context, and session-key proof locally;
+computes the raw payload hash locally; validates a nonempty reply subject
+against the signed inbox prefix; and enforces generated exact permission atoms
+and capabilities as subsets of the signed context. Request IDs remain signed
+message identity, but receivers keep no generic replay state. Durable mutations
+own transactional idempotency.
 
-NATS authentication verifies `natsConnectContext`, the complete trust chain, the
-immutable registry record, and fresh issuable state before compiling a transport
-JWT. Short context expiry bounds already-issued authority; immediate
-session/authority revocation atomically publishes a separate revocation record,
-refuses refresh and reconnect, and kicks current transport connections.
-Validators subscribe before loading complete manifest-pointer and revocation
-snapshots, become healthy only after both snapshots succeed, and gate Auth
-Callout startup on that readiness. They resnapshot after watch or manifest
-changes, invalidate stale verified contexts, and resolve exact manifest,
-certificate, context, and revocation records lazily by immutable key. Connection
-presence records the context id and digest used for admission.
+NATS authentication uses a minimal token containing only `format` and
+`contextDigest`. NATS verifies its ordinary nonce challenge. Auth Callout loads
+the active context, verifies it against the current manifest, requires the NATS
+NKey to encode the context session key, loads the exact participant binding and
+current physical resource bindings, and compiles transport permissions directly.
 
-## Transitional RPC Message Signing
+Providers establish `manifest.current` and `revocation.>` watches, verify the
+current manifest, consume the revocation watch's initial state, then become
+ready. Quiet watches remain healthy. Actual connection/watch failure makes the
+provider unready; reconnect recreates both watches and reconstructs one initial
+state. Unknown current contexts require one exact context GET. Historical events
+require one exact context GET and one exact manifest-generation GET. Registry
+permissions allow only those content-addressed reads and consumer creation for
+the fixed `manifest.current` and `revocation.>` filters; stream-sequence reads,
+whole-bucket watches, enumeration, and writes remain denied.
 
-The following request proof and `Auth.Requests.Validate` flow describes current
-migration-baseline implementation behavior, not the target 0.11 protocol. It
-remains temporarily so existing runtimes can migrate; no new ordinary request
-path should depend on it.
+## Local Request And Event Verification
 
-Each authenticated RPC includes proof of session-key ownership. Contract digest
-binding is established earlier during connect, bootstrap, or session creation;
-per-request RPC proofs do not carry or sign `contractDigest`.
+Providers exact-match generated route metadata before resolving caller context.
+They compute the payload hash from the raw bytes received and verify request
+proof v2 over the context digest, actual subject, actual reply subject, payload
+hash, corrected issue time, and request id. The resolved signed context must
+bind the presented session key and contain the exact generated permission atom
+and every declared capability.
 
-Proof input:
+Event proof v2 binds the context digest, actual event subject, raw payload hash,
+event id, and canonical event time. Typed consumers use their receiver-owned
+generated event descriptor for the API id, event name, actual subject, exact
+Publish atom, and required capabilities. The generic Event Log verifies trust,
+session binding, event signature, and publisher projection without
+reconstructing arbitrary contract semantics.
 
-```ts
-function buildProofInput(
-  sessionKey: string,
-  subject: string,
-  payloadHash: Uint8Array,
-  iat: number,
-  requestId: string,
-): Uint8Array {
-  const enc = new TextEncoder();
-  const sessionKeyBytes = enc.encode(sessionKey);
-  const subjectBytes = enc.encode(subject);
-  const iatBytes = enc.encode(String(iat));
-  const requestIdBytes = enc.encode(requestId);
+Request eligibility uses current time and denies any revoked context. Event
+eligibility uses the signed historical window:
+`notBefore <= eventTime <
+expiresAt` and, when revoked, `eventTime < revokedAt`.
+Retained context, manifest, and revocation values support the signed historical
+window. Durable listeners NAK retryable verification failures such as provider
+readiness, registry transport, publication races, and storage availability;
+cryptographically invalid or unauthorized events are permanently rejected.
+JetStream owns publication deduplication and redelivery, so a redelivered event
+is verified and may invoke its handler again. Business handlers that need
+exactly-once effects own transactional processed-event state.
 
-  const buf = new Uint8Array(
-    4 + sessionKeyBytes.length + 4 + subjectBytes.length + 4 +
-      payloadHash.length + 4 + iatBytes.length + 4 + requestIdBytes.length,
-  );
-  const view = new DataView(buf.buffer);
+After an unknown digest is resolved once, ordinary verification is entirely
+local: cache hits perform zero SQLite, HTTP, Auth RPC, or NATS registry reads.
 
-  let offset = 0;
-  view.setUint32(offset, sessionKeyBytes.length);
-  offset += 4;
-  buf.set(sessionKeyBytes, offset);
-  offset += sessionKeyBytes.length;
-  view.setUint32(offset, subjectBytes.length);
-  offset += 4;
-  buf.set(subjectBytes, offset);
-  offset += subjectBytes.length;
-  view.setUint32(offset, payloadHash.length);
-  offset += 4;
-  buf.set(payloadHash, offset);
-  offset += payloadHash.length;
-  view.setUint32(offset, iatBytes.length);
-  offset += 4;
-  buf.set(iatBytes, offset);
-  offset += iatBytes.length;
-  view.setUint32(offset, requestIdBytes.length);
-  offset += 4;
-  buf.set(requestIdBytes, offset);
+## Device Activation Retry
 
-  return buf;
-}
-
-payloadHash = SHA256(payload);
-proof = ed25519_sign(
-  sessionKeyPrivate,
-  SHA256(buildProofInput(sessionKey, subject, payloadHash, iat, requestId)),
-);
-```
-
-Rules:
-
-- receivers MUST compute `payloadHash` from the raw request body they actually
-  received
-- receivers MUST NOT trust a caller-supplied payload hash header
-- clients MUST send `iat` and `request-id` headers with every signed RPC request
-- verifiers MUST include the corrected `iat` value and `requestId` in the proof
-  input and reject proofs whose `iat` is outside the configured freshness window
-- auth MUST reject replay of the same `requestId` for the same session while the
-  replay cache entry is live
-- receivers MUST verify the request against the stored authenticated
-  session/principal state created at connect, bootstrap, or session binding time
-- length-prefixing is mandatory and prevents boundary attacks
-
-Required message headers:
-
-```text
-session-key: <sessionKey>
-proof: <base64url(ed25519 signature)>
-iat: <unix seconds, corrected to server-relative time when available>
-request-id: <unique request id for this session>
-```
-
-Verification steps:
-
-1. Extract `session-key`, `proof`, `iat`, and `request-id`
-2. Compute `payloadHash = SHA256(raw_request_body)`
-3. Reconstruct proof input and verify signature using `session-key` as the
-   public key
-4. Call `rpc.Auth.Requests.Validate` with `sessionKey`, `proof`, `subject`, raw
-   `payloadHash`, `iat`, `requestId`, and required capabilities for session
-   lookup, replay detection, stored contract/principal context, and capability
-   checking
-
-Target runtimes replace step 4 with the local signed-context decision described
-above. Historical proof v1 text remains here only to make that transition
-explicit.
-
-## Pre-Auth Device Wait Verification
-
-Before an activated device is activated it cannot use normal authenticated RPCs,
-but an online device may still wait for activation completion by calling
-`POST /auth/devices/activate/wait`.
-
-That endpoint uses an identity-key proof rather than a session-key proof.
-
-Proof input:
-
-```ts
-function buildDeviceWaitProofInput(
-  flowId: string,
-  publicIdentityKey: string,
-  nonce: string,
-  iat: number,
-  contractDigest: string,
-): Uint8Array {
-  const enc = new TextEncoder();
-  const flowIdBytes = enc.encode(flowId);
-  const publicIdentityKeyBytes = enc.encode(publicIdentityKey);
-  const nonceBytes = enc.encode(nonce);
-  const iatBytes = enc.encode(String(iat));
-  const contractDigestBytes = enc.encode(contractDigest);
-
-  const buf = new Uint8Array(
-    4 + flowIdBytes.length +
-      4 + publicIdentityKeyBytes.length +
-      4 + nonceBytes.length +
-      4 + iatBytes.length +
-      4 + contractDigestBytes.length,
-  );
-  const view = new DataView(buf.buffer);
-
-  let offset = 0;
-  view.setUint32(offset, flowIdBytes.length);
-  offset += 4;
-  buf.set(flowIdBytes, offset);
-  offset += flowIdBytes.length;
-
-  view.setUint32(offset, publicIdentityKeyBytes.length);
-  offset += 4;
-  buf.set(publicIdentityKeyBytes, offset);
-  offset += publicIdentityKeyBytes.length;
-
-  view.setUint32(offset, nonceBytes.length);
-  offset += 4;
-  buf.set(nonceBytes, offset);
-  offset += nonceBytes.length;
-
-  view.setUint32(offset, iatBytes.length);
-  offset += 4;
-  buf.set(iatBytes, offset);
-  offset += iatBytes.length;
-
-  view.setUint32(offset, contractDigestBytes.length);
-  offset += 4;
-  buf.set(contractDigestBytes, offset);
-
-  return buf;
-}
-
-sig = ed25519_sign(
-  identityPrivateKey,
-  SHA256(
-    buildDeviceWaitProofInput(
-      flowId,
-      publicIdentityKey,
-      nonce,
-      iat,
-      contractDigest,
-    ),
-  ),
-);
-```
-
-Rules:
-
-- the endpoint MUST reject if `abs(now - iat) > 30s`
-- the endpoint MUST verify `sig` using the supplied `publicIdentityKey`
-- the endpoint MUST include the signed `flowId` in the proof input and load the
-  browser flow directly by that id
-- the endpoint MUST include the exact `contractDigest` in the proof input
-- the endpoint MUST match the direct flow lookup against `publicIdentityKey` and
-  `nonce`; QR and MAC bearer semantics remain the intended protection for the
-  browser-to-flow handoff
-- the endpoint MUST NOT create a device session or issue transport credentials
-  directly
-- the endpoint is a bounded long poll for setup only; it is not a general
-  pre-auth RPC mechanism
+An unapproved `/bootstrap/device` request returns `activation_pending` with a
+review id, activation URL, and retry delay. The device retries the same
+bootstrap endpoint after that delay. There is no separate activation-wait
+endpoint.
 
 ## Reply-Subject Validation
 
@@ -535,9 +373,9 @@ Rules:
 ## Error Codes
 
 Public Auth RPCs use their declared `AuthError`, `ValidationError`, or
-`UnexpectedError` envelope with stable codes and safe messages. Transitional
-internal validators retain the reason codes below where existing runtimes depend
-on them.
+`UnexpectedError` envelope with stable codes and safe messages. HTTP, operation,
+local verification, and Auth Callout boundaries retain the applicable reason
+codes below.
 
 | Scenario                     | Reason Code                   |
 | ---------------------------- | ----------------------------- |
@@ -577,11 +415,10 @@ return path and show sign-in UX. Non-browser clients may surface the same
 
 Rust-owned principal, provider-identity, session, desired-authority,
 runtime-evidence, and materialized-authority records are specified in
-[rust-authorization-state.md](./rust-authorization-state.md). Those records and
-the unsigned issuable-state query precede external auth/bootstrap cutover and
-signed authorization-context issuance. The browser-flow records below describe
-the retained external flow behavior until that cutover; they are not the Rust
-authority storage model.
+[rust-authorization-state.md](./rust-authorization-state.md). Signed
+authorization-context issuance consumes the current issuable-state projection.
+The browser-flow records below describe external flow behavior; they are not a
+parallel authority storage model.
 
 ## Browser Flow Protocol
 
@@ -651,7 +488,6 @@ Runtime storage responsibilities:
 | SQL                           | Users, credentials, sessions, principals, desired and materialized authority, proposals/decisions, deployments, instances, devices, delegations, portals/routes, provisioning records, idempotency results, post-commit actions, and hashed account-management flows | Durable, with explicit expiries |
 | `trellis_auth_oauth` KV       | PKCE/nonce state, browser-binding digest, portal-policy digest, CAS claim/result, and terminal unknown-outcome state                                                                                                                                                 | 15 min                          |
 | `trellis_auth_browser` KV     | Proof-bound browser flow and exact server-owned consent proposal keyed by `flowId`                                                                                                                                                                                   | Browser-flow TTL                |
-| `trellis_auth_replay` KV      | Short-lived NATS connect-proof replay admissions                                                                                                                                                                                                                     | Proof window                    |
 | `trellis_auth_connections` KV | Active connection presence keyed by NATS user key                                                                                                                                                                                                                    | 120 s                           |
 
 Ephemeral browser-binding and account-flow bearer secrets are stored by digest,
@@ -785,5 +621,4 @@ Rules:
 - defining HTTP endpoint and RPC request/response payloads
 - defining TypeScript or Rust client library APIs
 - deployment configuration, rate limiting, root-key rotation, or HA runbooks
-- issuer private-key storage, context issuance/distribution, runtime
-  replay-cache implementation, and event-proof v2
+- issuer private-key storage and deployment-specific context distribution

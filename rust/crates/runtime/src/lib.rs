@@ -19,7 +19,7 @@ pub mod server;
 pub mod shutdown;
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
-/// Event log subsystem scaffold.
+/// Built-in Event Log subsystem.
 pub mod eventlog;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Health subsystem scaffold.
@@ -58,4 +58,4 @@ pub use server::{build_version_info, run_http_server, ServerError, VersionInfo};
 pub use supervisor::{run, RuntimeError, RuntimeOptions};
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
-pub use supervisor::check;
+pub use supervisor::{check, check_with_nats_servers, NatsEndpointOverride, RuntimeCheckReport};

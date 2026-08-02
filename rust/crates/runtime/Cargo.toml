@@ -48,7 +48,10 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 trellis-protocol.workspace = true
-trellis-rs = { path = "../trellis" }
+trellis-eventlog-runtime = { path = "../eventlog-runtime", version = "0.11.0" }
+trellis-jobs-runtime = { path = "../jobs-runtime", version = "0.11.0" }
+trellis-rs = { path = "../trellis", features = ["runtime-internals"] }
+trellis-sdk-auth.workspace = true
 ulid = "1.2.1"
 url.workspace = true
 

@@ -6,18 +6,24 @@ use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
     canonicalize_json, parse_authorization_context_v1, AuthorizationAuthorityKindV1,
-    AuthorizationPrincipalKindV1,
+    SignedAuthorizationContextV1,
 };
 
 use super::super::{
-    companion_repository::IdempotentOutcome,
-    repository::{issuance_snapshot_token, IssuanceSnapshotToken},
+    application::repository::IdempotentOutcome,
+    authority::{issuance_snapshot_token, IssuanceSnapshotToken},
+    domain::require_protocol_timestamp,
     sqlite::{
-        insert_sql_idempotency_and_actions, sqlite_idempotency_replay, sqlite_issuance_snapshot,
+        common::{
+            decode_enum, encode_enum, from_sql_version, map_write_error, sql_error, to_sql_version,
+        },
+        contexts::sqlite_issuance_snapshot,
+        outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay},
+        validation::next_version,
         SqliteAuthorizationStore,
     },
     AuthorityKind, AuthorizationStateError, IdempotencyResultRecord, PostCommitActionKind,
-    PostCommitActionRecord, PrincipalKind,
+    PostCommitActionRecord,
 };
 
 const MAXIMUM_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -36,8 +42,6 @@ pub struct AuthorizationTrustStateRecord {
     pub manifest_generation: u64,
     /// Digest accepted at `manifest_generation`.
     pub manifest_digest: String,
-    /// Current online issuer key ID.
-    pub active_issuer_key_id: String,
     /// Last accepted update in Unix milliseconds.
     pub updated_at: i64,
     /// Positive optimistic version.
@@ -62,7 +66,6 @@ pub enum AuthorizationContextState {
 pub enum AuthorizationContextRevocationReason {
     SessionRevoked,
     SessionExpired,
-    SessionRebound,
     CredentialChanged,
     PrincipalChanged,
     PrincipalInactive,
@@ -87,34 +90,35 @@ pub enum AuthorizationContextRevocationReason {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthorizationContextRecord {
-    pub context_id: String,
     pub context_digest: String,
     pub session_id: String,
     pub principal_id: String,
-    pub principal_kind: PrincipalKind,
-    pub participant_id: String,
-    pub participant_artifact_digest: String,
-    pub participant_needs_digest: String,
     pub authority_kind: AuthorityKind,
     pub authority_id: String,
-    pub authority_version: u64,
-    pub materialization_version: u64,
     pub deployment_id: Option<String>,
     pub instance_id: Option<String>,
     pub issuer_key_id: String,
+    pub issuer_manifest_generation: u64,
     pub signed_context_json: String,
-    pub context_token: String,
     pub issuance_snapshot_token: String,
-    pub trust_generation: u64,
-    pub issued_at: i64,
-    pub not_before: i64,
-    pub expires_at: i64,
     pub refresh_at: i64,
+    pub expires_at: i64,
     pub state: AuthorizationContextState,
     pub published_at: Option<i64>,
     pub revoked_at: Option<i64>,
     pub revocation_reason: Option<AuthorizationContextRevocationReason>,
     pub version: u64,
+}
+
+impl AuthorizationContextRecord {
+    pub(crate) fn signed_context(
+        &self,
+    ) -> Result<SignedAuthorizationContextV1, AuthorizationStateError> {
+        let value = serde_json::from_str(&self.signed_context_json)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        parse_authorization_context_v1(&value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+    }
 }
 
 /// Aggregate optimistic context-issuance commit.
@@ -141,7 +145,7 @@ pub enum AuthorizationContextSelector {
 
 /// Durable trust-floor and authorization-context repository boundary.
 #[async_trait]
-pub trait AuthorizationContextRepository: Send + Sync {
+pub(crate) trait AuthorizationContextRepository: Send + Sync {
     async fn get_trust_state(
         &self,
     ) -> Result<Option<AuthorizationTrustStateRecord>, AuthorizationStateError>;
@@ -152,11 +156,6 @@ pub trait AuthorizationContextRepository: Send + Sync {
         removed_issuer_key_ids: Vec<String>,
         revoked_at: i64,
     ) -> Result<AuthorizationTrustStateRecord, AuthorizationStateError>;
-
-    async fn get_context_by_id(
-        &self,
-        context_id: &str,
-    ) -> Result<Option<AuthorizationContextRecord>, AuthorizationStateError>;
 
     async fn get_context_by_digest(
         &self,
@@ -178,7 +177,7 @@ pub trait AuthorizationContextRepository: Send + Sync {
 
     async fn list_revoked_contexts(
         &self,
-        after_context_id: Option<&str>,
+        after_context_digest: Option<&str>,
         limit: usize,
     ) -> Result<Vec<AuthorizationContextRecord>, AuthorizationStateError>;
 
@@ -189,7 +188,7 @@ pub trait AuthorizationContextRepository: Send + Sync {
 
     async fn mark_context_published(
         &self,
-        context_id: &str,
+        context_digest: &str,
         expected_version: u64,
         published_at: i64,
     ) -> Result<AuthorizationContextRecord, AuthorizationStateError>;
@@ -222,7 +221,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         revoked_at: i64,
     ) -> Result<AuthorizationTrustStateRecord, AuthorizationStateError> {
         validate_trust_state(&state)?;
-        valid_timestamp("revokedAt", revoked_at)?;
+        require_protocol_timestamp("revokedAt", revoked_at)?;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             let accepted = accept_trust_state(load_sql_trust_state(&transaction)?.as_ref(), state)?;
@@ -230,29 +229,27 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                 .execute(
                     "INSERT INTO auth_authorization_trust_state (
                         singleton_id, authority, root_key_id, root_digest, manifest_generation,
-                        manifest_digest, active_issuer_key_id, updated_at, version
-                     ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                        manifest_digest, updated_at, version
+                     ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
                      ON CONFLICT(singleton_id) DO UPDATE SET
                         authority = excluded.authority,
                         root_key_id = excluded.root_key_id,
                         root_digest = excluded.root_digest,
                         manifest_generation = excluded.manifest_generation,
                         manifest_digest = excluded.manifest_digest,
-                        active_issuer_key_id = excluded.active_issuer_key_id,
                         updated_at = excluded.updated_at,
                         version = excluded.version",
                     params![
                         accepted.authority,
                         accepted.root_key_id,
                         accepted.root_digest,
-                        sql_version(accepted.manifest_generation)?,
+                        to_sql_version(accepted.manifest_generation)?,
                         accepted.manifest_digest,
-                        accepted.active_issuer_key_id,
                         accepted.updated_at,
-                        sql_version(accepted.version)?,
+                        to_sql_version(accepted.version)?,
                     ],
                 )
-                .map_err(write_error)?;
+                .map_err(map_write_error)?;
             for issuer_key_id in removed_issuer_key_ids {
                 revoke_sql_contexts(
                     &transaction,
@@ -265,15 +262,6 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             Ok(accepted)
         })
         .await
-    }
-
-    async fn get_context_by_id(
-        &self,
-        context_id: &str,
-    ) -> Result<Option<AuthorizationContextRecord>, AuthorizationStateError> {
-        let id = context_id.to_owned();
-        self.run(move |connection| load_sql_context_by_id(connection, &id))
-            .await
     }
 
     async fn get_context_by_digest(
@@ -303,7 +291,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         self.run(move |connection| {
             query_sql_contexts(
                 connection,
-                "session_id = ?1 AND state = 'active' ORDER BY expires_at, context_id",
+                "session_id = ?1 AND state = 'active' ORDER BY expires_at, context_digest",
                 &[&id],
             )
         })
@@ -318,7 +306,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         self.run(move |connection| {
             query_sql_contexts(
                 connection,
-                "state = 'active' AND published_at IS NULL ORDER BY issued_at, context_id LIMIT ?1",
+                "state = 'active' AND published_at IS NULL ORDER BY expires_at, context_digest LIMIT ?1",
                 &[&limit],
             )
         })
@@ -345,21 +333,21 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
 
     async fn list_revoked_contexts(
         &self,
-        after_context_id: Option<&str>,
+        after_context_digest: Option<&str>,
         limit: usize,
     ) -> Result<Vec<AuthorizationContextRecord>, AuthorizationStateError> {
-        let after_context_id = after_context_id.map(str::to_owned);
+        let after_context_digest = after_context_digest.map(str::to_owned);
         self.run(move |connection| {
             let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-            match after_context_id.as_deref() {
+            match after_context_digest.as_deref() {
                 Some(after) => query_sql_contexts(
                     connection,
-                    "state = 'revoked' AND context_id > ?1 ORDER BY context_id LIMIT ?2",
+                    "state = 'revoked' AND context_digest > ?1 ORDER BY context_digest LIMIT ?2",
                     &[&after, &limit],
                 ),
                 None => query_sql_contexts(
                     connection,
-                    "state = 'revoked' ORDER BY context_id LIMIT ?1",
+                    "state = 'revoked' ORDER BY context_digest LIMIT ?1",
                     &[&limit],
                 ),
             }
@@ -383,13 +371,13 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             }
             let active = query_sql_contexts(
                 &transaction,
-                "session_id = ?1 AND state = 'active' ORDER BY issued_at DESC, context_id DESC",
+                "session_id = ?1 AND state = 'active' ORDER BY expires_at DESC, context_digest DESC",
                 &[&commit.context.session_id],
             )?;
             for displaced in active.iter().skip(2) {
                 revoke_sql_contexts(
                     &transaction,
-                    &AuthorizationContextSelector::Context(displaced.context_id.clone()),
+                    &AuthorizationContextSelector::Context(displaced.context_digest.clone()),
                     AuthorizationContextRevocationReason::ContextReplaced,
                     commit.now,
                 )?;
@@ -397,12 +385,13 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             if let Some(existing) = active.iter().take(2).find(|context| {
                 context.issuance_snapshot_token == commit.context.issuance_snapshot_token
                     && context.issuer_key_id == commit.context.issuer_key_id
-                    && context.trust_generation == commit.context.trust_generation
+                    && context.issuer_manifest_generation
+                        == commit.context.issuer_manifest_generation
                     && context.refresh_at > commit.now
                     && context.expires_at - commit.now >= commit.minimum_remaining_seconds
             }) {
                 let mut idempotency = commit.idempotency;
-                idempotency.result = json!({ "contextId": existing.context_id });
+                idempotency.result = json!({ "contextDigest": existing.context_digest });
                 insert_sql_idempotency_and_actions(&transaction, &idempotency, &[])?;
                 let existing = existing.clone();
                 transaction.commit().map_err(sql_error)?;
@@ -411,7 +400,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
             for displaced in active.iter().skip(1) {
                 revoke_sql_contexts(
                     &transaction,
-                    &AuthorizationContextSelector::Context(displaced.context_id.clone()),
+                    &AuthorizationContextSelector::Context(displaced.context_digest.clone()),
                     AuthorizationContextRevocationReason::ContextReplaced,
                     commit.now,
                 )?;
@@ -420,7 +409,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                 context_action(&commit.context, PostCommitActionKind::ContextPublish, None)?;
             insert_sql_context(&transaction, &commit.context)?;
             let mut idempotency = commit.idempotency;
-            idempotency.result = json!({ "contextId": commit.context.context_id });
+            idempotency.result = json!({ "contextDigest": commit.context.context_digest });
             insert_sql_idempotency_and_actions(&transaction, &idempotency, &[action])?;
             transaction.commit().map_err(sql_error)?;
             Ok(IdempotentOutcome::Applied(commit.context))
@@ -430,15 +419,15 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
 
     async fn mark_context_published(
         &self,
-        context_id: &str,
+        context_digest: &str,
         expected_version: u64,
         published_at: i64,
     ) -> Result<AuthorizationContextRecord, AuthorizationStateError> {
-        valid_timestamp("publishedAt", published_at)?;
-        let id = context_id.to_owned();
+        require_protocol_timestamp("publishedAt", published_at)?;
+        let digest = context_digest.to_owned();
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
-            let current = load_sql_context_by_id(&transaction, &id)?.ok_or_else(|| {
+            let current = load_sql_context_by_digest(&transaction, &digest)?.ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("context is missing".to_owned())
             })?;
             if current.version != expected_version || published_at > current.expires_at {
@@ -456,15 +445,15 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                 .execute(
                     "UPDATE auth_authorization_contexts
                      SET published_at = ?1, version = ?2
-                     WHERE context_id = ?3 AND version = ?4 AND published_at IS NULL",
+                     WHERE context_digest = ?3 AND version = ?4 AND published_at IS NULL",
                     params![
                         published_at,
-                        sql_version(version)?,
-                        id,
-                        sql_version(expected_version)?,
+                        to_sql_version(version)?,
+                        digest,
+                        to_sql_version(expected_version)?,
                     ],
                 )
-                .map_err(write_error)
+                .map_err(map_write_error)
                 .and_then(|changed| {
                     if changed == 1 {
                         Ok(())
@@ -472,7 +461,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                         Err(AuthorizationStateError::StorageConflict)
                     }
                 })?;
-            let updated = load_sql_context_by_id(&transaction, &id)?.ok_or_else(|| {
+            let updated = load_sql_context_by_digest(&transaction, &digest)?.ok_or_else(|| {
                 AuthorizationStateError::Storage("published context disappeared".to_owned())
             })?;
             transaction.commit().map_err(sql_error)?;
@@ -485,26 +474,26 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         &self,
         now: i64,
     ) -> Result<Vec<AuthorizationContextRecord>, AuthorizationStateError> {
-        valid_timestamp("now", now)?;
+        require_protocol_timestamp("now", now)?;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             let contexts = query_sql_contexts(
                 &transaction,
-                "state = 'active' AND expires_at <= ?1 ORDER BY expires_at, context_id",
+                "state = 'active' AND expires_at <= ?1 ORDER BY expires_at, context_digest",
                 &[&now],
             )?;
             for context in &contexts {
                 transaction
                     .execute(
                         "UPDATE auth_authorization_contexts SET state = 'expired', version = ?1
-                         WHERE context_id = ?2 AND state = 'active' AND version = ?3",
+                         WHERE context_digest = ?2 AND state = 'active' AND version = ?3",
                         params![
-                            sql_version(next_version(context.version)?)?,
-                            context.context_id,
-                            sql_version(context.version)?,
+                            to_sql_version(next_version(context.version)?)?,
+                            context.context_digest,
+                            to_sql_version(context.version)?,
                         ],
                     )
-                    .map_err(write_error)?;
+                    .map_err(map_write_error)?;
             }
             let expired = contexts
                 .into_iter()
@@ -525,7 +514,7 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
         before: i64,
         limit: usize,
     ) -> Result<usize, AuthorizationStateError> {
-        valid_timestamp("before", before)?;
+        require_protocol_timestamp("before", before)?;
         let limit = i64::try_from(limit).map_err(|_| {
             AuthorizationStateError::InvalidRecord("context cleanup limit is too large".to_owned())
         })?;
@@ -541,36 +530,34 @@ impl AuthorizationContextRepository for SqliteAuthorizationStore {
                      WHERE purpose = 'authorizationContextIssue' AND expires_at <= ?1",
                     [before_millis],
                 )
-                .map_err(write_error)?;
+                .map_err(map_write_error)?;
             connection
                 .execute(
                     "DELETE FROM auth_authorization_contexts
-                     WHERE context_id IN (
-                       SELECT context_id FROM auth_authorization_contexts AS context
+                     WHERE context_digest IN (
+                       SELECT context_digest FROM auth_authorization_contexts AS context
                        WHERE state IN ('expired', 'revoked')
                           AND expires_at <= ?1
                          AND NOT EXISTS (
                            SELECT 1 FROM auth_post_commit_actions AS action
                            WHERE json_extract(action.payload_json, '$.contextDigest') = context.context_digest
                          )
-                        ORDER BY expires_at, context_id
+                         ORDER BY expires_at, context_digest
                        LIMIT ?2
                      )",
                     params![before, limit],
                 )
-                .map_err(write_error)
+                .map_err(map_write_error)
         })
         .await
     }
 }
 
 const CONTEXT_SELECT: &str = "SELECT
-    context_id, context_digest, session_id, principal_id, principal_kind,
-    participant_id, participant_artifact_digest, participant_needs_digest,
-    authority_kind, authority_id, authority_version, materialization_version,
-    deployment_id, instance_id, issuer_key_id, signed_context_json, context_token,
-    issuance_snapshot_token, trust_generation, issued_at, not_before, expires_at,
-    refresh_at, state, published_at, revoked_at, revocation_reason, version
+    context_digest, session_id, principal_id, authority_kind, authority_id,
+    deployment_id, instance_id, issuer_key_id, issuer_manifest_generation,
+    signed_context_json, issuance_snapshot_token, refresh_at, expires_at,
+    state, published_at, revoked_at, revocation_reason, version
     FROM auth_authorization_contexts";
 
 fn load_sql_trust_state(
@@ -589,7 +576,7 @@ fn load_sql_trust_state(
     connection
         .query_row(
             "SELECT authority, root_key_id, root_digest, manifest_generation, manifest_digest,
-                    active_issuer_key_id, updated_at, version
+                    updated_at, version
              FROM auth_authorization_trust_state WHERE singleton_id = 1",
             [],
             |row| {
@@ -597,11 +584,10 @@ fn load_sql_trust_state(
                     authority: row.get(0)?,
                     root_key_id: row.get(1)?,
                     root_digest: row.get(2)?,
-                    manifest_generation: row.get::<_, u64>(3)?,
+                    manifest_generation: from_sql_version(row.get(3)?)?,
                     manifest_digest: row.get(4)?,
-                    active_issuer_key_id: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    version: row.get::<_, u64>(7)?,
+                    updated_at: row.get(5)?,
+                    version: from_sql_version(row.get(6)?)?,
                 })
             },
         )
@@ -616,59 +602,47 @@ fn insert_sql_context(
     connection
         .execute(
             "INSERT INTO auth_authorization_contexts (
-                context_id, context_digest, session_id, principal_id, principal_kind,
-                participant_id, participant_artifact_digest, participant_needs_digest,
-                authority_kind, authority_id, authority_version, materialization_version,
-                deployment_id, instance_id, issuer_key_id, signed_context_json, context_token,
-                issuance_snapshot_token, trust_generation, issued_at, not_before, expires_at,
-                refresh_at, state, published_at, revoked_at, revocation_reason, version
+                context_digest, session_id, principal_id, authority_kind, authority_id,
+                deployment_id, instance_id, issuer_key_id, issuer_manifest_generation,
+                signed_context_json, issuance_snapshot_token, refresh_at, expires_at,
+                state, published_at, revoked_at, revocation_reason, version
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+                ?15, ?16, ?17, ?18
              )",
             params![
-                context.context_id,
                 context.context_digest,
                 context.session_id,
                 context.principal_id,
-                enum_string(context.principal_kind)?,
-                context.participant_id,
-                context.participant_artifact_digest,
-                context.participant_needs_digest,
-                enum_string(context.authority_kind)?,
+                encode_enum(context.authority_kind)?,
                 context.authority_id,
-                sql_version(context.authority_version)?,
-                sql_version(context.materialization_version)?,
                 context.deployment_id,
                 context.instance_id,
                 context.issuer_key_id,
+                to_sql_version(context.issuer_manifest_generation)?,
                 context.signed_context_json,
-                context.context_token,
                 context.issuance_snapshot_token,
-                sql_version(context.trust_generation)?,
-                context.issued_at,
-                context.not_before,
-                context.expires_at,
                 context.refresh_at,
-                enum_string(context.state)?,
+                context.expires_at,
+                encode_enum(context.state)?,
                 context.published_at,
                 context.revoked_at,
-                context.revocation_reason.map(enum_string).transpose()?,
-                sql_version(context.version)?,
+                context.revocation_reason.map(encode_enum).transpose()?,
+                to_sql_version(context.version)?,
             ],
         )
-        .map_err(write_error)?;
+        .map_err(map_write_error)?;
     Ok(())
 }
 
-fn load_sql_context_by_id(
+fn load_sql_context_by_digest(
     connection: &rusqlite::Connection,
-    context_id: &str,
+    context_digest: &str,
 ) -> Result<Option<AuthorizationContextRecord>, AuthorizationStateError> {
     connection
         .query_row(
-            &format!("{} WHERE context_id = ?1", CONTEXT_SELECT),
-            [context_id],
+            &format!("{} WHERE context_digest = ?1", CONTEXT_SELECT),
+            [context_digest],
             decode_sql_context,
         )
         .optional()
@@ -693,37 +667,27 @@ fn query_sql_contexts(
 
 fn decode_sql_context(row: &Row<'_>) -> rusqlite::Result<AuthorizationContextRecord> {
     Ok(AuthorizationContextRecord {
-        context_id: row.get(0)?,
-        context_digest: row.get(1)?,
-        session_id: row.get(2)?,
-        principal_id: row.get(3)?,
-        principal_kind: parse_enum(row.get::<_, String>(4)?)?,
-        participant_id: row.get(5)?,
-        participant_artifact_digest: row.get(6)?,
-        participant_needs_digest: row.get(7)?,
-        authority_kind: parse_enum(row.get::<_, String>(8)?)?,
-        authority_id: row.get(9)?,
-        authority_version: row.get(10)?,
-        materialization_version: row.get(11)?,
-        deployment_id: row.get(12)?,
-        instance_id: row.get(13)?,
-        issuer_key_id: row.get(14)?,
-        signed_context_json: row.get(15)?,
-        context_token: row.get(16)?,
-        issuance_snapshot_token: row.get(17)?,
-        trust_generation: row.get(18)?,
-        issued_at: row.get(19)?,
-        not_before: row.get(20)?,
-        expires_at: row.get(21)?,
-        refresh_at: row.get(22)?,
-        state: parse_enum(row.get::<_, String>(23)?)?,
-        published_at: row.get(24)?,
-        revoked_at: row.get(25)?,
+        context_digest: row.get(0)?,
+        session_id: row.get(1)?,
+        principal_id: row.get(2)?,
+        authority_kind: decode_enum(row.get::<_, String>(3)?)?,
+        authority_id: row.get(4)?,
+        deployment_id: row.get(5)?,
+        instance_id: row.get(6)?,
+        issuer_key_id: row.get(7)?,
+        issuer_manifest_generation: from_sql_version(row.get(8)?)?,
+        signed_context_json: row.get(9)?,
+        issuance_snapshot_token: row.get(10)?,
+        refresh_at: row.get(11)?,
+        expires_at: row.get(12)?,
+        state: decode_enum(row.get::<_, String>(13)?)?,
+        published_at: row.get(14)?,
+        revoked_at: row.get(15)?,
         revocation_reason: row
-            .get::<_, Option<String>>(26)?
-            .map(parse_enum)
+            .get::<_, Option<String>>(16)?
+            .map(decode_enum)
             .transpose()?,
-        version: row.get(27)?,
+        version: from_sql_version(row.get(17)?)?,
     })
 }
 
@@ -733,42 +697,44 @@ pub(crate) fn revoke_sql_contexts(
     reason: AuthorizationContextRevocationReason,
     revoked_at: i64,
 ) -> Result<Vec<AuthorizationContextRecord>, AuthorizationStateError> {
-    valid_timestamp("revokedAt", revoked_at)?;
+    require_protocol_timestamp("revokedAt", revoked_at)?;
     let contexts = match selector {
-        AuthorizationContextSelector::Context(id) => {
-            query_sql_contexts(connection, "state = 'active' AND context_id = ?1", &[id])?
-        }
+        AuthorizationContextSelector::Context(id) => query_sql_contexts(
+            connection,
+            "state = 'active' AND context_digest = ?1",
+            &[id],
+        )?,
         AuthorizationContextSelector::Session(id) => query_sql_contexts(
             connection,
-            "state = 'active' AND session_id = ?1 ORDER BY context_id",
+            "state = 'active' AND session_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
         AuthorizationContextSelector::Principal(id) => query_sql_contexts(
             connection,
-            "state = 'active' AND principal_id = ?1 ORDER BY context_id",
+            "state = 'active' AND principal_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
         AuthorizationContextSelector::Authority(kind, id) => {
-            let kind = enum_string(*kind)?;
+            let kind = encode_enum(*kind)?;
             query_sql_contexts(
                 connection,
-                "state = 'active' AND authority_kind = ?1 AND authority_id = ?2 ORDER BY context_id",
+                "state = 'active' AND authority_kind = ?1 AND authority_id = ?2 ORDER BY context_digest",
                 &[&kind, id],
             )?
         }
         AuthorizationContextSelector::Deployment(id) => query_sql_contexts(
             connection,
-            "state = 'active' AND deployment_id = ?1 ORDER BY context_id",
+            "state = 'active' AND deployment_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
         AuthorizationContextSelector::Instance(id) => query_sql_contexts(
             connection,
-            "state = 'active' AND instance_id = ?1 ORDER BY context_id",
+            "state = 'active' AND instance_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
         AuthorizationContextSelector::Issuer(id) => query_sql_contexts(
             connection,
-            "state = 'active' AND issuer_key_id = ?1 ORDER BY context_id",
+            "state = 'active' AND issuer_key_id = ?1 ORDER BY context_digest",
             &[id],
         )?,
     };
@@ -782,16 +748,16 @@ pub(crate) fn revoke_sql_contexts(
             .execute(
                 "UPDATE auth_authorization_contexts
                  SET state = 'revoked', revoked_at = ?1, revocation_reason = ?2, version = ?3
-                 WHERE context_id = ?4 AND state = 'active' AND version = ?5",
+                 WHERE context_digest = ?4 AND state = 'active' AND version = ?5",
                 params![
                     revoked_at,
-                    enum_string(reason)?,
-                    sql_version(context.version)?,
-                    context.context_id,
-                    sql_version(context.version - 1)?,
+                    encode_enum(reason)?,
+                    to_sql_version(context.version)?,
+                    context.context_digest,
+                    to_sql_version(context.version - 1)?,
                 ],
             )
-            .map_err(write_error)
+            .map_err(map_write_error)
             .and_then(|changed| {
                 if changed == 1 {
                     Ok(())
@@ -823,7 +789,7 @@ fn insert_context_action(
         .optional()
         .map_err(sql_error)?
     {
-        return if kind == enum_string(action.kind)? && existing_payload == payload {
+        return if kind == encode_enum(action.kind)? && existing_payload == payload {
             Ok(())
         } else {
             Err(AuthorizationStateError::StorageConflict)
@@ -837,7 +803,7 @@ fn insert_context_action(
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 action.action_id,
-                enum_string(action.kind)?,
+                encode_enum(action.kind)?,
                 payload,
                 action.created_at,
                 i64::from(action.attempts),
@@ -846,42 +812,8 @@ fn insert_context_action(
                 action.last_error,
             ],
         )
-        .map_err(write_error)?;
+        .map_err(map_write_error)?;
     Ok(())
-}
-
-fn enum_string<T: Serialize>(value: T) -> Result<String, AuthorizationStateError> {
-    serde_json::to_value(value)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .ok_or_else(|| AuthorizationStateError::Storage("cannot encode context enum".to_owned()))
-}
-
-fn parse_enum<T: for<'de> Deserialize<'de>>(value: String) -> rusqlite::Result<T> {
-    serde_json::from_value(Value::String(value)).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
-    })
-}
-
-fn sql_version(value: u64) -> Result<i64, AuthorizationStateError> {
-    i64::try_from(value).map_err(|_| {
-        AuthorizationStateError::InvalidRecord("version exceeds SQLite integer range".to_owned())
-    })
-}
-
-fn sql_error(error: rusqlite::Error) -> AuthorizationStateError {
-    AuthorizationStateError::Storage(error.to_string())
-}
-
-fn write_error(error: rusqlite::Error) -> AuthorizationStateError {
-    match error {
-        rusqlite::Error::SqliteFailure(code, _)
-            if code.code == rusqlite::ErrorCode::ConstraintViolation =>
-        {
-            AuthorizationStateError::StorageConflict
-        }
-        error => sql_error(error),
-    }
 }
 
 fn validate_trust_state(
@@ -891,10 +823,9 @@ fn validate_trust_state(
     digest("rootKeyId", &state.root_key_id)?;
     digest("rootDigest", &state.root_digest)?;
     digest("manifestDigest", &state.manifest_digest)?;
-    digest("activeIssuerKeyId", &state.active_issuer_key_id)?;
     positive("manifestGeneration", state.manifest_generation)?;
     positive("version", state.version)?;
-    valid_timestamp("updatedAt", state.updated_at)
+    require_protocol_timestamp("updatedAt", state.updated_at)
 }
 
 fn accept_trust_state(
@@ -928,34 +859,24 @@ fn accept_trust_state(
 fn validate_context_record(
     record: &AuthorizationContextRecord,
 ) -> Result<(), AuthorizationStateError> {
-    nonempty("contextId", &record.context_id)?;
     digest("contextDigest", &record.context_digest)?;
     nonempty("sessionId", &record.session_id)?;
     nonempty("principalId", &record.principal_id)?;
-    nonempty("participantId", &record.participant_id)?;
-    digest(
-        "participantArtifactDigest",
-        &record.participant_artifact_digest,
-    )?;
-    digest("participantNeedsDigest", &record.participant_needs_digest)?;
     nonempty("authorityId", &record.authority_id)?;
-    positive("authorityVersion", record.authority_version)?;
-    positive("materializationVersion", record.materialization_version)?;
     digest("issuerKeyId", &record.issuer_key_id)?;
     digest("issuanceSnapshotToken", &record.issuance_snapshot_token)?;
-    positive("trustGeneration", record.trust_generation)?;
+    positive(
+        "issuerManifestGeneration",
+        record.issuer_manifest_generation,
+    )?;
     positive("version", record.version)?;
     for (name, value) in [
-        ("issuedAt", record.issued_at),
-        ("notBefore", record.not_before),
         ("expiresAt", record.expires_at),
         ("refreshAt", record.refresh_at),
     ] {
-        valid_timestamp(name, value)?;
+        require_protocol_timestamp(name, value)?;
     }
-    if record.not_before > record.issued_at
-        || record.expires_at <= record.not_before
-        || !(record.issued_at..record.expires_at).contains(&record.refresh_at)
+    if record.refresh_at > record.expires_at
         || record.deployment_id.is_none() != record.instance_id.is_none()
         || (record.state == AuthorizationContextState::Revoked)
             != (record.revoked_at.is_some() && record.revocation_reason.is_some())
@@ -964,16 +885,6 @@ fn validate_context_record(
     {
         return Err(AuthorizationStateError::InvalidRecord(
             "authorization context lifecycle is inconsistent".to_owned(),
-        ));
-    }
-    let bytes = URL_SAFE_NO_PAD.decode(&record.context_token).map_err(|_| {
-        AuthorizationStateError::InvalidRecord("context token is not base64url".to_owned())
-    })?;
-    if URL_SAFE_NO_PAD.encode(&bytes) != record.context_token
-        || bytes.as_slice() != record.signed_context_json.as_bytes()
-    {
-        return Err(AuthorizationStateError::InvalidRecord(
-            "context token does not encode signed context JSON".to_owned(),
         ));
     }
     let value: Value = serde_json::from_str(&record.signed_context_json).map_err(|error| {
@@ -994,21 +905,14 @@ fn validate_context_record(
         ));
     }
     let context = signed.unsigned;
-    if context.context_id != record.context_id
-        || context.session_id != record.session_id
+    if context.session_id != record.session_id
         || context.principal.id != record.principal_id
-        || principal_kind(context.principal.kind) != record.principal_kind
-        || context.participant.id != record.participant_id
-        || context.participant.artifact_digest != record.participant_artifact_digest
-        || context.participant.needs_digest != record.participant_needs_digest
         || authority_kind(context.authority_ref.kind) != record.authority_kind
         || context.authority_ref.id != record.authority_id
-        || context.authority_ref.version != record.authority_version
         || context.deployment_id != record.deployment_id
         || context.instance_id != record.instance_id
         || context.issuer_key_id != record.issuer_key_id
-        || context.issued_at != record.issued_at
-        || context.not_before != record.not_before
+        || context.issuer_manifest_generation != record.issuer_manifest_generation
         || context.expires_at != record.expires_at
     {
         return Err(AuthorizationStateError::InvalidRecord(
@@ -1026,12 +930,10 @@ fn context_action(
     let payload = match kind {
         PostCommitActionKind::ContextPublish => json!({
             "format": "trellis.authorization-context-publish-action.v1",
-            "contextId": context.context_id,
             "contextDigest": context.context_digest,
         }),
         PostCommitActionKind::ContextRevoke => json!({
             "format": "trellis.authorization-context-revoke-action.v1",
-            "contextId": context.context_id,
             "contextDigest": context.context_digest,
             "reason": reason,
             "version": context.version,
@@ -1040,9 +942,15 @@ fn context_action(
     };
     let canonical = canonicalize_json(&payload)
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+    let signed_context = serde_json::from_str::<Value>(&context.signed_context_json)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let issued_at = parse_authorization_context_v1(&signed_context)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+        .unsigned
+        .issued_at;
     let action_at = context
         .revoked_at
-        .unwrap_or(context.issued_at)
+        .unwrap_or(issued_at)
         .checked_mul(1_000)
         .ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("context time overflow".to_owned())
@@ -1057,14 +965,6 @@ fn context_action(
         claimed_until: None,
         last_error: None,
     })
-}
-
-fn principal_kind(kind: AuthorizationPrincipalKindV1) -> PrincipalKind {
-    match kind {
-        AuthorizationPrincipalKindV1::User => PrincipalKind::User,
-        AuthorizationPrincipalKindV1::Service => PrincipalKind::Service,
-        AuthorizationPrincipalKindV1::Device => PrincipalKind::Device,
-    }
 }
 
 fn authority_kind(kind: AuthorizationAuthorityKindV1) -> AuthorityKind {
@@ -1107,23 +1007,6 @@ fn positive(name: &str, value: u64) -> Result<(), AuthorizationStateError> {
     }
 }
 
-fn valid_timestamp(name: &str, value: i64) -> Result<(), AuthorizationStateError> {
-    if (0..=MAXIMUM_SAFE_INTEGER as i64).contains(&value) {
-        Ok(())
-    } else {
-        Err(AuthorizationStateError::InvalidRecord(format!(
-            "{name} must be a nonnegative safe integer"
-        )))
-    }
-}
-
-fn next_version(version: u64) -> Result<u64, AuthorizationStateError> {
-    version
-        .checked_add(1)
-        .filter(|version| *version <= MAXIMUM_SAFE_INTEGER)
-        .ok_or_else(|| AuthorizationStateError::InvalidRecord("version overflow".to_owned()))
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1133,20 +1016,27 @@ mod tests {
 
     use ed25519_dalek::SigningKey;
     use trellis_protocol::{
-        encode_authorization_context_token_v1, parse_authorization_context_v1,
-        parse_participant_v1, resolve_participant_v1, sign_authorization_context_v1,
-        AuthorizationAuthorityRefV1, AuthorizationParticipantV1, AuthorizationPrincipalV1,
-        GrantSetV1, ParticipantKindV1, UnsignedAuthorizationContextV1,
-        AUTHORIZATION_CONTEXT_FORMAT_V1,
+        parse_authorization_context_v1, parse_participant_v1, resolve_participant_v1,
+        sign_authorization_context_v1, AuthorizationAuthorityRefV1, AuthorizationParticipantV1,
+        AuthorizationPrincipalKindV1, AuthorizationPrincipalV1, GrantSetV1, ParticipantKindV1,
+        UnsignedAuthorizationContextV1, AUTHORIZATION_CONTEXT_FORMAT_V1,
     };
 
     use super::*;
+    use crate::platform::auth::account::hash_password;
     use crate::platform::auth::{
-        AuthSessionRepository, AuthorityDecision, AuthorityState, AuthorityTarget,
-        AuthorizationMaterializationRepository, DesiredAuthorityRecord, IdentityAuthorityRecord,
-        IdentityAuthorityRepository, ParticipantBindingRecord, ParticipantBindingRepository,
-        ParticipantBindingState, PrincipalRepository, PrincipalState, SessionCreation,
-        SessionRecord, SessionRepository, SessionState, SqliteAuthorizationStore,
+        AccountCreation, AccountFlowCreation, AccountFlowKind, AccountFlowRecord, AccountFlowState,
+        AccountRepository, AuthService, AuthServiceConfig, AuthorityDecision,
+        AuthorityDecisionOutcome, AuthorityEvidenceRepository, AuthorityProposalKind,
+        AuthorityRepository, AuthorityState, AuthorityTarget, ContextRepository,
+        CreateAuthorityProposalInput, DecideAuthorityProposalInput, DesiredAuthorityRecord,
+        DeviceDelegationMutation, DeviceDelegationRecord, DeviceDelegationState, DeviceRecord,
+        DeviceState, IdempotencyResultRecord, IdentityAuthorityRecord, LocalCredentialRecord,
+        ParticipantBindingRecord, ParticipantBindingState, PasswordChange, PasswordResetCompletion,
+        PostCommitActionKind, PrincipalKind, PrincipalState, ProviderIdentityLink,
+        ProvisionedInstanceMutation, ProvisioningRepository, SessionCreation, SessionRecord,
+        SessionRepository, SessionRevocation, SessionState, SqliteAuthorizationStore,
+        UpdateUserInput, UserProfileRecord,
     };
 
     const NOW_MS: i64 = 1_735_689_600_000;
@@ -1156,10 +1046,9 @@ mod tests {
     async fn repository_conformance<R>(repository: &R) -> Result<(), AuthorizationStateError>
     where
         R: AuthorizationContextRepository
-            + AuthorizationMaterializationRepository
-            + AuthSessionRepository
-            + ParticipantBindingRepository
-            + PrincipalRepository
+            + AccountRepository
+            + AuthorityRepository
+            + ContextRepository
             + SessionRepository
             + Send
             + Sync,
@@ -1171,7 +1060,6 @@ mod tests {
             root_digest: DIGEST.to_owned(),
             manifest_generation: 1,
             manifest_digest: DIGEST.to_owned(),
-            active_issuer_key_id: context.issuer_key_id.clone(),
             updated_at: NOW_MS,
             version: 1,
         };
@@ -1206,7 +1094,6 @@ mod tests {
             advanced
         );
 
-        repository.touch_session("ses_context", NOW_MS + 1).await?;
         let current_snapshot = repository.load_issuance_snapshot("ses_context").await?;
         assert_eq!(issuance_snapshot_token(&current_snapshot)?, snapshot_token);
         let idempotency = IdempotencyResultRecord {
@@ -1233,7 +1120,7 @@ mod tests {
         assert!(matches!(
             repository.commit_context(commit).await?,
             IdempotentOutcome::Replayed(value)
-                if value == json!({ "contextId": "ctx_context" })
+                if value == json!({ "contextDigest": context.context_digest })
         ));
         assert_eq!(
             repository
@@ -1243,14 +1130,13 @@ mod tests {
         );
         assert_eq!(repository.list_unpublished_contexts(10).await?.len(), 1);
         let published = repository
-            .mark_context_published(&context.context_id, 1, NOW_SECONDS + 2)
+            .mark_context_published(&context.context_digest, 1, NOW_SECONDS + 2)
             .await?;
         assert_eq!(published.published_at, Some(NOW_SECONDS + 2));
         assert!(repository.list_unpublished_contexts(10).await?.is_empty());
         let mut rotated = advanced;
         rotated.manifest_generation = 3;
         rotated.manifest_digest = DIGEST.to_owned();
-        rotated.active_issuer_key_id = context.context_digest.clone();
         rotated.version = 3;
         repository
             .accept_trust_state(
@@ -1260,7 +1146,7 @@ mod tests {
             )
             .await?;
         let revoked = repository
-            .get_context_by_id(&context.context_id)
+            .get_context_by_digest(&context.context_digest)
             .await?
             .expect("context remains as revocation evidence");
         assert_eq!(revoked.state, AuthorizationContextState::Revoked);
@@ -1275,14 +1161,48 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn corrupted_context_row_fails_to_decode() -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        let context_digest = context.context_digest.clone();
+        let corrupted_context_digest = context_digest.clone();
+        commit_seed_context(&repository, context, snapshot_token, "req_corrupt", 19).await?;
+        // Persisted corruption: raw SQLite text `session_\u0072evoked` must not
+        // decode as the canonical `session_revoked` reason via JSON escape
+        // interpretation; the read must fail instead of silently accepting it.
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_authorization_contexts
+                         SET state = 'revoked', revoked_at = ?1, revocation_reason = ?2
+                         WHERE context_digest = ?3",
+                        rusqlite::params![
+                            NOW_MS,
+                            "session_\\u0072evoked",
+                            corrupted_context_digest
+                        ],
+                    )
+                    .map_err(sql_error)?;
+                Ok(1)
+            })
+            .await?;
+        assert!(matches!(
+            repository.get_context_by_digest(&context_digest).await,
+            Err(AuthorizationStateError::Storage(_))
+        ));
+        Ok(())
+    }
+
     async fn seed_context<R>(
         repository: &R,
     ) -> Result<(AuthorizationContextRecord, IssuanceSnapshotToken), AuthorizationStateError>
     where
-        R: AuthorizationMaterializationRepository
-            + AuthSessionRepository
-            + ParticipantBindingRepository
-            + PrincipalRepository
+        R: AccountRepository
+            + AuthorityRepository
+            + ContextRepository
+            + SessionRepository
             + Send
             + Sync,
     {
@@ -1324,15 +1244,55 @@ mod tests {
             })
             .await?;
         repository
-            .create_principal(crate::platform::auth::PrincipalRecord {
-                principal_id: "usr_context".to_owned(),
-                kind: PrincipalKind::User,
-                state: PrincipalState::Active,
-                created_at: NOW_MS,
-                updated_at: NOW_MS,
-                version: 1,
-                disabled_at: None,
-                revoked_at: None,
+            .create_user_account(AccountCreation {
+                principal: crate::platform::auth::PrincipalRecord {
+                    principal_id: "usr_context".to_owned(),
+                    kind: PrincipalKind::User,
+                    state: PrincipalState::Active,
+                    created_at: NOW_MS,
+                    updated_at: NOW_MS,
+                    version: 1,
+                    disabled_at: None,
+                    revoked_at: None,
+                },
+                profile: UserProfileRecord {
+                    principal_id: "usr_context".to_owned(),
+                    display_name: Some("Context user".to_owned()),
+                    email: None,
+                    image_url: None,
+                    created_at: NOW_MS,
+                    updated_at: NOW_MS,
+                    version: 1,
+                },
+                credential: Some(LocalCredentialRecord {
+                    principal_id: "usr_context".to_owned(),
+                    normalized_username: "context".to_owned(),
+                    password_hash: "current-hash".to_owned(),
+                    hash_profile: 1,
+                    failed_attempts: 0,
+                    locked_until: None,
+                    password_changed_at: NOW_MS,
+                    updated_at: NOW_MS,
+                    version: 1,
+                }),
+                identity: Some(ProviderIdentityLink {
+                    provider: "local".to_owned(),
+                    provider_subject: "context".to_owned(),
+                    principal_id: "usr_context".to_owned(),
+                    linked_at: NOW_MS,
+                    last_seen_at: NOW_MS,
+                }),
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([3; 32]),
+                    purpose: "testAccountCreate".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_account".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: json!({ "principalId": "usr_context" }),
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
             })
             .await?;
         let session_key = SigningKey::from_bytes(&[17; 32]);
@@ -1411,8 +1371,8 @@ mod tests {
             UnsignedAuthorizationContextV1 {
                 format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
                 authority: "example.test".to_owned(),
-                context_id: "ctx_context".to_owned(),
                 issuer_key_id: issuer_key_id.clone(),
+                issuer_manifest_generation: 2,
                 session_id: "ses_context".to_owned(),
                 session_key: session_public_key,
                 principal: AuthorizationPrincipalV1 {
@@ -1452,33 +1412,21 @@ mod tests {
         let context_digest = signed
             .digest()
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let context_token = encode_authorization_context_token_v1(&signed)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         Ok((
             AuthorizationContextRecord {
-                context_id: "ctx_context".to_owned(),
                 context_digest,
                 session_id: "ses_context".to_owned(),
                 principal_id: "usr_context".to_owned(),
-                principal_kind: PrincipalKind::User,
-                participant_id: "context-test-app".to_owned(),
-                participant_artifact_digest: participant_digest,
-                participant_needs_digest: needs_digest,
                 authority_kind: AuthorityKind::Identity,
                 authority_id: "iau_context".to_owned(),
-                authority_version: 1,
-                materialization_version: 1,
                 deployment_id: None,
                 instance_id: None,
                 issuer_key_id,
+                issuer_manifest_generation: 2,
                 signed_context_json,
-                context_token,
                 issuance_snapshot_token: token.0.clone(),
-                trust_generation: 2,
-                issued_at: NOW_SECONDS,
-                not_before: NOW_SECONDS - 30,
-                expires_at: NOW_SECONDS + 300,
                 refresh_at: NOW_SECONDS + 240,
+                expires_at: NOW_SECONDS + 300,
                 state: AuthorizationContextState::Active,
                 published_at: None,
                 revoked_at: None,
@@ -1489,6 +1437,94 @@ mod tests {
         ))
     }
 
+    async fn commit_seed_context<R>(
+        repository: &R,
+        context: AuthorizationContextRecord,
+        snapshot_token: IssuanceSnapshotToken,
+        request_id: &str,
+        scope_byte: u8,
+    ) -> Result<(), AuthorizationStateError>
+    where
+        R: AuthorizationContextRepository + Send + Sync,
+    {
+        repository
+            .commit_context(AuthorizationContextCommit {
+                expected_snapshot_token: snapshot_token,
+                context,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([scope_byte; 32]),
+                    purpose: "authorizationContextIssue".to_owned(),
+                    signer_id: "ses_context".to_owned(),
+                    request_id: request_id.to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                now: NOW_SECONDS,
+                minimum_remaining_seconds: 1,
+            })
+            .await?;
+        Ok(())
+    }
+
+    async fn seed_device_delegation_records(
+        repository: &SqliteAuthorizationStore,
+    ) -> Result<(DeviceRecord, DeviceDelegationRecord), AuthorizationStateError> {
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_deployments (
+                             deployment_id, participant_id, participant_kind, state, expires_at
+                         ) VALUES (?1, ?2, 'device', 'active', NULL)",
+                        rusqlite::params!["dep_context_device", "context-test-app"],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_devices (
+                             principal_id, deployment_id, state, created_at, updated_at, version
+                         ) VALUES (?1, ?2, 'active', ?3, ?3, 1)",
+                        rusqlite::params!["usr_context", "dep_context_device", NOW_MS],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_device_delegations (
+                             principal_id, deployment_id, required, state, expires_at
+                         ) VALUES (?1, ?2, 1, 'active', ?3)",
+                        rusqlite::params!["usr_context", "dep_context_device", NOW_MS + 600_000],
+                    )
+                    .map_err(sql_error)?;
+                Ok(())
+            })
+            .await?;
+        Ok((
+            repository
+                .get_device("usr_context", "dep_context_device")
+                .await?
+                .expect("device"),
+            repository
+                .get_device_delegation("usr_context", "dep_context_device")
+                .await?
+                .expect("device delegation"),
+        ))
+    }
+
+    fn device_delegation_idempotency(byte: u8) -> IdempotencyResultRecord {
+        IdempotencyResultRecord {
+            scope_key: URL_SAFE_NO_PAD.encode([byte + 100; 32]),
+            purpose: "device.delegation.mutate".to_owned(),
+            signer_id: "usr_context".to_owned(),
+            request_id: format!("req_device_delegation_{byte}"),
+            request_digest: DIGEST.to_owned(),
+            result: Value::Null,
+            created_at: NOW_MS,
+            expires_at: NOW_MS + 60_000,
+        }
+    }
+
     #[tokio::test]
     async fn sqlite_context_repository_conforms() -> Result<(), AuthorizationStateError> {
         repository_conformance(&SqliteAuthorizationStore::open_in_memory()?).await
@@ -1496,7 +1532,7 @@ mod tests {
 
     fn replacement_context(
         base: &AuthorizationContextRecord,
-        index: usize,
+        _index: usize,
         issuer_seed: u8,
     ) -> Result<AuthorizationContextRecord, AuthorizationStateError> {
         let value: Value = serde_json::from_str(&base.signed_context_json)
@@ -1504,22 +1540,18 @@ mod tests {
         let mut unsigned = parse_authorization_context_v1(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
             .unsigned;
-        unsigned.context_id = format!("ctx_replacement_{index:03}");
         let issuer_key = SigningKey::from_bytes(&[issuer_seed; 32]);
         unsigned.issuer_key_id =
             URL_SAFE_NO_PAD.encode(Sha256::digest(issuer_key.verifying_key().as_bytes()));
         let signed = sign_authorization_context_v1(unsigned, &issuer_key)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let mut context = base.clone();
-        context.context_id = signed.unsigned.context_id.clone();
         context.issuer_key_id = signed.unsigned.issuer_key_id.clone();
         context.signed_context_json = canonicalize_json(
             &serde_json::to_value(&signed)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
         )
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        context.context_token = encode_authorization_context_token_v1(&signed)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         context.context_digest = signed
             .digest()
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -1621,8 +1653,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sqlite_session_expiry_revokes_context_but_liveness_does_not(
-    ) -> Result<(), AuthorizationStateError> {
+    async fn sqlite_session_revocation_revokes_context() -> Result<(), AuthorizationStateError> {
         let repository = SqliteAuthorizationStore::open_in_memory()?;
         let (context, snapshot_token) = seed_context(&repository).await?;
         repository
@@ -1644,7 +1675,6 @@ mod tests {
             })
             .await?;
 
-        repository.touch_session("ses_context", NOW_MS + 1).await?;
         repository
             .reconcile_authority(
                 &AuthorityTarget {
@@ -1664,7 +1694,22 @@ mod tests {
         );
 
         repository
-            .expire_session("ses_context", 1, NOW_MS + 600_000)
+            .revoke_session(SessionRevocation {
+                session_id: "ses_context".to_owned(),
+                expected_version: 1,
+                revoked_at: NOW_MS + 600_000,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([8; 32]),
+                    purpose: "session.revoke".to_owned(),
+                    signer_id: "ses_context".to_owned(),
+                    request_id: "req_context_revoke".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: json!({ "sessionId": "ses_context" }),
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
             .await?;
         let revoked = repository
             .get_context_by_digest(&context.context_digest)
@@ -1673,7 +1718,1078 @@ mod tests {
         assert_eq!(revoked.state, AuthorizationContextState::Revoked);
         assert_eq!(
             revoked.revocation_reason,
-            Some(AuthorizationContextRevocationReason::SessionExpired)
+            Some(AuthorizationContextRevocationReason::SessionRevoked)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_device_delegation_version_only_update_keeps_context_active(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_device_delegation_noop_context",
+            40,
+        )
+        .await?;
+        let (device, delegation) = seed_device_delegation_records(&repository).await?;
+        let mut updated_device = device.clone();
+        updated_device.updated_at = NOW_MS + 1;
+        updated_device.version = 2;
+        assert!(matches!(
+            repository
+                .mutate_device_delegation(DeviceDelegationMutation {
+                    device: updated_device.clone(),
+                    delegation,
+                    expected_version: device.version,
+                    idempotency: device_delegation_idempotency(40),
+                    actions: Vec::new(),
+                })
+                .await?,
+            IdempotentOutcome::Applied(value) if value == updated_device
+        ));
+        let unchanged = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("context");
+        assert_eq!(unchanged.state, AuthorizationContextState::Active);
+        assert_eq!(unchanged.version, context.version);
+        assert_eq!(unchanged.revocation_reason, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_device_delegation_semantic_changes_revoke_context(
+    ) -> Result<(), AuthorizationStateError> {
+        for (byte, device_state, delegation_state, expires_at, reason) in [
+            (
+                41,
+                DeviceState::Disabled,
+                DeviceDelegationState::Active,
+                Some(NOW_MS + 600_000),
+                AuthorizationContextRevocationReason::DeviceChanged,
+            ),
+            (
+                42,
+                DeviceState::Active,
+                DeviceDelegationState::Missing,
+                Some(NOW_MS + 600_000),
+                AuthorizationContextRevocationReason::DelegationChanged,
+            ),
+            (
+                43,
+                DeviceState::Active,
+                DeviceDelegationState::Active,
+                Some(NOW_MS + 500_000),
+                AuthorizationContextRevocationReason::DelegationChanged,
+            ),
+        ] {
+            let repository = SqliteAuthorizationStore::open_in_memory()?;
+            let (context, snapshot_token) = seed_context(&repository).await?;
+            commit_seed_context(
+                &repository,
+                context.clone(),
+                snapshot_token,
+                &format!("req_device_delegation_semantic_context_{byte}"),
+                byte,
+            )
+            .await?;
+            let (device, mut delegation) = seed_device_delegation_records(&repository).await?;
+            let mut updated_device = device.clone();
+            updated_device.state = device_state;
+            updated_device.updated_at = NOW_MS + 1;
+            updated_device.version = 2;
+            delegation.state = delegation_state;
+            delegation.expires_at = expires_at;
+            repository
+                .mutate_device_delegation(DeviceDelegationMutation {
+                    device: updated_device,
+                    delegation,
+                    expected_version: device.version,
+                    idempotency: device_delegation_idempotency(byte),
+                    actions: Vec::new(),
+                })
+                .await?;
+            let revoked = repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context");
+            assert_eq!(revoked.state, AuthorizationContextState::Revoked);
+            assert_eq!(revoked.revocation_reason, Some(reason));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_password_reuse_rejection_preserves_auth_state(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_password_reuse_context",
+            44,
+        )
+        .await?;
+        let (password_hash, hash_profile) = hash_password("current password", Some(12))?;
+        repository
+            .run(move |connection| {
+                let changed = connection
+                    .execute(
+                        "UPDATE auth_local_credentials
+                         SET password_hash = ?1, hash_profile = ?2
+                         WHERE principal_id = ?3",
+                        rusqlite::params![password_hash, hash_profile, "usr_context"],
+                    )
+                    .map_err(sql_error)?;
+                if changed != 1 {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                Ok(())
+            })
+            .await?;
+        let service = AuthService::new(repository.clone(), AuthServiceConfig::default())?;
+        let credential_before = repository
+            .get_local_credential("usr_context")
+            .await?
+            .expect("credential");
+        let session_before = repository
+            .get_session("ses_context")
+            .await?
+            .expect("session");
+        let context_before = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("context");
+
+        assert_eq!(
+            service
+                .change_password(
+                    "usr_context",
+                    "ses_context",
+                    "current password",
+                    "current password",
+                    NOW_MS + 1,
+                    IdempotencyResultRecord {
+                        scope_key: URL_SAFE_NO_PAD.encode([45; 32]),
+                        purpose: "password.change".to_owned(),
+                        signer_id: "usr_context".to_owned(),
+                        request_id: "req_password_reuse_change".to_owned(),
+                        request_digest: DIGEST.to_owned(),
+                        result: Value::Null,
+                        created_at: NOW_MS,
+                        expires_at: NOW_MS + 60_000,
+                    },
+                    Vec::new(),
+                )
+                .await,
+            Err(AuthorizationStateError::InvalidRecord(
+                "new password must differ from current password".to_owned()
+            ))
+        );
+        assert_eq!(
+            repository
+                .get_local_credential("usr_context")
+                .await?
+                .expect("credential"),
+            credential_before
+        );
+        assert_eq!(
+            repository
+                .get_session("ses_context")
+                .await?
+                .expect("session"),
+            session_before
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context"),
+            context_before
+        );
+
+        let reset_token = URL_SAFE_NO_PAD.encode([46; 32]);
+        let reset_token_hash = URL_SAFE_NO_PAD.encode(Sha256::digest([46; 32]));
+        repository
+            .create_account_flow(AccountFlowCreation {
+                flow: AccountFlowRecord {
+                    flow_id: "flow_password_reuse".to_owned(),
+                    kind: AccountFlowKind::PasswordReset,
+                    token_hash: reset_token_hash,
+                    target_principal_id: Some("usr_context".to_owned()),
+                    target_provider_id: None,
+                    return_location: None,
+                    payload: Value::Null,
+                    state: AccountFlowState::Pending,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                    consumed_at: None,
+                    version: 1,
+                },
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([47; 32]),
+                    purpose: "account-flow.create".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_password_reuse_flow".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        assert_eq!(
+            service
+                .complete_password_reset(
+                    reset_token,
+                    1,
+                    "current password",
+                    NOW_MS + 2,
+                    IdempotencyResultRecord {
+                        scope_key: URL_SAFE_NO_PAD.encode([48; 32]),
+                        purpose: "password-reset.complete".to_owned(),
+                        signer_id: "usr_context".to_owned(),
+                        request_id: "req_password_reuse_reset".to_owned(),
+                        request_digest: DIGEST.to_owned(),
+                        result: Value::Null,
+                        created_at: NOW_MS,
+                        expires_at: NOW_MS + 60_000,
+                    },
+                    Vec::new(),
+                )
+                .await,
+            Err(AuthorizationStateError::InvalidRecord(
+                "new password must differ from current password".to_owned()
+            ))
+        );
+        assert_eq!(
+            repository
+                .get_local_credential("usr_context")
+                .await?
+                .expect("credential"),
+            credential_before
+        );
+        assert_eq!(
+            repository
+                .get_session("ses_context")
+                .await?
+                .expect("session"),
+            session_before
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context"),
+            context_before
+        );
+        assert_eq!(
+            repository
+                .get_account_flow_by_hash(&URL_SAFE_NO_PAD.encode(Sha256::digest([46; 32])))
+                .await?
+                .expect("reset flow")
+                .state,
+            AccountFlowState::Pending
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_password_change_revokes_context_and_validates_replacement(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_password_change_context",
+            12,
+        )
+        .await?;
+        let current = repository
+            .get_local_credential("usr_context")
+            .await?
+            .expect("credential");
+
+        let mut wrong_version = current.clone();
+        wrong_version.version = 3;
+        wrong_version.password_changed_at = NOW_MS + 1;
+        wrong_version.updated_at = NOW_MS + 1;
+        assert_eq!(
+            repository
+                .change_password(PasswordChange {
+                    principal_id: "usr_context".to_owned(),
+                    current_session_id: "ses_other".to_owned(),
+                    credential: wrong_version,
+                    expected_version: 1,
+                    changed_at: NOW_MS + 1,
+                    idempotency: IdempotencyResultRecord {
+                        scope_key: URL_SAFE_NO_PAD.encode([31; 32]),
+                        purpose: "password.change".to_owned(),
+                        signer_id: "usr_context".to_owned(),
+                        request_id: "req_password_change_invalid_version".to_owned(),
+                        request_digest: DIGEST.to_owned(),
+                        result: Value::Null,
+                        created_at: NOW_MS,
+                        expires_at: NOW_MS + 60_000,
+                    },
+                    actions: Vec::new(),
+                })
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+
+        let mut wrong_identity = current.clone();
+        wrong_identity.normalized_username = "other".to_owned();
+        wrong_identity.version = 2;
+        wrong_identity.password_changed_at = NOW_MS + 1;
+        wrong_identity.updated_at = NOW_MS + 1;
+        assert_eq!(
+            repository
+                .change_password(PasswordChange {
+                    principal_id: "usr_context".to_owned(),
+                    current_session_id: "ses_other".to_owned(),
+                    credential: wrong_identity,
+                    expected_version: 1,
+                    changed_at: NOW_MS + 1,
+                    idempotency: IdempotencyResultRecord {
+                        scope_key: URL_SAFE_NO_PAD.encode([13; 32]),
+                        purpose: "password.change".to_owned(),
+                        signer_id: "usr_context".to_owned(),
+                        request_id: "req_password_change_invalid_identity".to_owned(),
+                        request_digest: DIGEST.to_owned(),
+                        result: Value::Null,
+                        created_at: NOW_MS,
+                        expires_at: NOW_MS + 60_000,
+                    },
+                    actions: Vec::new(),
+                })
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .state,
+            AuthorizationContextState::Active
+        );
+
+        let replacement = LocalCredentialRecord {
+            password_hash: "replacement-hash".to_owned(),
+            password_changed_at: NOW_MS + 2,
+            updated_at: NOW_MS + 2,
+            version: 2,
+            ..current.clone()
+        };
+        let mut expected_revoked = context.clone();
+        expected_revoked.version = 2;
+        let mut conflicting = context_action(
+            &expected_revoked,
+            PostCommitActionKind::ContextRevoke,
+            Some(AuthorizationContextRevocationReason::CredentialChanged),
+        )?;
+        conflicting.payload = json!({ "conflict": true });
+        let conflicting_action_id = conflicting.action_id.clone();
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_post_commit_actions (
+                             action_id, kind, payload_json, created_at,
+                             attempts, next_attempt_at, claimed_until, last_error
+                         ) VALUES (?1, 'event', ?2, ?3, 0, ?3, NULL, NULL)",
+                        rusqlite::params![conflicting_action_id, "{}", NOW_MS],
+                    )
+                    .map_err(sql_error)
+            })
+            .await?;
+        let failed = repository
+            .change_password(PasswordChange {
+                principal_id: "usr_context".to_owned(),
+                current_session_id: "ses_other".to_owned(),
+                credential: replacement.clone(),
+                expected_version: 1,
+                changed_at: NOW_MS + 2,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([14; 32]),
+                    purpose: "password.change".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_password_change_outbox_failure".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await;
+        assert_eq!(failed, Err(AuthorizationStateError::StorageConflict));
+        assert_eq!(
+            repository.get_local_credential("usr_context").await?,
+            Some(current.clone())
+        );
+        assert_eq!(
+            repository
+                .get_session("ses_context")
+                .await?
+                .expect("session")
+                .state,
+            SessionState::Active
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .state,
+            AuthorizationContextState::Active
+        );
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "DELETE FROM auth_post_commit_actions WHERE action_id = ?1",
+                        [conflicting.action_id],
+                    )
+                    .map_err(sql_error)
+            })
+            .await?;
+        repository
+            .change_password(PasswordChange {
+                principal_id: "usr_context".to_owned(),
+                current_session_id: "ses_other".to_owned(),
+                credential: replacement,
+                expected_version: 1,
+                changed_at: NOW_MS + 2,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([15; 32]),
+                    purpose: "password.change".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_password_change_valid".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        let revoked = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("context");
+        assert_eq!(revoked.state, AuthorizationContextState::Revoked);
+        assert_eq!(
+            revoked.revocation_reason,
+            Some(AuthorizationContextRevocationReason::CredentialChanged)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_password_reset_revocation_rolls_back_with_flow_and_credential(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_password_reset_context",
+            15,
+        )
+        .await?;
+        let token_hash = DIGEST.to_owned();
+        repository
+            .create_account_flow(AccountFlowCreation {
+                flow: AccountFlowRecord {
+                    flow_id: "flow_context_reset".to_owned(),
+                    kind: AccountFlowKind::PasswordReset,
+                    token_hash: token_hash.clone(),
+                    target_principal_id: Some("usr_context".to_owned()),
+                    target_provider_id: None,
+                    return_location: None,
+                    payload: json!({}),
+                    state: AccountFlowState::Pending,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                    consumed_at: None,
+                    version: 1,
+                },
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([16; 32]),
+                    purpose: "account-flow.create".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_context_flow".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        let current = repository
+            .get_local_credential("usr_context")
+            .await?
+            .expect("credential");
+        let replacement = LocalCredentialRecord {
+            password_hash: "reset-hash".to_owned(),
+            password_changed_at: NOW_MS + 3,
+            updated_at: NOW_MS + 3,
+            version: 2,
+            ..current.clone()
+        };
+        let mut wrong_identity = replacement.clone();
+        wrong_identity.normalized_username = "other".to_owned();
+        assert_eq!(
+            repository
+                .complete_password_reset(PasswordResetCompletion {
+                    token_hash: token_hash.clone(),
+                    expected_flow_version: 1,
+                    replacement: wrong_identity,
+                    consumed_at: NOW_MS + 3,
+                    idempotency: IdempotencyResultRecord {
+                        scope_key: URL_SAFE_NO_PAD.encode([32; 32]),
+                        purpose: "password-reset.complete".to_owned(),
+                        signer_id: "usr_context".to_owned(),
+                        request_id: "req_context_reset_invalid_identity".to_owned(),
+                        request_digest: DIGEST.to_owned(),
+                        result: Value::Null,
+                        created_at: NOW_MS,
+                        expires_at: NOW_MS + 60_000,
+                    },
+                    actions: Vec::new(),
+                })
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+        let mut conflicting = context_action(&context, PostCommitActionKind::ContextPublish, None)?;
+        conflicting.payload = json!({ "conflict": true });
+        let failed = repository
+            .complete_password_reset(PasswordResetCompletion {
+                token_hash: token_hash.clone(),
+                expected_flow_version: 1,
+                replacement: replacement.clone(),
+                consumed_at: NOW_MS + 3,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([17; 32]),
+                    purpose: "password-reset.complete".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_context_reset_failed".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: vec![conflicting],
+            })
+            .await;
+        assert_eq!(failed, Err(AuthorizationStateError::StorageConflict));
+        assert_eq!(
+            repository.get_local_credential("usr_context").await?,
+            Some(current)
+        );
+        assert_eq!(
+            repository
+                .get_account_flow_by_hash(&token_hash)
+                .await?
+                .expect("flow")
+                .state,
+            AccountFlowState::Pending
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .state,
+            AuthorizationContextState::Active
+        );
+
+        repository
+            .complete_password_reset(PasswordResetCompletion {
+                token_hash,
+                expected_flow_version: 1,
+                replacement,
+                consumed_at: NOW_MS + 3,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([18; 32]),
+                    purpose: "password-reset.complete".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_context_reset_success".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        let revoked = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("context");
+        assert_eq!(revoked.state, AuthorizationContextState::Revoked);
+        assert_eq!(
+            revoked.revocation_reason,
+            Some(AuthorizationContextRevocationReason::CredentialChanged)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_principal_disable_and_revoke_context_but_profile_edits_do_not(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token.clone(),
+            "req_principal_disable_context",
+            19,
+        )
+        .await?;
+        let second_context = replacement_context(&context, 302, 43)?;
+        commit_seed_context(
+            &repository,
+            second_context.clone(),
+            snapshot_token,
+            "req_principal_disable_context_second",
+            44,
+        )
+        .await?;
+        let service = AuthService::new(repository.clone(), AuthServiceConfig::default())?;
+        let account = repository
+            .get_user_account("usr_context")
+            .await?
+            .expect("account");
+        service
+            .update_user(UpdateUserInput {
+                principal_id: "usr_context".to_owned(),
+                expected_version: 1,
+                name: account.1.display_name.clone(),
+                email: account.1.email.clone(),
+                image: account.1.image_url.clone(),
+                state: PrincipalState::Disabled,
+                updated_at: NOW_MS + 1,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([20; 32]),
+                    purpose: "account.update".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "req_principal_disable".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        assert_eq!(
+            repository
+                .get_principal("usr_context")
+                .await?
+                .expect("principal")
+                .state,
+            PrincipalState::Disabled
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .revocation_reason,
+            Some(AuthorizationContextRevocationReason::PrincipalInactive)
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&second_context.context_digest)
+                .await?
+                .expect("second context")
+                .revocation_reason,
+            Some(AuthorizationContextRevocationReason::PrincipalInactive)
+        );
+
+        let revoke_repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (revoke_context, revoke_snapshot_token) = seed_context(&revoke_repository).await?;
+        commit_seed_context(
+            &revoke_repository,
+            revoke_context.clone(),
+            revoke_snapshot_token,
+            "req_principal_revoke_context",
+            29,
+        )
+        .await?;
+        let revoke_service =
+            AuthService::new(revoke_repository.clone(), AuthServiceConfig::default())?;
+        revoke_service
+            .update_user(UpdateUserInput {
+                principal_id: "usr_context".to_owned(),
+                expected_version: 1,
+                name: Some("Context user".to_owned()),
+                email: None,
+                image: None,
+                state: PrincipalState::Revoked,
+                updated_at: NOW_MS + 1,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([30; 32]),
+                    purpose: "account.update".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "req_principal_revoke".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        let revoked_principal = revoke_repository
+            .get_principal("usr_context")
+            .await?
+            .expect("revoked principal");
+        assert_eq!(revoked_principal.state, PrincipalState::Revoked);
+        assert_eq!(revoked_principal.revoked_at, Some(NOW_MS + 1));
+        assert_eq!(
+            revoke_repository
+                .get_context_by_digest(&revoke_context.context_digest)
+                .await?
+                .expect("revoked context")
+                .revocation_reason,
+            Some(AuthorizationContextRevocationReason::PrincipalInactive)
+        );
+
+        let profile_repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (profile_context, profile_snapshot_token) = seed_context(&profile_repository).await?;
+        commit_seed_context(
+            &profile_repository,
+            profile_context.clone(),
+            profile_snapshot_token,
+            "req_profile_context",
+            21,
+        )
+        .await?;
+        let profile_service =
+            AuthService::new(profile_repository.clone(), AuthServiceConfig::default())?;
+        profile_service
+            .update_user(UpdateUserInput {
+                principal_id: "usr_context".to_owned(),
+                expected_version: 1,
+                name: Some("Updated profile".to_owned()),
+                email: None,
+                image: None,
+                state: PrincipalState::Active,
+                updated_at: NOW_MS + 1,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([22; 32]),
+                    purpose: "account.update".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "req_profile_only".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        let profile = profile_repository
+            .get_user_account("usr_context")
+            .await?
+            .expect("profile account");
+        profile_service
+            .update_user(UpdateUserInput {
+                principal_id: "usr_context".to_owned(),
+                expected_version: 2,
+                name: profile.1.display_name.clone(),
+                email: profile.1.email.clone(),
+                image: profile.1.image_url.clone(),
+                state: PrincipalState::Active,
+                updated_at: NOW_MS + 2,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([23; 32]),
+                    purpose: "account.update".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "req_profile_noop".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?;
+        assert_eq!(
+            profile_repository
+                .get_context_by_digest(&profile_context.context_digest)
+                .await?
+                .expect("profile context")
+                .state,
+            AuthorizationContextState::Active
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_principal_disable_rolls_back_when_context_outbox_fails(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token,
+            "req_principal_rollback_context",
+            24,
+        )
+        .await?;
+        let mut expected_revoked = context.clone();
+        expected_revoked.version = 2;
+        let mut conflicting = context_action(
+            &expected_revoked,
+            PostCommitActionKind::ContextRevoke,
+            Some(AuthorizationContextRevocationReason::PrincipalInactive),
+        )?;
+        conflicting.payload = json!({ "conflict": true });
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_post_commit_actions (
+                             action_id, kind, payload_json, created_at, attempts,
+                             next_attempt_at, claimed_until, last_error
+                         ) VALUES (?1, 'event', ?2, ?3, 0, ?3, NULL, NULL)",
+                        rusqlite::params![conflicting.action_id, "{}", NOW_MS,],
+                    )
+                    .map_err(sql_error)
+            })
+            .await?;
+        let service = AuthService::new(repository.clone(), AuthServiceConfig::default())?;
+        let result = service
+            .update_user(UpdateUserInput {
+                principal_id: "usr_context".to_owned(),
+                expected_version: 1,
+                name: Some("Context user".to_owned()),
+                email: None,
+                image: None,
+                state: PrincipalState::Disabled,
+                updated_at: NOW_MS + 1,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([25; 32]),
+                    purpose: "account.update".to_owned(),
+                    signer_id: "usr_admin".to_owned(),
+                    request_id: "req_principal_rollback".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await;
+        assert_eq!(result, Err(AuthorizationStateError::StorageConflict));
+        assert_eq!(
+            repository
+                .get_principal("usr_context")
+                .await?
+                .expect("principal")
+                .state,
+            PrincipalState::Active
+        );
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .state,
+            AuthorizationContextState::Active
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_provisioned_instance_noop_keeps_context_but_disable_and_remove_revoke_it(
+    ) -> Result<(), AuthorizationStateError> {
+        let repository = SqliteAuthorizationStore::open_in_memory()?;
+        let (context, snapshot_token) = seed_context(&repository).await?;
+        commit_seed_context(
+            &repository,
+            context.clone(),
+            snapshot_token.clone(),
+            "req_instance_context",
+            26,
+        )
+        .await?;
+        repository
+            .create_principal(crate::platform::auth::PrincipalRecord {
+                principal_id: "svc_instance_context".to_owned(),
+                kind: PrincipalKind::Service,
+                state: PrincipalState::Active,
+                created_at: NOW_MS,
+                updated_at: NOW_MS,
+                version: 1,
+                disabled_at: None,
+                revoked_at: None,
+            })
+            .await?;
+        repository
+            .put_deployment_evidence(crate::platform::auth::DeploymentRecord {
+                deployment_id: "dep_instance_context".to_owned(),
+                participant_id: "instance-context-service".to_owned(),
+                participant_kind: ParticipantKindV1::Service,
+                active: true,
+                expires_at: None,
+            })
+            .await?;
+        repository
+            .put_runtime_instance(crate::platform::auth::RuntimeInstanceRecord {
+                instance_id: "inst_context".to_owned(),
+                deployment_id: "dep_instance_context".to_owned(),
+                principal_id: "svc_instance_context".to_owned(),
+                state: crate::platform::auth::RuntimeInstanceState::Active,
+                created_at: NOW_MS,
+                updated_at: NOW_MS,
+                version: 1,
+            })
+            .await?;
+        let context_digest = context.context_digest.clone();
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_authorization_contexts
+                         SET deployment_id = 'dep_instance_context', instance_id = 'inst_context'
+                         WHERE context_digest = ?1",
+                        [&context_digest],
+                    )
+                    .map_err(sql_error)
+            })
+            .await?;
+        let removed_context = replacement_context(&context, 303, 46)?;
+        commit_seed_context(
+            &repository,
+            removed_context.clone(),
+            snapshot_token.clone(),
+            "req_instance_removed_context",
+            47,
+        )
+        .await?;
+        let removed_context_digest = removed_context.context_digest.clone();
+        repository
+            .run(move |connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_authorization_contexts
+                         SET deployment_id = 'dep_instance_context', instance_id = 'inst_context'
+                         WHERE context_digest = ?1",
+                        [&removed_context_digest],
+                    )
+                    .map_err(sql_error)
+            })
+            .await?;
+        let proof = |request_id: &str, byte: u8| IdempotencyResultRecord {
+            scope_key: URL_SAFE_NO_PAD.encode([byte; 32]),
+            purpose: "instance.mutate".to_owned(),
+            signer_id: "usr_admin".to_owned(),
+            request_id: request_id.to_owned(),
+            request_digest: DIGEST.to_owned(),
+            result: Value::Null,
+            created_at: NOW_MS,
+            expires_at: NOW_MS + 60_000,
+        };
+        repository
+            .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                instance: crate::platform::auth::RuntimeInstanceRecord {
+                    instance_id: "inst_context".to_owned(),
+                    deployment_id: "dep_instance_context".to_owned(),
+                    principal_id: "svc_instance_context".to_owned(),
+                    state: crate::platform::auth::RuntimeInstanceState::Active,
+                    created_at: NOW_MS,
+                    updated_at: NOW_MS + 1,
+                    version: 2,
+                },
+                device: None,
+                identity: None,
+                expected_version: 1,
+                idempotency: proof("req_instance_noop", 27),
+                actions: Vec::new(),
+            })
+            .await?;
+        assert_eq!(
+            repository
+                .get_context_by_digest(&context.context_digest)
+                .await?
+                .expect("context")
+                .state,
+            AuthorizationContextState::Active
+        );
+        repository
+            .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                instance: crate::platform::auth::RuntimeInstanceRecord {
+                    instance_id: "inst_context".to_owned(),
+                    deployment_id: "dep_instance_context".to_owned(),
+                    principal_id: "svc_instance_context".to_owned(),
+                    state: crate::platform::auth::RuntimeInstanceState::Disabled,
+                    created_at: NOW_MS,
+                    updated_at: NOW_MS + 2,
+                    version: 3,
+                },
+                device: None,
+                identity: None,
+                expected_version: 2,
+                idempotency: proof("req_instance_disable", 28),
+                actions: Vec::new(),
+            })
+            .await?;
+        let revoked = repository
+            .get_context_by_digest(&context.context_digest)
+            .await?
+            .expect("context");
+        assert_eq!(revoked.state, AuthorizationContextState::Revoked);
+        assert_eq!(
+            revoked.revocation_reason,
+            Some(AuthorizationContextRevocationReason::InstanceChanged)
+        );
+        let removed_instance = repository
+            .get_runtime_instance("inst_context")
+            .await?
+            .expect("instance after disable");
+        repository
+            .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                instance: crate::platform::auth::RuntimeInstanceRecord {
+                    state: crate::platform::auth::RuntimeInstanceState::Revoked,
+                    updated_at: NOW_MS + 3,
+                    version: 4,
+                    ..removed_instance
+                },
+                device: None,
+                identity: None,
+                expected_version: 3,
+                idempotency: proof("req_instance_remove", 48),
+                actions: Vec::new(),
+            })
+            .await?;
+        let removed = repository
+            .get_context_by_digest(&removed_context.context_digest)
+            .await?
+            .expect("removed context");
+        assert_eq!(removed.state, AuthorizationContextState::Revoked);
+        assert_eq!(
+            removed.revocation_reason,
+            Some(AuthorizationContextRevocationReason::InstanceChanged)
         );
         Ok(())
     }
@@ -1688,7 +2804,7 @@ mod tests {
                 expected_snapshot_token: snapshot_token,
                 context: context.clone(),
                 idempotency: IdempotencyResultRecord {
-                    scope_key: DIGEST.to_owned(),
+                    scope_key: URL_SAFE_NO_PAD.encode([9; 32]),
                     purpose: "authorizationContextIssue".to_owned(),
                     signer_id: "ses_context".to_owned(),
                     request_id: "req_context_authority_change".to_owned(),
@@ -1708,8 +2824,65 @@ mod tests {
         authority.version = 2;
         authority.updated_at = NOW_MS + 1;
         authority.expires_at = Some(NOW_MS + 500_000);
-        repository
-            .put_identity_authority(authority, Some(1))
+        let service = AuthService::new(repository.clone(), AuthServiceConfig::default())?;
+        let proposal = match service
+            .create_authority_proposal(CreateAuthorityProposalInput {
+                authority_kind: AuthorityKind::Identity,
+                authority_id: authority.authority_id.clone(),
+                deployment_id: None,
+                proposal_kind: AuthorityProposalKind::Update,
+                participant_id: authority.participant_id.clone(),
+                participant_artifact_digest: authority.participant_artifact_digest.clone(),
+                participant_needs_digest: authority.accepted_needs_digest.clone(),
+                grant_set: authority.desired_grant_set.clone(),
+                capabilities: authority.desired_capabilities.clone(),
+                base_authority_version: Some(1),
+                payload: json!({ "baseAuthorityVersion": 1 }),
+                created_at: NOW_MS + 1,
+                expires_at: Some(NOW_MS + 60_000),
+                idempotency: IdempotencyResultRecord {
+                    scope_key: URL_SAFE_NO_PAD.encode([10; 32]),
+                    purpose: "authority.proposal.create".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_authority_proposal".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
+            .await?
+        {
+            IdempotentOutcome::Applied(proposal) => proposal,
+            IdempotentOutcome::Replayed(_) => {
+                return Err(AuthorizationStateError::Storage(
+                    "authority proposal unexpectedly replayed".to_owned(),
+                ));
+            }
+        };
+        service
+            .decide_authority_proposal(DecideAuthorityProposalInput {
+                proposal_id: proposal.proposal_id,
+                expected_version: 1,
+                expected_base_authority_version: Some(Some(1)),
+                outcome: AuthorityDecisionOutcome::Accepted,
+                decided_by: "usr_context".to_owned(),
+                reason: None,
+                desired_authority: Some(DesiredAuthorityRecord::Identity(authority)),
+                decided_at: NOW_MS + 2,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: DIGEST.to_owned(),
+                    purpose: "authority.proposal.decide".to_owned(),
+                    signer_id: "usr_context".to_owned(),
+                    request_id: "req_authority_decide".to_owned(),
+                    request_digest: DIGEST.to_owned(),
+                    result: Value::Null,
+                    created_at: NOW_MS,
+                    expires_at: NOW_MS + 60_000,
+                },
+                actions: Vec::new(),
+            })
             .await?;
 
         let revoked = repository

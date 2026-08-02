@@ -53,6 +53,7 @@ fn runtime_config() -> RuntimeConfig {
     RuntimeConfig {
         instance_name: None,
         event_session_seed_file: Some(PathBuf::from("session.seed")),
+        event_context_digest_file: None,
         http: None,
         nats: Some(crate::NatsConfig {
             servers: Some("nats://127.0.0.1:4222".to_owned()),
@@ -79,7 +80,6 @@ fn runtime_config() -> RuntimeConfig {
             authorization: Some(crate::AuthorizationConfig {
                 trust_root_file: PathBuf::from("authorization-root.json"),
                 issuer_manifest_file: PathBuf::from("authorization-issuer-manifest.json"),
-                issuer_certificate_files: vec![PathBuf::from("authorization-issuer.json")],
                 issuer_signing_seed_file: PathBuf::from("authorization-issuer.seed"),
                 context_lifetime_seconds: 300,
                 refresh_lead_seconds: 60,
@@ -236,7 +236,7 @@ fn sqlite_platform_store_upgrades_current_marker_schema_and_reruns_safely(
 async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::platform::auth::{
-        DeploymentAuthorityRepository, EvidenceRepository, SqliteAuthorizationStore,
+        AuthorityEvidenceRepository, AuthorityRepository, SqliteAuthorizationStore,
     };
 
     let temp_dir = tempfile::tempdir()?;
@@ -354,22 +354,6 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
         .await?
         .expect("accepted M7 instance must survive");
     assert_eq!(instance.version, 1);
-    let mut device = repository
-        .get_device("dev_m7", "dep_m7")
-        .await?
-        .expect("accepted M7 device must survive");
-    device.updated_at = 1001;
-    device.version = 2;
-    repository.put_device(device).await?;
-    assert_eq!(
-        repository
-            .get_device("dev_m7", "dep_m7")
-            .await?
-            .expect("upgraded device must remain writable")
-            .version,
-        2
-    );
-
     Ok(())
 }
 

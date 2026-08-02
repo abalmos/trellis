@@ -6,7 +6,7 @@
 //! small local wrappers.
 
 mod auth;
-mod authorization_context;
+mod authorization;
 #[expect(
     clippy::module_inception,
     reason = "the public client module keeps its core implementation in client.rs"
@@ -22,12 +22,24 @@ mod subject;
 mod transfer;
 
 pub use auth::SessionAuth;
-pub use authorization_context::{
+pub use authorization::AuthorizationProviderCache;
+#[cfg(any(test, feature = "runtime-internals"))]
+pub use authorization::AuthorizationRegistryBinding;
+#[cfg(feature = "integration-test-scoping")]
+pub use authorization::IntegrationTestAuthorizationIoCounters;
+pub use authorization::{
     AuthorizationClientState, AuthorizationClientTrustState, AuthorizationContextBundle,
     AuthorizationContextCache, AuthorizationContextStore, AuthorizationRoutingMaterial,
     AuthorizationSessionBinding, AuthorizationTrustBundle, AuthorizationTrustPolicy,
-    FileAuthorizationContextStore, MemoryAuthorizationContextStore,
+    AuthorizationVerificationCore, AuthorizationVerificationError, FileAuthorizationContextStore,
+    MemoryAuthorizationContextStore, VerifiedAuthorizationEvent, VerifiedAuthorizationRequest,
+    VerifiedCaller,
 };
+#[cfg(feature = "runtime-internals")]
+pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};
+
+#[cfg(test)]
+pub(crate) use authorization::inject_own_verified_for_test;
 pub(crate) use client::ServiceConnectWithContractOptions;
 pub(crate) use client::TrellisClient;
 pub use client::{
@@ -54,7 +66,7 @@ pub use operations::{
     OperationTransport, OperationUpdateDescriptor, OperationUpdateEvent, StartedOperationTransfer,
     TransferOperationDescriptor,
 };
-pub use proof::{build_event_proof_input, verify_event_proof, verify_proof};
+pub use proof::verify_event_proof_v2;
 pub use state::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateEntry, MapStateListResult,
     MapStateStore, PutStateOptions, StateDeleteResult, StateEntry, StateGetResult,

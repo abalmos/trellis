@@ -385,12 +385,9 @@ struct KeyedJobRunState {
 
 async fn setup_jobs_fixture() -> JobsFixture {
     let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions {
-            disable_jobs_admin: true,
-            ..trellis_test::TrellisTestRuntimeOptions::default()
-        })
-        .await
-        .expect("start live Trellis test runtime");
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
@@ -1099,12 +1096,9 @@ async fn jobs_job_context_propagates_request_and_trace() {
 #[tokio::test]
 async fn jobs_admin_list_services_filters_stale_worker_heartbeats() {
     let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions {
-            disable_jobs_admin: true,
-            ..trellis_test::TrellisTestRuntimeOptions::default()
-        })
-        .await
-        .expect("start live Trellis test runtime");
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
     let bootstrap_url = runtime
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await

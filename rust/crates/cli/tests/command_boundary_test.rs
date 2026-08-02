@@ -27,6 +27,7 @@ fn new_top_level_help_is_available() {
         &["upgrade", "--help"],
         &["version", "--help"],
         &["completion", "--help"],
+        &["server", "--help"],
     ] {
         let output = run_cli(args);
         assert!(output.status.success(), "{args:?} help should succeed");

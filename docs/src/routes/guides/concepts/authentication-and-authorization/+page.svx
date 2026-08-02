@@ -102,7 +102,15 @@ in one transaction. Connection presence is short-lived operational KV state.
 Kick delivery is retried after commit, and short JWT expiry provides a second
 reauthorization bound if a connection cannot be kicked immediately.
 
-During the Milestone 8 to Milestone 10 transition, ordinary service request and
-retained-event proof validation can still call the internal
-`Auth.Requests.Validate` and `Auth.Events.Validate` surfaces. Those validators are
-not generated as public Auth SDK methods and do not own authority state.
+Ordinary requests and retained events are authorized locally from the presented
+context digest. Providers resolve an unknown immutable context and its exact
+descriptor evidence once, then verify the actual subject, reply subject, raw
+payload, request or event identity, signed time, exact permission atom,
+capabilities, revocation timestamp, and replay key from memory. Cache hits perform
+no Auth RPC, HTTP, SQLite, or NATS registry reads.
+
+Delayed events are checked at their signed event time. An event remains eligible
+after delivery delay or context expiry only when its event time is inside the
+context validity window and strictly before any revocation. Context, trust,
+descriptor, and revocation evidence is retained through the Event Log stream
+retention window.

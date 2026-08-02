@@ -6,13 +6,21 @@ pub(crate) async fn subscribe_subject(
     subject: &str,
 ) -> Result<async_nats::Subscriber, ServerError> {
     client
-        .queue_subscribe(subject.to_string(), subject.to_string())
+        .queue_subscribe(subject.to_string(), queue_group(subject))
         .await
         .map_err(|error| {
             ServerError::Nats(format!(
                 "failed to subscribe to subject '{subject}': {error}"
             ))
         })
+}
+
+fn queue_group(subject: &str) -> String {
+    subject
+        .strip_suffix(">")
+        .unwrap_or(subject)
+        .trim_end_matches('.')
+        .to_owned()
 }
 
 pub(crate) async fn run_multi_subject_service<H>(

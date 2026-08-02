@@ -8,10 +8,10 @@ use trellis_protocol::{
     ParticipantResourceKindV1, PermissionAtomV1,
 };
 
-use super::domain::canonical_capabilities;
-use super::repository::{
+use super::authority::{
     AuthorityMaterializationSnapshot, AuthoritySubjectRecord, MaterializationReplacement,
 };
+use super::domain::canonical_capabilities;
 use super::{
     AuthorityKind, AuthorizationStateError, AuthorizationTransition, AuthorizationTransitionKind,
     DependencyEvidence, DependencyState, DesiredAuthorityRecord, MaterializationState,

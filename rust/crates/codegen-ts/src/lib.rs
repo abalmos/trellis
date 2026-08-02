@@ -612,6 +612,10 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         ));
         lines.push(format!("  subject: {},", js_string(&rpc.subject)));
         lines.push(format!(
+            "  permission: {},",
+            permission_literal(&loaded.manifest.id, &rpc.version, "rpc", key, "call",)
+        ));
+        lines.push(format!(
             "  input: schema<Types.{base}Input>({}),",
             schema_const_names
                 .get(rpc.input.schema.as_str())
@@ -702,6 +706,53 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&operation.subject)));
+        lines.push("  permissions: Object.freeze({".to_string());
+        lines.push(format!(
+            "    invoke: {},",
+            permission_literal(
+                &loaded.manifest.id,
+                &operation.version,
+                "operation",
+                key,
+                "invoke",
+            )
+        ));
+        lines.push(format!(
+            "    observe: {},",
+            permission_literal(
+                &loaded.manifest.id,
+                &operation.version,
+                "operation",
+                key,
+                "observe",
+            )
+        ));
+        lines.push(format!(
+            "    cancel: {},",
+            permission_literal(
+                &loaded.manifest.id,
+                &operation.version,
+                "operation",
+                key,
+                "cancel",
+            )
+        ));
+        lines.push("    control: Object.freeze({".to_string());
+        for signal_name in operation.signals.keys() {
+            lines.push(format!(
+                "      {}: {},",
+                js_string(signal_name),
+                permission_literal(
+                    &loaded.manifest.id,
+                    &operation.version,
+                    "operation",
+                    &format!("{key}.{signal_name}"),
+                    "control",
+                )
+            ));
+        }
+        lines.push("    }),".to_string());
+        lines.push("  }),".to_string());
         lines.push(format!(
             "  input: schema<Types.{base}Input>({}),",
             schema_const_names
@@ -876,6 +927,20 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             js_string(key)
         ));
         lines.push(format!("  subject: {},", js_string(&event.subject)));
+        lines.push(format!(
+            "  publishPermission: {},",
+            permission_literal(&loaded.manifest.id, &event.version, "event", key, "publish",)
+        ));
+        lines.push(format!(
+            "  subscribePermission: {},",
+            permission_literal(
+                &loaded.manifest.id,
+                &event.version,
+                "event",
+                key,
+                "subscribe",
+            )
+        ));
         if let Some(params) = &event.params {
             if !params.is_empty() {
                 lines.push(format!(
@@ -928,6 +993,10 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
         ));
         lines.push(format!("  subject: {},", js_string(&feed.subject)));
         lines.push(format!(
+            "  permission: {},",
+            permission_literal(&loaded.manifest.id, &feed.version, "feed", key, "subscribe",)
+        ));
+        lines.push(format!(
             "  input: schema<Types.{base}Input>({}),",
             schema_const_names
                 .get(feed.input.schema.as_str())
@@ -959,6 +1028,23 @@ fn render_descriptors_ts(opts: &GenerateTsSdkOpts, loaded: &LoadedManifest) -> S
             "
 "
         )
+    )
+}
+
+fn permission_literal(
+    api_id: &str,
+    api_version: &str,
+    surface_kind: &str,
+    surface_name: &str,
+    action: &str,
+) -> String {
+    format!(
+        "Object.freeze({{ apiId: {}, apiVersion: {}, surfaceKind: {}, surfaceName: {}, action: {} }})",
+        js_string(api_id),
+        js_string(api_version),
+        js_string(surface_kind),
+        js_string(surface_name),
+        js_string(action),
     )
 }
 
@@ -1753,7 +1839,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_api_generation_uses_api_identity_and_hides_internal_rpcs() {
+    fn protocol_api_generation_uses_api_identity() {
         let manifest_path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime/trellis.api.json");
         let sources = collect_ts_sdk_sources(&GenerateTsSdkOpts {
@@ -1779,10 +1865,6 @@ mod tests {
 
         assert!(source("manifest.ts").contains("export const API_ID"));
         assert!(!source("manifest.ts").contains("CONTRACT_ID"));
-        for path in ["descriptors.ts", "types.ts", "schemas.ts"] {
-            assert!(!source(path).contains("AuthRequestsValidate"));
-            assert!(!source(path).contains("AuthEventsValidate"));
-        }
     }
 
     fn minimal_manifest(contract_id: &str) -> Value {
@@ -2145,6 +2227,9 @@ mod tests {
         ));
         assert!(descriptors
             .contains("export const ExampleLive = feedAction(CONTRACT_ID, \"Example.Live\""));
+        assert!(descriptors.contains(
+            "\"continue\": Object.freeze({ apiId: \"trellis.auth@v1\", apiVersion: \"v1\", surfaceKind: \"operation\", surfaceName: \"Example.Process.continue\", action: \"control\" }),"
+        ));
         assert!(!descriptors.contains("OWNED_API"));
         assert!(!descriptors.contains("API"));
         fs::remove_dir_all(root).unwrap();
@@ -2247,6 +2332,21 @@ mod tests {
             .contains("subscribeCapabilities: [\"trellis.demo::event.subscribe\"] as const,"));
         assert!(owned_api
             .contains("subscribeCapabilities: [\"trellis.demo::feed.subscribe\"] as const,"));
+        assert!(owned_api.contains(
+            "permission: Object.freeze({ apiId: \"trellis.demo@v1\", apiVersion: \"v1\", surfaceKind: \"rpc\", surfaceName: \"Demo.Get\", action: \"call\" }),"
+        ));
+        assert!(owned_api.contains(
+            "invoke: Object.freeze({ apiId: \"trellis.demo@v1\", apiVersion: \"v1\", surfaceKind: \"operation\", surfaceName: \"Demo.Run\", action: \"invoke\" }),"
+        ));
+        assert!(owned_api.contains(
+            "publishPermission: Object.freeze({ apiId: \"trellis.demo@v1\", apiVersion: \"v1\", surfaceKind: \"event\", surfaceName: \"Demo.Updated\", action: \"publish\" }),"
+        ));
+        assert!(owned_api.contains(
+            "subscribePermission: Object.freeze({ apiId: \"trellis.demo@v1\", apiVersion: \"v1\", surfaceKind: \"event\", surfaceName: \"Demo.Updated\", action: \"subscribe\" }),"
+        ));
+        assert!(owned_api.contains(
+            "permission: Object.freeze({ apiId: \"trellis.demo@v1\", apiVersion: \"v1\", surfaceKind: \"feed\", surfaceName: \"Demo.Live\", action: \"subscribe\" }),"
+        ));
 
         fs::remove_dir_all(root).unwrap();
     }

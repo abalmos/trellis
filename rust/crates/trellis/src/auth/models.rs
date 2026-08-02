@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 use super::AuthenticatedUser;
 use crate::client::{AuthorizationContextBundle, SessionAuth};
@@ -172,7 +171,7 @@ pub struct DeviceActivationPayload {
     pub qr_mac: String,
 }
 
-/// Signed pre-auth request sent to `/auth/devices/activate/wait`.
+/// Signed pre-auth request returned by the device wait/connect-info signers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationWaitRequest), "`.")]
 pub struct DeviceActivationWaitRequest {
@@ -307,78 +306,4 @@ pub struct GetDeviceConnectInfoOpts<'a> {
     pub contract_digest: &'a str,
     #[doc = concat!("The `", stringify!(iat), "` value.")]
     pub iat: u64,
-}
-
-/// Activated wait response returned by auth.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationActivatedResponse), "`.")]
-pub struct DeviceActivationActivatedResponse {
-    #[doc = concat!("The `", stringify!(status), "` value.")]
-    pub status: String,
-    #[serde(rename = "activatedAt")]
-    #[doc = concat!("The `", stringify!(activated_at), "` value.")]
-    pub activated_at: String,
-    #[serde(rename = "confirmationCode", skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(confirmation_code), "` value.")]
-    pub confirmation_code: Option<String>,
-    #[serde(rename = "connectInfo")]
-    #[doc = concat!("The `", stringify!(connect_info), "` value.")]
-    pub connect_info: serde_json::Value,
-}
-
-/// Rejected wait response returned by auth.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationRejectedResponse), "`.")]
-pub struct DeviceActivationRejectedResponse {
-    #[doc = concat!("The `", stringify!(status), "` value.")]
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(reason), "` value.")]
-    pub reason: Option<String>,
-}
-
-/// Pending wait response returned by auth.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[doc = concat!("Public Trellis data type `", stringify!(DeviceActivationPendingResponse), "`.")]
-pub struct DeviceActivationPendingResponse {
-    #[doc = concat!("The `", stringify!(status), "` value.")]
-    pub status: String,
-}
-
-/// Union of possible wait responses returned by auth.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "lowercase")]
-#[doc = concat!("Public Trellis value set `", stringify!(WaitForDeviceActivationResponse), "`.")]
-pub enum WaitForDeviceActivationResponse {
-    Activated {
-        #[serde(rename = "activatedAt")]
-        activated_at: String,
-        #[serde(rename = "confirmationCode", skip_serializing_if = "Option::is_none")]
-        confirmation_code: Option<String>,
-        #[serde(rename = "connectInfo")]
-        connect_info: serde_json::Value,
-    },
-    Rejected {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
-    Pending,
-}
-
-/// Polling options for waiting on an activated device.
-pub struct WaitForDeviceActivationOpts<'a> {
-    #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
-    pub trellis_url: &'a str,
-    #[doc = concat!("The `", stringify!(flow_id), "` value.")]
-    pub flow_id: &'a str,
-    #[doc = concat!("The `", stringify!(public_identity_key), "` value.")]
-    pub public_identity_key: &'a str,
-    #[doc = concat!("The `", stringify!(nonce), "` value.")]
-    pub nonce: &'a str,
-    #[doc = concat!("The `", stringify!(identity_seed_base64url), "` value.")]
-    pub identity_seed_base64url: &'a str,
-    #[doc = concat!("The `", stringify!(contract_digest), "` value.")]
-    pub contract_digest: Option<&'a str>,
-    #[doc = concat!("The `", stringify!(poll_interval), "` value.")]
-    pub poll_interval: Duration,
 }

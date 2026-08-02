@@ -15,6 +15,7 @@ import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../js/packages/trellis-te
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 const INTEGRATION_BINARY_ENV = "TRELLIS_TEST_INTEGRATION_BIN";
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
+const ALLOW_DIRTY_PREBUILT_ENV = "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT";
 export const INTEGRATION_LIVE_ARTIFACTS_MANIFEST =
   "dist/integration-runtime/manifest.json";
 const INTEGRATION_LIVE_ARTIFACTS_FORMAT =
@@ -22,7 +23,7 @@ const INTEGRATION_LIVE_ARTIFACTS_FORMAT =
 const LIVE_EXECUTABLES = {
   integrationTest: "trellis-integration-test",
   trellisServer: "trellis-server",
-  trellisServiceJobs: "trellis-service-jobs",
+  trellisCli: "trellis-cli",
 } as const;
 
 type IntegrationLiveArtifacts = {
@@ -78,17 +79,6 @@ async function main(args: readonly string[]): Promise<number> {
             args: ["--config", "{config}", "all"],
           },
         },
-        ...(tenantIds.some((id) => id.startsWith("jobs::"))
-          ? {
-            jobsAdmin: {
-              command: {
-                cmd: runtimeBinaries.TRELLIS_TEST_JOBS_SERVICE_BIN,
-                args: [],
-                env: { RUST_LOG: "warn" },
-              },
-            },
-          }
-          : {}),
       },
       assignments: tenantIds.map((id) => ({
         id,
@@ -98,7 +88,7 @@ async function main(args: readonly string[]): Promise<number> {
     })
     : {
       env: { [TRELLIS_TEST_SHARED_RUNTIME_ENV]: inheritedManifest },
-      metrics: async () => [],
+      metrics: () => [],
       output: () => "shared host is owned by the live orchestrator",
       stop: async () => {},
     };
@@ -277,12 +267,12 @@ export async function buildIntegrationTest(): Promise<string> {
 }
 
 export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
-  const jobs = Deno.env.get("TRELLIS_TEST_JOBS_SERVICE_BIN");
   const server = Deno.env.get("TRELLIS_TEST_SERVER_BIN");
-  if (jobs !== undefined && server !== undefined) {
+  const cli = Deno.env.get("TRELLIS_TEST_CLI_BIN");
+  if (server !== undefined && cli !== undefined) {
     return {
-      TRELLIS_TEST_JOBS_SERVICE_BIN: jobs,
       TRELLIS_TEST_SERVER_BIN: server,
+      TRELLIS_TEST_CLI_BIN: cli,
     };
   }
   rejectCargoFallback("Rust integration runtime binaries");
@@ -293,9 +283,9 @@ export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
       "--manifest-path",
       "rust/Cargo.toml",
       "-p",
-      "trellis-service-jobs",
-      "-p",
       "trellis-runtime",
+      "-p",
+      "trellis-cli",
       "--bins",
       "--message-format=json",
     ],
@@ -322,16 +312,16 @@ export async function buildRuntimeBinaries(): Promise<Record<string, string>> {
       binaries.set(artifact.target.name, artifact.executable);
     }
   }
-  const jobsBinary = jobs ?? binaries.get("trellis-service-jobs");
   const serverBinary = server ?? binaries.get("trellis-server");
-  if (jobsBinary === undefined || serverBinary === undefined) {
+  const cliBinary = cli ?? binaries.get("trellis");
+  if (serverBinary === undefined || cliBinary === undefined) {
     throw new Error(
-      "cargo did not report both Rust integration runtime binaries",
+      "cargo did not report all Rust integration runtime binaries",
     );
   }
   return {
-    TRELLIS_TEST_JOBS_SERVICE_BIN: jobsBinary,
     TRELLIS_TEST_SERVER_BIN: serverBinary,
+    TRELLIS_TEST_CLI_BIN: cliBinary,
   };
 }
 
@@ -346,7 +336,7 @@ export async function buildIntegrationLiveArtifacts(
     {
       integrationTest: integrationBinary,
       trellisServer: runtimeBinaries.TRELLIS_TEST_SERVER_BIN,
-      trellisServiceJobs: runtimeBinaries.TRELLIS_TEST_JOBS_SERVICE_BIN,
+      trellisCli: runtimeBinaries.TRELLIS_TEST_CLI_BIN,
     },
   );
 }
@@ -386,10 +376,43 @@ export async function writeIntegrationLiveArtifacts(
   return liveArtifactPaths(artifactDir);
 }
 
+/** @internal Returns the prebuilt-artifacts error when the working tree has uncommitted changes. */
+export function prebuiltDirtyTreeError(porcelain: string): string | undefined {
+  return porcelain.trim() === ""
+    ? undefined
+    : "the working tree has uncommitted changes while --prebuilt-only is set; " +
+      "rebuild the live artifacts with --build-only, or set " +
+      "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT=1 to use them anyway";
+}
+
+async function gitPorcelain(): Promise<string> {
+  const output = await new Deno.Command("git", {
+    args: ["status", "--porcelain"],
+    cwd: repoRoot,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "inherit",
+  }).output();
+  if (!output.success) {
+    throw new Error("failed to inspect the working tree status");
+  }
+  return new TextDecoder().decode(output.stdout);
+}
+
+async function assertPrebuiltTreeClean(): Promise<void> {
+  if (Deno.env.get(PREBUILT_ONLY_ENV) !== "1") return;
+  if (Deno.env.get(ALLOW_DIRTY_PREBUILT_ENV) === "1") return;
+  const error = prebuiltDirtyTreeError(await gitPorcelain());
+  if (error !== undefined) throw new Error(error);
+}
+
 export async function loadIntegrationLiveArtifacts(
   manifestPath = INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
   expectedSourceSha?: string,
 ): Promise<IntegrationLiveArtifacts> {
+  // Prebuilt binaries may be stale when the working tree has uncommitted
+  // changes; the commit SHA alone cannot catch that.
+  await assertPrebuiltTreeClean();
   const manifest = JSON.parse(
     await Deno.readTextFile(manifestPath),
   ) as Partial<IntegrationLiveArtifactsManifest>;
@@ -438,9 +461,9 @@ function liveArtifactPaths(artifactDir: string): IntegrationLiveArtifacts {
         resolvedArtifactDir,
         LIVE_EXECUTABLES.trellisServer,
       ),
-      TRELLIS_TEST_JOBS_SERVICE_BIN: join(
+      TRELLIS_TEST_CLI_BIN: join(
         resolvedArtifactDir,
-        LIVE_EXECUTABLES.trellisServiceJobs,
+        LIVE_EXECUTABLES.trellisCli,
       ),
     },
   };

@@ -1,12 +1,14 @@
-This guide covers day-to-day development from a Trellis source checkout. It uses the same simple local setup as [Starting Trellis](/guides/starting-trellis): NATS runs in a container, while the Trellis runtime and Console run from source.
+This guide covers day-to-day development from a Trellis source checkout. It uses the same simple local setup as [Starting Trellis](/guides/starting-trellis): the CLI auto-manages a local nats-server binary, while the Trellis runtime and Console run from source.
 
 ## What you need
 
 - Git
 - [Deno](https://deno.com) v2+
 - a Rust toolchain
-- `podman` or `docker`
 - the `trellis` CLI installed (see [Install the Trellis CLI](/guides/install-trellis-cli))
+- network access on first run: the CLI downloads a pinned, checksum-verified
+  nats-server binary and caches it under `TRELLIS_CACHE_DIR` (default
+  `~/.cache/trellis` on Linux) for later runs
 
 ## 1. Prepare a local runtime bundle
 
@@ -16,21 +18,8 @@ Generate local NATS, Trellis config, credentials, keys, and data directories:
 trellis init config --out ~/trellis
 ```
 
-Start NATS from that bundle:
-
-```sh
-podman run --replace --detach --name trellis-nats \
-  --publish 127.0.0.1:4222:4222 \
-  --publish 127.0.0.1:8080:8080 \
-  --publish 127.0.0.1:8222:8222 \
-  --volume "$HOME/trellis/nats/nats.conf:/etc/nats/nats.conf:ro,Z" \
-  --volume "$HOME/trellis/nats/jwt.conf:/etc/nats/jwt.conf:ro,Z" \
-  --volume "$HOME/trellis/nats/data:/data:Z" \
-  docker.io/library/nats:latest \
-  -c /etc/nats/nats.conf
-```
-
-The generated config is intended for local username/password login once the auth and portal services are available. The current Rust runtime path in this guide does not yet expose auth routes, the built-in portal, first-admin bootstrap, or a Rust-runtime-backed CLI login flow.
+`trellis server` derives its managed NATS config from that bundle, so no
+separate NATS setup step is needed.
 
 ## 2. Clone and prepare the repo
 
@@ -60,11 +49,14 @@ The Rust workspace exposes the same workflow as `cargo xtask prepare-watch`.
 
 ## 3. Start the Trellis runtime
 
+Run the CLI from the source tree so runtime and CLI changes are picked up by
+rebuilds; it auto-manages the local nats-server binary on first start:
+
 ```sh
 cargo run --manifest-path rust/Cargo.toml \
-  --package trellis-runtime \
-  --bin trellis-server \
-  -- all --config "$HOME/trellis/trellis/config.toml"
+  --package trellis-cli \
+  --bin trellis \
+  -- server all --config "$HOME/trellis/trellis/config.toml"
 ```
 
 The runtime safely converges the streams and KV buckets owned by `all`, then
@@ -95,7 +87,7 @@ Open `http://localhost:5173` for Console UI development. Console cannot complete
 
 ## Development workflow
 
-- **Runtime changes**: edit files under `rust/crates/runtime/`; restart `trellis-server` after rebuilding.
+- **Runtime changes**: edit files under `rust/crates/runtime/`; rebuild and restart the `trellis server` process after changes.
 - **Console changes**: edit files under `js/apps/console/`; Vite HMR applies changes in place.
 - **Contract changes**: run `cd js && deno task prepare`, or keep `cd js && deno task prepare:watch` running.
 - **CLI changes**: run `cargo build -p trellis-cli` in the `rust/` directory, then re-run `trellis ...` commands.

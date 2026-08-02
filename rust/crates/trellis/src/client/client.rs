@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::task::JoinHandle;
@@ -24,9 +25,9 @@ use crate::client::transfer::{get_download_grant, DownloadTransferGrant};
 use crate::client::transfer::{put_upload_grant, FileInfo, UploadTransferGrant};
 use crate::client::{
     prepare_event, AuthorizationContextBundle, AuthorizationContextCache,
-    AuthorizationContextStore, AuthorizationRoutingMaterial, CallError, EventDescriptor,
-    FeedDescriptor, PreparedTrellisEvent, RpcDescriptor, RpcErrorPayload, SessionAuth,
-    TrellisClientError,
+    AuthorizationContextStore, AuthorizationProviderCache, AuthorizationRoutingMaterial, CallError,
+    EventDescriptor, FeedDescriptor, PreparedTrellisEvent, RpcDescriptor, RpcErrorPayload,
+    SessionAuth, TrellisClientError,
 };
 #[cfg(feature = "integration-test-scoping")]
 use crate::integration_test_scoping::IntegrationTestScope;
@@ -41,6 +42,7 @@ struct FeedCancelGuard {
     runtime: tokio::runtime::Handle,
     nats: async_nats::Client,
     auth: Arc<SessionAuth>,
+    context_digest: String,
     subject: String,
     reply: String,
     payload: Bytes,
@@ -52,26 +54,41 @@ impl Drop for FeedCancelGuard {
         let subject = self.subject.clone();
         let reply = self.reply.clone();
         let payload = self.payload.clone();
-        let headers = signed_headers(&self.auth, &subject, &payload);
+        let context_digest = self.context_digest.clone();
+        let headers = signed_headers(&self.auth, &context_digest, &subject, &reply, &payload);
         self.runtime.spawn(async move {
+            let headers = match headers {
+                Ok(headers) => headers,
+                Err(error) => {
+                    tracing::warn!(%error, "feed cancel signing failed");
+                    return;
+                }
+            };
             let _ = nats
                 .publish_with_reply_and_headers(subject, reply, headers, payload)
                 .await;
-            let _ = nats.flush().await;
         });
     }
 }
 
-pub(crate) fn signed_headers(auth: &SessionAuth, subject: &str, payload: &[u8]) -> HeaderMap {
+pub(crate) fn signed_headers(
+    auth: &SessionAuth,
+    context_digest: &str,
+    subject: &str,
+    reply: &str,
+    payload: &[u8],
+) -> Result<HeaderMap, TrellisClientError> {
     let iat = now_iat_seconds() as i64;
     let request_id = new_request_id();
-    let proof = auth.create_proof(subject, payload, iat, &request_id);
+    let proof =
+        auth.create_request_proof_v2(context_digest, subject, reply, payload, iat, &request_id)?;
     let mut headers = HeaderMap::new();
     headers.insert("session-key", auth.session_key.as_str());
+    headers.insert("authorization-context", context_digest);
     headers.insert("proof", proof.as_str());
     headers.insert("iat", iat.to_string().as_str());
     headers.insert("request-id", request_id.as_str());
-    headers
+    Ok(headers)
 }
 
 /// Connection options for a Trellis service that can present its contract manifest during bootstrap.
@@ -247,6 +264,13 @@ impl<T> EventMessage<T> {
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
     }
 
+    pub(crate) async fn nak_after(&self, delay: Duration) -> Result<(), TrellisClientError> {
+        self.message
+            .ack_with(AckKind::Nak(Some(delay)))
+            .await
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+    }
+
     /// Terminate the message without successful acknowledgement or redelivery.
     pub async fn term(&self) -> Result<(), TrellisClientError> {
         self.message
@@ -312,12 +336,7 @@ struct ServiceBootstrapAuthorization {
 #[serde(rename_all = "camelCase")]
 struct NatsConnectToken {
     format: &'static str,
-    request_id: String,
-    issued_at: i64,
-    session_id: String,
-    participant_digest: String,
     context_digest: String,
-    proof: trellis_protocol::SessionProofV1,
 }
 
 #[derive(Debug)]
@@ -661,30 +680,37 @@ fn build_health_heartbeat(config: &HealthHeartbeatConfig) -> Value {
     })
 }
 
-fn signed_event_headers(auth: &SessionAuth, event: &PreparedTrellisEvent) -> HeaderMap {
+fn signed_event_headers(
+    auth: &SessionAuth,
+    context_digest: &str,
+    event: &PreparedTrellisEvent,
+) -> Result<HeaderMap, TrellisClientError> {
     let mut headers = event.publish_headers();
     headers.insert("session-key", auth.session_key.as_str());
+    headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",
-        auth.create_event_proof(
+        auth.create_event_proof_v2(
+            context_digest,
             event.subject(),
             event.payload(),
             event.event_id(),
             event.event_time(),
-        )
+        )?
         .as_str(),
     );
-    headers
+    Ok(headers)
 }
 
 async fn publish_prepared_event(
     nats: &async_nats::Client,
     auth: &SessionAuth,
+    context_digest: &str,
     timeout_ms: u64,
     event: &PreparedTrellisEvent,
 ) -> Result<(), TrellisClientError> {
     let jetstream = jetstream::new(nats.clone());
-    let headers = signed_event_headers(auth, event);
+    let headers = signed_event_headers(auth, context_digest, event)?;
     let publish = async {
         jetstream
             .publish_with_headers(event.subject().to_string(), headers, event.payload_bytes())
@@ -739,38 +765,80 @@ fn spawn_health_heartbeat_task(
 }
 
 fn spawn_authorization_context_refresh_task(
-    contexts: AuthorizationContextCache,
+    contexts: std::sync::Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
     nats: async_nats::Client,
 ) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        loop {
-            let delay = match contexts.refresh_delay() {
-                Ok(delay) => delay,
-                Err(error) => {
-                    tracing::warn!(%error, "authorization context refresh stopped");
-                    return;
-                }
-            };
-            tokio::time::sleep(delay).await;
-            match contexts.refresh(&auth).await {
-                Ok(()) => {}
-                Err(TrellisClientError::BootstrapHttp { status, .. })
-                    if matches!(status, 401 | 403 | 409) =>
-                {
-                    tracing::warn!(status, "authorization context refresh rejected");
-                    if let Err(error) = contexts.clear() {
-                        tracing::warn!(%error, "failed to clear rejected authorization context");
-                    }
-                    let _ = nats.drain().await;
-                    return;
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "authorization context refresh will retry");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                }
-            }
+    crate::client::authorization::spawn_authorization_context_refresh_task(contexts, auth, nats)
+}
+
+/// Connected provider-cache handle returned by attach.
+struct AuthorizationProviderHandle {
+    provider: AuthorizationProviderCache,
+    stop: tokio::sync::watch::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+/// Attach the connected NATS authorization registry to this client's provider
+/// cache and wait for its complete snapshot before returning.
+async fn attach_authorization_provider(
+    nats: async_nats::Client,
+    authorization_contexts: Arc<AuthorizationContextCache>,
+) -> Result<AuthorizationProviderHandle, TrellisClientError> {
+    let registry_binding = match authorization_contexts.bundle() {
+        Ok(bundle) => bundle.trust.authorization_registry.clone(),
+        Err(error) => return Err(error),
+    };
+    let provider = match AuthorizationProviderCache::attach(
+        nats.clone(),
+        &registry_binding,
+        authorization_contexts.clone(),
+    )
+    .await
+    {
+        Ok(provider) => provider,
+        Err(error) => {
+            let _ = nats.drain().await;
+            return Err(error);
         }
+    };
+    let (stop_tx, stop_rx) = tokio::sync::watch::channel(());
+    let watcher = provider.clone();
+    let task_stop = stop_tx.clone();
+    let task_nats = nats.clone();
+    let task = tokio::spawn(async move {
+        if let Err(error) = watcher.run(stop_rx).await {
+            tracing::warn!(%error, "authorization provider watch stopped");
+            let _ = task_stop.send(());
+            let _ = task_nats.drain().await;
+        }
+    });
+    let ready = match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        provider.wait_ready(stop_tx.subscribe()),
+    )
+    .await
+    {
+        Ok(ready) => ready,
+        Err(_) => {
+            let _ = stop_tx.send(());
+            task.abort();
+            let _ = nats.drain().await;
+            return Err(TrellisClientError::Bootstrap(
+                "authorization provider did not become ready".into(),
+            ));
+        }
+    };
+    if let Err(error) = ready {
+        let _ = stop_tx.send(());
+        task.abort();
+        let _ = nats.drain().await;
+        return Err(error);
+    }
+    Ok(AuthorizationProviderHandle {
+        provider,
+        stop: stop_tx,
+        task,
     })
 }
 
@@ -822,6 +890,7 @@ async fn connect_bootstrapped_service(
             bootstrap.server_now.div_euclid(1_000),
         )
         .await?;
+    let authorization_contexts = Arc::new(authorization_contexts);
     let (context_session_id, _, context_participant_digest, _, _) =
         authorization_contexts.refresh_evidence()?;
     if context_session_id != session.session_id || context_participant_digest != contract_digest {
@@ -840,22 +909,15 @@ async fn connect_bootstrapped_service(
     )?);
     let key_pair = std::sync::Arc::new(callback_auth.nkey_pair()?);
     let session_nkey = key_pair.public_key();
-    let callback_session_id = session.session_id;
-    let callback_participant_digest = contract_digest.to_owned();
     let callback_authorization_contexts = authorization_contexts.clone();
     let health_session_key = auth.session_key.clone();
 
     let nats = ConnectOptions::with_auth_callback(move |nonce| {
         let auth = callback_auth.clone();
         let key_pair = key_pair.clone();
-        let session_id = callback_session_id.clone();
         let session_nkey = session_nkey.clone();
-        let participant_digest = callback_participant_digest.clone();
         let authorization_contexts = callback_authorization_contexts.clone();
         async move {
-            let nonce_text = std::str::from_utf8(&nonce)
-                .map_err(async_nats::AuthError::new)?
-                .to_owned();
             if authorization_contexts.routing_jwt().is_err()
                 || authorization_contexts.context_digest().is_err()
             {
@@ -870,24 +932,6 @@ async fn connect_bootstrapped_service(
             let context_digest = authorization_contexts
                 .context_digest()
                 .map_err(async_nats::AuthError::new)?;
-            let issued_at = authorization_contexts
-                .corrected_now_millis()
-                .map_err(async_nats::AuthError::new)?;
-            let input = SessionProofInputV1::nats_connect_context(
-                new_request_id(),
-                issued_at,
-                session_id.clone(),
-                auth.key_id(),
-                auth.session_key.clone(),
-                session_nkey.clone(),
-                participant_digest.clone(),
-                context_digest.clone(),
-                nonce_text,
-            )
-            .map_err(async_nats::AuthError::new)?;
-            let proof = auth
-                .sign_session_proof(&input)
-                .map_err(async_nats::AuthError::new)?;
             let nonce_signature = key_pair.sign(&nonce).map_err(async_nats::AuthError::new)?;
             let mut credentials = async_nats::Auth::new();
             credentials.nkey = Some(session_nkey);
@@ -896,12 +940,7 @@ async fn connect_bootstrapped_service(
             credentials.token = Some(
                 serde_json::to_string(&NatsConnectToken {
                     format: "trellis.nats-connect-token.v1",
-                    request_id: input.request_id().to_owned(),
-                    issued_at,
-                    session_id,
-                    participant_digest,
                     context_digest,
-                    proof,
                 })
                 .map_err(async_nats::AuthError::new)?,
             );
@@ -917,6 +956,8 @@ async fn connect_bootstrapped_service(
             "service runtime connect failed for contract '{contract_id}' digest '{contract_digest}': {error}"
         ))
     })?;
+    let provider =
+        attach_authorization_provider(nats.clone(), authorization_contexts.clone()).await?;
 
     let health_heartbeat_config = HealthHeartbeatConfig {
         session_key: health_session_key,
@@ -960,6 +1001,9 @@ async fn connect_bootstrapped_service(
         health_heartbeat_task,
         authorization_contexts: Some(authorization_contexts),
         authorization_context_refresh_task,
+        authorization_provider: Some(provider.provider),
+        authorization_provider_stop: Some(provider.stop),
+        authorization_provider_task: Some(provider.task),
         #[cfg(feature = "integration-test-scoping")]
         integration_test_scope: opts.integration_test_scope.clone(),
     })
@@ -1032,33 +1076,20 @@ pub(crate) struct TrellisClient {
     timeout_ms: u64,
     service_bootstrap_binding: Option<CoreBootstrapBinding>,
     health_heartbeat_task: Option<JoinHandle<()>>,
-    authorization_contexts: Option<AuthorizationContextCache>,
+    authorization_contexts: Option<Arc<AuthorizationContextCache>>,
     authorization_context_refresh_task: Option<JoinHandle<()>>,
+    authorization_provider: Option<AuthorizationProviderCache>,
+    // RAII/join lifetime: dropping the stop sender ends the provider watch task;
+    // the join handle keeps the task addressable.
+    #[allow(dead_code)]
+    authorization_provider_stop: Option<tokio::sync::watch::Sender<()>>,
+    #[allow(dead_code)]
+    authorization_provider_task: Option<JoinHandle<()>>,
     #[cfg(feature = "integration-test-scoping")]
     integration_test_scope: Option<IntegrationTestScope>,
 }
 
 impl TrellisClient {
-    pub(crate) fn from_internal_parts(
-        nats: async_nats::Client,
-        auth: Arc<SessionAuth>,
-        timeout_ms: u64,
-    ) -> Self {
-        let inbox_prefix = auth.inbox_prefix();
-        Self {
-            nats,
-            auth,
-            inbox_prefix,
-            timeout_ms,
-            service_bootstrap_binding: None,
-            health_heartbeat_task: None,
-            authorization_contexts: None,
-            authorization_context_refresh_task: None,
-            #[cfg(feature = "integration-test-scoping")]
-            integration_test_scope: None,
-        }
-    }
-
     pub(crate) fn descriptor_subject(&self, subject: &str) -> String {
         #[cfg(feature = "integration-test-scoping")]
         {
@@ -1082,6 +1113,14 @@ impl TrellisClient {
         &self.nats
     }
 
+    /// Return the connected NATS client for live transport-boundary tests.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn integration_test_nats(&self) -> async_nats::Client {
+        self.nats.clone()
+    }
+
     /// Return the session auth helper used by this client.
     pub fn auth(&self) -> &SessionAuth {
         &self.auth
@@ -1090,17 +1129,6 @@ impl TrellisClient {
     /// Return the request timeout configured for this client.
     pub fn timeout_ms(&self) -> u64 {
         self.timeout_ms
-    }
-
-    /// Flush pending client protocol operations to the runtime.
-    pub async fn flush(&self) -> Result<(), TrellisClientError> {
-        timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            self.nats.flush(),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
     }
 
     /// Return the resource binding supplied by service HTTP bootstrap, if this is a service client.
@@ -1208,13 +1236,12 @@ impl TrellisClient {
         let key_pair = std::sync::Arc::new(callback_auth.nkey_pair()?);
         let session_nkey = key_pair.public_key();
         let bootstrap_jwt = opts.bootstrap_jwt.to_owned();
-        let session_id = opts.session_id.to_owned();
-        let participant_digest = opts.participant_digest.to_owned();
         let authorization_contexts = AuthorizationContextCache::new(
             opts.trellis_url,
             opts.authorization_context_binding,
             opts.authorization_context_store,
         )?;
+        let authorization_contexts = Arc::new(authorization_contexts);
         let now = now_context_seconds()?;
         if !authorization_contexts.restore(now).await?
             && !authorization_contexts
@@ -1244,14 +1271,9 @@ impl TrellisClient {
         let nats = ConnectOptions::with_auth_callback(move |nonce| {
             let auth = callback_auth.clone();
             let key_pair = key_pair.clone();
-            let session_id = session_id.clone();
             let session_nkey = session_nkey.clone();
-            let participant_digest = participant_digest.clone();
             let authorization_contexts = callback_authorization_contexts.clone();
             async move {
-                let nonce_text = std::str::from_utf8(&nonce)
-                    .map_err(async_nats::AuthError::new)?
-                    .to_owned();
                 if authorization_contexts.routing_jwt().is_err()
                     || authorization_contexts.context_digest().is_err()
                 {
@@ -1263,26 +1285,8 @@ impl TrellisClient {
                 let bootstrap_jwt = authorization_contexts
                     .routing_jwt()
                     .map_err(async_nats::AuthError::new)?;
-                let issued_at = authorization_contexts
-                    .corrected_now_millis()
-                    .map_err(async_nats::AuthError::new)?;
                 let context_digest = authorization_contexts
                     .context_digest()
-                    .map_err(async_nats::AuthError::new)?;
-                let input = SessionProofInputV1::nats_connect_context(
-                    new_request_id(),
-                    issued_at,
-                    session_id.clone(),
-                    auth.key_id(),
-                    auth.session_key.clone(),
-                    session_nkey.clone(),
-                    participant_digest.clone(),
-                    context_digest.clone(),
-                    nonce_text,
-                )
-                .map_err(async_nats::AuthError::new)?;
-                let proof = auth
-                    .sign_session_proof(&input)
                     .map_err(async_nats::AuthError::new)?;
                 let mut credentials = async_nats::Auth::new();
                 credentials.nkey = Some(session_nkey);
@@ -1292,12 +1296,7 @@ impl TrellisClient {
                 credentials.token = Some(
                     serde_json::to_string(&NatsConnectToken {
                         format: "trellis.nats-connect-token.v1",
-                        request_id: input.request_id().to_owned(),
-                        issued_at,
-                        session_id,
-                        participant_digest,
                         context_digest,
-                        proof,
                     })
                     .map_err(async_nats::AuthError::new)?,
                 );
@@ -1309,6 +1308,8 @@ impl TrellisClient {
         .await
         .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))?;
 
+        let provider =
+            attach_authorization_provider(nats.clone(), authorization_contexts.clone()).await?;
         let auth = Arc::new(auth);
         let authorization_context_refresh_task = Some(spawn_authorization_context_refresh_task(
             authorization_contexts.clone(),
@@ -1324,6 +1325,9 @@ impl TrellisClient {
             health_heartbeat_task: None,
             authorization_contexts: Some(authorization_contexts),
             authorization_context_refresh_task,
+            authorization_provider: Some(provider.provider),
+            authorization_provider_stop: Some(provider.stop),
+            authorization_provider_task: Some(provider.task),
             #[cfg(feature = "integration-test-scoping")]
             integration_test_scope: opts.integration_test_scope.clone(),
         })
@@ -1335,8 +1339,26 @@ impl TrellisClient {
     ) -> Result<Option<AuthorizationContextBundle>, TrellisClientError> {
         self.authorization_contexts
             .as_ref()
-            .map(AuthorizationContextCache::bundle)
+            .map(|cache| cache.bundle())
             .transpose()
+    }
+
+    /// Return the in-process provider cache used by local verification.
+    pub(crate) fn authorization_context_cache(
+        &self,
+    ) -> Result<AuthorizationProviderCache, TrellisClientError> {
+        self.authorization_provider.clone().ok_or_else(|| {
+            TrellisClientError::Bootstrap("authorization provider unavailable".into())
+        })
+    }
+
+    /// Return the local provider cache for live I/O and readiness assertions.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub fn integration_test_authorization_provider(
+        &self,
+    ) -> Result<AuthorizationProviderCache, TrellisClientError> {
+        self.authorization_context_cache()
     }
 
     /// Refresh and verify the current authorization context immediately.
@@ -1355,11 +1377,16 @@ impl TrellisClient {
         subject: &str,
         payload: Bytes,
     ) -> Result<async_nats::Message, TrellisClientError> {
-        let headers = self.signed_headers(subject, &payload);
+        // Create the exact reply inbox before signing so the proof binds the
+        // reply subject the response arrives on.
+        let reply = self.nats.new_inbox();
+        let headers = self.signed_headers(subject, &reply, &payload)?;
+        let request = async_nats::Request::new()
+            .inbox(reply)
+            .headers(headers)
+            .payload(payload);
 
-        let future = self
-            .nats
-            .request_with_headers(subject.to_string(), headers, payload);
+        let future = self.nats.send_request(subject.to_string(), request);
         let message = timeout(std::time::Duration::from_millis(self.timeout_ms), future)
             .await
             .map_err(|_| TrellisClientError::Timeout)?
@@ -1367,8 +1394,21 @@ impl TrellisClient {
         Ok(message)
     }
 
-    pub(crate) fn signed_headers(&self, subject: &str, payload: &[u8]) -> HeaderMap {
-        signed_headers(&self.auth, subject, payload)
+    pub(crate) fn signed_headers(
+        &self,
+        subject: &str,
+        reply: &str,
+        payload: &[u8],
+    ) -> Result<HeaderMap, TrellisClientError> {
+        let context_digest = self.authorization_context_digest()?;
+        signed_headers(&self.auth, &context_digest, subject, reply, payload)
+    }
+
+    pub(crate) fn authorization_context_digest(&self) -> Result<String, TrellisClientError> {
+        let contexts = self.authorization_contexts.as_ref().ok_or_else(|| {
+            TrellisClientError::Bootstrap("authorization context unavailable".into())
+        })?;
+        contexts.context_digest()
     }
 
     async fn request_json(&self, subject: &str, body: Value) -> Result<Value, TrellisClientError> {
@@ -1441,7 +1481,15 @@ impl TrellisClient {
         let event = event
             .clone()
             .with_subject(self.descriptor_subject(event.subject()));
-        publish_prepared_event(&self.nats, &self.auth, self.timeout_ms, &event).await
+        let context_digest = self.authorization_context_digest()?;
+        publish_prepared_event(
+            &self.nats,
+            &self.auth,
+            &context_digest,
+            self.timeout_ms,
+            &event,
+        )
+        .await
     }
 
     /// Subscribe to one descriptor-backed event subject from the default JetStream event stream.
@@ -1617,13 +1665,13 @@ impl TrellisClient {
         })?;
         let payload = Bytes::from(serde_json::to_vec(&input)?);
         let subject = self.descriptor_subject(D::SUBJECT);
-        let headers = self.signed_headers(&subject, &payload);
-
+        let context_digest = self.authorization_context_digest()?;
         let inbox = format!(
             "{}.{}",
             self.inbox_prefix,
             FEED_INBOX_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
+        let headers = signed_headers(&self.auth, &context_digest, &subject, &inbox, &payload)?;
         let cancel_payload = Bytes::from(serde_json::to_vec(&serde_json::json!({
             "_trellisFeedCancel": inbox.clone(),
         }))?);
@@ -1631,6 +1679,7 @@ impl TrellisClient {
             runtime: tokio::runtime::Handle::current(),
             nats: self.nats.clone(),
             auth: Arc::clone(&self.auth),
+            context_digest,
             subject: subject.clone(),
             reply: inbox.clone(),
             payload: cancel_payload,
@@ -1647,14 +1696,6 @@ impl TrellisClient {
             std::time::Duration::from_millis(self.timeout_ms),
             self.nats
                 .publish_with_reply_and_headers(subject, inbox, headers, payload),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            self.nats.flush(),
         )
         .await
         .map_err(|_| TrellisClientError::Timeout)?
@@ -1710,6 +1751,12 @@ impl Drop for TrellisClient {
         if let Some(task) = self.authorization_context_refresh_task.take() {
             task.abort();
         }
+        if let Some(stop) = self.authorization_provider_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(task) = self.authorization_provider_task.take() {
+            task.abort();
+        }
     }
 }
 
@@ -1732,9 +1779,8 @@ impl OperationTransport for TrellisClient {
         body: Value,
     ) -> Result<BoxStream<'a, Result<Value, TrellisClientError>>, TrellisClientError> {
         let payload = Bytes::from(serde_json::to_vec(&body)?);
-        let headers = self.signed_headers(&subject, &payload);
-
         let inbox = self.nats.new_inbox();
+        let headers = self.signed_headers(&subject, &inbox, &payload)?;
         let mut subscriber = timeout(
             std::time::Duration::from_millis(self.timeout_ms),
             self.nats.subscribe(inbox.clone()),

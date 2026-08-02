@@ -83,7 +83,6 @@ Cluster-wide required state:
 - SQLite auth/control-plane database (`storage.dbPath`)
 - services tables
 - sessions table
-- RPC replay cache used by auth validators
 - OAuth state store
 - pending auth store
 - device activation flow store
@@ -161,8 +160,7 @@ Minimum targets:
 - `/auth/flow/:flowId`
 - `/auth/flow/:flowId/approval`
 - `/auth/flow/:flowId/bind`
-- `/auth/devices/activate/wait`
-- `/bootstrap/client`
+- `/auth/context/refresh`
 - `/bootstrap/service`
 - `/bootstrap/device`
 

@@ -1,6 +1,5 @@
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
-import { canonicalizeJsonValue } from "./utils.ts";
 
 const SessionKeySchema = Type.String({
   pattern: "^[A-Za-z0-9_-]{43}$",
@@ -9,43 +8,6 @@ const SessionKeySchema = Type.String({
 const SignatureSchema = Type.String({
   pattern: "^[A-Za-z0-9_-]{86}$",
 });
-
-export const AuthLogoutResponseModeSchema = Type.Union([
-  Type.Literal("json"),
-  Type.Literal("redirect"),
-]);
-
-export type AuthLogoutResponseMode = StaticDecode<
-  typeof AuthLogoutResponseModeSchema
->;
-
-export type LogoutSignaturePayloadInput = {
-  iat: number;
-  providerLogout?: boolean;
-  federatedProviderLogout?: boolean;
-  returnTo?: string;
-  responseMode?: AuthLogoutResponseMode;
-};
-
-/** Builds the canonical value signed for POST-based HTTP logout requests. */
-export function buildLogoutSignaturePayload(
-  input: LogoutSignaturePayloadInput,
-): string {
-  const payload: Record<string, boolean | number | string> = { iat: input.iat };
-  if (input.providerLogout !== undefined) {
-    payload.providerLogout = input.providerLogout;
-  }
-  if (input.federatedProviderLogout !== undefined) {
-    payload.federatedProviderLogout = input.federatedProviderLogout;
-  }
-  if (input.returnTo !== undefined) {
-    payload.returnTo = input.returnTo;
-  }
-  if (input.responseMode !== undefined) {
-    payload.responseMode = input.responseMode;
-  }
-  return canonicalizeJsonValue(payload);
-}
 
 export const ContractDigestSchema = Type.String({
   pattern: "^[A-Za-z0-9_-]+$",
@@ -155,26 +117,6 @@ export const AuthStartRequestSchema = Type.Object({
   context: Type.Optional(OpenObjectSchema),
 });
 
-export const AuthLogoutRequestSchema = Type.Object({
-  sessionKey: SessionKeySchema,
-  iat: Type.Integer(),
-  sig: SignatureSchema,
-  providerLogout: Type.Optional(Type.Boolean()),
-  federatedProviderLogout: Type.Optional(Type.Boolean()),
-  returnTo: Type.Optional(Type.String({ minLength: 1 })),
-  responseMode: Type.Optional(AuthLogoutResponseModeSchema),
-}, { additionalProperties: true });
-
-export const AuthLogoutResponseSchema = Type.Object({
-  success: Type.Literal(true),
-  redirectTo: Type.Optional(
-    Type.String({ format: "uri", pattern: "^https?://", minLength: 1 }),
-  ),
-});
-
-export type AuthLogoutRequest = StaticDecode<typeof AuthLogoutRequestSchema>;
-export type AuthLogoutResponse = StaticDecode<typeof AuthLogoutResponseSchema>;
-
 export const AuthStartFlowResponseSchema = Type.Object({
   status: Type.Literal("flow_started"),
   flowId: Type.String({ minLength: 1 }),
@@ -191,13 +133,3 @@ export type AuthStartFlowResponse = StaticDecode<
   typeof AuthStartFlowResponseSchema
 >;
 export type AuthStartResponse = StaticDecode<typeof AuthStartResponseSchema>;
-
-export const NatsAuthTokenV1Schema = Type.Object({
-  v: Type.Literal(1),
-  sessionKey: SessionKeySchema,
-  sig: SignatureSchema,
-  iat: Type.Integer(),
-  contractDigest: ContractDigestSchema,
-});
-
-export type NatsAuthTokenV1 = StaticDecode<typeof NatsAuthTokenV1Schema>;

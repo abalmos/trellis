@@ -62,15 +62,7 @@ export type TrellisTestRuntimeTrellisCommand = {
 
 /** Options for the Trellis control-plane started by the test runtime. */
 export type TrellisTestRuntimeTrellisOptions = {
-  mutableDev?: boolean;
   command: TrellisTestRuntimeTrellisCommand;
-};
-
-/** Optional Jobs admin service sidecar started by the test runtime. */
-export type TrellisTestRuntimeJobsAdminOptions = {
-  command: TrellisTestRuntimeTrellisCommand;
-  deployment?: string;
-  mode?: "owner" | "rpc-only";
 };
 
 /** Options for starting an isolated Trellis test runtime. */
@@ -90,7 +82,6 @@ export type TrellisTestRuntimeStartOptions = {
   /** Existing or desired local test-admin password. */
   adminPassword?: string;
   trellis: TrellisTestRuntimeTrellisOptions;
-  jobsAdmin?: TrellisTestRuntimeJobsAdminOptions;
   authority?: {
     /**
      * Authority plan classifications the runtime admin automation may accept.

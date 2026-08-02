@@ -36,6 +36,9 @@ mod event_consumers;
 #[path = "integration/prepared_events.rs"]
 mod prepared_events;
 
+#[path = "integration/cli.rs"]
+mod cli;
+
 fn generated_caller(client: &trellis_rs::generated::Caller) -> &trellis_rs::generated::Caller {
     client
 }

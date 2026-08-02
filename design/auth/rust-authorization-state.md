@@ -19,9 +19,9 @@ state. Authorization delivery is split into five ordered steps:
 4. Rust issues signed authorization contexts and distributes issuer trust;
 5. runtimes validate ordinary context-bound requests locally.
 
-This document specifies the second step. It does not add public auth routes,
-context signing, issuer configuration, trust distribution, request-proof v2
-runtime integration, or removal of the transitional auth validation RPCs.
+This document specifies the durable authorization-state step. Public auth
+routes, context signing, trust distribution, and local request/event runtime
+verification are composed from this state by the surrounding Auth design.
 
 ## Ownership
 
@@ -237,14 +237,10 @@ acknowledges successful delivery; failed publication or restart leaves the row
 pending. The outbox is transient delivery state, not an activity or audit log.
 Session touches and semantic no-ops create no outbox row.
 
-## External Cutover Boundaries
+## Local Authorization Boundary
 
-The next milestone migrates Rust auth/bootstrap HTTP and RPC ownership, session
-creation and revocation APIs, login integration needed by bootstrap, and NATS
-auth callout. It must consume this document's repositories and issuable-state
-service rather than reconstructing authority.
-
-The following milestone adds issuer configuration, trust publication, context
-signing from issuable state, bootstrap context bundles, and refresh. Local
-request-proof validation and removal of `Auth.Requests.Validate` follow after
-that. Event authorization remains a separate later boundary.
+Rust owns auth/bootstrap HTTP and RPC, session creation and revocation, login,
+NATS Auth Callout, issuer configuration, trust publication, context signing,
+bootstrap bundles, and refresh. Providers consume signed contexts locally with
+generated route or receiver-owned event metadata; they do not reconstruct
+authority or call Auth for an ordinary authorization decision.

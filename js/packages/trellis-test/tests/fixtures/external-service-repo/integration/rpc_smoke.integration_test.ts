@@ -9,7 +9,6 @@ import { Type } from "typebox";
 import {
   caseScopedContractId,
   caseScopedName,
-  caseScopedSubject,
   integrationSlug,
   runtimeScopeForCase,
   trellisIntegrationTest,
@@ -39,11 +38,6 @@ const serviceContract = defineServiceContract({ schemas }, (ref) => ({
   rpc: {
     "Echo.Ping": {
       version: "v1",
-      subject: caseScopedSubject(
-        "rpc.v1.external.fixture",
-        CASE_ID,
-        "Echo.Ping",
-      ),
       input: ref.schema("PingInput"),
       output: ref.schema("PingOutput"),
       capabilities: { call: ["ping"] },

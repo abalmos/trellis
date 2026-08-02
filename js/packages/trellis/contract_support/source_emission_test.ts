@@ -255,6 +255,120 @@ Deno.test("kind-specific helpers preserve emitted manifest shape and digest", as
   });
 });
 
+Deno.test("runtime descriptors precompile exact permission identity", () => {
+  const contract = defineServiceContract(
+    { schemas: baseSchemas },
+    (ref) => ({
+      id: "permission.source@v1",
+      displayName: "Permission source",
+      description: "Checks descriptor permission identity.",
+      capabilities: {
+        "unrelated.capability": {
+          displayName: "Unrelated capability",
+          description: "Must not affect exact permission identity.",
+        },
+      },
+      rpc: {
+        "Demo.Get": {
+          version: "v1",
+          subject: "unrelated.subject",
+          input: ref.schema("Empty"),
+          output: ref.schema("StringValue"),
+          capabilities: { call: ["unrelated.capability"] },
+        },
+      },
+      operations: {
+        "Demo.Run": {
+          version: "v2",
+          input: ref.schema("Empty"),
+          output: ref.schema("StringValue"),
+          signals: {
+            continue: { input: ref.schema("Empty") },
+          },
+        },
+      },
+      events: {
+        "Demo.Changed": {
+          version: "v1",
+          event: ref.schema("StringValue"),
+          capabilities: { subscribe: ["unrelated.capability"] },
+        },
+      },
+      feeds: {
+        "Demo.Live": {
+          version: "v1",
+          input: ref.schema("Empty"),
+          event: ref.schema("StringValue"),
+        },
+      },
+    }),
+  );
+  const api = getContractRuntime(contract).ownedApi;
+
+  assertEquals(api.rpc["Demo.Get"]?.permission, {
+    apiId: "permission.source@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "Demo.Get",
+    action: "call",
+  });
+  assertEquals(api.operations["Demo.Run"]?.permissions, {
+    invoke: {
+      apiId: "permission.source@v1",
+      apiVersion: "v2",
+      surfaceKind: "operation",
+      surfaceName: "Demo.Run",
+      action: "invoke",
+    },
+    observe: {
+      apiId: "permission.source@v1",
+      apiVersion: "v2",
+      surfaceKind: "operation",
+      surfaceName: "Demo.Run",
+      action: "observe",
+    },
+    cancel: {
+      apiId: "permission.source@v1",
+      apiVersion: "v2",
+      surfaceKind: "operation",
+      surfaceName: "Demo.Run",
+      action: "cancel",
+    },
+    control: {
+      continue: {
+        apiId: "permission.source@v1",
+        apiVersion: "v2",
+        surfaceKind: "operation",
+        surfaceName: "Demo.Run.continue",
+        action: "control",
+      },
+    },
+  });
+  assertEquals(api.events["Demo.Changed"]?.publishPermission, {
+    apiId: "permission.source@v1",
+    apiVersion: "v1",
+    surfaceKind: "event",
+    surfaceName: "Demo.Changed",
+    action: "publish",
+  });
+  assertEquals(api.events["Demo.Changed"]?.subscribePermission, {
+    apiId: "permission.source@v1",
+    apiVersion: "v1",
+    surfaceKind: "event",
+    surfaceName: "Demo.Changed",
+    action: "subscribe",
+  });
+  assertEquals(api.feeds?.["Demo.Live"]?.permission, {
+    apiId: "permission.source@v1",
+    apiVersion: "v1",
+    surfaceKind: "feed",
+    surfaceName: "Demo.Live",
+    action: "subscribe",
+  });
+  assert(Object.isFrozen(api.rpc["Demo.Get"]?.permission));
+  assert(Object.isFrozen(api.operations["Demo.Run"]?.permissions));
+});
+
 Deno.test("service contracts do not model runtime heartbeats as contract uses", () => {
   const contract = defineServiceContract({}, () => ({
     id: "baseline-health.service@v1",

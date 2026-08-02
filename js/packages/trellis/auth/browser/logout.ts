@@ -1,105 +1,56 @@
-import { Value } from "typebox/value";
-
-import {
-  type AuthLogoutRequest,
-  type AuthLogoutResponse,
-  AuthLogoutResponseSchema,
-} from "../schemas.ts";
-import {
-  clearSessionKey,
-  logoutSessionSig,
-  type SessionKeyHandle,
-} from "./session.ts";
+import type { AsyncResult, BaseError } from "@qlever-llc/result";
+import type {
+  AuthSessionsLogoutInput,
+  AuthSessionsLogoutOutput,
+} from "../../sdk/auth.ts";
+import { clearSessionKey, type SessionKeyHandle } from "./session.ts";
 
 type LogoutLocation =
   & Pick<Location, "href">
   & Partial<Pick<Location, "assign">>;
 
+/** Generated Auth.Sessions.Logout call exposed by a connected runtime. */
+export type ConnectedSessionLogout = (
+  input: AuthSessionsLogoutInput,
+) => AsyncResult<AuthSessionsLogoutOutput, BaseError>;
+
 export type CompleteSessionLogoutArgs = {
-  authUrl: string;
   handle: SessionKeyHandle;
+  connected?: ConnectedSessionLogout;
   returnTo?: string;
-  providerLogout?: boolean;
-  federatedProviderLogout?: boolean;
   location?: LogoutLocation;
 };
 
+/** Revoke a connected session through generated Auth control or clear locally. */
 export async function logoutSession(args: {
-  authUrl: string;
   handle: SessionKeyHandle;
-  returnTo?: string;
-  providerLogout?: boolean;
-  federatedProviderLogout?: boolean;
-  responseMode?: "json";
-  fetch?: typeof fetch;
-}): Promise<AuthLogoutResponse> {
-  const iat = Math.floor(Date.now() / 1000);
-  const responseMode = args.responseMode ?? "json";
-  const sig = await logoutSessionSig(args.handle, {
-    iat,
-    ...(args.providerLogout === undefined
-      ? {}
-      : { providerLogout: args.providerLogout }),
-    ...(args.federatedProviderLogout === undefined
-      ? {}
-      : { federatedProviderLogout: args.federatedProviderLogout }),
-    ...(args.returnTo === undefined ? {} : { returnTo: args.returnTo }),
-    responseMode,
-  });
-  const body: AuthLogoutRequest = {
-    sessionKey: args.handle.sessionKey,
-    iat,
-    sig,
-    ...(args.providerLogout === undefined
-      ? {}
-      : { providerLogout: args.providerLogout }),
-    ...(args.federatedProviderLogout === undefined
-      ? {}
-      : { federatedProviderLogout: args.federatedProviderLogout }),
-    ...(args.returnTo === undefined ? {} : { returnTo: args.returnTo }),
-    responseMode,
-  };
-  const fetchImpl = args.fetch ?? globalThis.fetch;
-  const response = await fetchImpl(logoutUrl(args.authUrl), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Logout request failed with HTTP ${response.status}`);
+  connected?: ConnectedSessionLogout;
+}): Promise<{ success: true }> {
+  if (args.connected) {
+    await args.connected({}).orThrow();
+  } else {
+    await clearSessionKey({ persistence: args.handle.persistence });
   }
-
-  let parsed: unknown;
-  try {
-    parsed = await response.json();
-  } catch (cause) {
-    throw new Error("Logout response was not valid JSON", { cause });
-  }
-  if (!Value.Check(AuthLogoutResponseSchema, parsed)) {
-    throw new Error("Logout response did not match expected schema");
-  }
-  return parsed;
+  return { success: true };
 }
 
+/** Complete session logout without an HTTP control-plane fallback. */
 export async function completeSessionLogout(
   args: CompleteSessionLogoutArgs,
 ): Promise<never> {
-  let response: AuthLogoutResponse | undefined;
-
   try {
-    response = await logoutSession(args);
-  } catch {
-    response = undefined;
+    if (args.connected) {
+      await logoutSession({ handle: args.handle, connected: args.connected });
+    }
   } finally {
     try {
-      await clearSessionKey();
+      await clearSessionKey({ persistence: args.handle.persistence });
     } catch {
-      // Preserve logout completion in non-browser/test runtimes without IndexedDB.
+      // Temporary/test runtimes may not provide IndexedDB.
     }
   }
 
-  const target = response?.redirectTo ?? args.returnTo ?? "/";
+  const target = args.returnTo ?? "/";
   const location = args.location ?? globalThis.location;
   if (typeof location.assign === "function") {
     location.assign(target);
@@ -107,8 +58,4 @@ export async function completeSessionLogout(
     location.href = target;
   }
   throw new Error("Redirecting after logout");
-}
-
-function logoutUrl(authUrl: string): string {
-  return `${authUrl.replace(/\/+$/, "")}/auth/sessions/logout`;
 }

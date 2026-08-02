@@ -749,12 +749,14 @@ pub fn resolve_participant_v1(
             &required_grants,
             required_resources,
             &required_apis,
+            &implemented_apis,
             &resolved_by_alias,
         )?,
         optional: derive_proposal_section(
             &optional_grants,
             optional_resources,
             &optional_apis,
+            &[],
             &resolved_by_alias,
         )?,
     };
@@ -1567,14 +1569,19 @@ fn derive_proposal_section(
     grant_set: &GrantSetV1,
     resources: ParticipantResourceNeedsV1,
     used: &[ResolvedUsedApiV1],
+    provided: &[ResolvedImplementedApiV1],
     resolved: &BTreeMap<String, (&ApiArtifactV1, String)>,
 ) -> Result<AuthorityProposalSectionV1, ProtocolError> {
     let requested = grant_set.permissions().to_vec();
     let requested_set = requested.clone();
     let mut capabilities = Vec::new();
     let mut covered = Vec::new();
-    for use_ in used {
-        let (api, api_digest) = &resolved[&use_.alias];
+    for alias in used
+        .iter()
+        .map(|used| &used.alias)
+        .chain(provided.iter().map(|provided| &provided.alias))
+    {
+        let (api, api_digest) = &resolved[alias];
         let value = api.normalized_value()?;
         for (name, capability) in object_at(&value, "capabilities") {
             let allows = serde_json::from_value::<Vec<PermissionAtomV1>>(

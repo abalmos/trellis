@@ -405,36 +405,12 @@ pub enum EventLogQueryRequestVerificationStatusItem {
     /// The `verified` wire value.
     #[serde(rename = "verified")]
     Verified,
-    /// The `missing-proof` wire value.
-    #[serde(rename = "missing-proof")]
-    MissingProof,
-    /// The `invalid-signature` wire value.
-    #[serde(rename = "invalid-signature")]
-    InvalidSignature,
-    /// The `missing-session` wire value.
-    #[serde(rename = "missing-session")]
-    MissingSession,
-    /// The `subject-denied` wire value.
-    #[serde(rename = "subject-denied")]
-    SubjectDenied,
-    /// The `outside-session-window` wire value.
-    #[serde(rename = "outside-session-window")]
-    OutsideSessionWindow,
-    /// The `auth-unavailable` wire value.
-    #[serde(rename = "auth-unavailable")]
-    AuthUnavailable,
 }
 impl EventLogQueryRequestVerificationStatusItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Verified => "verified",
-            Self::MissingProof => "missing-proof",
-            Self::InvalidSignature => "invalid-signature",
-            Self::MissingSession => "missing-session",
-            Self::SubjectDenied => "subject-denied",
-            Self::OutsideSessionWindow => "outside-session-window",
-            Self::AuthUnavailable => "auth-unavailable",
         }
     }
 }
@@ -545,14 +521,14 @@ pub struct EventLogQueryRequest {
     #[serde(rename = "ownerEventName")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_event_name: Option<String>,
-    /// The `publisherContractId` wire field.
-    #[serde(rename = "publisherContractId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub publisher_contract_id: Option<String>,
     /// The `publisherDeploymentId` wire field.
     #[serde(rename = "publisherDeploymentId")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher_deployment_id: Option<String>,
+    /// The `publisherParticipantId` wire field.
+    #[serde(rename = "publisherParticipantId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher_participant_id: Option<String>,
     /// The `resolution` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolution: Option<Vec<EventLogQueryRequestResolutionItem>>,

@@ -268,6 +268,11 @@ pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
         .as_ref()
         .and_then(|headers| headers.get("proof"))
         .map(|value| value.as_str().to_string());
+    let authorization_context = message
+        .headers
+        .as_ref()
+        .and_then(|headers| headers.get("authorization-context"))
+        .map(|value| value.as_str().to_string());
     let iat = message
         .headers
         .as_ref()
@@ -297,9 +302,11 @@ pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
             subject,
             session_key,
             proof,
+            authorization_context,
             iat,
             request_id,
             required_capabilities: None,
+            required_permission: None,
             reply_to: reply_to.clone(),
             caller: None,
             traceparent,
@@ -658,13 +665,6 @@ async fn publish_reply(
     Ok(())
 }
 
-async fn flush_replies(client: &async_nats::Client) -> Result<(), ServerError> {
-    client
-        .flush()
-        .await
-        .map_err(|error| ServerError::Nats(error.to_string()))
-}
-
 async fn publish_response(
     client: &async_nats::Client,
     reply_to: String,
@@ -690,7 +690,6 @@ async fn publish_response(
             match frame {
                 Ok(Some(Ok(payload))) => {
                     publish_reply(client, encode_success_reply(reply_to.clone(), payload)).await?;
-                    flush_replies(client).await?;
                 }
                 Ok(Some(Err(error))) => {
                     publish_reply(
@@ -698,7 +697,6 @@ async fn publish_response(
                         encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
                     )
                     .await?;
-                    flush_replies(client).await?;
                     break;
                 }
                 Ok(None) => break,
@@ -709,7 +707,6 @@ async fn publish_response(
                         encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
                     )
                     .await?;
-                    flush_replies(client).await?;
                     break;
                 }
             }
@@ -721,7 +718,6 @@ async fn publish_response(
                 .publish_with_headers(reply_to.clone(), headers, Bytes::new())
                 .await
                 .map_err(|error| ServerError::Nats(error.to_string()))?;
-            flush_replies(client).await?;
 
             loop {
                 let frame = AssertUnwindSafe(stream.next()).catch_unwind().await;
@@ -729,7 +725,6 @@ async fn publish_response(
                     Ok(Some(Ok(payload))) => {
                         publish_reply(client, encode_success_reply(reply_to.clone(), payload))
                             .await?;
-                        flush_replies(client).await?;
                     }
                     Ok(Some(Err(error))) => {
                         publish_reply(
@@ -737,7 +732,6 @@ async fn publish_response(
                             encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
                         )
                         .await?;
-                        flush_replies(client).await?;
                         break;
                     }
                     Ok(None) => break,
@@ -748,7 +742,6 @@ async fn publish_response(
                             encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
                         )
                         .await?;
-                        flush_replies(client).await?;
                         break;
                     }
                 }
@@ -1056,9 +1049,11 @@ mod tests {
             subject: subject.to_string(),
             session_key: None,
             proof: None,
+            authorization_context: None,
             iat: None,
             request_id: Some("request-123".to_string()),
             required_capabilities: None,
+            required_permission: None,
             reply_to: Some("reply.inbox".to_string()),
             caller: None,
             traceparent: Some(TRACEPARENT.to_string()),

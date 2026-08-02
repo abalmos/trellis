@@ -1,4 +1,3 @@
-import { sha256 } from "js-sha256";
 import nacl from "tweetnacl";
 
 import { base64urlDecode, base64urlEncode, toArrayBuffer } from "./utils.ts";
@@ -49,23 +48,6 @@ function ed25519KeyPairFromSeed(seed32: Uint8Array): nacl.SignKeyPair {
 
 export function publicKeyBase64urlFromSeed(seed32: Uint8Array): string {
   return base64urlEncode(ed25519KeyPairFromSeed(seed32).publicKey);
-}
-
-export function signEd25519SeedDetached(
-  seed32: Uint8Array,
-  data: Uint8Array,
-): Uint8Array {
-  return nacl.sign.detached(data, ed25519KeyPairFromSeed(seed32).secretKey);
-}
-
-export function signEd25519SeedSha256(
-  seed32: Uint8Array,
-  data: Uint8Array,
-): Uint8Array {
-  return signEd25519SeedDetached(
-    seed32,
-    new Uint8Array(sha256.arrayBuffer(data)),
-  );
 }
 
 export async function importEd25519PrivateKeyFromSeedBase64url(

@@ -79,7 +79,7 @@ pub(crate) fn write_nats_material(
     Ok(())
 }
 
-fn write_private_file(
+pub(crate) fn write_private_file(
     path: impl AsRef<Path>,
     contents: impl AsRef<[u8]>,
 ) -> Result<(), BootstrapError> {

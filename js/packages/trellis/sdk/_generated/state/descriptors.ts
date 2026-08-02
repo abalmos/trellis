@@ -40,6 +40,13 @@ export const StateAdminDelete = rpcAction(
   "State.Admin.Delete",
   {
     subject: "rpc.v1.State.Admin.Delete",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Admin.Delete",
+      action: "call",
+    }),
     input: schema<Types.StateAdminDeleteInput>(StateAdminDeleteRequestSchema),
     output: schema<Types.StateAdminDeleteOutput>(
       StateAdminDeleteResponseSchema,
@@ -61,6 +68,13 @@ export const StateAdminGet = rpcAction(
   "State.Admin.Get",
   {
     subject: "rpc.v1.State.Admin.Get",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Admin.Get",
+      action: "call",
+    }),
     input: schema<Types.StateAdminGetInput>(StateAdminGetRequestSchema),
     output: schema<Types.StateAdminGetOutput>(StateAdminGetResponseSchema),
     callerCapabilities: ["admin"] as const,
@@ -80,6 +94,13 @@ export const StateAdminList = rpcAction(
   "State.Admin.List",
   {
     subject: "rpc.v1.State.Admin.List",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Admin.List",
+      action: "call",
+    }),
     input: schema<Types.StateAdminListInput>(StateAdminListRequestSchema),
     output: schema<Types.StateAdminListOutput>(StateAdminListResponseSchema),
     callerCapabilities: ["admin"] as const,
@@ -99,6 +120,13 @@ export const StateDelete = rpcAction(
   "State.Delete",
   {
     subject: "rpc.v1.State.Delete",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Delete",
+      action: "call",
+    }),
     input: schema<Types.StateDeleteInput>(StateDeleteRequestSchema),
     output: schema<Types.StateDeleteOutput>(StateDeleteResponseSchema),
     callerCapabilities: [] as const,
@@ -118,6 +146,13 @@ export const StateGet = rpcAction(
   "State.Get",
   {
     subject: "rpc.v1.State.Get",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Get",
+      action: "call",
+    }),
     input: schema<Types.StateGetInput>(StateGetRequestSchema),
     output: schema<Types.StateGetOutput>(StateGetResponseSchema),
     callerCapabilities: [] as const,
@@ -137,6 +172,13 @@ export const StateList = rpcAction(
   "State.List",
   {
     subject: "rpc.v1.State.List",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.List",
+      action: "call",
+    }),
     input: schema<Types.StateListInput>(StateListRequestSchema),
     output: schema<Types.StateListOutput>(StateListResponseSchema),
     callerCapabilities: [] as const,
@@ -156,6 +198,13 @@ export const StatePut = rpcAction(
   "State.Put",
   {
     subject: "rpc.v1.State.Put",
+    permission: Object.freeze({
+      apiId: "trellis.state@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "State.Put",
+      action: "call",
+    }),
     input: schema<Types.StatePutInput>(StatePutRequestSchema),
     output: schema<Types.StatePutOutput>(StatePutResponseSchema),
     callerCapabilities: [] as const,

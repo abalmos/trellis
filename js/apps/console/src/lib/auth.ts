@@ -6,8 +6,8 @@ import {
   completeSessionLogout,
   getOrCreateSessionKey,
   type SessionKeyHandle,
+  startAuthRequest,
 } from "@qlever-llc/trellis/auth/browser";
-import { startAuthRequest } from "@qlever-llc/trellis/auth";
 import contract from "../../contract.ts";
 import {
   APP_CONFIG,

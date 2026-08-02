@@ -11,6 +11,7 @@ import {
   type ContractWithRuntime,
   getContractRuntime,
 } from "./contract_support/contract_runtime.ts";
+import { compileProtocolArtifacts } from "./contract_support/protocol_artifacts.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   base64urlDecode,
@@ -18,7 +19,6 @@ import {
   BrowserAuthorizationContextStore,
   getOrCreateSessionKey,
   getPublicSessionKey,
-  natsConnectSigForIat,
   type SessionKeyOptions,
   setSessionId,
 } from "./auth/browser.ts";
@@ -26,22 +26,23 @@ import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
 import {
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
+  AuthorizationContextRefreshError,
   type AuthorizationContextStore,
+  AuthorizationProviderCache,
   MemoryAuthorizationContextStore,
+  refreshAuthorizationContextWithMetadata,
   startAuthorizationContextRefresh,
 } from "./auth/authorization_context.ts";
 import {
   SESSION_PROOF_FORMAT_V1,
   sessionProofRequestDigestV1,
 } from "./auth/session_proof.ts";
-import { sha256, toArrayBuffer, utf8 } from "./auth/browser.ts";
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
-import { buildNatsConnectSignaturePayload } from "./auth/session_auth.ts";
+import { sha256, toArrayBuffer, utf8 } from "./auth/browser.ts";
 import { canonicalizeJsonValue } from "./auth/utils.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
-  signEd25519SeedSha256,
 } from "./auth/keys.ts";
 import type { ClientOpts } from "./client.ts";
 import type { TrellisContractV1 } from "./contracts.ts";
@@ -92,6 +93,8 @@ function createConnectedClient(args: {
   inboxPrefix: string;
   sessionKey: string;
   sign(data: Uint8Array): Promise<Uint8Array>;
+  contextDigest: string | (() => string);
+  authorizationProviderCache: AuthorizationProviderCache;
   opts: {
     log: ClientOpts["log"];
     timeout: ClientOpts["timeout"];
@@ -108,6 +111,8 @@ function createConnectedClient(args: {
     {
       sessionKey: args.sessionKey,
       sign: args.sign,
+      contextDigest: args.contextDigest,
+      authorizationProviderCache: args.authorizationProviderCache,
     },
     {
       ...args.opts,
@@ -253,10 +258,7 @@ type ClientRuntimeIdentity = {
     provider?: string,
     contract?: Record<string, unknown> | string,
   ): Promise<string>;
-  natsConnectSigForIat(iat: number, contractDigest: string): Promise<string>;
-  bootstrapSig(iat: number): Promise<string>;
   bindFlowSig(flowId: string): Promise<string>;
-  buildRuntimeAuthTokenSync?(iat: number, contractDigest: string): string;
 };
 
 const ClientTransportEndpointsSchema = Type.Object({
@@ -292,39 +294,20 @@ const ClientBootstrapReadySchema = Type.Object({
   }),
 }, { additionalProperties: true });
 
-const ClientBootstrapAuthRequiredSchema = Type.Object({
-  status: Type.Literal("auth_required"),
-  serverNow: Type.Integer(),
-}, { additionalProperties: true });
-
-const ClientBootstrapNotReadySchema = Type.Object({
-  status: Type.Literal("not_ready"),
-  reason: Type.String({ minLength: 1 }),
-  serverNow: Type.Integer(),
-}, { additionalProperties: true });
-
-const ClientBootstrapIatOutOfRangeSchema = Type.Object({
-  reason: Type.Literal("iat_out_of_range"),
-  serverNow: Type.Integer(),
-}, { additionalProperties: true });
-
 type ClientBootstrapReady = StaticDecode<typeof ClientBootstrapReadySchema>;
-type ClientBootstrapAuthRequired = StaticDecode<
-  typeof ClientBootstrapAuthRequiredSchema
->;
-type ClientBootstrapNotReady = StaticDecode<
-  typeof ClientBootstrapNotReadySchema
->;
-type ClientBootstrapIatOutOfRange = StaticDecode<
-  typeof ClientBootstrapIatOutOfRangeSchema
->;
+type ClientBootstrapAuthRequired = {
+  status: "auth_required";
+  serverNow: number;
+};
+type ClientBootstrapNotReady = {
+  status: "not_ready";
+  reason: string;
+  serverNow: number;
+};
 type ClientBootstrapResponse =
   | ClientBootstrapReady
   | ClientBootstrapAuthRequired
   | ClientBootstrapNotReady;
-type ClientBootstrapAttemptResponse =
-  | ClientBootstrapResponse
-  | ClientBootstrapIatOutOfRange;
 type ClockOffsetState = { serverClockOffsetMs: number };
 type BrowserGlobalThis = typeof globalThis & {
   document?: unknown;
@@ -398,20 +381,6 @@ function createTransportError(args: {
   });
 }
 
-const ClientBootstrapWireSchema = Type.Object({
-  serverNow: Type.Integer(),
-  sessionId: Type.String({ minLength: 1 }),
-  inboxPrefix: Type.String({ minLength: 1 }),
-  participantId: Type.String({ minLength: 1 }),
-  participantArtifactDigest: Type.String({ minLength: 1 }),
-  participantNeedsDigest: Type.String({ minLength: 1 }),
-  nats: Type.Object({
-    jwt: Type.String({ minLength: 1 }),
-    jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    servers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  }),
-  authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: true });
 const BindWireSchema = Type.Object({
   serverNow: Type.Integer(),
   session: Type.Object({
@@ -528,8 +497,9 @@ async function createSessionKeyRuntimeIdentity(
     seed,
     auth,
     sessionId,
-    setSessionId: async (value) => {
+    setSessionId: (value) => {
       identity.sessionId = value;
+      return Promise.resolve();
     },
     sign,
     oauthInitSig: (redirectTo, context, provider, contract) =>
@@ -542,32 +512,7 @@ async function createSessionKeyRuntimeIdentity(
             canonicalizeJsonValue(contract)
           }:${canonicalizeJsonValue(context ?? null)}`,
       ),
-    natsConnectSigForIat: (iat, contractDigest) =>
-      signDomainValue(
-        sign,
-        "nats-connect",
-        buildNatsConnectSignaturePayload(iat, contractDigest),
-      ),
-    bootstrapSig: (iat) =>
-      signDomainValue(sign, "bootstrap-client", String(iat)),
     bindFlowSig: (flowId) => signDomainValue(sign, "bind-flow", flowId),
-    buildRuntimeAuthTokenSync: (iat, contractDigest) => {
-      const sig = signEd25519SeedSha256(
-        seed,
-        utf8(
-          `nats-connect:${
-            buildNatsConnectSignaturePayload(iat, contractDigest)
-          }`,
-        ),
-      );
-      return JSON.stringify({
-        v: 1,
-        sessionKey,
-        iat,
-        contractDigest,
-        sig: base64urlEncode(new Uint8Array(sig)),
-      });
-    },
   };
   return identity;
 }
@@ -593,18 +538,11 @@ async function resolveClientIdentity(
     seed: handle.seed,
     sessionId: handle.sessionId,
     auth: sessionAuth,
-    setSessionId: async (sessionId) => setSessionId(handle, sessionId),
+    setSessionId: (sessionId) =>
+      Promise.resolve(setSessionId(handle, sessionId)),
     sign: (data) => signBytes(handle, data),
     oauthInitSig: (redirectTo, context, provider, contract) =>
       oauthInitSig(handle, redirectTo, context, provider, contract),
-    natsConnectSigForIat: (iat, contractDigest) =>
-      natsConnectSigForIat(handle, iat, contractDigest),
-    bootstrapSig: (iat) =>
-      signDomainValue(
-        (data) => signBytes(handle, data),
-        "bootstrap-client",
-        String(iat),
-      ),
     bindFlowSig: (flowId) => bindFlowSig(handle, flowId),
   };
 }
@@ -696,169 +634,104 @@ async function bindClientFlow(args: {
   };
 }
 
-async function fetchClientBootstrap(args: {
+async function recoverClientBootstrapWithRetry(args: {
   trellisUrl: string;
   identity: ClientRuntimeIdentity;
-  participant: ClientConnectArgsFor<ClientContract>["participant"];
-  issuedAt: number;
-}): Promise<ClientBootstrapAttemptResponse> {
-  const startedAt = performance.now();
-  if (!args.identity.sessionId) {
-    return { status: "auth_required", serverNow: args.issuedAt / 1_000 };
-  }
-  const requestId = ulid();
-  const sessionKeyId = base64urlEncode(
-    await sha256(base64urlDecode(args.identity.sessionKey)),
-  );
-  const unsigned = {
-    requestId,
-    issuedAt: args.issuedAt,
-    sessionId: args.identity.sessionId,
-    sessionNkey: args.identity.sessionNkey,
-    expectedParticipantDigest: args.participant.artifactDigest,
-    expectedNeedsDigest: args.participant.needsDigest,
-    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
-  };
-  const requestDigest = await sessionProofRequestDigestV1(unsigned);
-  const response = await fetch(`${args.trellisUrl}/bootstrap/client`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      ...unsigned,
-      proof: await args.identity.auth.signSessionProof({
-        purpose: "clientBootstrap",
-        requestId,
-        issuedAt: args.issuedAt,
-        sessionId: args.identity.sessionId,
-        sessionKeyId,
-        sessionPublicKey: args.identity.sessionKey,
-        sessionNkey: args.identity.sessionNkey,
-        expectedParticipantDigest: args.participant.artifactDigest,
-        expectedNeedsDigest: args.participant.needsDigest,
-        requestDigest,
-      }),
-    }),
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    return { status: "auth_required", serverNow: args.issuedAt / 1_000 };
-  }
-
-  const payload = await readJsonResponse(response, {
-    code: "trellis.bootstrap.invalid_response",
-    message: "Trellis returned an invalid bootstrap response.",
-    hint:
-      "Retry the connection. If it keeps happening, check the Trellis deployment.",
-    context: { trellisUrl: args.trellisUrl },
-  });
-  if (!response.ok) {
-    if (Value.Check(ClientBootstrapIatOutOfRangeSchema, payload)) {
-      return { ...payload, serverNow: payload.serverNow / 1_000 };
-    }
-    const reason = payload && typeof payload === "object" &&
-        typeof (payload as { reason?: unknown }).reason === "string"
-      ? (payload as { reason: string }).reason
-      : `http_${response.status}`;
-    throw createTransportError({
-      code: "trellis.bootstrap.failed",
-      message: "Trellis could not prepare the client session.",
-      hint:
-        "Retry the connection. If it keeps failing, check Trellis availability and access.",
-      context: { trellisUrl: args.trellisUrl, status: response.status, reason },
-    });
-  }
-
-  if (Value.Check(ClientBootstrapWireSchema, payload)) {
-    recordTrellisDuration(
-      "trellis.connect.duration",
-      performance.now() - startedAt,
-      {
-        phase: "bootstrap",
-        participantKind: "client",
-        outcome: "ok",
-      },
-    );
-    const wire = payload as StaticDecode<typeof ClientBootstrapWireSchema>;
-    return {
-      status: "ready",
-      serverNow: wire.serverNow / 1_000,
-      connectInfo: {
-        sessionId: wire.sessionId,
-        contractId: args.participant.id,
-        contractDigest: wire.participantArtifactDigest,
-        transports: { websocket: { natsServers: wire.nats.servers } },
-        transport: {
-          inboxPrefix: wire.inboxPrefix,
-          jwt: wire.nats.jwt,
-          jwtExpiresAt: wire.nats.jwtExpiresAt,
-        },
-        authorizationContext: wire.authorizationContext,
-      },
-    };
-  }
-
-  throw createTransportError({
-    code: "trellis.bootstrap.invalid_response",
-    message: "Trellis returned an invalid bootstrap response.",
-    hint:
-      "Retry the connection. If it keeps happening, check the Trellis deployment.",
-    context: { trellisUrl: args.trellisUrl },
-  });
-}
-
-function updateClockOffsetFromServer(args: {
-  offsetState: ClockOffsetState;
-  requestStartedAtMs: number;
-  responseReceivedAtMs: number;
-  serverNowSeconds: number;
-}): void {
-  args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
-    requestStartedAtMs: args.requestStartedAtMs,
-    responseReceivedAtMs: args.responseReceivedAtMs,
-    serverNowSeconds: args.serverNowSeconds,
-  });
-}
-
-async function fetchClientBootstrapWithRetry(args: {
-  trellisUrl: string;
-  sessionKey: string;
-  identity: ClientRuntimeIdentity;
-  participant: ClientConnectArgsFor<ClientContract>["participant"];
+  cache: AuthorizationContextCache;
   deps: ClientConnectDeps;
   offsetState: ClockOffsetState;
 }): Promise<ClientBootstrapResponse> {
+  if (!args.identity.sessionId) {
+    return {
+      status: "auth_required",
+      serverNow: args.deps.now() / 1_000,
+    };
+  }
+
+  try {
+    await args.cache.restore();
+    args.cache.sessionBinding();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "no authorization session is installed"
+    ) {
+      return {
+        status: "auth_required",
+        serverNow: args.deps.now() / 1_000,
+      };
+    }
+    throw error;
+  }
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptStartedAt = performance.now();
     const requestStartedAtMs = args.deps.now();
-    const issuedAt = Math.trunc(
-      requestStartedAtMs + args.offsetState.serverClockOffsetMs,
-    );
-    const response = await fetchClientBootstrap({
-      trellisUrl: args.trellisUrl,
-      identity: args.identity,
-      participant: args.participant,
-      issuedAt,
-    });
-    const responseReceivedAtMs = args.deps.now();
-    recordTrellisDuration(
-      "trellis.connect.duration",
-      performance.now() - attemptStartedAt,
-      {
-        phase: "bootstrap",
-        participantKind: "client",
-        outcome: "ok",
-      },
-    );
-
-    updateClockOffsetFromServer({
-      offsetState: args.offsetState,
-      requestStartedAtMs,
-      responseReceivedAtMs,
-      serverNowSeconds: response.serverNow,
-    });
-
-    if ("status" in response) {
-      return response;
+    try {
+      const result = await refreshAuthorizationContextWithMetadata({
+        trellisUrl: args.trellisUrl,
+        sessionId: args.identity.sessionId,
+        auth: args.identity.auth,
+        cache: args.cache,
+      });
+      const responseReceivedAtMs = args.deps.now();
+      const serverClockOffsetMs = estimateMidpointClockOffsetMs({
+        requestStartedAtMs,
+        responseReceivedAtMs,
+        serverNowSeconds: result.response.serverNow / 1_000,
+      });
+      args.offsetState.serverClockOffsetMs = serverClockOffsetMs;
+      const session = result.response.session;
+      const nats = result.response.nats;
+      if (
+        !nats.transports.native && !nats.transports.websocket
+      ) {
+        throw createTransportError({
+          code: "trellis.bootstrap.invalid_response",
+          message: "Trellis returned incomplete client recovery metadata.",
+          hint: "Retry the connection. If it keeps happening, check Trellis.",
+          context: { trellisUrl: args.trellisUrl },
+        });
+      }
+      recordTrellisDuration(
+        "trellis.connect.duration",
+        performance.now() - attemptStartedAt,
+        {
+          phase: "bootstrap",
+          participantKind: "client",
+          outcome: "ok",
+        },
+      );
+      return {
+        status: "ready",
+        serverNow: result.response.serverNow / 1_000,
+        connectInfo: {
+          sessionId: session.sessionId,
+          contractId: session.participantId,
+          contractDigest: session.participantArtifactDigest,
+          transports: nats.transports,
+          transport: {
+            inboxPrefix: session.inboxPrefix,
+            jwt: nats.jwt,
+            jwtExpiresAt: nats.jwtExpiresAt,
+          },
+          authorizationContext: result.response.authorizationContext,
+        },
+      };
+    } catch (error) {
+      if (
+        error instanceof AuthorizationContextRefreshError &&
+        error.terminal
+      ) {
+        return {
+          status: "auth_required",
+          serverNow: args.deps.now() / 1_000,
+        };
+      }
+      if (attempt === 0) {
+        continue;
+      }
+      throw error;
     }
   }
 
@@ -874,13 +747,11 @@ async function fetchClientBootstrapWithRetry(args: {
 async function createRuntimeUserAuthenticator(args: {
   identity: ClientRuntimeIdentity;
   sessionId: string;
-  participantDigest: string;
   contextDigest: string | (() => string);
   jwt: string | (() => string);
 }): Promise<{ authenticators: Authenticator[]; stop: () => void }> {
   const options = await args.identity.auth.natsConnectOptions({
     sessionId: args.sessionId,
-    participantDigest: args.participantDigest,
     contextDigest: args.contextDigest,
     jwt: args.jwt,
   });
@@ -903,7 +774,7 @@ function cleanupBrowserCallbackUrl(currentUrl: URL): void {
 
   currentUrl.searchParams.delete("flowId");
   currentUrl.searchParams.delete("authError");
-  window.history.replaceState(
+  globalThis.history.replaceState(
     {},
     "",
     currentUrl.pathname + currentUrl.search + currentUrl.hash,
@@ -950,12 +821,16 @@ async function buildSessionKeyLoginUrl(args: {
   redirectTo: string;
   identity: ClientRuntimeIdentity;
   participant: ClientConnectArgsFor<ClientContract>["participant"];
+  contract: ClientContract;
 }): Promise<
-  { status: "bound" } | { status: "flow_started"; loginUrl: string }
+  { status: "flow_started"; loginUrl: string }
 > {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
+  const presentation = args.participant.id === args.contract.CONTRACT.id
+    ? await compileProtocolArtifacts(args.contract)
+    : undefined;
   const unsigned = {
     requestId,
     issuedAt,
@@ -964,6 +839,15 @@ async function buildSessionKeyLoginUrl(args: {
     participantId: args.participant.id,
     participantArtifactDigest: args.participant.artifactDigest,
     participantNeedsDigest: args.participant.needsDigest,
+    ...(presentation
+      ? {
+        participantArtifact: presentation.participant,
+        referencedApiArtifacts: [
+          presentation.api,
+          ...presentation.referencedApis,
+        ],
+      }
+      : {}),
     redirectTarget: args.redirectTo,
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
@@ -1052,6 +936,29 @@ export async function connectClientWithDeps<
     : currentUrl?.searchParams.get("authError") ?? undefined;
   const offsetState: ClockOffsetState = { serverClockOffsetMs: 0 };
 
+  const trustScope = new URL(trellisUrl).origin;
+  if (
+    args.auth?.mode === "session_key" &&
+    !args.auth.authorizationContextStore &&
+    args.auth.authorizationContextEphemeral !== true
+  ) {
+    throw new Error(
+      "session-key clients require persistent authorization context storage or explicit ephemeral mode",
+    );
+  }
+  const contextStore = args.auth?.authorizationContextStore ??
+    deps.authorizationContextStore ??
+    (args.auth?.mode === "session_key"
+      ? new MemoryAuthorizationContextStore()
+      : new BrowserAuthorizationContextStore(trustScope));
+  const authorizationContexts = new AuthorizationContextCache(
+    trellisUrl,
+    `installation:${trustScope}`,
+    contextStore,
+    (input, init) => globalThis.fetch(input, init),
+    deps.now,
+  );
+
   if (callbackAuthError) {
     if (currentUrl) cleanupBrowserCallbackUrl(currentUrl);
     throw createTransportError({
@@ -1083,11 +990,10 @@ export async function connectClientWithDeps<
 
   const initialBootstrapStartedAt = performance.now();
   const initialBootstrap = callbackBootstrap ??
-    await fetchClientBootstrapWithRetry({
+    await recoverClientBootstrapWithRetry({
       trellisUrl,
-      sessionKey: identity.sessionKey,
       identity,
-      participant: args.participant,
+      cache: authorizationContexts,
       deps,
       offsetState,
     });
@@ -1104,7 +1010,7 @@ export async function connectClientWithDeps<
   const authStartedAt = performance.now();
   const bootstrap = needsReauth(initialBootstrap) ||
       !bootstrapTargetsRequestedContract(initialBootstrap, args)
-    ? await resolveAuthRequired(args, identity, currentUrl, deps, offsetState)
+    ? await resolveAuthRequired(args, identity, currentUrl)
     : initialBootstrap;
   recordTrellisDuration(
     "trellis.connect.duration",
@@ -1134,28 +1040,6 @@ export async function connectClientWithDeps<
   }
 
   const transport = await deps.loadTransport();
-  const trustScope = new URL(trellisUrl).origin;
-  if (
-    args.auth?.mode === "session_key" &&
-    !args.auth.authorizationContextStore &&
-    args.auth.authorizationContextEphemeral !== true
-  ) {
-    throw new Error(
-      "session-key clients require persistent authorization context storage or explicit ephemeral mode",
-    );
-  }
-  const contextStore = args.auth?.authorizationContextStore ??
-    deps.authorizationContextStore ??
-    (args.auth?.mode === "session_key"
-      ? new MemoryAuthorizationContextStore()
-      : new BrowserAuthorizationContextStore(trustScope));
-  const authorizationContexts = new AuthorizationContextCache(
-    trellisUrl,
-    `installation:${trustScope}`,
-    contextStore,
-    (input, init) => globalThis.fetch(input, init),
-    deps.now,
-  );
   identity.auth.setServerClockOffsetMs(
     offsetState.serverClockOffsetMs + deps.now() - Date.now(),
   );
@@ -1183,8 +1067,6 @@ export async function connectClientWithDeps<
           args,
           identity,
           latestCurrentUrl,
-          deps,
-          offsetState,
         );
       } catch (error) {
         if (error instanceof ClientAuthHandledError) {
@@ -1197,11 +1079,12 @@ export async function connectClientWithDeps<
   const runtimeAuth = await createRuntimeUserAuthenticator({
     identity,
     sessionId: runtimeState.sessionId,
-    participantDigest: runtimeState.participantDigest,
     contextDigest: runtimeState.contextDigest,
     jwt: runtimeState.jwt,
   });
-  let nc: NatsConnection;
+  let nc: NatsConnection | undefined;
+  let authorizationProviderCache: AuthorizationProviderCache | undefined;
+  let stopContextRefresh: (() => void) | undefined;
   try {
     const natsStartedAt = performance.now();
     nc = await transport.connect({
@@ -1213,15 +1096,24 @@ export async function connectClientWithDeps<
       inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
       authenticator: runtimeAuth.authenticators,
     });
-    const stopContextRefresh = startAuthorizationContextRefresh({
+    const connectedNats = nc;
+    authorizationProviderCache = await AuthorizationProviderCache.attach(
+      connectedNats,
+      authorizationContexts.bundle().trust.authorizationRegistry,
+      authorizationContexts,
+    );
+    authorizationProviderCache.start();
+    await authorizationProviderCache.waitReady();
+    stopContextRefresh = startAuthorizationContextRefresh({
       trellisUrl: args.trellisUrl,
       sessionId: runtimeState.sessionId,
       auth: identity.auth,
       cache: authorizationContexts,
-      onTerminalFailure: () => nc.drain(),
+      onTerminalFailure: () => connectedNats.drain(),
     });
-    void nc.closed().finally(() => {
-      stopContextRefresh();
+    void connectedNats.closed().finally(() => {
+      stopContextRefresh?.();
+      authorizationProviderCache?.stop();
     });
     recordTrellisDuration(
       "trellis.connect.duration",
@@ -1233,6 +1125,9 @@ export async function connectClientWithDeps<
       },
     );
   } catch (error) {
+    authorizationProviderCache?.stop();
+    stopContextRefresh?.();
+    if (nc && !nc.isClosed()) await nc.close();
     runtimeAuth.stop();
     throw createTransportError({
       code: "trellis.runtime.connect_failed",
@@ -1242,6 +1137,9 @@ export async function connectClientWithDeps<
       cause: error,
       context: { trellisUrl },
     });
+  }
+  if (!nc || !authorizationProviderCache) {
+    throw new Error("Trellis client runtime connection was not established");
   }
   void nc.closed().finally(() => runtimeAuth.stop());
 
@@ -1267,6 +1165,9 @@ export async function connectClientWithDeps<
       }
       : {}),
   });
+  connection.subscribe((status) =>
+    authorizationProviderCache.observeConnectionPhase(status.phase)
+  );
 
   const api = getContractRuntime(args.contract).usedApi as RuntimeApi;
   const state = args.contract[CONTRACT_STATE_METADATA] as TrellisOpts<
@@ -1280,6 +1181,8 @@ export async function connectClientWithDeps<
     inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
     sessionKey: identity.sessionKey,
     sign: identity.sign,
+    contextDigest: () => authorizationContexts.current().contextDigest,
+    authorizationProviderCache,
     opts: {
       log: clientOpts.log,
       timeout: clientOpts.timeout,
@@ -1308,8 +1211,6 @@ async function resolveAuthRequired<
   args: ClientConnectArgsFor<TContract>,
   identity: ClientRuntimeIdentity,
   currentUrl: URL | null,
-  deps: ClientConnectDeps,
-  offsetState: ClockOffsetState,
 ): Promise<ClientBootstrapResponse> {
   const browserAuth: BrowserClientAuthOptions =
     args.auth?.mode === "session_key" ? {} : args.auth ?? {};
@@ -1327,29 +1228,8 @@ async function resolveAuthRequired<
     redirectTo,
     identity,
     participant: args.participant,
+    contract: args.contract,
   });
-
-  if (authStart.status === "bound") {
-    const bootstrapStartedAt = performance.now();
-    const bootstrap = await fetchClientBootstrapWithRetry({
-      trellisUrl: normalizeTrellisUrl(args.trellisUrl),
-      sessionKey: identity.sessionKey,
-      identity,
-      participant: args.participant,
-      deps,
-      offsetState,
-    });
-    recordTrellisDuration(
-      "trellis.connect.duration",
-      performance.now() - bootstrapStartedAt,
-      {
-        phase: "bootstrap",
-        participantKind: "client",
-        outcome: "ok",
-      },
-    );
-    return bootstrap;
-  }
 
   const loginUrl = authStart.loginUrl;
 
@@ -1393,7 +1273,7 @@ async function resolveAuthRequired<
   }
 
   if (isBrowserRuntime()) {
-    window.location.href = loginUrl;
+    globalThis.location.href = loginUrl;
     throw new ClientAuthHandledError();
   }
 

@@ -1,9 +1,9 @@
 import { type Authenticator, jwtAuthenticator } from "@nats-io/nats-core";
 import { fromSeed, Prefix } from "@nats-io/nkeys";
 import { Codec } from "@nats-io/nkeys/lib/codec.js";
-import { sha256 as sha256Sync } from "@noble/hashes/sha256";
 import { ulid } from "ulid";
 
+import type { AuthorizationProviderCache } from "./authorization_context.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
@@ -13,7 +13,6 @@ import {
   type SessionProofInputV1,
   type SessionProofV1,
   signSessionProofV1,
-  signSessionProofV1Sync,
 } from "./session_proof.ts";
 import { correctedIatSeconds } from "./time.ts";
 import {
@@ -36,6 +35,10 @@ export type TrellisAuth = {
   sign: (data: Uint8Array) => Promise<Uint8Array>;
   currentIat: () => number;
   setServerClockOffsetMs: (clockOffsetMs: number) => void;
+  /** Current authorization-context digest bound into v2 request and event proofs. */
+  contextDigest: () => string;
+  /** Local verifier for received requests and events. */
+  authorizationProviderCache?: AuthorizationProviderCache;
 
   oauthInitSig: (
     redirectTo: string,
@@ -44,14 +47,10 @@ export type TrellisAuth = {
     contract?: Record<string, unknown>,
   ) => Promise<string>;
   bindFlowSig: (flowId: string) => Promise<string>;
-  natsConnectSigForIat: (
-    iat: number,
-    contractDigest: string,
-  ) => Promise<string>;
-
   createProof: (
     subject: string,
     payloadHash: Uint8Array,
+    reply: string,
     requestId?: string,
     iat?: number,
   ) => Promise<string>;
@@ -59,25 +58,14 @@ export type TrellisAuth = {
   natsConnectOptions: (
     opts: {
       sessionId: string;
-      participantDigest: string;
       contextDigest: string | (() => string);
       jwt: string | (() => string);
     },
   ) => Promise<NatsConnectOptions>;
 };
 
-/**
- * Builds the canonical value signed for NATS runtime-auth tokens.
- */
-export function buildNatsConnectSignaturePayload(
-  iat: number,
-  contractDigest: string,
-): string {
-  return `${iat}:${contractDigest}`;
-}
-
 export async function createAuth(
-  opts: { sessionKeySeed: string },
+  opts: { sessionKeySeed: string; contextDigest?: string | (() => string) },
 ): Promise<TrellisAuth> {
   const seed = base64urlDecode(opts.sessionKeySeed);
   const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
@@ -87,6 +75,15 @@ export async function createAuth(
   const encodedSeed = Codec.encodeSeed(Prefix.User, seed);
   const sessionNkey = fromSeed(encodedSeed).getPublicKey();
   let serverClockOffsetMs = 0;
+  const resolveContextDigest = (): string => {
+    const digest = typeof opts.contextDigest === "function"
+      ? opts.contextDigest()
+      : opts.contextDigest;
+    if (digest === undefined) {
+      throw new Error("contextDigest is required to sign v2 request proofs");
+    }
+    return digest;
+  };
 
   const sign = async (data: Uint8Array): Promise<Uint8Array> => {
     const sig = await crypto.subtle.sign(
@@ -132,17 +129,14 @@ export async function createAuth(
     setServerClockOffsetMs: (clockOffsetMs) => {
       serverClockOffsetMs = clockOffsetMs;
     },
+    contextDigest: resolveContextDigest,
     oauthInitSig: signOauthInit,
     bindFlowSig: (flowId) => signDomainHash("bind-flow", flowId),
-    natsConnectSigForIat: (iat, contractDigest) =>
-      signDomainHash(
-        "nats-connect",
-        buildNatsConnectSignaturePayload(iat, contractDigest),
-      ),
-    createProof: (subject, payloadHash, requestId, iat) =>
+    createProof: (subject, payloadHash, reply, requestId, iat) =>
       createProof(privateKey, {
-        sessionKey,
+        contextDigest: resolveContextDigest(),
         subject,
+        reply,
         payloadHash,
         iat: iat ?? currentIat(),
         requestId: requestId ?? ulid(),
@@ -150,42 +144,21 @@ export async function createAuth(
     signSessionProof: (input) =>
       signSessionProofV1(input, privateKey, sessionKey),
     natsConnectOptions: (options) => {
-      const sessionKeyId = base64urlEncode(
-        sha256Sync(base64urlDecode(sessionKey)),
-      );
       return Promise.resolve({
         authenticator: [
           jwtAuthenticator(options.jwt, encodedSeed),
           (nonce) => {
             if (!nonce) throw new Error("NATS server nonce is required");
-            const issuedAt = Math.trunc(
-              Date.now() + serverClockOffsetMs,
-            );
-            const requestId = ulid();
             const contextDigest = typeof options.contextDigest === "function"
               ? options.contextDigest()
               : options.contextDigest;
-            const input = {
-              purpose: "natsConnectContext" as const,
-              requestId,
-              issuedAt,
-              sessionId: options.sessionId,
-              sessionKeyId,
-              sessionPublicKey: sessionKey,
-              sessionNkey,
-              participantDigest: options.participantDigest,
-              contextDigest,
-              nonce,
-            };
+            if (!contextDigest) {
+              throw new Error("contextDigest is required for NATS connect");
+            }
             return {
               auth_token: JSON.stringify({
                 format: "trellis.nats-connect-token.v1",
-                requestId,
-                issuedAt,
-                sessionId: options.sessionId,
-                participantDigest: options.participantDigest,
                 contextDigest,
-                proof: signSessionProofV1Sync(input, seed, sessionKey),
               }),
             };
           },

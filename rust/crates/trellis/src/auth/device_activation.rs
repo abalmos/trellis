@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
@@ -13,7 +11,6 @@ use url::Url;
 use super::models::{
     DeviceActivationPayload, DeviceActivationWaitRequest, DeviceConnectInfoRequest,
     DeviceConnectInfoResponse, DeviceIdentity, GetDeviceConnectInfoOpts,
-    WaitForDeviceActivationOpts, WaitForDeviceActivationResponse,
 };
 use super::TrellisAuthError;
 
@@ -560,22 +557,6 @@ pub fn sign_device_wait_request(
     })
 }
 
-#[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for_device_activation_response), "`.")]
-pub async fn wait_for_device_activation_response(
-    trellis_url: &str,
-    request: &DeviceActivationWaitRequest,
-) -> Result<WaitForDeviceActivationResponse, TrellisAuthError> {
-    let url = Url::parse(trellis_url)?.join("/auth/devices/activate/wait")?;
-    let response = Client::new().post(url).json(request).send().await?;
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        return Err(TrellisAuthError::DeviceActivationWaitFailure(status, body));
-    }
-
-    response.json().await.map_err(TrellisAuthError::from)
-}
-
 /// Fetch current runtime connect info for an already activated device.
 #[doc = concat!("Asynchronous Trellis API operation `", stringify!(get_device_connect_info), "`.")]
 pub async fn get_device_connect_info(
@@ -645,43 +626,6 @@ fn validate_device_connect_info_response(
     }
 
     Ok(())
-}
-
-#[doc = concat!("Asynchronous Trellis API operation `", stringify!(wait_for_device_activation), "`.")]
-pub async fn wait_for_device_activation(
-    opts: WaitForDeviceActivationOpts<'_>,
-) -> Result<serde_json::Value, TrellisAuthError> {
-    loop {
-        let request = sign_device_wait_request(
-            opts.flow_id,
-            opts.public_identity_key,
-            opts.nonce,
-            opts.identity_seed_base64url,
-            opts.contract_digest,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        )?;
-        match wait_for_device_activation_response(opts.trellis_url, &request).await? {
-            WaitForDeviceActivationResponse::Activated { connect_info, .. } => {
-                return Ok(connect_info);
-            }
-            WaitForDeviceActivationResponse::Rejected { reason } => {
-                return Err(TrellisAuthError::DeviceActivationRejected(match reason {
-                    Some(reason) => format!(": {reason}"),
-                    None => String::new(),
-                }));
-            }
-            WaitForDeviceActivationResponse::Pending => {
-                tokio::time::sleep(match opts.poll_interval {
-                    duration if duration.is_zero() => Duration::from_millis(1),
-                    duration => duration,
-                })
-                .await
-            }
-        }
-    }
 }
 
 #[doc = concat!("Trellis API operation `", stringify!(derive_device_confirmation_code), "`.")]

@@ -57,6 +57,33 @@ export function unwrapSchema(raw: SchemaLike): unknown {
   return raw;
 }
 
+/** Exact permission metadata for one contract API surface action. */
+export type PermissionAtomV1 = Readonly<{
+  /** Source API artifact identity. */
+  apiId: string;
+  /** Version of the source API surface. */
+  apiVersion: `v${number}`;
+  /** API surface family. */
+  surfaceKind: "rpc" | "operation" | "event" | "feed" | "state";
+  /** Exact API-local surface name. */
+  surfaceName: string;
+  /** Exact action required for the surface. */
+  action:
+    | "call"
+    | "invoke"
+    | "observe"
+    | "cancel"
+    | "control"
+    | "publish"
+    | "subscribe"
+    | "read"
+    | "write"
+    | "delete"
+    | "submit"
+    | "process"
+    | "consume";
+}>;
+
 export type RPCDesc<
   I extends SchemaLike = SchemaLike,
   O extends SchemaLike = SchemaLike,
@@ -68,6 +95,8 @@ export type RPCDesc<
   subject: string;
   input: I;
   output: O;
+  /** Exact permission required to call this RPC. */
+  permission: PermissionAtomV1;
   callerCapabilities: readonly string[];
   transfer?: { direction: "receive" };
   authRequired?: boolean;
@@ -80,6 +109,10 @@ export type EventDesc<S extends SchemaLike = SchemaLike> = {
   subject: string;
   params?: readonly SubjectParam[];
   event: S;
+  /** Exact permission required to publish this event. */
+  publishPermission: PermissionAtomV1;
+  /** Exact permission required to subscribe to this event. */
+  subscribePermission: PermissionAtomV1;
   publishCapabilities: readonly string[];
   subscribeCapabilities: readonly string[];
 };
@@ -91,6 +124,8 @@ export type FeedDesc<
   subject: string;
   input: I;
   event: E;
+  /** Exact permission required to subscribe to this feed. */
+  permission: PermissionAtomV1;
   subscribeCapabilities: readonly string[];
 };
 
@@ -109,6 +144,13 @@ export type OperationDesc<
   progress?: P;
   update?: U;
   output?: O;
+  /** Exact permissions required by each operation action. */
+  permissions: Readonly<{
+    invoke: PermissionAtomV1;
+    observe: PermissionAtomV1;
+    cancel: PermissionAtomV1;
+    control: Readonly<Record<string, PermissionAtomV1>>;
+  }>;
   errors?: E;
   runtimeErrors?: TRuntimeErrors;
   declaredErrorTypes?: readonly string[];

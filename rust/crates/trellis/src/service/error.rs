@@ -173,6 +173,14 @@ pub enum ServerError {
     #[doc(hidden)]
     MissingProof { subject: String },
 
+    #[error("missing authorization-context for authenticated subject '{subject}'")]
+    #[doc(hidden)]
+    MissingAuthorizationContext { subject: String },
+
+    #[error("missing reply inbox for authenticated request subject '{subject}'")]
+    #[doc(hidden)]
+    MissingReply { subject: String },
+
     #[error("request denied for subject '{subject}' and session '{session_key}'")]
     #[doc(hidden)]
     RequestDenied {

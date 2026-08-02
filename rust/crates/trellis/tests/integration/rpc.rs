@@ -10,7 +10,7 @@ use trellis_rs::service::{
     ConnectedServiceRuntime, DeclaredRpcError, GeneratedServiceContract, ServerError,
 };
 
-use crate::support::assertions::assert_case_registered;
+use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
 const RPC_SERVICE_ID: &str = "trellis.integration.rpc-service@v1";
 const RPC_CLIENT_ID: &str = "trellis.integration.rpc-client@v1";
@@ -244,7 +244,7 @@ impl RpcDescriptor for MixedValidationRpc {
 struct ObservedRpcRequest {
     subject: String,
     required_capabilities: Option<Vec<String>>,
-    caller: Option<Value>,
+    caller: Option<trellis_rs::service::VerifiedCaller>,
     session_key: Option<String>,
     request_id: Option<String>,
     traceparent: Option<String>,
@@ -353,11 +353,6 @@ async fn rpc_client_calls_service_success() {
     let client_capability = client.integration_test_descriptor_capability(RPC_READ_CAPABILITY);
     assert_eq!(service_subjects, [client_subject.as_str()]);
     assert_ne!(client_subject, EntityGetRpc::SUBJECT);
-    let context = client
-        .refresh_authorization_context()
-        .await
-        .expect("refresh and verify live authorization context");
-    assert!(!context.context_digest.is_empty());
     let output = call_entity_get_with_retry(&client, "entity-1").await;
 
     service_task.abort_and_wait().await;
@@ -376,78 +371,268 @@ async fn rpc_client_calls_service_success() {
         }
     );
     drop(observed_requests);
+}
 
-    let policy = trellis_protocol::AuthorizationVerificationPolicyV1::new(
-        i64::try_from(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time")
-                .as_secs(),
-        )
-        .expect("system time fits protocol integer"),
-        context.trust.policy.allowed_clock_skew_seconds,
-        context.trust.policy.maximum_context_lifetime_seconds,
-        context.trust.policy.maximum_context_bytes,
-        context.trust.policy.maximum_permissions,
-        context.trust.policy.maximum_capabilities,
-        context.trust.issuer_manifest_generation,
-    )
-    .expect("context verification policy");
-    let signed = trellis_protocol::parse_authorization_context_token_v1(&context.context, &policy)
-        .expect("parse issued context");
-    let context_digest = context.context_digest.clone();
-    let registry_url = format!(
-        "{}{}{}",
-        runtime.trellis_url().trim_end_matches('/'),
-        context.trust.context_registry_locator,
-        context_digest
+#[tokio::test]
+async fn auth_post_commit_event_publish_uses_jetstream_puback() {
+    assert_runtime_case_registered(
+        "auth-post-commit.event-publish-uses-jetstream-puback",
+        "auth-post-commit",
+        "rpc",
     );
-    let registry_context = reqwest::get(&registry_url)
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
+            .await
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
-        .expect("read published context registry entry")
-        .error_for_status()
-        .expect("published context registry status")
-        .text()
+        .expect("observe first admin bootstrap URL");
+    let mut target_admin = runtime.admin();
+    let target_session_id = {
+        let target_contract =
+            rpc_unauthorized_client_contract().expect("build target client contract");
+        let (_, target) = target_admin
+            .connect_client_with_session_seed_reconnectable(
+                &bootstrap_url,
+                &target_contract,
+                trellis_rs::auth::generate_session_keypair().0,
+            )
+            .await
+            .expect("connect target client");
+        target.session_id().to_owned()
+    };
+
+    let ack_observer = runtime
+        .start_jetstream_publish_ack_observer()
         .await
-        .expect("read published context registry body");
-    assert_eq!(
-        registry_context,
-        trellis_protocol::canonicalize_json(
-            &serde_json::to_value(&signed).expect("serialize signed context")
-        )
-        .expect("canonicalize signed context")
-    );
+        .expect("start JetStream publication ACK observer");
+    let event_observer = runtime
+        .start_nats_message_observer("events.v1.Auth.Sessions.Revoked")
+        .await
+        .expect("start auth event observer");
+
+    let mut admin = runtime.admin();
     admin
         .revoke_session(
             &bootstrap_url,
-            &trellis_rs::sdk::auth::types::AuthSessionsRevokeRequest {
+            &trellis_rs::sdk::auth::AuthSessionsRevokeRequest {
                 expected_version: None,
-                idempotency_key: format!("revoke-{}", signed.unsigned.context_id),
-                reason: Some("integration context revocation".to_owned()),
-                session_id: signed.unsigned.session_id,
+                idempotency_key: "auth-post-commit-puback".to_owned(),
+                reason: Some("verify durable publication".to_owned()),
+                session_id: target_session_id.clone(),
             },
         )
         .await
-        .expect("revoke context session");
-    assert!(client.refresh_authorization_context().await.is_err());
-    let revocation_url = format!(
-        "{}{}revocation.{}",
-        runtime.trellis_url().trim_end_matches('/'),
-        context.trust.context_registry_locator,
-        context_digest
+        .expect("revoke target admin session");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let event = loop {
+        let event = event_observer.frames().into_iter().find_map(|frame| {
+            let value: Value = serde_json::from_str(&frame.payload).ok()?;
+            (value.get("sessionId").and_then(Value::as_str) == Some(target_session_id.as_str()))
+                .then_some(value)
+        });
+        if event.is_some() {
+            break event;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for Auth.Sessions.Revoked event"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let event = event.expect("event found before timeout");
+
+    let ack = loop {
+        let ack = ack_observer.frames().into_iter().find_map(|frame| {
+            let value: Value = serde_json::from_str(&frame.payload).ok()?;
+            (value.get("stream").and_then(Value::as_str) == Some("trellis")).then_some(value)
+        });
+        if ack.is_some() {
+            break ack;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for Auth post-commit JetStream PubAck"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    assert!(event["eventId"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("evt_")));
+    assert!(ack.is_some(), "publication ACK found before timeout");
+    assert_eq!(ack_observer.errors(), Vec::<String>::new());
+    event_observer.stop().await;
+    ack_observer.stop().await;
+}
+
+#[tokio::test]
+async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live() {
+    assert_case_registered(
+        "authorization-registry.provider-cache",
+        "authorization-registry",
+        "rpc",
     );
-    let mut revocation_published = false;
-    for _ in 0..50 {
-        if reqwest::get(&revocation_url)
+
+    let runtime =
+        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
             .await
-            .is_ok_and(|response| response.status().is_success())
-        {
-            revocation_published = true;
+            .expect("start live Trellis test runtime");
+    let bootstrap_url = runtime
+        .wait_for_bootstrap_url(Duration::from_secs(10))
+        .await
+        .expect("observe first admin bootstrap URL");
+    let mut admin = runtime.admin();
+    let service_contract =
+        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
+            .expect("build RPC service test contract");
+    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_key = admin
+        .provision_service_instance(&bootstrap_url, &service_contract, None, None)
+        .await
+        .expect("provision live RPC service instance");
+    let mut service = connect_rpc_service(runtime.trellis_url(), &service_key).await;
+    service.register_rpc::<EntityGetRpc, _, _>(|_context, input| async move {
+        Ok(EntityGetOutput {
+            id: input.id,
+            found: true,
+        })
+    });
+    let provider = service.integration_test_authorization_provider();
+    let service_nats = service.integration_test_nats();
+    let before = provider.integration_test_io_counters();
+    let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
+    let client = admin
+        .connect_client(&bootstrap_url, &client_contract)
+        .await
+        .expect("connect live Rust RPC client");
+    let context = client
+        .refresh_authorization_context()
+        .await
+        .expect("refresh live caller context");
+    let context = trellis_protocol::parse_authorization_context_v1(&context.context)
+        .expect("parse refreshed caller context");
+    let context_digest = context.digest().expect("digest refreshed caller context");
+
+    let first = call_entity_get_with_retry(&client, "registry-first").await;
+    assert_eq!(first.id, "registry-first");
+    let first_io = provider.integration_test_io_counters();
+    assert_eq!(first_io.context_gets - before.context_gets, 1);
+    assert_eq!(first_io.context_resolves - before.context_resolves, 1);
+    assert!(
+        first_io.trust_gets - before.trust_gets <= 2,
+        "first miss used more than two exact trust reads: before={before:?} after={first_io:?}"
+    );
+
+    let second = call_entity_get_with_retry(&client, "registry-hit").await;
+    assert_eq!(second.id, "registry-hit");
+    assert_eq!(provider.integration_test_io_counters(), first_io);
+
+    service_nats
+        .force_reconnect()
+        .await
+        .expect("force service NATS reconnect");
+    // The NATS disconnect makes the provider unready immediately.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if !provider.integration_test_provider_ready() {
             break;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            Instant::now() < deadline,
+            "provider stayed ready through the NATS disconnect"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert!(revocation_published, "context revocation was not published");
+    // Reconnect recreates watches and their initial state before readiness returns.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let current = provider.integration_test_io_counters();
+        if current.revocation_watch_initializations > first_io.revocation_watch_initializations {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "provider did not reinitialize after reconnect: before={first_io:?} after={current:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        provider.integration_test_provider_ready(),
+        "provider did not become ready again after reconnect initialization"
+    );
+    // A quiet registry remains ready without recreating its watches.
+    let quiet = provider.integration_test_io_counters();
+    tokio::time::sleep(Duration::from_secs(35)).await;
+    let quiet_after = provider.integration_test_io_counters();
+    assert_eq!(
+        quiet_after.revocation_watch_initializations, quiet.revocation_watch_initializations,
+        "quiet registry recreated its revocation watch"
+    );
+    assert!(
+        provider.integration_test_provider_ready(),
+        "quiet registry made the provider unready"
+    );
+
+    let client_js = async_nats::jetstream::new(client.integration_test_nats());
+    let client_registry = client_js
+        .get_key_value("trellis_authorization_contexts")
+        .await
+        .expect("open context registry through issued client JWT");
+    assert!(client_registry
+        .get(&context_digest)
+        .await
+        .expect("read own context through issued client JWT")
+        .is_some());
+    assert!(
+        client_registry
+            .put(
+                format!("forbidden.{context_digest}"),
+                bytes::Bytes::from_static(b"forbidden"),
+            )
+            .await
+            .is_err(),
+        "issued client JWT unexpectedly wrote the context registry"
+    );
+
+    let revoked_at = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_secs(),
+    )
+    .expect("system time fits protocol integer");
+    runtime
+        .publish_authorization_revocation(
+            &context_digest,
+            &serde_json::json!({
+                "revokedAt": revoked_at,
+            }),
+        )
+        .await
+        .expect("publish synthetic context revocation");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let error = client
+            .call::<EntityGetRpc>(&EntityGetInput {
+                id: "registry-revoked".to_owned(),
+            })
+            .await;
+        if error.is_err() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "revocation watch did not deny caller"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    service_task.abort_and_wait().await;
 }
 
 #[tokio::test]
@@ -779,234 +964,6 @@ async fn rpc_invalid_mixed_input_validation() {
     service_task.abort_and_wait().await;
     assert_eq!(error.error_type, "ValidationError");
     assert_eq!(handler_call_count.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn rpc_auth_validation_retries_transient_session_not_found() {
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
-    let bootstrap_url = runtime
-        .wait_for_bootstrap_url(Duration::from_secs(10))
-        .await
-        .expect("observe first admin bootstrap URL");
-    let mut admin = runtime.admin();
-
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
-
-    let service_key = admin
-        .provision_service_instance(&bootstrap_url, &service_contract, None, None)
-        .await
-        .expect("provision live RPC service instance");
-    let trellis_url = runtime.trellis_url().to_string();
-    let mut service: RpcServiceRuntime = connect_rpc_service(&trellis_url, &service_key).await;
-
-    let handler_call_count = Arc::new(AtomicUsize::new(0));
-    let handler_counter = Arc::clone(&handler_call_count);
-    service.register_rpc::<EntityGetRpc, _, _>(move |_context, input| {
-        let handler_counter = Arc::clone(&handler_counter);
-        async move {
-            handler_counter.fetch_add(1, Ordering::SeqCst);
-            Ok(EntityGetOutput {
-                id: input.id,
-                found: true,
-            })
-        }
-    });
-    let service_task = AbortOnDrop::new(tokio::spawn(async move { service.run().await }));
-
-    let (client_seed, client_session_key) = trellis_rs::auth::generate_session_keypair();
-    let client = admin
-        .connect_client_with_session_seed(&bootstrap_url, &client_contract, client_seed)
-        .await
-        .expect("connect live Rust RPC client");
-    let observer = runtime
-        .start_nats_message_observer("rpc.v1.Auth.Requests.Validate")
-        .await
-        .expect("start auth validation NATS observer");
-    let auth_reply_observer = runtime
-        .start_nats_message_observer("_INBOX.>")
-        .await
-        .expect("start auth validation reply NATS observer");
-    let session_snapshot = runtime
-        .control_plane_sqlite()
-        .take_session(&client_session_key)
-        .expect("take client session row")
-        .expect("client session row exists");
-
-    let call_task = tokio::spawn(async move {
-        client
-            .call::<EntityGetRpc>(&EntityGetInput {
-                id: "entity-1".to_string(),
-            })
-            .await
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        let frames = auth_reply_observer.frames();
-        if frames.iter().any(|frame| {
-            let Ok(value) = serde_json::from_str::<Value>(&frame.payload) else {
-                return false;
-            };
-            value.get("type").and_then(Value::as_str) == Some("AuthError")
-                && value.get("reason").and_then(Value::as_str) == Some("session_not_found")
-        }) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for session_not_found AuthError reply; frames: {frames:?}"
-        );
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
-    session_snapshot
-        .restore()
-        .expect("restore client session row");
-
-    let output = call_task
-        .await
-        .expect("join live Rust RPC call")
-        .expect("call live Entity.Get RPC after transient missing session");
-    service_task.abort_and_wait().await;
-    assert_eq!(
-        output,
-        EntityGetOutput {
-            id: "entity-1".to_string(),
-            found: true,
-        }
-    );
-    assert_eq!(handler_call_count.load(Ordering::SeqCst), 1);
-    assert_eq!(observer.frames().len(), 2);
-    auth_reply_observer.stop().await;
-    observer.stop().await;
-}
-
-#[tokio::test]
-async fn auth_requests_validate_enforces_proof_signature_time_replay_and_permissions() {
-    let runtime =
-        trellis_test::TrellisTestRuntime::start(trellis_test::TrellisTestRuntimeOptions::default())
-            .await
-            .expect("start live Trellis test runtime");
-    let bootstrap_url = runtime
-        .wait_for_bootstrap_url(Duration::from_secs(10))
-        .await
-        .expect("observe first admin bootstrap URL");
-    let mut admin = runtime.admin();
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
-    let service_key = admin
-        .provision_service_instance(&bootstrap_url, &service_contract, None, None)
-        .await
-        .expect("provision live RPC service instance");
-    let service = connect_rpc_service(runtime.trellis_url(), &service_key).await;
-    let auth_client = trellis_rs::auth::TransitionalAuthClient::new(service.caller());
-
-    let (target_seed, target_session_key) = trellis_rs::auth::generate_session_keypair();
-    let target_client = admin
-        .connect_client_with_session_seed(&bootstrap_url, &client_contract, target_seed.clone())
-        .await
-        .expect("connect target app session");
-    let target_subject = target_client.integration_test_descriptor_subject(EntityGetRpc::SUBJECT);
-    let target_auth =
-        trellis_rs::client::SessionAuth::from_seed_base64url(&target_seed).expect("target auth");
-    let payload = br#"{}"#;
-    let payload_hash = trellis_rs::auth::payload_hash_base64url(payload);
-    let now = i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock after epoch")
-            .as_secs(),
-    )
-    .expect("current time fits i64");
-    let request = |subject: &str, request_id: &str, iat: i64, capabilities: Vec<String>| {
-        trellis_rs::auth::AuthRequestsValidateRequest {
-            session_key: target_session_key.clone(),
-            proof: target_auth.create_proof(subject, payload, iat, request_id),
-            subject: subject.to_owned(),
-            payload_hash: payload_hash.clone(),
-            iat,
-            request_id: request_id.to_owned(),
-            capabilities,
-        }
-    };
-
-    assert!(
-        auth_client
-            .validate_request(&request(&target_subject, "req_allowed", now, Vec::new()))
-            .await
-            .expect("validate allowed request")
-            .allowed
-    );
-
-    let invalid_signature = trellis_rs::auth::AuthRequestsValidateRequest {
-        proof: "invalid".to_owned(),
-        ..request(&target_subject, "req_invalid", now, Vec::new())
-    };
-    assert_validator_error(
-        auth_client.validate_request(&invalid_signature).await,
-        "invalid request proof",
-    );
-    assert_validator_error(
-        auth_client
-            .validate_request(&request(&target_subject, "req_stale", now - 61, Vec::new()))
-            .await,
-        "outside the accepted window",
-    );
-    assert_validator_error(
-        auth_client
-            .validate_request(&request(
-                "rpc.v1.Removed.Ping",
-                "req_denied_subject",
-                now,
-                Vec::new(),
-            ))
-            .await,
-        "not granted by the active authority",
-    );
-    assert_validator_error(
-        auth_client
-            .validate_request(&request(
-                &target_subject,
-                "req_denied_capability",
-                now,
-                vec!["missing".to_owned()],
-            ))
-            .await,
-        "capability is not granted",
-    );
-
-    let replay = request(&target_subject, "req_replay", now, Vec::new());
-    assert!(
-        auth_client
-            .validate_request(&replay)
-            .await
-            .expect("first replay probe succeeds")
-            .allowed
-    );
-    assert_validator_error(
-        auth_client.validate_request(&replay).await,
-        "request proof was already used",
-    );
-}
-
-fn assert_validator_error(
-    result: Result<
-        trellis_rs::auth::AuthRequestsValidateResponse,
-        trellis_rs::auth::TrellisAuthError,
-    >,
-    internal_detail: &str,
-) {
-    let error = result.expect_err("validator request must fail");
-    let debug = format!("{error:?}");
-    assert!(debug.contains("invalid_request"), "{debug}");
-    assert!(!debug.contains(internal_detail), "{debug}");
 }
 
 async fn call_entity_get_with_retry(

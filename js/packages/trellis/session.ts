@@ -17,7 +17,10 @@ import type {
   InferSchemaType,
   RPCDesc,
 } from "./contracts.ts";
-import type { RuntimeApi } from "./contract_support/runtime.ts";
+import type {
+  PermissionAtomV1 as DescriptorPermissionAtomV1,
+  RuntimeApi,
+} from "./contract_support/runtime.ts";
 import {
   CONTRACT_RUNTIME,
   type ContractRuntime,
@@ -31,13 +34,18 @@ import {
   type EventConsumerResourceBinding,
 } from "./contract_support/mod.ts";
 import type { StaticDecode } from "typebox";
-import {
-  AuthEventsValidateResponseSchema,
-  AuthEventsValidateSchema,
-  AuthRequestsValidateResponseSchema,
-  AuthRequestsValidateSchema,
-} from "./auth/protocol.ts";
 import { buildEventProofInput } from "./auth/proof.ts";
+import {
+  AuthorizationProviderCache,
+  type AuthorizationProviderEventV2,
+  type AuthorizationProviderRequestV2,
+} from "./auth/authorization_context.ts";
+import { AuthorizationProviderUnavailableError } from "./auth/authorization/provider_cache.ts";
+import type {
+  AuthorizationVerificationErrorCode,
+  PermissionAtomV1 as VerifierPermissionAtomV1,
+  VerifiedAuthorizationContextProjection,
+} from "./auth/protocol_wasm.ts";
 import {
   AsyncResult,
   BaseError,
@@ -149,20 +157,223 @@ type InferRuntimeRpcError<T> = T extends {
 } ? TError
   : never;
 
-export type AuthRequestsValidateResponse = StaticDecode<
-  typeof AuthRequestsValidateResponseSchema
->;
-export type AuthRequestsValidateInput = StaticDecode<
-  typeof AuthRequestsValidateSchema
->;
-export type AuthEventsValidateResponse = StaticDecode<
-  typeof AuthEventsValidateResponseSchema
->;
-export type AuthEventsValidateInput = StaticDecode<
-  typeof AuthEventsValidateSchema
->;
+/** Caller projection returned after a context-bound proof is verified locally. */
+export type VerifiedCaller = {
+  type: "verified";
+  sessionKey: string;
+  principal: {
+    kind: "user" | "service" | "device";
+    id: string;
+  };
+  participant: {
+    kind: "service" | "app" | "device" | "agent";
+    id: string;
+    artifactDigest: string;
+    needsDigest: string;
+  };
+  deploymentId: string | null;
+  instanceId: string | null;
+  sessionId: string;
+  capabilities: string[];
+  inboxPrefix: string;
+};
 
-export type SessionCaller = AuthRequestsValidateResponse["caller"];
+/** Internal system caller used only by explicitly unauthenticated surfaces. */
+export type InternalCaller = {
+  type: "internal";
+  capabilities: readonly [];
+};
+
+/** Caller data exposed to Trellis handlers. */
+export type SessionCaller = VerifiedCaller | InternalCaller;
+
+type LocalAuthorizationRequestMessage = Pick<
+  Msg,
+  "data" | "headers" | "reply" | "subject"
+>;
+type LocalAuthorizationEventMessage = Pick<Msg, "data" | "headers" | "subject">;
+
+type LocalAuthorizationArgs =
+  | {
+    kind: "request";
+    cache: AuthorizationProviderCache | undefined;
+    message: LocalAuthorizationRequestMessage;
+    permission: DescriptorPermissionAtomV1 | undefined;
+    requiredCapabilities: readonly string[];
+  }
+  | {
+    kind: "event";
+    cache: AuthorizationProviderCache | undefined;
+    message: LocalAuthorizationEventMessage;
+    permission: DescriptorPermissionAtomV1 | undefined;
+    requiredCapabilities: readonly string[];
+  };
+
+type VerifyAuthorizationRequestV2ResultLike =
+  | ({ ok: true } & VerifiedAuthorizationContextProjection)
+  | { ok: false; error: { code: AuthorizationVerificationErrorCode } };
+type VerifyAuthorizationEventV2ResultLike =
+  VerifyAuthorizationRequestV2ResultLike;
+
+class EventVerificationAuthError extends AuthError {
+  constructor(readonly retryable: boolean) {
+    super({
+      reason: retryable ? "authorization_unavailable" : "invalid_signature",
+    });
+  }
+}
+
+/** Verifies one received request or event through the provider-local WASM cache. */
+export async function verifyLocalAuthorization(
+  args: LocalAuthorizationArgs,
+): Promise<Result<VerifiedCaller, AuthError>> {
+  if (!args.permission) {
+    return err(new AuthError({ reason: "insufficient_permissions" }));
+  }
+  if (!args.cache) {
+    return err(new AuthError({ reason: "invalid_signature" }));
+  }
+
+  const sessionKey = args.message.headers?.get("session-key");
+  const proof = args.message.headers?.get("proof");
+  const contextDigest = args.message.headers?.get("authorization-context");
+  if (!sessionKey) {
+    return err(new AuthError({ reason: "missing_session_key" }));
+  }
+  if (!proof || !contextDigest) {
+    return err(new AuthError({ reason: "missing_proof" }));
+  }
+
+  let result:
+    | VerifyAuthorizationRequestV2ResultLike
+    | VerifyAuthorizationEventV2ResultLike;
+  try {
+    if (args.kind === "request") {
+      const iatHeader = args.message.headers?.get("iat");
+      const requestId = args.message.headers?.get("request-id");
+      const reply = args.message.reply;
+      const iat = Number(iatHeader);
+      if (!Number.isSafeInteger(iat) || !requestId || !reply) {
+        return err(new AuthError({ reason: "invalid_signature" }));
+      }
+      const request: AuthorizationProviderRequestV2 = {
+        contextDigest,
+        subject: args.message.subject,
+        reply,
+        payload: new Uint8Array(args.message.data ?? new Uint8Array()),
+        iat,
+        requestId,
+        proof,
+        requiredPermissions: [toVerifierPermission(args.permission)],
+        requiredCapabilities: [...args.requiredCapabilities],
+      };
+      result = await args.cache.verifyRequestV2(request);
+    } else {
+      const eventId = args.message.headers?.get("Nats-Msg-Id");
+      const eventTime = args.message.headers?.get("Trellis-Event-Time");
+      if (!eventId || !eventTime) {
+        return err(new AuthError({ reason: "invalid_signature" }));
+      }
+      const event: AuthorizationProviderEventV2 = {
+        contextDigest,
+        subject: args.message.subject,
+        payload: new Uint8Array(args.message.data ?? new Uint8Array()),
+        eventId,
+        eventTime,
+        proof,
+        requiredPermissions: [toVerifierPermission(args.permission)],
+        requiredCapabilities: [...args.requiredCapabilities],
+      };
+      result = await args.cache.verifyEventV2(event);
+    }
+  } catch (error) {
+    if (
+      args.kind === "event" &&
+      error instanceof AuthorizationProviderUnavailableError
+    ) {
+      return err(new EventVerificationAuthError(true));
+    }
+    return err(new AuthError({ reason: "invalid_signature" }));
+  }
+
+  if (!result.ok) {
+    return err(
+      new AuthError({
+        reason: localAuthorizationErrorReason(result.error.code),
+      }),
+    );
+  }
+  if (result.sessionKey !== sessionKey) {
+    return err(new AuthError({ reason: "invalid_signature" }));
+  }
+  return ok(toVerifiedCaller(result));
+}
+
+function toVerifierPermission(
+  permission: DescriptorPermissionAtomV1,
+): VerifierPermissionAtomV1 {
+  if (
+    permission.surfaceKind === "operation" && permission.action === "control"
+  ) {
+    const separator = permission.surfaceName.lastIndexOf(".");
+    if (separator <= 0 || separator === permission.surfaceName.length - 1) {
+      throw new Error("operation signal permission is invalid");
+    }
+    return {
+      target: {
+        kind: "operationSignal",
+        api: permission.apiId,
+        operation: permission.surfaceName.slice(0, separator),
+        signal: permission.surfaceName.slice(separator + 1),
+      },
+      action: permission.action,
+    };
+  }
+  return {
+    target: {
+      kind: "apiSurface",
+      api: permission.apiId,
+      surface: permission.surfaceKind,
+      name: permission.surfaceName,
+    },
+    action: permission.action,
+  };
+}
+
+function toVerifiedCaller(
+  projection: VerifiedAuthorizationContextProjection,
+): VerifiedCaller {
+  return {
+    type: "verified",
+    sessionKey: projection.sessionKey,
+    principal: { ...projection.principal },
+    participant: { ...projection.participant },
+    deploymentId: projection.deploymentId,
+    instanceId: projection.instanceId,
+    sessionId: projection.sessionId,
+    capabilities: [...projection.capabilities],
+    inboxPrefix: projection.inboxPrefix,
+  };
+}
+
+function localAuthorizationErrorReason(
+  code: AuthorizationVerificationErrorCode,
+): string {
+  switch (code) {
+    case "PermissionDenied":
+    case "CapabilityDenied":
+      return "insufficient_permissions";
+    case "ReplySubjectMismatch":
+      return "reply_subject_mismatch";
+    case "ProofIatOutOfRange":
+      return "iat_out_of_range";
+    case "ContextExpired":
+    case "EventRevoked":
+      return "session_expired";
+    default:
+      return "invalid_signature";
+  }
+}
 
 /**
  * Safely extract JSON from a NATS message.
@@ -313,56 +524,49 @@ export async function sha256(data: Uint8Array): Promise<Uint8Array> {
 }
 
 export function buildProofInput(
-  sessionKey: string,
+  contextDigest: string,
   subject: string,
+  reply: string,
   payloadHash: Uint8Array,
   iat: number,
   requestId: string,
 ): Uint8Array {
   const enc = new TextEncoder();
-  const sessionKeyBytes = enc.encode(sessionKey);
+  const contextDigestBytes = base64urlDecode(contextDigest);
+  if (contextDigestBytes.length !== 32) {
+    throw new Error("authorization context digest must encode 32 bytes");
+  }
+  if (reply.length === 0) {
+    throw new Error("request reply subject must not be empty");
+  }
+  const domainBytes = enc.encode(
+    "trellis.authorization-request-proof.v2",
+  );
   const subjectBytes = enc.encode(subject);
+  const replyBytes = enc.encode(reply);
   const iatBytes = enc.encode(String(iat));
   const requestIdBytes = enc.encode(requestId);
 
-  const buf = new Uint8Array(
-    4 +
-      sessionKeyBytes.length +
-      4 +
-      subjectBytes.length +
-      4 +
-      payloadHash.length +
-      4 +
-      iatBytes.length +
-      4 +
-      requestIdBytes.length,
-  );
+  const components = [
+    domainBytes,
+    contextDigestBytes,
+    subjectBytes,
+    replyBytes,
+    payloadHash,
+    iatBytes,
+    requestIdBytes,
+  ];
+  const total = components.reduce((sum, value) => sum + 4 + value.length, 0);
+  const buf = new Uint8Array(total);
   const view = new DataView(buf.buffer);
 
   let offset = 0;
-  view.setUint32(offset, sessionKeyBytes.length);
-  offset += 4;
-  buf.set(sessionKeyBytes, offset);
-  offset += sessionKeyBytes.length;
-
-  view.setUint32(offset, subjectBytes.length);
-  offset += 4;
-  buf.set(subjectBytes, offset);
-  offset += subjectBytes.length;
-
-  view.setUint32(offset, payloadHash.length);
-  offset += 4;
-  buf.set(payloadHash, offset);
-  offset += payloadHash.length;
-
-  view.setUint32(offset, iatBytes.length);
-  offset += 4;
-  buf.set(iatBytes, offset);
-  offset += iatBytes.length;
-
-  view.setUint32(offset, requestIdBytes.length);
-  offset += 4;
-  buf.set(requestIdBytes, offset);
+  for (const component of components) {
+    view.setUint32(offset, component.length);
+    offset += 4;
+    buf.set(component, offset);
+    offset += component.length;
+  }
 
   return buf;
 }
@@ -375,6 +579,10 @@ export type TrellisAuth = {
   sessionKey: string;
   sign: TrellisSigner;
   currentIat?: () => number;
+  /** Current authorization-context digest bound into v2 request and event proofs. */
+  contextDigest?: string | (() => string);
+  /** Provider-only local verifier for service request and event handling. */
+  authorizationProviderCache?: AuthorizationProviderCache;
 };
 
 export type TrellisMode = "client" | "server";
@@ -1536,6 +1744,10 @@ export type RpcHandlerContext = {
   caller: SessionCaller;
   sessionKey: string;
   inboxPrefix: string;
+  /** Exact permission verified for this request. */
+  permission: DescriptorPermissionAtomV1;
+  /** Capabilities required by this request surface. */
+  requiredCapabilities: readonly string[];
   requestId?: string;
   traceId?: string;
   /** Schedules work after the successful RPC response has reached NATS. */
@@ -2000,14 +2212,6 @@ const NATS_SUBJECT_TOKEN_FORBIDDEN = /[\u0000\s.*>~]/gu;
 
 const DEFAULT_NO_RESPONDER_MAX_RETRIES = 2;
 const DEFAULT_NO_RESPONDER_RETRY_MS = 200;
-const DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS = 3;
-const DEFAULT_AUTH_VALIDATE_SESSION_RETRY_MS = 25;
-const AUTH_EVENTS_VALIDATE_RPC = {
-  subject: "rpc.v1.Auth.Events.Validate",
-  input: AuthEventsValidateSchema,
-  output: AuthEventsValidateResponseSchema,
-  callerCapabilities: [] as const,
-};
 
 function activeTraceId(span: Span): string | undefined {
   const traceId = span.spanContext().traceId;
@@ -2042,11 +2246,6 @@ const EMPTY_TRELLIS_API: RuntimeApi = {
   subjects: {},
 };
 
-type AuthCacheEntry = {
-  caller: SessionCaller;
-  expires: number;
-};
-
 function isBrowserAuthRequiredError(error: unknown): boolean {
   const isAuthRequiredReason = (reason: unknown): boolean =>
     reason === "session_not_found";
@@ -2061,22 +2260,6 @@ function isBrowserAuthRequiredError(error: unknown): boolean {
   ) {
     const reason = Reflect.get(error.remoteError, "reason");
     return isAuthRequiredReason(reason);
-  }
-
-  return false;
-}
-
-function isTransientAuthValidateSessionError(error: unknown): boolean {
-  if (error instanceof AuthError) {
-    return error.reason === "session_not_found";
-  }
-
-  if (
-    error instanceof RemoteError &&
-    error.remoteError.type === "AuthError"
-  ) {
-    const reason = Reflect.get(error.remoteError, "reason");
-    return reason === "session_not_found";
   }
 
   return false;
@@ -2672,22 +2855,13 @@ export class Trellis<
       }
       const span = startClientSpan(method, subject);
       const attempt = async (): Promise<Result<TOutput, BaseError>> => {
-        const authHeaders = await this.#createProof(subject, msg);
-
-        const headers = natsHeaders();
-        headers.set("session-key", this.#auth.sessionKey);
-        headers.set("proof", authHeaders.proof);
-        headers.set("iat", String(authHeaders.iat));
-        headers.set("request-id", authHeaders.requestId);
-        injectTraceContext(createNatsHeaderCarrier(headers), span);
-
         const msgResult = await this.#requestMessageWithRetry({
           method,
           subject,
           payload: msg,
-          headers,
           timeout: opts?.timeout ?? this.timeout,
           callerCapabilities: ctx.callerCapabilities,
+          span,
         });
         const response = msgResult.take();
         if (isErr(response)) {
@@ -2858,92 +3032,17 @@ export class Trellis<
   }
 
   async #authenticateFeedRequest(args: {
-    feed: string;
-    subject: string;
     msg: Msg;
-    payloadHash: Uint8Array;
+    permission: DescriptorPermissionAtomV1 | undefined;
     requiredCapabilities: readonly string[];
   }): Promise<Result<SessionCaller, BaseError>> {
-    const sessionKey = args.msg.headers?.get("session-key");
-    const proof = args.msg.headers?.get("proof");
-    const iatHeader = args.msg.headers?.get("iat");
-    const requestId = args.msg.headers?.get("request-id");
-    if (!sessionKey) {
-      return err(new AuthError({ reason: "missing_session_key" }));
-    }
-    if (!proof) return err(new AuthError({ reason: "missing_proof" }));
-    const iat = Number(iatHeader);
-    if (!Number.isSafeInteger(iat) || !requestId) {
-      return err(new AuthError({ reason: "invalid_signature" }));
-    }
-
-    const proofInput = buildProofInput(
-      sessionKey,
-      args.subject,
-      args.payloadHash,
-      iat,
-      requestId,
-    );
-    const digest = await sha256(proofInput);
-    const verifyResult = await AsyncResult.try(async () => {
-      const publicKeyRaw = base64urlDecode(sessionKey);
-      const pub = await crypto.subtle.importKey(
-        "raw",
-        toArrayBuffer(publicKeyRaw),
-        { name: "Ed25519" },
-        true,
-        ["verify"],
-      );
-      return crypto.subtle.verify(
-        { name: "Ed25519" },
-        pub,
-        toArrayBuffer(base64urlDecode(proof)),
-        toArrayBuffer(digest),
-      );
+    return await verifyLocalAuthorization({
+      kind: "request",
+      cache: this.#auth.authorizationProviderCache,
+      message: args.msg,
+      permission: args.permission,
+      requiredCapabilities: args.requiredCapabilities,
     });
-    if (!verifyResult.isOk() || verifyResult.take() !== true) {
-      return err(
-        new AuthError({ reason: "invalid_signature", context: { sessionKey } }),
-      );
-    }
-
-    const auth = await this.requestAuthValidate({
-      sessionKey,
-      proof,
-      subject: args.subject,
-      payloadHash: base64urlEncode(args.payloadHash),
-      iat,
-      requestId,
-      capabilities: [...args.requiredCapabilities],
-    }).take();
-    if (isErr(auth)) return err(auth.error);
-
-    if (!auth.allowed) {
-      return err(
-        new AuthError({
-          reason: "insufficient_permissions",
-          context: {
-            feed: args.feed,
-            requiredCapabilities: args.requiredCapabilities,
-            userCapabilities: auth.caller.capabilities,
-          },
-        }),
-      );
-    }
-
-    if (
-      typeof args.msg.reply !== "string" ||
-      !args.msg.reply.startsWith(`${auth.inboxPrefix}.`)
-    ) {
-      return err(
-        new AuthError({
-          reason: "reply_subject_mismatch",
-          context: { expected: auth.inboxPrefix, actual: args.msg.reply },
-        }),
-      );
-    }
-
-    return ok(auth.caller);
   }
 
   feedHandle<F extends FeedsOf<TA>>(
@@ -3011,7 +3110,8 @@ export class Trellis<
         return subject;
       }
 
-      const authHeaders = await this.#createProof(subject, payload);
+      const inbox = createInbox(this.#inboxPrefix);
+      const authHeaders = await this.#createProof(subject, payload, inbox);
       if (opts?.signal?.aborted) {
         const error = createTransportError({
           code: "trellis.feed.subscribe_aborted",
@@ -3033,9 +3133,9 @@ export class Trellis<
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
+      headers.set("authorization-context", authHeaders.contextDigest);
       injectTraceContext(createNatsHeaderCarrier(headers));
 
-      const inbox = createInbox(this.#inboxPrefix);
       const sub = this.#nats.subscribe(inbox);
       const iterator = sub[Symbol.asyncIterator]();
       const cancelPayload = JSON.stringify({
@@ -3046,18 +3146,18 @@ export class Trellis<
         if (cancelled) return;
         cancelled = true;
         try {
-          const auth = await this.#createProof(subject, cancelPayload);
+          const auth = await this.#createProof(subject, cancelPayload, inbox);
           const cancelHeaders = natsHeaders();
           cancelHeaders.set("session-key", this.#auth.sessionKey);
           cancelHeaders.set("proof", auth.proof);
           cancelHeaders.set("iat", String(auth.iat));
           cancelHeaders.set("request-id", auth.requestId);
+          cancelHeaders.set("authorization-context", auth.contextDigest);
           injectTraceContext(createNatsHeaderCarrier(cancelHeaders));
           this.#nats.publish(subject, cancelPayload, {
             headers: cancelHeaders,
             reply: inbox,
           });
-          await this.#nats.flush();
         } catch {
           // Best effort: the transport may already be closing with the feed.
         }
@@ -3070,7 +3170,6 @@ export class Trellis<
 
       try {
         this.#nats.publish(subject, payload, { headers, reply: inbox });
-        await this.#nats.flush();
       } catch (cause) {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
@@ -3253,7 +3352,6 @@ export class Trellis<
     let sub: ReturnType<NatsConnection["subscribe"]>;
     try {
       sub = this.#nats.subscribe(subject);
-      await this.#nats.flush();
     } catch (cause) {
       const error = createTransportError({
         code: "trellis.feed.listen_failed",
@@ -3327,10 +3425,8 @@ export class Trellis<
       return json;
     }
     const caller = await this.#authenticateFeedRequest({
-      feed,
-      subject: msg.subject,
       msg,
-      payloadHash: await sha256(msg.data ?? new Uint8Array()),
+      permission: descriptor.permission,
       requiredCapabilities: descriptor.subscribeCapabilities,
     });
     const callerValue = caller.take();
@@ -3409,7 +3505,6 @@ export class Trellis<
       this.#nats.publish(msg.reply, new Uint8Array(), {
         headers: readyHeaders,
       });
-      await this.#nats.flush();
       if (controller.signal.aborted) return ok(undefined);
 
       const handlerResult = await handler({
@@ -3442,7 +3537,6 @@ export class Trellis<
             }
             try {
               this.#nats.publish(msg.reply, payload);
-              await this.#nats.flush();
             } catch (cause) {
               const error = new UnexpectedError({
                 cause,
@@ -3635,7 +3729,6 @@ export class Trellis<
         }
 
         if (result.afterReply.length > 0) {
-          await this.#nats.flush();
           for (const task of result.afterReply) {
             try {
               await task();
@@ -3728,257 +3821,56 @@ export class Trellis<
         const authRequired = ctx.authRequired ?? true;
         if (!authRequired) {
           caller = {
-            type: "service",
-            id: "system",
-            active: true,
-            name: "System",
-            capabilities: ["service"],
+            type: "internal",
+            capabilities: [],
           };
         } else {
-          const sessionKey = msg.headers?.get("session-key");
-          const proof = msg.headers?.get("proof");
-          const iatHeader = msg.headers?.get("iat");
-          const requestId = msg.headers?.get("request-id");
-          if (!sessionKey) {
-            this.#log.warn({ method }, "Missing session-key header");
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "Missing session-key",
-            });
-            const error = new AuthError({ reason: "missing_session_key" });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-          if (!proof) {
-            this.#log.warn({ method }, "Missing proof in request");
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "Missing proof",
-            });
-            const error = new AuthError({ reason: "missing_proof" });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-          const iat = Number(iatHeader);
-          if (!Number.isSafeInteger(iat) || !requestId) {
-            const error = new AuthError({ reason: "invalid_signature" });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-
-          // Verify proof signature locally using the raw request bytes we received.
-          const payloadBytes = msg.data ?? new Uint8Array();
-          const payloadHash = await sha256(payloadBytes);
-          const proofInput = buildProofInput(
-            sessionKey,
-            msg.subject,
-            payloadHash,
-            iat,
-            requestId,
-          );
-          const digest = await sha256(proofInput);
-
-          const verifyResult = await AsyncResult.try(async () => {
-            const publicKeyRaw = base64urlDecode(sessionKey);
-            const pub = await crypto.subtle.importKey(
-              "raw",
-              toArrayBuffer(publicKeyRaw),
-              { name: "Ed25519" },
-              true,
-              ["verify"],
-            );
-            return crypto.subtle.verify(
-              { name: "Ed25519" },
-              pub,
-              toArrayBuffer(base64urlDecode(proof)),
-              toArrayBuffer(digest),
-            );
+          const auth = await verifyLocalAuthorization({
+            kind: "request",
+            cache: this.#auth.authorizationProviderCache,
+            message: msg,
+            permission: ctx.permission,
+            requiredCapabilities: ctx.callerCapabilities,
           });
-          const signatureOk = verifyResult.isOk() &&
-            verifyResult.take() === true;
-
-          if (!signatureOk) {
+          const authValue = auth.take();
+          if (isErr(authValue)) {
             span.setStatus({
               code: SpanStatusCode.ERROR,
-              message: "Invalid signature",
+              message: authValue.error.message,
             });
-            const error = new AuthError({
-              reason: "invalid_signature",
-              context: { sessionKey },
-            });
-            recordRuntimeError(error, {
+            recordRuntimeError(authValue.error, {
               surface: "rpc",
               direction: "server",
               operation: String(method),
               phase: "auth",
             });
-            return err(error);
+            return err(authValue.error);
           }
-
-          let auth:
-            | AuthRequestsValidateResponse
-            | AuthError
-            | RemoteError
-            | TransportError
-            | ValidationError
-            | UnexpectedError
-            | undefined;
-          for (
-            let attempt = 0;
-            attempt < DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS;
-            attempt++
-          ) {
-            const authValue = await this.requestAuthValidate({
-              sessionKey,
-              proof,
-              subject: msg.subject,
-              payloadHash: base64urlEncode(payloadHash),
-              iat,
-              requestId,
-              capabilities: [...ctx.callerCapabilities],
-            }).take();
-            if (!isErr(authValue)) {
-              auth = authValue;
-              break;
-            }
-
-            const authError = authValue.error;
-
-            if (
-              !isTransientAuthValidateSessionError(authError) ||
-              attempt === DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS - 1
-            ) {
-              auth = authError;
-              break;
-            }
-
-            await sleep(
-              DEFAULT_AUTH_VALIDATE_SESSION_RETRY_MS * (attempt + 1),
-            );
-          }
-
-          if (!auth) {
-            const error = new UnexpectedError({
-              context: { reason: "missing_auth_validate_result" },
-            });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-
-          if (auth instanceof Error) {
-            this.#log.warn(
-              {
-                method,
-                error: auth.message,
-                errorType: auth.name,
-                remoteError: auth instanceof RemoteError
-                  ? auth.toSerializable()
-                  : undefined,
-              },
-              "Auth.Requests.Validate failed",
-            );
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "Auth.Requests.Validate failed",
-            });
-            if (auth instanceof BaseError) {
-              recordRuntimeError(auth, {
-                surface: "rpc",
-                direction: "server",
-                operation: String(method),
-                phase: "auth",
-              });
-              return err(auth);
-            }
-            const error = new UnexpectedError({ cause: auth });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-
-          if (!auth.allowed) {
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "Insufficient permissions",
-            });
-            const error = new AuthError({
-              reason: "insufficient_permissions",
-              context: {
-                requiredCapabilities: ctx.callerCapabilities,
-                userCapabilities: auth.caller.capabilities,
-              },
-            });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-
-          if (
-            typeof msg.reply !== "string" ||
-            !msg.reply.startsWith(`${auth.inboxPrefix}.`)
-          ) {
-            span.setStatus({
-              code: SpanStatusCode.ERROR,
-              message: "Reply subject mismatch",
-            });
-            const error = new AuthError({
-              reason: "reply_subject_mismatch",
-              context: { expected: auth.inboxPrefix, actual: msg.reply },
-            });
-            recordRuntimeError(error, {
-              surface: "rpc",
-              direction: "server",
-              operation: String(method),
-              phase: "auth",
-            });
-            return err(error);
-          }
-
-          caller = auth.caller;
-          callerInboxPrefix = auth.inboxPrefix;
+          caller = authValue;
+          callerInboxPrefix = authValue.inboxPrefix;
         }
 
         span.setAttribute("auth.caller.type", caller.type);
-        if (caller.type === "user") {
-          span.setAttribute("user.id", caller.userId);
-          span.setAttribute("user.identity.provider", caller.identity.provider);
-          span.setAttribute("user.identity.subject", caller.identity.subject);
-        }
-        if (caller.type === "service") {
-          const { id } = caller;
-          span.setAttribute("service.id", id);
-        }
-        if (caller.type === "device") {
-          span.setAttribute("device.id", caller.deviceId);
-          span.setAttribute("device.deployment_id", caller.deploymentId);
+        if (caller.type === "verified") {
+          span.setAttribute("auth.principal.kind", caller.principal.kind);
+          span.setAttribute("auth.principal.id", caller.principal.id);
+          span.setAttribute("auth.participant.kind", caller.participant.kind);
+          span.setAttribute("auth.participant.id", caller.participant.id);
+          span.setAttribute(
+            "auth.participant.artifact_digest",
+            caller.participant.artifactDigest,
+          );
+          span.setAttribute(
+            "auth.participant.needs_digest",
+            caller.participant.needsDigest,
+          );
+          span.setAttribute("auth.session.id", caller.sessionId);
+          if (caller.deploymentId) {
+            span.setAttribute("auth.deployment.id", caller.deploymentId);
+          }
+          if (caller.instanceId) {
+            span.setAttribute("auth.instance.id", caller.instanceId);
+          }
         }
 
         const invokeHandler = fn as (
@@ -3994,8 +3886,12 @@ export class Trellis<
               input: parsedInput,
               context: {
                 caller,
-                sessionKey: callerSessionKey,
+                sessionKey: caller.type === "verified"
+                  ? caller.sessionKey
+                  : callerSessionKey,
                 inboxPrefix: callerInboxPrefix,
+                permission: ctx.permission,
+                requiredCapabilities: ctx.callerCapabilities,
                 requestId: handlerRequestIdFromHeader || undefined,
                 traceId: handlerTraceIdFromHeader || undefined,
                 afterReply: (task) => afterReply.push(task),
@@ -4306,7 +4202,8 @@ export class Trellis<
         headers.set("Nats-Msg-Id", event.header.id);
         headers.set("Trellis-Event-Time", event.header.time);
         const proof = await this.#createEventProof(event);
-        headers.set("proof", proof);
+        headers.set("proof", proof.proof);
+        headers.set("authorization-context", proof.contextDigest);
 
         logger.trace(
           { subject: event.subject },
@@ -4437,7 +4334,6 @@ export class Trellis<
           once: true,
         });
       }
-      await this.#nats.flush();
     } catch (cause) {
       if (sub) {
         sub.unsubscribe();
@@ -4452,7 +4348,7 @@ export class Trellis<
 
     const task = AsyncResult.try(async () => {
       for await (const msg of sub) {
-        const proofResult = await this.#validateEventProof(event, msg);
+        const proofResult = await this.#validateEventProof(event, ctx, msg);
         const proofValue = proofResult.take();
         if (isErr(proofValue)) {
           this.#log.warn(
@@ -4812,15 +4708,14 @@ export class Trellis<
   ): AsyncResult<void, ValidationError | UnexpectedError> {
     return AsyncResult.try(async () => {
       for await (const msg of messages) {
-        const proofResult = await this.#validateEventProof(event, msg);
+        const proofResult = await this.#validateEventProof(event, ctx, msg);
         const proofValue = proofResult.take();
         if (isErr(proofValue)) {
           this.#log.warn(
             { error: proofValue.error, event, subject: msg.subject },
             "Event auth validation failed",
           );
-          if (isTransientAuthValidateSessionError(proofValue.error)) msg.nak();
-          else msg.term();
+          msg.term();
           continue;
         }
 
@@ -4889,6 +4784,7 @@ export class Trellis<
         for (const registration of matching) {
           const proofResult = await this.#validateEventProof(
             registration.event,
+            registration.ctx,
             msg,
           );
           const proofValue = proofResult.take();
@@ -4907,9 +4803,14 @@ export class Trellis<
               },
               "Event auth validation failed",
             );
-            if (isTransientAuthValidateSessionError(proofValue.error)) {
-              msg.nak();
-            } else msg.term();
+            if (
+              proofValue.error instanceof EventVerificationAuthError &&
+              proofValue.error.retryable
+            ) {
+              msg.nak(5_000);
+            } else {
+              msg.term();
+            }
             failed = true;
             break;
           }
@@ -4994,66 +4895,16 @@ export class Trellis<
 
   async #validateEventProof(
     event: EventsOf<TA>,
+    descriptor: EventDescriptorOf<TA, EventsOf<TA>>,
     msg: Pick<Msg, "data" | "headers" | "subject">,
-  ): Promise<Result<void, BaseError>> {
-    const sessionKey = msg.headers?.get("session-key");
-    const proof = msg.headers?.get("proof");
-    const eventId = msg.headers?.get("Nats-Msg-Id");
-    const eventTime = msg.headers?.get("Trellis-Event-Time");
-    if (!sessionKey) {
-      return err(new AuthError({ reason: "missing_session_key" }));
-    }
-    if (!proof) return err(new AuthError({ reason: "missing_proof" }));
-    if (!eventId || !eventTime) {
-      return err(new AuthError({ reason: "invalid_signature" }));
-    }
-
-    const payloadHash = await sha256(msg.data ?? new Uint8Array());
-    let auth: AuthEventsValidateResponse | BaseError | undefined;
-    for (
-      let attempt = 0;
-      attempt < DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS;
-      attempt++
-    ) {
-      const authValue = await this.requestAuthEventValidate({
-        sessionKey,
-        proof,
-        subject: msg.subject,
-        payloadHash: base64urlEncode(payloadHash),
-        eventId,
-        eventTime,
-      }).take();
-      if (!isErr(authValue)) {
-        auth = authValue;
-        break;
-      }
-      const authError = authValue.error;
-      if (
-        !isTransientAuthValidateSessionError(authError) ||
-        attempt === DEFAULT_AUTH_VALIDATE_SESSION_RETRY_ATTEMPTS - 1
-      ) {
-        auth = authError;
-        break;
-      }
-      await sleep(DEFAULT_AUTH_VALIDATE_SESSION_RETRY_MS * (attempt + 1));
-    }
-
-    if (!auth) return err(new UnexpectedError({ context: { event } }));
-    if (auth instanceof BaseError) return err(auth);
-    if (auth instanceof Error) return err(new UnexpectedError({ cause: auth }));
-    if (!auth.allowed) {
-      return err(
-        new AuthError({
-          reason: "insufficient_permissions",
-          context: {
-            event,
-            status: auth.status,
-            userCapabilities: auth.caller?.capabilities ?? [],
-          },
-        }),
-      );
-    }
-    return ok(undefined);
+  ): Promise<Result<VerifiedCaller, BaseError>> {
+    return await verifyLocalAuthorization({
+      kind: "event",
+      cache: this.#auth.authorizationProviderCache,
+      message: msg,
+      permission: descriptor.publishPermission,
+      requiredCapabilities: descriptor.publishCapabilities,
+    });
   }
 
   wait(): AsyncResult<void, BaseError> {
@@ -5128,53 +4979,99 @@ export class Trellis<
     return this.#auth.currentIat?.() ?? Math.floor(Date.now() / 1000);
   }
 
+  #contextDigest(): string {
+    const digest = typeof this.#auth.contextDigest === "function"
+      ? this.#auth.contextDigest()
+      : this.#auth.contextDigest;
+    if (digest === undefined) {
+      throw new Error(
+        "contextDigest is required to sign v2 request and event proofs",
+      );
+    }
+    return digest;
+  }
+
   async #createProof(
     subject: string,
     payload: string,
-  ): Promise<{ proof: string; iat: number; requestId: string }> {
+    reply: string,
+  ): Promise<
+    { proof: string; iat: number; requestId: string; contextDigest: string }
+  > {
+    const contextDigest = this.#contextDigest();
     const payloadBytes = new TextEncoder().encode(payload);
     const payloadHash = await sha256(payloadBytes);
     const iat = this.#currentIat();
     const requestId = ulid();
     const input = buildProofInput(
-      this.#auth.sessionKey,
+      contextDigest,
       subject,
+      reply,
       payloadHash,
       iat,
       requestId,
     );
     const digest = await sha256(input);
     const sigBytes = await this.#auth.sign(digest);
-    return { proof: base64urlEncode(sigBytes), iat, requestId };
+    return {
+      proof: base64urlEncode(sigBytes),
+      iat,
+      requestId,
+      contextDigest,
+    };
   }
 
-  async #createEventProof(event: PreparedTrellisEvent): Promise<string> {
+  async #createEventProof(
+    event: PreparedTrellisEvent,
+  ): Promise<{ proof: string; contextDigest: string }> {
+    const contextDigest = this.#contextDigest();
     const payloadHash = await sha256(
       new TextEncoder().encode(event.encodedPayload),
     );
     const input = buildEventProofInput(
-      this.#auth.sessionKey,
+      contextDigest,
       event.subject,
       payloadHash,
       event.header.id,
       event.header.time,
     );
     const digest = await sha256(input);
-    return base64urlEncode(await this.#auth.sign(digest));
+    return {
+      proof: base64urlEncode(await this.#auth.sign(digest)),
+      contextDigest,
+    };
   }
 
   async #requestMessageWithRetry(args: {
     method?: string;
     subject: string;
     payload: string;
-    headers: MsgHdrs;
     timeout: number;
     callerCapabilities?: readonly string[];
+    span?: Span;
   }): Promise<Result<Msg, TransportError>> {
     for (let retry = 0; retry <= this.#noResponderMaxRetries; retry++) {
+      // Create the exact reply inbox before signing so the proof binds the
+      // reply subject the response arrives on.
+      const reply = createInbox(this.#inboxPrefix);
+      const authHeaders = await this.#createProof(
+        args.subject,
+        args.payload,
+        reply,
+      );
+      const headers = natsHeaders();
+      headers.set("session-key", this.#auth.sessionKey);
+      headers.set("authorization-context", authHeaders.contextDigest);
+      headers.set("proof", authHeaders.proof);
+      headers.set("iat", String(authHeaders.iat));
+      headers.set("request-id", authHeaders.requestId);
+      injectTraceContext(createNatsHeaderCarrier(headers), args.span);
+
       const result = await AsyncResult.try(() =>
         this.#nats.request(args.subject, args.payload, {
-          headers: args.headers,
+          headers,
+          reply,
+          noMux: true,
           timeout: args.timeout,
         })
       );
@@ -5232,20 +5129,11 @@ export class Trellis<
       return await withSpanAsync(span, async () => {
         try {
           const payload = JSON.stringify(body);
-          const authHeaders = await this.#createProof(subject, payload);
-
-          const headers = natsHeaders();
-          headers.set("session-key", this.#auth.sessionKey);
-          headers.set("proof", authHeaders.proof);
-          headers.set("iat", String(authHeaders.iat));
-          headers.set("request-id", authHeaders.requestId);
-          injectTraceContext(createNatsHeaderCarrier(headers), span);
-
           const response = (await this.#requestMessageWithRetry({
             subject,
             payload,
-            headers,
             timeout: this.timeout,
+            span,
           })).take();
           if (isErr(response)) {
             span.setStatus({
@@ -5316,15 +5204,16 @@ export class Trellis<
   > {
     return AsyncResult.from((async () => {
       const payload = JSON.stringify(body);
-      const authHeaders = await this.#createProof(subject, payload);
+      const inbox = createInbox(this.#inboxPrefix);
+      const authHeaders = await this.#createProof(subject, payload, inbox);
 
       const headers = natsHeaders();
       headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
+      headers.set("authorization-context", authHeaders.contextDigest);
 
-      const inbox = createInbox(this.#inboxPrefix);
       const sub = this.#nats.subscribe(inbox);
 
       try {
@@ -5332,7 +5221,6 @@ export class Trellis<
           headers,
           reply: inbox,
         });
-        await this.#nats.flush();
       } catch (cause) {
         sub.unsubscribe();
         const error = createTransportError({
@@ -5440,43 +5328,5 @@ export class Trellis<
         }
       })());
     })());
-  }
-
-  protected requestAuthValidate(
-    input: AuthRequestsValidateInput,
-  ): AsyncResult<
-    AuthRequestsValidateResponse,
-    AuthError | RemoteError | TransportError | ValidationError | UnexpectedError
-  > {
-    const request = this.request.bind(this) as (
-      method: string,
-      input: unknown,
-      opts?: RequestOpts,
-    ) => AsyncResult<
-      unknown,
-      | AuthError
-      | RemoteError
-      | TransportError
-      | ValidationError
-      | UnexpectedError
-    >;
-    return request("Auth.Requests.Validate", input) as AsyncResult<
-      AuthRequestsValidateResponse,
-      | AuthError
-      | RemoteError
-      | TransportError
-      | ValidationError
-      | UnexpectedError
-    >;
-  }
-
-  protected requestAuthEventValidate(
-    input: AuthEventsValidateInput,
-  ): AsyncResult<AuthEventsValidateResponse, BaseError> {
-    return this.#requestBuiltRpc<AuthEventsValidateResponse>(
-      "Auth.Events.Validate",
-      input,
-      AUTH_EVENTS_VALIDATE_RPC,
-    );
   }
 }

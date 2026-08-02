@@ -32,27 +32,6 @@
       "signature": "chLZnE-0ZulS0fQOi-wnpP71lob2g4Iizgb5fZ5F_-cwNWT7JlESQNQMnM47pp3lbUCyptoaqvyE-NyhWLY9DQ"
     },
     {
-      "name": "client-bootstrap",
-      "purpose": "clientBootstrap",
-      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-      "request": {
-        "requestId": "req_client_01",
-        "issuedAt": 1735689600000,
-        "sessionId": "ses_example_01",
-        "sessionKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
-        "sessionNkey": "UAB2CB576PHBBPQ5ODORRZ2LYCMWPZGWGCN2KDK7DXOIMZASKUY3RLKK",
-        "expectedParticipantDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        "expectedNeedsDigest": null,
-        "proof": {
-          "format": "trellis.session-proof.v1",
-          "signature": "obpYhRo8v3YvuS3FDNFFCul69EPazaTx8ArF3v3tuC2EW2rpm7WEDuwF5-e0wCofwWhe6HIbBOBvPojOWvGHCw"
-        }
-      },
-      "requestDigest": "_VXnOLbduPFB1fEVcWVx5SSQjZ1pwVsBeOlqEWghHAM",
-      "transcriptDigest": "EIUWRw7V_HqUjSwiW-FNT28kXmhq1mYChmb44EAdfYI",
-      "signature": "obpYhRo8v3YvuS3FDNFFCul69EPazaTx8ArF3v3tuC2EW2rpm7WEDuwF5-e0wCofwWhe6HIbBOBvPojOWvGHCw"
-    },
-    {
       "name": "service-bootstrap",
       "purpose": "serviceBootstrap",
       "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
@@ -104,27 +83,6 @@
       "signature": "iG2F8BB5JGNTo302T9dECfpKzHZSoq9Gy78JevZgrIc6-UhYXV15Q5EGCnnzbIguzy9nyOuyzQgrZsWlfnZ6DA"
     },
     {
-      "name": "nats-connect",
-      "purpose": "natsConnect",
-      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-      "input": {
-        "requestId": "req_nats_01",
-        "issuedAt": 1735689600000,
-        "sessionId": "ses_example_01",
-        "sessionKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
-        "sessionNkey": "UAB2CB576PHBBPQ5ODORRZ2LYCMWPZGWGCN2KDK7DXOIMZASKUY3RLKK",
-        "participantDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        "nonce": "NATS-SERVER-NONCE-01",
-        "proof": {
-          "format": "trellis.session-proof.v1",
-          "signature": "JS2QtO0Wq21u950jc5mV70E6GF7rff5bq05t2R1pxq-sSIxSHn_xQBTQj8tWRJW0sQZlwpBNEeLC07HhFL_WBA"
-        }
-      },
-      "requestDigest": null,
-      "transcriptDigest": "hKBxlNoickZkwDaQmbaNrKKV8F_zMaOh-h3fkDMLeKE",
-      "signature": "JS2QtO0Wq21u950jc5mV70E6GF7rff5bq05t2R1pxq-sSIxSHn_xQBTQj8tWRJW0sQZlwpBNEeLC07HhFL_WBA"
-    },
-    {
       "name": "authorization-context-refresh",
       "purpose": "authorizationContextRefresh",
       "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
@@ -145,47 +103,6 @@
       "requestDigest": "JGJBtn3sPyPJ_mGY-T3y5x5TdMAKg8_TL6G7ppDAcgE",
       "transcriptDigest": "4iJPr8V9QuQxDFix6eSZKkHfElgAELHDMszUU8bMYEQ",
       "signature": "goPQThcdHbevPYZmUnHbE5Sqv883G1haeSVJlyXUHZS55pdIzPqQi6HZI25NHcdgtp6yCS_6BJ585i1mA_UzAg"
-    },
-    {
-      "name": "nats-connect-context",
-      "purpose": "natsConnectContext",
-      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-      "input": {
-        "requestId": "req_nats_context_01",
-        "issuedAt": 1735689600000,
-        "sessionId": "ses_example_01",
-        "sessionKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
-        "sessionNkey": "UAB2CB576PHBBPQ5ODORRZ2LYCMWPZGWGCN2KDK7DXOIMZASKUY3RLKK",
-        "participantDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        "contextDigest": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-        "nonce": "NATS-SERVER-NONCE-CONTEXT-01",
-        "proof": {
-          "format": "trellis.session-proof.v1",
-          "signature": "9SwiD_uuf8cd1EjsAXj1QHY2sy_oM3Oe01xgmHaZMW3yta6_9HUvcZgn5bRb3Wyx1gGbHbiDm_4HSjGATfV1BQ"
-        }
-      },
-      "requestDigest": null,
-      "transcriptDigest": "BYS-ZPWDwqOJBH6qc2t7mBoezLmBynIkUL_2EEL9H-I",
-      "signature": "9SwiD_uuf8cd1EjsAXj1QHY2sy_oM3Oe01xgmHaZMW3yta6_9HUvcZgn5bRb3Wyx1gGbHbiDm_4HSjGATfV1BQ"
-    },
-    {
-      "name": "session-self-control",
-      "purpose": "sessionSelfControl",
-      "signerPublicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
-      "request": {
-        "requestId": "req_logout_01",
-        "issuedAt": 1735689600000,
-        "sessionId": "ses_example_01",
-        "sessionKeyId": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
-        "reason": null,
-        "proof": {
-          "format": "trellis.session-proof.v1",
-          "signature": "ZgwYK3qolCP5CoS1Xb42MwFCAuOL3B5Vi3Ed1NaqhqFhXGJn9mrjo4haHhGMTjHJPslPu3teuli_L-uCKFMgAA"
-        }
-      },
-      "requestDigest": "E3PHA9e4-KR_pIypq9xjmDtfV2Ml9TSWUZnTym1loNQ",
-      "transcriptDigest": "_nqzUoIjoAeAgLNRBWxs-WcQk4MIXV_ZbbRajPFq8FE",
-      "signature": "ZgwYK3qolCP5CoS1Xb42MwFCAuOL3B5Vi3Ed1NaqhqFhXGJn9mrjo4haHhGMTjHJPslPu3teuli_L-uCKFMgAA"
     }
   ],
   "invalidCases": [
@@ -227,15 +144,9 @@
     },
     {
       "name": "modified-request-id",
-      "base": "client-bootstrap",
+      "base": "service-bootstrap",
       "mutation": "requestId",
       "expected": "InvalidSignature"
-    },
-    {
-      "name": "mismatched-session-public-key",
-      "base": "nats-connect",
-      "mutation": "sessionPublicKey",
-      "expected": "InvalidKeyId"
     },
     {
       "name": "noncanonical-public-key",
@@ -245,37 +156,25 @@
     },
     {
       "name": "invalid-signature",
-      "base": "nats-connect",
+      "base": "service-bootstrap",
       "mutation": "signature",
       "expected": "InvalidSignature"
     },
     {
       "name": "expired-issued-at",
-      "base": "client-bootstrap",
+      "base": "service-bootstrap",
       "mutation": "expiredNow",
       "expected": "ProofIatOutOfRange"
     },
     {
       "name": "future-issued-at",
-      "base": "client-bootstrap",
+      "base": "service-bootstrap",
       "mutation": "futureNow",
       "expected": "ProofIatOutOfRange"
     },
     {
-      "name": "duplicate-request-id",
-      "base": "nats-connect",
-      "mutation": "admitTwice",
-      "expected": "Replay"
-    },
-    {
-      "name": "same-id-different-content",
-      "base": "nats-connect",
-      "mutation": "sameIdDifferentNonce",
-      "expected": "ReplayContentMismatch"
-    },
-    {
       "name": "unknown-proof-field",
-      "base": "client-bootstrap",
+      "base": "service-bootstrap",
       "mutation": "unknownProofField",
       "expected": "InvalidFormat"
     }

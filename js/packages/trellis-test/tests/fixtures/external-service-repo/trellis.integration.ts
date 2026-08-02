@@ -10,7 +10,6 @@ export const externalServiceRepoJsRoot = resolve(
 
 export const externalServiceRepoRuntime = {
   trellis: {
-    mutableDev: true,
     command: {
       cmd: "cargo",
       args: [

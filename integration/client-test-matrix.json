@@ -1,6 +1,67 @@
 {
   "cases": [
     {
+      "id": "authorization-registry.provider-cache",
+      "fixture": "authorization-registry",
+      "title": "Connected providers resolve authorization evidence through NATS and apply live revocation",
+      "coverage": [
+        "auth-protocol-matrix",
+        "cross-runtime-rpc",
+        "authorization-registry"
+      ],
+      "description": "A connected provider resolves an unknown caller through exact NATS KV reads, serves cache hits without external I/O, receives revocation through its watch, becomes unready on NATS disconnect, recreates watches and initial state before readiness returns, stays ready on a quiet registry, and cannot write registry values with its issued JWT.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.rpc-client@v1"
+          },
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.rpc-service@v1"
+          }
+        ],
+        "given": [
+          "a live Trellis runtime",
+          "a connected provider with initialized manifest and revocation watch state"
+        ],
+        "when": [
+          "an unknown caller invokes the provider twice",
+          "the caller context is revoked while both runtimes remain connected",
+          "the service NATS connection disconnects and reconnects",
+          "the registry stays quiet for longer than the removed staleness interval"
+        ],
+        "then": [
+          "the first request performs one coalesced context and evidence resolution through NATS KV",
+          "the second request performs zero HTTP, NATS registry, Auth RPC, or SQLite I/O",
+          "the provider's issued JWT can read but cannot write the registry",
+          "the revocation watch denies the next request without context refresh or expiry",
+          "the NATS disconnect makes the provider unready immediately",
+          "reconnect recreates watches and initial state before readiness returns",
+          "a quiet registry never recreates watches or becomes unhealthy"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      },
+      "classification": "shared",
+      "implementations": {
+        "typescript": {
+          "id": "authorization-registry.provider-cache",
+          "file": "authorization_registry/provider_cache.integration_test.ts",
+          "testName": "authorization-registry.provider-cache resolves over NATS and applies live revocation",
+          "runtime": "live-trellis"
+        },
+        "rust": {
+          "module": "rpc",
+          "function": "authorization_registry_provider_cache_is_nats_local_and_revocation_live"
+        }
+      }
+    },
+    {
       "id": "rpc.client-calls-service-success",
       "fixture": "rpc",
       "title": "Client calls a service RPC and receives a successful typed response",

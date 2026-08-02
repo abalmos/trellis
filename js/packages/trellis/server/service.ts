@@ -4,14 +4,13 @@ import {
   type NatsConnection,
   type Subscription,
 } from "@nats-io/nats-core";
-import type { KVError, StoreError } from "../errors/index.ts";
+import type { StoreError } from "../errors/index.ts";
 import { TypedKV } from "../kv.ts";
 import {
   type StoreWaitOptions,
   TypedStore,
-  TypedStoreEntry,
+  type TypedStoreEntry,
 } from "../store.ts";
-import { AUTH_SESSION_API } from "../session_baseline.ts";
 import {
   TrellisServiceRuntime,
   type TrellisServiceRuntimeFor,
@@ -31,6 +30,7 @@ import {
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
   type AuthorizationContextPersistence,
+  AuthorizationProviderCache,
   MemoryAuthorizationContextStore,
   startAuthorizationContextRefresh,
 } from "../auth/authorization_context.ts";
@@ -38,7 +38,10 @@ import {
   ContractResourceBindingsSchema,
   type InferSchemaType,
 } from "../contracts.ts";
-import type { RuntimeApi } from "../contract_support/runtime.ts";
+import type {
+  PermissionAtomV1,
+  RuntimeApi,
+} from "../contract_support/runtime.ts";
 import type { TrellisContractV1 } from "../contract_support/mod.ts";
 import { compileProtocolArtifacts } from "../contract_support/protocol_artifacts.ts";
 import type {
@@ -55,7 +58,6 @@ import {
   type ConnectedActionName,
   lowerCamelSurfaceName,
 } from "../contract_support/surface_names.ts";
-import type { CallerRuntime } from "../caller.ts";
 import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
@@ -76,7 +78,7 @@ import {
   ServiceHealthRuntime,
 } from "./health.ts";
 import { publishHealthHeartbeatSample } from "../health_transport.ts";
-import type { EventDesc, RPCDesc } from "../contracts.ts";
+import type { EventDesc } from "../contracts.ts";
 import type {
   AcceptedOperation,
   ActiveEventFacade,
@@ -105,11 +107,7 @@ import {
   annotateHandlerBoundaryError,
   createTrellisInternal,
 } from "../session.ts";
-import type {
-  NatsConnectFn,
-  NatsConnectOpts,
-  TrellisServiceRuntimeDeps,
-} from "./runtime.ts";
+import type { NatsConnectOpts, TrellisServiceRuntimeDeps } from "./runtime.ts";
 import { ServiceTransfer } from "./transfer.ts";
 import { logger as noopLogger, type LoggerLike } from "../globals.ts";
 import {
@@ -127,7 +125,7 @@ import {
 } from "../runtime_transport.ts";
 import { serverLogger } from "../server_logger.ts";
 import {
-  TransferError,
+  type TransferError,
   TransportError,
   UnexpectedError,
   ValidationError,
@@ -137,7 +135,6 @@ import {
   ActiveJob as PublicActiveJob,
   decodeJobUpdateEnvelope,
   type JobHandlerOptions,
-  type JobIdentity,
   type JobLogEntry,
   JobNotEnqueuedError,
   type JobProgress,
@@ -173,7 +170,6 @@ import type {
 } from "./internal_jobs/bindings.ts";
 import type { ActiveJob as InternalActiveJob } from "./internal_jobs/active-job.ts";
 import {
-  type Job as InternalJob,
   type JobContext as InternalJobContext,
   type JobEvent as InternalJobEvent,
   JobEventSchema,
@@ -313,15 +309,6 @@ type ResourceBindingEventConsumer = {
   maxDeliver: number;
   backoffMs: number[];
 };
-
-const ClientTransportEndpointsSchema = Type.Object({
-  natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-});
-
-const ClientTransportsSchema = Type.Object({
-  native: Type.Optional(ClientTransportEndpointsSchema),
-  websocket: Type.Optional(ClientTransportEndpointsSchema),
-});
 
 type ServiceBootstrapConnectInfo = {
   sessionId: string;
@@ -502,27 +489,6 @@ function getErrorCauseMessage(error: unknown): string {
   }
 
   return error instanceof Error ? error.message : String(error);
-}
-
-function bootstrapContractStateError(args: {
-  serviceName: string;
-  contractId: string;
-  contractDigest: string;
-  step: "catalog lookup" | "bindings lookup";
-  cause?: unknown;
-}): Error {
-  const base =
-    `Service '${args.serviceName}' could not bootstrap contract '${args.contractId}' (${args.contractDigest}) during ${args.step}. ` +
-    "This usually means Trellis has stale or incomplete state for this service session. " +
-    "Accept the pending deployment authority plan or re-run authority reconciliation so Trellis records current permissions and resource bindings for this instance key.";
-  const cause = args.cause
-    ? ` Underlying error: ${getErrorCauseMessage(args.cause)}`
-    : "";
-  return new Error(base + cause);
-}
-
-function runtimeImport<TModule>(specifier: string): Promise<TModule> {
-  return import(specifier) as Promise<TModule>;
 }
 
 function delay(ms: number): Promise<void> {
@@ -1883,6 +1849,7 @@ export async function createConnectedService<
   auth: SessionAuth;
   nc: NatsConnection;
   inboxPrefix: string;
+  contextDigest: string | (() => string);
   contractId?: string;
   contractDigest?: string;
   participantDigest?: string;
@@ -1898,6 +1865,7 @@ export async function createConnectedService<
   durableEventConsumerBeforeReadinessCheck?: TrellisServiceRuntimeDeps[
     "durableEventConsumerBeforeReadinessCheck"
   ];
+  authorizationProviderCache?: AuthorizationProviderCache;
 }): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>> {
   const resolvedLog = resolveServiceLogger(args.server.log);
   const connection = observeNatsTrellisConnection({
@@ -1909,21 +1877,28 @@ export async function createConnectedService<
       context: { service: args.name },
     },
   });
+  if (args.authorizationProviderCache) {
+    connection.subscribe((status) =>
+      args.authorizationProviderCache?.observeConnectionPhase(status.phase)
+    );
+  }
   const currentApi = (args.server.trellisApi ?? args.server.api) as
     & TOwnedApi
     & TTrellisApi;
   const runtimeApi = {
     ...currentApi,
-    rpc: {
-      ...AUTH_SESSION_API.rpc,
-      ...currentApi.rpc,
-    },
+    rpc: currentApi.rpc,
   } as TOwnedApi & TTrellisApi;
 
   const server = TrellisServiceRuntime.create(
     args.name,
     args.nc,
-    { sessionKey: args.auth.sessionKey, sign: args.auth.sign },
+    {
+      sessionKey: args.auth.sessionKey,
+      sign: args.auth.sign,
+      contextDigest: args.contextDigest,
+      authorizationProviderCache: args.auth.authorizationProviderCache,
+    },
     {
       log: resolvedLog,
       timeout: args.server.timeout,
@@ -1945,7 +1920,12 @@ export async function createConnectedService<
   const outbound = createTrellisInternal<TTrellisApi>(
     args.name,
     args.nc,
-    { sessionKey: args.auth.sessionKey, sign: args.auth.sign },
+    {
+      sessionKey: args.auth.sessionKey,
+      sign: args.auth.sign,
+      contextDigest: args.contextDigest,
+      authorizationProviderCache: args.auth.authorizationProviderCache,
+    },
     {
       log: resolvedLog,
       timeout: args.server.timeout,
@@ -2766,13 +2746,6 @@ function subscribeToJobUpdates(args: {
     };
     const abort = () => close();
     args.options?.signal?.addEventListener("abort", abort, { once: true });
-    try {
-      await args.nc.flush();
-    } catch (cause) {
-      close();
-      args.options?.signal?.removeEventListener("abort", abort);
-      return Result.err(toUnexpectedError(cause));
-    }
     if (args.options?.signal?.aborted) close();
 
     const updates: JobUpdateSubscription<unknown> = {
@@ -2915,7 +2888,6 @@ function createJobsFacade<
               jobs: jobsBinding,
               keyCoordinator,
             });
-            await args.nc.flush();
             const created = await manager.create(queueType, payload);
             return Result.ok(createJobRef({
               nc: args.nc,
@@ -2955,7 +2927,6 @@ function createJobsFacade<
               jobs: jobsBinding,
               keyCoordinator,
             });
-            await args.nc.flush();
             const outcome = await manager.submit(queueType, payload);
             if (outcome.kind === "accepted") {
               return Result.ok({
@@ -3404,12 +3375,13 @@ export function connectTrellisServiceWithRuntimeDeps<
       const { authenticator, inboxPrefix } = await sessionAuth
         .natsConnectOptions({
           sessionId: bootstrap.connectInfo.sessionId,
-          participantDigest: bootstrap.connectInfo.participantDigest,
           contextDigest: () => authorizationContexts.current().contextDigest,
           jwt: () => authorizationContexts.routingJwt(),
         });
 
-      let nc: NatsConnection;
+      let nc: NatsConnection | undefined;
+      let authorizationProviderCache: AuthorizationProviderCache | undefined;
+      let stopContextRefresh: (() => void) | undefined;
       try {
         const natsStartedAt = performance.now();
         nc = await runtimeDeps.connect({
@@ -3421,15 +3393,29 @@ export function connectTrellisServiceWithRuntimeDeps<
           inboxPrefix,
           authenticator,
         });
-        const stopContextRefresh = startAuthorizationContextRefresh({
+        const connectedNats = nc;
+        authorizationProviderCache = await AuthorizationProviderCache.attach(
+          connectedNats,
+          authorizationContexts.bundle().trust.authorizationRegistry,
+          authorizationContexts,
+        );
+        authorizationProviderCache.start();
+        await authorizationProviderCache.waitReady();
+        runtimeDeps.authorizationProviderReady?.(
+          authorizationProviderCache,
+          connectedNats,
+          authorizationContexts,
+        );
+        stopContextRefresh = startAuthorizationContextRefresh({
           trellisUrl: args.trellisUrl,
           sessionId: bootstrap.connectInfo.sessionId,
           auth: sessionAuth,
           cache: authorizationContexts,
-          onTerminalFailure: () => nc.drain(),
+          onTerminalFailure: () => connectedNats.drain(),
         });
-        void nc.closed().finally(() => {
-          stopContextRefresh();
+        void connectedNats.closed().finally(() => {
+          stopContextRefresh?.();
+          authorizationProviderCache?.stop();
         });
         recordTrellisDuration(
           "trellis.connect.duration",
@@ -3441,6 +3427,9 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
         );
       } catch (cause) {
+        authorizationProviderCache?.stop();
+        stopContextRefresh?.();
+        if (nc && !nc.isClosed()) await nc.close();
         throw new TransportError({
           code: "trellis.runtime.connect_failed",
           message: "Trellis could not open the service runtime connection.",
@@ -3454,6 +3443,16 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
         });
       }
+
+      if (!nc || !authorizationProviderCache) {
+        throw new Error(
+          "Trellis service runtime connection was not established",
+        );
+      }
+      const serviceAuth: SessionAuth = {
+        ...sessionAuth,
+        authorizationProviderCache,
+      };
 
       try {
         const contractRuntime = getContractRuntime(args.contract);
@@ -3470,9 +3469,10 @@ export function connectTrellisServiceWithRuntimeDeps<
           ContractKvOf<TContract>
         >({
           name: args.name,
-          auth: sessionAuth,
+          auth: serviceAuth,
           nc,
           inboxPrefix,
+          contextDigest: () => authorizationContexts.current().contextDigest,
           contractId: args.contract.CONTRACT_ID,
           contractDigest: args.contract.CONTRACT_DIGEST,
           participantDigest: bootstrap.connectInfo.participantDigest,
@@ -3493,6 +3493,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
           durableEventConsumerBeforeReadinessCheck:
             runtimeDeps.durableEventConsumerBeforeReadinessCheck,
+          authorizationProviderCache,
         });
         recordTrellisDuration(
           "trellis.connect.duration",
@@ -3513,6 +3514,37 @@ export function connectTrellisServiceWithRuntimeDeps<
         cause instanceof TransportError ? cause : toUnexpectedError(cause),
       );
     }
+  })());
+}
+
+/** Connects the typed service facade with a live provider-cache test hook. @internal */
+export function connectTrellisServiceWithAuthorizationTestHook<
+  const TContract extends ServiceContract<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ContractJobsMetadata,
+    ContractKvMetadata
+  >,
+>(
+  args: TrellisServiceConnectArgs<TContract>,
+  authorizationProviderReady: NonNullable<
+    TrellisServiceRuntimeDeps["authorizationProviderReady"]
+  >,
+): AsyncResult<
+  ConnectedTrellisService<TContract>,
+  TransportError | UnexpectedError
+> {
+  return AsyncResult.from((async () => {
+    const connected = await connectTrellisServiceWithRuntimeDeps(args, {
+      authorizationProviderReady,
+    });
+    if (isErr(connected)) return connected;
+    return Result.ok(createProviderRuntime(
+      connected.unwrapOrElse(() => {
+        throw new Error("Connected service result narrowed incorrectly");
+      }),
+      args.contract,
+    ));
   })());
 }
 
@@ -3779,12 +3811,10 @@ export class TrellisServiceSession<
             });
             if (submission.mode === "create") {
               const job = await manager.createPrepared(submission);
-              await this.#nc.flush();
               return Result.ok({ kind: "accepted", jobId: job.id });
             }
 
             const outcome = await manager.submitPrepared(submission);
-            await this.#nc.flush();
             if (outcome.kind === "accepted") {
               return Result.ok({
                 kind: outcome.kind,
@@ -3933,6 +3963,8 @@ export class TrellisServiceSession<
     store: string;
     key: string;
     sessionKey: string;
+    permission: PermissionAtomV1;
+    requiredCapabilities?: readonly string[];
     inboxPrefix: string;
     expiresInMs?: number;
   }): AsyncResult<ReceiveTransferGrant, TransferError> {
@@ -3941,6 +3973,8 @@ export class TrellisServiceSession<
         store: args.store,
         key: args.key,
         sessionKey: args.sessionKey,
+        permission: args.permission,
+        requiredCapabilities: args.requiredCapabilities,
         inboxPrefix: args.inboxPrefix,
         expiresInMs: args.expiresInMs ?? 60_000,
       }),

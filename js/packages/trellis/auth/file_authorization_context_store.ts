@@ -54,7 +54,7 @@ export class FileAuthorizationContextStore
       const state = await this.#load();
       if (
         (expectedContextDigest !== undefined &&
-          (state?.context?.contextDigest ?? null) !== expectedContextDigest) ||
+          (state?.contextDigest ?? null) !== expectedContextDigest) ||
         (expectedBootstrapJwt !== undefined &&
           (state?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
       ) return false;
@@ -62,6 +62,7 @@ export class FileAuthorizationContextStore
         await this.#write({
           ...state,
           context: null,
+          contextDigest: null,
           contextExpiresAt: null,
           routing: null,
         });

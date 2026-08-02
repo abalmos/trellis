@@ -12,3 +12,17 @@ pub const CONTRACT_JSON: &str = "{\"capabilities\":{\"trellis.jobs::admin.mutate
 pub fn contract_manifest() -> crate::contracts::ContractManifest {
     serde_json::from_str(CONTRACT_JSON).expect("generated manifest json")
 }
+/// Register every generated RPC descriptor as router metadata.
+pub fn register_rpc_metadata(router: &mut crate::service::Router) {
+    router.set_api_id(CONTRACT_ID);
+    router.register_rpc_metadata::<super::rpc::JobsCancelRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsDismissDLQRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsGetKeyRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsInspectRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsListDLQRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsListServicesRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsMetricsRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsQueryRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsReplayDLQRpc>();
+    router.register_rpc_metadata::<super::rpc::JobsRetryRpc>();
+}

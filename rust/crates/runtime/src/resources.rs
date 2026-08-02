@@ -9,6 +9,7 @@ use crate::supervisor::RuntimeError;
 use crate::{RuntimeConfig, RuntimeMode, SubsystemName};
 
 pub(crate) const EVENT_STREAM: &str = "trellis";
+pub(crate) const EVENT_STREAM_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub(crate) const JOBS_STREAM: &str = "JOBS";
 pub(crate) const JOBS_WORK_STREAM: &str = "JOBS_WORK";
 pub(crate) const JOBS_ADVISORIES_STREAM: &str = "JOBS_ADVISORIES";
@@ -108,6 +109,7 @@ fn event_stream_config() -> stream::Config {
         retention: stream::RetentionPolicy::Limits,
         storage: stream::StorageType::File,
         discard: stream::DiscardPolicy::Old,
+        max_age: EVENT_STREAM_RETENTION,
         ..Default::default()
     }
 }

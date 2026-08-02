@@ -41,7 +41,6 @@ const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
 pub(crate) const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
 pub(crate) const DEFAULT_TRANSPORT_MAX_BYTES: i64 = 1_073_741_824;
 const DEFAULT_HISTORY_RETENTION_DAYS: i64 = 30;
-const AUTH_VALIDATE_TIMEOUT_MS: u64 = 5_000;
 const RPC_SUBJECTS: &[&str] = &[
     "rpc.v1.Health.Query",
     "rpc.v1.Health.Inspect",
@@ -96,6 +95,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let router = build_router(store.clone(), invalidation_tx.clone());
     let stop = StopHandle::new();
     let task_stop = stop.clone();
+    let mut validator_join =
+        crate::platform::auth::verifier::ensure_read_only(context, task_stop.clone()).await?;
     let nats = context.trellis_nats.clone();
     let history_days = context
         .config
@@ -104,9 +105,15 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .and_then(|health| health.history_retention_days)
         .map(i64::from)
         .unwrap_or(DEFAULT_HISTORY_RETENTION_DAYS);
-    let event_auth = Arc::new(load_event_auth(&context.config)?);
+    let event_auth_pair = load_event_auth(&context.config)?;
+    let event_context_digest = event_auth_pair.1;
+    let event_auth = Arc::new(event_auth_pair.0);
+    let verifier: std::sync::Arc<dyn trellis_rs::service::RequestValidator> =
+        match context.platform_verifier.get() {
+            Some(verifier) => std::sync::Arc::new(verifier.clone()),
+            None => std::sync::Arc::new(crate::platform::auth::verifier::DenyAllValidator),
+        };
     let join = tokio::spawn(async move {
-        let request_auth = event_auth.clone();
         let invalidation_loop = run_invalidation_subscriber(
             nats.clone(),
             invalidation_subject.clone(),
@@ -121,22 +128,46 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             invalidation_subject,
             history_days,
             event_auth,
+            event_context_digest,
             task_stop.clone(),
         );
         let api_loop = run_builtin_authenticated_router(
             nats,
-            request_auth,
-            AUTH_VALIDATE_TIMEOUT_MS,
+            "trellis.health@v1",
             RPC_SUBJECTS,
             router,
+            verifier,
         );
         tokio::pin!(invalidation_loop, owner_loop, api_loop);
-        tokio::select! {
-            result = &mut invalidation_loop => result,
-            result = &mut owner_loop => result,
-            result = &mut api_loop => result.map_err(|error| RuntimeError::Health(error.to_string())),
-            () = task_stop.stopped() => Ok(()),
+        let result = {
+            let validator_exit = async {
+                match validator_join.as_mut() {
+                    Some(join) => match join.await {
+                        Ok(Ok(())) => Err(RuntimeError::Platform(
+                            "authorization validator cache exited unexpectedly".to_owned(),
+                        )),
+                        Ok(Err(error)) => Err(error),
+                        Err(error) => Err(RuntimeError::Platform(format!(
+                            "authorization validator cache task failed: {error}"
+                        ))),
+                    },
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::pin!(validator_exit);
+            tokio::select! {
+                result = &mut invalidation_loop => result,
+                result = &mut owner_loop => result,
+                result = &mut api_loop => result.map_err(|error| RuntimeError::Health(error.to_string())),
+                result = &mut validator_exit => result,
+                () = task_stop.stopped() => Ok(()),
+            }
+        };
+        task_stop.stop();
+        if let Some(join) = validator_join {
+            let _ = join.await;
         }
+        result
     });
 
     Ok(SubsystemHandle {
@@ -260,6 +291,7 @@ async fn run_owner(
     invalidation_subject: String,
     history_days: i64,
     event_auth: Arc<SessionAuth>,
+    event_context_digest: String,
     stop: StopHandle,
 ) -> Result<(), RuntimeError> {
     tracing::debug!(
@@ -307,7 +339,13 @@ async fn run_owner(
                     publish_invalidation(&nats, &invalidation_subject, commit).await?;
                 }
             }
-            _ = outbox.tick() => publish_outbox(&nats, &store, &event_auth).await?,
+            _ = outbox.tick() => publish_outbox(
+                &nats,
+                &store,
+                &event_auth,
+                &event_context_digest,
+            )
+            .await?,
             _ = retention.tick() => {
                 let cutoff = now_ns().saturating_sub(
                     history_days.saturating_mul(24 * 60 * 60 * 1_000_000_000),
@@ -455,13 +493,14 @@ async fn publish_outbox(
     nats: &async_nats::Client,
     store: &HealthStore,
     auth: &SessionAuth,
+    context_digest: &str,
 ) -> Result<(), RuntimeError> {
     let jetstream = jetstream::new(nats.clone());
     for transition in store
         .pending_transitions(100)
         .map_err(map_runtime_store_error)?
     {
-        let headers = transition_headers(auth, &transition)?;
+        let headers = transition_headers(auth, context_digest, &transition)?;
         match jetstream
             .publish_with_headers(
                 STATUS_CHANGED_SUBJECT.to_string(),
@@ -488,6 +527,7 @@ async fn publish_outbox(
 
 fn transition_headers(
     auth: &SessionAuth,
+    context_digest: &str,
     transition: &store::PendingTransition,
 ) -> Result<HeaderMap, RuntimeError> {
     let event_time = store::rfc3339(transition.created_at_ns).map_err(map_runtime_store_error)?;
@@ -495,28 +535,41 @@ fn transition_headers(
     headers.insert("Nats-Msg-Id", transition.event_id.as_str());
     headers.insert(EVENT_TIME_HEADER, event_time.as_str());
     headers.insert("session-key", auth.session_key.as_str());
+    headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",
-        auth.create_event_proof(
+        auth.create_event_proof_v2(
+            context_digest,
             STATUS_CHANGED_SUBJECT,
             &transition.payload,
             &transition.event_id,
             &event_time,
         )
+        .map_err(|error| RuntimeError::Health(format!("invalid event proof: {error}")))?
         .as_str(),
     );
     Ok(headers)
 }
 
-fn load_event_auth(config: &crate::RuntimeConfig) -> Result<SessionAuth, RuntimeError> {
+fn load_event_auth(config: &crate::RuntimeConfig) -> Result<(SessionAuth, String), RuntimeError> {
     let path = config.event_session_seed_file.as_ref().ok_or_else(|| {
         RuntimeError::Health("event_session_seed_file is required for health mode".to_string())
     })?;
     let seed = std::fs::read_to_string(path).map_err(|error| {
         RuntimeError::Health(format!("failed to read '{}': {error}", path.display()))
     })?;
-    SessionAuth::from_seed_base64url(seed.trim())
-        .map_err(|error| RuntimeError::Health(format!("invalid event session seed: {error}")))
+    let auth = SessionAuth::from_seed_base64url(seed.trim())
+        .map_err(|error| RuntimeError::Health(format!("invalid event session seed: {error}")))?;
+    let digest_path = config.event_context_digest_file.as_ref().ok_or_else(|| {
+        RuntimeError::Health("event_context_digest_file is required for health mode".to_string())
+    })?;
+    let context_digest = std::fs::read_to_string(digest_path).map_err(|error| {
+        RuntimeError::Health(format!(
+            "failed to read '{}': {error}",
+            digest_path.display()
+        ))
+    })?;
+    Ok((auth, context_digest.trim().to_owned()))
 }
 
 async fn publish_invalidation(
@@ -604,7 +657,7 @@ fn now_ns() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_rs::client::verify_event_proof;
+    use trellis_rs::client::verify_event_proof_v2;
 
     #[test]
     fn heartbeat_subject_identity_is_authoritative() {
@@ -638,17 +691,27 @@ mod tests {
     fn status_transition_headers_are_signed() {
         let auth = SessionAuth::from_seed_base64url("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
             .expect("session auth");
+        let context_digest = "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c";
         let transition = store::PendingTransition {
             event_id: "01J00000000000000000000000".to_string(),
             created_at_ns: 1_767_225_600_000_000_000,
             payload: br#"{"status":"offline"}"#.to_vec(),
         };
-        let headers = transition_headers(&auth, &transition).expect("signed headers");
+        let headers =
+            transition_headers(&auth, context_digest, &transition).expect("signed headers");
+        assert_eq!(
+            headers
+                .get("authorization-context")
+                .expect("authorization-context")
+                .as_str(),
+            context_digest
+        );
         let event_time = headers.get(EVENT_TIME_HEADER).expect("event time").as_str();
         let proof = headers.get("proof").expect("proof").as_str();
 
-        assert!(verify_event_proof(
+        assert!(verify_event_proof_v2(
             &auth.session_key,
+            context_digest,
             STATUS_CHANGED_SUBJECT,
             &transition.payload,
             &transition.event_id,

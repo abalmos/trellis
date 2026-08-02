@@ -17,6 +17,13 @@ const OrdersGet = rpcAction(
   "Orders.Get",
   {
     subject: "rpc.v1.Orders.Get",
+    permission: Object.freeze({
+      apiId: "orders@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Orders.Get",
+      action: "call",
+    }),
     input: Empty,
     output: Empty,
     callerCapabilities: [],
@@ -28,6 +35,20 @@ const OrdersChanged = eventActions(
   "Orders.Changed",
   {
     subject: "events.v1.Orders.Changed",
+    publishPermission: Object.freeze({
+      apiId: "orders@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Orders.Changed",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "orders@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Orders.Changed",
+      action: "subscribe",
+    }),
     event: Empty,
     publishCapabilities: [],
     subscribeCapabilities: [],
@@ -40,6 +61,13 @@ const HealthQuery = rpcAction(
   "Health.Query",
   {
     subject: "rpc.v1.Health.Query",
+    permission: Object.freeze({
+      apiId: "trellis.health@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Health.Query",
+      action: "call",
+    }),
     input: Empty,
     output: Empty,
     callerCapabilities: [],
@@ -50,18 +78,39 @@ const HealthQuery = rpcAction(
 const acronymActions = [
   rpcAction("ai@v1", "AI.GenerateJSON", {
     subject: "rpc.v1.AI.GenerateJSON",
+    permission: Object.freeze({
+      apiId: "ai@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "AI.GenerateJSON",
+      action: "call",
+    }),
     input: Empty,
     output: Empty,
     callerCapabilities: [],
   }, "AIGenerateJSON"),
   rpcAction("ai@v1", "AI.OCR", {
     subject: "rpc.v1.AI.OCR",
+    permission: Object.freeze({
+      apiId: "ai@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "AI.OCR",
+      action: "call",
+    }),
     input: Empty,
     output: Empty,
     callerCapabilities: [],
   }, "AIOCR"),
   rpcAction("jobs@v1", "Jobs.ListDLQ", {
     subject: "rpc.v1.Jobs.ListDLQ",
+    permission: Object.freeze({
+      apiId: "jobs@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Jobs.ListDLQ",
+      action: "call",
+    }),
     input: Empty,
     output: Empty,
     callerCapabilities: [],

@@ -277,9 +277,9 @@ Required descriptor semantics:
   wildcard subscribe subject metadata, and enough logic to derive a concrete
   publish subject from an event value when the subject is templated
 - generated server descriptors and authenticated routers must propagate the
-  required caller capabilities for the matched RPC or operation-control action
-  into `Auth.Requests.Validate`; the auth validator, not only local Rust
-  routing, enforces those capabilities against the caller session
+  exact API identity, surface, action, and required capabilities for the matched
+  RPC, event, feed, or operation-control action into the provider-local
+  context-bound verifier
 
 Generated participant facades expose contract-driven connection helpers through
 the public `trellis` facade. The facade may delegate to low-level runtime

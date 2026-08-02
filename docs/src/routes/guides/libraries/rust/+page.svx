@@ -268,6 +268,20 @@ exists for generated code, not application code. If a generated facade lacks a
 declared capability, fix the contract or generator rather than importing a
 lower-level transport type.
 
+HTTP is limited to browser flows, initial bootstrap, proof-bound restart
+recovery, and public immutable trust. Connected control uses generated RPC,
+operation, and event APIs over NATS; service code must not call HTTP context,
+revocation, logout, or client-bootstrap endpoints. Provider authorization
+evidence is read from the internal NATS KV registry with readiness and bounded
+watch staleness; registry handles and subjects are not service APIs, and ordinary
+request/event cache hits perform no external I/O.
+
+Trust rotation is generation-exact: accepted manifest generation and digest,
+issuer key, and certificate digest stay bound together; historical evidence is
+not rebound to a current certificate by issuer key alone. Context refresh is
+restart recovery and returns the route, session, NATS, and context material
+needed to reconnect.
+
 ## Rustdoc
 
 Use the [API Reference](/api) for runtime Rustdoc. Generated crate source is the

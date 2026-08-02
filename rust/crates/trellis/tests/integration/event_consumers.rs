@@ -1,15 +1,19 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex, Notify};
 use trellis_rs::client::EventDescriptor;
 use trellis_rs::service::{
-    ConnectedServiceRuntime, ServiceEventListenOptions, ServiceEventListenerContext,
+    ConnectedServiceRuntime, ServerError, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerMode, ServiceRuntimeError,
 };
 
 use crate::support::assertions::assert_runtime_case_registered;
+
+const SOURCE_CONTRACT_ID: &str = "trellis.integration.event-consumers-source-rust@v1";
 
 struct EventConsumerContract;
 
@@ -348,7 +352,8 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
     .await;
 
     let result = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, _context| async { Ok(()) },
             ServiceEventListenOptions::default(),
         )
@@ -393,7 +398,8 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
     let release_first = Arc::new(Notify::new());
     let first_finished = Arc::new(Notify::new());
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             {
                 let first_started = Arc::clone(&first_started);
                 let second_started = Arc::clone(&second_started);
@@ -431,7 +437,8 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
     wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 2).await;
 
     let conflicting = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, _context| async { Ok(()) },
             ServiceEventListenOptions {
                 mode: ServiceEventListenerMode::Durable,
@@ -486,6 +493,227 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
 }
 
 #[tokio::test]
+async fn event_consumers_handler_failure_redelivers_same_event() {
+    assert_runtime_case_registered(
+        "event-consumers.handler-failure-redelivers-same-event",
+        "event-consumers",
+        "event_consumers",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    admin
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .await
+        .expect("approve source contract");
+    let consumer = connect_consumer(
+        &mut admin,
+        runtime.trellis_url(),
+        &bootstrap_url,
+        PARALLEL_DEPENDENCY_CONSUMER_JSON,
+        "event-consumers-redelivery-rust",
+    )
+    .await;
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let succeeded = Arc::new(Notify::new());
+    let listener = consumer
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
+            {
+                let attempts = Arc::clone(&attempts);
+                let succeeded = Arc::clone(&succeeded);
+                move |event, _context| {
+                    let attempts = Arc::clone(&attempts);
+                    let succeeded = Arc::clone(&succeeded);
+                    async move {
+                        assert_eq!(event.id, "rust-event-consumers-redelivery");
+                        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                            return Err(ServerError::Nats("fail once".to_owned()));
+                        }
+                        succeeded.notify_one();
+                        Ok(())
+                    }
+                }
+            },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Durable,
+                group: Some("ingest".to_owned()),
+                durable_name: None,
+                concurrency: 1,
+            },
+        )
+        .await
+        .expect("start redelivery listener");
+    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+
+    let publisher = admin
+        .connect_client(&bootstrap_url, &publisher_contract())
+        .await
+        .expect("connect event publisher client");
+    publisher
+        .publish::<SourcePingedEvent>(&EventRecord {
+            id: "rust-event-consumers-redelivery".to_owned(),
+            value: "redeliver".to_owned(),
+        })
+        .await
+        .expect("publish redelivery event");
+    tokio::time::timeout(Duration::from_secs(10), succeeded.notified())
+        .await
+        .expect("failed event was not redelivered");
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+
+    listener.abort();
+    let _ = listener.await;
+}
+
+#[tokio::test]
+async fn event_consumers_authorization_failures_redeliver_or_term() {
+    assert_runtime_case_registered(
+        "event-consumers.authorization-failures-redeliver-or-term",
+        "event-consumers",
+        "event_consumers",
+    );
+
+    let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    admin
+        .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+        .await
+        .expect("approve source contract");
+    let consumer = connect_consumer(
+        &mut admin,
+        runtime.trellis_url(),
+        &bootstrap_url,
+        PARALLEL_DEPENDENCY_CONSUMER_JSON,
+        "event-consumers-auth-redelivery-rust",
+    )
+    .await;
+    let provider = consumer.integration_test_authorization_provider();
+    let ack_observer = runtime
+        .start_jetstream_ack_observer()
+        .await
+        .expect("start JetStream ACK observer");
+    let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+    let listener = consumer
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
+            {
+                let observed = Arc::clone(&observed);
+                move |event, _context| {
+                    let observed = Arc::clone(&observed);
+                    async move {
+                        observed.lock().await.push(event.id);
+                        Ok(())
+                    }
+                }
+            },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Durable,
+                group: Some("ingest".to_owned()),
+                durable_name: None,
+                concurrency: 1,
+            },
+        )
+        .await
+        .expect("start authorization redelivery listener");
+    wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+    let durable = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+        .await
+        .remove(0);
+    let durable_name = consumer_name(&durable).to_owned();
+    let mut raw_events = consumer
+        .integration_test_nats()
+        .subscribe(durable.filter_subjects[0].clone())
+        .await
+        .expect("subscribe to raw test events");
+
+    let publisher = admin
+        .connect_client(&bootstrap_url, &publisher_contract())
+        .await
+        .expect("connect first event publisher");
+    provider.integration_test_fail_next_readiness_check();
+    publisher
+        .publish::<SourcePingedEvent>(&EventRecord {
+            id: "rust-event-auth-not-ready".into(),
+            value: "retry".into(),
+        })
+        .await
+        .expect("publish while provider is unready");
+    wait_for_ack_payload(&ack_observer, &durable_name, "-NAK").await;
+    wait_for_observed_vec_id(&observed, "rust-event-auth-not-ready").await;
+
+    let publisher = admin
+        .connect_client(&bootstrap_url, &publisher_contract())
+        .await
+        .expect("connect second event publisher");
+    provider.integration_test_fail_next_context_read();
+    publisher
+        .publish::<SourcePingedEvent>(&EventRecord {
+            id: "rust-event-auth-read-retry".into(),
+            value: "retry".into(),
+        })
+        .await
+        .expect("publish before injected context read failure");
+    let raw = tokio::time::timeout(Duration::from_secs(5), raw_events.next())
+        .await
+        .expect("timed out waiting for raw event")
+        .expect("raw event subscription ended");
+    wait_for_observed_vec_id(&observed, "rust-event-auth-read-retry").await;
+
+    let mut headers = raw.headers.expect("published event headers");
+    headers.insert("proof", "invalid-event-proof");
+    headers.insert("Nats-Msg-Id", format!("evt_invalid_{}", ulid::Ulid::new()));
+    publisher
+        .integration_test_nats()
+        .publish_with_headers(raw.subject, headers, raw.payload)
+        .await
+        .expect("publish cryptographically invalid event");
+    wait_for_ack_payload(&ack_observer, &durable_name, "+TERM").await;
+    assert_eq!(observed.lock().await.len(), 2);
+
+    listener.abort();
+    let _ = listener.await;
+    ack_observer.stop().await;
+}
+
+async fn wait_for_observed_vec_id(observed: &Arc<Mutex<Vec<String>>>, expected: &str) {
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        if observed.lock().await.iter().any(|id| id == expected) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "event {expected} was not processed"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn wait_for_ack_payload(
+    observer: &trellis_test::TrellisJetStreamAckObserver,
+    consumer: &str,
+    payload: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if observer.frames().iter().any(|frame| {
+            frame.subject.contains(consumer)
+                && (frame.payload == payload
+                    || (payload == "-NAK" && frame.payload.starts_with("-NAK")))
+        }) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "consumer {consumer} did not emit {payload}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+#[tokio::test]
 async fn event_consumers_strict_group_rejects_parallel_workers() {
     assert_runtime_case_registered(
         "event-consumers.strict-group-rejects-parallel-workers",
@@ -509,7 +737,8 @@ async fn event_consumers_strict_group_rejects_parallel_workers() {
     .await;
 
     let result = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, _context| async { Ok(()) },
             ServiceEventListenOptions {
                 mode: ServiceEventListenerMode::Durable,
@@ -551,7 +780,8 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
     .await;
 
     let ambiguous = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, _context| async { Ok(()) },
             ServiceEventListenOptions::default(),
         )
@@ -572,7 +802,8 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
     ));
     let handler_observed = Arc::clone(&observed);
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {
@@ -632,7 +863,8 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
     .await;
 
     let result = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, _context| async { Ok(()) },
             ServiceEventListenOptions {
                 mode: ServiceEventListenerMode::Durable,
@@ -689,7 +921,8 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
     ));
     let handler_observed = Arc::clone(&observed);
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {
@@ -771,7 +1004,8 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     ));
     let handler_observed = Arc::clone(&observed);
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {
@@ -852,7 +1086,8 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
     let observed_ping = Arc::new(Mutex::new(None::<String>));
     let handler_observed_ping = Arc::clone(&observed_ping);
     let ping_listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed_ping = Arc::clone(&handler_observed_ping);
                 async move {
@@ -878,7 +1113,8 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
     let (release_handler_tx, release_handler_rx) = oneshot::channel::<()>();
     let release_handler_rx = Arc::new(Mutex::new(Some(release_handler_rx)));
     let pong_listener = consumer
-        .listen_event::<SourcePongedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePongedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed_pong = Arc::clone(&handler_observed_pong);
                 let handler_started_tx = Arc::clone(&handler_started_tx);
@@ -998,7 +1234,8 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
     let observed = Arc::new(Mutex::new(Vec::<String>::new()));
     let handler_observed = Arc::clone(&observed);
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {
@@ -1077,7 +1314,8 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
     let observed = Arc::new(Mutex::new(Vec::<String>::new()));
     let first_observed = Arc::clone(&observed);
     let first_listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let first_observed = Arc::clone(&first_observed);
                 async move {
@@ -1100,7 +1338,8 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
         .expect("start first duplicate listener");
     let second_observed = Arc::clone(&observed);
     let second_listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let second_observed = Arc::clone(&second_observed);
                 async move {
@@ -1367,7 +1606,8 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
     let observed = Arc::new(Mutex::new(Vec::<String>::new()));
     let handler_observed = Arc::clone(&observed);
     let listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed = Arc::clone(&handler_observed);
                 async move {
@@ -1443,7 +1683,8 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
     let observed_ping = Arc::new(Mutex::new(None::<String>));
     let handler_observed_ping = Arc::clone(&observed_ping);
     let ping_listener = consumer
-        .listen_event::<SourcePingedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             move |event, context| {
                 let handler_observed_ping = Arc::clone(&handler_observed_ping);
                 async move {
@@ -1480,7 +1721,8 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
     assert_eq!(*observed_ping.lock().await, None);
 
     let pong_listener = consumer
-        .listen_event::<SourcePongedEvent, _, _>(
+        .listen_event_with_api_id::<SourcePongedEvent, _, _>(
+            SOURCE_CONTRACT_ID,
             |_event, context| async move {
                 assert_eq!(context.group.as_deref(), Some("paired"));
                 Ok(())

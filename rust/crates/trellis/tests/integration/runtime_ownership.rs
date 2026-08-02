@@ -7,6 +7,7 @@ use std::time::Duration;
 use async_nats::jetstream::{self, kv};
 use async_nats::ConnectOptions;
 use bytes::Bytes;
+use futures_util::StreamExt;
 
 const TEST_NAME: &str = "runtime_ownership::runtime_singleton_ownership_lifecycle";
 const INCOMPATIBLE_BUCKET_TEST_NAME: &str =
@@ -151,6 +152,7 @@ async fn runtime_singleton_ownership_lifecycle() {
     let first_config = runtime.workdir().join("jobs-first.toml");
     let mut first = RuntimeProcess::start(&runtime, "jobs", &first_config, "jobs-first");
     first.wait_ready().await;
+    assert_jobs_owner_consumers(&client).await;
 
     let blocked_storage = runtime.workdir().join("blocked-jobs.sqlite");
     std::fs::create_dir(&blocked_storage).expect("create path that SQLite cannot open as a file");
@@ -218,6 +220,7 @@ async fn runtime_singleton_ownership_lifecycle() {
     let mut all_runtime =
         RuntimeProcess::start(&runtime, "all", &all_runtime_config, "all-runtime");
     all_runtime.wait_ready().await;
+    assert_jobs_owner_consumers(&client).await;
     let manipulated_revision = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let jobs_entry = leases
@@ -430,6 +433,36 @@ async fn acquire_and_release(leases: &kv::Store, key: &str) {
         .unwrap_or_else(|error| panic!("release probed lease {key}: {error}"));
 }
 
+async fn assert_jobs_owner_consumers(client: &async_nats::Client) {
+    let jobs = jetstream::new(client.clone())
+        .get_stream("JOBS")
+        .await
+        .expect("open built-in Jobs stream");
+    let mut consumers = jobs.consumers();
+    let mut names = Vec::new();
+    while let Some(info) = consumers.next().await {
+        names.push(info.expect("inspect built-in Jobs consumer").name);
+    }
+    assert!(
+        names.iter().any(|name| name.starts_with("jobs-projector-")),
+        "Jobs projector did not start: {names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| name == "jobs-worker-presence-projector"),
+        "Jobs worker-presence projector did not start: {names:?}"
+    );
+    let advisories = jetstream::new(client.clone())
+        .get_stream("JOBS_ADVISORIES")
+        .await
+        .expect("open built-in Jobs advisories stream");
+    advisories
+        .consumer_info("jobs-advisories")
+        .await
+        .expect("Jobs advisory loop did not start");
+}
+
 async fn wait_to_acquire(leases: &kv::Store, key: &str) -> u64 {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
@@ -460,6 +493,9 @@ fn write_runtime_config(
     let session_seed = runtime
         .workdir()
         .join(&runtime.manifest().paths.session_seed);
+    let event_context_digest = runtime
+        .workdir()
+        .join(format!("{label}-event-context.digest"));
     let jobs_path = if label == "jobs-duplicate" {
         runtime.workdir().join("blocked-jobs.sqlite")
     } else {
@@ -468,6 +504,7 @@ fn write_runtime_config(
     let mut config = format!(
         r#"instance_name = "{label}"
 event_session_seed_file = "{}"
+event_context_digest_file = "{}"
 
 [http]
 port = {port}
@@ -487,6 +524,7 @@ ttl_ms = 3000
 renew_ms = 500
 "#,
         toml_path(&session_seed),
+        toml_path(&event_context_digest),
         runtime.nats_url(),
         toml_path(&nats_dir.join("auth-auth.creds")),
         toml_path(&nats_dir.join("trellis-auth.creds")),
@@ -502,18 +540,12 @@ path = "{}"
             toml_path(&jobs_path)
         ));
     }
-    if matches!(mode, "platform" | "all") {
-        config.push_str(&format!(
-            r#"
-[nats.auth_callout]
-issuer_signing_seed_file = "{}"
-target_signing_seed_file = "{}"
-xkey_seed_file = "{}"
-
+    let auth_dir = runtime.workdir().join("trellis/auth");
+    config.push_str(&format!(
+        r#"
 [auth.authorization]
 trust_root_file = "{}"
 issuer_manifest_file = "{}"
-issuer_certificate_files = ["{}"]
 issuer_signing_seed_file = "{}"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
@@ -528,6 +560,18 @@ maximum_capabilities = 256
 trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
+"#,
+        toml_path(&auth_dir.join("authorization-root.json")),
+        toml_path(&auth_dir.join("authorization-issuer-manifest.json")),
+        toml_path(&auth_dir.join("authorization-issuer.seed")),
+    ));
+    if matches!(mode, "platform" | "all") {
+        config.push_str(&format!(
+            r#"
+[nats.auth_callout]
+issuer_signing_seed_file = "{}"
+target_signing_seed_file = "{}"
+xkey_seed_file = "{}"
 
 [platform.storage]
 kind = "sqlite"
@@ -544,26 +588,6 @@ path = "{}"
                     .join("nats/secrets/auth-target-signing.seed")
             ),
             toml_path(&runtime.workdir().join("nats/secrets/auth-sx.seed")),
-            toml_path(
-                &runtime
-                    .workdir()
-                    .join("trellis/auth/authorization-root.json")
-            ),
-            toml_path(
-                &runtime
-                    .workdir()
-                    .join("trellis/auth/authorization-issuer-manifest.json")
-            ),
-            toml_path(
-                &runtime
-                    .workdir()
-                    .join("trellis/auth/authorization-issuer-certificate.json")
-            ),
-            toml_path(
-                &runtime
-                    .workdir()
-                    .join("trellis/auth/authorization-issuer.seed")
-            ),
             toml_path(&runtime.workdir().join(format!("{label}-platform.sqlite"))),
         ));
     }

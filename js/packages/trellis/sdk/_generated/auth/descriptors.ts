@@ -152,6 +152,13 @@ export const AuthCapabilitiesList = rpcAction(
   "Auth.Capabilities.List",
   {
     subject: "rpc.v1.Auth.Capabilities.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Capabilities.List",
+      action: "call",
+    }),
     input: schema<Types.AuthCapabilitiesListInput>(
       AuthCapabilitiesListRequestSchema,
     ),
@@ -192,6 +199,13 @@ export const AuthConnectionsKick = rpcAction(
   "Auth.Connections.Kick",
   {
     subject: "rpc.v1.Auth.Connections.Kick",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Connections.Kick",
+      action: "call",
+    }),
     input: schema<Types.AuthConnectionsKickInput>(
       AuthConnectionsKickRequestSchema,
     ),
@@ -232,6 +246,13 @@ export const AuthConnectionsList = rpcAction(
   "Auth.Connections.List",
   {
     subject: "rpc.v1.Auth.Connections.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Connections.List",
+      action: "call",
+    }),
     input: schema<Types.AuthConnectionsListInput>(
       AuthConnectionsListRequestSchema,
     ),
@@ -272,6 +293,13 @@ export const AuthDeploymentAuthorityAcceptMigration = rpcAction(
   "Auth.DeploymentAuthority.AcceptMigration",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.AcceptMigration",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.AcceptMigration",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityAcceptMigrationInput>(
       AuthDeploymentAuthorityAcceptMigrationRequestSchema,
     ),
@@ -312,6 +340,13 @@ export const AuthDeploymentAuthorityAcceptUpdate = rpcAction(
   "Auth.DeploymentAuthority.AcceptUpdate",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.AcceptUpdate",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityAcceptUpdateInput>(
       AuthDeploymentAuthorityAcceptUpdateRequestSchema,
     ),
@@ -352,6 +387,13 @@ export const AuthDeploymentAuthorityGet = rpcAction(
   "Auth.DeploymentAuthority.Get",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityGetInput>(
       AuthDeploymentAuthorityGetRequestSchema,
     ),
@@ -392,6 +434,13 @@ export const AuthDeploymentAuthorityList = rpcAction(
   "Auth.DeploymentAuthority.List",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityListInput>(
       AuthDeploymentAuthorityListRequestSchema,
     ),
@@ -432,6 +481,13 @@ export const AuthDeploymentAuthorityPlan = rpcAction(
   "Auth.DeploymentAuthority.Plan",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Plan",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Plan",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityPlanInput>(
       AuthDeploymentAuthorityPlanRequestSchema,
     ),
@@ -472,6 +528,13 @@ export const AuthDeploymentAuthorityPlansGet = rpcAction(
   "Auth.DeploymentAuthority.Plans.Get",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Plans.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Plans.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityPlansGetInput>(
       AuthDeploymentAuthorityPlansGetRequestSchema,
     ),
@@ -512,6 +575,13 @@ export const AuthDeploymentAuthorityPlansList = rpcAction(
   "Auth.DeploymentAuthority.Plans.List",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Plans.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Plans.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityPlansListInput>(
       AuthDeploymentAuthorityPlansListRequestSchema,
     ),
@@ -552,6 +622,13 @@ export const AuthDeploymentAuthorityReconcile = rpcAction(
   "Auth.DeploymentAuthority.Reconcile",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Reconcile",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Reconcile",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityReconcileInput>(
       AuthDeploymentAuthorityReconcileRequestSchema,
     ),
@@ -592,6 +669,13 @@ export const AuthDeploymentAuthorityReject = rpcAction(
   "Auth.DeploymentAuthority.Reject",
   {
     subject: "rpc.v1.Auth.DeploymentAuthority.Reject",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeploymentAuthority.Reject",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentAuthorityRejectInput>(
       AuthDeploymentAuthorityRejectRequestSchema,
     ),
@@ -632,6 +716,13 @@ export const AuthDeploymentsCreate = rpcAction(
   "Auth.Deployments.Create",
   {
     subject: "rpc.v1.Auth.Deployments.Create",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Deployments.Create",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentsCreateInput>(
       AuthDeploymentsCreateRequestSchema,
     ),
@@ -672,6 +763,13 @@ export const AuthDeploymentsDisable = rpcAction(
   "Auth.Deployments.Disable",
   {
     subject: "rpc.v1.Auth.Deployments.Disable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Deployments.Disable",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentsDisableInput>(
       AuthDeploymentsDisableRequestSchema,
     ),
@@ -712,6 +810,13 @@ export const AuthDeploymentsEnable = rpcAction(
   "Auth.Deployments.Enable",
   {
     subject: "rpc.v1.Auth.Deployments.Enable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Deployments.Enable",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentsEnableInput>(
       AuthDeploymentsEnableRequestSchema,
     ),
@@ -752,6 +857,13 @@ export const AuthDeploymentsList = rpcAction(
   "Auth.Deployments.List",
   {
     subject: "rpc.v1.Auth.Deployments.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Deployments.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentsListInput>(
       AuthDeploymentsListRequestSchema,
     ),
@@ -792,6 +904,13 @@ export const AuthDeploymentsRemove = rpcAction(
   "Auth.Deployments.Remove",
   {
     subject: "rpc.v1.Auth.Deployments.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Deployments.Remove",
+      action: "call",
+    }),
     input: schema<Types.AuthDeploymentsRemoveInput>(
       AuthDeploymentsRemoveRequestSchema,
     ),
@@ -832,6 +951,13 @@ export const AuthDeviceUserAuthoritiesList = rpcAction(
   "Auth.DeviceUserAuthorities.List",
   {
     subject: "rpc.v1.Auth.DeviceUserAuthorities.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeviceUserAuthorities.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDeviceUserAuthoritiesListInput>(
       AuthDeviceUserAuthoritiesListRequestSchema,
     ),
@@ -872,6 +998,13 @@ export const AuthDeviceUserAuthoritiesReviewsDecide = rpcAction(
   "Auth.DeviceUserAuthorities.Reviews.Decide",
   {
     subject: "rpc.v1.Auth.DeviceUserAuthorities.Reviews.Decide",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeviceUserAuthorities.Reviews.Decide",
+      action: "call",
+    }),
     input: schema<Types.AuthDeviceUserAuthoritiesReviewsDecideInput>(
       AuthDeviceUserAuthoritiesReviewsDecideRequestSchema,
     ),
@@ -912,6 +1045,13 @@ export const AuthDeviceUserAuthoritiesReviewsList = rpcAction(
   "Auth.DeviceUserAuthorities.Reviews.List",
   {
     subject: "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeviceUserAuthorities.Reviews.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDeviceUserAuthoritiesReviewsListInput>(
       AuthDeviceUserAuthoritiesReviewsListRequestSchema,
     ),
@@ -952,6 +1092,13 @@ export const AuthDeviceUserAuthoritiesRevoke = rpcAction(
   "Auth.DeviceUserAuthorities.Revoke",
   {
     subject: "rpc.v1.Auth.DeviceUserAuthorities.Revoke",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.DeviceUserAuthorities.Revoke",
+      action: "call",
+    }),
     input: schema<Types.AuthDeviceUserAuthoritiesRevokeInput>(
       AuthDeviceUserAuthoritiesRevokeRequestSchema,
     ),
@@ -992,6 +1139,13 @@ export const AuthDevicesConnectInfoGet = rpcAction(
   "Auth.Devices.ConnectInfo.Get",
   {
     subject: "rpc.v1.Auth.Devices.ConnectInfo.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.ConnectInfo.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesConnectInfoGetInput>(
       AuthDevicesConnectInfoGetRequestSchema,
     ),
@@ -1032,6 +1186,13 @@ export const AuthDevicesDisable = rpcAction(
   "Auth.Devices.Disable",
   {
     subject: "rpc.v1.Auth.Devices.Disable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.Disable",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesDisableInput>(
       AuthDevicesDisableRequestSchema,
     ),
@@ -1072,6 +1233,13 @@ export const AuthDevicesEnable = rpcAction(
   "Auth.Devices.Enable",
   {
     subject: "rpc.v1.Auth.Devices.Enable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.Enable",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesEnableInput>(AuthDevicesEnableRequestSchema),
     output: schema<Types.AuthDevicesEnableOutput>(
       AuthDevicesEnableResponseSchema,
@@ -1110,6 +1278,13 @@ export const AuthDevicesList = rpcAction(
   "Auth.Devices.List",
   {
     subject: "rpc.v1.Auth.Devices.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.List",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesListInput>(AuthDevicesListRequestSchema),
     output: schema<Types.AuthDevicesListOutput>(AuthDevicesListResponseSchema),
     callerCapabilities: [] as const,
@@ -1146,6 +1321,13 @@ export const AuthDevicesProvision = rpcAction(
   "Auth.Devices.Provision",
   {
     subject: "rpc.v1.Auth.Devices.Provision",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.Provision",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesProvisionInput>(
       AuthDevicesProvisionRequestSchema,
     ),
@@ -1186,6 +1368,13 @@ export const AuthDevicesRemove = rpcAction(
   "Auth.Devices.Remove",
   {
     subject: "rpc.v1.Auth.Devices.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Devices.Remove",
+      action: "call",
+    }),
     input: schema<Types.AuthDevicesRemoveInput>(AuthDevicesRemoveRequestSchema),
     output: schema<Types.AuthDevicesRemoveOutput>(
       AuthDevicesRemoveResponseSchema,
@@ -1224,6 +1413,13 @@ export const AuthIdentityAuthorityGet = rpcAction(
   "Auth.IdentityAuthority.Get",
   {
     subject: "rpc.v1.Auth.IdentityAuthority.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.IdentityAuthority.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthIdentityAuthorityGetInput>(
       AuthIdentityAuthorityGetRequestSchema,
     ),
@@ -1264,6 +1460,13 @@ export const AuthIdentityAuthorityList = rpcAction(
   "Auth.IdentityAuthority.List",
   {
     subject: "rpc.v1.Auth.IdentityAuthority.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.IdentityAuthority.List",
+      action: "call",
+    }),
     input: schema<Types.AuthIdentityAuthorityListInput>(
       AuthIdentityAuthorityListRequestSchema,
     ),
@@ -1304,6 +1507,13 @@ export const AuthIdentityAuthorityRevoke = rpcAction(
   "Auth.IdentityAuthority.Revoke",
   {
     subject: "rpc.v1.Auth.IdentityAuthority.Revoke",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.IdentityAuthority.Revoke",
+      action: "call",
+    }),
     input: schema<Types.AuthIdentityAuthorityRevokeInput>(
       AuthIdentityAuthorityRevokeRequestSchema,
     ),
@@ -1344,6 +1554,13 @@ export const AuthPortalsGet = rpcAction(
   "Auth.Portals.Get",
   {
     subject: "rpc.v1.Auth.Portals.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsGetInput>(AuthPortalsGetRequestSchema),
     output: schema<Types.AuthPortalsGetOutput>(AuthPortalsGetResponseSchema),
     callerCapabilities: [] as const,
@@ -1380,6 +1597,13 @@ export const AuthPortalsList = rpcAction(
   "Auth.Portals.List",
   {
     subject: "rpc.v1.Auth.Portals.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.List",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsListInput>(AuthPortalsListRequestSchema),
     output: schema<Types.AuthPortalsListOutput>(AuthPortalsListResponseSchema),
     callerCapabilities: [] as const,
@@ -1416,6 +1640,13 @@ export const AuthPortalsLoginSettingsGet = rpcAction(
   "Auth.Portals.LoginSettings.Get",
   {
     subject: "rpc.v1.Auth.Portals.LoginSettings.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.LoginSettings.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsLoginSettingsGetInput>(
       AuthPortalsLoginSettingsGetRequestSchema,
     ),
@@ -1456,6 +1687,13 @@ export const AuthPortalsLoginSettingsUpdate = rpcAction(
   "Auth.Portals.LoginSettings.Update",
   {
     subject: "rpc.v1.Auth.Portals.LoginSettings.Update",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.LoginSettings.Update",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsLoginSettingsUpdateInput>(
       AuthPortalsLoginSettingsUpdateRequestSchema,
     ),
@@ -1496,6 +1734,13 @@ export const AuthPortalsPut = rpcAction(
   "Auth.Portals.Put",
   {
     subject: "rpc.v1.Auth.Portals.Put",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.Put",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsPutInput>(AuthPortalsPutRequestSchema),
     output: schema<Types.AuthPortalsPutOutput>(AuthPortalsPutResponseSchema),
     callerCapabilities: [] as const,
@@ -1532,6 +1777,13 @@ export const AuthPortalsRemove = rpcAction(
   "Auth.Portals.Remove",
   {
     subject: "rpc.v1.Auth.Portals.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.Remove",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsRemoveInput>(AuthPortalsRemoveRequestSchema),
     output: schema<Types.AuthPortalsRemoveOutput>(
       AuthPortalsRemoveResponseSchema,
@@ -1570,6 +1822,13 @@ export const AuthPortalsRoutesPut = rpcAction(
   "Auth.Portals.Routes.Put",
   {
     subject: "rpc.v1.Auth.Portals.Routes.Put",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.Routes.Put",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsRoutesPutInput>(
       AuthPortalsRoutesPutRequestSchema,
     ),
@@ -1610,6 +1869,13 @@ export const AuthPortalsRoutesRemove = rpcAction(
   "Auth.Portals.Routes.Remove",
   {
     subject: "rpc.v1.Auth.Portals.Routes.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.Routes.Remove",
+      action: "call",
+    }),
     input: schema<Types.AuthPortalsRoutesRemoveInput>(
       AuthPortalsRoutesRemoveRequestSchema,
     ),
@@ -1650,6 +1916,13 @@ export const AuthServiceInstancesDisable = rpcAction(
   "Auth.ServiceInstances.Disable",
   {
     subject: "rpc.v1.Auth.ServiceInstances.Disable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.ServiceInstances.Disable",
+      action: "call",
+    }),
     input: schema<Types.AuthServiceInstancesDisableInput>(
       AuthServiceInstancesDisableRequestSchema,
     ),
@@ -1690,6 +1963,13 @@ export const AuthServiceInstancesEnable = rpcAction(
   "Auth.ServiceInstances.Enable",
   {
     subject: "rpc.v1.Auth.ServiceInstances.Enable",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.ServiceInstances.Enable",
+      action: "call",
+    }),
     input: schema<Types.AuthServiceInstancesEnableInput>(
       AuthServiceInstancesEnableRequestSchema,
     ),
@@ -1730,6 +2010,13 @@ export const AuthServiceInstancesList = rpcAction(
   "Auth.ServiceInstances.List",
   {
     subject: "rpc.v1.Auth.ServiceInstances.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.ServiceInstances.List",
+      action: "call",
+    }),
     input: schema<Types.AuthServiceInstancesListInput>(
       AuthServiceInstancesListRequestSchema,
     ),
@@ -1770,6 +2057,13 @@ export const AuthServiceInstancesProvision = rpcAction(
   "Auth.ServiceInstances.Provision",
   {
     subject: "rpc.v1.Auth.ServiceInstances.Provision",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.ServiceInstances.Provision",
+      action: "call",
+    }),
     input: schema<Types.AuthServiceInstancesProvisionInput>(
       AuthServiceInstancesProvisionRequestSchema,
     ),
@@ -1810,6 +2104,13 @@ export const AuthServiceInstancesRemove = rpcAction(
   "Auth.ServiceInstances.Remove",
   {
     subject: "rpc.v1.Auth.ServiceInstances.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.ServiceInstances.Remove",
+      action: "call",
+    }),
     input: schema<Types.AuthServiceInstancesRemoveInput>(
       AuthServiceInstancesRemoveRequestSchema,
     ),
@@ -1850,6 +2151,13 @@ export const AuthSessionsList = rpcAction(
   "Auth.Sessions.List",
   {
     subject: "rpc.v1.Auth.Sessions.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Sessions.List",
+      action: "call",
+    }),
     input: schema<Types.AuthSessionsListInput>(AuthSessionsListRequestSchema),
     output: schema<Types.AuthSessionsListOutput>(
       AuthSessionsListResponseSchema,
@@ -1888,6 +2196,13 @@ export const AuthSessionsLogout = rpcAction(
   "Auth.Sessions.Logout",
   {
     subject: "rpc.v1.Auth.Sessions.Logout",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Sessions.Logout",
+      action: "call",
+    }),
     input: schema<Types.AuthSessionsLogoutInput>(
       AuthSessionsLogoutRequestSchema,
     ),
@@ -1928,6 +2243,13 @@ export const AuthSessionsMe = rpcAction(
   "Auth.Sessions.Me",
   {
     subject: "rpc.v1.Auth.Sessions.Me",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Sessions.Me",
+      action: "call",
+    }),
     input: schema<Types.AuthSessionsMeInput>(AuthSessionsMeRequestSchema),
     output: schema<Types.AuthSessionsMeOutput>(AuthSessionsMeResponseSchema),
     callerCapabilities: [] as const,
@@ -1964,6 +2286,13 @@ export const AuthSessionsRevoke = rpcAction(
   "Auth.Sessions.Revoke",
   {
     subject: "rpc.v1.Auth.Sessions.Revoke",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Sessions.Revoke",
+      action: "call",
+    }),
     input: schema<Types.AuthSessionsRevokeInput>(
       AuthSessionsRevokeRequestSchema,
     ),
@@ -2004,6 +2333,13 @@ export const AuthUserIdentitiesList = rpcAction(
   "Auth.UserIdentities.List",
   {
     subject: "rpc.v1.Auth.UserIdentities.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.UserIdentities.List",
+      action: "call",
+    }),
     input: schema<Types.AuthUserIdentitiesListInput>(
       AuthUserIdentitiesListRequestSchema,
     ),
@@ -2044,6 +2380,13 @@ export const AuthUserIdentitiesUnlink = rpcAction(
   "Auth.UserIdentities.Unlink",
   {
     subject: "rpc.v1.Auth.UserIdentities.Unlink",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.UserIdentities.Unlink",
+      action: "call",
+    }),
     input: schema<Types.AuthUserIdentitiesUnlinkInput>(
       AuthUserIdentitiesUnlinkRequestSchema,
     ),
@@ -2084,6 +2427,13 @@ export const AuthUsersCreate = rpcAction(
   "Auth.Users.Create",
   {
     subject: "rpc.v1.Auth.Users.Create",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.Create",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersCreateInput>(AuthUsersCreateRequestSchema),
     output: schema<Types.AuthUsersCreateOutput>(AuthUsersCreateResponseSchema),
     callerCapabilities: [] as const,
@@ -2120,6 +2470,13 @@ export const AuthUsersGet = rpcAction(
   "Auth.Users.Get",
   {
     subject: "rpc.v1.Auth.Users.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.Get",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersGetInput>(AuthUsersGetRequestSchema),
     output: schema<Types.AuthUsersGetOutput>(AuthUsersGetResponseSchema),
     callerCapabilities: [] as const,
@@ -2156,6 +2513,13 @@ export const AuthUsersIdentityLinkCreate = rpcAction(
   "Auth.Users.IdentityLink.Create",
   {
     subject: "rpc.v1.Auth.Users.IdentityLink.Create",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.IdentityLink.Create",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersIdentityLinkCreateInput>(
       AuthUsersIdentityLinkCreateRequestSchema,
     ),
@@ -2196,6 +2560,13 @@ export const AuthUsersList = rpcAction(
   "Auth.Users.List",
   {
     subject: "rpc.v1.Auth.Users.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.List",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersListInput>(AuthUsersListRequestSchema),
     output: schema<Types.AuthUsersListOutput>(AuthUsersListResponseSchema),
     callerCapabilities: [] as const,
@@ -2232,6 +2603,13 @@ export const AuthUsersPasswordChange = rpcAction(
   "Auth.Users.Password.Change",
   {
     subject: "rpc.v1.Auth.Users.Password.Change",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.Password.Change",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersPasswordChangeInput>(
       AuthUsersPasswordChangeRequestSchema,
     ),
@@ -2272,6 +2650,13 @@ export const AuthUsersPasswordResetCreate = rpcAction(
   "Auth.Users.PasswordReset.Create",
   {
     subject: "rpc.v1.Auth.Users.PasswordReset.Create",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.PasswordReset.Create",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersPasswordResetCreateInput>(
       AuthUsersPasswordResetCreateRequestSchema,
     ),
@@ -2312,6 +2697,13 @@ export const AuthUsersResolve = rpcAction(
   "Auth.Users.Resolve",
   {
     subject: "rpc.v1.Auth.Users.Resolve",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.Resolve",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersResolveInput>(AuthUsersResolveRequestSchema),
     output: schema<Types.AuthUsersResolveOutput>(
       AuthUsersResolveResponseSchema,
@@ -2350,6 +2742,13 @@ export const AuthUsersUpdate = rpcAction(
   "Auth.Users.Update",
   {
     subject: "rpc.v1.Auth.Users.Update",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Users.Update",
+      action: "call",
+    }),
     input: schema<Types.AuthUsersUpdateInput>(AuthUsersUpdateRequestSchema),
     output: schema<Types.AuthUsersUpdateOutput>(AuthUsersUpdateResponseSchema),
     callerCapabilities: [] as const,
@@ -2386,6 +2785,30 @@ export const AuthDeviceUserAuthoritiesResolve = operationAction(
   "Auth.DeviceUserAuthorities.Resolve",
   {
     subject: "operations.v1.Auth.DeviceUserAuthorities.Resolve",
+    permissions: Object.freeze({
+      invoke: Object.freeze({
+        apiId: "trellis.auth@v1",
+        apiVersion: "v1",
+        surfaceKind: "operation",
+        surfaceName: "Auth.DeviceUserAuthorities.Resolve",
+        action: "invoke",
+      }),
+      observe: Object.freeze({
+        apiId: "trellis.auth@v1",
+        apiVersion: "v1",
+        surfaceKind: "operation",
+        surfaceName: "Auth.DeviceUserAuthorities.Resolve",
+        action: "observe",
+      }),
+      cancel: Object.freeze({
+        apiId: "trellis.auth@v1",
+        apiVersion: "v1",
+        surfaceKind: "operation",
+        surfaceName: "Auth.DeviceUserAuthorities.Resolve",
+        action: "cancel",
+      }),
+      control: Object.freeze({}),
+    }),
     input: schema<Types.AuthDeviceUserAuthoritiesResolveInput>(
       AuthDeviceUserAuthoritiesResolveRequestSchema,
     ),
@@ -2433,6 +2856,20 @@ export const AuthConnectionsClosed = eventActions(
   "Auth.Connections.Closed",
   {
     subject: "events.v1.Auth.Connections.Closed",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Closed",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Closed",
+      action: "subscribe",
+    }),
     event: schema<Types.AuthConnectionsClosedEvent>(
       AuthConnectionsClosedEventSchema,
     ),
@@ -2449,6 +2886,20 @@ export const AuthConnectionsKicked = eventActions(
   "Auth.Connections.Kicked",
   {
     subject: "events.v1.Auth.Connections.Kicked",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Kicked",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Kicked",
+      action: "subscribe",
+    }),
     event: schema<Types.AuthConnectionsKickedEvent>(
       AuthConnectionsKickedEventSchema,
     ),
@@ -2465,6 +2916,20 @@ export const AuthConnectionsOpened = eventActions(
   "Auth.Connections.Opened",
   {
     subject: "events.v1.Auth.Connections.Opened",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Opened",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Connections.Opened",
+      action: "subscribe",
+    }),
     event: schema<Types.AuthConnectionsOpenedEvent>(
       AuthConnectionsOpenedEventSchema,
     ),
@@ -2481,6 +2946,20 @@ export const AuthDeviceUserAuthoritiesApproved = eventActions(
   "Auth.DeviceUserAuthorities.Approved",
   {
     subject: "events.v1.Auth.DeviceUserAuthorities.Approved",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Approved",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Approved",
+      action: "subscribe",
+    }),
     params: ["/deploymentId"] as const,
     event: schema<Types.AuthDeviceUserAuthoritiesApprovedEvent>(
       AuthDeviceUserAuthoritiesApprovedEventSchema,
@@ -2498,6 +2977,20 @@ export const AuthDeviceUserAuthoritiesRequested = eventActions(
   "Auth.DeviceUserAuthorities.Requested",
   {
     subject: "events.v1.Auth.DeviceUserAuthorities.Requested",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Requested",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Requested",
+      action: "subscribe",
+    }),
     params: ["/deploymentId"] as const,
     event: schema<Types.AuthDeviceUserAuthoritiesRequestedEvent>(
       AuthDeviceUserAuthoritiesRequestedEventSchema,
@@ -2515,6 +3008,20 @@ export const AuthDeviceUserAuthoritiesResolved = eventActions(
   "Auth.DeviceUserAuthorities.Resolved",
   {
     subject: "events.v1.Auth.DeviceUserAuthorities.Resolved",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Resolved",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.Resolved",
+      action: "subscribe",
+    }),
     params: ["/deploymentId"] as const,
     event: schema<Types.AuthDeviceUserAuthoritiesResolvedEvent>(
       AuthDeviceUserAuthoritiesResolvedEventSchema,
@@ -2532,6 +3039,20 @@ export const AuthDeviceUserAuthoritiesReviewRequested = eventActions(
   "Auth.DeviceUserAuthorities.ReviewRequested",
   {
     subject: "events.v1.Auth.DeviceUserAuthorities.ReviewRequested",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.ReviewRequested",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.DeviceUserAuthorities.ReviewRequested",
+      action: "subscribe",
+    }),
     params: ["/deploymentId"] as const,
     event: schema<Types.AuthDeviceUserAuthoritiesReviewRequestedEvent>(
       AuthDeviceUserAuthoritiesReviewRequestedEventSchema,
@@ -2549,6 +3070,20 @@ export const AuthSessionsRevoked = eventActions(
   "Auth.Sessions.Revoked",
   {
     subject: "events.v1.Auth.Sessions.Revoked",
+    publishPermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Sessions.Revoked",
+      action: "publish",
+    }),
+    subscribePermission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "event",
+      surfaceName: "Auth.Sessions.Revoked",
+      action: "subscribe",
+    }),
     event: schema<Types.AuthSessionsRevokedEvent>(
       AuthSessionsRevokedEventSchema,
     ),

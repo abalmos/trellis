@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_rs::client::{verify_event_proof, PreparedTrellisEvent};
+use trellis_rs::client::{verify_event_proof_v2, PreparedTrellisEvent};
 use trellis_rs::sdk::health::client::HealthClient;
 use trellis_rs::sdk::health::types::{
     HealthInspectRequest, HealthMetricsRequest, HealthQueryRequest, HealthQueryResponse,
@@ -66,10 +66,18 @@ impl HealthRuntimeProcess {
         let session_seed = runtime
             .workdir()
             .join(&runtime.manifest().paths.session_seed);
+        let context_digest = runtime.workdir().join("health-context.digest");
+        let auth_dir = runtime.workdir().join("trellis/auth");
+        std::fs::write(
+            &context_digest,
+            "byhVYTUxr4iVywgon-utTJesrl5WZVm1MC0PXqCU06c\n",
+        )
+        .expect("write health event context digest");
         let nats_dir = runtime.workdir().join("nats/creds");
         let config = format!(
             r#"instance_name = "health-integration"
 event_session_seed_file = "{}"
+event_context_digest_file = "{}"
 
 [http]
 port = 0
@@ -99,13 +107,35 @@ bucket = "trellis_runtime_leases"
 replicas = 1
 ttl_ms = 9000
 renew_ms = 3000
+
+[auth.authorization]
+trust_root_file = "{}"
+issuer_manifest_file = "{}"
+issuer_signing_seed_file = "{}"
+context_lifetime_seconds = 300
+refresh_lead_seconds = 60
+refresh_jitter_seconds = 15
+minimum_context_lifetime_seconds = 76
+maximum_bootstrap_jwt_lifetime_seconds = 3600
+cleanup_grace_seconds = 3600
+allowed_clock_skew_seconds = 30
+maximum_context_bytes = 16384
+maximum_permissions = 4096
+maximum_capabilities = 256
+trust_bucket = "trellis_authorization_trust"
+context_bucket = "trellis_authorization_contexts"
+registry_replicas = 1
 "#,
             toml_path(&session_seed),
+            toml_path(&context_digest),
             runtime.nats_url(),
             toml_path(&nats_dir.join("auth-auth.creds")),
             toml_path(&nats_dir.join("trellis-auth.creds")),
             toml_path(&nats_dir.join("system.creds")),
             toml_path(&health_db),
+            toml_path(&auth_dir.join("authorization-root.json")),
+            toml_path(&auth_dir.join("authorization-issuer-manifest.json")),
+            toml_path(&auth_dir.join("authorization-issuer.seed")),
         );
         std::fs::write(&config_path, config).expect("write health runtime config");
         let rust_dir = rust_dir();
@@ -355,9 +385,14 @@ fn assert_signed_transition(transition: &async_nats::Message) {
         .get("session-key")
         .expect("transition session key")
         .as_str();
+    let context_digest = headers
+        .get("authorization-context")
+        .expect("transition authorization-context")
+        .as_str();
     let proof = headers.get("proof").expect("transition proof").as_str();
-    assert!(verify_event_proof(
+    assert!(verify_event_proof_v2(
         session_key,
+        context_digest,
         transition.subject.as_str(),
         &transition.payload,
         event_id,

@@ -101,6 +101,11 @@ export type TrellisIntegrationRuntime = {
   ): Promise<void>;
   /** Seeds one raw state KV entry in runtimes that support backing-store injection. */
   seedRawStateEntry?(args: TrellisTestRawStateEntry): Promise<void>;
+  /** Publishes one synthetic immutable revocation in owned live runtimes. */
+  publishAuthorizationRevocation?(
+    contextDigest: string,
+    value: Record<string, unknown>,
+  ): Promise<void>;
   /** Observes raw NATS messages on a runtime-owned scratch NATS server. */
   startNatsMessageObserver?(
     subject: string,

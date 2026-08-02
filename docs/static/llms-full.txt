@@ -1,6 +1,6 @@
 # Trellis AI guidance for services and browser apps
 
-Last verified against Trellis main (2026-07-26).
+Last verified against Trellis main (2026-08-02).
 
 This file is for AI coding agents working in a service or browser app repository
 that consumes Trellis. The canonical URL is:
@@ -27,6 +27,8 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   `abort()`; aborting a
   durable listener removes that handler from the shared registry so re-registering
   can resume delivery from the same Trellis-provisioned durable consumer.
+  Authorization-provider, registry, and storage availability failures are NAKed
+  for redelivery; malformed signatures and unauthorized events are TERMed.
 - Runtime authority comes from deployment authority and identity authority.
 - Trellis public API object schemas are open by default. For contract schemas
   used by public RPC input/output, events, operation input/progress/output, feeds,
@@ -82,6 +84,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 - NATS is the private transport boundary. Application code uses generated
   participant facades rather than hand-built subjects, raw NATS connection
   handles, `trellis_rs::client`, or `trellis_rs::generated`.
+- HTTP is limited to browser/account flows, initial service/device bootstrap,
+  proof-bound restart recovery, and portal assets. Connected
+  control uses generated RPC, operation, and event APIs over NATS; there is no
+  HTTP context registry, revocation, logout, or client-bootstrap API.
 - Feed subscriptions are connection-scoped. Closing or aborting a client feed
   propagates cancellation to the provider; watch feeds must not create a durable
   consumer per viewer.
@@ -103,30 +109,35 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 - Bootstrap replays rerun current issuance and generate fresh credentials.
   Public HTTP/RPC/operation/callout errors use stable redacted codes.
 - Bootstrap and browser bind return a deny-all JWT and signed authorization
-  context. Every NATS connect signs the server nonce and a separate
-  `natsConnectContext` proof over the context digest; shared sentinel credentials
+  context. Every NATS connect uses the standard nonce signature and a digest-only
+  context token; shared sentinel credentials and second Trellis handshake proofs
   are retired.
-- The implemented bootstrap/connect trust chain is a pinned authorization root,
-  root-signed current generation-numbered issuer manifest and issuer
-  certificates and issuer-signed short-lived context. Clients durably retain the
+- The trust chain is a pinned authorization root, a root-signed current manifest
+  containing active issuer public keys, and an issuer-signed short-lived context.
+  Clients durably retain the
   root key id/digest and minimum manifest generation/digest across session clears
   and restarts. TypeScript and Svelte delegate cryptographic verification to the
-  authoritative Rust/WASM verifier. All runtimes schedule the distributed,
-  digest-jittered `refreshAt`; they do not derive a local lifetime fraction.
-  TypeScript fetches only its own immutable same-origin manifest/certificate
-  locators and does not watch Auth KV, resolve arbitrary caller contexts, or
-  maintain a runtime validator-readiness cache. Native file context-store paths
-  are single-writer and private to one active client process.
-  Ordinary context-bound request proof v2 and local
-  permission/capability checks remain Milestone 10. Current
-  `Auth.Requests.Validate` use is transitional; do not add new dependencies on it.
+  authoritative Rust/WASM verifier. Manifest overlap uses direct public-key
+  entries in the exact accepted generation. All runtimes compute the same
+  digest-jittered refresh time. Bootstrap supplies the complete current trust
+  chain. Provider runtimes keep a
+  separate private cache over the internal NATS KV authorization registry for
+  presented caller contexts and revocation state; registry handles are never
+  service-author APIs. Providers watch manifest generation and revocations,
+  become ready after current manifest verification and revocation initial state,
+  and fail closed on actual connection/watch failure. Quiet watches are healthy.
+  Native file context-store paths are single-writer and private to one active
+  client process. Ordinary request and event proof v2 verification is local,
+  exact-permission/capability checked, revocation aware, and
+  performs no control-plane or registry I/O on cache hits.
 - The deny-all bootstrap JWT grants no authority and only selects the Auth
-  Callout route. Context refresh atomically renews it with the verified context
-  and returns its exact expiry. Clients whose context or route JWT expired retain
-  the session/trust floor and send proof-bound `currentContextDigest: null`
-  recovery rather than restarting enrollment.
+  Callout route. Context refresh is restart recovery: it atomically renews the
+  route JWT with the verified context and returns route/session/NATS metadata plus
+  its exact expiry. Clients whose context or route JWT expired retain the
+  session/trust floor and send proof-bound `currentContextDigest: null` recovery
+  rather than restarting enrollment. Pending devices retry `/bootstrap/device`.
 - Bootstrap and refresh return server time in milliseconds. Clients estimate a
-  request-midpoint offset and use corrected time for validity, reconnect proofs,
+  request-midpoint offset and use corrected time for validity, reconnect,
   UI state, and scheduling. Same-digest refresh success still reschedules.
   `maximumContextBytes` means canonical complete signed-context JSON UTF-8 bytes,
   not base64url token length.
@@ -253,12 +264,11 @@ Rules:
   the Trellis browser/Svelte helpers. Plain callbacks after expired login flows
   should restart the current auth request; reserve user-visible callback errors
   for explicit outcomes such as `authError=approval_denied`.
-- Browser apps should request sign-out through Trellis browser auth helpers,
-  which sign and POST the logout request over HTTP before navigating to any
-  returned redirect. Browser apps should not call `Auth.Sessions.Logout` from
-  the active app connection. Trellis owns provider logout URL construction and
-  return-target validation; apps should not hard-code IdP logout endpoints or
-  arbitrary post-logout return URLs.
+- Browser apps should use Trellis browser helpers for initial auth redirects and
+  portal flows. Once connected, sign-out and other auth control use generated
+  Auth APIs over NATS; do not add HTTP logout, context, revocation, or
+  client-bootstrap calls. Trellis still owns provider return-target validation;
+  apps should not hard-code IdP logout endpoints or arbitrary return URLs.
 - Browser apps that already received Trellis user ids on authorized records can
   declare `Auth.Users.Resolve` to render minimal display labels. It is not a
   directory; do not request `Auth.Users.List` or denormalize user profile tables
@@ -280,7 +290,33 @@ Rules:
   `--jobs` to child `DENO_JOBS` rather than passing a `deno test --jobs` flag.
   Parallel cases share one NATS server but have separate NATS accounts, Trellis
   processes, SQLite databases, and sidecars. Keep one case per module and never
-  depend on execution order.
+  depend on execution order. `trellis-test` runs NATS as a managed child process
+  from pinned, checksum-verified nats-server and nsc binaries (cached under
+  `TRELLIS_TEST_CACHE_DIR`, default `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh` must be on `PATH`); no container runtime is
+  required.
+- The `trellis` CLI runs the runtime with
+  `trellis server [mode] --config PATH [--nats URL | --nats-binary PATH]
+  [--nats-state-dir PATH] [--check]` (mode defaults to `all`; `--check`
+  validates configuration, trust, stores, streams, and NATS connectivity,
+  then exits). Managed mode (no `--nats`) downloads the pinned nats-server
+  release, verifies its checksum, caches it under `TRELLIS_CACHE_DIR`
+  (default `~/.cache/trellis`), listens on 127.0.0.1 ports 4222 (NATS), 8222
+  (monitoring), and 8080 (websocket), and stops the server when the CLI
+  exits. `--nats URL` runs against an external server; `--nats-binary PATH`
+  manages an existing trusted nats-server binary without re-verifying it;
+  `--nats-state-dir PATH` keeps all mutable managed-NATS files (rendered
+  configs, pid file, resolver JWTs, JetStream data) outside a read-only
+  bundle.
+- The runtime OCI image bakes the `trellis` CLI and the pinned,
+  checksum-verified nats-server at `/usr/local/bin/nats-server`; `nsc` is
+  test-harness-only and not in the image. The entrypoint stays
+  `trellis-server` for external-NATS deployments. For a managed single
+  container, mount the generated bundle read-only from its own named volume
+  and the writable state on a second volume
+  (`trellis-bundle:/etc/trellis:ro,Z`, `trellis-state:/var/lib/trellis:rw,Z`),
+  with the bundle's SQLite store paths rewritten to the state volume, and run
+  `trellis server ... --nats-binary /usr/local/bin/nats-server
+  --nats-state-dir /var/lib/trellis/nats`.
   Migration authority plans should be allowed only in tests that intentionally
   cover migrations.
 - Deployment authority plans can be `superseded`; only `pending` plans targeting

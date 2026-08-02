@@ -27,7 +27,13 @@ presence, revocation, and post-commit delivery.
 
 TypeScript remains first class for portal source, generated SDKs, WASM proof
 bindings, browser/service/device clients, and integration tests. It does not
-own, read, write, proxy, or validate migrated auth state at runtime.
+own, write, or proxy durable/control-plane auth state at runtime.
+
+HTTP is limited to browser flows, initial service/device bootstrap, proof-bound
+recovery, and portal assets. Once a participant is connected, caller-visible
+control, including auth control, uses generated RPC, operation, and event APIs
+over NATS. There is no HTTP context registry, revocation, logout, or
+client-bootstrap surface.
 
 The auth owner starts only after `platform.owner` is held, SQLite migrations and
 repository construction complete, startup reconciliation succeeds, and required
@@ -139,17 +145,17 @@ intent together. Connection presence is short-lived KV state, not authority.
 
 Each deployment pins one public authorization root. The root private key is
 offline deployment tooling state and is not a `trellis-server` configuration
-field. A root-signed, generation-numbered manifest selects active root-signed
-issuer certificates. The runtime loads only the active issuer seed and rejects
-root mismatch, manifest rollback/equivocation, missing certificates, wrong
-usage, expired trust, and issuer-seed mismatch before auth listeners start.
+field. A root-signed, generation-numbered manifest contains the active issuer
+`{keyId, publicKey}` entries. The runtime loads one active issuer seed and
+rejects root mismatch, manifest rollback/equivocation, expired trust, or
+issuer-seed mismatch before auth listeners start.
 
-The platform publishes immutable public trust records to
-`trellis_authorization_trust` and short-lived contexts plus separate revocation
-records to `trellis_authorization_contexts`. Bootstrap returns the pinned root,
-current manifest identity, lazy HTTP registry locators, verification policy, and
-one signed context. It does not return the full trust history or expose NATS KV
-credentials to clients.
+The trust bucket contains only `manifest.current` and immutable
+`manifest.<generation>` values. The bounded context bucket contains canonical
+signed context JSON keyed by its digest and separate `{"revokedAt": ...}`
+records. Bootstrap returns the pinned root, complete current manifest, the two
+bucket names, verification policy, and one signed context object. Registry
+handles and subjects remain Trellis runtime internals.
 
 Context issuance resolves one coherent `IssuableAuthorizationState`, derives a
 snapshot token that excludes liveness-only timestamps, signs the exact session,
@@ -171,21 +177,27 @@ context atomically in deployment-origin-scoped IndexedDB. Rust and TypeScript
 service, device, CLI, and non-browser clients require an explicit durable store;
 memory stores are opt-in for tests and deliberately ephemeral processes only.
 
+Manifest generation is exact. The mutable `manifest.current` pointer names one
+immutable generation-addressed manifest and its digest. A context names the
+exact generation under which it was issued. Issuer overlap is represented only
+by multiple direct public-key entries in a manifest. Historical verification
+exact-reads the context's retained generation.
+
 Rust/WASM is the sole cryptographic verifier for TypeScript consumers. The
 TypeScript cache owns fetching, persistence, timers, and state projection, but
 does not independently parse signed security objects or implement Ed25519/RFC
-8785 verification. Issuance distributes one deterministic `refreshAt` computed
-from context expiry, configured lead, and context-digest-derived earlier-only
-jitter. All clients schedule that exact signed-bundle value rather than deriving
-a local fraction of context lifetime.
+8785 verification. Clients compute the deterministic refresh time from context
+expiry, configured lead, and context-digest-derived earlier-only jitter.
 
 Bootstrap and refresh return server time in milliseconds. Clients estimate the
 server offset from the request midpoint and use corrected time for validity,
-refresh scheduling, reconnect proofs, and UI state. An expired context is
-verified at its signed historical window, then cleared while its session binding
-and trust floor remain available for proof-bound `currentContextDigest: null`
-recovery. Refresh atomically installs the returned context and renewed route
-JWT; same-digest success still reschedules.
+refresh scheduling, reconnect proofs, and UI state. Context refresh is restart
+recovery, not connected control: it is proof-bound, accepts nullable
+`currentContextDigest`, and returns the signed context together with renewed
+route-JWT material, session metadata, and current NATS metadata. An expired
+context is verified at its signed historical window, then cleared while its
+session binding and trust floor remain available for recovery. Refresh
+atomically installs the returned bundle; same-digest success still reschedules.
 
 Authorization-relevant mutations revoke matching active contexts and enqueue
 immutable revocation publication in the same SQLite transaction. This includes
@@ -232,11 +244,10 @@ bootstrap-JWT cap, and is renewed atomically by context refresh. Context expiry
 and revocation govern admission independently. There is no shared sentinel user
 or seed.
 
-Every connect and reconnect uses the same session private key to produce:
-
-- the standard NATS signature over the server challenge nonce
-- a separate `natsConnectContext` `trellis.session-proof.v1` binding the nonce,
-  exact participant digest, and current context digest
+Every connect and reconnect uses the session private key for the standard NATS
+signature over the server challenge nonce. The auth token contains exactly its
+format and the current `contextDigest`; there is no second Trellis handshake
+proof.
 
 The callout pipeline is:
 
@@ -245,13 +256,12 @@ The callout pipeline is:
    NKey
 3. validate the deny-all bootstrap JWT
 4. verify the standard NATS nonce signature
-5. verify the domain-separated Trellis proof
-6. admit the proof through context-purpose CAS replay protection
-7. load the published, active, unrevoked context and verify root, manifest,
-   certificate, signature, policy, and digest
-8. resolve current issuable authorization state and compare every
-   authorization-bearing context field
-9. compile transport permissions from current exact grants and bindings
+5. parse the digest-only auth token
+6. load the published, active context and verify root, manifest, signature,
+   policy, digest, and revocation state
+7. require the NATS NKey to encode the signed context's session key
+8. load the exact participant binding and current physical resource bindings
+9. compile transport permissions directly from signed grants and those bindings
 10. issue the short-lived target-account user JWT and record connection presence
 
 The outer AuthResponse is signed by the Auth-account signing key. The inner user
@@ -265,17 +275,31 @@ subjects. Request and event validation resolve the exact API action and require
 its atom; capability metadata authorizes only when every mapped atom is present.
 Transport subjects and bindings are never read back as authority.
 
+Connected providers use the authorization registry over internal NATS KV, not
+HTTP. They establish the current-manifest and revocation watches, verify the
+current manifest, consume the revocation watch's initial state, then become
+ready. Quiet watches remain healthy. Actual connection/watch failure makes the
+provider unready; reconnect recreates both watches and reconstructs one initial
+state. Unknown current context digests require one exact context read; cache
+hits perform no HTTP, SQLite, Auth RPC, or registry I/O. Historical events
+exact-read the context and its named manifest generation without populating a
+second cache.
+
 ## HTTP And RPC
 
 One auth router is merged into the Rust Axum listener. It owns CORS, security
 headers, body limits, peer-address rate limiting, redirect allowlists, and
-flow-specific origin checks. See [auth-api.md](./auth-api.md) for route and
-surface boundaries; use `rust/crates/runtime/trellis.api.json` for exact current
-schemas.
+flow-specific origin checks. HTTP serves browser/account flows, initial
+service/device bootstrap, proof-bound context recovery, and portal assets. It
+does not serve connected control, trust lookup, or provider authorization
+evidence. Pending devices retry `/bootstrap/device`; there is no separate wait
+endpoint. See [auth-api.md](./auth-api.md) for the boundary; use
+`rust/crates/runtime/trellis.api.json` for exact current schemas.
 
-Auth RPC uses the generated dispatcher and implements the complete authored
-surface. Transitional `Auth.Requests.Validate` and `Auth.Events.Validate` remain
-internal until ordinary local proof validation replaces them in Milestone 10.
+After connection, Auth RPC, operations, and events exact-match the generated
+descriptor table and use the same local context-bound verifier as every other
+provider. Connected control is generated API control over NATS, not a parallel
+HTTP API. Auth has no privileged central request or event validation path.
 
 ## Storage And Atomicity
 
@@ -309,13 +333,9 @@ context.
 
 ## Trust Evolution
 
-Milestone 9 distributes issuer trust, issues and refreshes signed authorization
+The runtime distributes issuer trust, issues and refreshes signed authorization
 contexts, verifies them on every NATS connect/reconnect, and couples revocation
-to authoritative SQLite transactions. Internal request/event validators remain.
-Milestone 10 moves ordinary request-proof v2 validation local to services and
-removes `Auth.Requests.Validate`; Milestone 11 applies context-local validation
-to events and removes `Auth.Events.Validate`.
-
-Those later trust layers must consume the same exact principals, participant
-bindings, grant sets, authority versions, session identity, and inbox prefix;
-they must not introduce a parallel authority model.
+to authoritative SQLite transactions. Ordinary requests and events consume the
+same exact principals, participant bindings, grant sets, authority versions,
+session identity, and inbox prefix through local provider caches and generated
+receiver metadata; there is no parallel or centralized request-authority model.

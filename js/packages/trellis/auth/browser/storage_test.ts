@@ -25,6 +25,7 @@ function state(
       needsDigest: "needs",
     },
     context: null,
+    contextDigest: null,
     contextExpiresAt: null,
     routing: null,
   };
