@@ -199,6 +199,83 @@ Deno.test("resolveUserReconnectSession narrows stale optional delegated capabili
   ]);
 });
 
+Deno.test("resolveUserReconnectSession checks approval-plan required capabilities before stored authority extras", async () => {
+  const approvalPlan: UserContractApprovalPlan = {
+    digest: "digest-approved",
+    contract: {
+      format: "trellis.contract.v1",
+      id: "example.console@v1",
+      displayName: "Example Console",
+      description: "Browser app",
+      kind: "app",
+    },
+    approval: {
+      contractDigest: "digest-approved",
+      contractId: "example.console@v1",
+      displayName: "Example Console",
+      description: "Browser app",
+      participantKind: "app",
+      capabilities: {
+        "jobs:cancel": {
+          displayName: "Cancel jobs",
+          description: "Cancel jobs.",
+        },
+        "jobs:read": {
+          displayName: "Read jobs",
+          description: "Read jobs.",
+        },
+      },
+    },
+    requiredCapabilities: ["jobs:cancel", "jobs:read"],
+    publishSubjects: [
+      "operations.v1.example.Jobs.Run",
+      "operations.v1.example.Jobs.Run.control",
+    ],
+    subscribeSubjects: [],
+    publishSubjectGrants: [{
+      subject: "operations.v1.example.Jobs.Run",
+      capabilities: ["jobs:read"],
+      required: true,
+    }, {
+      subject: "operations.v1.example.Jobs.Run.control",
+      capabilities: ["jobs:cancel"],
+      required: true,
+    }],
+    subscribeSubjectGrants: [],
+  };
+  const result = await resolveUserReconnectSession({
+    session: createSession({
+      contractId: "example.console@v1",
+      delegatedCapabilities: ["jobs:cancel", "jobs:read"],
+      delegatedPublishSubjects: [
+        "operations.v1.example.Jobs.Run",
+        "operations.v1.example.Jobs.Run.control",
+      ],
+      identityAuthorityNeeds: {
+        contracts: [],
+        surfaces: [],
+        capabilities: [
+          { capability: "jobs:cancel", required: true },
+          { capability: "jobs:read", required: true },
+          { capability: "jobs:signal", required: true },
+        ],
+        resources: [],
+      },
+    }),
+    presentedContractDigest: "digest-approved",
+    loadUserProjection: async () =>
+      activeUser({ capabilities: ["jobs:cancel", "jobs:read"] }),
+    approvalPlan,
+  });
+
+  assertEquals(result.ok, true);
+  if (!result.ok) return;
+  assertEquals(result.session.delegatedCapabilities, [
+    "jobs:cancel",
+    "jobs:read",
+  ]);
+});
+
 Deno.test("resolveUserReconnectSession returns user state failures", async () => {
   assertEquals(
     await resolveUserReconnectSession({

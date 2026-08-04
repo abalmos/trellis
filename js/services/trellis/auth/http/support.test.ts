@@ -47,6 +47,8 @@ function storedAppApproval(args: {
   userTrellisId: string;
   answer: "approved" | "denied";
   capabilities: string[];
+  publishSubjects?: string[];
+  subscribeSubjects?: string[];
   answeredAt?: Date;
 }): IdentityGrantRecord {
   const answeredAt = args.answeredAt ?? new Date();
@@ -72,8 +74,8 @@ function storedAppApproval(args: {
       participantKind: "app",
       capabilities: approvalCapabilities(args.capabilities),
     },
-    publishSubjects: [],
-    subscribeSubjects: [],
+    publishSubjects: args.publishSubjects ?? [],
+    subscribeSubjects: args.subscribeSubjects ?? [],
   };
 }
 
@@ -674,6 +676,86 @@ Deno.test("getApprovalResolution uses injected loaders", async () => {
     contractId: "trellis.console@v1",
     origin: "http://localhost:5173",
   });
+});
+
+Deno.test("getApprovalResolution accepts generic stored approval for scoped device review capability", async () => {
+  const reviewSubject = "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List";
+  const authContract: TrellisContractV1 = {
+    format: "trellis.contract.v1",
+    id: "trellis.auth@v1",
+    displayName: "Trellis Auth",
+    description: "Auth API",
+    kind: "service",
+    capabilities: approvalCapabilities(["trellis.auth::device.review"]),
+    schemas: { Empty: { type: "object" } },
+    rpc: {
+      "Auth.DeviceUserAuthorities.Reviews.List": {
+        version: "v1",
+        subject: reviewSubject,
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        capabilities: { call: ["trellis.auth::device.review"] },
+      },
+    },
+  };
+  const contracts = createTestContracts([{
+    digest: "auth-digest",
+    contract: authContract,
+  }]);
+  const resolution = await getApprovalResolution(contracts, {
+    userId: linkedUserId,
+    identity: linkedIdentity,
+    user: {
+      origin: "github",
+      id: "123",
+      email: "user@example.com",
+      name: "User",
+    },
+    sessionKey: "A".repeat(43),
+    redirectTo: "https://console.example/callback",
+    app: {
+      contractId: "trellis.console@v1",
+      origin: "https://console.example",
+    },
+    contract: {
+      format: "trellis.contract.v1",
+      id: "trellis.console@v1",
+      displayName: "Console",
+      description: "Admin",
+      kind: "app",
+      uses: {
+        required: {
+          auth: {
+            contract: "trellis.auth@v1",
+            rpc: { call: ["Auth.DeviceUserAuthorities.Reviews.List"] },
+          },
+        },
+      },
+    },
+    createdAt: new Date(),
+  }, {
+    loadUserProjection: async () => ({
+      origin: "github",
+      id: "123",
+      name: "User",
+      email: "user@example.com",
+      active: true,
+      capabilities: ["trellis.auth::device.review.deployment-a"],
+      capabilityGroups: [],
+    }),
+    loadIdentityGrantsByUser: async () => [
+      storedAppApproval({
+        userTrellisId: linkedUserId,
+        answer: "approved",
+        capabilities: ["trellis.auth::device.review"],
+        publishSubjects: [reviewSubject],
+      }),
+    ],
+  });
+
+  assertEquals(resolution.storedApproval?.answer, "approved");
+  assertEquals(resolution.effectiveApproval.kind, "stored_approval");
+  assertEquals(resolution.missingCapabilities, []);
 });
 
 Deno.test("getApprovalResolution ignores stale known dependency digests when active digest exists", async () => {

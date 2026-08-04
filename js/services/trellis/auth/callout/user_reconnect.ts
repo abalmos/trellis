@@ -48,9 +48,9 @@ export async function resolveUserReconnectSession(args: {
     projection,
     args.capabilityGroupStorage,
   );
-  const requiredCapabilities = requiredCapabilityKeys(
-    args.session.identityAuthorityNeeds,
-  ) ?? args.session.delegatedCapabilities;
+  const requiredCapabilities = args.approvalPlan?.requiredCapabilities ??
+    requiredCapabilityKeys(args.session.identityAuthorityNeeds) ??
+    args.session.delegatedCapabilities;
   if (
     args.session.approvalSource !== "deployment_grant" &&
     !requiredCapabilities.every((capability) =>

@@ -454,7 +454,7 @@ function storedApprovalCoversPlan(
     ...delegatedCapabilitiesForApprovalPlan(plan, effectiveCapabilities),
   ]);
   return [...requestedCapabilities].every((capability) =>
-    approvedCapabilities.has(capability)
+    capabilityCoveredByApproval(capability, approvedCapabilities)
   ) &&
     delegatedPublishSubjectsForApprovalPlan(plan, effectiveCapabilities).every((
       subject,
@@ -463,6 +463,16 @@ function storedApprovalCoversPlan(
       .every(
         (subject) => approvedSubscribeSubjects.has(subject),
       );
+}
+
+function capabilityCoveredByApproval(
+  capability: string,
+  approvedCapabilities: ReadonlySet<string>,
+): boolean {
+  if (approvedCapabilities.has(capability)) return true;
+  const deviceReview = "trellis.auth::device.review";
+  return capability.startsWith(`${deviceReview}.`) &&
+    approvedCapabilities.has(deviceReview);
 }
 
 function authorityNeedSetFromDesiredState(

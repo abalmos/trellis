@@ -318,6 +318,64 @@ Deno.test("planUserContractApproval includes operation observe and declared canc
   ]);
 });
 
+Deno.test("delegatedPublishSubjectsForApprovalPlan treats operation control capabilities as alternatives", async () => {
+  const dependency: TrellisContractV1 = {
+    format: "trellis.contract.v1",
+    id: "example.jobs@v1",
+    displayName: "Example Jobs",
+    description: "Job API",
+    kind: "service",
+    schemas: { Empty: { type: "object" } },
+    operations: {
+      "Jobs.Run": {
+        version: "v1",
+        subject: "operations.v1.example.Jobs.Run",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        cancel: true,
+        capabilities: {
+          call: ["jobs:write"],
+          observe: ["jobs:read"],
+          cancel: ["jobs:cancel"],
+        },
+      },
+    },
+  };
+  const store = createTestContracts([{
+    digest: "dep-digest",
+    contract: dependency,
+  }]);
+
+  const plan = await planUserContractApproval(store, {
+    format: "trellis.contract.v1",
+    id: "example.console@v1",
+    displayName: "Example Console",
+    description: "Browser app",
+    kind: "app",
+    uses: {
+      optional: {
+        jobs: {
+          contract: "example.jobs@v1",
+          operations: { call: ["Jobs.Run"] },
+        },
+      },
+    },
+  });
+
+  assertEquals(
+    delegatedPublishSubjectsForApprovalPlan(plan, ["jobs:cancel"]),
+    ["operations.v1.example.Jobs.Run.control"],
+  );
+  assertEquals(
+    delegatedPublishSubjectsForApprovalPlan(plan, ["jobs:read"]),
+    ["operations.v1.example.Jobs.Run.control"],
+  );
+  assertEquals(
+    delegatedPublishSubjectsForApprovalPlan(plan, ["jobs:write"]),
+    ["operations.v1.example.Jobs.Run"],
+  );
+});
+
 Deno.test("planUserContractApproval prefers active dependency digest over stale known digest", async () => {
   const activeDependency: TrellisContractV1 = {
     format: "trellis.contract.v1",

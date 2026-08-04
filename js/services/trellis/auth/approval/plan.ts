@@ -272,11 +272,13 @@ export async function planUserContractApproval(
       operation.operation,
     );
     if (operationControlRules.length > 0) {
-      addPublishSubject(
-        `${operation.operation.subject}.control`,
-        operationControlRules.flat(),
-        operation.required,
-      );
+      for (const controlCapabilities of operationControlRules) {
+        addPublishSubject(
+          `${operation.operation.subject}.control`,
+          controlCapabilities,
+          operation.required,
+        );
+      }
     }
     if (operation.operation.transfer?.direction === "send") {
       addPublishSubject(

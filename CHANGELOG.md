@@ -18,6 +18,8 @@ and this project adheres to
 - Fixed browser client reconnect and bootstrap paths to recompute approval plans
   and trim stale optional grants instead of retaining permissions the user no
   longer has.
+- Fixed user reconnect and stored approval checks for scoped device-review
+  capabilities and operation cancel-only authority.
 - Fixed capability catalog and capability-group editing behavior so platform
   capabilities such as health access are listed and duplicate contract
   capability definitions from different deployments remain visible.
