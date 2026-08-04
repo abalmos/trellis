@@ -1,13 +1,17 @@
 import { HTTPException } from "@hono/hono/http-exception";
 import { isErr } from "@qlever-llc/result";
-import { approvalCapabilityKeys } from "@qlever-llc/trellis/auth";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { ulid } from "ulid";
 
 import type { Config } from "../../config.ts";
 import type { ContractsModule } from "../../catalog/runtime.ts";
 import type { SqlContractStorageRepository } from "../../catalog/storage.ts";
-import { planUserContractApproval } from "../approval/plan.ts";
+import {
+  delegatedCapabilitiesForApprovalPlan,
+  delegatedPublishSubjectsForApprovalPlan,
+  delegatedSubscribeSubjectsForApprovalPlan,
+  planUserContractApproval,
+} from "../approval/plan.ts";
 import { OAuth2CodeRequest, OAuth2CodeResponse } from "../oauth.ts";
 import type { Provider } from "../providers/index.ts";
 import { createProviders } from "../providers/registry.ts";
@@ -755,12 +759,18 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
       ...(args.resolution.requestedAuthority
         ? { identityAuthorityNeeds: args.resolution.requestedAuthority }
         : {}),
-      delegatedCapabilities: delegatedCapabilitiesForApproval(
-        approvalCapabilityKeys(args.resolution.plan.approval),
+      delegatedCapabilities: delegatedCapabilitiesForApprovalPlan(
+        args.resolution.plan,
         args.resolution.effectiveCapabilities,
       ),
-      delegatedPublishSubjects: args.resolution.plan.publishSubjects,
-      delegatedSubscribeSubjects: args.resolution.plan.subscribeSubjects,
+      delegatedPublishSubjects: delegatedPublishSubjectsForApprovalPlan(
+        args.resolution.plan,
+        args.resolution.effectiveCapabilities,
+      ),
+      delegatedSubscribeSubjects: delegatedSubscribeSubjectsForApprovalPlan(
+        args.resolution.plan,
+        args.resolution.effectiveCapabilities,
+      ),
     });
     const sessionEnsuredValue = sessionEnsured.take();
     if (isErr(sessionEnsuredValue)) {
@@ -938,19 +948,4 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
     createFlowStartResponse,
     completePendingBind,
   };
-}
-
-function delegatedCapabilitiesForApproval(
-  requiredCapabilities: string[],
-  effectiveCapabilities: string[],
-): string[] {
-  return [
-    ...new Set(requiredCapabilities.flatMap((capability) => {
-      if (capability !== "trellis.auth::device.review") return [capability];
-      const scoped = effectiveCapabilities.filter((candidate) =>
-        candidate.startsWith("trellis.auth::device.review.")
-      );
-      return scoped.length > 0 ? scoped : [capability];
-    })),
-  ].sort();
 }

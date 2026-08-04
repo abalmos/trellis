@@ -84,32 +84,31 @@ Deno.test("Auth.Capabilities.List returns platform and active contract capabilit
     },
   });
 
-  assertEquals(result.take(), {
-    entries: [{
-      key: "admin",
-      displayName: "Administer Trellis",
-      description:
-        "Manage Trellis users, sessions, deployments, and runtime policy.",
-      source: "platform",
-    }, {
-      key: "trellis.auth::device.review",
-      displayName: "Review device activation",
-      description: "Review and decide pending device activation requests.",
-      source: "contract",
-      deploymentId: "svc-auth",
-      contractId: "trellis.auth@v1",
-      contractDigest: "digest-auth",
-      contractDisplayName: "Trellis Auth",
-      direction: "creates",
-    }],
-    count: 2,
-    offset: 0,
-    limit: 10,
-    nextOffset: undefined,
+  const output = result.take();
+  assert(!isErr(output));
+  assertEquals(output.entries[0], {
+    key: "admin",
+    displayName: "Administer Trellis",
+    description:
+      "Manage Trellis users, sessions, deployments, and runtime policy.",
+    source: "platform",
   });
+  assert(
+    output.entries.some((entry) =>
+      entry.key === "trellis.health::read" && entry.source === "platform"
+    ),
+  );
+  assert(
+    output.entries.some((entry) =>
+      entry.key === "trellis.auth::device.review" &&
+      entry.source === "contract" &&
+      entry.deploymentId === "svc-auth"
+    ),
+  );
+  assertEquals(output.count, 10);
 });
 
-Deno.test("Auth.Capabilities.List returns unique assignment capability keys", async () => {
+Deno.test("Auth.Capabilities.List preserves duplicate contract capability definitions", async () => {
   const capabilities: DeploymentAuthorityCapabilityDefinition[] = [{
     deploymentId: "svc-a",
     key: "krishi.billing::events.subscribe",
@@ -139,14 +138,16 @@ Deno.test("Auth.Capabilities.List returns unique assignment capability keys", as
 
   const output = result.take();
   assert(!isErr(output));
-  assertEquals(output.entries.map((entry: { key: string }) => entry.key), [
-    "admin",
-    "krishi.billing::events.subscribe",
-  ]);
-  const duplicateEntry = output.entries[1];
-  assert(duplicateEntry?.source === "contract");
-  assertEquals(duplicateEntry.deploymentId, "svc-a");
-  assertEquals(output.count, 2);
+  assertEquals(
+    output.entries.flatMap((entry) =>
+      entry.key === "krishi.billing::events.subscribe" &&
+        "deploymentId" in entry
+        ? [entry.deploymentId]
+        : []
+    ),
+    ["svc-a", "svc-b"],
+  );
+  assertEquals(output.count, 11);
 });
 
 Deno.test("Auth.CapabilityGroups RPCs expose built-ins and manage custom groups", async () => {

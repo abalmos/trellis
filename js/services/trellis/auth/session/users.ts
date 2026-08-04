@@ -79,6 +79,47 @@ const PLATFORM_CAPABILITIES: CapabilityCatalogEntry[] = [{
   description:
     "Manage Trellis users, sessions, deployments, and runtime policy.",
   source: "platform",
+}, {
+  key: "trellis.auth::device.review",
+  displayName: "Review device activations",
+  description: "Review and decide pending Trellis device activation requests.",
+  source: "platform",
+}, {
+  key: "trellis.auth::events.auth",
+  displayName: "Read auth events",
+  description: "Read Trellis authentication and authorization events.",
+  source: "platform",
+}, {
+  key: "trellis.core::catalog.read",
+  displayName: "Read Trellis catalog",
+  description: "Read Trellis contract and participant catalog data.",
+  source: "platform",
+}, {
+  key: "trellis.core::contract.read",
+  displayName: "Read Trellis contracts",
+  description: "Read Trellis contract manifests and metadata.",
+  source: "platform",
+}, {
+  key: "trellis.health::read",
+  displayName: "Read participant health",
+  description: "View current and historical participant health state.",
+  source: "platform",
+}, {
+  key: "trellis.jobs::admin.mutate",
+  displayName: "Manage Trellis jobs",
+  description:
+    "Mutate Trellis job state, including retry and dead-letter actions.",
+  source: "platform",
+}, {
+  key: "trellis.jobs::admin.read",
+  displayName: "Read Trellis jobs",
+  description: "Read Trellis job state, metrics, and dead-letter queues.",
+  source: "platform",
+}, {
+  key: "trellis.jobs::admin.stream",
+  displayName: "Stream Trellis jobs",
+  description: "Subscribe to Trellis job administration streams.",
+  source: "platform",
 }];
 
 function capabilitySortParts(capability: {
@@ -106,16 +147,6 @@ function compareCapabilityCatalogEntries(
     if (compared !== 0) return compared;
   }
   return 0;
-}
-
-function uniqueCapabilityCatalogEntries(
-  entries: CapabilityCatalogEntry[],
-): CapabilityCatalogEntry[] {
-  const byKey = new Map<string, CapabilityCatalogEntry>();
-  for (const entry of entries) {
-    if (!byKey.has(entry.key)) byKey.set(entry.key, entry);
-  }
-  return [...byKey.values()];
 }
 
 function requireUserCaller(caller: {
@@ -477,10 +508,10 @@ export function createAuthCapabilitiesListHandler(
       "RPC request",
     );
 
-    const capabilities = uniqueCapabilityCatalogEntries([
+    const capabilities = [
       ...PLATFORM_CAPABILITIES,
       ...(await capabilityDefinitions.listEnabled()),
-    ].sort(compareCapabilityCatalogEntries));
+    ].sort(compareCapabilityCatalogEntries);
 
     const offset = input.offset ?? 0;
     return Result.ok(listPage(

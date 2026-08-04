@@ -2,7 +2,12 @@ import { approvalCapabilityKeys } from "@qlever-llc/trellis/auth";
 import type { AsyncResult, BaseError } from "@qlever-llc/result";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 
-import { planUserContractApproval } from "../approval/plan.ts";
+import {
+  delegatedCapabilitiesForApprovalPlan,
+  delegatedPublishSubjectsForApprovalPlan,
+  delegatedSubscribeSubjectsForApprovalPlan,
+  planUserContractApproval,
+} from "../approval/plan.ts";
 import {
   analyzeContractProposal,
   deriveContractContributedAvailability,
@@ -437,21 +442,27 @@ function escapeHtml(value: string): string {
 function storedApprovalCoversPlan(
   approval: IdentityGrantRecord,
   plan: ApprovalResolution["plan"],
+  effectiveCapabilities: string[],
 ): boolean {
   const approvedCapabilities = new Set(
     approvalCapabilityKeys(approval.approvalEvidence),
   );
   const approvedPublishSubjects = new Set(approval.publishSubjects);
   const approvedSubscribeSubjects = new Set(approval.subscribeSubjects);
-  return approvalCapabilityKeys(plan.approval).every((capability) =>
+  const requestedCapabilities = new Set([
+    ...(plan.requiredCapabilities ?? approvalCapabilityKeys(plan.approval)),
+    ...delegatedCapabilitiesForApprovalPlan(plan, effectiveCapabilities),
+  ]);
+  return [...requestedCapabilities].every((capability) =>
     approvedCapabilities.has(capability)
   ) &&
-    plan.publishSubjects.every((subject) =>
-      approvedPublishSubjects.has(subject)
-    ) &&
-    plan.subscribeSubjects.every((subject) =>
-      approvedSubscribeSubjects.has(subject)
-    );
+    delegatedPublishSubjectsForApprovalPlan(plan, effectiveCapabilities).every((
+      subject,
+    ) => approvedPublishSubjects.has(subject)) &&
+    delegatedSubscribeSubjectsForApprovalPlan(plan, effectiveCapabilities)
+      .every(
+        (subject) => approvedSubscribeSubjects.has(subject),
+      );
 }
 
 function authorityNeedSetFromDesiredState(
@@ -570,7 +581,11 @@ export async function getApprovalResolution(
         sameIdentityAnchor(approval.identityAnchor, requestedIdentityAnchor)
       ) ?? null;
   const storedApproval = matchingStoredApproval &&
-      storedApprovalCoversPlan(matchingStoredApproval, plan)
+      storedApprovalCoversPlan(
+        matchingStoredApproval,
+        plan,
+        existingResolvedCapabilities,
+      )
     ? matchingStoredApproval
     : null;
   recordTrellisDuration(
@@ -596,12 +611,14 @@ export async function getApprovalResolution(
       ...grantOverrideCapabilities,
     ]),
   ].sort();
+  const requiredApprovalCapabilities = plan.requiredCapabilities ??
+    approvalCapabilityKeys(plan.approval);
   const unresolvedGrantCapabilities = missingCapabilities({
-    requiredCapabilities: approvalCapabilityKeys(plan.approval),
+    requiredCapabilities: requiredApprovalCapabilities,
     effectiveCapabilities: grantOverrideCapabilities,
   });
   const unresolvedCapabilities = missingCapabilities({
-    requiredCapabilities: approvalCapabilityKeys(plan.approval),
+    requiredCapabilities: requiredApprovalCapabilities,
     effectiveCapabilities: resolvedCapabilities,
   });
   const resolvedApproval = effectiveApproval({

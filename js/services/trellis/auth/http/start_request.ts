@@ -17,6 +17,10 @@ import {
   buildAppIdentity,
   getApprovalResolutionBlocker,
 } from "./support.ts";
+import {
+  delegatedPublishSubjectsForApprovalPlan,
+  delegatedSubscribeSubjectsForApprovalPlan,
+} from "../approval/plan.ts";
 
 export type AuthStartRequest = {
   provider?: string;
@@ -254,7 +258,10 @@ export function resolveCurrentSessionApproval(
 
   if (
     !isSubset(
-      args.resolution.plan.publishSubjects,
+      delegatedPublishSubjectsForApprovalPlan(
+        args.resolution.plan,
+        args.resolution.effectiveCapabilities,
+      ),
       args.delegatedPublishSubjects,
     )
   ) {
@@ -262,7 +269,10 @@ export function resolveCurrentSessionApproval(
   }
   if (
     !isSubset(
-      args.resolution.plan.subscribeSubjects,
+      delegatedSubscribeSubjectsForApprovalPlan(
+        args.resolution.plan,
+        args.resolution.effectiveCapabilities,
+      ),
       args.delegatedSubscribeSubjects,
     )
   ) {

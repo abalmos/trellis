@@ -102,6 +102,7 @@ type ContractUseEntry = {
 
 export type ResolvedRpcUse = {
   alias: string;
+  required: boolean;
   contractId: string;
   contract: TrellisContractV1;
   key: string;
@@ -110,6 +111,7 @@ export type ResolvedRpcUse = {
 
 export type ResolvedEventUse = {
   alias: string;
+  required: boolean;
   contractId: string;
   contract: TrellisContractV1;
   key: string;
@@ -118,6 +120,7 @@ export type ResolvedEventUse = {
 
 export type ResolvedFeedUse = {
   alias: string;
+  required: boolean;
   contractId: string;
   contract: TrellisContractV1;
   key: string;
@@ -126,6 +129,7 @@ export type ResolvedFeedUse = {
 
 export type ResolvedOperationUse = {
   alias: string;
+  required: boolean;
   contractId: string;
   contract: TrellisContractV1;
   key: string;
@@ -928,6 +932,7 @@ export function resolveContractUses(
       }
       resolved.rpcCalls.push({
         alias,
+        required,
         contractId: target.id,
         contract: target,
         key,
@@ -949,6 +954,7 @@ export function resolveContractUses(
       }
       resolved.operationCalls.push({
         alias,
+        required,
         contractId: target.id,
         contract: target,
         key,
@@ -979,6 +985,7 @@ export function resolveContractUses(
       }
       resolved.eventPublishes.push({
         alias,
+        required,
         contractId: target.id,
         contract: target,
         key,
@@ -1000,6 +1007,7 @@ export function resolveContractUses(
       }
       resolved.eventSubscribes.push({
         alias,
+        required,
         contractId: target.id,
         contract: target,
         key,
@@ -1022,6 +1030,7 @@ export function resolveContractUses(
       }
       resolved.feedSubscribes.push({
         alias,
+        required,
         contractId: target.id,
         contract: target,
         key,

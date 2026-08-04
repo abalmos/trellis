@@ -1,7 +1,18 @@
 import type { TrellisContractV1 } from "@qlever-llc/trellis/contracts";
 import { assertEquals, assertRejects } from "@std/assert";
 import { createTestContracts } from "../../catalog/test_contracts.ts";
-import { planUserContractApproval } from "./plan.ts";
+import {
+  delegatedCapabilitiesForApprovalPlan,
+  delegatedPublishSubjectsForApprovalPlan,
+  planUserContractApproval,
+} from "./plan.ts";
+
+function approvalCapabilities(keys: string[]) {
+  return Object.fromEntries(keys.map((key) => [key, {
+    displayName: key,
+    description: key,
+  }]));
+}
 
 Deno.test("planUserContractApproval derives exact app capabilities and subjects", async () => {
   const dependency: TrellisContractV1 = {
@@ -126,6 +137,12 @@ Deno.test("planUserContractApproval derives exact app capabilities and subjects"
       description: "Read user profile data.",
     },
   });
+  assertEquals(plan.requiredCapabilities, [
+    "audit:read",
+    "evidence:read",
+    "evidence:write",
+    "users:read",
+  ]);
   assertEquals(plan.publishSubjects, [
     "feeds.v1.example.Audit.Feed",
     "operations.v1.example.Evidence.Upload",
@@ -138,6 +155,100 @@ Deno.test("planUserContractApproval derives exact app capabilities and subjects"
   assertEquals(plan.subscribeSubjects, [
     "events.v1.example.Auth.Connections.Opened",
   ]);
+});
+
+Deno.test("planUserContractApproval keeps optional dependency capabilities non-blocking", async () => {
+  const workspace: TrellisContractV1 = {
+    format: "trellis.contract.v1",
+    id: "krishi.workspace@v1",
+    displayName: "Krishi Workspace",
+    description: "Workspace API",
+    kind: "service",
+    capabilities: approvalCapabilities(["krishi.workspace::read"]),
+    schemas: { Empty: { type: "object" } },
+    rpc: {
+      "Workspace.Me": {
+        version: "v1",
+        subject: "rpc.v1.Workspace.Me",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        capabilities: { call: ["krishi.workspace::read"] },
+      },
+    },
+  };
+  const sherpa: TrellisContractV1 = {
+    format: "trellis.contract.v1",
+    id: "krishi.sherpa@v1",
+    displayName: "Krishi Sherpa",
+    description: "Sherpa API",
+    kind: "service",
+    capabilities: approvalCapabilities(["krishi.sherpa::devices.admin.read"]),
+    schemas: { Empty: { type: "object" } },
+    rpc: {
+      "Sherpa.Admin.Devices.List": {
+        version: "v1",
+        subject: "rpc.v1.Sherpa.Admin.Devices.List",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        capabilities: { call: ["krishi.sherpa::devices.admin.read"] },
+      },
+    },
+  };
+
+  const store = createTestContracts([
+    { digest: "workspace-digest", contract: workspace },
+    { digest: "sherpa-digest", contract: sherpa },
+  ]);
+
+  const plan = await planUserContractApproval(store, {
+    format: "trellis.contract.v1",
+    id: "krishi.krishi-ui@v1",
+    displayName: "Krishi",
+    description: "Krishi UI",
+    kind: "app",
+    uses: {
+      required: {
+        workspace: {
+          contract: "krishi.workspace@v1",
+          rpc: { call: ["Workspace.Me"] },
+        },
+      },
+      optional: {
+        sherpaAdmin: {
+          contract: "krishi.sherpa@v1",
+          rpc: { call: ["Sherpa.Admin.Devices.List"] },
+        },
+      },
+    },
+  });
+
+  assertEquals(Object.keys(plan.approval.capabilities).sort(), [
+    "krishi.sherpa::devices.admin.read",
+    "krishi.workspace::read",
+  ]);
+  assertEquals(plan.requiredCapabilities, ["krishi.workspace::read"]);
+  assertEquals(
+    delegatedCapabilitiesForApprovalPlan(plan, [
+      "krishi.workspace::read",
+    ]),
+    ["krishi.workspace::read"],
+  );
+  assertEquals(
+    delegatedPublishSubjectsForApprovalPlan(plan, [
+      "krishi.workspace::read",
+    ]),
+    ["rpc.v1.Workspace.Me"],
+  );
+  assertEquals(
+    delegatedPublishSubjectsForApprovalPlan(plan, [
+      "krishi.sherpa::devices.admin.read",
+      "krishi.workspace::read",
+    ]),
+    [
+      "rpc.v1.Sherpa.Admin.Devices.List",
+      "rpc.v1.Workspace.Me",
+    ],
+  );
 });
 
 Deno.test("planUserContractApproval includes operation observe and declared cancel capabilities", async () => {

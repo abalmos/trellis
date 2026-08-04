@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 
+import type { UserContractApprovalPlan } from "../approval/plan.ts";
 import type { UserProjectionEntry, UserSession } from "../schemas.ts";
 import { resolveUserReconnectSession } from "./user_reconnect.ts";
 
@@ -117,6 +118,85 @@ Deno.test("resolveUserReconnectSession rejects changed digest and missing curren
     }),
     { ok: false, reason: "insufficient_permissions" },
   );
+});
+
+Deno.test("resolveUserReconnectSession narrows stale optional delegated capabilities", async () => {
+  const approvalPlan: UserContractApprovalPlan = {
+    digest: "digest-approved",
+    contract: {
+      format: "trellis.contract.v1",
+      id: "krishi.krishi-ui@v1",
+      displayName: "Krishi",
+      description: "Krishi UI",
+      kind: "app",
+    },
+    approval: {
+      contractDigest: "digest-approved",
+      contractId: "krishi.krishi-ui@v1",
+      displayName: "Krishi",
+      description: "Krishi UI",
+      participantKind: "app",
+      capabilities: {
+        "krishi.sherpa::devices.admin.read": {
+          displayName: "Sherpa admin read",
+          description: "Read Sherpa admin data.",
+        },
+        "krishi.workspace::read": {
+          displayName: "Workspace read",
+          description: "Read workspace data.",
+        },
+      },
+    },
+    requiredCapabilities: ["krishi.workspace::read"],
+    publishSubjects: [
+      "rpc.v1.Sherpa.Admin.Devices.List",
+      "rpc.v1.Workspace.Me",
+    ],
+    subscribeSubjects: [],
+    publishSubjectGrants: [{
+      subject: "rpc.v1.Workspace.Me",
+      capabilities: ["krishi.workspace::read"],
+    }, {
+      subject: "rpc.v1.Sherpa.Admin.Devices.List",
+      capabilities: ["krishi.sherpa::devices.admin.read"],
+    }],
+    subscribeSubjectGrants: [],
+  };
+  const result = await resolveUserReconnectSession({
+    session: createSession({
+      contractId: "krishi.krishi-ui@v1",
+      delegatedCapabilities: [
+        "krishi.sherpa::devices.admin.read",
+        "krishi.workspace::read",
+      ],
+      delegatedPublishSubjects: [
+        "rpc.v1.Sherpa.Admin.Devices.List",
+        "rpc.v1.Workspace.Me",
+      ],
+      identityAuthorityNeeds: {
+        contracts: [],
+        surfaces: [],
+        capabilities: [{
+          capability: "krishi.workspace::read",
+          required: true,
+        }],
+        resources: [],
+      },
+    }),
+    presentedContractDigest: "digest-approved",
+    loadUserProjection: async () =>
+      activeUser({ capabilities: ["krishi.workspace::read"] }),
+    approvalPlan,
+  });
+
+  assertEquals(result.ok, true);
+  if (!result.ok) return;
+  assertEquals(result.session.delegatedCapabilities, [
+    "krishi.workspace::read",
+  ]);
+  assertEquals(result.session.delegatedPublishSubjects, [
+    "rpc.v1.Workspace.Me",
+  ]);
 });
 
 Deno.test("resolveUserReconnectSession returns user state failures", async () => {

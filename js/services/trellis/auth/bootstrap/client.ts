@@ -8,8 +8,9 @@ import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
 
 import type { ContractsModule } from "../../catalog/runtime.ts";
+import { planUserContractApproval } from "../approval/plan.ts";
 import type { CapabilityGroupLoader } from "../capability_groups.ts";
-import { resolveSessionPrincipal } from "../session/principal.ts";
+import { resolveUserReconnectSession } from "../callout/user_reconnect.ts";
 import type { SentinelCreds, Session, SessionKey } from "../schemas.ts";
 import type { UserProjectionEntry } from "../schemas.ts";
 import type { SqlSessionRepository } from "../storage.ts";
@@ -113,7 +114,13 @@ async function deleteClientSession(
 }
 
 export type ClientBootstrapDeps = {
-  contracts: Pick<ContractsModule, "getKnownContract">;
+  contracts: Pick<
+    ContractsModule,
+    | "getKnownContract"
+    | "validateContract"
+    | "getActiveEntries"
+    | "getKnownEntriesByContractId"
+  >;
   transports: ClientTransports;
   sentinel: SentinelCreds;
   sessionStorage: SessionStore;
@@ -165,22 +172,6 @@ export async function resolveClientBootstrap(
     return { status: "auth_required", serverNow: nowSeconds };
   }
 
-  const principal = await resolveSessionPrincipal(session, request.sessionKey, {
-    loadUserProjection: deps.loadUserProjection,
-    capabilityGroupStorage: deps.capabilityGroupStorage,
-  });
-  if (!principal.ok) {
-    switch (principal.error.reason) {
-      case "user_not_found":
-      case "user_inactive":
-      case "insufficient_permissions":
-        await deleteClientSession(deps.sessionStorage, request.sessionKey);
-        return { status: "auth_required", serverNow: nowSeconds };
-      default:
-        return { status: "auth_required", serverNow: nowSeconds };
-    }
-  }
-
   const knownContract = await deps.contracts.getKnownContract(
     session.contractDigest,
   );
@@ -196,6 +187,29 @@ export async function resolveClientBootstrap(
     knownContract,
     session.contractDigest,
   );
+  const approvalPlan = await planUserContractApproval(
+    deps.contracts,
+    knownContract,
+  );
+  const reconnect = await resolveUserReconnectSession({
+    session,
+    presentedContractDigest: session.contractDigest,
+    loadUserProjection: deps.loadUserProjection,
+    capabilityGroupStorage: deps.capabilityGroupStorage,
+    approvalPlan,
+  });
+  if (!reconnect.ok) {
+    switch (reconnect.reason) {
+      case "user_not_found":
+      case "user_inactive":
+      case "insufficient_permissions":
+        await deleteClientSession(deps.sessionStorage, request.sessionKey);
+        return { status: "auth_required", serverNow: nowSeconds };
+      default:
+        return { status: "auth_required", serverNow: nowSeconds };
+    }
+  }
+  const narrowedSession = reconnect.session;
 
   return {
     status: "ready",
@@ -212,18 +226,18 @@ export async function resolveClientBootstrap(
     },
     contract: contractView,
     user: {
-      userId: session.userId,
-      identity: session.identity,
-      email: session.email,
-      name: session.name,
-      ...(session.image ? { image: session.image } : {}),
+      userId: narrowedSession.userId,
+      identity: narrowedSession.identity,
+      email: narrowedSession.email,
+      name: narrowedSession.name,
+      ...(narrowedSession.image ? { image: narrowedSession.image } : {}),
     },
     binding: {
-      contractId: session.contractId,
-      digest: session.contractDigest,
-      capabilities: session.delegatedCapabilities,
-      publishSubjects: session.delegatedPublishSubjects,
-      subscribeSubjects: session.delegatedSubscribeSubjects,
+      contractId: narrowedSession.contractId,
+      digest: narrowedSession.contractDigest,
+      capabilities: narrowedSession.delegatedCapabilities,
+      publishSubjects: narrowedSession.delegatedPublishSubjects,
+      subscribeSubjects: narrowedSession.delegatedSubscribeSubjects,
     },
   };
 }

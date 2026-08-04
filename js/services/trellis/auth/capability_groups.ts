@@ -7,6 +7,7 @@ export const BUILTIN_ADMIN_CAPABILITIES = [
   "trellis.jobs::admin.read",
   "trellis.jobs::admin.mutate",
   "trellis.jobs::admin.stream",
+  "trellis.health::read",
   "trellis.core::catalog.read",
   "trellis.core::contract.read",
 ] as const;

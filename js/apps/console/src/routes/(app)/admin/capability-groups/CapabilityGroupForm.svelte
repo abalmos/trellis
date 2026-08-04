@@ -75,7 +75,7 @@
     return sections
       .map((section) => ({
         ...section,
-        capabilities: uniqueCapabilitiesByKey(section.capabilities).sort((left, right) =>
+        capabilities: section.capabilities.sort((left, right) =>
           (left.contractDisplayName ?? left.contractId ?? "").localeCompare(right.contractDisplayName ?? right.contractId ?? "") ||
           localCapabilityKey(left.key).localeCompare(localCapabilityKey(right.key))
         ),
@@ -127,10 +127,6 @@
       capability.contractId ?? "",
       capability.contractDigest ?? "",
     ].join("\u001f");
-  }
-
-  function uniqueCapabilitiesByKey(items: CapabilityView[]): CapabilityView[] {
-    return [...new Map(items.map((capability) => [capability.key, capability])).values()];
   }
 
   function uniqueSorted(values: string[]): string[] {

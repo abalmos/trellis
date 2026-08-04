@@ -38,6 +38,7 @@ import {
   resolveContractUsesFromEntries,
   validateActiveContractCompatibility,
 } from "../../catalog/uses.ts";
+import { planUserContractApproval } from "../approval/plan.ts";
 import type {
   AuthorityNeedSetSurface,
   DeploymentAuthority,
@@ -1508,6 +1509,10 @@ export function startAuthCallout(
       ) {
         return stageDeny("invalid_auth_token");
       }
+      const reconnectApprovalPlan = await approvalPlanForStoredContract(
+        opts.contracts,
+        session.contractDigest,
+      );
 
       const resolvedReconnect = await resolveUserReconnectSession({
         session,
@@ -1516,6 +1521,7 @@ export function startAuthCallout(
           return await opts.userStorage.get(trellisId) ?? null;
         },
         capabilityGroupStorage: opts.capabilityGroupStorage,
+        approvalPlan: reconnectApprovalPlan,
       });
       if (!resolvedReconnect.ok) {
         return stageDeny(resolvedReconnect.reason);
@@ -1537,6 +1543,15 @@ export function startAuthCallout(
     }
 
     return stageOk(session);
+  }
+
+  async function approvalPlanForStoredContract(
+    contracts: CalloutContractDeps,
+    digest: string,
+  ) {
+    const contract = await contracts.getKnownContract(digest);
+    if (!contract) return undefined;
+    return await planUserContractApproval(contracts, contract);
   }
 
   async function issuePrincipalPermissions(

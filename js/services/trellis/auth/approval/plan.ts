@@ -19,8 +19,17 @@ export type UserContractApprovalPlan = {
   digest: string;
   contract: TrellisContractV1;
   approval: ContractApproval;
+  requiredCapabilities?: string[];
   publishSubjects: string[];
   subscribeSubjects: string[];
+  publishSubjectGrants?: SubjectCapabilityGrant[];
+  subscribeSubjectGrants?: SubjectCapabilityGrant[];
+};
+
+export type SubjectCapabilityGrant = {
+  subject: string;
+  capabilities: string[];
+  required?: boolean;
 };
 
 type UserContractApprovalDeps = Pick<
@@ -47,6 +56,95 @@ function approvalCapabilitiesObject(
     if (metadata) result[key] = metadata;
   }
   return result;
+}
+
+function grantForSubject(
+  subject: string,
+  capabilities: Iterable<string> = [],
+  required = false,
+): SubjectCapabilityGrant {
+  return {
+    subject,
+    capabilities: sortUniqueStrings(capabilities),
+    ...(required ? { required } : {}),
+  };
+}
+
+function matchingEffectiveCapabilities(
+  required: string,
+  effectiveCapabilities: readonly string[],
+): string[] {
+  if (effectiveCapabilities.includes(required)) return [required];
+  if (required !== "trellis.auth::device.review") return [];
+  return effectiveCapabilities.filter((capability) =>
+    capability.startsWith("trellis.auth::device.review.")
+  );
+}
+
+function capabilitiesSatisfied(
+  capabilities: readonly string[],
+  effectiveCapabilities: readonly string[],
+): boolean {
+  return capabilities.every((capability) =>
+    matchingEffectiveCapabilities(capability, effectiveCapabilities).length > 0
+  );
+}
+
+function delegatedSubjectsForCapabilities(
+  grants: readonly SubjectCapabilityGrant[] | undefined,
+  fallbackSubjects: readonly string[],
+  effectiveCapabilities: readonly string[],
+): string[] {
+  if (!grants) {
+    return [...fallbackSubjects].sort((left, right) =>
+      left.localeCompare(right)
+    );
+  }
+  const subjects = new Set<string>();
+  for (const grant of grants) {
+    if (
+      grant.required ||
+      capabilitiesSatisfied(grant.capabilities, effectiveCapabilities)
+    ) {
+      subjects.add(grant.subject);
+    }
+  }
+  return [...subjects].sort((left, right) => left.localeCompare(right));
+}
+
+export function delegatedCapabilitiesForApprovalPlan(
+  plan: UserContractApprovalPlan,
+  effectiveCapabilities: readonly string[],
+): string[] {
+  return [
+    ...new Set(
+      Object.keys(plan.approval.capabilities).flatMap((capability) =>
+        matchingEffectiveCapabilities(capability, effectiveCapabilities)
+      ),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+export function delegatedPublishSubjectsForApprovalPlan(
+  plan: UserContractApprovalPlan,
+  effectiveCapabilities: readonly string[],
+): string[] {
+  return delegatedSubjectsForCapabilities(
+    plan.publishSubjectGrants,
+    plan.publishSubjects,
+    effectiveCapabilities,
+  );
+}
+
+export function delegatedSubscribeSubjectsForApprovalPlan(
+  plan: UserContractApprovalPlan,
+  effectiveCapabilities: readonly string[],
+): string[] {
+  return delegatedSubjectsForCapabilities(
+    plan.subscribeSubjectGrants,
+    plan.subscribeSubjects,
+    effectiveCapabilities,
+  );
 }
 
 async function getKnownDependencyEntries(
@@ -95,7 +193,32 @@ export async function planUserContractApproval(
   }
   const publishSubjects = new Set<string>();
   const subscribeSubjects = new Set<string>();
+  const publishSubjectGrants: SubjectCapabilityGrant[] = [];
+  const subscribeSubjectGrants: SubjectCapabilityGrant[] = [];
   const capabilities = new Map<string, ContractApprovalCapability>();
+  const requiredCapabilities = new Set<string>();
+  const addPublishSubject = (
+    subject: string,
+    subjectCapabilities: Iterable<string> = [],
+    required = false,
+  ) => {
+    const normalized = templateToWildcard(subject);
+    publishSubjects.add(normalized);
+    publishSubjectGrants.push(
+      grantForSubject(normalized, subjectCapabilities, required),
+    );
+  };
+  const addSubscribeSubject = (
+    subject: string,
+    subjectCapabilities: Iterable<string> = [],
+    required = false,
+  ) => {
+    const normalized = templateToWildcard(subject);
+    subscribeSubjects.add(normalized);
+    subscribeSubjectGrants.push(
+      grantForSubject(normalized, subjectCapabilities, required),
+    );
+  };
   const addCapability = (key: string, contract: TrellisContractV1) => {
     if (!capabilities.has(key)) {
       capabilities.set(
@@ -104,45 +227,72 @@ export async function planUserContractApproval(
       );
     }
   };
+  const addRequiredCapability = (key: string, contract: TrellisContractV1) => {
+    addCapability(key, contract);
+    requiredCapabilities.add(key);
+  };
 
   for (
     const event of Object.values<ContractEvent>(validated.contract.events ?? {})
   ) {
-    publishSubjects.add(templateToWildcard(event.subject));
+    addPublishSubject(event.subject, event.capabilities?.publish ?? [], true);
     for (const capability of event.capabilities?.publish ?? []) {
-      addCapability(capability, validated.contract);
+      addRequiredCapability(capability, validated.contract);
     }
   }
 
   for (const method of uses.rpcCalls) {
-    publishSubjects.add(templateToWildcard(method.method.subject));
+    const methodCapabilities = method.method.capabilities?.call ?? [];
+    addPublishSubject(
+      method.method.subject,
+      methodCapabilities,
+      method.required,
+    );
     if (method.method.transfer?.direction === "receive") {
-      publishSubjects.add(TRANSFER_DOWNLOAD_SUBJECT);
+      addPublishSubject(
+        TRANSFER_DOWNLOAD_SUBJECT,
+        methodCapabilities,
+        method.required,
+      );
     }
-    for (const capability of method.method.capabilities?.call ?? []) {
+    for (const capability of methodCapabilities) {
       addCapability(capability, method.contract);
+      if (method.required) requiredCapabilities.add(capability);
     }
   }
 
   for (const operation of uses.operationCalls) {
-    publishSubjects.add(templateToWildcard(operation.operation.subject));
+    const operationCapabilities = operation.operation.capabilities?.call ?? [];
+    addPublishSubject(
+      operation.operation.subject,
+      operationCapabilities,
+      operation.required,
+    );
     const operationControlRules = operationControlCapabilityRules(
       operation.operation,
     );
     if (operationControlRules.length > 0) {
-      publishSubjects.add(
-        templateToWildcard(`${operation.operation.subject}.control`),
+      addPublishSubject(
+        `${operation.operation.subject}.control`,
+        operationControlRules.flat(),
+        operation.required,
       );
     }
     if (operation.operation.transfer?.direction === "send") {
-      publishSubjects.add(TRANSFER_UPLOAD_SUBJECT);
+      addPublishSubject(
+        TRANSFER_UPLOAD_SUBJECT,
+        operationCapabilities,
+        operation.required,
+      );
     }
-    for (const capability of operation.operation.capabilities?.call ?? []) {
+    for (const capability of operationCapabilities) {
       addCapability(capability, operation.contract);
+      if (operation.required) requiredCapabilities.add(capability);
     }
-    for (const requiredCapabilities of operationControlRules) {
-      for (const capability of requiredCapabilities) {
+    for (const controlCapabilities of operationControlRules) {
+      for (const capability of controlCapabilities) {
         addCapability(capability, operation.contract);
+        if (operation.required) requiredCapabilities.add(capability);
       }
     }
   }
@@ -153,7 +303,7 @@ export async function planUserContractApproval(
     )
   ) {
     if (method.transfer?.direction === "receive") {
-      publishSubjects.add(TRANSFER_DOWNLOAD_SUBJECT);
+      addPublishSubject(TRANSFER_DOWNLOAD_SUBJECT, [], true);
     }
   }
 
@@ -163,28 +313,34 @@ export async function planUserContractApproval(
     )
   ) {
     if (operation.transfer?.direction === "send") {
-      publishSubjects.add(TRANSFER_UPLOAD_SUBJECT);
+      addPublishSubject(TRANSFER_UPLOAD_SUBJECT, [], true);
     }
   }
 
   for (const event of uses.eventPublishes) {
-    publishSubjects.add(templateToWildcard(event.event.subject));
+    const eventCapabilities = event.event.capabilities?.publish ?? [];
+    addPublishSubject(event.event.subject, eventCapabilities, event.required);
     for (const capability of event.event.capabilities?.publish ?? []) {
       addCapability(capability, event.contract);
+      if (event.required) requiredCapabilities.add(capability);
     }
   }
 
   for (const event of uses.eventSubscribes) {
-    subscribeSubjects.add(templateToWildcard(event.event.subject));
+    const eventCapabilities = event.event.capabilities?.subscribe ?? [];
+    addSubscribeSubject(event.event.subject, eventCapabilities, event.required);
     for (const capability of event.event.capabilities?.subscribe ?? []) {
       addCapability(capability, event.contract);
+      if (event.required) requiredCapabilities.add(capability);
     }
   }
 
   for (const feed of uses.feedSubscribes) {
-    publishSubjects.add(templateToWildcard(feed.feed.subject));
+    const feedCapabilities = feed.feed.capabilities?.subscribe ?? [];
+    addPublishSubject(feed.feed.subject, feedCapabilities, feed.required);
     for (const capability of feed.feed.capabilities?.subscribe ?? []) {
       addCapability(capability, feed.contract);
+      if (feed.required) requiredCapabilities.add(capability);
     }
   }
 
@@ -199,7 +355,10 @@ export async function planUserContractApproval(
       participantKind: validated.contract.kind,
       capabilities: approvalCapabilitiesObject(capabilities),
     },
+    requiredCapabilities: sortUniqueStrings(requiredCapabilities),
     publishSubjects: sortUniqueStrings(publishSubjects),
     subscribeSubjects: sortUniqueStrings(subscribeSubjects),
+    publishSubjectGrants,
+    subscribeSubjectGrants,
   };
 }
