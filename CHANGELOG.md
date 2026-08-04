@@ -8,6 +8,20 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.9] - 2026-08-04
+
+### Fixed
+
+- Fixed app identity approval for optional contract dependencies so only
+  required capabilities block approval, while delegated capabilities and
+  subjects are narrowed to the user's effective authority.
+- Fixed browser client reconnect and bootstrap paths to recompute approval plans
+  and trim stale optional grants instead of retaining permissions the user no
+  longer has.
+- Fixed capability catalog and capability-group editing behavior so platform
+  capabilities such as health access are listed and duplicate contract
+  capability definitions from different deployments remain visible.
+
 ## [0.11.0-rc.8] - 2026-07-13
 
 ### Fixed
@@ -24,8 +38,9 @@ and this project adheres to
 
 - Replaced TypeScript owner SDK runtime packages with vocabulary-only generated
   packages and participant-contract-derived caller/provider facades. Removed the
-  old generated `api`, `client`, and `contract` surfaces, implicit contract uses,
-  low-level connection constructors, and direct binding/resource bootstrap.
+  old generated `api`, `client`, and `contract` surfaces, implicit contract
+  uses, low-level connection constructors, and direct binding/resource
+  bootstrap.
 - Changed TypeScript participant contracts to select explicit RPC, event,
   operation, feed, state, KV, store, and Jobs descriptors. Generated action
   names, handler registration types, and connected runtime access now derive
@@ -73,7 +88,8 @@ and this project adheres to
 
 - Updated the Console Jobs workspace around a job-type health matrix, scoped
   throughput and latency charts, execution-story timelines, attempt details,
-  lineage, wait edges, related jobs, worker state, and structured Trellis errors.
+  lineage, wait edges, related jobs, worker state, and structured Trellis
+  errors.
 - Updated deployment authority acceptance to commit desired state and return
   while physical reconciliation continues in the background. The Console plan
   workspace now surfaces structured schema/capability/resource breakage and
