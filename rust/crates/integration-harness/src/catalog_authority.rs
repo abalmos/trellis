@@ -242,8 +242,8 @@ async fn run_materialized_authority_runtime_proof(
     let _broad_service_client = connect_service(
         trellis_url.to_string(),
         MATERIALIZED_AUTHORITY_CONTRACT_ID.to_string(),
-        broad_contract_json,
-        broad_digest,
+        broad_contract_json.clone(),
+        broad_digest.clone(),
         broad_seed,
         30_000,
     )
@@ -257,7 +257,7 @@ async fn run_materialized_authority_runtime_proof(
             MATERIALIZED_AUTHORITY_CONTRACT_ID.to_string(),
             narrow_contract_json,
             narrow_digest,
-            narrow_seed,
+            narrow_seed.clone(),
             30_000,
         )
         .await?,
@@ -280,7 +280,37 @@ async fn run_materialized_authority_runtime_proof(
         .await?;
         expect_materialized_authority_extra_denied(&caller_client).await?;
         assert_narrow_materialized_authority_grants(sdk_auth_client).await?;
-        Ok(4)
+
+        service_task.abort();
+        drop(service_client);
+        let upgrade_task = tokio::spawn(connect_service(
+            trellis_url.to_string(),
+            MATERIALIZED_AUTHORITY_CONTRACT_ID.to_string(),
+            broad_contract_json.clone(),
+            broad_digest.clone(),
+            narrow_seed,
+            30_000,
+        ));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if upgrade_task.is_finished() {
+            return Err(miette!(
+                "service additive owned-surface upgrade connected before authority approval"
+            ));
+        }
+        plan_accept_reconcile_deployment_authority(
+            sdk_auth_client,
+            MATERIALIZED_NARROW_DEPLOYMENT_ID,
+            &broad_contract_json,
+            &broad_digest,
+            "integration harness additive owned-surface approval",
+        )
+        .await?;
+        let upgraded_client = Arc::new(upgrade_task.await.into_diagnostic()??);
+        let upgraded_service_task =
+            start_materialized_authority_service(Arc::clone(&upgraded_client));
+        wait_for_materialized_authority_extra(&caller_client, "materialized-upgraded").await?;
+        upgraded_service_task.abort();
+        Ok(6)
     }
     .await;
 
@@ -491,6 +521,30 @@ async fn wait_for_materialized_authority_ping(client: &TrellisClient, message: &
                     ));
                 }
             }
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_for_materialized_authority_extra(
+    client: &TrellisClient,
+    message: &str,
+) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        match client
+            .call::<MaterializedAuthorityExtraRpc>(&AuthorityPingRequest {
+                message: message.to_string(),
+            })
+            .await
+        {
+            Ok(response) if response.message == message => return Ok(()),
+            result if tokio::time::Instant::now() >= deadline => {
+                return Err(miette!(
+                    "timed out waiting for materialized Authority.Extra `{message}`: {result:?}"
+                ));
+            }
+            _ => {}
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }

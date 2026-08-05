@@ -152,6 +152,22 @@ function compatibleMetadataContract(): TrellisContractV1 {
   };
 }
 
+function additiveRpcContract(): TrellisContractV1 {
+  return {
+    ...baseContract(),
+    rpc: {
+      ...baseContract().rpc,
+      "Admin.List": {
+        version: "v1",
+        subject: "rpc.v1.svc.Admin.List",
+        input: { schema: "Empty" },
+        output: { schema: "Empty" },
+        capabilities: { call: ["svc.call"] },
+      },
+    },
+  };
+}
+
 function incompatibleSchemaContract(): TrellisContractV1 {
   return {
     ...baseContract(),
@@ -928,7 +944,10 @@ Deno.test("POST /bootstrap/service allows retry with accepted compatibility migr
   const providedSurfaces = replacementAnalysis.contributedAvailability.surfaces
     .map(({ required: _required, ...surface }) => surface);
   const setup = await createApp({
-    envelopeBoundary: replacementNeeds,
+    envelopeBoundary: mergeBoundaries(
+      replacementNeeds,
+      replacementAnalysis.contributedAvailability,
+    ),
     initialOffers: [serviceOffer(current)],
     initialBindings: [kvBinding("cache")],
     initialPlans: [
@@ -1002,6 +1021,40 @@ Deno.test("POST /bootstrap/service accepts compatible same-contract digest repla
   );
   assertEquals(staleOffer?.staleAt, TEST_NOW);
   assertEquals(staleOffer?.liveness, "disconnected");
+});
+
+Deno.test("POST /bootstrap/service plans additive owned RPC surfaces", async () => {
+  const current = await validatedContract(baseContract());
+  const replacement = await validatedContract(additiveRpcContract());
+  const setup = await createApp({
+    initialOffers: [serviceOffer(current)],
+    initialBindings: [kvBinding("cache")],
+  });
+
+  const response = await setup.bootstrap({
+    contractId: replacement.contract.id,
+    contractDigest: replacement.digest,
+    contract: replacement.contract,
+  });
+
+  assertEquals(response.status, 202);
+  const body = await response.json();
+  assertEquals(body.reason, "authority_update_required");
+  assertEquals(body.missingAvailability.surfaces, [{
+    contractId: replacement.contract.id,
+    kind: "rpc",
+    name: "Admin.List",
+    action: "call",
+    required: true,
+  }]);
+  assertEquals(setup.plans.length, 1);
+  assertEquals(
+    setup.plans[0]?.proposal.providedSurfaces.some((surface) =>
+      surface.kind === "rpc" && surface.name === "Admin.List"
+    ),
+    true,
+  );
+  assertEquals(setup.offers.length, 1);
 });
 
 Deno.test("POST /bootstrap/service stales older active offers when refreshing newer digest", async () => {

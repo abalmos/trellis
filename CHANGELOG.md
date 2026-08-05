@@ -8,6 +8,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.10.23-rc.3] - 2026-08-04
+
+### Fixed
+
+- Fixed service bootstrap authority planning for compatible contract updates so
+  newly provided RPC, operation, event, and feed surfaces create an authority
+  update plan before the service reconnects with their NATS permissions.
+
 ## [0.10.23-rc.2] - 2026-07-31
 
 ### Added
@@ -26,7 +34,8 @@ and this project adheres to
   as non-blocking grants and only delegated when the user has them.
 - Improved OAuth callback and userinfo error handling so browser login failures
   return clear app-facing errors instead of terminal callback failures.
-- Added private-network CORS preflight support for browser auth/bootstrap routes.
+- Added private-network CORS preflight support for browser auth/bootstrap
+  routes.
 - Improved capability-group validation errors for built-in groups and unknown
   capabilities.
 

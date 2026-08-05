@@ -1069,7 +1069,10 @@ export function createServiceBootstrapHandler(deps: ServiceBootstrapDeps) {
     );
     const fit = evaluateProposalNeedsFit(
       desiredNeeds,
-      requestedNeeds,
+      mergeBoundaries(requestedNeeds, {
+        ...emptyAuthorityNeeds(),
+        surfaces: analysis.contributedAvailability.surfaces,
+      }),
     );
     const now = (deps.now?.() ?? new Date()).toISOString();
     const planClassification = classifyDeploymentAuthorityPlan(
