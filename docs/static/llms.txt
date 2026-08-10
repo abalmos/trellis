@@ -213,6 +213,10 @@ commands.
 - Feed subscriptions are connection-scoped. Closing or aborting a client feed
   propagates cancellation to the provider; watch feeds must not create a durable
   consumer per viewer.
+- App and device contracts may declare schema-backed value or map State stores.
+  Use generated named State facades; services use `service.kv`, and no participant
+  accesses the internal `trellis_state` bucket directly. State follows the stable
+  principal plus contract lineage across reconnects and compatible digest changes.
 
 ## Service repo setup
 

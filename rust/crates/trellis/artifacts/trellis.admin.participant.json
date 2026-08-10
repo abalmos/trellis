@@ -72,6 +72,17 @@
             "Auth.Capabilities.List"
           ]
         }
+      },
+      "state": {
+        "api": "trellis.state@v1",
+        "apiDigest": "p7I3D6uCe7wDhQXoWjEeP5_cOr31XgGKboam-v_8gjk",
+        "rpc": {
+          "call": [
+            "State.Admin.Delete",
+            "State.Admin.Get",
+            "State.Admin.List"
+          ]
+        }
       }
     },
     "optional": {}

@@ -796,7 +796,6 @@ export async function connectDeviceWithDeps<
   const log = resolveDeviceLogger(args.log);
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
-  const contractDigest = args.contract.CONTRACT_DIGEST;
   const offsetState: DeviceClockOffsetState = { serverClockOffsetMs: 0 };
   const bootstrap = await fetchDeviceBootstrap({
     trellisUrl: args.trellisUrl,
@@ -827,7 +826,7 @@ export async function connectDeviceWithDeps<
   const connectInfo = bootstrap.connectInfo;
   assertBootstrapContractMatches({
     contractId: args.contract.CONTRACT_ID,
-    contractDigest,
+    contractDigest: args.identity.participantArtifactDigest,
     connectInfo,
   });
 

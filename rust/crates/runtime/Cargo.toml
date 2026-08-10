@@ -29,6 +29,7 @@ bytes = { workspace = true, optional = true }
 clap.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
+jsonschema.workspace = true
 nats-jwt-rs.workspace = true
 nkeys.workspace = true
 oauth2.workspace = true

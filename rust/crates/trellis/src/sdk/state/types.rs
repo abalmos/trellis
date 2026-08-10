@@ -8,18 +8,6 @@ where
 {
     Option::<T>::deserialize(deserializer).map(Some)
 }
-/// Generated schema type `StateAdminDeleteRequestUserAppUser`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StateAdminDeleteRequestUserAppUser {
-    /// The `id` wire field.
-    pub id: String,
-    /// The `origin` wire field.
-    pub origin: String,
-    /// The `userId` wire field.
-    #[serde(rename = "userId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-}
 /// Generated schema type `StateAdminDeleteRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "scope")]
@@ -42,8 +30,9 @@ pub enum StateAdminDeleteRequest {
         key: Option<String>,
         /// The `store` wire field.
         store: String,
-        /// The `user` wire field.
-        user: StateAdminDeleteRequestUserAppUser,
+        /// The `userId` wire field.
+        #[serde(rename = "userId")]
+        user_id: String,
     },
     /// The `deviceApp` variant.
     #[serde(rename = "deviceApp")]
@@ -74,18 +63,6 @@ pub struct StateAdminDeleteResponse {
     /// The `deleted` wire field.
     pub deleted: bool,
 }
-/// Generated schema type `StateAdminGetRequestUserAppUser`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StateAdminGetRequestUserAppUser {
-    /// The `id` wire field.
-    pub id: String,
-    /// The `origin` wire field.
-    pub origin: String,
-    /// The `userId` wire field.
-    #[serde(rename = "userId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-}
 /// Generated schema type `StateAdminGetRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "scope")]
@@ -104,8 +81,9 @@ pub enum StateAdminGetRequest {
         key: Option<String>,
         /// The `store` wire field.
         store: String,
-        /// The `user` wire field.
-        user: StateAdminGetRequestUserAppUser,
+        /// The `userId` wire field.
+        #[serde(rename = "userId")]
+        user_id: String,
     },
     /// The `deviceApp` variant.
     #[serde(rename = "deviceApp")]
@@ -196,18 +174,6 @@ pub enum StateAdminGetResponse {
         found: bool,
     },
 }
-/// Generated schema type `StateAdminListRequestUserAppUser`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StateAdminListRequestUserAppUser {
-    /// The `id` wire field.
-    pub id: String,
-    /// The `origin` wire field.
-    pub origin: String,
-    /// The `userId` wire field.
-    #[serde(rename = "userId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-}
 /// Generated schema type `StateAdminListRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "scope")]
@@ -231,8 +197,9 @@ pub enum StateAdminListRequest {
         prefix: Option<String>,
         /// The `store` wire field.
         store: String,
-        /// The `user` wire field.
-        user: StateAdminListRequestUserAppUser,
+        /// The `userId` wire field.
+        #[serde(rename = "userId")]
+        user_id: String,
     },
     /// The `deviceApp` variant.
     #[serde(rename = "deviceApp")]

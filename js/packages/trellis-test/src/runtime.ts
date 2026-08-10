@@ -87,7 +87,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
   readonly natsUrl: string;
   readonly workdir: string;
   readonly deployments: {
-    create(args: { id?: string }): Promise<void>;
+    create(args: { id?: string; kind?: "service" | "device" }): Promise<void>;
     reconcile(deployment: string): Promise<void>;
     waitReady(deployment: string): Promise<void>;
   };
@@ -112,6 +112,24 @@ export class TrellisTestRuntime implements AsyncDisposable {
       deployment?: string;
       sessionKeySeed?: string;
     }): Promise<{ seed: string; sessionKey: string }>;
+  };
+  readonly devices: {
+    provision(
+      input: import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionInput,
+    ): Promise<
+      import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionOutput
+    >;
+  };
+  readonly state: {
+    adminGet(
+      input: import("@qlever-llc/trellis/sdk/state").StateAdminGetInput,
+    ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminGetOutput>;
+    adminList(
+      input: import("@qlever-llc/trellis/sdk/state").StateAdminListInput,
+    ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminListOutput>;
+    adminDelete(
+      input: import("@qlever-llc/trellis/sdk/state").StateAdminDeleteInput,
+    ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminDeleteOutput>;
   };
   readonly authority: {
     readonly plans: {
@@ -180,9 +198,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
       };
     }
     this.deployments = {
-      create: ({ id }) =>
+      create: ({ id, kind }) =>
         this.#admin.createDeployment({
           deployment: id ?? this.#deployment,
+          kind,
         }),
       reconcile: (deployment) => this.#admin.reconcile(deployment),
       waitReady: (deployment) => this.#admin.waitReady(deployment),
@@ -207,6 +226,14 @@ export class TrellisTestRuntime implements AsyncDisposable {
           deployment: deployment ?? this.#deployment,
           sessionKeySeed,
         }),
+    };
+    this.devices = {
+      provision: (input) => this.#admin.provisionDevice(input),
+    };
+    this.state = {
+      adminGet: (input) => this.#admin.stateAdminGet(input),
+      adminList: (input) => this.#admin.stateAdminList(input),
+      adminDelete: (input) => this.#admin.stateAdminDelete(input),
     };
     this.authority = {
       plans: {

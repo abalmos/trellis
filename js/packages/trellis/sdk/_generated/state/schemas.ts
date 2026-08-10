@@ -8,17 +8,9 @@ export const StateAdminDeleteRequestSchema = {
       "key": { "minLength": 1, "type": "string" },
       "scope": { "const": "userApp", "type": "string" },
       "store": { "minLength": 1, "type": "string" },
-      "user": {
-        "properties": {
-          "id": { "minLength": 1, "type": "string" },
-          "origin": { "minLength": 1, "type": "string" },
-          "userId": { "minLength": 1, "type": "string" },
-        },
-        "required": ["origin", "id"],
-        "type": "object",
-      },
+      "userId": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "user"],
+    "required": ["scope", "contractId", "contractDigest", "store", "userId"],
     "type": "object",
   }, {
     "properties": {
@@ -49,17 +41,9 @@ export const StateAdminGetRequestSchema = {
       "key": { "minLength": 1, "type": "string" },
       "scope": { "const": "userApp", "type": "string" },
       "store": { "minLength": 1, "type": "string" },
-      "user": {
-        "properties": {
-          "id": { "minLength": 1, "type": "string" },
-          "origin": { "minLength": 1, "type": "string" },
-          "userId": { "minLength": 1, "type": "string" },
-        },
-        "required": ["origin", "id"],
-        "type": "object",
-      },
+      "userId": { "minLength": 1, "type": "string" },
     },
-    "required": ["scope", "contractId", "contractDigest", "store", "user"],
+    "required": ["scope", "contractId", "contractDigest", "store", "userId"],
     "type": "object",
   }, {
     "properties": {
@@ -136,15 +120,7 @@ export const StateAdminListRequestSchema = {
       "prefix": { "minLength": 1, "type": "string" },
       "scope": { "const": "userApp", "type": "string" },
       "store": { "minLength": 1, "type": "string" },
-      "user": {
-        "properties": {
-          "id": { "minLength": 1, "type": "string" },
-          "origin": { "minLength": 1, "type": "string" },
-          "userId": { "minLength": 1, "type": "string" },
-        },
-        "required": ["origin", "id"],
-        "type": "object",
-      },
+      "userId": { "minLength": 1, "type": "string" },
     },
     "required": [
       "limit",
@@ -152,7 +128,7 @@ export const StateAdminListRequestSchema = {
       "contractId",
       "contractDigest",
       "store",
-      "user",
+      "userId",
     ],
     "type": "object",
   }, {

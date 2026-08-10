@@ -1,5 +1,6 @@
-import { dirname, join } from "@std/path";
 import { TransportError } from "@qlever-llc/trellis/errors";
+import { dirname, join } from "@std/path";
+
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
@@ -175,7 +176,13 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
       } catch (error) {
         return Response.json({
           ok: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: typeof error === "object" && error !== null &&
+              "toSerializable" in error &&
+              typeof error.toSerializable === "function"
+            ? JSON.stringify(error.toSerializable())
+            : error instanceof Error
+            ? error.message
+            : String(error),
         }, { status: 500 });
       }
     });

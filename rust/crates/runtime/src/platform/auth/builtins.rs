@@ -4,6 +4,14 @@ use serde_json::Value;
 
 use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
 
+fn state_api_value() -> Result<Value, AuthorizationStateError> {
+    let contract: Value = serde_json::from_str(trellis_rs::sdk::state::contract::CONTRACT_JSON)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    trellis_rs::contracts::compile_protocol_artifacts(&contract, &BTreeMap::new())
+        .map(|artifacts| artifacts.api)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
+
 pub(crate) fn administration_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
@@ -11,11 +19,17 @@ pub(crate) fn administration_participant_binding(
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let api = trellis_protocol::parse_api_v1(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let state_api_value = state_api_value()?;
+    let state_api = trellis_protocol::parse_api_v1(&state_api_value)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let participant_json =
         include_str!("../../../../trellis/artifacts/trellis.admin.participant.json");
     builtin_participant_binding(
         participant_json,
-        BTreeMap::from([(api.id().to_owned(), api_value)]),
+        BTreeMap::from([
+            (api.id().to_owned(), api_value),
+            (state_api.id().to_owned(), state_api_value),
+        ]),
         resolved_at,
     )
 }
@@ -114,4 +128,13 @@ fn builtin_participant_binding(
         state: ParticipantBindingState::Resolved,
         error: None,
     })
+}
+
+#[cfg(test)]
+mod state_api_digest_test {
+    #[test]
+    fn admin_binding_includes_state_admin_api() {
+        let binding = super::administration_participant_binding(0).expect("admin binding");
+        assert!(binding.api_artifacts_json.contains("trellis.state@v1"));
+    }
 }

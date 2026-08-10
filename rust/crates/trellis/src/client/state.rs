@@ -162,12 +162,9 @@ pub struct StatePutResult<TEntry, TMigrationEntry = StateEntry<Value>> {
 /// Result returned by state delete requests.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct StateDeleteResult<TEntry, TMigrationEntry = StateEntry<Value>> {
+pub struct StateDeleteResult {
     #[doc = concat!("The `", stringify!(deleted), "` value.")]
     pub deleted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[doc = concat!("The `", stringify!(entry), "` value.")]
-    pub entry: Option<StateValue<TEntry, TMigrationEntry>>,
 }
 
 /// Result returned by map state list requests.
@@ -235,9 +232,7 @@ where
 
     /// Delete the value state entry.
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
-    pub async fn delete(
-        &self,
-    ) -> Result<StateDeleteResult<StateEntry<TValue>>, TrellisClientError> {
+    pub async fn delete(&self) -> Result<StateDeleteResult, TrellisClientError> {
         self.delete_with_options(&DeleteStateOptions::default())
             .await
     }
@@ -247,7 +242,7 @@ where
     pub async fn delete_with_options(
         &self,
         options: &DeleteStateOptions,
-    ) -> Result<StateDeleteResult<StateEntry<TValue>>, TrellisClientError> {
+    ) -> Result<StateDeleteResult, TrellisClientError> {
         let response = self
             .transport
             .request_state_json(DELETE_SUBJECT, delete_request(self.store, None, options))
@@ -342,11 +337,7 @@ where
 
     /// Delete one map state entry.
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(delete), "`.")]
-    pub async fn delete(
-        &self,
-        key: &str,
-    ) -> Result<StateDeleteResult<MapStateEntry<TValue>, MapStateEntry<Value>>, TrellisClientError>
-    {
+    pub async fn delete(&self, key: &str) -> Result<StateDeleteResult, TrellisClientError> {
         self.delete_with_options(key, &DeleteStateOptions::default())
             .await
     }
@@ -357,8 +348,7 @@ where
         &self,
         key: &str,
         options: &DeleteStateOptions,
-    ) -> Result<StateDeleteResult<MapStateEntry<TValue>, MapStateEntry<Value>>, TrellisClientError>
-    {
+    ) -> Result<StateDeleteResult, TrellisClientError> {
         let composed_key = join_state_path(&self.prefix, key);
         let response = self
             .transport
@@ -466,11 +456,11 @@ fn list_request(store: &'static str, prefix: &str, options: &ListStateOptions) -
 }
 
 fn join_state_path(left: &str, right: &str) -> String {
-    left.split('/')
-        .chain(right.split('/'))
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join("/")
+    if left.is_empty() {
+        right.to_owned()
+    } else {
+        format!("{left}/{right}")
+    }
 }
 
 fn deserialize_true<'de, D>(deserializer: D) -> Result<bool, D::Error>

@@ -469,6 +469,24 @@ async function rewriteSdkWrapperTargets() {
         }
       }
     }
+    for (const format of ["esm", "script"]) {
+      for (const extension of ["js", "d.ts"]) {
+        const fileUrl = new URL(
+          `../npm/${format}/sdk/${sdkName}_manifest.${extension}`,
+          import.meta.url,
+        );
+        const original = await Deno.readTextFile(fileUrl).catch((error) => {
+          if (error instanceof Deno.errors.NotFound) return undefined;
+          throw error;
+        });
+        if (original === undefined) continue;
+        const updated = original.replaceAll(
+          `./_generated/${sdkName}/manifest.js`,
+          `../generated-sdk/${sdkDir}/manifest.js`,
+        );
+        if (updated !== original) await Deno.writeTextFile(fileUrl, updated);
+      }
+    }
   }
 }
 

@@ -4912,6 +4912,7 @@ dependencies = [
  "ed25519-dalek",
  "futures-util",
  "getrandom 0.3.4",
+ "jsonschema",
  "nats-jwt-rs",
  "nkeys",
  "oauth2",

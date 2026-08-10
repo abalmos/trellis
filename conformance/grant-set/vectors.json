@@ -403,8 +403,8 @@
       "digest": "_oayWipJ9hf1C0ne1LV3hFRRoXVyz2EJrUw-qjmiGQ0"
     },
     {
-      "name": "invalid-participant-state-delete",
-      "valid": false,
+      "name": "participant-state-delete",
+      "valid": true,
       "input": {
         "format": "trellis.grant-set.v1",
         "permissions": [
@@ -418,7 +418,9 @@
             "action": "delete"
           }
         ]
-      }
+      },
+      "normalizedJson": "{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"delete\",\"target\":{\"kind\":\"participantResource\",\"name\":\"draftInspection\",\"participant\":\"documents-worker\",\"resource\":\"state\"}}]}",
+      "digest": "l50_a2njwmjQaM7SWYmik_FJAI-auWABgqwQ9rwRa7A"
     },
     {
       "name": "invalid-job-queue-read",

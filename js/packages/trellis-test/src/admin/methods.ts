@@ -27,6 +27,15 @@ import {
   AuthDeploymentsCreate,
   AuthDeploymentsCreateRequestSchema,
   AuthDeploymentsCreateResponseSchema,
+  AuthDevicesProvision,
+  AuthDevicesProvisionRequestSchema,
+  AuthDevicesProvisionResponseSchema,
+  AuthPortalsList,
+  AuthPortalsListRequestSchema,
+  AuthPortalsListResponseSchema,
+  AuthPortalsPut,
+  AuthPortalsPutRequestSchema,
+  AuthPortalsPutResponseSchema,
   AuthServiceInstancesProvision,
   AuthServiceInstancesProvisionRequestSchema,
   AuthServiceInstancesProvisionResponseSchema,
@@ -34,13 +43,24 @@ import {
   AuthSessionsRevokeRequestSchema,
   AuthSessionsRevokeResponseSchema,
 } from "@qlever-llc/trellis/sdk/auth";
+import {
+  StateAdminDelete,
+  StateAdminDeleteRequestSchema,
+  StateAdminDeleteResponseSchema,
+  StateAdminGet,
+  StateAdminGetRequestSchema,
+  StateAdminGetResponseSchema,
+  StateAdminList,
+  StateAdminListRequestSchema,
+  StateAdminListResponseSchema,
+} from "@qlever-llc/trellis/sdk/state";
 import type { Static, TSchema } from "typebox";
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PARTICIPANT = {
   id: "trellis-platform-administration",
-  artifactDigest: "lQoimvKOcLmB4Acn3Q5roDNXQe4KlY3RjUvJ10hJ6CY",
-  needsDigest: "bqA3XWyeUSFZUzDOLAjpCODp__crKL4hwd6mVf7nrIU",
+  artifactDigest: "TWSRwOznrzNvGenCJbm5tB9hoX-I__6MA5bOaGaV5BE",
+  needsDigest: "6G5DIvZCX41sEDxlNrtfAskJepMA-89WRIvVn1lSsog",
 } as const;
 
 export const adminContract = defineAppContract(() => ({
@@ -58,8 +78,14 @@ export const adminContract = defineAppContract(() => ({
     AuthDeploymentAuthorityPlansList,
     AuthDeploymentAuthorityReconcile,
     AuthDeploymentsCreate,
+    AuthDevicesProvision,
+    AuthPortalsList,
+    AuthPortalsPut,
     AuthServiceInstancesProvision,
     AuthSessionsRevoke,
+    StateAdminDelete,
+    StateAdminGet,
+    StateAdminList,
   ],
 }));
 
@@ -80,6 +106,36 @@ function adminMethod<const I extends TSchema, const O extends TSchema>(
 
 /** @internal Concrete Auth RPCs available to the shared test host. */
 export const adminMethods = {
+  authPortalsList: adminMethod(
+    AuthPortalsListRequestSchema,
+    AuthPortalsListResponseSchema,
+    (client, input) => client.authPortalsList(input).orThrow(),
+  ),
+  authPortalsPut: adminMethod(
+    AuthPortalsPutRequestSchema,
+    AuthPortalsPutResponseSchema,
+    (client, input) => client.authPortalsPut(input).orThrow(),
+  ),
+  authDevicesProvision: adminMethod(
+    AuthDevicesProvisionRequestSchema,
+    AuthDevicesProvisionResponseSchema,
+    (client, input) => client.authDevicesProvision(input).orThrow(),
+  ),
+  stateAdminDelete: adminMethod(
+    StateAdminDeleteRequestSchema,
+    StateAdminDeleteResponseSchema,
+    (client, input) => client.stateAdminDelete(input).orThrow(),
+  ),
+  stateAdminGet: adminMethod(
+    StateAdminGetRequestSchema,
+    StateAdminGetResponseSchema,
+    (client, input) => client.stateAdminGet(input).orThrow(),
+  ),
+  stateAdminList: adminMethod(
+    StateAdminListRequestSchema,
+    StateAdminListResponseSchema,
+    (client, input) => client.stateAdminList(input).orThrow(),
+  ),
   authDeploymentsCreate: adminMethod(
     AuthDeploymentsCreateRequestSchema,
     AuthDeploymentsCreateResponseSchema,

@@ -279,7 +279,7 @@ mod subjects;
 pub use api::{
     compare_api_replacement_v1, lint_api_v1_authoring, parse_api_v1, ApiArtifactV1,
     ApiCompatibilityIssueCodeV1, ApiCompatibilityIssueV1, ApiCompatibilityReportV1,
-    API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
+    StateDefinitionV1, StateKindV1, API_AUTHORING_SCHEMA_V1_JSON, API_FORMAT_V1,
 };
 pub use authorization::{
     authorization_context_refresh_at_v1, authorization_context_signing_digest_v1,

@@ -40,7 +40,9 @@ mod sqlite;
 mod transport;
 pub(crate) mod verifier;
 
-pub(super) use resources::{ensure_authority_dependencies, ensure_deployment_resources};
+pub(super) use resources::{
+    ensure_authority_dependencies, ensure_deployment_resources, ensure_identity_resources,
+};
 #[cfg(test)]
 pub(super) use transport::compile_test_transport_permissions;
 pub(super) use transport::{compile_transport_permissions, TransportPermissions};

@@ -66,6 +66,10 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
 - Register owned RPC, feed, and operation providers through
   `service.handle()`. Used remote surfaces never appear under `handle()`.
 - Use generated resource, state, Jobs, event-consumer, and publisher handles.
+- Rust app and device facades expose declared value/map State stores. State is
+  schema-validated by the Rust Platform owner, supports revision CAS and per-entry
+  TTL, and follows the stable principal plus contract lineage. Services use KV
+  resources instead; never open the internal `trellis_state` bucket.
 - Do not import `trellis_rs::client` or `trellis_rs::generated` from application
   code. Do not extract NATS, credentials, bindings, subjects, or generic
   request/publish/subscribe methods.

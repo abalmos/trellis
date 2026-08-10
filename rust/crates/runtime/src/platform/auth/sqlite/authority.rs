@@ -247,6 +247,16 @@ impl AuthorityRepository for SqliteAuthorizationStore {
                 );
                 return Err(AuthorizationStateError::StorageConflict);
             }
+            let accepted_noop = if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
+                match command.desired_authority.as_ref() {
+                    Some(desired) => {
+                        desired_authority_enforceability_equal(&transaction, desired)?
+                    }
+                    None => false,
+                }
+            } else {
+                false
+            };
             if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
                 if let Some(expected_base_authority_version) = command.expected_base_authority_version
                 {
@@ -275,6 +285,7 @@ impl AuthorityRepository for SqliteAuthorizationStore {
                     .map_err(sql_error)?;
                 if super::validation::proposal_base_authority_version(&current)?
                     != current_authority_version
+                    && !accepted_noop
                 {
                     tracing::warn!(
                         proposal_id = %command.proposal_id,
@@ -293,7 +304,7 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             if let Some(deployment) = command.deployment {
                 put_sql_deployment_evidence(&transaction, deployment)?;
             }
-            if let Some(desired) = command.desired_authority {
+            if let Some(desired) = command.desired_authority.filter(|_| !accepted_noop) {
                 put_sql_desired_authority(&transaction, desired)?;
             }
             transaction
@@ -364,7 +375,7 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             let result = load_authority_proposal(&transaction, &command.proposal_id)?
                 .map(|value| value.0)
                 .ok_or(AuthorizationStateError::StorageConflict)?;
-            if command.decision.outcome == AuthorityDecisionOutcome::Accepted {
+            if command.decision.outcome == AuthorityDecisionOutcome::Accepted && !accepted_noop {
                 revoke_sql_contexts(
                     &transaction,
                     &AuthorizationContextSelector::Authority(
@@ -561,6 +572,26 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             Ok(())
         })
         .await
+    }
+}
+
+fn desired_authority_enforceability_equal(
+    connection: &Connection,
+    desired: &DesiredAuthorityRecord,
+) -> Result<bool, AuthorizationStateError> {
+    match desired {
+        DesiredAuthorityRecord::Identity(desired) => Ok(load_identity_authority(
+            connection,
+            &desired.principal_id,
+            &desired.participant_id,
+        )?
+        .is_some_and(|current| identity_enforceability_equal(&current, desired))),
+        DesiredAuthorityRecord::Deployment(desired) => Ok(load_deployment_authority(
+            connection,
+            &desired.deployment_id,
+            &desired.participant_id,
+        )?
+        .is_some_and(|current| deployment_enforceability_equal(&current, desired))),
     }
 }
 

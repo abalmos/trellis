@@ -7,7 +7,7 @@ export type StateAdminDeleteInput = {
   key?: string;
   scope: "userApp";
   store: string;
-  user: { id: string; origin: string; userId?: string };
+  userId: string;
 } | {
   contractDigest: string;
   contractId: string;
@@ -25,7 +25,7 @@ export type StateAdminGetInput = {
   key?: string;
   scope: "userApp";
   store: string;
-  user: { id: string; origin: string; userId?: string };
+  userId: string;
 } | {
   contractDigest: string;
   contractId: string;
@@ -65,7 +65,7 @@ export type StateAdminListInput = {
   prefix?: string;
   scope: "userApp";
   store: string;
-  user: { id: string; origin: string; userId?: string };
+  userId: string;
 } | {
   contractDigest: string;
   contractId: string;

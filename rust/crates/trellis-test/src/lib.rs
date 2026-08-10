@@ -1228,6 +1228,14 @@ impl TrellisTestRuntime {
         self.workdir.path()
     }
 
+    /// Return the exact case-scoped contract installed by this runtime.
+    pub fn scoped_contract(
+        &self,
+        contract: &TrellisTestContract,
+    ) -> Result<TrellisTestContract, TrellisTestError> {
+        contract.scoped(self.integration_test_scope.as_ref())
+    }
+
     /// Return direct SQLite access for the runtime-owned Trellis control plane.
     #[must_use]
     pub fn control_plane_sqlite(&self) -> TrellisControlPlaneSqlite {
@@ -1437,7 +1445,7 @@ impl TrellisTestRuntime {
         entry: TrellisRawStateEntry,
     ) -> Result<(), TrellisTestError> {
         let client = ConnectOptions::new()
-            .credentials_file(auth_creds_path(self.workdir.path()))
+            .credentials_file(trellis_creds_path(self.workdir.path()))
             .await?
             .connect(&self.nats_url)
             .await
@@ -1781,6 +1789,63 @@ impl TrellisTestAdmin {
             .client
             .as_ref()
             .expect("admin client is initialized before returning"))
+    }
+
+    /// Call `State.Admin.Get` through the live shared or local administrator.
+    pub async fn state_admin_get(
+        &mut self,
+        bootstrap_url: &str,
+        request: &trellis_rs::sdk::state::types::StateAdminGetRequest,
+    ) -> Result<trellis_rs::sdk::state::types::StateAdminGetResponse, TrellisTestError> {
+        if let Some(proxy) = &self.admin_rpc {
+            proxy.call("stateAdminGet", request).await
+        } else {
+            Ok(trellis_rs::sdk::state::client::StateClient::new(
+                self.connect_admin(bootstrap_url).await?,
+            )
+            .rpc()
+            .state()
+            .admin_get(request)
+            .await?)
+        }
+    }
+
+    /// Call `State.Admin.List` through the live shared or local administrator.
+    pub async fn state_admin_list(
+        &mut self,
+        bootstrap_url: &str,
+        request: &trellis_rs::sdk::state::types::StateAdminListRequest,
+    ) -> Result<trellis_rs::sdk::state::types::StateAdminListResponse, TrellisTestError> {
+        if let Some(proxy) = &self.admin_rpc {
+            proxy.call("stateAdminList", request).await
+        } else {
+            Ok(trellis_rs::sdk::state::client::StateClient::new(
+                self.connect_admin(bootstrap_url).await?,
+            )
+            .rpc()
+            .state()
+            .admin_list(request)
+            .await?)
+        }
+    }
+
+    /// Call `State.Admin.Delete` through the live shared or local administrator.
+    pub async fn state_admin_delete(
+        &mut self,
+        bootstrap_url: &str,
+        request: &trellis_rs::sdk::state::types::StateAdminDeleteRequest,
+    ) -> Result<trellis_rs::sdk::state::types::StateAdminDeleteResponse, TrellisTestError> {
+        if let Some(proxy) = &self.admin_rpc {
+            proxy.call("stateAdminDelete", request).await
+        } else {
+            Ok(trellis_rs::sdk::state::client::StateClient::new(
+                self.connect_admin(bootstrap_url).await?,
+            )
+            .rpc()
+            .state()
+            .admin_delete(request)
+            .await?)
+        }
     }
 
     /// Create a service deployment through `Auth.Deployments.Create`.
@@ -2168,8 +2233,91 @@ impl TrellisTestAdmin {
         contract: &TrellisTestContract,
         session_seed: impl Into<String>,
     ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(bootstrap_url, contract, session_seed.into(), None)
+            .await
+    }
+
+    /// Register and connect a distinct local user through public Auth browser surfaces.
+    pub async fn connect_new_local_user(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<Caller, TrellisTestError> {
         self.complete_bootstrap(bootstrap_url).await?;
-        let session_seed = session_seed.into();
+        let list_request = auth_sdk::types::AuthPortalsListRequest {
+            cursor: None,
+            disabled: None,
+            limit: Some(100),
+        };
+        let portals: auth_sdk::types::AuthPortalsListResponse = if let Some(proxy) = &self.admin_rpc
+        {
+            proxy.call("authPortalsList", &list_request).await?
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .portals_list(&list_request)
+                .await?
+        };
+        let portal = portals
+            .entries
+            .into_iter()
+            .find(|portal| portal.built_in)
+            .ok_or_else(|| {
+                TrellisTestError::UnexpectedResponse(
+                    "built-in login portal was not found".to_owned(),
+                )
+            })?;
+        if !portal.login_settings.local_registration {
+            let put_request = auth_sdk::types::AuthPortalsPutRequest {
+                disabled: portal.disabled,
+                display_name: portal.display_name,
+                entry_url: portal.entry_url,
+                expected_version: Some(portal.version),
+                idempotency_key: random_session_seed(),
+                login_settings: auth_sdk::types::AuthPortalsPutRequestLoginSettings {
+                    federated_registration: portal.login_settings.federated_registration,
+                    local_login: true,
+                    local_registration: true,
+                    providers: Some(vec!["local".to_owned()]),
+                },
+                portal_id: portal.portal_id,
+            };
+            if let Some(proxy) = &self.admin_rpc {
+                let _: auth_sdk::types::AuthPortalsPutResponse =
+                    proxy.call("authPortalsPut", &put_request).await?;
+            } else {
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .portals_put(&put_request)
+                    .await?;
+            }
+        }
+        let (caller, _) = self
+            .connect_client_with_registration(
+                bootstrap_url,
+                contract,
+                random_session_seed(),
+                Some(LocalUserRegistration {
+                    username: username.into(),
+                    password: password.into(),
+                }),
+            )
+            .await?;
+        Ok(caller)
+    }
+
+    async fn connect_client_with_registration(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        session_seed: String,
+        registration: Option<LocalUserRegistration>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.complete_bootstrap(bootstrap_url).await?;
         let auth = SessionAuth::from_seed_base64url(&session_seed)?;
         let contract = contract.scoped(self.integration_test_scope.as_ref())?;
         let compiled = compile_test_contract(&contract, &mut self.api_artifacts)?;
@@ -2185,7 +2333,16 @@ impl TrellisTestAdmin {
         )
         .await?;
         let flow_id = started.flow_id;
-        if let Some(proxy) = &self.admin_rpc {
+        if let Some(registration) = registration {
+            register_local_user(
+                &self.trellis_url,
+                &flow_id,
+                &registration.username,
+                &registration.password,
+            )
+            .await?;
+            submit_portal_approval(&self.trellis_url, &flow_id).await?;
+        } else if let Some(proxy) = &self.admin_rpc {
             proxy
                 .complete_client_auth(&self.trellis_url, &flow_id, &auth.session_key)
                 .await?;
@@ -2217,6 +2374,11 @@ impl TrellisTestAdmin {
         .await?;
         Ok((client, reconnect))
     }
+}
+
+struct LocalUserRegistration {
+    username: String,
+    password: String,
 }
 
 /// Bound client reconnect material captured from a completed public auth flow.
@@ -2277,6 +2439,14 @@ impl TrellisTestContract {
     #[must_use]
     pub fn digest(&self) -> &str {
         &self.digest
+    }
+
+    /// Return the contract ID from this test manifest.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        self.manifest["id"]
+            .as_str()
+            .expect("validated test contract has an id")
     }
 
     fn scoped(
@@ -2536,13 +2706,16 @@ fn scope_manifest_value(
 }
 
 fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
-    [(
+    let mut apis = [(
         trellis_rs::sdk::auth::API_ID.to_owned(),
         serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
             .expect("embedded Auth API artifact is valid JSON"),
     )]
     .into_iter()
-    .collect()
+    .collect();
+    ensure_builtin_api(trellis_rs::sdk::state::CONTRACT_ID, &mut apis)
+        .expect("embedded State API artifact compiles");
+    apis
 }
 
 fn compile_test_contract(
@@ -2922,6 +3095,31 @@ async fn perform_local_login(
         &format!("{}/auth/login/local", trim_url(trellis_url)),
         trellis_url,
         &json!({ "flowId": flow_id, "username": ADMIN_USERNAME, "password": password }),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn register_local_user(
+    trellis_url: &str,
+    flow_id: &str,
+    username: &str,
+    password: &str,
+) -> Result<(), TrellisTestError> {
+    let _: Value = post_json_with_origin(
+        &format!(
+            "{}/auth/flow/{}/register/local",
+            trim_url(trellis_url),
+            flow_id
+        ),
+        trellis_url,
+        &json!({
+            "username": username,
+            "password": password,
+            "name": username,
+            "email": null,
+            "idempotencyKey": random_session_seed(),
+        }),
     )
     .await?;
     Ok(())

@@ -260,6 +260,7 @@ fn compile_participant(
         "docs",
         "kind",
         "schemas",
+        "state",
     ] {
         copy(contract, &mut participant, field);
     }

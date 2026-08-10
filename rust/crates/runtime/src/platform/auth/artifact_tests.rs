@@ -5,8 +5,8 @@ use trellis_protocol::{
 
 const AUTH_API_DIGEST: &str = "k-AVuZetf28XCxaYc2HEIzbafPeA63WeRgg0YmHtia0";
 const AUTH_PARTICIPANT_DIGEST: &str = "plMjQVw7Fp3Q5R---qSTLjypJJaUU7A5hT_ayaTpd0k";
-const ADMIN_PARTICIPANT_DIGEST: &str = "lQoimvKOcLmB4Acn3Q5roDNXQe4KlY3RjUvJ10hJ6CY";
-const ADMIN_PARTICIPANT_NEEDS_DIGEST: &str = "bqA3XWyeUSFZUzDOLAjpCODp__crKL4hwd6mVf7nrIU";
+const ADMIN_PARTICIPANT_DIGEST: &str = "TWSRwOznrzNvGenCJbm5tB9hoX-I__6MA5bOaGaV5BE";
+const ADMIN_PARTICIPANT_NEEDS_DIGEST: &str = "6G5DIvZCX41sEDxlNrtfAskJepMA-89WRIvVn1lSsog";
 
 #[test]
 fn source_auth_artifacts_are_valid_and_digest_pinned() {

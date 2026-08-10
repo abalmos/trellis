@@ -1,6 +1,110 @@
 {
   "cases": [
     {
+      "id": "state.client-rust-owner",
+      "fixture": "state",
+      "title": "Generated TypeScript and Rust app State clients reach the Rust Platform owner",
+      "coverage": [
+        "state-parity",
+        "cross-runtime-state",
+        "auth-protocol-matrix"
+      ],
+      "description": "Generated TypeScript and Rust app facades call the Rust-owned State API through live authorization and NATS; typed path composition preserves invalid syntax for server rejection.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-typescript@v1"
+          }
+        ],
+        "given": [
+          "a live Rust Trellis Platform owner"
+        ],
+        "when": [
+          "generated TypeScript and Rust app clients invoke State"
+        ],
+        "then": [
+          "both clients receive canonical State responses from Rust",
+          "leading, trailing, and doubled slash mutations are rejected by Platform",
+          "canonical nested prefixes succeed"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented",
+        "rust": "implemented"
+      },
+      "classification": "shared",
+      "implementations": {
+        "typescript": {
+          "id": "state.client-rust-owner",
+          "file": "state/typescript_client_rust_owner.integration_test.ts",
+          "testName": "state.client-rust-owner uses generated app State facades",
+          "runtime": "live-trellis"
+        },
+        "rust": {
+          "module": "state",
+          "function": "state_rust_client_reaches_rust_owner"
+        }
+      }
+    },
+    {
+      "id": "state.typescript-device-rust-owner",
+      "fixture": "state",
+      "title": "Activated TypeScript devices use State owned by the Rust Platform",
+      "coverage": [
+        "state-parity",
+        "cross-runtime-state",
+        "auth-protocol-matrix",
+        "device-activation"
+      ],
+      "description": "Two real activated TypeScript devices use value and map State through the Rust Platform owner, retain isolated namespaces across reconnect, and are inspectable through exact device Admin targets.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "activation-admin",
+            "kind": "app",
+            "contract": "trellis.integration.state-device-admin@v1"
+          },
+          {
+            "name": "device-a",
+            "kind": "device",
+            "contract": "trellis.integration.state-device@v1"
+          },
+          {
+            "name": "device-b",
+            "kind": "device",
+            "contract": "trellis.integration.state-device@v1"
+          }
+        ],
+        "given": [
+          "two provisioned devices are activated and connected with the same contract"
+        ],
+        "when": [
+          "both devices perform value and map CRUD",
+          "device A reconnects",
+          "an administrator gets, lists, and deletes device A State"
+        ],
+        "then": [
+          "device A and B retain isolated value and map entries",
+          "device A retains undeleted State across reconnect",
+          "exact device Admin targets succeed and a wrong digest returns ValidationError"
+        ]
+      },
+      "completion": {
+        "typescript": "implemented"
+      },
+      "classification": "shared",
+      "implementations": {
+        "typescript": {
+          "id": "state.typescript-device-rust-owner",
+          "file": "state/typescript_device_rust_owner.integration_test.ts",
+          "testName": "state.typescript-device-rust-owner uses activated device State facades",
+          "runtime": "live-trellis"
+        }
+      }
+    },
+    {
       "id": "authorization-registry.provider-cache",
       "fixture": "authorization-registry",
       "title": "Connected providers resolve authorization evidence through NATS and apply live revocation",

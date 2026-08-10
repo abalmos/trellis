@@ -111,6 +111,16 @@ impl ApiArtifactV1 {
         &self.id
     }
 
+    /// Return one declared State definition by name.
+    pub fn state_definition(&self, name: &str) -> Option<&StateDefinitionV1> {
+        self.state.get(name)
+    }
+
+    /// Return one declared JSON Schema by name.
+    pub fn schema(&self, name: &str) -> Option<&Value> {
+        self.schemas.get(name)
+    }
+
     /// Serialize the normalized supported API shape, including human fields.
     ///
     /// # Errors
@@ -713,14 +723,18 @@ struct FeedDefinitionV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum StateKindV1 {
+/// Storage shape of one declared State store.
+pub enum StateKindV1 {
+    /// One value without a logical key.
     Value,
+    /// Values addressed by canonical slash-path keys.
     Map,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateDefinitionV1 {
+/// One validated State store declaration from an API artifact.
+pub struct StateDefinitionV1 {
     kind: StateKindV1,
     schema: SchemaReferenceV1,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -729,6 +743,30 @@ struct StateDefinitionV1 {
     accepted_versions: BTreeMap<String, SchemaReferenceV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
     docs: Option<DocumentationV1>,
+}
+
+impl StateDefinitionV1 {
+    /// Return whether this declaration stores one value or a map of values.
+    pub fn kind(&self) -> StateKindV1 {
+        self.kind
+    }
+
+    /// Return the schema used by the current State version.
+    pub fn schema_name(&self) -> &str {
+        &self.schema.schema
+    }
+
+    /// Return the current logical State version, defaulting to `v1`.
+    pub fn state_version(&self) -> &str {
+        self.state_version.as_deref().unwrap_or("v1")
+    }
+
+    /// Return accepted old State versions and their schema names.
+    pub fn accepted_versions(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.accepted_versions
+            .iter()
+            .map(|(version, schema)| (version.as_str(), schema.schema.as_str()))
+    }
 }
 
 fn validate_docs(path: &str, docs: &DocumentationV1) -> Result<(), ProtocolError> {

@@ -7,6 +7,10 @@ import Type, {
 import { Value } from "typebox/value";
 import type { BaseError } from "@qlever-llc/result";
 import { TrellisError } from "../errors/TrellisError.ts";
+import {
+  CONTRACT as TRELLIS_STATE_CONTRACT,
+  CONTRACT_DIGEST as TRELLIS_STATE_CONTRACT_DIGEST,
+} from "../sdk/state_manifest.ts";
 import type {
   StateDeleteInput,
   StateDeleteResponse,
@@ -1453,6 +1457,10 @@ type BuiltRpcDesc = {
 };
 
 const TRELLIS_STATE_CONTRACT_ID = "trellis.state@v1";
+const TRELLIS_STATE_ACTION_SOURCE = {
+  artifact: TRELLIS_STATE_CONTRACT,
+  digest: TRELLIS_STATE_CONTRACT_DIGEST,
+} as const;
 
 const BASELINE_STATE_RPC_CALL = [
   "State.Get",
@@ -1507,24 +1515,28 @@ const BASELINE_STATE_ACTIONS = [
     "State.Get",
     BASELINE_STATE_API.rpc["State.Get"],
     "StateGet",
+    TRELLIS_STATE_ACTION_SOURCE,
   ),
   rpcAction(
     TRELLIS_STATE_CONTRACT_ID,
     "State.Put",
     BASELINE_STATE_API.rpc["State.Put"],
     "StatePut",
+    TRELLIS_STATE_ACTION_SOURCE,
   ),
   rpcAction(
     TRELLIS_STATE_CONTRACT_ID,
     "State.Delete",
     BASELINE_STATE_API.rpc["State.Delete"],
     "StateDelete",
+    TRELLIS_STATE_ACTION_SOURCE,
   ),
   rpcAction(
     TRELLIS_STATE_CONTRACT_ID,
     "State.List",
     BASELINE_STATE_API.rpc["State.List"],
     "StateList",
+    TRELLIS_STATE_ACTION_SOURCE,
   ),
 ] as const;
 

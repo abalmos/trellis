@@ -176,6 +176,27 @@ impl RuntimeAuthVerifier {
         self.source.io_counters()
     }
 
+    /// Require one additional exact permission from an already-cached current context.
+    pub(crate) fn require_cached_permission(
+        &self,
+        context_digest: &str,
+        permission: &PermissionAtomV1,
+    ) -> Result<(), AuthorizationStateError> {
+        self.require_healthy()?;
+        if self.source.revocation_time(context_digest)?.is_some() {
+            return Err(denied("request is not granted by the active authority"));
+        }
+        let context = self
+            .source
+            .verified_context(context_digest)?
+            .ok_or_else(|| denied("authorization context is not cached"))?;
+        if context.allows(permission) {
+            Ok(())
+        } else {
+            Err(denied("request is not granted by the active authority"))
+        }
+    }
+
     /// Verify a v2 request proof against the exact routed permission.
     ///
     /// `reply` must be the actual NATS reply inbox (`message.reply`); the

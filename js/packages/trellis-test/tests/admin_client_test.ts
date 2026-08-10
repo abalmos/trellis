@@ -13,6 +13,12 @@ import {
 } from "../src/admin_client.ts";
 
 const expectedAdminMethods = [
+  "authPortalsList",
+  "authPortalsPut",
+  "authDevicesProvision",
+  "stateAdminDelete",
+  "stateAdminGet",
+  "stateAdminList",
   "authDeploymentsCreate",
   "authDeploymentAuthorityPlan",
   "authDeploymentAuthorityAcceptUpdate",

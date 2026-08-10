@@ -1961,10 +1961,7 @@ const STATE_RUNTIME_RPC = {
 }>;
 
 function joinStatePath(prefix: string | undefined, key: string): string {
-  return [prefix, key]
-    .flatMap((value) => value?.split("/") ?? [])
-    .filter((segment) => segment.length > 0)
-    .join("/");
+  return prefix ? `${prefix}/${key}` : key;
 }
 
 function validateStateValue(

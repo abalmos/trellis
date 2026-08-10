@@ -1,3 +1,5 @@
+import { getBuiltinRpcError } from "@qlever-llc/trellis/errors";
+
 import type { TrellisTestAdminRpcMethod } from "./methods.ts";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,9 +45,28 @@ export async function postAdminRpc(
   });
   const body: unknown = await response.json();
   if (response.ok && isRecord(body) && body.ok === true) return body.output;
+  const message = isRecord(body) && typeof body.error === "string"
+    ? body.error
+    : undefined;
+  if (message !== undefined) {
+    let serialized: unknown;
+    try {
+      serialized = JSON.parse(message);
+    } catch {
+      // Fall through to the transport-level error below.
+    }
+    if (
+      isRecord(serialized) && typeof serialized.type === "string"
+    ) {
+      const descriptor = getBuiltinRpcError(serialized.type);
+      if (descriptor !== undefined) {
+        throw descriptor.fromSerializable(serialized);
+      }
+    }
+  }
   throw new Error(
-    isRecord(body) && typeof body.error === "string"
-      ? body.error
+    message !== undefined
+      ? message
       : `Trellis test admin RPC proxy returned ${response.status}`,
   );
 }

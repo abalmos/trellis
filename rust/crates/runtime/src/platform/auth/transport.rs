@@ -346,17 +346,18 @@ fn compile_resource(
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
     match (&resource.provider_identity, action) {
-        (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Read)
-        | (ResourceProviderIdentity::State { bucket }, PermissionActionV1::Read) => {
+        (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Read) => {
             kv_read(bucket, publish);
         }
         (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Write)
-        | (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Delete)
-        | (ResourceProviderIdentity::State { bucket }, PermissionActionV1::Write)
-        | (ResourceProviderIdentity::State { bucket }, PermissionActionV1::Delete) => {
+        | (ResourceProviderIdentity::Kv { bucket }, PermissionActionV1::Delete) => {
             publish.insert(format!("$KV.{bucket}.>"));
             publish.insert(format!("$JS.API.STREAM.INFO.KV_{bucket}"));
         }
+        (
+            ResourceProviderIdentity::State { .. },
+            PermissionActionV1::Read | PermissionActionV1::Write | PermissionActionV1::Delete,
+        ) => {}
         (ResourceProviderIdentity::Store { bucket }, PermissionActionV1::Read) => {
             let stream = format!("OBJ_{bucket}");
             publish.insert("$JS.API.INFO".to_owned());

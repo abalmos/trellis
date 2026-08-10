@@ -187,8 +187,35 @@ export class TrellisTestAdminAutomation {
   /** Creates a service deployment through `Auth.Deployments.Create`. */
   async createDeployment(args: {
     deployment?: string;
+    kind?: "service" | "device";
   } = {}): Promise<void> {
     return await adminDeployment.createDeployment(this.#deployment, args);
+  }
+
+  async provisionDevice(
+    input: import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionInput,
+  ): Promise<
+    import("@qlever-llc/trellis/sdk/auth").AuthDevicesProvisionOutput
+  > {
+    return await this.#rpc("authDevicesProvision", input);
+  }
+
+  async stateAdminGet(
+    input: import("@qlever-llc/trellis/sdk/state").StateAdminGetInput,
+  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminGetOutput> {
+    return await this.#rpc("stateAdminGet", input);
+  }
+
+  async stateAdminList(
+    input: import("@qlever-llc/trellis/sdk/state").StateAdminListInput,
+  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminListOutput> {
+    return await this.#rpc("stateAdminList", input);
+  }
+
+  async stateAdminDelete(
+    input: import("@qlever-llc/trellis/sdk/state").StateAdminDeleteInput,
+  ): Promise<import("@qlever-llc/trellis/sdk/state").StateAdminDeleteOutput> {
+    return await this.#rpc("stateAdminDelete", input);
   }
 
   /** Completes a public app/client authentication flow as the test admin user. */

@@ -422,7 +422,12 @@ impl PermissionAtomV1 {
                     matches!(action, PermissionActionV1::Consume)
                 }
                 ParticipantResourceKindV1::State => {
-                    matches!(action, PermissionActionV1::Read | PermissionActionV1::Write)
+                    matches!(
+                        action,
+                        PermissionActionV1::Read
+                            | PermissionActionV1::Write
+                            | PermissionActionV1::Delete
+                    )
                 }
             },
             (PermissionTargetV1::OperationSignal { .. }, action) => {

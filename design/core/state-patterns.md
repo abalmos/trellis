@@ -103,8 +103,9 @@ Typical use cases:
 ## Ownership And Boundary
 
 - `State` is a Trellis-owned contract surface
-- v1 is implemented by the `trellis` service
-- backing storage is a Trellis-owned internal KV bucket
+- v1 is implemented by the Rust Platform owner; it is not a separate runtime
+  subsystem or process
+- backing storage is the single Trellis-owned internal `trellis_state` KV bucket
 - normal callers use contract-declared stores, not raw buckets or raw subjects
 
 This mirrors the `Files` boundary: the public API is contract-owned and the
@@ -285,7 +286,8 @@ Admin inspection is separate from the normal runtime API.
 - admin callers use dedicated `State.Admin.*` RPCs
 - admin APIs still target an explicit namespace and may distinguish
   `scope: "userApp" | "deviceApp"`
-- user-app admin targets use the exact Trellis `userId`
+- user-app admin targets carry the exact stable Trellis `userId` directly; they
+  do not use provider origin or identity fields
 - admin APIs are for inspection and mutation by administrators, not for normal
   app/device runtime access
 

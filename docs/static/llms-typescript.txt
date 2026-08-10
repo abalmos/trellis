@@ -92,6 +92,10 @@ Rules:
   boundary or another documented requirement must reject unknown fields
 - after changing a contract, run `deno task prepare` before typing extracted
   handlers so generated SDK aliases match the current surfaces
+- App and device contracts may declare schema-backed value or map State stores and
+  use their generated `client.state.<store>` facades. State supports revisions,
+  per-entry TTL, and author-declared migration versions; services use
+  `service.kv`, and callers never access the internal `trellis_state` bucket.
 - TypeScript contract authoring compiles to canonical `trellis.api.v1` and
   `trellis.participant.v1` artifacts before bootstrap. Do not send legacy contract
   manifests directly to the Rust auth runtime.

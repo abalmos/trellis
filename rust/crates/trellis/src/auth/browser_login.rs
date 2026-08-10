@@ -50,6 +50,10 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
     let api = parse_api_v1(&api_value)?;
     let mut apis = BTreeMap::new();
     apis.insert(api.id().to_owned(), api.clone());
+    let state_manifest: Value = serde_json::from_str(crate::sdk::state::contract::CONTRACT_JSON)?;
+    let state = trellis_contracts::compile_protocol_artifacts(&state_manifest, &BTreeMap::new())?;
+    let state_api = parse_api_v1(&state.api)?;
+    apis.insert(state_api.id().to_owned(), state_api);
     let resolved = resolve_participant_v1(&participant, &apis)?;
     Ok(AdministrationParticipant {
         id: participant.id().to_owned(),

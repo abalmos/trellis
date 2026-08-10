@@ -1,5 +1,6 @@
 use super::super::*;
 use super::local::BrowserFlowResponse;
+use crate::platform::auth::MaterializationState;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,74 +102,14 @@ where
         },
         |authority| authority.authority_id.clone(),
     );
-    let request_value =
-        serde_json::to_value(&request).map_err(|_| HttpError::bad_request("invalid_approval"))?;
-    let request_digest = trellis_protocol::digest_json(&request_value)
-        .map_err(|_| HttpError::bad_request("invalid_approval"))?;
-    let signer_id = super::super::super::domain::validate_ed25519_public_key(
-        "sessionPublicKey",
-        &flow.session_public_key,
-    )?;
-    let proposal = state
-        .service
-        .create_authority_proposal(CreateAuthorityProposalInput {
-            authority_kind: AuthorityKind::Identity,
-            authority_id: authority_id.clone(),
-            deployment_id: None,
-            proposal_kind: if current.is_some() {
-                AuthorityProposalKind::Update
-            } else {
-                AuthorityProposalKind::Initial
-            },
-            participant_id: flow.participant_id.clone(),
-            participant_artifact_digest: flow.participant_artifact_digest.clone(),
-            participant_needs_digest: flow.participant_needs_digest.clone(),
-            grant_set: grant_set.clone(),
-            capabilities: capabilities.clone(),
-            base_authority_version: current.as_ref().map(|authority| authority.version),
-            payload: json!({
-                "source": "browser_approval",
-                "flowId": flow_id,
-                "consentViewDigest": flow.consent.consent_view_digest,
-                "proposalDigest": flow.consent.proposal_digest,
-                "selectedOptionalBundles": selected_optional_bundles,
-                "baseAuthorityVersion": current.as_ref().map(|authority| authority.version),
-            }),
-            created_at: now,
-            expires_at: current.as_ref().and_then(|authority| authority.expires_at),
-            idempotency: idempotency(
-                &flow_id,
-                "browser.authority.propose",
-                &signer_id,
-                &request.idempotency_key,
-                &request_digest,
-                now,
-            )?,
-            actions: Vec::new(),
-        })
-        .await?;
-    let proposal_id = match proposal {
-        IdempotentOutcome::Applied(proposal) => proposal.proposal_id,
-        IdempotentOutcome::Replayed(value) => value
-            .get("proposalId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| HttpError::internal("invalid_proposal_replay"))?
-            .to_owned(),
-    };
-    let (proposal, _) = state
-        .service
-        .repository()
-        .get_authority_proposal(&proposal_id)
-        .await?
-        .ok_or_else(|| HttpError::internal("proposal_missing"))?;
-    let desired = DesiredAuthorityRecord::Identity(IdentityAuthorityRecord {
+    let desired = IdentityAuthorityRecord {
         authority_id: authority_id.clone(),
-        principal_id,
+        principal_id: principal_id.clone(),
         participant_id: flow.participant_id.clone(),
         participant_artifact_digest: flow.participant_artifact_digest.clone(),
         accepted_needs_digest: flow.participant_needs_digest.clone(),
-        desired_grant_set: grant_set,
-        desired_capabilities: capabilities,
+        desired_grant_set: grant_set.clone(),
+        desired_capabilities: capabilities.clone(),
         state: AuthorityState::Accepted,
         version: current
             .as_ref()
@@ -183,47 +124,157 @@ where
             decided_by: flow.session_public_key.clone(),
             reason: None,
         }),
+    };
+    let request_value =
+        serde_json::to_value(&request).map_err(|_| HttpError::bad_request("invalid_approval"))?;
+    let request_digest = trellis_protocol::digest_json(&request_value)
+        .map_err(|_| HttpError::bad_request("invalid_approval"))?;
+    let signer_id = super::super::super::domain::validate_ed25519_public_key(
+        "sessionPublicKey",
+        &flow.session_public_key,
+    )?;
+    let mut durable = current.clone().filter(|current| {
+        super::super::super::authority::identity_enforceability_equal(current, &desired)
     });
+    if durable.is_none() {
+        let proposal = state
+            .service
+            .create_authority_proposal(CreateAuthorityProposalInput {
+                authority_kind: AuthorityKind::Identity,
+                authority_id: authority_id.clone(),
+                deployment_id: None,
+                proposal_kind: if current.is_some() {
+                    AuthorityProposalKind::Update
+                } else {
+                    AuthorityProposalKind::Initial
+                },
+                participant_id: flow.participant_id.clone(),
+                participant_artifact_digest: flow.participant_artifact_digest.clone(),
+                participant_needs_digest: flow.participant_needs_digest.clone(),
+                grant_set,
+                capabilities,
+                base_authority_version: current.as_ref().map(|authority| authority.version),
+                payload: json!({
+                    "source": "browser_approval",
+                    "flowId": flow_id,
+                    "consentViewDigest": flow.consent.consent_view_digest,
+                    "proposalDigest": flow.consent.proposal_digest,
+                    "selectedOptionalBundles": selected_optional_bundles,
+                    "baseAuthorityVersion": current.as_ref().map(|authority| authority.version),
+                }),
+                created_at: now,
+                expires_at: current.as_ref().and_then(|authority| authority.expires_at),
+                idempotency: idempotency(
+                    &flow_id,
+                    "browser.authority.propose",
+                    &signer_id,
+                    &request.idempotency_key,
+                    &request_digest,
+                    now,
+                )?,
+                actions: Vec::new(),
+            })
+            .await?;
+        let proposal_id = match proposal {
+            IdempotentOutcome::Applied(proposal) => proposal.proposal_id,
+            IdempotentOutcome::Replayed(value) => value
+                .get("proposalId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| HttpError::internal("invalid_proposal_replay"))?
+                .to_owned(),
+        };
+        let (proposal, _) = state
+            .service
+            .repository()
+            .get_authority_proposal(&proposal_id)
+            .await?
+            .ok_or_else(|| HttpError::internal("proposal_missing"))?;
+        let decision = state
+            .service
+            .decide_authority_proposal(DecideAuthorityProposalInput {
+                proposal_id,
+                expected_version: proposal.version,
+                expected_base_authority_version: None,
+                outcome: AuthorityDecisionOutcome::Accepted,
+                decided_by: flow.session_public_key.clone(),
+                reason: None,
+                desired_authority: Some(DesiredAuthorityRecord::Identity(desired.clone())),
+                decided_at: now,
+                idempotency: idempotency(
+                    &flow_id,
+                    "browser.authority.accept",
+                    &signer_id,
+                    &request.idempotency_key,
+                    &request_digest,
+                    now,
+                )?,
+                actions: Vec::new(),
+            })
+            .await;
+        match decision {
+            Ok(_) | Err(AuthorizationStateError::StorageConflict) => {
+                durable = state
+                    .service
+                    .repository()
+                    .get_identity_authority(&principal_id, &flow.participant_id)
+                    .await?
+                    .filter(|current| {
+                        super::super::super::authority::identity_enforceability_equal(
+                            current, &desired,
+                        )
+                    });
+                if durable.is_none() {
+                    return Err(HttpError::conflict("authority_changed"));
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let durable = durable.ok_or_else(|| HttpError::internal("authority_missing"))?;
+    let durable_record = DesiredAuthorityRecord::Identity(durable.clone());
     let durable_result_digest = trellis_protocol::digest_json(
-        &serde_json::to_value(&desired).map_err(|_| HttpError::internal("authority_encode"))?,
+        &serde_json::to_value(&durable_record)
+            .map_err(|_| HttpError::internal("authority_encode"))?,
     )
     .map_err(|_| HttpError::internal("authority_digest"))?;
-    state
-        .service
-        .decide_authority_proposal(DecideAuthorityProposalInput {
-            proposal_id,
-            expected_version: proposal.version,
-            expected_base_authority_version: None,
-            outcome: AuthorityDecisionOutcome::Accepted,
-            decided_by: flow.session_public_key.clone(),
-            reason: None,
-            desired_authority: Some(desired),
-            decided_at: now,
-            idempotency: idempotency(
-                &flow_id,
-                "browser.authority.accept",
-                &signer_id,
-                &request.idempotency_key,
-                &request_digest,
-                now,
-            )?,
-            actions: Vec::new(),
-        })
-        .await?;
     let authority_target =
         AuthorityTarget::new(AuthorityKind::Identity, authority_id).map_err(HttpError::from)?;
-    super::super::super::ensure_authority_dependencies(
-        state.service.repository(),
-        AuthorityEvidenceScope {
-            target: authority_target.clone(),
-            participant_id: flow.participant_id.clone(),
-            participant_artifact_digest: flow.participant_artifact_digest.clone(),
-            participant_needs_digest: flow.participant_needs_digest.clone(),
-        },
-        &binding,
-        now,
-    )
-    .await?;
+    let evidence_required = state
+        .service
+        .repository()
+        .get_materialized_authority(authority_target.kind, &authority_target.authority_id)
+        .await?
+        .is_none_or(|materialization| {
+            materialization.authority.state != MaterializationState::Available
+                || materialization.authority.authority_version != durable.version
+        });
+    if evidence_required {
+        super::super::super::ensure_identity_resources(
+            state.service.repository(),
+            AuthorityEvidenceScope {
+                target: authority_target.clone(),
+                participant_id: flow.participant_id.clone(),
+                participant_artifact_digest: flow.participant_artifact_digest.clone(),
+                participant_needs_digest: flow.participant_needs_digest.clone(),
+            },
+            &binding,
+            &principal_id,
+            now,
+        )
+        .await?;
+        super::super::super::ensure_authority_dependencies(
+            state.service.repository(),
+            AuthorityEvidenceScope {
+                target: authority_target.clone(),
+                participant_id: flow.participant_id.clone(),
+                participant_artifact_digest: flow.participant_artifact_digest.clone(),
+                participant_needs_digest: flow.participant_needs_digest.clone(),
+            },
+            &binding,
+            now,
+        )
+        .await?;
+    }
     state
         .service
         .authorization()

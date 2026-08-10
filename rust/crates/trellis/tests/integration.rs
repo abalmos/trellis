@@ -36,6 +36,9 @@ mod event_consumers;
 #[path = "integration/prepared_events.rs"]
 mod prepared_events;
 
+#[path = "integration/state.rs"]
+mod state;
+
 #[path = "integration/cli.rs"]
 mod cli;
 

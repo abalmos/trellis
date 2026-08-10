@@ -46,6 +46,7 @@ export async function createDeployment(
   context: AdminDeploymentContext,
   args: {
     deployment?: string;
+    kind?: "service" | "device";
   } = {},
 ): Promise<void> {
   const deployment = args.deployment ?? context.defaultDeployment;
@@ -58,7 +59,7 @@ export async function createDeployment(
       displayName: deployment,
       expiresAt: null,
       idempotencyKey: crypto.randomUUID(),
-      kind: "service",
+      kind: args.kind ?? "service",
       participantId: null,
       portalId: null,
       requiresDeviceDelegation: false,

@@ -217,7 +217,18 @@ fn validate_matrix(matrix: &TestMatrix, client: bool) -> Result<(), String> {
                 validate_pending(case)?;
             }
             None if client => {
-                return Err(format!("client case {} has no Rust status", case.id));
+                if rust.is_some() {
+                    return Err(format!(
+                        "client case {} has a Rust implementation without a status",
+                        case.id
+                    ));
+                }
+                if case.pending.is_some() {
+                    return Err(format!(
+                        "client case {} has Rust pending metadata without a status",
+                        case.id
+                    ));
+                }
             }
             None => return Err(format!("runtime case {} has no Rust status", case.id)),
         }

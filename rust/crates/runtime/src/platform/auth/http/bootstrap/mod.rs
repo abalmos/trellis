@@ -459,7 +459,7 @@ where
             .get_device(&identity.principal_id, &input.deployment_id)
             .await?
             .ok_or_else(|| HttpError::unauthorized("device_not_found"))?;
-        if device.state == DeviceState::Disabled {
+        if matches!(device.state, DeviceState::Pending | DeviceState::Disabled) {
             let challenge_digest = input
                 .challenge_digest
                 .clone()

@@ -3,7 +3,7 @@ import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.state@v1" as const;
 export const CONTRACT_DIGEST =
-  "tZjPt_mJqNYwA2A7hlo7I6-bEz5Nsx32tlIws71dCWk" as const;
+  "FWHUEkOGUe2449OzNblHOB4ymuOGyGhi4nqRaSUkzqs" as const;
 export const CONTRACT: TrellisContractV1 = {
   "description":
     "Trellis-managed app state for authenticated app and device participants.",
@@ -129,17 +129,15 @@ export const CONTRACT: TrellisContractV1 = {
           "key": { "minLength": 1, "type": "string" },
           "scope": { "const": "userApp", "type": "string" },
           "store": { "minLength": 1, "type": "string" },
-          "user": {
-            "properties": {
-              "id": { "minLength": 1, "type": "string" },
-              "origin": { "minLength": 1, "type": "string" },
-              "userId": { "minLength": 1, "type": "string" },
-            },
-            "required": ["origin", "id"],
-            "type": "object",
-          },
+          "userId": { "minLength": 1, "type": "string" },
         },
-        "required": ["scope", "contractId", "contractDigest", "store", "user"],
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "userId",
+        ],
         "type": "object",
       }, {
         "properties": {
@@ -174,17 +172,15 @@ export const CONTRACT: TrellisContractV1 = {
           "key": { "minLength": 1, "type": "string" },
           "scope": { "const": "userApp", "type": "string" },
           "store": { "minLength": 1, "type": "string" },
-          "user": {
-            "properties": {
-              "id": { "minLength": 1, "type": "string" },
-              "origin": { "minLength": 1, "type": "string" },
-              "userId": { "minLength": 1, "type": "string" },
-            },
-            "required": ["origin", "id"],
-            "type": "object",
-          },
+          "userId": { "minLength": 1, "type": "string" },
         },
-        "required": ["scope", "contractId", "contractDigest", "store", "user"],
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "userId",
+        ],
         "type": "object",
       }, {
         "properties": {
@@ -265,15 +261,7 @@ export const CONTRACT: TrellisContractV1 = {
           "prefix": { "minLength": 1, "type": "string" },
           "scope": { "const": "userApp", "type": "string" },
           "store": { "minLength": 1, "type": "string" },
-          "user": {
-            "properties": {
-              "id": { "minLength": 1, "type": "string" },
-              "origin": { "minLength": 1, "type": "string" },
-              "userId": { "minLength": 1, "type": "string" },
-            },
-            "required": ["origin", "id"],
-            "type": "object",
-          },
+          "userId": { "minLength": 1, "type": "string" },
         },
         "required": [
           "limit",
@@ -281,7 +269,7 @@ export const CONTRACT: TrellisContractV1 = {
           "contractId",
           "contractDigest",
           "store",
-          "user",
+          "userId",
         ],
         "type": "object",
       }, {
@@ -610,21 +598,6 @@ export const CONTRACT: TrellisContractV1 = {
         "required": ["applied", "found"],
         "type": "object",
       }],
-    },
-    "StateScope": {
-      "anyOf": [{ "const": "userApp", "type": "string" }, {
-        "const": "deviceApp",
-        "type": "string",
-      }],
-    },
-    "StateUserTarget": {
-      "properties": {
-        "id": { "minLength": 1, "type": "string" },
-        "origin": { "minLength": 1, "type": "string" },
-        "userId": { "minLength": 1, "type": "string" },
-      },
-      "required": ["origin", "id"],
-      "type": "object",
     },
   },
 };

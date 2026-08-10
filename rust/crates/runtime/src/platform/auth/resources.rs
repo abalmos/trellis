@@ -134,6 +134,8 @@ where
     let jetstream = jetstream::new(client.clone());
     let mut evidence = Vec::new();
 
+    add_state_evidence(&mut evidence, binding, deployment_id, &participant, now);
+
     for (kind, resources) in participant
         .get("resources")
         .and_then(Value::as_object)
@@ -182,20 +184,9 @@ where
                     }
                     ResourceProviderIdentity::Store { bucket }
                 }
-                "state" => {
-                    let bucket = format!("tr_state_{token}");
-                    if jetstream.get_key_value(&bucket).await.is_err() {
-                        jetstream
-                            .create_key_value(kv::Config {
-                                bucket: bucket.clone(),
-                                history: 1,
-                                ..Default::default()
-                            })
-                            .await
-                            .map_err(|error| storage(error.to_string()))?;
-                    }
-                    ResourceProviderIdentity::State { bucket }
-                }
+                "state" => ResourceProviderIdentity::State {
+                    bucket: "trellis_state".to_owned(),
+                },
                 _ => continue,
             };
             evidence.push(resource_evidence(
@@ -431,6 +422,51 @@ where
 
     validate_resource_evidence(&evidence)?;
     repository.replace_resource_evidence(scope, evidence).await
+}
+
+pub(crate) async fn ensure_identity_resources<R>(
+    repository: &R,
+    scope: AuthorityEvidenceScope,
+    binding: &ParticipantBindingRecord,
+    principal_id: &str,
+    now: i64,
+) -> Result<(), AuthorizationStateError>
+where
+    R: AuthorityEvidenceRepository,
+{
+    let participant: Value = serde_json::from_str(&binding.participant_json)
+        .map_err(|error| invalid(error.to_string()))?;
+    parse_participant_v1(&participant).map_err(|error| invalid(error.to_string()))?;
+    let mut evidence = Vec::new();
+    add_state_evidence(&mut evidence, binding, principal_id, &participant, now);
+    validate_resource_evidence(&evidence)?;
+    repository.replace_resource_evidence(scope, evidence).await
+}
+
+fn add_state_evidence(
+    evidence: &mut Vec<ResourceBindingEvidence>,
+    binding: &ParticipantBindingRecord,
+    subject_id: &str,
+    participant: &Value,
+    now: i64,
+) {
+    for local_name in participant
+        .get("state")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|state| state.keys())
+    {
+        evidence.push(resource_evidence(
+            binding,
+            subject_id,
+            "state",
+            local_name,
+            ResourceProviderIdentity::State {
+                bucket: "trellis_state".to_owned(),
+            },
+            now,
+        ));
+    }
 }
 
 fn participant_api_aliases(

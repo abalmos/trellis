@@ -976,6 +976,21 @@ impl<C> ConnectedServiceRuntime<C> {
             .integration_test_nats()
     }
 
+    /// Send one signed raw RPC request through the connected service session.
+    #[cfg(feature = "integration-test-scoping")]
+    #[doc(hidden)]
+    pub async fn integration_test_request_json_value(
+        &self,
+        subject: &str,
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
+        self.client
+            .as_ref()
+            .expect("connected service client is present")
+            .request_json_value(subject, input)
+            .await
+    }
+
     /// Build a connected runtime from an injected client and bootstrap binding.
     pub(crate) fn from_parts(
         service_name: impl Into<String>,

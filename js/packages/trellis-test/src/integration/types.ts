@@ -49,6 +49,10 @@ export type TrellisIntegrationRuntime = {
   readonly contracts: TrellisTestRuntime["contracts"];
   /** Service provisioning helpers scoped to the runtime default deployment. */
   readonly services: TrellisTestRuntime["services"];
+  /** Device provisioning helpers backed by the existing Auth admin surface. */
+  readonly devices: TrellisTestRuntime["devices"];
+  /** State administration helpers backed by the existing State admin surface. */
+  readonly state: TrellisTestRuntime["state"];
   /** Authority-plan helpers for tests that assert approval workflows. */
   readonly authority: TrellisTestRuntime["authority"];
   /** Test-only handles available when this runtime owns the control-plane process. */

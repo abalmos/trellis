@@ -321,6 +321,7 @@ export async function compileProtocolArtifacts(
       "docs",
       "kind",
       "schemas",
+      "state",
     ]
   ) copy(source, participant, field);
   Object.values(object(participant.schemas) ?? {}).forEach(normalizeSchema);

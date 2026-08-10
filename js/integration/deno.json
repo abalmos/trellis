@@ -4,7 +4,7 @@
   "exports": "./runner.ts",
   "extends": "../deno.json",
   "tasks": {
-    "check": "deno check ./runner.ts ./matrix_conformance_test.ts ./_support/runtime.ts ./authorization_registry/*.integration_test.ts ./rpc/_fixture.ts ./rpc/*.integration_test.ts ./events/_fixture.ts ./events/*.integration_test.ts ./operations/_fixture.ts ./operations/*.integration_test.ts ./feeds/_fixture.ts ./feeds/*.integration_test.ts ./transfer/_fixture.ts ./transfer/*.integration_test.ts ./resources/_fixture.ts ./resources/*.integration_test.ts",
+    "check": "deno check ./runner.ts ./matrix_conformance_test.ts ./_support/runtime.ts ./authorization_registry/*.integration_test.ts ./rpc/_fixture.ts ./rpc/*.integration_test.ts ./events/_fixture.ts ./events/*.integration_test.ts ./operations/_fixture.ts ./operations/*.integration_test.ts ./feeds/_fixture.ts ./feeds/*.integration_test.ts ./transfer/_fixture.ts ./transfer/*.integration_test.ts ./resources/_fixture.ts ./resources/*.integration_test.ts ./state/*.integration_test.ts",
     "test": "deno run -A ./runner.ts"
   }
 }

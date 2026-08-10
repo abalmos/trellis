@@ -9,6 +9,7 @@ mod auth_operation;
 mod auth_post_commit;
 pub mod bootstrap;
 pub mod catalog;
+mod state;
 
 use auth::{
     authorization_reconciliation_channel, AccountRepository, AuthService, AuthServiceConfig,
@@ -210,6 +211,12 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             "runtime-local auth verifier was already installed".to_owned(),
         ));
     }
+    let state = state::StateRuntime::start(
+        context.trellis_nats.clone(),
+        auth_store.clone(),
+        verifier.clone(),
+    )
+    .await?;
     let auth_operation = AuthOperationRuntime::new(
         context.trellis_nats.clone(),
         auth_operation_session,
@@ -331,6 +338,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             result = auth_rpc.run(task_stop.clone()) => result,
             result = auth_operation.run(task_stop.clone()) => result,
             result = auth_post_commit.run(task_stop.clone()) => result,
+            result = state.run(task_stop.clone()) => result,
             result = authorization_contexts.clone().run_janitor(task_stop.clone()) => result,
             result = &mut validator_join => {
                 match result {

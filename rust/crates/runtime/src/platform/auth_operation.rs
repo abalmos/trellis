@@ -137,10 +137,7 @@ async fn approve_pending_review(
                 expires_at: None,
             }),
             idempotency: IdempotencyResultRecord {
-                scope_key: format!(
-                    "device.user-authority.resolve:{caller}:{}",
-                    review.review_id
-                ),
+                scope_key: resolve_scope_key(caller, &review.review_id)?,
                 purpose: "device.user-authority.resolve".to_owned(),
                 signer_id: caller.to_owned(),
                 request_id: review.review_id.clone(),
@@ -151,7 +148,7 @@ async fn approve_pending_review(
                     .checked_add(86_400_000)
                     .ok_or_else(|| ServerError::Nats("idempotency expiry overflow".to_owned()))?,
             },
-            actions: vec![resolved_event(&review, now)],
+            actions: vec![resolved_event(&review, now)?],
         })
         .await
         .map_err(server_error)?;
@@ -232,10 +229,7 @@ async fn resolve_snapshot(
                         delegation: delegation.clone(),
                         expected_version,
                         idempotency: IdempotencyResultRecord {
-                            scope_key: format!(
-                                "device.user-authority.resolve:{caller}:{}",
-                                review.review_id
-                            ),
+                            scope_key: resolve_scope_key(caller, &review.review_id)?,
                             purpose: "device.user-authority.resolve".to_owned(),
                             signer_id: caller.to_owned(),
                             request_id: review.review_id.clone(),
@@ -246,7 +240,7 @@ async fn resolve_snapshot(
                                 ServerError::Nats("idempotency expiry overflow".to_owned())
                             })?,
                         },
-                        actions: vec![resolved_event(&review, now)],
+                        actions: vec![resolved_event(&review, now)?],
                     })
                     .await
                     .map_err(server_error)?;
@@ -305,6 +299,16 @@ async fn resolve_snapshot(
     }
 }
 
+#[allow(clippy::result_large_err)]
+fn resolve_scope_key(caller: &str, review_id: &str) -> Result<String, ServerError> {
+    trellis_protocol::digest_json(&json!({
+        "purpose": "device.user-authority.resolve",
+        "signerId": caller,
+        "requestId": review_id,
+    }))
+    .map_err(|error| ServerError::Nats(error.to_string()))
+}
+
 fn snapshot(
     review: &DeviceActivationReviewRecord,
     state: OperationState,
@@ -349,9 +353,17 @@ fn caller_principal_id(context: &RequestContext) -> Result<&str, ServerError> {
     Ok(&caller.principal.id)
 }
 
-fn resolved_event(review: &DeviceActivationReviewRecord, now: i64) -> PostCommitActionRecord {
-    PostCommitActionRecord {
-        action_id: format!("act_{}_resolved", review.review_id),
+#[allow(clippy::result_large_err)]
+fn resolved_event(
+    review: &DeviceActivationReviewRecord,
+    now: i64,
+) -> Result<PostCommitActionRecord, ServerError> {
+    Ok(PostCommitActionRecord {
+        action_id: trellis_protocol::digest_json(&json!({
+            "kind": "device.user-authority.resolved",
+            "reviewId": review.review_id,
+        }))
+        .map_err(|error| ServerError::Nats(error.to_string()))?,
         kind: PostCommitActionKind::Event,
         payload: json!({
             "eventType": "Auth.DeviceUserAuthorities.Resolved",
@@ -370,7 +382,7 @@ fn resolved_event(review: &DeviceActivationReviewRecord, now: i64) -> PostCommit
         next_attempt_at: now,
         claimed_until: None,
         last_error: None,
-    }
+    })
 }
 
 #[allow(clippy::result_large_err)]

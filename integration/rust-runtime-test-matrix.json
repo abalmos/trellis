@@ -75,12 +75,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_value_store_missing_read"
+        }
       },
       "classification": "shared"
     },
@@ -118,12 +119,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_value_store_create_read_delete"
+        }
       },
       "classification": "shared"
     },
@@ -158,12 +160,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_value_store_stale_revision_rejected"
+        }
       },
       "classification": "shared"
     },
@@ -203,24 +206,25 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_map_store_prefix_put_get_list_delete"
+        }
       },
       "classification": "shared"
     },
     {
       "id": "state.map-store-list-limit",
       "fixture": "state",
-      "title": "Map store list respects the requested limit",
+      "title": "Map store list respects its initial snapshot and requested limit",
       "coverage": [
         "state-parity",
         "observability-trace-matrix"
       ],
-      "description": "Putting more entries than the requested limit returns no more than limit entries with stable keys.",
+      "description": "Putting more entries than the requested limit returns stable bounded entries, and one list invocation completes from its initial consumer snapshot while concurrent writes continue.",
       "scenario": {
         "participants": [
           {
@@ -234,20 +238,23 @@
         ],
         "when": [
           "the client puts more entries than the requested list limit",
-          "the client lists entries with the limit"
+          "the client lists entries with the limit",
+          "the client lists while another task writes under the same prefix"
         ],
         "then": [
           "the list returns no more than the requested limit entries",
-          "the returned keys are stable"
+          "the returned keys are stable",
+          "the concurrent list completes without chasing later writes"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_map_store_list_limit"
+        }
       },
       "classification": "shared"
     },
@@ -294,12 +301,13 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_admin_inspect_and_delete_state"
+        }
       },
       "classification": "shared"
     },
@@ -3211,7 +3219,7 @@
         "capability-permission-matrix",
         "observability-trace-matrix"
       ],
-      "description": "A v1 app contract writes value and map state, and a new digest with the same contract id and accepted old state versions reads the entries as migration-required through generated runtime and admin surfaces.",
+      "description": "A v1 app contract writes value and map State, and a new digest with the same contract id and accepted old State versions reads them through generated runtime Get/List and Admin Get/List surfaces before exact-revision rewrites.",
       "scenario": {
         "participants": [
           {
@@ -3232,16 +3240,18 @@
           "the v1 client writes value and map state and the v2 client reads them"
         ],
         "then": [
-          "runtime and admin reads return migration-required metadata and old values"
+          "runtime and admin reads return migration-required metadata and old values",
+          "exact old revisions rewrite both entries to their current versions"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_migration_required_is_returned_live"
+        }
       },
       "classification": "shared"
     },
@@ -3253,7 +3263,7 @@
         "state-parity",
         "observability-trace-matrix"
       ],
-      "description": "Entries written with ttlMs disappear from get, list, create-if-absent, and revision delete behavior through live State RPCs after expiry.",
+      "description": "Entries written with ttlMs disappear from get and list, can be recreated with expectedRevision null, and return deleted false through both normal and Admin Delete after expiry.",
       "scenario": {
         "participants": [
           {
@@ -3270,28 +3280,30 @@
         ],
         "then": [
           "get and list treat them as absent",
-          "create-if-absent and delete behave over expired entries as absent"
+          "create-if-absent and normal delete behave over expired entries as absent",
+          "Admin Delete may clean the physical entry but returns deleted false"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_ttl_expiry_is_logically_absent"
+        }
       },
       "classification": "shared"
     },
     {
-      "id": "state.value-and-map-conflict-shapes-live",
+      "id": "state.store-kind-and-schema-validation",
       "fixture": "state",
-      "title": "Value and map state stores return public create and stale conflict shapes",
+      "title": "State enforces store kind and declared schemas",
       "coverage": [
         "state-parity",
-        "observability-trace-matrix"
+        "auth-protocol-matrix"
       ],
-      "description": "Existing value and map state entries reject expectedRevision null creates and stale revision writes while returning the current public conflict entry.",
+      "description": "The Rust State owner rejects values outside the current schema and operations incompatible with the declared store kind.",
       "scenario": {
         "participants": [
           {
@@ -3301,24 +3313,225 @@
           }
         ],
         "given": [
-          "value and map state entries already exist"
+          "the app declares value and map State stores"
         ],
         "when": [
-          "the client writes with expectedRevision null",
-          "the client writes with a stale expectedRevision"
+          "the client writes a schema-invalid value or uses the wrong store kind"
         ],
         "then": [
-          "both stores return not-applied conflict results",
-          "the conflict entries contain the current stored values"
+          "the request returns ValidationError without persistence"
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "State remains pending until its runtime owner is implemented in Rust.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_store_kind_and_schema_validation"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.raw-bucket-access-is-denied",
+      "fixture": "state",
+      "title": "State callers cannot access the internal KV bucket",
+      "coverage": [
+        "state-parity",
+        "capability-permission-matrix"
+      ],
+      "description": "An ordinary app with State authority cannot open the Trellis-owned State KV bucket directly.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "the app has exact State RPC and store authority"
+        ],
+        "when": [
+          "the app attempts to open the internal State KV bucket"
+        ],
+        "then": [
+          "NATS denies raw bucket access"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_raw_bucket_access_is_denied"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.agent-normal-access-is-denied",
+      "fixture": "state",
+      "title": "Agents cannot use normal State RPCs",
+      "coverage": [
+        "state-parity",
+        "capability-permission-matrix"
+      ],
+      "description": "An authenticated agent with a State RPC selection is denied because normal State is limited to user apps and device apps.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "agent",
+            "kind": "agent",
+            "contract": "trellis.integration.state-agent@v1"
+          }
+        ],
+        "given": [
+          "the agent is authenticated"
+        ],
+        "when": [
+          "the agent invokes normal State.Get"
+        ],
+        "then": [
+          "the request returns AuthError"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_agent_normal_access_is_denied"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.lineage-survives-compatible-contract-digest-change",
+      "fixture": "state",
+      "title": "State follows reconnects and compatible contract digest changes",
+      "coverage": [
+        "state-parity",
+        "auth-protocol-matrix"
+      ],
+      "description": "A reconnect and compatible artifact digest change within one participant lineage retain the same State namespace.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "the app wrote State under its stable participant lineage"
+        ],
+        "when": [
+          "the session reconnects and the compatible contract digest changes"
+        ],
+        "then": [
+          "both callers read the original current State value"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_lineage_survives_compatible_contract_digest_change"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.contract-namespaces-are-isolated",
+      "fixture": "state",
+      "title": "Different contract lineages use isolated State namespaces",
+      "coverage": [
+        "state-parity",
+        "auth-protocol-matrix"
+      ],
+      "description": "The same user cannot observe one contract lineage's State through another contract lineage.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "first",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          },
+          {
+            "name": "second",
+            "kind": "app",
+            "contract": "trellis.integration.state-other@v1"
+          }
+        ],
+        "given": [
+          "the first contract wrote State"
+        ],
+        "when": [
+          "the same user reads the same store through another contract lineage"
+        ],
+        "then": [
+          "the second contract observes missing State"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_contract_namespaces_are_isolated"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.value-and-map-conflict-shapes-live",
+      "fixture": "state",
+      "title": "State map stores return public sequential, concurrent, and stale conflict shapes",
+      "coverage": [
+        "state-parity",
+        "observability-trace-matrix"
+      ],
+      "description": "Two independently refreshed sessions for one user and app both call State, concurrently creating one missing key produces exactly one applied write and one current-entry conflict, and revoking one session leaves its sibling active.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "two live sessions share one user and contract State namespace"
+        ],
+        "when": [
+          "both sessions refresh and call State",
+          "the client writes with expectedRevision null",
+          "the client writes with a stale expectedRevision",
+          "both sessions concurrently create one missing key",
+          "an administrator revokes only the first session"
+        ],
+        "then": [
+          "sequential and stale writes return the current conflict entry",
+          "exactly one concurrent create applies and the loser returns found true",
+          "the stored value and revision identify the winning candidate",
+          "the revoked session loses authorization while the sibling session remains active"
+        ]
+      },
+      "completion": {
+        "rust": "implemented"
+      },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_value_and_map_conflict_shapes_live"
+        }
       },
       "classification": "shared"
     },
@@ -3333,7 +3546,7 @@
         "capability-permission-matrix",
         "observability-trace-matrix"
       ],
-      "description": "A malformed raw state KV entry causes public state get to fail, and public generated State admin delete removes the corrupt entry so later public reads report missing state.",
+      "description": "A structurally valid raw State envelope containing a schema-invalid value causes public State.Get to fail, and generated State Admin.Delete removes it so later reads report missing State.",
       "scenario": {
         "participants": [
           {
@@ -3348,7 +3561,7 @@
           }
         ],
         "given": [
-          "a raw malformed state KV entry exists for the client app state target"
+          "a structurally valid raw State envelope contains a schema-invalid value for the client app target"
         ],
         "when": [
           "the client reads the corrupt state through the public generated state facade",
@@ -3361,12 +3574,154 @@
         ]
       },
       "completion": {
-        "rust": "pending"
+        "rust": "implemented"
       },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_admin_deletes_corrupt_state_entry"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.distinct-user-namespaces-are-isolated",
+      "fixture": "state",
+      "title": "Distinct users have isolated State namespaces for the same contract",
+      "coverage": ["state-parity", "auth-protocol-matrix"],
+      "description": "Two real local users use the same exact app contract, store, and key while retaining independent State values.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "user-a",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          },
+          {
+            "name": "user-b",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": [
+          "two distinct authenticated user principals use the same contract"
+        ],
+        "when": ["both users read and write the same State store"],
+        "then": ["each user observes only its own value"]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_distinct_users_with_same_contract_are_isolated"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.exact-resource-permission-is-required",
+      "fixture": "state",
+      "title": "State requires the exact participant-resource atom in addition to RPC Call",
+      "coverage": [
+        "state-parity",
+        "capability-permission-matrix",
+        "auth-protocol-matrix"
+      ],
+      "description": "A live app context with State.Get Call and the exact State Read resource atom succeeds; a fresh context retaining Call but lacking that exact atom is denied.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          }
+        ],
+        "given": ["State.Get Call remains granted"],
+        "when": [
+          "the exact participant-resource State Read atom is present and then absent"
+        ],
+        "then": [
+          "the exact atom succeeds and the missing atom returns AuthError"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_exact_resource_permission_is_required"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "requires test-only mutation of one authority/materialized grant set in the runtime-owned SQLite database"
+    },
+    {
+      "id": "state.malformed-envelope-and-unknown-version-are-unexpected",
+      "fixture": "state",
+      "title": "Malformed envelopes and unknown State versions fail closed",
+      "coverage": ["state-parity", "state-admin", "observability-trace-matrix"],
+      "description": "Public State.Get returns UnexpectedError for an envelope missing stateVersion, an unaccepted stateVersion, and an invalid writerContractDigest; State Admin.Delete removes each and later reads report missing State.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "client",
+            "kind": "app",
+            "contract": "trellis.integration.state-client@v1"
+          },
+          {
+            "name": "admin",
+            "kind": "app",
+            "contract": "trellis.integration.state-admin@v1"
+          }
+        ],
+        "given": [
+          "raw missing-field, unknown-version, and invalid-writer-digest State envelopes are seeded"
+        ],
+        "when": ["the app reads them and the admin deletes them"],
+        "then": [
+          "reads return UnexpectedError",
+          "admin cleanup succeeds without trusting malformed metadata",
+          "later reads report found false"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_malformed_envelope_and_unknown_version_are_unexpected"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "state.service-normal-access-is-denied",
+      "fixture": "state",
+      "title": "Services cannot use normal State RPCs",
+      "coverage": [
+        "state-parity",
+        "capability-permission-matrix",
+        "auth-protocol-matrix"
+      ],
+      "description": "A real authenticated service sends a normally signed State.Get request through its service session and receives AuthError because normal State is limited to user apps and devices.",
+      "scenario": {
+        "participants": [
+          {
+            "name": "service",
+            "kind": "service",
+            "contract": "trellis.integration.state-service@v1"
+          }
+        ],
+        "given": [
+          "the service is authenticated and has State.Get Call authority"
+        ],
+        "when": ["it sends a signed State.Get request"],
+        "then": ["Platform returns AuthError"]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "state",
+          "function": "state_service_normal_access_is_denied"
+        }
       },
       "classification": "shared"
     },

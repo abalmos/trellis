@@ -328,6 +328,11 @@ Rules:
   bootstrap/control-plane responders. If a live test needs a missing failure or
   inspection surface, add the smallest named test helper instead of enriching a
   fake.
+- Trellis State is a Rust Platform-owned API for schema-backed app/device value
+  and map stores. Its namespace is the stable principal plus contract lineage,
+  independent of session and artifact digest. Generated facades provide revision
+  CAS, TTL, bounded map listing, and author-declared migration results. Services
+  use KV resources; participants never access the internal `trellis_state` bucket.
 - the local `AGENTS.md` should record the contract source path, generated artifact
   command, format command, typecheck/clippy command, test command, run command,
   and migration command

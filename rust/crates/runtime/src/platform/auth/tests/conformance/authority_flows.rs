@@ -352,6 +352,9 @@ pub(super) async fn exercise_authority_flows(
     let mut stale_desired = desired.clone();
     stale_desired.version = 2;
     stale_desired.updated_at = NOW + 7;
+    stale_desired
+        .desired_capabilities
+        .push("changed-authority".to_owned());
     assert_eq!(
         store
             .decide_authority_proposal(AuthorityProposalDecision {
@@ -393,6 +396,71 @@ pub(super) async fn exercise_authority_flows(
             actions: Vec::new(),
         })
         .await?;
+
+    let mut noop_proposal = superseded_proposal.clone();
+    noop_proposal.proposal_id = "proposal_accepted_noop".to_owned();
+    noop_proposal.proposal_digest = digest(242);
+    noop_proposal.created_at = NOW + 9;
+    noop_proposal.expires_at = Some(NOW + 100);
+    noop_proposal.payload["baseAuthorityVersion"] = json!(desired.version);
+    store
+        .create_authority_proposal(AuthorityProposalCreation {
+            proposal: noop_proposal.clone(),
+            idempotency: proof(242, "authority-proposal.create-noop"),
+            actions: Vec::new(),
+        })
+        .await?;
+    let mut noop_desired = desired.clone();
+    noop_desired.version += 1;
+    noop_desired.updated_at = NOW + 9;
+    noop_desired.decision = Some(AuthorityDecision {
+        decided_at: NOW + 9,
+        decided_by: "different_admin".to_owned(),
+        reason: Some("must not replace durable metadata".to_owned()),
+    });
+    store
+        .decide_authority_proposal(AuthorityProposalDecision {
+            proposal_id: noop_proposal.proposal_id.clone(),
+            expected_version: noop_proposal.version,
+            expected_base_authority_version: Some(Some(desired.version)),
+            decision: AuthorityDecisionRecord {
+                proposal_id: noop_proposal.proposal_id.clone(),
+                outcome: AuthorityDecisionOutcome::Accepted,
+                decided_by: admin_id.clone(),
+                reason: None,
+                decided_at: NOW + 9,
+                decision_digest: digest(244),
+            },
+            desired_authority: Some(DesiredAuthorityRecord::Deployment(noop_desired)),
+            deployment: None,
+            idempotency: proof(245, "authority-proposal.accept-noop"),
+            actions: Vec::new(),
+        })
+        .await?;
+    assert_eq!(
+        store
+            .get_deployment_authority(&desired.deployment_id, &desired.participant_id)
+            .await?,
+        Some(desired.clone()),
+        "semantic no-op must preserve authority version and decision metadata",
+    );
+    assert_eq!(
+        store
+            .get_authority_proposal(&noop_proposal.proposal_id)
+            .await?
+            .ok_or("accepted no-op proposal missing")?
+            .0
+            .state,
+        AuthorityProposalState::Accepted,
+    );
+    assert!(!store
+        .list_authority_proposals()
+        .await?
+        .iter()
+        .any(
+            |(candidate, _)| candidate.authority_id == desired.authority_id
+                && candidate.state == AuthorityProposalState::Pending
+        ));
 
     let service = AuthService::new(store.clone(), AuthServiceConfig::default())?;
     for (index, (fixture, deployment_id)) in [
