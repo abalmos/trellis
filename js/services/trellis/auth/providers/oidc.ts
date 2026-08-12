@@ -10,7 +10,10 @@ const OIDCUserInfoSchema = Type.Object({
   email: Type.Optional(Type.String()),
   email_verified: Type.Optional(Type.Boolean()),
   picture: Type.Optional(Type.String({ format: "url" })),
-  updated_at: Type.Optional(Type.String({ format: "date-time" })),
+  updated_at: Type.Optional(
+    // TODO: OIDC spec says this should be a number?
+    Type.Union([Type.String({ format: "date-time" }), Type.Number()]),
+  ),
 });
 
 type FetchImpl = typeof fetch;
