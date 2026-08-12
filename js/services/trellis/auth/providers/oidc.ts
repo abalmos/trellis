@@ -4,6 +4,9 @@ import { OIDCProvider } from "./index.ts";
 import type { ProviderLogoutConfig } from "./index.ts";
 import type { OAuth2User } from "./oauth2_user.ts";
 
+/**
+ * @see {@link https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims}
+ */
 const OIDCUserInfoSchema = Type.Object({
   sub: Type.String(),
   name: Type.Optional(Type.String()),
@@ -11,7 +14,7 @@ const OIDCUserInfoSchema = Type.Object({
   email_verified: Type.Optional(Type.Boolean()),
   picture: Type.Optional(Type.String({ format: "url" })),
   updated_at: Type.Optional(
-    // TODO: OIDC spec says this should be a number?
+    // FIXME: OIDC spec says this should be a number?
     Type.Union([Type.String({ format: "date-time" }), Type.Number()]),
   ),
 });
@@ -139,7 +142,13 @@ export class OIDC extends OIDCProvider {
         `${this.name}-${payload.sub}@users.noreply.invalid`,
       emailVerified: payload.email_verified ?? false,
       picture: payload.picture,
-      updated: payload.updated_at,
+      updated:
+        /*
+         * @see {@link https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims}
+         */
+        typeof payload.updated_at === "number"
+          ? new Date(payload.updated_at * 1000).toISOString()
+          : payload.updated_at,
     };
   }
 }
