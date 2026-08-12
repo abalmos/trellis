@@ -22,7 +22,7 @@ function isSamePageLocation(currentUrl: URL, location: string | null): boolean {
 }
 
 type LocalLoginSuccess = {
-  status: "authenticated";
+  state: "authenticated" | "approval_required" | "approved";
   flowId: string;
 };
 
@@ -230,13 +230,15 @@ export async function submitLocalLogin(
   const body: unknown = await response.json();
   if (
     !isRecord(body) ||
-    body.status !== "authenticated" ||
+    (body.state !== "authenticated" &&
+      body.state !== "approval_required" &&
+      body.state !== "approved") ||
     body.flowId !== request.flowId
   ) {
     throw new Error("Unable to sign in. Please try again.");
   }
 
-  return { status: "authenticated", flowId: request.flowId };
+  return { state: body.state, flowId: request.flowId };
 }
 
 export async function submitLocalRegistration(

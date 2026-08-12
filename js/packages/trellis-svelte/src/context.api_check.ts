@@ -36,7 +36,7 @@ const app = createTrellisApp({
   participant: {
     id: testContract.CONTRACT_ID,
     artifactDigest: testContract.CONTRACT_DIGEST,
-    needsDigest: testContract.CONTRACT_DIGEST,
+    needsDigest: testContract.PARTICIPANT_NEEDS_DIGEST,
   },
   trellisUrl: "https://trellis.example",
 });
@@ -56,6 +56,11 @@ type GeneratedClient = {
 const generatedApp = createTrellisApp<typeof testContract, GeneratedClient>(
   {
     contract: testContract,
+    participant: {
+      id: testContract.CONTRACT_ID,
+      artifactDigest: testContract.CONTRACT_DIGEST,
+      needsDigest: testContract.PARTICIPANT_NEEDS_DIGEST,
+    },
     trellisUrl: () => new URL("https://trellis.example"),
   },
 );
@@ -113,9 +118,7 @@ async function typecheckContextApi(): Promise<void> {
   const generatedMe = await generatedTrellis.authSessionsMe({}).orThrow();
 
   const me = await trellis.authSessionsMe({}).orThrow();
-  const participantKind: "app" | "agent" | "device" | "service" =
-    me.participantKind;
-  const deviceId: string | undefined = me.device?.deviceId;
+  void me;
 
   const preferences = await trellis.state.preferences.get().orThrow();
   if (!("migrationRequired" in preferences) && preferences.found) {
@@ -132,10 +135,8 @@ async function typecheckContextApi(): Promise<void> {
   // @ts-expect-error contract-anchored typing rejects undeclared actions
   const invalidRpc = trellis.authNotDeclared;
 
-  void deviceId;
   void invalidRpc;
   void invalidStateList;
-  void participantKind;
   void sameTrellis;
   void appUrl;
   void statusPhase;

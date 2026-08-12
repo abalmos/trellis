@@ -12,7 +12,7 @@ order: 45
   communication model
 - [kv-resource-patterns.md](./kv-resource-patterns.md) - related service-owned
   resource patterns and naming guidance
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   canonical contract and binding model
 
 ## Context

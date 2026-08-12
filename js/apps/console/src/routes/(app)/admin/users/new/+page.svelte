@@ -2,7 +2,6 @@
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
-    AuthCapabilityGroupsListOutput,
     AuthUsersCreateInput,
   } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
@@ -17,8 +16,13 @@
   import { getNotifications } from "../../../../../lib/notifications.svelte";
   import { getTrellis } from "../../../../../lib/trellis";
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number];
-  type AssignableCapabilityGroup = AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+    key: string;
+    source: "platform" | "contract";
+    contractId: string | null;
+    contractDisplayName: string | null;
+    consequence: string | null;
+  };
   type CreatedResult = {
     userId: string;
     setupUrl: string;
@@ -41,15 +45,10 @@
   let email = $state("");
   let active = $state(true);
   let capabilities = $state<CapabilityView[]>([]);
-  let assignableCapabilityGroups = $state<AssignableCapabilityGroup[]>([]);
   let selectedCapabilities = $state<string[]>([]);
   let selectedCapabilityGroups = $state<string[]>([]);
   let createdResult = $state<CreatedResult | null>(null);
 
-  const sortedAssignableCapabilityGroups = $derived(assignableCapabilityGroups.slice().sort((left, right) => {
-    if ((left.groupKey === "admin") !== (right.groupKey === "admin")) return left.groupKey === "admin" ? -1 : 1;
-    return left.groupKey.localeCompare(right.groupKey);
-  }));
   const capabilitySections = $derived.by(() => {
     const sections: CapabilitySection[] = [];
 
@@ -115,12 +114,12 @@
     return { href };
   }
 
-  function buildCreateInput(username: string): AuthUsersCreateInput {
+  function buildCreateInput(_username: string): AuthUsersCreateInput {
     const input: AuthUsersCreateInput = {
-      active,
-      capabilities: uniqueCapabilities(selectedCapabilities),
-      capabilityGroups: uniqueCapabilities(selectedCapabilityGroups),
-      username,
+      email: null,
+      idempotencyKey: crypto.randomUUID(),
+      image: null,
+      name: null,
     };
     const trimmedName = trimmedOptional(name);
     const trimmedEmail = trimmedOptional(email);
@@ -133,14 +132,16 @@
     loading = true;
     error = null;
     try {
-      const [capabilitiesResponse, groupsResponse] = await Promise.all([
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
-        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
-      ]);
+      const capabilitiesResponse = await trellis.authCapabilitiesList({ limit: 500 }).take();
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      if (isErr(groupsResponse)) { error = errorMessage(groupsResponse); return; }
-      capabilities = (capabilitiesResponse.entries ?? []).slice().sort((left, right) => left.key.localeCompare(right.key));
-      assignableCapabilityGroups = groupsResponse.entries ?? [];
+      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+        ...capability,
+        key: capability.capability,
+        source: capability.sourceApi ? "contract" as const : "platform" as const,
+        contractId: capability.sourceApi,
+        contractDisplayName: null,
+        consequence: null,
+      })).sort((left, right) => left.key.localeCompare(right.key));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -163,13 +164,15 @@
       if (isErr(createResponse)) { error = errorMessage(createResponse); return; }
 
       const setupResponse = await trellis.authUsersPasswordResetCreate({
+        idempotencyKey: crypto.randomUUID(),
+        returnTarget: null,
         userId: createResponse.user.userId,
       }).take();
       if (isErr(setupResponse)) { error = errorMessage(setupResponse); return; }
 
       createdResult = {
         userId: createResponse.user.userId,
-        setupUrl: setupResponse.url,
+        setupUrl: setupResponse.flow.completionUrl,
       };
       notifications.success(`Created ${createResponse.user.name ?? createResponse.user.userId}.`, "Created");
 
@@ -274,25 +277,6 @@
           <span class="trellis-metadata text-xs">{selectedCapabilityGroups.length} selected</span>
         </div>
 
-        <SelectionGroup title="Capability Groups" count={selectedCapabilityGroups.length} bodyClass="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 xl:grid-cols-2">
-          {#each sortedAssignableCapabilityGroups as group (group.groupKey)}
-            <ChoiceRow compact class="border-y py-2">
-              {#snippet input()}
-                <input class="checkbox checkbox-sm mt-0.5" type="checkbox" bind:group={selectedCapabilityGroups} value={group.groupKey} />
-              {/snippet}
-              <span class="min-w-0 pr-2">
-                <span class="flex min-w-0 items-center gap-2">
-                  <span class="trellis-identifier truncate font-medium text-base-content">{group.groupKey}</span>
-                  {#if group.groupKey === "admin"}<span class="badge badge-neutral badge-xs shrink-0">built-in/read-only</span>{/if}
-                </span>
-                <span class="mt-0.5 block truncate text-base-content/60" title={group.displayName}>{group.displayName}</span>
-                <span class="trellis-field-help block">{group.capabilities.length} capabilities, {group.includedGroups.length} included groups</span>
-              </span>
-            </ChoiceRow>
-          {:else}
-            <div class="border-y border-base-300 py-4 trellis-metadata text-xs">No capability groups were returned.</div>
-          {/each}
-        </SelectionGroup>
       </section>
 
       <section class="px-5 py-3">

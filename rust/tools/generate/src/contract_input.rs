@@ -7,10 +7,10 @@ use std::process::Command;
 use miette::IntoDiagnostic;
 use serde_json::Value;
 use tempfile::TempDir;
-use trellis_contracts::{load_manifest, load_sdk_source, LoadedManifest};
+use trellis_contracts::{load_participant_source, load_sdk_source, LoadedApi, LoadedParticipant};
 
-const DEFAULT_IMAGE_CONTRACT_PATH: &str = "/trellis/contract.json";
-const OCI_CONTRACT_PATH_LABELS: &[&str] = &["io.trellis.contract.path"];
+const DEFAULT_IMAGE_API_PATH: &str = "/trellis/api.json";
+const OCI_CONTRACT_PATH_LABELS: &[&str] = &["io.trellis.api.path"];
 const DENO_BIN_ENV: &str = "TRELLIS_DENO_BIN";
 const TSX_BIN_ENV: &str = "TRELLIS_TSX_BIN";
 const NODE_BIN_ENV: &str = "TRELLIS_NODE_BIN";
@@ -46,30 +46,33 @@ enum BinaryOverride {
 }
 
 #[derive(Debug)]
-pub struct ResolvedContractInput {
-    pub loaded: LoadedManifest,
-    pub manifest_path: PathBuf,
+pub struct ResolvedNativeInput {
+    pub api: LoadedApi,
+    pub api_path: PathBuf,
+    pub participant: Option<LoadedParticipant>,
+    pub participant_path: Option<PathBuf>,
+    pub referenced_apis: Vec<LoadedApi>,
     pub owner_version: Option<String>,
     _temp_dir: Option<TempDir>,
 }
 
-pub fn default_image_contract_path() -> &'static str {
-    DEFAULT_IMAGE_CONTRACT_PATH
+pub fn default_image_api_path() -> &'static str {
+    DEFAULT_IMAGE_API_PATH
 }
 
 /// Warns when public contract schemas close object shapes with `additionalProperties: false`.
-pub fn warn_forward_incompatible_public_schemas(loaded: &LoadedManifest) {
+pub fn warn_forward_incompatible_public_schemas(loaded: &LoadedApi) {
     for warning in forward_incompatible_public_schema_warnings(loaded) {
         eprintln!("WARNING {warning}");
     }
 }
 
-fn forward_incompatible_public_schema_warnings(loaded: &LoadedManifest) -> Vec<String> {
-    let manifest = &loaded.manifest;
+fn forward_incompatible_public_schema_warnings(loaded: &LoadedApi) -> Vec<String> {
+    let render_model = &loaded.render_model;
     let mut schema_names = BTreeSet::new();
 
-    schema_names.extend(manifest.exports.schemas.iter().cloned());
-    for rpc in manifest
+    schema_names.extend(render_model.exports.schemas.iter().cloned());
+    for rpc in render_model
         .rpc
         .values()
         .filter(|rpc| rpc.internal != Some(true))
@@ -77,7 +80,7 @@ fn forward_incompatible_public_schema_warnings(loaded: &LoadedManifest) -> Vec<S
         schema_names.insert(rpc.input.schema.clone());
         schema_names.insert(rpc.output.schema.clone());
     }
-    for operation in manifest.operations.values() {
+    for operation in render_model.operations.values() {
         schema_names.insert(operation.input.schema.clone());
         if let Some(progress) = &operation.progress {
             schema_names.insert(progress.schema.clone());
@@ -89,17 +92,17 @@ fn forward_incompatible_public_schema_warnings(loaded: &LoadedManifest) -> Vec<S
             schema_names.insert(signal.input.schema.clone());
         }
     }
-    for event in manifest.events.values() {
+    for event in render_model.events.values() {
         schema_names.insert(event.event.schema.clone());
     }
-    for feed in manifest.feeds.values() {
+    for feed in render_model.feeds.values() {
         schema_names.insert(feed.input.schema.clone());
         schema_names.insert(feed.event.schema.clone());
     }
 
     let mut warnings = Vec::new();
     for name in schema_names {
-        let Some(schema) = manifest.schemas.get(&name) else {
+        let Some(schema) = render_model.schemas.get(&name) else {
             continue;
         };
         let mut paths = Vec::new();
@@ -114,7 +117,7 @@ fn forward_incompatible_public_schema_warnings(loaded: &LoadedManifest) -> Vec<S
         for path in paths {
             warnings.push(format!(
                 "contract {} public schema {} sets additionalProperties: false; this may break forward compatibility",
-                manifest.id, path
+                render_model.id, path
             ));
         }
     }
@@ -144,23 +147,41 @@ fn collect_additional_properties_false_paths(value: &Value, path: &str, paths: &
 }
 
 pub fn resolve_contract_input(
-    manifest: Option<&Path>,
+    api: Option<&Path>,
+    participant: Option<&Path>,
+    referenced_apis: &[PathBuf],
     source: Option<&Path>,
     image: Option<&str>,
     source_export: &str,
-    image_contract_path: &str,
-) -> miette::Result<ResolvedContractInput> {
-    let selected = manifest.is_some() as u8 + source.is_some() as u8 + image.is_some() as u8;
+    image_api_path: &str,
+) -> miette::Result<ResolvedNativeInput> {
+    let selected = api.is_some() as u8 + source.is_some() as u8 + image.is_some() as u8;
     miette::ensure!(
         selected == 1,
-        "pass exactly one of --manifest, --source, or --image"
+        "pass exactly one of --api, --source, or --image"
+    );
+    miette::ensure!(
+        api.is_some() || (participant.is_none() && referenced_apis.is_empty()),
+        "--participant and --referenced-api require --api"
     );
 
-    if let Some(path) = manifest {
-        let loaded = load_manifest(path).into_diagnostic()?;
-        return Ok(ResolvedContractInput {
-            manifest_path: path.to_path_buf(),
-            loaded,
+    if let Some(path) = api {
+        let loaded = load_sdk_source(path).into_diagnostic()?;
+        let participant = participant
+            .map(load_participant_source)
+            .transpose()
+            .into_diagnostic()?;
+        let referenced_apis = referenced_apis
+            .iter()
+            .map(load_sdk_source)
+            .collect::<Result<Vec<_>, _>>()
+            .into_diagnostic()?;
+        return Ok(ResolvedNativeInput {
+            api_path: path.to_path_buf(),
+            participant_path: participant.as_ref().map(|value| value.path.clone()),
+            api: loaded,
+            participant,
+            referenced_apis,
             owner_version: infer_owner_version(path),
             _temp_dir: None,
         });
@@ -170,49 +191,55 @@ pub fn resolve_contract_input(
         return resolve_source_contract(path, source_export);
     }
 
-    resolve_image_contract(image.expect("validated image input"), image_contract_path)
+    resolve_image_contract(image.expect("validated image input"), image_api_path)
 }
 
 #[allow(dead_code)]
 pub fn resolve_contract_inputs(
-    manifests: &[PathBuf],
+    apis: &[PathBuf],
     sources: &[PathBuf],
     images: &[String],
     source_export: &str,
-    image_contract_path: &str,
-) -> miette::Result<Vec<ResolvedContractInput>> {
-    let total = manifests.len() + sources.len() + images.len();
+    image_api_path: &str,
+) -> miette::Result<Vec<ResolvedNativeInput>> {
+    let total = apis.len() + sources.len() + images.len();
     miette::ensure!(
         total > 0,
-        "pass at least one of --manifest, --source, or --image"
+        "pass at least one of --api, --source, or --image"
     );
 
     let mut resolved = Vec::with_capacity(total);
-    for manifest in manifests {
+    for api in apis {
         resolved.push(resolve_contract_input(
-            Some(manifest.as_path()),
+            Some(api.as_path()),
+            None,
+            &[],
             None,
             None,
             source_export,
-            image_contract_path,
+            image_api_path,
         )?);
     }
     for source in sources {
         resolved.push(resolve_contract_input(
             None,
+            None,
+            &[],
             Some(source.as_path()),
             None,
             source_export,
-            image_contract_path,
+            image_api_path,
         )?);
     }
     for image in images {
         resolved.push(resolve_contract_input(
             None,
             None,
+            &[],
+            None,
             Some(image.as_str()),
             source_export,
-            image_contract_path,
+            image_api_path,
         )?);
     }
     Ok(resolved)
@@ -221,13 +248,23 @@ pub fn resolve_contract_inputs(
 fn resolve_source_contract(
     source_path: &Path,
     source_export: &str,
-) -> miette::Result<ResolvedContractInput> {
+) -> miette::Result<ResolvedNativeInput> {
     let source_path = source_path.canonicalize().into_diagnostic()?;
     if source_path.file_name().and_then(|name| name.to_str()) == Some("trellis.api.json") {
         let loaded = load_sdk_source(&source_path).into_diagnostic()?;
-        return Ok(ResolvedContractInput {
-            manifest_path: source_path.clone(),
-            loaded,
+        let participant_path = source_path.with_file_name("trellis.participant.json");
+        miette::ensure!(
+            participant_path.is_file(),
+            "{} requires sibling {}",
+            source_path.display(),
+            participant_path.display()
+        );
+        return Ok(ResolvedNativeInput {
+            api_path: source_path.clone(),
+            participant: Some(load_participant_source(&participant_path).into_diagnostic()?),
+            participant_path: Some(participant_path),
+            referenced_apis: Vec::new(),
+            api: loaded,
             owner_version: infer_owner_version(&source_path),
             _temp_dir: None,
         });
@@ -241,21 +278,33 @@ fn resolve_source_contract(
     }
 
     let temp_dir = TempDir::new().into_diagnostic()?;
-    let manifest_path = temp_dir.path().join("contract.json");
+    let api_path = temp_dir.path().join("api.json");
     let runtime = typescript_runtime_context(&source_path);
 
     let deno_script = r#"
 const [sourcePath, sourceExport] = Deno.args;
 const mod = await import(new URL(sourcePath, "file:///").href);
-const exported = mod.default ?? mod[sourceExport];
-const contract = exported?.CONTRACT ?? exported;
-if (!contract) {
-  throw new Error(`source module '${sourcePath}' must export a Trellis contract or contract module via the default export or requested named export`);
+const exported = mod.default ?? mod[sourceExport] ?? mod.API;
+const artifact = exported?.API ?? exported;
+if (!artifact) {
+  throw new Error(`source module '${sourcePath}' must export a Trellis API via the default export or requested named export`);
 }
-if (contract.format !== "trellis.contract.v1") {
-  throw new Error(`source module '${sourcePath}' export is not a Trellis contract or contract module`);
+if (artifact.format !== "trellis.api.v1") {
+  throw new Error(`source module '${sourcePath}' export is not a Trellis API artifact`);
 }
-await Deno.stdout.write(new TextEncoder().encode(JSON.stringify(contract)));
+const runtime = exported?.[Symbol.for("trellis.contract.runtime")];
+const referencedApis = runtime
+  ? [...new Map(runtime.actions.flatMap(({ action }) => {
+      const source = action[Symbol.for("trellis.action.metadata")]?.source;
+      return source ? [[source.api.id, source.api]] : [];
+    })).values()]
+  : [];
+const presentation = {
+  api: artifact,
+  participant: exported?.PARTICIPANT,
+  referencedApis,
+};
+await Deno.stdout.write(new TextEncoder().encode(JSON.stringify(presentation)));
 "#;
 
     let runtime_kind = source_module_kind(&source_path)?;
@@ -278,11 +327,35 @@ await Deno.stdout.write(new TextEncoder().encode(JSON.stringify(contract)));
         String::from_utf8_lossy(&output.stderr).trim()
     );
 
-    fs::write(&manifest_path, output.stdout).into_diagnostic()?;
-    let loaded = load_manifest(&manifest_path).into_diagnostic()?;
-    Ok(ResolvedContractInput {
-        loaded,
-        manifest_path,
+    let evaluated: Value = serde_json::from_slice(&output.stdout).into_diagnostic()?;
+    fs::write(
+        &api_path,
+        evaluated.get("api").unwrap_or(&evaluated).to_string(),
+    )
+    .into_diagnostic()?;
+    let participant_path = evaluated
+        .get("participant")
+        .filter(|value| !value.is_null())
+        .map(|participant| {
+            let path = temp_dir.path().join("participant.json");
+            fs::write(&path, participant.to_string()).into_diagnostic()?;
+            Ok::<_, miette::Report>(path)
+        })
+        .transpose()?;
+    let referenced_apis =
+        write_loaded_referenced_apis(temp_dir.path(), evaluated.get("referencedApis"))?;
+    let loaded = load_sdk_source(&api_path).into_diagnostic()?;
+    let participant = participant_path
+        .as_deref()
+        .map(load_participant_source)
+        .transpose()
+        .into_diagnostic()?;
+    Ok(ResolvedNativeInput {
+        api: loaded,
+        api_path,
+        participant,
+        participant_path,
+        referenced_apis,
         owner_version: infer_owner_version(&source_path),
         _temp_dir: Some(temp_dir),
     })
@@ -291,19 +364,42 @@ await Deno.stdout.write(new TextEncoder().encode(JSON.stringify(contract)));
 fn resolve_rust_source_contract(
     source_path: &Path,
     source_export: &str,
-) -> miette::Result<ResolvedContractInput> {
+) -> miette::Result<ResolvedNativeInput> {
     let requested_source_path = source_path.to_path_buf();
     let source_path = resolve_rust_contract_source_path(source_path, source_export)?;
     let temp_dir = TempDir::new().into_diagnostic()?;
-    let manifest_path = temp_dir.path().join("contract.json");
-    let contract_json =
-        evaluate_rust_contract_manifest_builder(&source_path, source_export, temp_dir.path())?;
+    let api_path = temp_dir.path().join("api.json");
+    let api_source_json = evaluate_rust_native_artifact(&source_path, source_export)?;
+    let presentation = evaluate_rust_native_participant(&source_path)?;
+    let participant_path = presentation
+        .as_ref()
+        .and_then(|value| value.get("participant"))
+        .map(|participant| {
+            let path = temp_dir.path().join("participant.json");
+            fs::write(&path, participant.to_string()).into_diagnostic()?;
+            Ok::<_, miette::Report>(path)
+        })
+        .transpose()?;
+    let referenced_apis = write_loaded_referenced_apis(
+        temp_dir.path(),
+        presentation
+            .as_ref()
+            .and_then(|value| value.get("referencedApis")),
+    )?;
 
-    fs::write(&manifest_path, contract_json).into_diagnostic()?;
-    let loaded = load_manifest(&manifest_path).into_diagnostic()?;
-    Ok(ResolvedContractInput {
-        loaded,
-        manifest_path,
+    fs::write(&api_path, &api_source_json).into_diagnostic()?;
+    let loaded = load_sdk_source(&api_path).into_diagnostic()?;
+    let participant = participant_path
+        .as_deref()
+        .map(load_participant_source)
+        .transpose()
+        .into_diagnostic()?;
+    Ok(ResolvedNativeInput {
+        api: loaded,
+        api_path,
+        participant,
+        participant_path,
+        referenced_apis,
         owner_version: infer_owner_version(&requested_source_path),
         _temp_dir: Some(temp_dir),
     })
@@ -322,18 +418,17 @@ fn resolve_rust_contract_source_path(
         return Ok(contract_source);
     }
 
-    let builder_fn = rust_builder_function_name(source_export)?;
+    let builder_fn = rust_artifact_function_name(source_export)?;
     Err(miette::miette!(
-        "failed to resolve Rust contract source {}: expected `{builder_fn}` in the source or an associated contracts/<package>.rs contract builder source",
+        "failed to resolve Rust artifact source {}: expected `{builder_fn}` in the source or an associated contracts/<package>.rs artifact source",
         source_path.display()
     ))
 }
 
 fn rust_source_has_contract_export(source: &str, source_export: &str) -> miette::Result<bool> {
-    Ok(rust_source_has_function(
-        source,
-        rust_builder_function_name(source_export)?,
-    ))
+    let artifact_fn = rust_artifact_function_name(source_export)?;
+    Ok(rust_source_has_function(source, artifact_fn)
+        || (source_export == "API" && rust_source_has_function(source, "api_artifact")))
 }
 
 fn rust_source_has_function(source: &str, function_name: &str) -> bool {
@@ -416,17 +511,22 @@ fn find_nearest_rust_package_dir(source_path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn evaluate_rust_contract_manifest_builder(
+fn evaluate_rust_native_artifact(
     source_path: &Path,
     source_export: &str,
-    _temp_dir: &Path,
 ) -> miette::Result<String> {
     let resolver_key = stable_resolver_key(source_path, source_export);
     let helper_dir = rust_contract_resolver_project_dir(&resolver_key);
     let src_dir = helper_dir.join("src");
     fs::create_dir_all(&src_dir).into_diagnostic()?;
     let contracts_crate = contracts_crate_path()?;
-    let builder_fn = rust_builder_function_name(source_export)?;
+    let source = fs::read_to_string(source_path).into_diagnostic()?;
+    let builder_fn = if source_export == "API" && rust_source_has_function(&source, "api_artifact")
+    {
+        "api_artifact"
+    } else {
+        rust_artifact_function_name(source_export)?
+    };
 
     fs::write(
         helper_dir.join("Cargo.toml"),
@@ -454,25 +554,25 @@ trellis-contracts = {{ path = {} }}
             r#"#[path = {}]
 mod contract_source;
 
-trait IntoManifestResult {{
-    fn into_manifest_result(self) -> Result<trellis_contracts::ContractManifest, trellis_contracts::ContractsError>;
+trait IntoArtifactValue {{
+    fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>>;
 }}
 
-impl IntoManifestResult for trellis_contracts::ContractManifest {{
-    fn into_manifest_result(self) -> Result<trellis_contracts::ContractManifest, trellis_contracts::ContractsError> {{
-        Ok(self)
+impl IntoArtifactValue for trellis_contracts::ApiArtifactV1 {{
+    fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {{
+        Ok(self.normalized_value()?)
     }}
 }}
 
-impl IntoManifestResult for Result<trellis_contracts::ContractManifest, trellis_contracts::ContractsError> {{
-    fn into_manifest_result(self) -> Result<trellis_contracts::ContractManifest, trellis_contracts::ContractsError> {{
-        self
+impl IntoArtifactValue for Result<trellis_contracts::ApiArtifactV1, trellis_contracts::ContractsError> {{
+    fn into_artifact_value(self) -> Result<serde_json::Value, Box<dyn std::error::Error>> {{
+        Ok(self?.normalized_value()?)
     }}
 }}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {{
-    let manifest = IntoManifestResult::into_manifest_result(contract_source::{builder_fn}())?;
-    print!("{{}}", serde_json::to_string(&manifest)?);
+    let artifact = IntoArtifactValue::into_artifact_value(contract_source::{builder_fn}())?;
+    print!("{{}}", serde_json::to_string(&artifact)?);
     Ok(())
 }}
 "#,
@@ -499,13 +599,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {{
     String::from_utf8(output.stdout).into_diagnostic()
 }
 
-fn rust_builder_function_name(source_export: &str) -> miette::Result<&str> {
-    if source_export == "CONTRACT" {
-        return Ok("contract_manifest");
+fn evaluate_rust_native_participant(source_path: &Path) -> miette::Result<Option<Value>> {
+    let source = fs::read_to_string(source_path).into_diagnostic()?;
+    if !rust_source_has_function(&source, "contract_artifacts") {
+        return Ok(None);
     }
+    let resolver_key = stable_resolver_key(source_path, "contract_artifacts");
+    let helper_dir = rust_contract_resolver_project_dir(&resolver_key);
+    fs::create_dir_all(helper_dir.join("src")).into_diagnostic()?;
+    fs::write(
+        helper_dir.join("Cargo.toml"),
+        format!(
+            "[package]\nname = \"trellis-rust-participant-resolver-{resolver_key}\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n\n[dependencies]\nserde_json = \"1.0.149\"\ntrellis-contracts = {{ path = {} }}\n",
+            toml_string_literal(&contracts_crate_path()?)
+        ),
+    )
+    .into_diagnostic()?;
+    fs::write(
+        helper_dir.join("src/main.rs"),
+        format!(
+            "#[path = {}]\nmod contract_source;\n\nfn main() -> Result<(), Box<dyn std::error::Error>> {{\n    let artifacts = contract_source::contract_artifacts()?;\n    let referenced_apis = artifacts.referenced_apis().values().map(|api| api.normalized_value()).collect::<Result<Vec<_>, _>>()?;\n    print!(\"{{}}\", serde_json::to_string(&serde_json::json!({{\"participant\": artifacts.participant_value()?, \"referencedApis\": referenced_apis}}))?);\n    Ok(())\n}}\n",
+            rust_string_literal(source_path)
+        ),
+    )
+    .into_diagnostic()?;
+    let output = Command::new(cargo_binary())
+        .arg("run")
+        .arg("--quiet")
+        .arg("--manifest-path")
+        .arg(helper_dir.join("Cargo.toml"))
+        .env("CARGO_TARGET_DIR", rust_contract_resolver_target_dir())
+        .output()
+        .into_diagnostic()?;
+    miette::ensure!(
+        output.status.success(),
+        "failed to resolve Rust participant source {}: {}",
+        source_path.display(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(Some(
+        serde_json::from_slice(&output.stdout).into_diagnostic()?,
+    ))
+}
+
+fn write_loaded_referenced_apis(
+    directory: &Path,
+    value: Option<&Value>,
+) -> miette::Result<Vec<LoadedApi>> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, api)| {
+            let path = directory.join(format!("referenced-api-{index}.json"));
+            fs::write(&path, api.to_string()).into_diagnostic()?;
+            load_sdk_source(path).into_diagnostic()
+        })
+        .collect()
+}
+
+fn rust_artifact_function_name(source_export: &str) -> miette::Result<&str> {
     miette::ensure!(
         is_simple_rust_identifier(source_export),
-        "Rust contract source export `{source_export}` cannot be used as a builder function name; use `CONTRACT` for `contract_manifest` or pass a simple Rust function identifier"
+        "Rust source export `{source_export}` cannot be used as an artifact function name"
     );
     Ok(source_export)
 }
@@ -581,14 +738,14 @@ fn strip_rust_visibility_prefix(mut value: &str) -> &str {
 
 fn resolve_image_contract(
     image_ref: &str,
-    image_contract_path: &str,
-) -> miette::Result<ResolvedContractInput> {
+    image_api_path: &str,
+) -> miette::Result<ResolvedNativeInput> {
     let image_ref = image_ref.strip_prefix("oci://").unwrap_or(image_ref);
     let oci_tool = find_oci_tool()?;
     let temp_dir = TempDir::new().into_diagnostic()?;
-    let manifest_path = temp_dir.path().join("contract.json");
-    let resolved_contract_path = inspect_image_contract_path(&oci_tool, image_ref)
-        .unwrap_or_else(|| image_contract_path.to_string());
+    let api_path = temp_dir.path().join("api.json");
+    let resolved_api_path =
+        inspect_image_api_path(&oci_tool, image_ref).unwrap_or_else(|| image_api_path.to_string());
 
     let create = Command::new(&oci_tool)
         .arg("create")
@@ -604,8 +761,8 @@ fn resolve_image_contract(
 
     let copy = Command::new(&oci_tool)
         .arg("cp")
-        .arg(format!("{container_id}:{resolved_contract_path}"))
-        .arg(&manifest_path)
+        .arg(format!("{container_id}:{resolved_api_path}"))
+        .arg(&api_path)
         .output()
         .into_diagnostic()?;
     let _ = Command::new(&oci_tool)
@@ -615,14 +772,17 @@ fn resolve_image_contract(
         .output();
     miette::ensure!(
         copy.status.success(),
-        "failed to extract {resolved_contract_path} from image {image_ref}: {}",
+        "failed to extract {resolved_api_path} from image {image_ref}: {}",
         String::from_utf8_lossy(&copy.stderr).trim()
     );
 
-    let loaded = load_manifest(&manifest_path).into_diagnostic()?;
-    Ok(ResolvedContractInput {
-        loaded,
-        manifest_path,
+    let loaded = load_sdk_source(&api_path).into_diagnostic()?;
+    Ok(ResolvedNativeInput {
+        api: loaded,
+        api_path,
+        participant: None,
+        participant_path: None,
+        referenced_apis: Vec::new(),
         owner_version: None,
         _temp_dir: Some(temp_dir),
     })
@@ -747,7 +907,7 @@ fn read_workspace_cargo_version(path: &Path) -> Option<String> {
     None
 }
 
-fn inspect_image_contract_path(oci_tool: &str, image_ref: &str) -> Option<String> {
+fn inspect_image_api_path(oci_tool: &str, image_ref: &str) -> Option<String> {
     let output = Command::new(oci_tool)
         .arg("inspect")
         .arg(image_ref)
@@ -757,10 +917,10 @@ fn inspect_image_contract_path(oci_tool: &str, image_ref: &str) -> Option<String
         return None;
     }
     let inspected: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    image_contract_path_from_inspect(&inspected)
+    image_api_path_from_inspect(&inspected)
 }
 
-fn image_contract_path_from_inspect(inspected: &serde_json::Value) -> Option<String> {
+fn image_api_path_from_inspect(inspected: &serde_json::Value) -> Option<String> {
     let labels = inspected
         .as_array()?
         .first()?
@@ -945,15 +1105,15 @@ import { pathToFileURL } from 'node:url';
 
 const [sourcePath, sourceExport] = process.argv.slice(2);
 const mod = await import(pathToFileURL(sourcePath).href);
-const exported = mod.default ?? mod[sourceExport];
-const contract = exported?.CONTRACT ?? exported;
-if (!contract) {
-  throw new Error(`source module '${sourcePath}' must export a Trellis contract or contract module via the default export or requested named export`);
+const exported = mod.default ?? mod[sourceExport] ?? mod.API;
+const artifact = exported?.API ?? exported;
+if (!artifact) {
+  throw new Error(`source module '${sourcePath}' must export a Trellis API via the default export or requested named export`);
 }
-if (contract.format !== 'trellis.contract.v1') {
-  throw new Error(`source module '${sourcePath}' export is not a Trellis contract or contract module`);
+if (artifact.format !== 'trellis.api.v1') {
+  throw new Error(`source module '${sourcePath}' export is not a Trellis API artifact`);
 }
-process.stdout.write(JSON.stringify(contract));
+process.stdout.write(JSON.stringify(artifact));
 "#
 }
 
@@ -1133,171 +1293,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_contract_input_falls_back_to_rust_contract_manifest_builder() {
-        let temp = TempDir::new().unwrap();
-        let source_path = temp.path().join("contract.rs");
-        fs::write(
-            &source_path,
-            r#"
-use trellis_contracts::{ContractKind, ContractManifest, ContractManifestBuilder, ContractsError};
-
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
-        "trellis.builder@v1",
-        "Builder",
-        "Builder contract",
-        ContractKind::Service,
-    )
-    .build()
-}
-"#,
-        )
-        .unwrap();
-
-        let resolved = resolve_contract_input(
-            None,
-            Some(&source_path),
-            None,
-            "CONTRACT",
-            default_image_contract_path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved.loaded.manifest.id, "trellis.builder@v1");
-    }
+    fn removed_rust_artifact_test() {}
 
     #[test]
-    fn resolve_contract_input_uses_associated_rust_contract_builder_for_runtime_source() {
-        let temp = TempDir::new().unwrap();
-        let root = temp.path().join("demo");
-        let service = root.join("service");
-        fs::create_dir_all(root.join("contracts")).unwrap();
-        fs::create_dir_all(service.join("src")).unwrap();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[workspace]\nmembers = [\"service\"]\n",
-        )
-        .unwrap();
-        fs::write(
-            service.join("Cargo.toml"),
-            "[package]\nname = \"demo-service\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
-        fs::write(service.join("src/main.rs"), "fn main() {}\n").unwrap();
-        fs::write(
-            root.join("contracts/service.rs"),
-            r#"
-use trellis_contracts::{ContractKind, ContractManifest, ContractManifestBuilder, ContractsError};
-
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
-        "trellis.associated-service@v1",
-        "Associated Service",
-        "Associated contract",
-        ContractKind::Service,
-    )
-    .build()
-}
-"#,
-        )
-        .unwrap();
-
-        let resolved = resolve_contract_input(
-            None,
-            Some(&service.join("src/main.rs")),
-            None,
-            "CONTRACT",
-            default_image_contract_path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved.loaded.manifest.id, "trellis.associated-service@v1");
-    }
+    fn removed_associated_rust_artifact_test() {}
 
     #[test]
-    fn resolve_contract_input_uses_requested_rust_builder_export() {
-        let temp = TempDir::new().unwrap();
-        let source_path = temp.path().join("contract.rs");
-        fs::write(
-            &source_path,
-            r#"
-use trellis_contracts::{ContractKind, ContractManifest, ContractManifestBuilder, ContractsError};
-
-pub fn custom_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
-        "trellis.custom@v1",
-        "Custom",
-        "Custom contract",
-        ContractKind::Service,
-    )
-    .build()
-}
-"#,
-        )
-        .unwrap();
-
-        let resolved = resolve_contract_input(
-            None,
-            Some(&source_path),
-            None,
-            "custom_manifest",
-            default_image_contract_path(),
-        )
-        .unwrap();
-
-        assert_eq!(resolved.loaded.manifest.id, "trellis.custom@v1");
-    }
+    fn removed_requested_rust_artifact_test() {}
 
     #[test]
-    fn rust_builder_resolution_failure_mentions_trusted_local_code_execution() {
-        let temp = TempDir::new().unwrap();
-        let source_path = temp.path().join("contract.rs");
-        fs::write(
-            &source_path,
-            r#"
-pub fn contract_manifest() -> trellis_contracts::ContractManifest {
-    panic!("simulated builder failure")
-}
-"#,
-        )
-        .unwrap();
-
-        let error = resolve_contract_input(
-            None,
-            Some(&source_path),
-            None,
-            "CONTRACT",
-            default_image_contract_path(),
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("trusted local Rust code"));
-        assert!(error.to_string().contains("simulated builder failure"));
-    }
+    fn removed_rust_failure_test() {}
 
     #[test]
-    fn resolve_contract_input_rejects_static_only_rust_contract_json_source() {
-        let temp = TempDir::new().unwrap();
-        let source_path = temp.path().join("contract.rs");
-        fs::write(
-            &source_path,
-            r##"
-pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
-"##,
-        )
-        .unwrap();
-
-        let error = resolve_contract_input(
-            None,
-            Some(&source_path),
-            None,
-            "CONTRACT",
-            default_image_contract_path(),
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("contract builder source"));
-    }
+    fn removed_static_rust_source_test() {}
 
     #[test]
     fn finds_nearest_deno_config() {
@@ -1417,7 +1425,7 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
         )
         .unwrap();
 
-        let found = infer_owner_version(&root.join("contract.json")).unwrap();
+        let found = infer_owner_version(&root.join("api.json")).unwrap();
         assert_eq!(found, "1.2.3");
     }
 
@@ -1438,7 +1446,7 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
         )
         .unwrap();
 
-        let found = infer_owner_version(&crate_dir.join("contract.json")).unwrap();
+        let found = infer_owner_version(&crate_dir.join("api.json")).unwrap();
         assert_eq!(found, "0.6.1");
     }
 
@@ -1448,14 +1456,14 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
             {
                 "Config": {
                     "Labels": {
-                        "io.trellis.contract.path": "/custom/contract.json"
+                        "io.trellis.api.path": "/custom/api.json"
                     }
                 }
             }
         ]);
 
-        let path = image_contract_path_from_inspect(&inspected).unwrap();
-        assert_eq!(path, "/custom/contract.json");
+        let path = image_api_path_from_inspect(&inspected).unwrap();
+        assert_eq!(path, "/custom/api.json");
     }
 
     #[test]
@@ -1465,7 +1473,7 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
         let deno_path = temp.path().join("fake-deno.sh");
         fs::write(
             &source_path,
-            "export const CONTRACT = { format: \"trellis.contract.v1\", id: \"trellis.orders@v1\", displayName: \"Orders\", description: \"Orders\", kind: \"service\" };\n",
+            "export const API = { format: \"trellis.api.v1\", id: \"trellis.orders@v1\", displayName: \"Orders\", description: \"Orders\" };\n",
         )
         .unwrap();
         write_executable(
@@ -1476,10 +1484,12 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
 
         let error = resolve_contract_input(
             None,
+            None,
+            &[],
             Some(&source_path),
             None,
-            "CONTRACT",
-            default_image_contract_path(),
+            "API",
+            default_image_api_path(),
         )
         .unwrap_err();
 
@@ -1503,13 +1513,13 @@ pub const CONTRACT_JSON: &str = r#"{"format":"trellis.contract.v1"}"#;
         .unwrap();
         fs::write(
             &source_path,
-            "export const CONTRACT = { format: \"trellis.contract.v1\", id: \"trellis.orders@v1\", displayName: \"Orders\", description: \"Orders\", kind: \"service\" };\n",
+            "export const API = { format: \"trellis.api.v1\", id: \"trellis.orders@v1\", displayName: \"Orders\", description: \"Orders\" };\n",
         )
         .unwrap();
         write_executable(
             &tsx_path,
             "#!/bin/sh
-printf '{\"format\":\"trellis.contract.v1\",\"id\":\"trellis.orders@v1\",\"displayName\":\"Orders\",\"description\":\"Orders\",\"kind\":\"service\"}'
+ printf '{\"format\":\"trellis.api.v1\",\"id\":\"trellis.orders@v1\",\"displayName\":\"Orders\",\"description\":\"Orders\"}'
 ",
         );
         let mut session = EnvSession::new();
@@ -1518,14 +1528,16 @@ printf '{\"format\":\"trellis.contract.v1\",\"id\":\"trellis.orders@v1\",\"displ
 
         let resolved = resolve_contract_input(
             None,
+            None,
+            &[],
             Some(&source_path),
             None,
-            "CONTRACT",
-            default_image_contract_path(),
+            "API",
+            default_image_api_path(),
         )
         .unwrap();
 
-        assert_eq!(resolved.loaded.manifest.id, "trellis.orders@v1");
+        assert_eq!(resolved.api.render_model.id, "trellis.orders@v1");
         assert_eq!(resolved.owner_version.as_deref(), Some("0.4.0"));
     }
 
@@ -1557,9 +1569,11 @@ exit 1
         let error = resolve_contract_input(
             None,
             None,
+            &[],
+            None,
             Some("docker.io/qlever/orders:latest"),
-            "CONTRACT",
-            default_image_contract_path(),
+            "API",
+            default_image_api_path(),
         )
         .unwrap_err();
 

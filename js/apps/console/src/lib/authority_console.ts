@@ -48,8 +48,21 @@ type AuthorityMaterialization = NonNullable<
 type MaterializedCapabilityGrant = AuthorityMaterialization["grants"][
   "capabilities"
 ][number];
-export type AuthorityCapabilityDefinition =
-  AuthCapabilitiesListOutput["entries"][number];
+export type AuthorityCapabilityDefinition = {
+  allows?: AuthCapabilitiesListOutput["entries"][number]["allows"];
+  capability?: string;
+  displayName: string;
+  description: string;
+  sourceApi?: string | null;
+  key?: string;
+  consequence?: string | null;
+  source?: "platform" | "contract" | "deployment";
+  contractId?: string | null;
+  contractDigest?: string | null;
+  contractDisplayName?: string | null;
+  deploymentId?: string | null;
+  direction?: "creates" | "given";
+};
 
 export type DeltaContractRow = {
   id: string;
@@ -91,7 +104,7 @@ export type ContractDiffRow = {
   after: unknown;
 };
 
-export type ContractManifestDiffRows = {
+export type ContractDiffRows = {
   contracts: ContractDiffRow[];
   surfaces: ContractDiffRow[];
   schemas: ContractDiffRow[];
@@ -288,7 +301,7 @@ export function applyBreakingChanges(
   }));
   return { groups: next, unmatched: [...remaining] };
 }
-type ContractDiffGroup = keyof ContractManifestDiffRows;
+type ContractDiffGroup = keyof ContractDiffRows;
 type ContractDiffSection = {
   group: ContractDiffGroup;
   kind: string;
@@ -542,7 +555,7 @@ export function deltaCapabilityRows(
 export function contractManifestDiffRows(
   previous: unknown,
   proposed: unknown,
-): ContractManifestDiffRows {
+): ContractDiffRows {
   const oldContract = isRecord(previous) ? previous : null;
   const newContract = isRecord(proposed) ? proposed : null;
   if (!newContract) return emptyContractDiffRows();
@@ -571,12 +584,12 @@ export function createsCapabilityRows(
     "creates",
   ).map((definition) => ({
     id: capabilityDefinitionId(definition),
-    capability: definition.key,
+    capability: definition.key ?? definition.capability ?? "",
     displayName: definition.displayName,
     description: definition.description,
     consequence: definition.consequence ?? null,
-    source: definition.source,
-    contractId: definition.contractId ?? null,
+    source: definition.source ?? "platform",
+    contractId: definition.contractId ?? definition.sourceApi ?? null,
     contractDigest: definition.contractDigest ?? null,
     contractDisplayName: definition.contractDisplayName ?? null,
   }));
@@ -808,11 +821,14 @@ function capabilityDefinitionsForDeployment(
 ): AuthorityCapabilityDefinition[] {
   return definitions
     .filter((definition) =>
-      definition.deploymentId === deploymentId &&
+      (definition.deploymentId === deploymentId ||
+        definition.deploymentId === undefined) &&
       definition.direction === direction
     )
     .toSorted((left, right) =>
-      left.key.localeCompare(right.key) ||
+      (left.key ?? left.capability ?? "").localeCompare(
+        right.key ?? right.capability ?? "",
+      ) ||
       (left.contractId ?? "").localeCompare(right.contractId ?? "") ||
       (left.contractDigest ?? "").localeCompare(right.contractDigest ?? "")
     );
@@ -830,16 +846,18 @@ function capabilityDefinitionIndex(
       "given",
     )
   ) {
-    index.set(definition.key, definition);
+    index.set(definition.key ?? definition.capability ?? "", definition);
   }
   for (const definition of definitions) {
     if (
-      definition.deploymentId !== deploymentId ||
+      (definition.deploymentId !== deploymentId &&
+        definition.deploymentId !== undefined) ||
       definition.direction !== undefined
     ) {
       continue;
     }
-    if (!index.has(definition.key)) index.set(definition.key, definition);
+    const key = definition.key ?? definition.capability ?? "";
+    if (!index.has(key)) index.set(key, definition);
   }
   return index;
 }
@@ -850,7 +868,7 @@ function capabilityDefinitionId(
   return [
     definition.deploymentId ?? "global",
     definition.direction ?? "unspecified",
-    definition.key,
+    definition.key ?? definition.capability ?? "",
     definition.contractId ?? "platform",
     definition.contractDigest ?? "no-digest",
   ].join(":");
@@ -924,7 +942,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function emptyContractDiffRows(): ContractManifestDiffRows {
+function emptyContractDiffRows(): ContractDiffRows {
   return {
     contracts: [],
     surfaces: [],

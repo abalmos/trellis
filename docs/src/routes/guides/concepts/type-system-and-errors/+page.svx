@@ -2,7 +2,7 @@ Trellis uses contract-owned schemas and explicit expected-failure modeling so se
 
 ## Schemas
 
-Contract source defines input, output, event, job, state, resource, and error payload schemas. The emitted `trellis.contract.v1` manifest is the canonical cross-language artifact.
+Contract source defines input, output, event, job, state, resource, and error payload schemas. The emitted native `trellis.api.v1` and `trellis.participant.v1` manifest is the canonical cross-language artifact.
 
 In TypeScript, services use TypeBox schemas and `ref.schema(...)` references inside contract builders:
 

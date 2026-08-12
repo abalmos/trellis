@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AuthIdentityGrantsListOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthIdentityAuthorityListOutput } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
@@ -18,13 +18,13 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let identityGrants = $state<AuthIdentityGrantsListOutput["entries"]>([]);
+  let identityGrants = $state<AuthIdentityAuthorityListOutput["entries"]>([]);
 
   async function load() {
     loading = true;
     error = null;
 
-    const res = await trellis.authIdentityGrantsList({ limit: 500, offset: 0 }).take();
+    const res = await trellis.authIdentityAuthorityList({ limit: 500 }).take();
     loading = false;
     if (isErr(res)) {
       error = errorMessage(res);
@@ -83,19 +83,17 @@
             </tr>
           </thead>
           <tbody>
-            {#each identityGrants as entry (entry.identityGrantId)}
+            {#each identityGrants as entry (entry.authorityId)}
               <tr>
-                <td class="font-medium">{entry.participantKind}</td>
+                <td class="font-medium">{entry.materialization?.participantKind ?? "app"}</td>
                 <td>
-                  {entry.displayName ??
-                    entry.contractEvidence.contractId ??
-                    "—"}
+                  {entry.participantId}
                 </td>
                 <td class="trellis-identifier text-base-content/60">
-                  {entry.contractEvidence.contractDigest.slice(0, 12)}…
+                  {entry.participantArtifactDigest.slice(0, 12)}…
                 </td>
                 <td class="text-base-content/60">
-                  {formatDate(entry.grantedAt)}
+                  {formatDate(entry.createdAt)}
                 </td>
                 <td class="text-right">
                   <ActionMenu>
@@ -103,7 +101,7 @@
                         <a
                           class="text-error"
                           href={resolve(
-                            `/admin/apps/revoke?grant=${encodeURIComponent(entry.identityGrantId)}`,
+                            `/admin/apps/revoke?grant=${encodeURIComponent(entry.authorityId)}`,
                           )}>Revoke</a
                         >
                       </li>

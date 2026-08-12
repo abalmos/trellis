@@ -8,18 +8,18 @@ pub mod auth_callout;
 mod auth_operation;
 mod auth_post_commit;
 pub mod bootstrap;
-pub mod catalog;
 mod state;
 
 use auth::{
-    authorization_reconciliation_channel, AccountRepository, AuthService, AuthServiceConfig,
-    AuthorityDecision, AuthorityEvidenceRepository, AuthorityEvidenceScope, AuthorityKind,
-    AuthorityRepository, AuthorityState, AuthorityTarget, AuthorizationStateService,
-    CreateSessionInput, DeploymentAuthorityRecord, DeploymentRecord, FirstAdminAuthorityTarget,
-    IdempotencyResultRecord, LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord,
-    ParticipantBindingRecord, PortalRepository, PrincipalKind, PrincipalRecord, PrincipalState,
-    ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, RuntimeInstanceRecord,
-    RuntimeInstanceState, SessionRepository, SqliteAuthorizationStore,
+    authorization_reconciliation_channel, portal_policy_reconciliation, AccountRepository,
+    AuthService, AuthServiceConfig, AuthorityDecision, AuthorityEvidenceRepository,
+    AuthorityEvidenceScope, AuthorityKind, AuthorityRepository, AuthorityState, AuthorityTarget,
+    AuthorizationStateService, CreateSessionInput, DeploymentAuthorityRecord, DeploymentRecord,
+    FirstAdminAuthorityTarget, IdempotencyResultRecord, LoginPortalMutation, LoginPortalRecord,
+    LoginSettingsRecord, ParticipantBindingRecord, PortalRepository, PrincipalKind,
+    PrincipalRecord, PrincipalState, ResourceBindingEvidence, ResourceBindingState,
+    ResourceProviderIdentity, RuntimeInstanceRecord, RuntimeInstanceState, SessionRepository,
+    SqliteAuthorizationStore,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -66,17 +66,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let (reconciliation, reconciliation_worker) =
         authorization_reconciliation_channel(authorization.clone(), 256);
-    let ephemeral = auth::NatsAuthEphemeralRepository::ensure(context.trellis_nats.clone())
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let authorization_contexts = auth::AuthorizationContextService::start(
-        Arc::new(auth_store.clone()),
-        context.trellis_nats.clone(),
-        authorization_config.clone(),
-        now / 1_000,
-    )
-    .await
-    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let nats = context
         .config
         .resolve_nats_runtime_with(context.nats_override.as_ref().map(|o| o.servers.as_str()))
@@ -85,6 +74,29 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .config
         .resolve_nats_auth_callout()
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let user_jwt_ttl_ms = auth_callout::resolve_user_jwt_ttl_ms(
+        context
+            .config
+            .platform
+            .as_ref()
+            .and_then(|platform| platform.ttl_ms.as_ref())
+            .and_then(|ttl| ttl.nats_jwt),
+    )
+    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let connection_max_age = auth_callout::connection_presence_max_age(user_jwt_ttl_ms)
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let ephemeral =
+        auth::NatsAuthEphemeralRepository::ensure(context.trellis_nats.clone(), connection_max_age)
+            .await
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let authorization_contexts = auth::AuthorizationContextService::start(
+        Arc::new(auth_store.clone()),
+        context.trellis_nats.clone(),
+        authorization_config.clone(),
+        now / 1_000,
+    )
+    .await
+    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let issuer = auth::NatsBootstrapIssuer::from_files(
         &callout.issuer_signing_seed_file,
         &nats.auth_creds_path,
@@ -121,17 +133,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         &callout.xkey_seed_file,
         &nats.auth_creds_path,
         &nats.trellis_creds_path,
-        context
-            .config
-            .platform
-            .as_ref()
-            .and_then(|platform| platform.ttl_ms.as_ref())
-            .and_then(|ttl| ttl.nats_jwt),
+        user_jwt_ttl_ms,
     )
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let (portal_reconciliation, portal_reconciliation_worker) =
+        portal_policy_reconciliation(auth_service.clone());
     let (auth_event_session, auth_operation_session) =
         ensure_auth_event_session(&auth_service, &authorization, &auth_participant, now).await?;
     let event_session = auth_service
@@ -232,6 +241,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         native_nats_servers.clone(),
         websocket_nats_servers.clone(),
         verifier.clone(),
+        portal_reconciliation.clone(),
     )
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
@@ -332,6 +342,9 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         let _reconciliation = reconciliation;
         tokio::select! {
             result = reconciliation_worker.run(task_stop.clone()) => {
+                result.map_err(|error| RuntimeError::Platform(error.to_string()))
+            }
+            result = portal_reconciliation_worker.run(task_stop.clone()) => {
                 result.map_err(|error| RuntimeError::Platform(error.to_string()))
             }
             result = callout_runtime.run(task_stop.clone()) => result,

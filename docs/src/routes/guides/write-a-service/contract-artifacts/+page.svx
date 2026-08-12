@@ -42,7 +42,8 @@ Docs-only edits still require artifact regeneration so manifests and generated d
 
 Outputs include:
 
-- contract manifests under `generated/contracts/manifests/`
+- normalized APIs under `generated/protocol/apis/` and participants under
+  `generated/protocol/participants/`
 - generated JSR TypeScript packages under `generated/packages/jsr/`
 - generated npm JavaScript packages under `generated/packages/npm/`
 - generated Cargo crates under `generated/packages/cargo/`

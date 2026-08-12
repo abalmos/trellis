@@ -16,7 +16,10 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
-use trellis_protocol::{session_proof_request_digest_v1, SessionProofInputV1};
+use trellis_protocol::{
+    parse_participant_v1, resolve_participant_v1, session_proof_request_digest_v1,
+    SessionProofInputV1,
+};
 
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
 use crate::client::operations::OperationTransport;
@@ -91,12 +94,15 @@ pub(crate) fn signed_headers(
     Ok(headers)
 }
 
-/// Connection options for a Trellis service that can present its contract manifest during bootstrap.
+/// Connection options for a Trellis service that presents native artifacts during bootstrap.
 pub(crate) struct ServiceConnectWithContractOptions<'a> {
     pub(crate) trellis_url: &'a str,
-    pub(crate) contract_id: &'a str,
-    pub(crate) contract_digest: &'a str,
-    pub(crate) contract_json: &'a str,
+    pub(crate) participant_id: &'a str,
+    pub(crate) participant_digest: &'a str,
+    pub(crate) participant_json: &'a str,
+    pub(crate) api_json: &'a str,
+    pub(crate) api_digest: &'a str,
+    pub(crate) referenced_api_artifacts: &'a [(&'a str, &'a str)],
     pub(crate) deployment_id: &'a str,
     pub(crate) instance_id: &'a str,
     pub(crate) provisioned_identity_seed_base64url: &'a str,
@@ -119,6 +125,10 @@ pub struct DeviceConnectOptions<'a> {
     participant_id: &'a str,
     participant_digest: &'a str,
     participant_needs_digest: &'a str,
+    participant_json: &'a str,
+    api_json: &'a str,
+    api_digest: &'a str,
+    referenced_api_artifacts: &'a [(&'a str, &'a str)],
     public_identity_key: &'a str,
     identity_seed_base64url: &'a str,
     session_key_seed_base64url: &'a str,
@@ -138,6 +148,10 @@ impl<'a> DeviceConnectOptions<'a> {
         participant_id: &'a str,
         participant_digest: &'a str,
         participant_needs_digest: &'a str,
+        participant_json: &'a str,
+        api_json: &'a str,
+        api_digest: &'a str,
+        referenced_api_artifacts: &'a [(&'a str, &'a str)],
         public_identity_key: &'a str,
         identity_seed_base64url: &'a str,
         session_key_seed_base64url: &'a str,
@@ -151,6 +165,10 @@ impl<'a> DeviceConnectOptions<'a> {
             participant_id,
             participant_digest,
             participant_needs_digest,
+            participant_json,
+            api_json,
+            api_digest,
+            referenced_api_artifacts,
             public_identity_key,
             identity_seed_base64url,
             session_key_seed_base64url,
@@ -293,6 +311,8 @@ struct ServiceBootstrapRequest {
     participant_id: String,
     participant_artifact_digest: String,
     participant_needs_digest: String,
+    participant_artifact: Value,
+    referenced_api_artifacts: Vec<Value>,
     proof: Value,
 }
 
@@ -364,6 +384,8 @@ struct DeviceBootstrapRequest {
     participant_id: String,
     participant_artifact_digest: String,
     participant_needs_digest: String,
+    participant_artifact: Value,
+    referenced_api_artifacts: Vec<Value>,
     challenge_digest: Option<String>,
     proof: Value,
 }
@@ -391,7 +413,9 @@ enum HealthHeartbeatServiceKind {
 async fn fetch_service_bootstrap_with_contract(
     session_auth: &SessionAuth,
     opts: &ServiceConnectWithContractOptions<'_>,
-    _contract: &Value,
+    participant_artifact: Value,
+    api_artifact: Value,
+    referenced_api_artifacts: Vec<Value>,
 ) -> Result<ServiceBootstrapResponse, TrellisClientError> {
     let identity_auth = SessionAuth::from_seed_base64url(opts.provisioned_identity_seed_base64url)?;
     let session_nkey = session_auth.nkey_pair()?.public_key();
@@ -407,9 +431,13 @@ async fn fetch_service_bootstrap_with_contract(
         provisioned_identity_key_id: identity_auth.key_id(),
         new_session_public_key: session_auth.session_key.clone(),
         new_session_nkey: session_nkey.clone(),
-        participant_id: opts.contract_id.to_owned(),
-        participant_artifact_digest: opts.contract_digest.to_owned(),
+        participant_id: opts.participant_id.to_owned(),
+        participant_artifact_digest: opts.participant_digest.to_owned(),
         participant_needs_digest: opts.participant_needs_digest.to_owned(),
+        participant_artifact,
+        referenced_api_artifacts: std::iter::once(api_artifact)
+            .chain(referenced_api_artifacts)
+            .collect(),
         proof: serde_json::json!({
             "format": "trellis.session-proof.v1",
             "signature": ""
@@ -535,6 +563,65 @@ async fn fetch_device_bootstrap(
         .and_then(|value| value.checked_mul(1_000))
         .ok_or_else(|| TrellisClientError::Bootstrap("device timestamp overflow".into()))?;
     let session_nkey = session_auth.nkey_pair()?.public_key();
+    let participant_artifact: Value = serde_json::from_str(opts.participant_json)?;
+    let parsed_participant = trellis_protocol::parse_participant_v1(&participant_artifact)
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+    if parsed_participant.id() != opts.participant_id
+        || parsed_participant
+            .digest()
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+            != opts.participant_digest
+    {
+        return Err(TrellisClientError::Bootstrap(
+            "participant artifact identity mismatch".into(),
+        ));
+    }
+    let api_artifact: Value = serde_json::from_str(opts.api_json)?;
+    let parsed_api = trellis_protocol::parse_api_v1(&api_artifact)
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+    if parsed_api
+        .digest()
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+        != opts.api_digest
+    {
+        return Err(TrellisClientError::Bootstrap(
+            "owned API artifact digest mismatch".into(),
+        ));
+    }
+    let mut participant_apis = std::collections::BTreeMap::new();
+    participant_apis.insert(parsed_api.id().to_owned(), parsed_api.clone());
+    let referenced_api_artifacts = opts
+        .referenced_api_artifacts
+        .iter()
+        .map(|(json, digest)| {
+            let artifact = serde_json::from_str(json)?;
+            let parsed = trellis_protocol::parse_api_v1(&artifact)
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+            if parsed
+                .digest()
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+                != *digest
+            {
+                return Err(TrellisClientError::Bootstrap(
+                    "referenced API artifact digest mismatch".into(),
+                ));
+            }
+            participant_apis.insert(parsed.id().to_owned(), parsed);
+            Ok(artifact)
+        })
+        .collect::<Result<Vec<_>, TrellisClientError>>()?;
+    let resolved = trellis_protocol::resolve_participant_v1(&parsed_participant, &participant_apis)
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+    if resolved
+        .needs()
+        .digest()
+        .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+        != opts.participant_needs_digest
+    {
+        return Err(TrellisClientError::Bootstrap(
+            "participant needs digest mismatch".into(),
+        ));
+    }
     let mut request = serde_json::to_value(DeviceBootstrapRequest {
         request_id: request_id.clone(),
         issued_at,
@@ -550,6 +637,10 @@ async fn fetch_device_bootstrap(
         participant_id: opts.participant_id.to_owned(),
         participant_artifact_digest: opts.participant_digest.to_owned(),
         participant_needs_digest: opts.participant_needs_digest.to_owned(),
+        participant_artifact,
+        referenced_api_artifacts: std::iter::once(api_artifact)
+            .chain(referenced_api_artifacts)
+            .collect(),
         challenge_digest: None,
         proof: Value::Null,
     })?;
@@ -848,8 +939,8 @@ async fn connect_bootstrapped_service(
     bootstrap: ServiceBootstrapResponse,
 ) -> Result<TrellisClient, TrellisClientError> {
     let session_key_seed_base64url = opts.session_key_seed_base64url;
-    let contract_id = opts.contract_id;
-    let contract_digest = opts.contract_digest;
+    let participant_id = opts.participant_id;
+    let participant_digest = opts.participant_digest;
     let deployment_id = opts.deployment_id;
     let instance_id = opts.instance_id;
     let timeout_ms = opts.timeout_ms;
@@ -861,8 +952,8 @@ async fn connect_bootstrapped_service(
         .ok_or_else(|| TrellisClientError::Bootstrap("missing bootstrap authorization".into()))?;
     let authorization_identity =
         serde_json::from_value::<ServiceBootstrapAuthorization>(authorization.clone())?;
-    if authorization_identity.participant_id != contract_id
-        || authorization_identity.participant_artifact_digest != contract_digest
+    if authorization_identity.participant_id != participant_id
+        || authorization_identity.participant_artifact_digest != participant_digest
     {
         return Err(TrellisClientError::Bootstrap(
             "bootstrap authorization participant mismatch".into(),
@@ -893,7 +984,8 @@ async fn connect_bootstrapped_service(
     let authorization_contexts = Arc::new(authorization_contexts);
     let (context_session_id, _, context_participant_digest, _, _) =
         authorization_contexts.refresh_evidence()?;
-    if context_session_id != session.session_id || context_participant_digest != contract_digest {
+    if context_session_id != session.session_id || context_participant_digest != participant_digest
+    {
         return Err(TrellisClientError::Bootstrap(
             "authorization context binding mismatch".into(),
         ));
@@ -953,7 +1045,7 @@ async fn connect_bootstrapped_service(
     .await
     .map_err(|error| {
         TrellisClientError::NatsConnect(format!(
-            "service runtime connect failed for contract '{contract_id}' digest '{contract_digest}': {error}"
+            "service runtime connect failed for participant '{participant_id}' digest '{participant_digest}': {error}"
         ))
     })?;
     let provider =
@@ -961,12 +1053,12 @@ async fn connect_bootstrapped_service(
 
     let health_heartbeat_config = HealthHeartbeatConfig {
         session_key: health_session_key,
-        service_name: contract_id.to_string(),
+        service_name: participant_id.to_string(),
         kind: HealthHeartbeatServiceKind::Service,
         deployment_id: deployment_id.to_owned(),
         instance_id: instance_id.to_owned(),
-        contract_id: contract_id.to_string(),
-        contract_digest: contract_digest.to_string(),
+        contract_id: participant_id.to_string(),
+        contract_digest: participant_digest.to_string(),
         started_at: now_rfc3339(),
         publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
     };
@@ -1068,6 +1160,46 @@ impl<'a> UserConnectOptions<'a> {
     }
 }
 
+/// Attempt one NATS admission with the exact supplied routing material, without refresh.
+#[cfg(feature = "integration-test-scoping")]
+#[doc(hidden)]
+pub async fn connect_captured_user_admission(
+    opts: UserConnectOptions<'_>,
+    context_digest: &str,
+) -> Result<async_nats::Client, TrellisClientError> {
+    let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
+    let key_pair = std::sync::Arc::new(auth.nkey_pair()?);
+    let session_nkey = key_pair.public_key();
+    let bootstrap_jwt = opts.bootstrap_jwt.to_owned();
+    let context_digest = context_digest.to_owned();
+    ConnectOptions::with_auth_callback(move |nonce| {
+        let key_pair = key_pair.clone();
+        let session_nkey = session_nkey.clone();
+        let bootstrap_jwt = bootstrap_jwt.clone();
+        let context_digest = context_digest.clone();
+        async move {
+            let mut credentials = async_nats::Auth::new();
+            credentials.nkey = Some(session_nkey);
+            credentials.jwt = Some(bootstrap_jwt);
+            credentials.signature =
+                Some(key_pair.sign(&nonce).map_err(async_nats::AuthError::new)?);
+            credentials.token = Some(
+                serde_json::to_string(&NatsConnectToken {
+                    format: "trellis.nats-connect-token.v1",
+                    context_digest,
+                })
+                .map_err(async_nats::AuthError::new)?,
+            );
+            Ok(credentials)
+        }
+    })
+    .custom_inbox_prefix(opts.inbox_prefix)
+    .connection_timeout(std::time::Duration::from_millis(opts.timeout_ms))
+    .connect(opts.servers)
+    .await
+    .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))
+}
+
 /// Internal authenticated Trellis transport.
 pub(crate) struct TrellisClient {
     nats: async_nats::Client,
@@ -1136,14 +1268,72 @@ impl TrellisClient {
         self.service_bootstrap_binding.as_ref()
     }
 
-    /// Connect using service bootstrap, presenting the contract manifest and waiting while authority is pending.
+    /// Connect using service bootstrap, presenting native participant and API artifacts.
     pub async fn connect_service_with_contract(
         opts: ServiceConnectWithContractOptions<'_>,
     ) -> Result<Self, TrellisClientError> {
         let auth = SessionAuth::from_seed_base64url(opts.session_key_seed_base64url)?;
-        let contract = serde_json::from_str(opts.contract_json)?;
+        let participant = serde_json::from_str(opts.participant_json)?;
+        let parsed_participant = parse_participant_v1(&participant)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        if parsed_participant.id() != opts.participant_id
+            || parsed_participant
+                .digest()
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+                != opts.participant_digest
+        {
+            return Err(TrellisClientError::Bootstrap(
+                "participant artifact identity mismatch".into(),
+            ));
+        }
+        let mut participant_apis = std::collections::BTreeMap::new();
+        let api = serde_json::from_str(opts.api_json)?;
+        let referenced = opts
+            .referenced_api_artifacts
+            .iter()
+            .map(|(json, digest)| {
+                let artifact = serde_json::from_str(json)?;
+                let parsed = trellis_protocol::parse_api_v1(&artifact)
+                    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+                let actual_digest = parsed
+                    .digest()
+                    .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+                if actual_digest != *digest {
+                    return Err(TrellisClientError::Bootstrap(
+                        "referenced API artifact digest mismatch".into(),
+                    ));
+                }
+                participant_apis.insert(parsed.id().to_owned(), parsed);
+                Ok(artifact)
+            })
+            .collect::<Result<Vec<_>, TrellisClientError>>()?;
+        let parsed_api = trellis_protocol::parse_api_v1(&api)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        if parsed_api
+            .digest()
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+            != opts.api_digest
+        {
+            return Err(TrellisClientError::Bootstrap(
+                "owned API artifact digest mismatch".into(),
+            ));
+        }
+        participant_apis.insert(parsed_api.id().to_owned(), parsed_api);
+        let resolved = resolve_participant_v1(&parsed_participant, &participant_apis)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        if resolved
+            .needs()
+            .digest()
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
+            != opts.participant_needs_digest
+        {
+            return Err(TrellisClientError::Bootstrap(
+                "participant needs digest mismatch".into(),
+            ));
+        }
         let bootstrap_result =
-            fetch_service_bootstrap_with_contract(&auth, &opts, &contract).await?;
+            fetch_service_bootstrap_with_contract(&auth, &opts, participant, api, referenced)
+                .await?;
         connect_bootstrapped_service(auth, &opts, bootstrap_result).await
     }
 
@@ -1459,8 +1649,10 @@ impl TrellisClient {
                 D::KEY
             )))
         })?;
-        serde_json::from_value(output).map_err(|error| {
-            CallError::Protocol(crate::client::ProtocolError::new(error.to_string()))
+        serde_json::from_value(output.clone()).map_err(|error| {
+            CallError::Protocol(crate::client::ProtocolError::new(format!(
+                "{error}; output={output}"
+            )))
         })
     }
 

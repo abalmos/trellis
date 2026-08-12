@@ -21,14 +21,18 @@
     error = null;
     try {
       const input: AuthDeploymentsCreateInput = {
-        deploymentId: deploymentId.trim(),
+        displayName: deploymentId.trim(),
+        expiresAt: null,
+        idempotencyKey: crypto.randomUUID(),
         kind: "device",
-        reviewMode,
+        participantId: null,
+        portalId: null,
+        requiresDeviceDelegation: reviewMode === "required",
       };
 
       const response = await trellis.authDeploymentsCreate(input).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      notifications.success(`Device deployment ${input.deploymentId} created.`, "Created");
+      notifications.success(`Device deployment ${response.deployment.deploymentId} created.`, "Created");
       deploymentId = "";
       reviewMode = "none";
     } catch (e) {

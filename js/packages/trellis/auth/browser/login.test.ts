@@ -1,8 +1,30 @@
 import { assertEquals, assertRejects } from "@std/assert";
 
 import { bindFlow, buildLoginUrl, startAuthRequest } from "./login.ts";
+import { defineAppContract } from "../../contract_support/mod.ts";
 import type { SessionKeyHandle } from "./session.ts";
-import { base64urlDecode, sha256, toArrayBuffer, utf8 } from "../utils.ts";
+import {
+  base64urlDecode,
+  canonicalizeJsonValue,
+  sha256,
+  toArrayBuffer,
+  utf8,
+} from "../utils.ts";
+
+const TEST_CONTRACT = defineAppContract(() => ({
+  id: "demo.app@v1",
+  displayName: "Demo app",
+  description: "Demo app contract.",
+}));
+
+const SIGNED_CONTRACT = defineAppContract(() => ({
+  id: "demo.app@v1",
+  displayName: "Demo app",
+  description: "Demo app contract.",
+  capabilities: {
+    admin: { displayName: "Admin", description: "Admin access" },
+  },
+}));
 
 async function createHandle(): Promise<SessionKeyHandle> {
   const keyPair = await crypto.subtle.generateKey(
@@ -34,7 +56,9 @@ Deno.test("buildLoginUrl targets auth chooser when provider is omitted", async (
       assertEquals(init?.method, "POST");
       const body = JSON.parse(String(init?.body));
       assertEquals(body.redirectTo, "http://localhost:5173/profile");
-      assertEquals(body.contract, { id: "demo.app@v1" });
+      assertEquals(body.participantId, TEST_CONTRACT.CONTRACT_ID);
+      assertEquals(body.participantArtifact, TEST_CONTRACT.PARTICIPANT);
+      assertEquals("contract" in body, false);
       assertEquals(body.context, { subtitle: "Welcome back" });
       return new Response(JSON.stringify({
         status: "flow_started",
@@ -48,7 +72,7 @@ Deno.test("buildLoginUrl targets auth chooser when provider is omitted", async (
       authUrl: "http://localhost:3000",
       redirectTo: "http://localhost:5173/profile",
       handle: await createHandle(),
-      contract: { id: "demo.app@v1" },
+      contract: TEST_CONTRACT,
       context: { subtitle: "Welcome back" },
     });
 
@@ -79,7 +103,7 @@ Deno.test("buildLoginUrl preserves explicit provider selection through flow crea
       provider: "github",
       redirectTo: "http://localhost:5173/profile",
       handle: await createHandle(),
-      contract: { id: "demo.app@v1" },
+      contract: TEST_CONTRACT,
     });
 
     assertEquals(url, "http://localhost:3000/auth/login/github?flowId=flow-1");
@@ -106,54 +130,10 @@ Deno.test("startAuthRequest returns bound immediately when auth auto-approves", 
       authUrl: "http://localhost:3000",
       redirectTo: "http://localhost:5173/profile",
       handle: await createHandle(),
-      contract: { id: "demo.app@v1" },
+      contract: TEST_CONTRACT,
     });
 
     assertEquals(response.status, "bound");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("startAuthRequest retries with full manifest only when auth requires it", async () => {
-  const originalFetch = globalThis.fetch;
-  const bodies: Array<Record<string, unknown>> = [];
-  try {
-    globalThis.fetch = (async (_input, init) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      bodies.push(body);
-      if (bodies.length === 1) {
-        return new Response(JSON.stringify({ reason: "manifest_required" }), {
-          status: 409,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({
-        status: "flow_started",
-        flowId: "flow-digest",
-        loginUrl: "http://localhost:3000/auth/login?flowId=flow-digest",
-      }));
-    }) as typeof fetch;
-
-    const contract = {
-      format: "trellis.contract.v1",
-      id: "demo.app@v1",
-      displayName: "Demo App",
-      description: "Demo app contract.",
-      kind: "app",
-    } as const;
-    const response = await startAuthRequest({
-      authUrl: "http://localhost:3000",
-      redirectTo: "http://localhost:5173/profile",
-      handle: await createHandle(),
-      contract,
-    });
-
-    assertEquals(response.status, "flow_started");
-    assertEquals(bodies.length, 2);
-    assertEquals("contractDigest" in bodies[0], true);
-    assertEquals("contract" in bodies[0], false);
-    assertEquals(bodies[1].contract, contract);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -177,7 +157,7 @@ Deno.test("startAuthRequest omits scalar context from both request body and sign
       authUrl: "http://localhost:3000",
       redirectTo: "http://localhost:5173/profile",
       handle: await createHandle(),
-      contract: { id: "demo.app@v1" },
+      contract: TEST_CONTRACT,
       context: "scalar-context",
     });
 
@@ -195,7 +175,17 @@ Deno.test("startAuthRequest signs provider, contract, and canonical context", as
       const body = JSON.parse(String(init?.body));
       const digest = await sha256(
         utf8(
-          'oauth-init:http://localhost:5173/profile:github:{"capabilities":["admin"],"id":"demo.app@v1"}:{"subtitle":"Welcome back"}',
+          `oauth-init:http://localhost:5173/profile:github:${
+            canonicalizeJsonValue({
+              participantId: SIGNED_CONTRACT.CONTRACT_ID,
+              participantArtifactDigest: SIGNED_CONTRACT.CONTRACT_DIGEST,
+              participantNeedsDigest: SIGNED_CONTRACT.PARTICIPANT_NEEDS_DIGEST,
+              participantArtifact: SIGNED_CONTRACT.PARTICIPANT,
+              referencedApiArtifacts: [
+                SIGNED_CONTRACT.API,
+              ],
+            })
+          }:{"subtitle":"Welcome back"}`,
         ),
       );
       const verified = await crypto.subtle.verify(
@@ -217,7 +207,7 @@ Deno.test("startAuthRequest signs provider, contract, and canonical context", as
       provider: "github",
       redirectTo: "http://localhost:5173/profile",
       handle,
-      contract: { id: "demo.app@v1", capabilities: ["admin"] },
+      contract: SIGNED_CONTRACT,
       context: { subtitle: "Welcome back" },
     });
 

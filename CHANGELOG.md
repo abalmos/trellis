@@ -31,6 +31,11 @@ and this project adheres to
 - Added `trellis server` managed local NATS: when no external `--nats` URL is
   supplied, Trellis starts a pinned, checksum-verified nats-server binary for
   local single-node use, with explicit external and baked-binary options.
+- Added trusted login-portal authority policy keyed by portal and participant,
+  including recursive capability-group macros, verified OIDC role mappings,
+  trusted local registration, atomic provenance, automatic authority
+  convergence, and live multi-connection session recovery after policy
+  reduction, revocation, restoration, or expansion.
 
 ### Changed
 
@@ -84,6 +89,9 @@ and this project adheres to
 - Defined context size limits uniformly as canonical complete signed-context
   JSON UTF-8 bytes and restored eight-worker TypeScript and Rust integration
   gates.
+- Made authorization-context revocation observation monotonic and reconnect
+  recovery adopt refreshed dynamic NATS credentials without browser
+  reauthentication.
 
 ## [0.11.0] - 2026-07-23
 

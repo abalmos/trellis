@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
-  import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
+  import type { AuthDeploymentAuthorityPlansListOutput } from "@qlever-llc/trellis/sdk/auth";
   import { base } from "$app/paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -15,7 +15,8 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type AuthorityKind = DeploymentAuthorityKind;
+  type AuthorityKind = "identity" | "deployment" | "service" | "device" | "app" | "cli" | "native" | "device-user";
+  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type PlanState = "pending" | "accepted" | "rejected" | "expired" | "superseded";
   type PlanClassification = "update" | "migration";
   type PlanListInput = {
@@ -28,7 +29,7 @@
   };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityPlansRequest = {
-    (method: "Auth.DeploymentAuthority.Plans.List", input: PlanListInput): RpcTakeable<{ entries?: DeploymentAuthorityPlan[]; count?: number }>;
+    (method: "Auth.DeploymentAuthority.Plans.List", input: PlanListInput): RpcTakeable<{ entries?: AuthorityPlan[]; count?: number }>;
   };
 
   const trellis = getTrellis();
@@ -39,7 +40,7 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let plans = $state.raw<DeploymentAuthorityPlan[]>([]);
+  let plans = $state.raw<AuthorityPlan[]>([]);
   let total = $state(0);
   let offset = $state(0);
   let stateFilter = $state<PlanState | "">("pending");
@@ -49,7 +50,24 @@
 
   const rows = $derived.by(() => {
     const term = search.trim().toLowerCase();
-    return authorityPlanRows(plans)
+    return plans.map((plan) => ({
+      planId: plan.proposalId,
+      deploymentId: plan.subjectId,
+      state: plan.state,
+      classification: plan.classification === "migration" ? "migration" as const : "update" as const,
+      contractId: plan.participantId,
+      contractDigest: plan.participantArtifactDigest,
+      requiredContracts: 0,
+      optionalContracts: 0,
+      requiredSurfaces: plan.proposedGrantSet.permissions.filter((permission) => permission.target.kind === "apiSurface").length,
+      optionalSurfaces: 0,
+      requiredResources: 0,
+      optionalResources: 0,
+      resources: plan.proposedGrantSet.permissions.filter((permission) => permission.target.kind === "participantResource").length,
+      capabilities: plan.proposedCapabilities.length,
+      createdAt: String(plan.createdAt),
+      searchableText: [plan.proposalId, plan.subjectId, plan.participantId, ...plan.proposedCapabilities].join(" ").toLowerCase(),
+    }))
       .filter((row) =>
         !term || row.searchableText.includes(term) ||
         (kindFilter && kindFilter.includes(term))
@@ -66,9 +84,8 @@
   const canPageBack = $derived(!loading && offset > 0);
   const canPageForward = $derived(!loading && offset + plans.length < total);
 
-  function planState(plan: DeploymentAuthorityPlan): PlanState {
-    if ("state" in plan && isPlanState(plan.state)) return plan.state;
-    return "pending";
+  function planState(plan: AuthorityPlan): PlanState {
+    return plan.state;
   }
 
   function isPlanState(value: unknown): value is PlanState {
@@ -99,15 +116,16 @@
   async function load() {
     loading = true;
     error = null;
-    const input: PlanListInput = { limit: pageSize, offset };
+    const input: PlanListInput = { limit: pageSize };
     if (stateFilter) input.state = stateFilter;
-    if (classificationFilter) input.classification = classificationFilter;
-    if (kindFilter) input.kind = kindFilter;
     try {
       const plansResponse = await trellis.authDeploymentAuthorityPlansList(input).take();
       if (isErr(plansResponse)) { error = errorMessage(plansResponse); return; }
-      plans = plansResponse.entries ?? [];
-      total = plansResponse.count ?? plans.length;
+      plans = plansResponse.entries.filter((plan) =>
+        (!classificationFilter || plan.classification === classificationFilter) &&
+        (!kindFilter || plan.authorityKind === kindFilter || plan.participantId === kindFilter)
+      );
+      total = plans.length;
     } catch (cause) {
       error = errorMessage(cause);
     } finally {

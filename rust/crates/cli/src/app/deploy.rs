@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
+use std::path::PathBuf;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
@@ -11,8 +12,8 @@ use trellis_rs::generated::Caller;
 
 use crate::app::{connect_authenticated_cli_client, generate_session_keypair, json_value_label};
 use crate::cli::*;
-use crate::contract_input;
 use crate::output;
+use trellis_generate::contract_input;
 
 const DEVICE_NAME_METADATA_KEY: &str = "name";
 const DEVICE_SERIAL_METADATA_KEY: &str = "serialNumber";
@@ -45,25 +46,6 @@ pub(super) async fn run_dev(format: OutputFormat, command: DevCommand) -> miette
         (None, DevSubcommand::Resource(_)) => Err(miette::miette!(
             "missing device deployment ID; use `trellis dev <ID> <COMMAND>`"
         )),
-    }
-}
-
-pub(super) async fn run_grants(format: OutputFormat, command: GrantsCommand) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    match command.command {
-        GrantsSubcommand::List(args) => {
-            if let Some(deployment_id) = args.deployment {
-                deployment_grants_list(format, &connected, &deployment_id).await
-            } else {
-                deployment_grants_list_all(format, &connected).await
-            }
-        }
-        GrantsSubcommand::Add(args) => {
-            deployment_grants_mutate(format, &connected, &args.deployment, &args.grant, true).await
-        }
-        GrantsSubcommand::Remove(args) => {
-            deployment_grants_mutate(format, &connected, &args.deployment, &args.grant, false).await
-        }
     }
 }
 
@@ -228,15 +210,27 @@ async fn apply_contract(
     args: &ApplyArgs,
 ) -> miette::Result<()> {
     let resolved = contract_input::resolve_contract_input(
-        args.manifest.as_deref().map(Path::new),
+        args.api.as_deref().map(Path::new),
+        args.participant.as_deref().map(Path::new),
+        &args
+            .referenced_api
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>(),
         args.source.as_deref().map(Path::new),
         args.image.as_deref(),
         "CONTRACT",
-        contract_input::default_image_contract_path(),
+        contract_input::default_image_api_path(),
     )?;
     let (_state, connected) = connect_authenticated_cli_client(format).await?;
-    let Value::Object(contract) = resolved.loaded.value else {
-        return Err(miette::miette!("contract manifest must be an object"));
+    let participant = resolved.participant.ok_or_else(|| {
+        miette::miette!("deployment apply requires a native Trellis participant artifact")
+    })?;
+    let Value::Object(participant_artifact) = participant.value else {
+        return Err(miette::miette!("participant artifact must be an object"));
+    };
+    let Value::Object(api_artifact) = resolved.api.value else {
+        return Err(miette::miette!("API artifact must be an object"));
     };
     let response = trellis_rs::sdk::auth::AuthClient::new(&connected)
         .rpc()
@@ -244,8 +238,16 @@ async fn apply_contract(
         .deployment_authority_plan(
             &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityPlanRequest {
                 deployment_id: deployment_id.to_string(),
-                participant_artifact: contract.into_iter().collect(),
-                referenced_api_artifacts: Vec::new(),
+                participant_artifact: participant_artifact.into_iter().collect(),
+                referenced_api_artifacts: std::iter::once(api_artifact)
+                    .chain(resolved.referenced_apis.into_iter().map(|api| {
+                        api.value
+                            .as_object()
+                            .expect("validated API artifact is an object")
+                            .clone()
+                    }))
+                    .map(|api| api.into_iter().collect())
+                    .collect(),
                 expires_at: None,
                 idempotency_key: cli_idempotency_key(),
             },
@@ -258,7 +260,7 @@ async fn apply_contract(
     } else {
         output::print_success("deployment authority plan created");
         output::print_info(&format!("deploymentId={deployment_id}"));
-        output::print_info(&format!("contractDigest={}", resolved.loaded.digest));
+        output::print_info(&format!("participantDigest={}", participant.digest));
         if let Some(plan) = response.get("proposal") {
             if let Some(plan_id) = plan.get("proposalId").and_then(Value::as_str) {
                 output::print_info(&format!("proposalId={plan_id}"));
@@ -894,80 +896,6 @@ fn authority_desired_version(response: &Value) -> Option<&str> {
         })
 }
 
-async fn deployment_grants_list(
-    format: OutputFormat,
-    connected: &Caller,
-    deployment_id: &str,
-) -> miette::Result<()> {
-    let authority_id = deployment_authority_id(connected, deployment_id).await?;
-    let response = trellis_rs::sdk::auth::AuthClient::new(connected)
-        .rpc()
-        .auth()
-        .deployment_authority_get(
-            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityGetRequest { authority_id },
-        )
-        .await
-        .into_diagnostic()?;
-    let response = serde_json::to_value(response).into_diagnostic()?;
-    print_deployment_grants_result(format, deployment_id, &response)
-}
-
-async fn deployment_grants_list_all(
-    format: OutputFormat,
-    connected: &Caller,
-) -> miette::Result<()> {
-    let list_response = trellis_rs::sdk::auth::AuthClient::new(connected)
-        .rpc()
-        .auth()
-        .deployment_authority_list(
-            &trellis_rs::sdk::auth::types::AuthDeploymentAuthorityListRequest {
-                deployment_id: None,
-                participant_id: None,
-                state: None,
-                cursor: None,
-                limit: Some(100),
-            },
-        )
-        .await
-        .into_diagnostic()?;
-    let authorities = serde_json::to_value(list_response.entries).into_diagnostic()?;
-    print_grants_result(format, &authorities)
-}
-
-async fn deployment_grants_mutate(
-    format: OutputFormat,
-    connected: &Caller,
-    deployment_id: &str,
-    args: &DeploymentGrantMutationArgs,
-    add: bool,
-) -> miette::Result<()> {
-    let _ = (format, connected, deployment_id, args, add);
-    Err(miette::miette!(
-        "deployment grant overrides were removed; submit and accept a participant authority proposal"
-    ))
-}
-
-fn print_grants_result(format: OutputFormat, grant_overrides: &Value) -> miette::Result<()> {
-    if output::is_json(format) {
-        output::print_json(&json!({ "grantOverrides": grant_overrides }))?;
-        return Ok(());
-    }
-
-    print_value_table(
-        grant_overrides,
-        &[
-            "deploymentId",
-            "identityKind",
-            "grantKind",
-            "contractId",
-            "origin",
-            "sessionPublicKey",
-            "capability",
-            "capabilityGroupKey",
-        ],
-    )
-}
-
 fn print_deployment_show_result<T: serde::Serialize>(
     format: OutputFormat,
     kind: DeploymentKind,
@@ -1168,32 +1096,6 @@ fn print_device_reviews_result<T: serde::Serialize>(
             "deploymentId",
             "state",
             "createdAt",
-        ],
-    )
-}
-
-fn print_deployment_grants_result(
-    format: OutputFormat,
-    deployment_id: &str,
-    response: &Value,
-) -> miette::Result<()> {
-    let grant_overrides = response.get("grantOverrides").unwrap_or(&Value::Null);
-    if output::is_json(format) {
-        output::print_json(&json!({
-            "deploymentId": deployment_id,
-            "grantOverrides": grant_overrides,
-        }))?;
-        return Ok(());
-    }
-
-    print_value_table(
-        grant_overrides,
-        &[
-            "identityKind",
-            "contractId",
-            "origin",
-            "sessionPublicKey",
-            "capability",
         ],
     )
 }

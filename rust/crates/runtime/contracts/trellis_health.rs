@@ -2,8 +2,8 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ContractCapabilityMetadata, ContractKind, ContractManifest, ContractManifestBuilder,
-    ContractsError,
+    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+    ContractKind, ContractsError,
 };
 
 const READ_CAPABILITY: &str = "read";
@@ -11,13 +11,12 @@ const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";
 
-/// Build the canonical Health service contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+/// Build the canonical Health service API artifact.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    ApiBuilder::authoring(
         "trellis.health@v1",
         "Trellis Health",
         "Trellis-managed participant health projection and operational history.",
-        ContractKind::Service,
     )
     .docs_with_summary(
         "Participant health administration APIs.",
@@ -108,6 +107,12 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         ),
     )
     .build()
+}
+
+/// Build the native Health participant and API artifacts.
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = api_artifact()?.normalized_value()?;
+    ContractBuilder::from_api(api, ContractKind::Service)?.build()
 }
 
 fn health_rpc(
@@ -638,7 +643,7 @@ fn not_found_error_schema() -> Value {
             "resource": { "type": "string", "minLength": 1 },
             "id": { "type": "string", "minLength": 1 },
             "message": { "type": "string" },
-            "context": { "type": "object", "patternProperties": { "^.*$": {} } },
+            "context": { "type": "object", "additionalProperties": true },
             "traceId": { "type": "string" }
         }
     })

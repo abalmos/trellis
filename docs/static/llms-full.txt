@@ -106,6 +106,18 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   server-issued optional bundle ids. OIDC callbacks require a state-specific
   `HttpOnly` cookie and revalidate portal/provider registration policy. The full
   server-owned consent proposal is immutable across browser-flow transitions.
+- Trusted portal policy is exact to portal + participant. Base capabilities and
+  recursive capability-group macros plus verified provider-role mappings select
+  only proposal-defined authority. Successful trusted local registration applies
+  the same policy immediately as local or OIDC login. Policy reconciliation uses
+  ordinary identity authority, context revocation, and exact connection kicks;
+  removing a portal, provider allowance, or policy atomically clears verified-role
+  provenance. Restoring configuration alone cannot resurrect authority; a fresh
+  verified login is required. Retained sessions can refresh and reconnect after
+  eligible authority returns.
+- Ordinary context expiry still permits delayed historical event verification;
+  explicit context revocation invalidates every RPC and event proof from that
+  context, including proofs created before revocation.
 - Bootstrap replays rerun current issuance and generate fresh credentials.
   Public HTTP/RPC/operation/callout errors use stable redacted codes.
 - Bootstrap and browser bind return a deny-all JWT and signed authorization

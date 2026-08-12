@@ -3,22 +3,44 @@ import { AsyncResult, Result } from "@qlever-llc/result";
 import { Type } from "typebox";
 import { defineServiceContract } from "./contract.ts";
 import { rpcAction } from "./contracts.ts";
+import { apiDigest } from "./contract_support/protocol_artifacts.ts";
 import { createProviderRuntime, PROVIDER_CALLER } from "./provider.ts";
 
 const Empty = Type.Object({});
-const ThreadsCreate = rpcAction("ai@v1", "AI.ThreadsCreate", {
-  subject: "rpc.v1.AI.ThreadsCreate",
-  permission: Object.freeze({
-    apiId: "ai@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "AI.ThreadsCreate",
-    action: "call",
-  }),
-  input: Empty,
-  output: Empty,
-  callerCapabilities: [],
-}, "AIThreadsCreate");
+const aiApi = {
+  format: "trellis.api.v1",
+  id: "ai@v1",
+  displayName: "AI",
+  description: "AI test API.",
+  schemas: { Empty },
+  rpc: {
+    "AI.ThreadsCreate": {
+      version: "v1",
+      subject: "rpc.v1.AI.ThreadsCreate",
+      input: { schema: "Empty" },
+      output: { schema: "Empty" },
+    },
+  },
+} as const;
+const ThreadsCreate = rpcAction(
+  "ai@v1",
+  "AI.ThreadsCreate",
+  {
+    subject: "rpc.v1.AI.ThreadsCreate",
+    permission: Object.freeze({
+      apiId: "ai@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "AI.ThreadsCreate",
+      action: "call",
+    }),
+    input: Empty,
+    output: Empty,
+    callerCapabilities: [],
+  },
+  "AIThreadsCreate",
+  { api: aiApi, apiDigest: apiDigest(aiApi) },
+);
 
 const contract = defineServiceContract(
   { schemas: { Empty } },

@@ -23,7 +23,7 @@ fn run_cli(cli: Cli) -> miette::Result<()> {
         Some(TopLevelCommand::Prepare(args)) => prepare::run(&args, cli.force),
         Some(TopLevelCommand::Discover(args)) => discover::discover(&args, cli.force),
         Some(TopLevelCommand::Generate(command)) => match command.command {
-            GenerateSubcommand::Manifest(args) => generate::manifest(&args),
+            GenerateSubcommand::Api(args) => generate::api(&args),
             GenerateSubcommand::Jsr(args) => generate::jsr_package(&args),
             GenerateSubcommand::Npm(args) => generate::npm_package(&args),
             GenerateSubcommand::Cargo(args) => generate::cargo_package(&args),

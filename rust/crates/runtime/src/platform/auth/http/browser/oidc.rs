@@ -419,6 +419,10 @@ where
             return Err(HttpError::unauthorized("oauth_access_token_mismatch"));
         }
     }
+    let provider_attributes = ProviderLoginAttributes {
+        provider_id: provider_id.to_owned(),
+        roles: extract_provider_roles(&id_token.to_string(), &provider.role_claims)?,
+    };
     let subject = claims.subject().as_str().to_owned();
     let now = now_ms()?;
     if oauth.kind == AuthOAuthKind::AccountFlow {
@@ -544,6 +548,7 @@ where
                     linked_at: now,
                     last_seen_at: now,
                 },
+                local_password: None,
                 completed_at: now,
                 idempotency: idempotency(
                     &token_hash,
@@ -642,6 +647,27 @@ where
         .ephemeral
         .replace_browser_flow(expected, flow.clone())
         .await?;
+    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+        state,
+        flow.clone(),
+        provider_attributes,
+        now,
+    )
+    .await?
+    {
+        let expected = flow.version;
+        approved.version += 1;
+        state
+            .ephemeral
+            .replace_browser_flow(expected, approved.clone())
+            .await?;
+        return Ok(Redirect::temporary(&format!(
+            "{}/_trellis/portal/auth?flowId={}",
+            state.public_origin.trim_end_matches('/'),
+            approved.flow_id,
+        ))
+        .into_response());
+    }
     let expected = flow.version;
     flow.state = AuthBrowserFlowState::ApprovalRequired;
     flow.version += 1;
@@ -657,6 +683,42 @@ where
     .into_response())
 }
 
+fn extract_provider_roles(token: &str, pointers: &[String]) -> Result<Vec<String>, HttpError> {
+    let payload = token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| HttpError::unauthorized("oauth_id_token_invalid"))?;
+    let payload = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|_| HttpError::unauthorized("oauth_id_token_invalid"))?;
+    let claims: Value = serde_json::from_slice(&payload)
+        .map_err(|_| HttpError::unauthorized("oauth_id_token_invalid"))?;
+    let mut roles = BTreeSet::new();
+    for pointer in pointers {
+        let Some(value) = claims.pointer(pointer) else {
+            continue;
+        };
+        match value {
+            Value::String(role) if !role.is_empty() => {
+                roles.insert(role.clone());
+            }
+            Value::Array(values) => {
+                for value in values {
+                    let Value::String(role) = value else {
+                        return Err(HttpError::unauthorized("oauth_role_claim_invalid"));
+                    };
+                    if role.is_empty() {
+                        return Err(HttpError::unauthorized("oauth_role_claim_invalid"));
+                    }
+                    roles.insert(role.clone());
+                }
+            }
+            _ => return Err(HttpError::unauthorized("oauth_role_claim_invalid")),
+        }
+    }
+    Ok(roles.into_iter().collect())
+}
+
 async fn mark_oauth_restart_required(
     repository: &impl AuthEphemeralRepository,
     oauth: &mut AuthOAuthState,
@@ -668,4 +730,47 @@ async fn mark_oauth_restart_required(
         .replace_oauth_state(expected, oauth.clone())
         .await
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+
+    fn token(claims: Value) -> String {
+        format!(
+            "e30.{}.signature",
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap())
+        )
+    }
+
+    #[test]
+    fn extracts_string_array_and_nested_roles_exactly() {
+        let roles = extract_provider_roles(
+            &token(json!({
+                "role": "Admin",
+                "groups": ["Reader", "Admin"],
+                "realm": { "roles": ["writer"] }
+            })),
+            &[
+                "/role".to_owned(),
+                "/groups".to_owned(),
+                "/realm/roles".to_owned(),
+                "/missing".to_owned(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(roles, ["Admin", "Reader", "writer"]);
+    }
+
+    #[test]
+    fn rejects_present_invalid_or_empty_role_claims() {
+        assert!(extract_provider_roles(
+            &token(json!({ "roles": ["ok", 1] })),
+            &["/roles".to_owned()]
+        )
+        .is_err());
+        assert!(
+            extract_provider_roles(&token(json!({ "role": "" })), &["/role".to_owned()]).is_err()
+        );
+    }
 }

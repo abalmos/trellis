@@ -153,7 +153,8 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
             id: "usr-1",
             name: "Admin",
           },
-          redirectTarget: "https://app.example.com/callback?flowId=flow-1",
+          redirectTarget:
+            "https://app.example.com/callback?portalCallback=token",
         }));
       }
       assertEquals(
@@ -178,7 +179,8 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
     );
     assertEquals(state, {
       status: "redirect",
-      location: "https://app.example.com/callback?flowId=flow-1",
+      location:
+        "https://app.example.com/callback?portalCallback=token&flowId=flow-1",
     });
   } finally {
     globalThis.fetch = originalFetch;

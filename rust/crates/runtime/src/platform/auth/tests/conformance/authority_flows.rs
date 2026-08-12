@@ -129,6 +129,8 @@ pub(super) async fn exercise_authority_flows(
             desired_authority: None,
             deployment: None,
             idempotency: proof(183, "authority-proposal.reject"),
+            portal_binding: None,
+            expected_portal_binding: None,
             actions: Vec::new(),
         })
         .await?;
@@ -241,6 +243,8 @@ pub(super) async fn exercise_authority_flows(
         desired_authority: Some(DesiredAuthorityRecord::Deployment(desired.clone())),
         deployment: None,
         idempotency: proposal_proof,
+        portal_binding: None,
+        expected_portal_binding: None,
         actions: vec![action(62, "authority.accepted")],
     };
     assert!(matches!(
@@ -331,6 +335,8 @@ pub(super) async fn exercise_authority_flows(
                     DesiredAuthorityRecord::Deployment(wrong_expected_desired,)
                 ),
                 deployment: None,
+                portal_binding: None,
+                expected_portal_binding: None,
                 idempotency: proof(241, "authority-proposal.accept-wrong-base"),
                 actions: Vec::new(),
             })
@@ -371,6 +377,8 @@ pub(super) async fn exercise_authority_flows(
                 },
                 desired_authority: Some(DesiredAuthorityRecord::Deployment(stale_desired)),
                 deployment: None,
+                portal_binding: None,
+                expected_portal_binding: None,
                 idempotency: proof(187, "authority-proposal.accept-stale"),
                 actions: Vec::new(),
             })
@@ -393,6 +401,8 @@ pub(super) async fn exercise_authority_flows(
             desired_authority: None,
             deployment: None,
             idempotency: proof(188, "authority-proposal.reject-stale"),
+            portal_binding: None,
+            expected_portal_binding: None,
             actions: Vec::new(),
         })
         .await?;
@@ -434,6 +444,8 @@ pub(super) async fn exercise_authority_flows(
             desired_authority: Some(DesiredAuthorityRecord::Deployment(noop_desired)),
             deployment: None,
             idempotency: proof(245, "authority-proposal.accept-noop"),
+            portal_binding: None,
+            expected_portal_binding: None,
             actions: Vec::new(),
         })
         .await?;

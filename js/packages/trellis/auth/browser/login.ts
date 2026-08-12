@@ -1,8 +1,8 @@
 import { Value } from "typebox/value";
 import {
-  digestContractManifest,
-  type TrellisContractV1,
-} from "../../contract_support/mod.ts";
+  type NativeProtocolContract,
+  nativeProtocolPresentation,
+} from "../../contract_support/protocol_artifacts.ts";
 import {
   type AuthStartRequest,
   AuthStartRequestSchema,
@@ -11,7 +11,6 @@ import {
   type BindResponse,
   BindResponseSchema,
   type BindSuccessResponse,
-  type SentinelCreds,
 } from "../schemas.ts";
 import type { SessionKeyHandle } from "./session.ts";
 import { bindFlowSig, getPublicSessionKey, oauthInitSig } from "./session.ts";
@@ -35,7 +34,7 @@ type BuildLoginUrlArgs = {
   provider?: string;
   redirectTo: string;
   handle: SessionKeyHandle;
-  contract: Record<string, unknown>;
+  contract: NativeProtocolContract;
   context?: unknown;
 };
 
@@ -44,7 +43,7 @@ type BuildLoginUrlFlatArgs = {
   provider?: string;
   redirectTo: string;
   handle: SessionKeyHandle;
-  contract: Record<string, unknown>;
+  contract: NativeProtocolContract;
   context?: unknown;
 };
 
@@ -53,7 +52,7 @@ type StartAuthRequestArgs = {
   provider?: string;
   redirectTo: string;
   handle: SessionKeyHandle;
-  contract: Record<string, unknown>;
+  contract: NativeProtocolContract;
   context?: unknown;
 };
 
@@ -69,7 +68,7 @@ export async function buildLoginUrl(
   provider: string | undefined,
   redirectTo: string,
   handle: SessionKeyHandle,
-  contract: Record<string, unknown>,
+  contract: NativeProtocolContract,
   context?: unknown,
 ): Promise<string>;
 export async function buildLoginUrl(
@@ -78,7 +77,7 @@ export async function buildLoginUrl(
     provider?: string;
     redirectTo: string;
     handle: SessionKeyHandle;
-    contract: Record<string, unknown>;
+    contract: NativeProtocolContract;
     context?: unknown;
   },
 ): Promise<string>;
@@ -88,7 +87,7 @@ export async function buildLoginUrl(
     provider?: string;
     redirectTo: string;
     handle: SessionKeyHandle;
-    contract: Record<string, unknown>;
+    contract: NativeProtocolContract;
     context?: unknown;
   },
 ): Promise<string>;
@@ -97,7 +96,7 @@ export async function buildLoginUrl(
   provider?: string,
   redirectTo?: string,
   handle?: SessionKeyHandle,
-  contract?: Record<string, unknown>,
+  contract?: NativeProtocolContract,
   context?: unknown,
 ): Promise<string> {
   const resolved = isNestedBuildLoginUrlArgs(argsOrConfig)
@@ -137,48 +136,36 @@ export async function startAuthRequest(
   args: StartAuthRequestArgs,
 ): Promise<AuthStartResponse> {
   const context = contextRecord(args.context);
-  const contractDigest = isTrellisContractV1(args.contract)
-    ? digestContractManifest(args.contract)
-    : undefined;
+  const presentation = nativeProtocolPresentation(args.contract);
+  const participantDigest = args.contract.CONTRACT_DIGEST;
+  const participantEvidence = {
+    participantId: args.contract.CONTRACT_ID,
+    participantArtifactDigest: participantDigest,
+    participantNeedsDigest: args.contract.PARTICIPANT_NEEDS_DIGEST,
+    participantArtifact: presentation.participant,
+    referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
+  };
   const sig = await oauthInitSig(
     args.handle,
     args.redirectTo,
     context,
     args.provider,
-    contractDigest ?? args.contract,
+    participantEvidence,
   );
   const request = Value.Parse(AuthStartRequestSchema, {
     redirectTo: args.redirectTo,
     sessionKey: getPublicSessionKey(args.handle),
     sig,
-    ...(contractDigest ? { contractDigest } : { contract: args.contract }),
+    ...participantEvidence,
     ...(args.provider ? { provider: args.provider } : {}),
     ...(context ? { context } : {}),
   }) as AuthStartRequest;
 
-  let response = await fetch(`${args.authUrl}/auth/requests`, {
+  const response = await fetch(`${args.authUrl}/auth/requests`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
-  if (await authStartNeedsManifest(response)) {
-    const fullSig = await oauthInitSig(
-      args.handle,
-      args.redirectTo,
-      context,
-      args.provider,
-      args.contract,
-    );
-    response = await fetch(`${args.authUrl}/auth/requests`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...request,
-        sig: fullSig,
-        contract: args.contract,
-      }),
-    });
-  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Auth request failed: ${response.status} ${text}`);
@@ -190,36 +177,12 @@ export async function startAuthRequest(
   ) as AuthStartResponse;
 }
 
-async function authStartNeedsManifest(response: Response): Promise<boolean> {
-  if (response.ok || response.status !== 409) return false;
-  const clone = response.clone();
-  let payload: unknown;
-  try {
-    payload = await clone.json();
-  } catch {
-    payload = undefined;
-  }
-  if (payload && typeof payload === "object") {
-    const record = payload as {
-      reason?: unknown;
-      code?: unknown;
-      error?: unknown;
-      message?: unknown;
-    };
-    return record.reason === "manifest_required" ||
-      record.code === "manifest_required" ||
-      record.error === "manifest_required" ||
-      record.message === "manifest_required";
-  }
-  return (await response.clone().text()).includes("manifest_required");
-}
-
 function buildLoginUrlArgsFromPositional(
   config: AuthConfig,
   provider: string | undefined,
   redirectTo: string | undefined,
   handle: SessionKeyHandle | undefined,
-  contract: Record<string, unknown> | undefined,
+  contract: NativeProtocolContract | undefined,
   context: unknown,
 ): BuildLoginUrlArgs {
   if (
@@ -237,16 +200,6 @@ function buildLoginUrlArgsFromPositional(
     contract,
     context,
   };
-}
-
-function isTrellisContractV1(
-  contract: Record<string, unknown>,
-): contract is TrellisContractV1 {
-  return contract.format === "trellis.contract.v1" &&
-    typeof contract.id === "string" &&
-    typeof contract.displayName === "string" &&
-    typeof contract.description === "string" &&
-    typeof contract.kind === "string";
 }
 
 function isNestedBuildLoginUrlArgs(

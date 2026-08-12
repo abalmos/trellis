@@ -27,7 +27,7 @@ const installedContract = {
     storeResources: 1,
   },
   contract: {
-    format: "trellis.contract.v1",
+    format: "trellis.api.v1",
     id: "documents@v1",
     displayName: "Documents",
     description: "Document APIs",

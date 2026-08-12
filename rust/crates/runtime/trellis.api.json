@@ -13280,6 +13280,997 @@
         "retryable",
         "field"
       ]
+    },
+    "AuthCapabilityGroupsDeleteRequest": {
+      "type": "object",
+      "properties": {
+        "groupKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "groupKey",
+        "expectedVersion",
+        "idempotencyKey"
+      ]
+    },
+    "AuthCapabilityGroupsDeleteResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ]
+    },
+    "AuthCapabilityGroupsGetRequest": {
+      "type": "object",
+      "properties": {
+        "groupKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "groupKey"
+      ]
+    },
+    "AuthCapabilityGroupsGetResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "object",
+          "properties": {
+            "groupKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "includedGroups": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "updatedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "groupKey",
+            "displayName",
+            "description",
+            "capabilities",
+            "includedGroups",
+            "createdAt",
+            "updatedAt",
+            "version"
+          ]
+        }
+      },
+      "required": [
+        "group"
+      ]
+    },
+    "AuthCapabilityGroupsListRequest": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "limit"
+      ]
+    },
+    "AuthCapabilityGroupsListResponse": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "groupKey": {
+                "type": "string",
+                "minLength": 1
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "includedGroups": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updatedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "groupKey",
+              "displayName",
+              "description",
+              "capabilities",
+              "includedGroups",
+              "createdAt",
+              "updatedAt",
+              "version"
+            ]
+          }
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "entries",
+        "count",
+        "offset",
+        "limit"
+      ]
+    },
+    "AuthCapabilityGroupsPutRequest": {
+      "type": "object",
+      "properties": {
+        "groupKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "includedGroups": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "expectedVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "groupKey",
+        "displayName",
+        "description",
+        "capabilities",
+        "includedGroups",
+        "expectedVersion",
+        "idempotencyKey"
+      ]
+    },
+    "AuthCapabilityGroupsPutResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "type": "object",
+          "properties": {
+            "groupKey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "displayName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "includedGroups": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "updatedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "groupKey",
+            "displayName",
+            "description",
+            "capabilities",
+            "includedGroups",
+            "createdAt",
+            "updatedAt",
+            "version"
+          ]
+        }
+      },
+      "required": [
+        "group"
+      ]
+    },
+    "AuthIdentityGrantsListRequest": {
+      "properties": {
+        "limit": {
+          "maximum": 500,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "user": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit"
+      ],
+      "type": "object"
+    },
+    "AuthIdentityGrantsListResponse": {
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "entries": {
+          "default": [],
+          "items": {
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "contractEvidence": {
+                "properties": {
+                  "contractDigest": {
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "type": "string"
+                  },
+                  "contractId": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contractDigest",
+                  "contractId"
+                ],
+                "type": "object"
+              },
+              "description": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "displayName": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "grantedAt": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "identityAnchor": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "contractId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "web",
+                        "type": "string"
+                      },
+                      "origin": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "origin"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "contractId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "cli",
+                        "type": "string"
+                      },
+                      "sessionPublicKey": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "sessionPublicKey"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "contractId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "native",
+                        "type": "string"
+                      },
+                      "sessionPublicKey": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "sessionPublicKey"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "contractId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "devicePublicKey": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "device-user",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "contractId",
+                      "devicePublicKey"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "identityGrantId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "participantKind": {
+                "anyOf": [
+                  {
+                    "const": "app",
+                    "type": "string"
+                  },
+                  {
+                    "const": "agent",
+                    "type": "string"
+                  }
+                ]
+              },
+              "updatedAt": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "identityGrantId",
+              "identityAnchor",
+              "contractEvidence",
+              "displayName",
+              "description",
+              "participantKind",
+              "capabilities",
+              "grantedAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nextOffset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entries",
+        "count",
+        "offset",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "AuthIdentityGrantsRevokeRequest": {
+      "properties": {
+        "identityGrantId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "user": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "identityGrantId"
+      ],
+      "type": "object"
+    },
+    "AuthIdentityGrantsRevokeResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
+    "AuthPortalsGrantOverridesListRequest": {
+      "type": "object",
+      "properties": {
+        "portalId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "participantId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "limit"
+      ]
+    },
+    "AuthPortalsGrantOverridesListResponse": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "portalId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "participantId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "directCapabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "capabilityGroupKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "roleMappings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "providerId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "role": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "directCapabilities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "capabilityGroupKeys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "providerId",
+                    "role",
+                    "directCapabilities",
+                    "capabilityGroupKeys"
+                  ]
+                }
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "updatedAt": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "portalId",
+              "participantId",
+              "directCapabilities",
+              "capabilityGroupKeys",
+              "roleMappings",
+              "createdAt",
+              "updatedAt",
+              "version"
+            ]
+          }
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "entries",
+        "count",
+        "offset",
+        "limit"
+      ]
+    },
+    "AuthPortalsGrantOverridesPutRequest": {
+      "type": "object",
+      "properties": {
+        "portalId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "participantId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "directCapabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "capabilityGroupKeys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "roleMappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "providerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "directCapabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "capabilityGroupKeys": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "providerId",
+              "role",
+              "directCapabilities",
+              "capabilityGroupKeys"
+            ]
+          }
+        },
+        "expectedVersion": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "portalId",
+        "participantId",
+        "directCapabilities",
+        "capabilityGroupKeys",
+        "roleMappings",
+        "expectedVersion",
+        "idempotencyKey"
+      ]
+    },
+    "AuthPortalsGrantOverridesPutResponse": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "object",
+          "properties": {
+            "portalId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "participantId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "directCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "capabilityGroupKeys": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "roleMappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "directCapabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "capabilityGroupKeys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "role",
+                  "directCapabilities",
+                  "capabilityGroupKeys"
+                ]
+              }
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "updatedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "portalId",
+            "participantId",
+            "directCapabilities",
+            "capabilityGroupKeys",
+            "roleMappings",
+            "createdAt",
+            "updatedAt",
+            "version"
+          ]
+        }
+      },
+      "required": [
+        "policy"
+      ]
+    },
+    "AuthPortalsGrantOverridesRemoveRequest": {
+      "type": "object",
+      "properties": {
+        "portalId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "participantId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "portalId",
+        "participantId",
+        "expectedVersion",
+        "idempotencyKey"
+      ]
+    },
+    "AuthPortalsGrantOverridesRemoveResponse": {
+      "type": "object",
+      "properties": {
+        "removed": {
+          "type": "object",
+          "properties": {
+            "portalId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "participantId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "directCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "capabilityGroupKeys": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "roleMappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "providerId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "directCapabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "capabilityGroupKeys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "role",
+                  "directCapabilities",
+                  "capabilityGroupKeys"
+                ]
+              }
+            },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "updatedAt": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "portalId",
+            "participantId",
+            "directCapabilities",
+            "capabilityGroupKeys",
+            "roleMappings",
+            "createdAt",
+            "updatedAt",
+            "version"
+          ]
+        }
+      },
+      "required": []
     }
   },
   "errors": {
@@ -14325,6 +15316,167 @@
         "summary": "List read-only capability definitions derived from installed API artifacts and platform policy.",
         "markdown": "List read-only capability definitions derived from installed API artifacts and platform policy.\n"
       }
+    },
+    "Auth.CapabilityGroups.Delete": {
+      "docs": {
+        "markdown": "Deletes a reusable capability group.",
+        "summary": "Delete capability group."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "input": {
+        "schema": "AuthCapabilityGroupsDeleteRequest"
+      },
+      "output": {
+        "schema": "AuthCapabilityGroupsDeleteResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.CapabilityGroups.Get": {
+      "docs": {
+        "markdown": "Returns one reusable capability group.",
+        "summary": "Read capability group."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "input": {
+        "schema": "AuthCapabilityGroupsGetRequest"
+      },
+      "output": {
+        "schema": "AuthCapabilityGroupsGetResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.CapabilityGroups.List": {
+      "docs": {
+        "markdown": "Lists reusable capability groups.",
+        "summary": "List capability groups."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "input": {
+        "schema": "AuthCapabilityGroupsListRequest"
+      },
+      "output": {
+        "schema": "AuthCapabilityGroupsListResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.CapabilityGroups.Put": {
+      "docs": {
+        "markdown": "Creates or replaces a reusable capability group.",
+        "summary": "Write capability group."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "input": {
+        "schema": "AuthCapabilityGroupsPutRequest"
+      },
+      "output": {
+        "schema": "AuthCapabilityGroupsPutResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.IdentityGrants.List": {
+      "docs": {
+        "markdown": "Lists identity grants for the caller or an admin-selected user.",
+        "summary": "List identity grants."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError"
+      ],
+      "input": {
+        "schema": "AuthIdentityGrantsListRequest"
+      },
+      "output": {
+        "schema": "AuthIdentityGrantsListResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.IdentityGrants.Revoke": {
+      "docs": {
+        "markdown": "Revokes deployment access for one identity grant.",
+        "summary": "Revoke identity grant."
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "input": {
+        "schema": "AuthIdentityGrantsRevokeRequest"
+      },
+      "output": {
+        "schema": "AuthIdentityGrantsRevokeResponse"
+      },
+      "version": "v1"
+    },
+    "Auth.Portals.GrantOverrides.List": {
+      "version": "v1",
+      "input": {
+        "schema": "AuthPortalsGrantOverridesListRequest"
+      },
+      "output": {
+        "schema": "AuthPortalsGrantOverridesListResponse"
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "docs": {
+        "summary": "List trusted portal grant policies.",
+        "markdown": "List trusted portal grant policies.\n"
+      }
+    },
+    "Auth.Portals.GrantOverrides.Put": {
+      "version": "v1",
+      "input": {
+        "schema": "AuthPortalsGrantOverridesPutRequest"
+      },
+      "output": {
+        "schema": "AuthPortalsGrantOverridesPutResponse"
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "docs": {
+        "summary": "Create or update a trusted portal grant policy.",
+        "markdown": "Create or update a trusted portal grant policy.\n"
+      }
+    },
+    "Auth.Portals.GrantOverrides.Remove": {
+      "version": "v1",
+      "input": {
+        "schema": "AuthPortalsGrantOverridesRemoveRequest"
+      },
+      "output": {
+        "schema": "AuthPortalsGrantOverridesRemoveResponse"
+      },
+      "errors": [
+        "AuthError",
+        "UnexpectedError",
+        "ValidationError"
+      ],
+      "docs": {
+        "summary": "Remove a trusted portal grant policy.",
+        "markdown": "Remove a trusted portal grant policy.\n"
+      }
     }
   },
   "operations": {
@@ -14886,6 +16038,87 @@
             "api": "trellis.auth@v1",
             "surface": "rpc",
             "name": "Auth.Capabilities.List"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.CapabilityGroups.Delete"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.CapabilityGroups.Get"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.CapabilityGroups.List"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.CapabilityGroups.Put"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.Portals.GrantOverrides.List"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.Portals.GrantOverrides.Put"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.Portals.GrantOverrides.Remove"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.IdentityGrants.List"
+          },
+          "action": "call"
+        },
+        {
+          "target": {
+            "kind": "apiSurface",
+            "api": "trellis.auth@v1",
+            "surface": "rpc",
+            "name": "Auth.IdentityGrants.Revoke"
           },
           "action": "call"
         }

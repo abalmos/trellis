@@ -1,9 +1,13 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   defineAppContract,
   defineServiceContract,
   Result,
 } from "@qlever-llc/trellis";
+import {
+  ACTION_METADATA,
+  actionSource,
+} from "../../../../../trellis/contract_support/mod.ts";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { Type } from "typebox";
 import {
@@ -63,6 +67,32 @@ trellisIntegrationTest({
   scope: runtimeScopeForCase(CASE_ID),
   runtime: externalServiceRepoRuntime,
   async fn(runtime) {
+    const uses = clientContract.PARTICIPANT.uses as {
+      required?: Record<string, { rpc?: { call?: string[] } }>;
+    };
+    assert(
+      uses.required?.[serviceContract.CONTRACT_ID]?.rpc?.call?.includes(
+        "Echo.Ping",
+      ),
+    );
+    assertEquals(
+      actionSource(serviceContract.EchoPing)?.api.id,
+      serviceContract.API.id,
+    );
+    assertEquals(
+      actionSource(serviceContract.EchoPing)?.apiDigest,
+      serviceContract.API_DIGEST,
+    );
+    assertEquals(
+      serviceContract.EchoPing[ACTION_METADATA].descriptor.permission,
+      {
+        apiId: serviceContract.API.id,
+        apiVersion: "v1",
+        surfaceKind: "rpc",
+        surfaceName: "Echo.Ping",
+        action: "call",
+      },
+    );
     const serviceKey = await runtime.registerService({
       name: serviceName,
       contract: serviceContract,

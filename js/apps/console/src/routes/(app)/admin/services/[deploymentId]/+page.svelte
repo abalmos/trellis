@@ -1,6 +1,11 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
+  import type {
+    AuthDeploymentAuthorityGetOutput,
+    AuthDeploymentAuthorityPlansListOutput,
+    AuthServiceInstancesListOutput,
+  } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -31,7 +36,8 @@
   type AuthorityDetail = { authority: DeploymentAuthority; materializedAuthority: MaterializedAuthority | null; portalRoute: unknown; grantOverrides: unknown[]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
   type ReconcileResponse = { authority: DeploymentAuthority; materializedAuthority: MaterializedAuthority };
   type CapabilitiesListResponse = { entries?: AuthorityCapabilityDefinition[] };
-  type ServiceInstance = { deploymentId: string; instanceId: string; disabled: boolean; createdAt?: string };
+  type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
+  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type ListResponse<T> = { entries?: T[] };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityRequest = {
@@ -55,7 +61,7 @@
   let notice = $state<string | null>(null);
   let detail = $state.raw<AuthorityDetail | null>(null);
   let instances = $state.raw<ServiceInstance[]>([]);
-  let plans = $state.raw<DeploymentAuthorityPlan[]>([]);
+  let plans = $state.raw<AuthorityPlan[]>([]);
   let capabilityDefinitions = $state.raw<AuthorityCapabilityDefinition[]>([]);
   let activeTab = $state<Tab>("desired");
 
@@ -76,10 +82,21 @@
   const givenRows = $derived(authority ? givenCapabilityRows(authority, materializedAuthority, authorityCapabilityDefinitions) : []);
   const reconciliationStatus = $derived(materializedAuthority?.status ?? "pending");
   const planRows = $derived.by(() =>
-    authorityPlanRows(plans).toSorted((left, right) => {
+    plans.map((plan) => ({
+      planId: plan.proposalId,
+      state: plan.state,
+      classification: plan.classification,
+      requiredContracts: 0,
+      optionalContracts: 0,
+      requiredSurfaces: plan.proposedGrantSet.permissions.filter((permission) => permission.target.kind === "apiSurface").length,
+      optionalSurfaces: 0,
+      resources: plan.proposedGrantSet.permissions.filter((permission) => permission.target.kind === "participantResource").length,
+      capabilities: plan.proposedCapabilities.length,
+      createdAt: plan.createdAt,
+    })).toSorted((left, right) => {
       if (left.state === "pending" && right.state !== "pending") return -1;
       if (left.state !== "pending" && right.state === "pending") return 1;
-      return right.createdAt.localeCompare(left.createdAt);
+      return right.createdAt - left.createdAt;
     })
   );
   const pendingPlanCount = $derived(planRows.filter((plan) => plan.state === "pending").length);
@@ -89,17 +106,34 @@
     error = null;
     notice = null;
     try {
+      const authoritiesResponse = await trellis.authDeploymentAuthorityList({ limit: 500 }).take();
+      if (isErr(authoritiesResponse)) { error = errorMessage(authoritiesResponse); return; }
+      const authorityId = authoritiesResponse.entries.find((authority) => authority.deploymentId === selectedDeploymentId)?.authorityId;
+      if (!authorityId) { error = "Deployment authority not found."; return; }
       const [detailResponse, instancesResponse, plansResponse, capabilitiesResponse] = await Promise.all([
-        trellis.authDeploymentAuthorityGet({ deploymentId: selectedDeploymentId }).take(),
-        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ deploymentId: selectedDeploymentId, limit: authorityPlanPreviewLimit, offset: 0 }).take(),
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentAuthorityGet({ authorityId }).take(),
+        trellis.authServiceInstancesList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ deploymentId: selectedDeploymentId, limit: authorityPlanPreviewLimit }).take(),
+        trellis.authCapabilitiesList({ limit: 500 }).take(),
       ]);
       if (isErr(detailResponse)) { error = errorMessage(detailResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
       if (isErr(plansResponse)) { error = errorMessage(plansResponse); return; }
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      detail = detailResponse;
+      detail = {
+        authority: {
+          deploymentId: detailResponse.authority.deploymentId,
+          kind: detailResponse.authority.materialization?.participantKind === "service" ? "service" : "device",
+          disabled: detailResponse.authority.state !== "accepted",
+          version: String(detailResponse.authority.version),
+          createdAt: new Date(detailResponse.authority.createdAt).toISOString(),
+          updatedAt: new Date(detailResponse.authority.updatedAt).toISOString(),
+          desiredState: { surfaces: [], resources: [], capabilities: detailResponse.authority.desiredCapabilities, needs: { contracts: [], surfaces: [], resources: [], capabilities: detailResponse.authority.desiredCapabilities.map((capability) => ({ capability, required: true })) } },
+        },
+        materializedAuthority: null,
+        portalRoute: null,
+        grantOverrides: [],
+      };
       instances = instancesResponse.entries ?? [];
       plans = plansResponse.entries ?? [];
       capabilityDefinitions = capabilitiesResponse.entries ?? [];
@@ -116,11 +150,15 @@
     error = null;
     notice = null;
     try {
-      const response = await trellis.authDeploymentAuthorityReconcile({ deploymentId: authority.deploymentId, desiredVersion: authority.version }).take();
+      const current = await trellis.authDeploymentAuthorityList({ limit: 500 }).take();
+      if (isErr(current)) { error = errorMessage(current); return; }
+      const accepted = current.entries.find((entry) => entry.deploymentId === authority.deploymentId);
+      if (!accepted) { error = "Deployment authority not found."; return; }
+      const response = await trellis.authDeploymentAuthorityReconcile({ authorityId: accepted.authorityId, expectedVersion: accepted.version, idempotencyKey: crypto.randomUUID() }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       detail = {
-        authority: response.authority,
-        materializedAuthority: response.materializedAuthority,
+        authority,
+        materializedAuthority: detail?.materializedAuthority ?? null,
         portalRoute: detail?.portalRoute ?? null,
         grantOverrides: detail?.grantOverrides ?? [],
         capabilityDefinitions: detail?.capabilityDefinitions,
@@ -258,7 +296,7 @@
             </div>
           </div>
         {:else if activeTab === "instances"}
-          <DataTable><thead><tr><th>Instance</th><th>Status</th><th>Created</th></tr></thead><tbody>{#each selectedInstances as instance (instance.instanceId)}<tr><td class="trellis-identifier">{instance.instanceId}</td><td><StatusBadge label={instance.disabled ? "Disabled" : "Enabled"} status={statusVariant(instance.disabled ? "Disabled" : "Enabled")} /></td><td>{instance.createdAt ? formatDate(instance.createdAt) : "—"}</td></tr>{:else}<tr><td colspan="3"><EmptyState title="No runtime instances" description="Service runtime instances appear after they connect." /></td></tr>{/each}</tbody></DataTable>
+          <DataTable><thead><tr><th>Instance</th><th>Status</th><th>Created</th></tr></thead><tbody>{#each selectedInstances as instance (instance.instanceId)}<tr><td class="trellis-identifier">{instance.instanceId}</td><td><StatusBadge label={instance.state} status={statusVariant(instance.state === "active" ? "Enabled" : "Disabled")} /></td><td>{instance.createdAt ? formatDate(instance.createdAt) : "—"}</td></tr>{:else}<tr><td colspan="3"><EmptyState title="No runtime instances" description="Service runtime instances appear after they connect." /></td></tr>{/each}</tbody></DataTable>
         {:else if activeTab === "plans"}
           <DataTable><thead><tr><th>Plan</th><th>State</th><th>Class</th><th>Diff preview</th><th>Created</th></tr></thead><tbody>{#each planRows as row (row.planId)}<tr><td><a class="trellis-identifier font-medium link-hover" href={resolve(`/admin/authority/plans/${encodeURIComponent(row.planId)}`)}>{row.planId}</a></td><td><StatusBadge label={row.state} status={statusVariant(row.state)} /></td><td><span class="badge badge-outline badge-xs">{row.classification}</span></td><td>{row.requiredContracts + row.optionalContracts} contracts · {row.requiredSurfaces + row.optionalSurfaces} surfaces · {row.resources} resources · {row.capabilities} capabilities</td><td>{formatDate(row.createdAt)}</td></tr>{:else}<tr><td colspan="5"><EmptyState title="No authority plans" description="This deployment has no pending or historical authority plans." /></td></tr>{/each}</tbody></DataTable>
         {/if}

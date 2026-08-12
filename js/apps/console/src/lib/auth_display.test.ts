@@ -25,8 +25,8 @@ Deno.test("describeSessionPrincipal renders explicit user app and agent metadata
       },
       contractId: "trellis.console@v1",
       contractDisplayName: "Trellis Console",
-      createdAt: "2026-04-10T00:00:00.000Z",
-      lastAuth: "2026-04-10T01:00:00.000Z",
+      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
+      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
     }),
     {
       title: "usr_123",
@@ -52,8 +52,8 @@ Deno.test("describeSessionPrincipal renders explicit user app and agent metadata
       },
       contractId: "trellis.agent@v1",
       contractDisplayName: "Trellis Agent",
-      createdAt: "2026-04-10T00:00:00.000Z",
-      lastAuth: "2026-04-10T01:00:00.000Z",
+      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
+      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
     }),
     {
       title: "usr_123",
@@ -77,8 +77,8 @@ Deno.test("describeSessionPrincipal renders device and service metadata without 
       },
       contractId: "device.contract@v1",
       contractDisplayName: "Device Runtime",
-      createdAt: "2026-04-10T00:00:00.000Z",
-      lastAuth: "2026-04-10T01:00:00.000Z",
+      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
+      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
     }),
     {
       title: "dev_1",
@@ -98,8 +98,8 @@ Deno.test("describeSessionPrincipal renders device and service metadata without 
         instanceId: "svc_123",
         deploymentId: "billing.default",
       },
-      createdAt: "2026-04-10T00:00:00.000Z",
-      lastAuth: "2026-04-10T01:00:00.000Z",
+      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
+      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
     }),
     {
       title: "Billing Service",

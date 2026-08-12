@@ -760,11 +760,6 @@ mod tests {
             image: None,
             name: Some("Ada".to_string()),
             user_id: "usr_123".to_string(),
-            created_at: 1,
-            updated_at: 1,
-            disabled_at: None,
-            revoked_at: None,
-            version: 1,
         };
 
         assert_eq!(

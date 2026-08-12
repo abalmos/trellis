@@ -6,8 +6,6 @@ pub mod api;
 pub mod client;
 /// Event descriptors.
 pub mod events;
-/// Job descriptors.
-pub mod jobs;
 /// Operation descriptors.
 pub mod operations;
 /// RPC descriptors and declared errors.

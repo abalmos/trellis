@@ -2,8 +2,8 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ContractCapabilityMetadata, ContractKind, ContractManifest, ContractManifestBuilder,
-    ContractsError,
+    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+    ContractKind, ContractsError,
 };
 
 const READ_CAPABILITY: &str = "admin.read";
@@ -13,13 +13,12 @@ const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";
 
-/// Build the canonical Jobs admin contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    let mut manifest = ContractManifestBuilder::new(
+/// Build the canonical Jobs admin API artifact.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    ApiBuilder::authoring(
         "trellis.jobs@v1",
         "Trellis Jobs",
         "Trellis-managed background job administration API.",
-        ContractKind::Service,
     )
     .docs_with_summary(
         "Background job administration APIs.",
@@ -236,15 +235,13 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         )
         .with_subscribe_capabilities([STREAM_CAPABILITY]),
     )
-    .build()?;
+    .build()
+}
 
-    // Jobs admin bootstrap dependencies are runtime internals, not contract uses.
-    manifest.uses.required_mut().remove("core");
-    manifest.uses.required_mut().remove("auth");
-    manifest.uses.optional_mut().remove("core");
-    manifest.uses.optional_mut().remove("auth");
-
-    Ok(manifest)
+/// Build the native Jobs participant and API artifacts.
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = api_artifact()?.normalized_value()?;
+    ContractBuilder::from_api(api, ContractKind::Service)?.build()
 }
 
 fn admin_rpc(

@@ -16,7 +16,7 @@ import type {
   Schema,
 } from "./contract_support/runtime.ts";
 import type { TrellisConnection } from "./connection.ts";
-import type { TrellisContractV1 } from "./contract_support/mod.ts";
+import type { NativeProtocolContract } from "./contract_support/protocol_artifacts.ts";
 import type { OperationInvoker } from "./operations.ts";
 import type {
   EventListenerContext,
@@ -96,10 +96,7 @@ type CallerMethods<TContract> = UnionToIntersection<
 >;
 
 /** Minimum participant contract accepted by the public caller connector. */
-export type CallerContract = ContractWithRuntime & {
-  readonly CONTRACT: TrellisContractV1;
-  readonly CONTRACT_DIGEST?: string;
-};
+export type CallerContract = NativeProtocolContract;
 
 /** Flat caller surface inferred from the participant contract's selected actions. */
 export type CallerRuntime<TContract> = CallerMethods<TContract> & {

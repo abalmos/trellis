@@ -184,7 +184,7 @@ export async function exerciseDeviceState(runtime: LiveTrellisRuntime) {
 
   const adminTarget = {
     contractDigest: deviceContract.CONTRACT_DIGEST,
-    contractId: deviceContract.CONTRACT.id,
+    contractId: deviceContract.CONTRACT_ID,
     deviceId: deviceA.provisioned.device.principalId,
     scope: "deviceApp" as const,
   };

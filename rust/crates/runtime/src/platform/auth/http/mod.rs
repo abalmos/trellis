@@ -60,20 +60,21 @@ use super::ephemeral::{
     BrowserConsentProposal, BROWSER_FLOW_FORMAT,
 };
 use super::{
-    AccountFlowState, AccountRepository, AuthService, AuthorityDecision, AuthorityDecisionOutcome,
-    AuthorityEvidenceRepository, AuthorityEvidenceScope, AuthorityKind, AuthorityProposalKind,
-    AuthorityProposalRecord, AuthorityProposalState, AuthorityRepository, AuthorityState,
-    AuthorityTarget, AuthorizationStateError, CompleteIdentityLinkInput, ContextRepository,
-    CreateActivationReviewInput, CreateAuthorityProposalInput, CreateFederatedUserInput,
-    CreateLocalUserInput, CreateSessionInput, DecideAuthorityProposalInput, DeploymentRepository,
-    DesiredAuthorityRecord, DeviceState, EnrollDeviceIdentityInput,
-    FirstAdminFederatedRegistration, FirstAdminRegistration, IdempotencyResultRecord,
-    IdempotentOutcome, IdentityAuthorityRecord, LocalAuthentication, LoginPortalRecord,
+    resolve_portal_authority_selection, AccountFlowState, AccountRepository,
+    ApplyIdentityAuthoritySelectionInput, AuthService, AuthorityEvidenceRepository,
+    AuthorityEvidenceScope, AuthorityKind, AuthorityProposalKind, AuthorityProposalRecord,
+    AuthorityProposalState, AuthorityRepository, AuthorityState, AuthorityTarget,
+    AuthorizationStateError, CompleteIdentityLinkInput, CompletePasswordResetInput,
+    ContextRepository, CreateActivationReviewInput, CreateFederatedUserInput, CreateLocalUserInput,
+    CreateSessionInput, DeploymentRepository, DesiredAuthorityRecord, DeviceState,
+    EnrollDeviceIdentityInput, FirstAdminFederatedRegistration, FirstAdminRegistration,
+    IdempotencyResultRecord, IdempotentOutcome, LocalAuthentication, LoginPortalRecord,
     LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord, ParticipantBindingState,
-    PortalRepository, PostCommitActionKind, PostCommitActionRecord,
-    PresentDeploymentAuthorityInput, PrincipalKind, ProvisionedIdentityKind,
-    ProvisionedIdentityState, ProvisioningRepository, ResourceBindingEvidence,
-    ResourceProviderIdentity, RuntimeInstanceState, SessionRecord, SessionRepository,
+    PortalAuthoritySource, PortalBindingMutation, PortalRepository, PostCommitActionKind,
+    PostCommitActionRecord, PresentDeploymentAuthorityInput, PrincipalKind,
+    ProviderLoginAttributes, ProvisionedIdentityKind, ProvisionedIdentityState,
+    ProvisioningRepository, ResourceBindingEvidence, ResourceProviderIdentity,
+    RuntimeInstanceState, SessionRecord, SessionRepository,
 };
 
 const FLOW_TTL_MS: i64 = 15 * 60_000;
@@ -86,6 +87,7 @@ pub(crate) struct OidcProvider {
     client_secret: Option<ClientSecret>,
     redirect_uri: RedirectUrl,
     scopes: Vec<Scope>,
+    role_claims: Vec<String>,
 }
 
 pub(crate) async fn discover_oidc_providers(
@@ -107,6 +109,15 @@ pub(crate) async fn discover_oidc_providers(
         if provider.provider_type != "oidc" {
             return Err(AuthorizationStateError::InvalidRecord(format!(
                 "OAuth provider {provider_id} type must be oidc"
+            )));
+        }
+        if provider
+            .role_claims
+            .iter()
+            .any(|pointer| !valid_json_pointer(pointer))
+        {
+            return Err(AuthorizationStateError::InvalidRecord(format!(
+                "OAuth provider {provider_id} has an invalid role_claims JSON Pointer"
             )));
         }
         let issuer = provider.issuer.clone().ok_or_else(|| {
@@ -148,7 +159,7 @@ pub(crate) async fn discover_oidc_providers(
             }
         };
         let redirect_uri = RedirectUrl::new(format!(
-            "{}/auth/callback/{provider_id}",
+            "{}/{provider_id}",
             redirect_base.trim_end_matches('/')
         ))
         .map_err(|_| {
@@ -176,10 +187,18 @@ pub(crate) async fn discover_oidc_providers(
                     .into_iter()
                     .map(Scope::new)
                     .collect(),
+                role_claims: provider.role_claims.clone(),
             },
         );
     }
     Ok(providers)
+}
+
+fn valid_json_pointer(pointer: &str) -> bool {
+    pointer.starts_with('/')
+        && !pointer.as_bytes().iter().enumerate().any(|(index, byte)| {
+            *byte == b'~' && !matches!(pointer.as_bytes().get(index + 1), Some(b'0' | b'1'))
+        })
 }
 
 #[derive(Clone)]
@@ -372,60 +391,7 @@ fn flow_response(flow: AuthBrowserFlow) -> BrowserFlowResponse {
 fn browser_consent(
     binding: &ParticipantBindingRecord,
 ) -> Result<BrowserConsentProposal, HttpError> {
-    let resolved = binding.resolve()?;
-    let proposal = resolved.proposal();
-    let participant: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|_| HttpError::internal("consent_encode"))?;
-    let optional_grant_bundles = resolved
-        .optional_apis()
-        .iter()
-        .map(|used| (used.alias().to_owned(), used.grant_set().clone()))
-        .collect();
-    let optional_capability_definitions = proposal
-        .optional()
-        .capabilities()
-        .iter()
-        .map(|capability| {
-            (
-                format!("{}::{}", capability.api(), capability.name()),
-                GrantSetV1::new(capability.allows().to_vec()),
-            )
-        })
-        .collect();
-    let consent_view = json!({
-        "participant": {
-            "id": binding.participant_id,
-            "digest": binding.artifact_digest,
-            "displayName": participant.get("displayName").and_then(Value::as_str).unwrap_or(&binding.participant_id),
-            "description": participant.get("description").and_then(Value::as_str).unwrap_or("Trellis participant"),
-        },
-        "required": {
-            "permissions": proposal.required().grant_set().permissions(),
-            "capabilities": proposal.required().capabilities().iter().map(|capability| format!("{}::{}", capability.api(), capability.name())).collect::<Vec<_>>(),
-        },
-        "optionalBundles": resolved.optional_apis().iter().map(|used| json!({
-            "id": used.alias(),
-            "api": used.api(),
-            "apiDigest": used.api_digest(),
-            "permissions": used.grant_set().permissions(),
-        })).collect::<Vec<_>>(),
-    });
-    BrowserConsentProposal::new(
-        binding.participant_id.clone(),
-        binding.artifact_digest.clone(),
-        binding.needs_digest.clone(),
-        consent_view,
-        proposal.required().grant_set().clone(),
-        optional_grant_bundles,
-        proposal
-            .required()
-            .capabilities()
-            .iter()
-            .map(|capability| capability.name().to_owned())
-            .collect(),
-        optional_capability_definitions,
-    )
-    .map_err(Into::into)
+    super::browser_consent_proposal(binding).map_err(Into::into)
 }
 
 fn select_browser_authority(
@@ -455,10 +421,7 @@ fn select_browser_authority(
             .iter()
             .all(|permission| grant_set.permissions().contains(permission))
         {
-            let name = qualified_name
-                .rsplit_once("::")
-                .map_or(qualified_name.as_str(), |(_, name)| name);
-            capabilities.push(name.to_owned());
+            capabilities.push(qualified_name.clone());
         }
     }
     capabilities.sort();
@@ -516,16 +479,6 @@ fn now_ms() -> Result<i64, HttpError> {
 }
 
 #[allow(clippy::result_large_err)]
-fn administration_participant_digest() -> Result<String, HttpError> {
-    let value: Value = serde_json::from_str(include_str!(
-        "../../../../../trellis/artifacts/trellis.admin.participant.json"
-    ))
-    .map_err(|_| HttpError::internal("invalid_administration_participant"))?;
-    parse_participant_v1(&value)
-        .and_then(|participant| participant.digest())
-        .map_err(|_| HttpError::internal("invalid_administration_participant"))
-}
-
 fn checked_add(value: i64, duration: i64) -> Result<i64, HttpError> {
     value
         .checked_add(duration)

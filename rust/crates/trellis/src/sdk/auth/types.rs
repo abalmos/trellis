@@ -286,6 +286,167 @@ pub struct AuthCapabilitiesListResponse {
     #[serde(rename = "nextCursor")]
     pub next_cursor: Option<String>,
 }
+/// Generated schema type `AuthCapabilityGroupsDeleteRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsDeleteRequest {
+    /// The `expectedVersion` wire field.
+    #[serde(rename = "expectedVersion")]
+    pub expected_version: i64,
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+    /// The `idempotencyKey` wire field.
+    #[serde(rename = "idempotencyKey")]
+    pub idempotency_key: String,
+}
+/// Generated schema type `AuthCapabilityGroupsDeleteResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsDeleteResponse {
+    /// The `success` wire field.
+    pub success: bool,
+}
+/// Generated schema type `AuthCapabilityGroupsGetRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsGetRequest {
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+}
+/// Generated schema type `AuthCapabilityGroupsGetResponseGroup`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsGetResponseGroup {
+    /// The `capabilities` wire field.
+    pub capabilities: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `description` wire field.
+    pub description: String,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+    /// The `includedGroups` wire field.
+    #[serde(rename = "includedGroups")]
+    pub included_groups: Vec<String>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthCapabilityGroupsGetResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsGetResponse {
+    /// The `group` wire field.
+    pub group: AuthCapabilityGroupsGetResponseGroup,
+}
+/// Generated schema type `AuthCapabilityGroupsListRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsListRequest {
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `offset` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+}
+/// Generated schema type `AuthCapabilityGroupsListResponseEntriesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsListResponseEntriesItem {
+    /// The `capabilities` wire field.
+    pub capabilities: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `description` wire field.
+    pub description: String,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+    /// The `includedGroups` wire field.
+    #[serde(rename = "includedGroups")]
+    pub included_groups: Vec<String>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthCapabilityGroupsListResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsListResponse {
+    /// The `count` wire field.
+    pub count: i64,
+    /// The `entries` wire field.
+    pub entries: Vec<AuthCapabilityGroupsListResponseEntriesItem>,
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `nextOffset` wire field.
+    #[serde(rename = "nextOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<i64>,
+    /// The `offset` wire field.
+    pub offset: i64,
+}
+/// Generated schema type `AuthCapabilityGroupsPutRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsPutRequest {
+    /// The `capabilities` wire field.
+    pub capabilities: Vec<String>,
+    /// The `description` wire field.
+    pub description: String,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `expectedVersion` wire field.
+    #[serde(rename = "expectedVersion")]
+    pub expected_version: Option<i64>,
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+    /// The `idempotencyKey` wire field.
+    #[serde(rename = "idempotencyKey")]
+    pub idempotency_key: String,
+    /// The `includedGroups` wire field.
+    #[serde(rename = "includedGroups")]
+    pub included_groups: Vec<String>,
+}
+/// Generated schema type `AuthCapabilityGroupsPutResponseGroup`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsPutResponseGroup {
+    /// The `capabilities` wire field.
+    pub capabilities: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `description` wire field.
+    pub description: String,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `groupKey` wire field.
+    #[serde(rename = "groupKey")]
+    pub group_key: String,
+    /// The `includedGroups` wire field.
+    #[serde(rename = "includedGroups")]
+    pub included_groups: Vec<String>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthCapabilityGroupsPutResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthCapabilityGroupsPutResponse {
+    /// The `group` wire field.
+    pub group: AuthCapabilityGroupsPutResponseGroup,
+}
 /// Generated schema type `AuthConnectionsKickRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthConnectionsKickRequest {
@@ -10382,6 +10543,172 @@ pub struct AuthIdentityAuthorityRevokeResponse {
     /// The `authority` wire field.
     pub authority: AuthIdentityAuthorityRevokeResponseAuthority,
 }
+/// Generated schema type `AuthIdentityGrantsListRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsListRequest {
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `offset` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+    /// The `user` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemContractEvidence`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsListResponseEntriesItemContractEvidence {
+    /// The `contractDigest` wire field.
+    #[serde(rename = "contractDigest")]
+    pub contract_digest: String,
+    /// The `contractId` wire field.
+    #[serde(rename = "contractId")]
+    pub contract_id: String,
+}
+/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemIdentityAnchor`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthIdentityGrantsListResponseEntriesItemIdentityAnchor {
+    /// The `web` variant.
+    #[serde(rename = "web")]
+    Web {
+        /// The `contractId` wire field.
+        #[serde(rename = "contractId")]
+        contract_id: String,
+        /// The `origin` wire field.
+        origin: String,
+    },
+    /// The `cli` variant.
+    #[serde(rename = "cli")]
+    Cli {
+        /// The `contractId` wire field.
+        #[serde(rename = "contractId")]
+        contract_id: String,
+        /// The `sessionPublicKey` wire field.
+        #[serde(rename = "sessionPublicKey")]
+        session_public_key: String,
+    },
+    /// The `native` variant.
+    #[serde(rename = "native")]
+    Native {
+        /// The `contractId` wire field.
+        #[serde(rename = "contractId")]
+        contract_id: String,
+        /// The `sessionPublicKey` wire field.
+        #[serde(rename = "sessionPublicKey")]
+        session_public_key: String,
+    },
+    /// The `device-user` variant.
+    #[serde(rename = "device-user")]
+    DeviceUser {
+        /// The `contractId` wire field.
+        #[serde(rename = "contractId")]
+        contract_id: String,
+        /// The `devicePublicKey` wire field.
+        #[serde(rename = "devicePublicKey")]
+        device_public_key: String,
+    },
+}
+/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemParticipantKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthIdentityGrantsListResponseEntriesItemParticipantKind {
+    /// The `app` wire value.
+    #[serde(rename = "app")]
+    App,
+    /// The `agent` wire value.
+    #[serde(rename = "agent")]
+    Agent,
+}
+impl AuthIdentityGrantsListResponseEntriesItemParticipantKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Agent => "agent",
+        }
+    }
+}
+impl AsRef<str> for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthIdentityGrantsListResponseEntriesItemParticipantKind> for &str {
+    fn eq(&self, other: &AuthIdentityGrantsListResponseEntriesItemParticipantKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthIdentityGrantsListResponseEntriesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsListResponseEntriesItem {
+    /// The `capabilities` wire field.
+    pub capabilities: Vec<String>,
+    /// The `contractEvidence` wire field.
+    #[serde(rename = "contractEvidence")]
+    pub contract_evidence: AuthIdentityGrantsListResponseEntriesItemContractEvidence,
+    /// The `description` wire field.
+    pub description: String,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `grantedAt` wire field.
+    #[serde(rename = "grantedAt")]
+    pub granted_at: String,
+    /// The `identityAnchor` wire field.
+    #[serde(rename = "identityAnchor")]
+    pub identity_anchor: AuthIdentityGrantsListResponseEntriesItemIdentityAnchor,
+    /// The `identityGrantId` wire field.
+    #[serde(rename = "identityGrantId")]
+    pub identity_grant_id: String,
+    /// The `participantKind` wire field.
+    #[serde(rename = "participantKind")]
+    pub participant_kind: AuthIdentityGrantsListResponseEntriesItemParticipantKind,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
+}
+/// Generated schema type `AuthIdentityGrantsListResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsListResponse {
+    /// The `count` wire field.
+    pub count: i64,
+    /// The `entries` wire field.
+    pub entries: Vec<AuthIdentityGrantsListResponseEntriesItem>,
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `nextOffset` wire field.
+    #[serde(rename = "nextOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<i64>,
+    /// The `offset` wire field.
+    pub offset: i64,
+}
+/// Generated schema type `AuthIdentityGrantsRevokeRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsRevokeRequest {
+    /// The `identityGrantId` wire field.
+    #[serde(rename = "identityGrantId")]
+    pub identity_grant_id: String,
+    /// The `user` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+/// Generated schema type `AuthIdentityGrantsRevokeResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthIdentityGrantsRevokeResponse {
+    /// The `success` wire field.
+    pub success: bool,
+}
 /// Generated schema type `AuthPortalsGetRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthPortalsGetRequest {
@@ -10468,6 +10795,234 @@ pub struct AuthPortalsGetResponse {
     pub portal: AuthPortalsGetResponsePortal,
     /// The `routes` wire field.
     pub routes: Vec<AuthPortalsGetResponseRoutesItem>,
+}
+/// Generated schema type `AuthPortalsGrantOverridesListRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesListRequest {
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `offset` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i64>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub portal_id: Option<String>,
+}
+/// Generated schema type `AuthPortalsGrantOverridesListResponseEntriesItemRoleMappingsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesListResponseEntriesItemRoleMappingsItem {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `providerId` wire field.
+    #[serde(rename = "providerId")]
+    pub provider_id: String,
+    /// The `role` wire field.
+    pub role: String,
+}
+/// Generated schema type `AuthPortalsGrantOverridesListResponseEntriesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesListResponseEntriesItem {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: String,
+    /// The `roleMappings` wire field.
+    #[serde(rename = "roleMappings")]
+    pub role_mappings: Vec<AuthPortalsGrantOverridesListResponseEntriesItemRoleMappingsItem>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthPortalsGrantOverridesListResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesListResponse {
+    /// The `count` wire field.
+    pub count: i64,
+    /// The `entries` wire field.
+    pub entries: Vec<AuthPortalsGrantOverridesListResponseEntriesItem>,
+    /// The `limit` wire field.
+    pub limit: i64,
+    /// The `nextOffset` wire field.
+    #[serde(rename = "nextOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<i64>,
+    /// The `offset` wire field.
+    pub offset: i64,
+}
+/// Generated schema type `AuthPortalsGrantOverridesPutRequestRoleMappingsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesPutRequestRoleMappingsItem {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `providerId` wire field.
+    #[serde(rename = "providerId")]
+    pub provider_id: String,
+    /// The `role` wire field.
+    pub role: String,
+}
+/// Generated schema type `AuthPortalsGrantOverridesPutRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesPutRequest {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `expectedVersion` wire field.
+    #[serde(rename = "expectedVersion")]
+    pub expected_version: Option<i64>,
+    /// The `idempotencyKey` wire field.
+    #[serde(rename = "idempotencyKey")]
+    pub idempotency_key: String,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: String,
+    /// The `roleMappings` wire field.
+    #[serde(rename = "roleMappings")]
+    pub role_mappings: Vec<AuthPortalsGrantOverridesPutRequestRoleMappingsItem>,
+}
+/// Generated schema type `AuthPortalsGrantOverridesPutResponsePolicyRoleMappingsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesPutResponsePolicyRoleMappingsItem {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `providerId` wire field.
+    #[serde(rename = "providerId")]
+    pub provider_id: String,
+    /// The `role` wire field.
+    pub role: String,
+}
+/// Generated schema type `AuthPortalsGrantOverridesPutResponsePolicy`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesPutResponsePolicy {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: String,
+    /// The `roleMappings` wire field.
+    #[serde(rename = "roleMappings")]
+    pub role_mappings: Vec<AuthPortalsGrantOverridesPutResponsePolicyRoleMappingsItem>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthPortalsGrantOverridesPutResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesPutResponse {
+    /// The `policy` wire field.
+    pub policy: AuthPortalsGrantOverridesPutResponsePolicy,
+}
+/// Generated schema type `AuthPortalsGrantOverridesRemoveRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesRemoveRequest {
+    /// The `expectedVersion` wire field.
+    #[serde(rename = "expectedVersion")]
+    pub expected_version: i64,
+    /// The `idempotencyKey` wire field.
+    #[serde(rename = "idempotencyKey")]
+    pub idempotency_key: String,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: String,
+}
+/// Generated schema type `AuthPortalsGrantOverridesRemoveResponseRemovedRoleMappingsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesRemoveResponseRemovedRoleMappingsItem {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `providerId` wire field.
+    #[serde(rename = "providerId")]
+    pub provider_id: String,
+    /// The `role` wire field.
+    pub role: String,
+}
+/// Generated schema type `AuthPortalsGrantOverridesRemoveResponseRemoved`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesRemoveResponseRemoved {
+    /// The `capabilityGroupKeys` wire field.
+    #[serde(rename = "capabilityGroupKeys")]
+    pub capability_group_keys: Vec<String>,
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `directCapabilities` wire field.
+    #[serde(rename = "directCapabilities")]
+    pub direct_capabilities: Vec<String>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: String,
+    /// The `roleMappings` wire field.
+    #[serde(rename = "roleMappings")]
+    pub role_mappings: Vec<AuthPortalsGrantOverridesRemoveResponseRemovedRoleMappingsItem>,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthPortalsGrantOverridesRemoveResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthPortalsGrantOverridesRemoveResponse {
+    /// The `removed` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<AuthPortalsGrantOverridesRemoveResponseRemoved>,
 }
 /// Generated schema type `AuthPortalsListRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

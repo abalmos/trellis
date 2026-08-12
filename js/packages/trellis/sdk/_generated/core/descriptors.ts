@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.core@v1.json
+// Generated from ./generated/protocol/apis/trellis.core@v1.json
 import {
   eventActions,
   feedAction,
@@ -6,77 +6,22 @@ import {
   rpcAction,
   schema,
 } from "../../../contracts.ts";
-import type * as Types from "./types.ts";
+import * as Types from "./types.ts";
 import {
-  TrellisCatalogRequestSchema,
-  TrellisCatalogResponseSchema,
-  TrellisContractGetRequestSchema,
-  TrellisContractGetResponseSchema,
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
 } from "./schemas.ts";
-import {
-  CONTRACT as ACTION_ARTIFACT,
-  CONTRACT_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
-const CONTRACT_ID = "trellis.core@v1" as const;
-
-export const TrellisCatalog = rpcAction(
-  CONTRACT_ID,
-  "Trellis.Catalog",
-  {
-    subject: "rpc.v1.Trellis.Catalog",
-    permission: Object.freeze({
-      apiId: "trellis.core@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "Trellis.Catalog",
-      action: "call",
-    }),
-    input: schema<Types.TrellisCatalogInput>(TrellisCatalogRequestSchema),
-    output: schema<Types.TrellisCatalogOutput>(TrellisCatalogResponseSchema),
-    callerCapabilities: ["trellis.core::catalog.read"] as const,
-    errors: ["UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
-  },
-  "TrellisCatalog",
-  ACTION_SOURCE,
-);
-
-export const TrellisContractGet = rpcAction(
-  CONTRACT_ID,
-  "Trellis.Contract.Get",
-  {
-    subject: "rpc.v1.Trellis.Contract.Get",
-    permission: Object.freeze({
-      apiId: "trellis.core@v1",
-      apiVersion: "v1",
-      surfaceKind: "rpc",
-      surfaceName: "Trellis.Contract.Get",
-      action: "call",
-    }),
-    input: schema<Types.TrellisContractGetInput>(
-      TrellisContractGetRequestSchema,
-    ),
-    output: schema<Types.TrellisContractGetOutput>(
-      TrellisContractGetResponseSchema,
-    ),
-    callerCapabilities: ["trellis.core::contract.read"] as const,
-    errors: ["UnexpectedError", "ValidationError"] as const,
-    declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
-  },
-  "TrellisContractGet",
-  ACTION_SOURCE,
-);
+const API_ID = "trellis.core@v1" as const;
 
 export const TrellisSurfaceStatus = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Trellis.Surface.Status",
   {
     subject: "rpc.v1.Trellis.Surface.Status",
@@ -93,9 +38,19 @@ export const TrellisSurfaceStatus = rpcAction(
     output: schema<Types.TrellisSurfaceStatusOutput>(
       TrellisSurfaceStatusResponseSchema,
     ),
-    callerCapabilities: ["trellis.core::catalog.read"] as const,
+    callerCapabilities: ["trellis.core::authority.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "TrellisSurfaceStatus",
   ACTION_SOURCE,

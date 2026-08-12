@@ -24,9 +24,9 @@ checklists.
 
 ## Key concepts
 
-- **Contracts** - service-owned contract definitions that emit canonical
-  `trellis.contract.v1` JSON for release and exchange boundaries. See
-  `design/contracts/trellis-contracts-catalog.md`.
+- **Contracts** - service-owned contract definitions that emit canonical native
+  `trellis.api.v1` and `trellis.participant.v1` JSON for release and exchange
+  boundaries. See `design/contracts/trellis-api-participants.md`.
 - **Auth** - two-layer model: NATS transport auth plus Trellis session-key
   proofs with contract-gated approval. See `design/auth/trellis-auth.md`.
 - **Jobs** - JetStream-backed job lifecycle with retry, progress tracking, and

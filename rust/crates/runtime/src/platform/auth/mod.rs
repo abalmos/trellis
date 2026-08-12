@@ -25,7 +25,8 @@ mod ephemeral;
 mod http;
 pub(super) use builtins::{administration_participant_binding, auth_runtime_participant_binding};
 pub(crate) use ephemeral::{
-    AuthConnectionPresence, AuthEphemeralRepository, NatsAuthEphemeralRepository,
+    validate_connection_kick_response, AuthConnectionPresence, AuthEphemeralRepository,
+    NatsAuthEphemeralRepository,
 };
 pub(super) use http::{
     discover_oidc_providers, router as auth_http_router, AuthHttpOptions, NatsBootstrapIssuer,
@@ -33,6 +34,8 @@ pub(super) use http::{
 mod issuance;
 mod materializer;
 mod model;
+mod policy;
+mod portal_reconciliation;
 mod reconciliation;
 mod resources;
 pub(crate) mod rpc;
@@ -66,13 +69,14 @@ pub(crate) use application::repository::{
 };
 pub(crate) use application::validation::validate_login_portal;
 pub(crate) use application::{
-    AuthService, AuthServiceConfig, CompleteIdentityLinkInput, CreateAccountFlowInput,
+    ApplyIdentityAuthoritySelectionInput, AuthService, AuthServiceConfig,
+    CompleteIdentityLinkInput, CompletePasswordResetInput, CreateAccountFlowInput,
     CreateActivationReviewInput, CreateAuthorityProposalInput, CreateFederatedUserInput,
     CreateLocalUserInput, CreateSessionInput, CreateUserInput, DecideActivationReviewInput,
     DecideAuthorityProposalInput, EnrollDeviceIdentityInput, FirstAdminAuthorityTarget,
     FirstAdminFederatedRegistration, FirstAdminRegistration, LocalAuthentication,
-    PresentDeploymentAuthorityInput, ProvisionDeviceInput, ProvisionServiceIdentityInput,
-    UpdateUserInput, UserAccount,
+    PortalAuthoritySource, PortalBindingMutation, PresentDeploymentAuthorityInput,
+    ProvisionDeviceInput, ProvisionServiceIdentityInput, UpdateUserInput, UserAccount,
 };
 pub(crate) use authority::MaterializationReplacement;
 pub(crate) use authority::{
@@ -103,12 +107,19 @@ pub(crate) use model::deployment_authority_id;
 pub use model::{
     AccountFlowKind, AccountFlowRecord, AccountFlowState, AuthorityDecisionOutcome,
     AuthorityDecisionRecord, AuthorityProposalKind, AuthorityProposalRecord,
-    AuthorityProposalState, DeploymentProfileRecord, DeploymentProfileState,
+    AuthorityProposalState, CapabilityGroupRecord, DeploymentProfileRecord, DeploymentProfileState,
     DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceProvisioningSecretRecord,
     IdempotencyResultRecord, LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord,
-    PortalRouteRecord, PostCommitActionKind, PostCommitActionRecord, ProvisionedIdentityKind,
+    PortalAuthorityBindingRecord, PortalGrantOverrideRecord, PortalRoleMapping, PortalRouteRecord,
+    PostCommitActionKind, PostCommitActionRecord, ProvisionedIdentityKind,
     ProvisionedIdentityRecord, ProvisionedIdentityState, ProvisioningSecretState,
     UserProfileRecord,
+};
+pub(crate) use policy::{
+    browser_consent_proposal, resolve_portal_authority_selection, ProviderLoginAttributes,
+};
+pub(crate) use portal_reconciliation::{
+    portal_policy_reconciliation, PortalPolicyReconciliationHandle,
 };
 pub(crate) use reconciliation::authorization_reconciliation_channel;
 pub use reconciliation::{AuthorizationReconciliationHandle, ReconciliationCause};

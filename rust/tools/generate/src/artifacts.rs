@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 
 use miette::IntoDiagnostic;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use trellis_codegen_rust::{
     default_sdk_stem, rust_sdk_cargo_manifest_is_valid, GenerateRustParticipantFacadeOpts,
     GenerateRustSdkOpts, ParticipantAliasMapping, RustRuntimeDeps,
@@ -16,9 +17,10 @@ use trellis_codegen_ts::{
     collect_ts_sdk_sources, GenerateTsSdkOpts, TsRuntimeDeps,
     TsRuntimeSource as CodegenTsRuntimeSource,
 };
+use trellis_contracts::ApiBuilder;
 
 use crate::cli::{ContractInputArgs, RuntimeSource};
-use crate::contract_input::{self, ResolvedContractInput};
+use crate::contract_input::{self, ResolvedNativeInput};
 use crate::output;
 
 const TRELLIS_DENO_JSON: &str = include_str!("../../../../js/packages/trellis/deno.json");
@@ -27,7 +29,7 @@ const TRELLIS_DENO_JSON: &str = include_str!("../../../../js/packages/trellis/de
 pub struct GeneratedArtifactsMetadata {
     pub schema_version: u8,
     pub contract_id: String,
-    pub contract_digest: String,
+    pub api_digest: String,
     pub artifact_version: String,
     pub runtime_source: RuntimeSource,
     pub jsr_runtime_version: String,
@@ -76,15 +78,17 @@ pub fn sdk_output_stem(contract_id: &str) -> String {
     }
 }
 
-pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedContractInput> {
+pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedNativeInput> {
     let resolved = contract_input::resolve_contract_input(
-        args.manifest.as_deref(),
+        args.api.as_deref(),
+        args.participant.as_deref(),
+        &args.referenced_api,
         args.source.as_deref(),
         args.image.as_deref(),
         &args.source_export,
-        &args.image_contract_path,
+        &args.image_api_path,
     )?;
-    contract_input::warn_forward_incompatible_public_schemas(&resolved.loaded);
+    contract_input::warn_forward_incompatible_public_schemas(&resolved.api);
     Ok(resolved)
 }
 
@@ -93,9 +97,9 @@ pub fn resolve_contract(args: &ContractInputArgs) -> miette::Result<ResolvedCont
     reason = "the output matrix is the generator command boundary"
 )]
 pub fn write_contract_outputs(
-    resolved: &ResolvedContractInput,
+    resolved: &ResolvedNativeInput,
     artifact_version: String,
-    out_manifest: &Path,
+    out_api: &Path,
     ts_out: Option<&Path>,
     npm_out: Option<&Path>,
     rust_out: Option<&Path>,
@@ -106,8 +110,10 @@ pub fn write_contract_outputs(
     generator_fingerprint: &str,
     success_message: &str,
 ) -> miette::Result<()> {
+    let api = native_api_artifact(resolved)?;
     let metadata = generated_artifacts_metadata(
         resolved,
+        &api.digest,
         &artifact_version,
         runtime_source,
         &trellis_package_version(),
@@ -118,14 +124,14 @@ pub fn write_contract_outputs(
         crate_name,
         generator_fingerprint,
     );
-    if let Some(parent) = out_manifest.parent() {
+    if let Some(parent) = out_api.parent() {
         fs::create_dir_all(parent).into_diagnostic()?;
     }
-    write_if_changed(out_manifest, &format!("{}\n", resolved.loaded.canonical))?;
+    write_if_changed(out_api, &format!("{}\n", api.json))?;
 
     if let Some(ts_out) = ts_out {
         trellis_codegen_ts::generate_ts_sdk(&GenerateTsSdkOpts {
-            manifest_path: out_manifest.to_path_buf(),
+            api_path: out_api.to_path_buf(),
             out_dir: ts_out.to_path_buf(),
             package_name: package_name.to_string(),
             package_version: artifact_version.clone(),
@@ -136,10 +142,14 @@ pub fn write_contract_outputs(
             ),
         })
         .into_diagnostic()?;
-        rewrite_local_generated_ts_sdk_imports(ts_out, runtime_source)?;
+        rewrite_local_generated_ts_sdk_imports(
+            ts_out,
+            runtime_source,
+            runtime_repo_root.as_deref(),
+        )?;
         format_generated_typescript_artifacts(ts_out, runtime_repo_root.as_deref())?;
         copy_embedded_trellis_owned_ts_sdk(
-            &resolved.loaded.manifest.id,
+            &resolved.api.render_model.id,
             ts_out,
             runtime_source,
             runtime_repo_root.as_deref(),
@@ -149,8 +159,8 @@ pub fn write_contract_outputs(
     if let Some(npm_out) = npm_out {
         let staging_dir = tempfile::tempdir().into_diagnostic()?;
         let npm_sources = stage_npm_ts_sources(
-            &resolved.loaded.manifest.id,
-            out_manifest,
+            &resolved.api.render_model.id,
+            out_api,
             staging_dir.path(),
             package_name,
             &artifact_version,
@@ -161,7 +171,7 @@ pub fn write_contract_outputs(
             package_name,
             &artifact_version,
             &trellis_package_version(),
-            &resolved.loaded.manifest.id,
+            &resolved.api.render_model.id,
             &npm_sources.dependency_packages,
             runtime_repo_root.as_deref(),
         )?;
@@ -169,7 +179,7 @@ pub fn write_contract_outputs(
 
     if let Some(rust_out) = rust_out {
         trellis_codegen_rust::generate_rust_sdk(&GenerateRustSdkOpts {
-            manifest_path: out_manifest.to_path_buf(),
+            api_path: out_api.to_path_buf(),
             out_dir: rust_out.to_path_buf(),
             crate_name: crate_name.to_string(),
             crate_version: artifact_version.clone(),
@@ -181,22 +191,46 @@ pub fn write_contract_outputs(
         })
         .into_diagnostic()?;
         copy_embedded_trellis_owned_rust_sdk(
-            &resolved.loaded.manifest.id,
+            &resolved.api.render_model.id,
             rust_out,
             runtime_source,
             runtime_repo_root.as_deref(),
         )?;
     }
 
-    write_generated_artifacts_metadata(out_manifest, &metadata)?;
+    write_generated_artifacts_metadata(out_api, &metadata)?;
 
     output::print_success(&format!(
         "{} for {}",
-        success_message, resolved.loaded.manifest.id
+        success_message, resolved.api.render_model.id
     ));
-    output::print_detail("manifest", out_manifest.display().to_string());
-    output::print_detail("digest", &resolved.loaded.digest);
+    output::print_detail("api", out_api.display().to_string());
+    output::print_detail("digest", &api.digest);
     Ok(())
+}
+
+struct NativeApiOutput {
+    json: String,
+    digest: String,
+}
+
+pub fn native_api_digest(resolved: &ResolvedNativeInput) -> miette::Result<String> {
+    Ok(native_api_artifact(resolved)?.digest)
+}
+
+pub fn native_api_json(resolved: &ResolvedNativeInput) -> miette::Result<String> {
+    Ok(native_api_artifact(resolved)?.json)
+}
+
+fn native_api_artifact(resolved: &ResolvedNativeInput) -> miette::Result<NativeApiOutput> {
+    let api = ApiBuilder::new(resolved.api.value.clone())
+        .build()
+        .into_diagnostic()?;
+    Ok(NativeApiOutput {
+        json: serde_json::to_string(&api.normalized_value().into_diagnostic()?)
+            .into_diagnostic()?,
+        digest: api.digest().into_diagnostic()?,
+    })
 }
 
 #[expect(
@@ -206,7 +240,7 @@ pub fn write_contract_outputs(
 pub fn write_contract_shell_outputs(
     contract_id: &str,
     artifact_version: &str,
-    out_manifest: Option<&Path>,
+    out_api: Option<&Path>,
     ts_out: Option<&Path>,
     npm_out: Option<&Path>,
     rust_out: Option<&Path>,
@@ -241,11 +275,11 @@ pub fn write_contract_shell_outputs(
         )?;
     }
 
-    if let Some(out_manifest) = out_manifest {
-        if let Some(parent) = out_manifest.parent() {
+    if let Some(out_api) = out_api {
+        if let Some(parent) = out_api.parent() {
             fs::create_dir_all(parent).into_diagnostic()?;
         }
-        let metadata_path = generated_artifacts_metadata_path(out_manifest);
+        let metadata_path = generated_artifacts_metadata_path(out_api);
         if metadata_path.exists() {
             fs::remove_file(metadata_path).into_diagnostic()?;
         }
@@ -281,11 +315,11 @@ fn write_npm_package_shell(
     )?;
     write_if_changed(
         &out.join("esm/mod.js"),
-        "export const CONTRACT_DIGEST = \"shell\";\n",
+        "export const API_DIGEST = \"shell\";\n",
     )?;
     write_if_changed(
         &out.join("esm/mod.d.ts"),
-        "export declare const CONTRACT_DIGEST = \"shell\";\n",
+        "export declare const API_DIGEST = \"shell\";\n",
     )
 }
 
@@ -311,11 +345,17 @@ fn write_ts_sdk_shell(
             serde_json::to_string_pretty(&deno).into_diagnostic()?
         ),
     )?;
-    write_if_changed(&out.join("mod.ts"), "export * from \"./descriptors.ts\";\nexport * from \"./types.ts\";\nexport * from \"./schemas.ts\";\n")?;
+    write_if_changed(&out.join("mod.ts"), "export * from \"./api.ts\";\nexport * from \"./descriptors.ts\";\nexport * from \"./types.ts\";\nexport * from \"./schemas.ts\";\n")?;
     write_if_changed(&out.join("descriptors.ts"), "")?;
     write_if_changed(&out.join("types.ts"), "")?;
     write_if_changed(&out.join("schemas.ts"), "")?;
-    write_if_changed(&out.join("manifest.ts"), &format!("export const CONTRACT_ID = {} as const;\nexport const CONTRACT_DIGEST = \"shell\" as const;\n", js_string(contract_id)))?;
+    write_if_changed(
+        &out.join("api.ts"),
+        &format!(
+            "export const API_ID = {} as const;\nexport const API_DIGEST = \"shell\" as const;\n",
+            js_string(contract_id)
+        ),
+    )?;
     Ok(())
 }
 
@@ -334,7 +374,7 @@ fn write_rust_sdk_shell(
         runtime_repo_root,
     );
     let opts = GenerateRustSdkOpts {
-        manifest_path: out.join("shell.contract.json"),
+        api_path: out.join("shell.api.json"),
         out_dir: out.to_path_buf(),
         crate_name: crate_name.to_string(),
         crate_version: artifact_version.to_string(),
@@ -411,8 +451,7 @@ fn rust_runtime_deps_lines(deps: &RustRuntimeDeps) -> Vec<String> {
 
 fn render_rust_shell_lib_rs(contract_id: &str) -> String {
     format!(
-        "//! Temporary generated Rust SDK shell used during `trellis-generate prepare`.\n\npub const CONTRACT_ID: &str = {};\npub const CONTRACT_DIGEST: &str = \"shell\";\npub const CONTRACT_NAME: &str = {};\npub const CONTRACT_JSON: &str = \"{{}}\";\n",
-        string_literal(contract_id),
+        "//! Temporary generated Rust SDK shell used during `trellis-generate prepare`.\n\npub const API_ID: &str = {};\npub const API_DIGEST: &str = \"shell\";\npub const API_JSON: &str = \"{{}}\";\n",
         string_literal(contract_id),
     )
 }
@@ -443,7 +482,7 @@ fn ts_shell_deno_json(
     );
     root.insert(
         "exports".to_string(),
-        serde_json::json!({ ".": "./mod.ts", "./manifest": "./manifest.ts" }),
+        serde_json::json!({ ".": "./mod.ts", "./api": "./api.ts" }),
     );
     root.insert(
         "compilerOptions".to_string(),
@@ -459,11 +498,21 @@ fn ts_shell_deno_json(
 fn rewrite_local_generated_ts_sdk_imports(
     ts_out: &Path,
     runtime_source: RuntimeSource,
+    runtime_repo_root: Option<&Path>,
 ) -> miette::Result<()> {
     if !matches!(runtime_source, RuntimeSource::Local) {
         return Ok(());
     }
 
+    let repo_root = runtime_repo_root.ok_or_else(|| {
+        miette::miette!("local generated TypeScript imports require a runtime repository root")
+    })?;
+    let depth = ts_out
+        .strip_prefix(repo_root)
+        .into_diagnostic()?
+        .components()
+        .count();
+    let errors_import = format!("{}js/packages/trellis/errors/index.ts", "../".repeat(depth));
     for entry in fs::read_dir(ts_out).into_diagnostic()? {
         let entry = entry.into_diagnostic()?;
         let path = entry.path();
@@ -473,7 +522,7 @@ fn rewrite_local_generated_ts_sdk_imports(
         let contents = fs::read_to_string(&path).into_diagnostic()?;
         let rewritten = contents.replace(
             "from \"@qlever-llc/trellis/errors\"",
-            "from \"../../../../js/packages/trellis/errors/index.ts\"",
+            &format!("from \"{errors_import}\""),
         );
         if rewritten != contents {
             write_if_changed(&path, &rewritten)?;
@@ -509,7 +558,9 @@ fn string_literal(value: &str) -> String {
     reason = "participant generation receives the resolved CLI output settings"
 )]
 pub fn write_participant_facade_outputs(
-    manifest_path: &Path,
+    api_path: &Path,
+    participant_path: &Path,
+    protocol_participant_out: &Path,
     rust_participant_out: &Path,
     crate_name: &str,
     crate_version: &str,
@@ -519,8 +570,19 @@ pub fn write_participant_facade_outputs(
     owned_sdk_path: Option<PathBuf>,
     alias_mappings: Vec<ParticipantAliasMapping>,
 ) -> miette::Result<()> {
+    let (participant_json, participant_digest) = trellis_codegen_rust::native_participant_artifact(
+        api_path,
+        participant_path,
+        &alias_mappings,
+    )
+    .into_diagnostic()?;
+    if let Some(parent) = protocol_participant_out.parent() {
+        fs::create_dir_all(parent).into_diagnostic()?;
+    }
+    write_if_changed(protocol_participant_out, &format!("{participant_json}\n"))?;
     trellis_codegen_rust::generate_rust_participant_facade(&GenerateRustParticipantFacadeOpts {
-        manifest_path: manifest_path.to_path_buf(),
+        api_path: api_path.to_path_buf(),
+        participant_path: participant_path.to_path_buf(),
         out_dir: rust_participant_out.to_path_buf(),
         crate_name: crate_name.to_string(),
         crate_version: crate_version.to_string(),
@@ -538,6 +600,31 @@ pub fn write_participant_facade_outputs(
         "rust participant",
         rust_participant_out.display().to_string(),
     );
+    output::print_detail(
+        "participant",
+        protocol_participant_out.display().to_string(),
+    );
+    output::print_detail("participant digest", participant_digest);
+    Ok(())
+}
+
+pub fn write_protocol_participant(
+    api_path: &Path,
+    participant_path: &Path,
+    protocol_participant_out: &Path,
+) -> miette::Result<()> {
+    let (participant_json, participant_digest) =
+        trellis_codegen_rust::native_participant_artifact(api_path, participant_path, &[])
+            .into_diagnostic()?;
+    if let Some(parent) = protocol_participant_out.parent() {
+        fs::create_dir_all(parent).into_diagnostic()?;
+    }
+    write_if_changed(protocol_participant_out, &format!("{participant_json}\n"))?;
+    output::print_detail(
+        "participant",
+        protocol_participant_out.display().to_string(),
+    );
+    output::print_detail("participant digest", participant_digest);
     Ok(())
 }
 
@@ -612,7 +699,7 @@ pub fn build_npm_package_from_ts_sources(
 
 pub fn stage_npm_ts_sources(
     contract_id: &str,
-    manifest_path: &Path,
+    api_path: &Path,
     staging_root: &Path,
     package_name: &str,
     package_version: &str,
@@ -620,7 +707,7 @@ pub fn stage_npm_ts_sources(
     let root_dir = staging_root.join(sdk_output_stem(contract_id));
     fs::create_dir_all(&root_dir).into_diagnostic()?;
     let opts = GenerateTsSdkOpts {
-        manifest_path: manifest_path.to_path_buf(),
+        api_path: api_path.to_path_buf(),
         out_dir: root_dir.clone(),
         package_name: package_name.to_string(),
         package_version: package_version.to_string(),
@@ -775,7 +862,8 @@ fn binary_is_available(binary: &OsString) -> bool {
     reason = "metadata construction records the complete generated output matrix"
 )]
 pub fn generated_artifacts_metadata(
-    resolved: &ResolvedContractInput,
+    resolved: &ResolvedNativeInput,
+    api_digest: &str,
     artifact_version: &str,
     runtime_source: RuntimeSource,
     jsr_runtime_version: &str,
@@ -788,8 +876,8 @@ pub fn generated_artifacts_metadata(
 ) -> GeneratedArtifactsMetadata {
     GeneratedArtifactsMetadata {
         schema_version: GeneratedArtifactsMetadata::SCHEMA_VERSION,
-        contract_id: resolved.loaded.manifest.id.clone(),
-        contract_digest: resolved.loaded.digest.clone(),
+        contract_id: resolved.api.render_model.id.clone(),
+        api_digest: api_digest.to_owned(),
         artifact_version: artifact_version.to_string(),
         runtime_source,
         jsr_runtime_version: jsr_runtime_version.to_string(),
@@ -804,33 +892,33 @@ pub fn generated_artifacts_metadata(
 
 pub fn generated_artifacts_are_fresh(
     expected: &GeneratedArtifactsMetadata,
-    out_manifest: &Path,
+    out_api: &Path,
     ts_out: Option<&Path>,
     npm_out: Option<&Path>,
     rust_out: Option<&Path>,
 ) -> bool {
-    let Some(existing) = read_generated_artifacts_metadata(out_manifest) else {
+    let Some(existing) = read_generated_artifacts_metadata(out_api) else {
         return false;
     };
     existing == *expected
-        && out_manifest.exists()
+        && out_api.exists()
         && ts_key_outputs_exist(ts_out)
-        && embedded_trellis_owned_ts_sdk_key_outputs_exist(expected, out_manifest)
+        && embedded_trellis_owned_ts_sdk_key_outputs_exist(expected, out_api)
         && npm_key_outputs_exist(npm_out)
-        && rust_key_outputs_exist(rust_out, expected, out_manifest)
+        && rust_key_outputs_exist(rust_out, expected, out_api)
 }
 
-fn read_generated_artifacts_metadata(out_manifest: &Path) -> Option<GeneratedArtifactsMetadata> {
-    let contents = fs::read_to_string(generated_artifacts_metadata_path(out_manifest)).ok()?;
+fn read_generated_artifacts_metadata(out_api: &Path) -> Option<GeneratedArtifactsMetadata> {
+    let contents = fs::read_to_string(generated_artifacts_metadata_path(out_api)).ok()?;
     serde_json::from_str(&contents).ok()
 }
 
 fn write_generated_artifacts_metadata(
-    out_manifest: &Path,
+    out_api: &Path,
     metadata: &GeneratedArtifactsMetadata,
 ) -> miette::Result<()> {
     write_if_changed(
-        &generated_artifacts_metadata_path(out_manifest),
+        &generated_artifacts_metadata_path(out_api),
         &format!(
             "{}\n",
             serde_json::to_string_pretty(metadata).into_diagnostic()?
@@ -838,8 +926,8 @@ fn write_generated_artifacts_metadata(
     )
 }
 
-pub fn generated_artifacts_metadata_path(out_manifest: &Path) -> PathBuf {
-    out_manifest.with_extension("trellis-generate.json")
+pub fn generated_artifacts_metadata_path(out_api: &Path) -> PathBuf {
+    out_api.with_extension("trellis-generate.json")
 }
 
 fn ts_key_outputs_exist(ts_out: Option<&Path>) -> bool {
@@ -850,7 +938,7 @@ fn ts_key_outputs_exist(ts_out: Option<&Path>) -> bool {
         && ts_out.join("descriptors.ts").exists()
         && ts_out.join("types.ts").exists()
         && ts_out.join("schemas.ts").exists()
-        && ts_out.join("manifest.ts").exists()
+        && ts_out.join("api.ts").exists()
 }
 
 fn npm_key_outputs_exist(npm_out: Option<&Path>) -> bool {
@@ -864,7 +952,7 @@ fn npm_key_outputs_exist(npm_out: Option<&Path>) -> bool {
 
 fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
     expected: &GeneratedArtifactsMetadata,
-    out_manifest: &Path,
+    out_api: &Path,
 ) -> bool {
     if !matches!(expected.runtime_source, RuntimeSource::Local) {
         return true;
@@ -872,7 +960,7 @@ fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
     let Some(module) = embedded_trellis_owned_rust_sdk_module(&expected.contract_id) else {
         return true;
     };
-    let repo_root = detect_output_root(out_manifest.parent().unwrap_or(out_manifest));
+    let repo_root = detect_output_root(out_api.parent().unwrap_or(out_api));
     let embedded_dir = repo_root
         .join("js/packages/trellis/sdk/_generated")
         .join(module);
@@ -882,15 +970,20 @@ fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
 fn rust_key_outputs_exist(
     rust_out: Option<&Path>,
     expected: &GeneratedArtifactsMetadata,
-    out_manifest: &Path,
+    out_api: &Path,
 ) -> bool {
     let Some(rust_out) = rust_out else {
         return true;
     };
     let cargo_toml = rust_out.join("Cargo.toml");
+    let source = if manifest_is_api(out_api) {
+        "api.rs"
+    } else {
+        "contract.rs"
+    };
     cargo_toml.exists()
-        && rust_out.join("src/contract.rs").exists()
-        && embedded_trellis_owned_rust_sdk_key_outputs_exist(expected, out_manifest)
+        && rust_out.join("src").join(source).exists()
+        && embedded_trellis_owned_rust_sdk_key_outputs_exist(expected, out_api)
         && rust_sdk_cargo_manifest_is_valid(
             &cargo_toml,
             &expected.crate_name,
@@ -900,7 +993,7 @@ fn rust_key_outputs_exist(
 
 fn embedded_trellis_owned_rust_sdk_key_outputs_exist(
     expected: &GeneratedArtifactsMetadata,
-    out_manifest: &Path,
+    out_api: &Path,
 ) -> bool {
     if !matches!(expected.runtime_source, RuntimeSource::Local) {
         return true;
@@ -908,12 +1001,31 @@ fn embedded_trellis_owned_rust_sdk_key_outputs_exist(
     let Some(module) = embedded_trellis_owned_rust_sdk_module(&expected.contract_id) else {
         return true;
     };
-    let repo_root = detect_output_root(out_manifest.parent().unwrap_or(out_manifest));
+    let repo_root = detect_output_root(out_api.parent().unwrap_or(out_api));
     let embedded_dir = repo_root.join("rust/crates/trellis/src/sdk").join(module);
-    embedded_dir.join("mod.rs").exists() && embedded_dir.join("contract.rs").exists()
+    let source = if manifest_is_api(out_api) {
+        "api.rs"
+    } else {
+        "contract.rs"
+    };
+    embedded_dir.join("mod.rs").exists() && embedded_dir.join(source).exists()
 }
 
-fn copy_embedded_trellis_owned_rust_sdk(
+fn manifest_is_api(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .and_then(|value| {
+            value
+                .get("format")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("trellis.api.v1")
+}
+
+pub fn copy_embedded_trellis_owned_rust_sdk(
     contract_id: &str,
     rust_out: &Path,
     runtime_source: RuntimeSource,
@@ -1213,19 +1325,19 @@ pub fn current_generator_fingerprint() -> &'static str {
 }
 
 pub fn infer_artifact_version(
-    resolved: &ResolvedContractInput,
+    resolved: &ResolvedNativeInput,
     explicit: Option<String>,
     action: &str,
 ) -> miette::Result<String> {
     explicit.or(resolved.owner_version.clone()).ok_or_else(|| {
         miette::miette!(
-            "cannot {action}: no version could be inferred; pass --artifact-version when using --manifest or --image"
+            "cannot {action}: no version could be inferred; pass --artifact-version when using --api or --image"
         )
     })
 }
 
 pub fn required_owner_version(
-    resolved: &ResolvedContractInput,
+    resolved: &ResolvedNativeInput,
     action: &str,
 ) -> miette::Result<String> {
     resolved.owner_version.clone().ok_or_else(|| {
@@ -1438,9 +1550,7 @@ mod tests {
     #[test]
     fn contract_shell_outputs_create_empty_typescript_vocabulary() {
         let temp = tempfile::tempdir().expect("create tempdir");
-        let manifest = temp
-            .path()
-            .join("generated/contracts/manifests/demo@v1.json");
+        let manifest = temp.path().join("generated/protocol/apis/demo@v1.json");
         let metadata = generated_artifacts_metadata_path(&manifest);
         fs::create_dir_all(metadata.parent().expect("metadata parent"))
             .expect("create metadata dir");
@@ -1461,8 +1571,7 @@ mod tests {
         )
         .expect("write shell outputs");
 
-        let shell_manifest =
-            fs::read_to_string(ts_out.join("manifest.ts")).expect("read manifest shell");
+        let shell_manifest = fs::read_to_string(ts_out.join("api.ts")).expect("read API shell");
         let deno = fs::read_to_string(ts_out.join("deno.json")).expect("read deno shell config");
         assert_eq!(
             fs::read_to_string(ts_out.join("descriptors.ts")).unwrap(),
@@ -1470,10 +1579,10 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(ts_out.join("types.ts")).unwrap(), "");
         assert_eq!(fs::read_to_string(ts_out.join("schemas.ts")).unwrap(), "");
-        assert!(shell_manifest.contains("CONTRACT_ID"));
-        assert!(shell_manifest.contains("CONTRACT_DIGEST"));
+        assert!(shell_manifest.contains("API_ID"));
+        assert!(shell_manifest.contains("API_DIGEST"));
         assert!(!ts_out.join("contract.ts").exists());
-        assert!(!ts_out.join("api.ts").exists());
+        assert!(ts_out.join("api.ts").exists());
         assert!(!ts_out.join("owned_api.ts").exists());
         assert!(!ts_out.join("client.ts").exists());
         assert!(deno.contains(r#""lib": ["#));
@@ -1506,7 +1615,7 @@ mod tests {
         assert!(cargo.contains("name = \"trellis_sdk_demo\""));
         assert!(!cargo.contains("publish = false"));
         assert!(cargo.contains("trellis-contracts"));
-        assert!(lib.contains("pub const CONTRACT_ID: &str = \"demo@v1\""));
+        assert!(lib.contains("pub const API_ID: &str = \"demo@v1\""));
     }
 
     #[test]

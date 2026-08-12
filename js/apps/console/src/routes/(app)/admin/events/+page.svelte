@@ -324,7 +324,7 @@
     };
     if (focus === "exceptions") input.integrityExceptionOnly = true;
     else if (focus === "unresolved" || focus === "malformed") input.resolution = [focus];
-    else if (focus !== "all" && focus !== "largest") input.verificationStatus = [focus];
+    else if (focus === "verified") input.verificationStatus = [focus];
     return input;
   }
 

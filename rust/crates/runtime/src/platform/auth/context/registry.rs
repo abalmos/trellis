@@ -362,7 +362,7 @@ async fn inspect_trust_floor(
         })?;
     pointer
         .map(|entry| {
-            let pointer = parse_manifest_pointer(&entry.value)?;
+            let pointer = parse_api_authoring_source_pointer(&entry.value)?;
             Ok(AuthorizationRegistryTrustFloor {
                 generation: pointer.generation,
                 digest: pointer.digest,
@@ -375,7 +375,7 @@ async fn advance_manifest_pointer(
     store: &kv::Store,
     canonical_pointer: &str,
 ) -> Result<(), AuthorizationStateError> {
-    let configured = parse_manifest_pointer(canonical_pointer.as_bytes())?;
+    let configured = parse_api_authoring_source_pointer(canonical_pointer.as_bytes())?;
     let existing = store
         .entry(MANIFEST_CURRENT_KEY.to_owned())
         .await
@@ -399,7 +399,7 @@ async fn advance_manifest_pointer(
                 })?;
         }
         Some(entry) => {
-            let current = parse_manifest_pointer(&entry.value)?;
+            let current = parse_api_authoring_source_pointer(&entry.value)?;
             if current.generation > configured.generation {
                 return Err(storage("current issuer manifest pointer would roll back"));
             }
@@ -427,7 +427,9 @@ async fn advance_manifest_pointer(
     confirm_exact(store, MANIFEST_CURRENT_KEY, canonical_pointer.as_bytes()).await
 }
 
-fn parse_manifest_pointer(value: &[u8]) -> Result<ManifestPointer, AuthorizationStateError> {
+fn parse_api_authoring_source_pointer(
+    value: &[u8],
+) -> Result<ManifestPointer, AuthorizationStateError> {
     let pointer: ManifestPointer = serde_json::from_slice(value).map_err(|error| {
         storage(format!(
             "current issuer manifest pointer is invalid: {error}"

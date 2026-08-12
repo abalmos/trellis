@@ -26,7 +26,7 @@ type BrowserFlowWire = {
     required: { permissions: unknown[]; capabilities: string[] };
     optionalBundles?: {
       id: string;
-      api: string;
+      apiId: string;
       permissions: Record<string, unknown>[];
     }[];
   };
@@ -107,7 +107,7 @@ function portalState(wire: BrowserFlowWire): PortalFlowState {
         bundle,
       ) => ({
         id: bundle.id,
-        apiId: bundle.api,
+        apiId: bundle.apiId,
         permissions: bundle.permissions,
       })),
       user: wire.user,
@@ -124,7 +124,9 @@ function portalState(wire: BrowserFlowWire): PortalFlowState {
     if (!wire.redirectTarget) {
       throw new Error("Completed portal flow has no redirect target");
     }
-    state = { status: "redirect", location: wire.redirectTarget };
+    const location = new URL(wire.redirectTarget);
+    location.searchParams.set("flowId", wire.flowId);
+    state = { status: "redirect", location: location.toString() };
   } else {
     state = {
       status: "expired",

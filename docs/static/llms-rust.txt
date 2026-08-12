@@ -58,6 +58,9 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   atomically with the verified context. It only routes Auth Callout and remains
   bounded by current session, authority, delegation, context, and the configured
   JWT lifetime cap.
+- Runtime connection presence is retained for the resolved maximum user-JWT
+  lifetime plus a 60-second cleanup grace, then exact records are removed after
+  successful or already-absent physical connection kicks.
 - Generated service/device clients present their embedded canonical participant
   and exact referenced API artifacts during bootstrap. Runtime planning parses
   and resolves them through the same semantic proposal path as admin planning.
@@ -139,6 +142,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   physical reconciliation continues in the background.
 - Deployment authority `needs` group contracts, surfaces, capabilities, and
   resources. Materialized grants group capabilities, surfaces, and NATS rules.
+- Trusted browser authority policy is keyed by exact portal + participant.
+  Capability groups are recursive administrative macros, verified OIDC roles
+  select provider-scoped mappings, and both are bounded by the participant
+  proposal. Successful trusted local registration applies the same policy as
+  local or OIDC login. Reconciliation revokes superseded contexts and exact
+  matching connections. Removing a portal, provider allowance, or policy clears
+  verified-role provenance, so restoring configuration requires a fresh verified
+  login before authority returns. Sessions remain available for credential refresh.
 
 ## Typed calls
 
@@ -196,7 +207,9 @@ Prefer cumulative updates and treat terminal output/result as authoritative.
   Trellis-provisioned durable.
 - Event handlers receive verified publisher metadata when proof validation
   succeeds. Event Log may validate retained historical session windows after an
-  ordinary publisher session expires.
+  ordinary publisher context expires, but explicit context revocation
+  invalidates every event proof from that context, including proofs created
+  before revocation.
 
 ## Prepared events and inboxes
 

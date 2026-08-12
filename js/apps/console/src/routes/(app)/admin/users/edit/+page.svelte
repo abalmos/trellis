@@ -2,7 +2,6 @@
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
-    AuthCapabilityGroupsListOutput,
     AuthUsersListOutput,
     AuthUsersUpdateInput,
   } from "@qlever-llc/trellis/sdk/auth";
@@ -22,9 +21,15 @@
   import { getTrellis } from "../../../../../lib/trellis";
 
   type UserView = AuthUsersListOutput["entries"][number];
-  type IdentityView = UserView["identities"][number];
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number];
-  type AssignableCapabilityGroup = AuthCapabilityGroupsListOutput["entries"][number];
+  type IdentityView = { provider: string; subject: string };
+  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+    key: string;
+    source: "platform" | "contract";
+    contractId: string | null;
+    contractDisplayName: string | null;
+    consequence: string | null;
+  };
+  type AssignableCapabilityGroup = { groupKey: string; displayName: string; capabilities: string[]; includedGroups: string[] };
   type CapabilitySection = {
     key: string;
     title: string;
@@ -45,6 +50,7 @@
   let selectedCapabilityGroups = $state<string[]>([]);
   let active = $state(true);
   let savePending = $state(false);
+  const targetIdentities: Array<IdentityView & { identityId: string; displayName?: string | null; email?: string | null; linkedAt?: number; lastLoginAt?: number | null }> = [];
 
   const requestedUserId = $derived(page.url.searchParams.get("userId") ?? "");
   const hasTargetParams = $derived(requestedUserId.length > 0);
@@ -192,10 +198,10 @@
 
   function loadUserIntoForm(user: UserView | null) {
     if (!user) return;
-    const loadedCapabilityGroups = uniqueCapabilities(user.capabilityGroups);
+    const loadedCapabilityGroups: string[] = [];
     selectedCapabilityGroups = loadedCapabilityGroups;
-    selectedCapabilities = pruneGroupProvidedDirectCapabilities(loadedCapabilityGroups, uniqueCapabilities(user.capabilities));
-    active = user.active;
+    selectedCapabilities = [];
+    active = user.state === "active";
   }
 
   async function load() {
@@ -205,16 +211,21 @@
       targetUser = null;
       if (!hasTargetParams) return;
 
-      const [usersResponse, capabilitiesResponse, groupsResponse] = await Promise.all([
-        trellis.authUsersList({ limit: 500, offset: 0 }).take(),
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
-        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
+      const [usersResponse, capabilitiesResponse] = await Promise.all([
+        trellis.authUsersList({ limit: 500 }).take(),
+        trellis.authCapabilitiesList({ limit: 500 }).take(),
       ]);
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      if (isErr(groupsResponse)) { error = errorMessage(groupsResponse); return; }
-      capabilities = (capabilitiesResponse.entries ?? []).slice().sort((left, right) => left.key.localeCompare(right.key));
-      assignableCapabilityGroups = groupsResponse.entries ?? [];
+      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+        ...capability,
+        key: capability.capability,
+        source: capability.sourceApi ? "contract" as const : "platform" as const,
+        contractId: capability.sourceApi,
+        contractDisplayName: null,
+        consequence: null,
+      })).sort((left, right) => left.key.localeCompare(right.key));
+      assignableCapabilityGroups = [];
       const users = usersResponse.entries ?? [];
       const match = users.find((user) => user.userId === requestedUserId) ?? null;
       targetUser = match;
@@ -233,9 +244,12 @@
     try {
       const response = await trellis.authUsersUpdate({
         userId: targetUser.userId,
-        active,
-        capabilities: uniqueCapabilities(selectedCapabilities),
-        capabilityGroups: uniqueCapabilities(selectedCapabilityGroups),
+        email: targetUser.email,
+        expectedVersion: targetUser.version,
+        idempotencyKey: crypto.randomUUID(),
+        image: targetUser.image,
+        name: targetUser.name,
+        state: active ? "active" : "disabled",
       } satisfies AuthUsersUpdateInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Updated ${targetUser.name ?? targetUser.userId}.`, "Updated");
@@ -307,7 +321,7 @@
             <h3 class="trellis-field-label">Linked identities</h3>
             <p class="trellis-field-help mt-1">Users add identities from Profile after proving control of an enabled provider.</p>
           </div>
-          <span class="trellis-metadata text-xs">{targetUser.identities.length} linked</span>
+          <span class="trellis-metadata text-xs">0 linked</span>
         </div>
 
         <DataTable wrapperClass="mt-3 border-y border-base-300">
@@ -320,7 +334,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each targetUser.identities as identity (identity.identityId)}
+              {#each targetIdentities as identity (identity.identityId)}
                 <tr>
                   <td class="align-top"><span class="trellis-identifier break-all">{providerSubject(identity)}</span></td>
                   <td class="align-top"><span class="trellis-identifier break-all text-base-content/60">{identity.identityId}</span></td>

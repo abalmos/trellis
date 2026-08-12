@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.health@v1.json
+// Generated from ./generated/protocol/apis/trellis.health@v1.json
 import {
   eventActions,
   feedAction,
@@ -19,20 +19,17 @@ import {
   HealthWatchRequestSchema,
   NotFoundErrorDataSchema,
 } from "./schemas.ts";
-import {
-  CONTRACT as ACTION_ARTIFACT,
-  CONTRACT_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
-const CONTRACT_ID = "trellis.health@v1" as const;
+const API_ID = "trellis.health@v1" as const;
 
 export const HealthInspect = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Health.Inspect",
   {
     subject: "rpc.v1.Health.Inspect",
@@ -46,17 +43,25 @@ export const HealthInspect = rpcAction(
     input: schema<Types.HealthInspectInput>(HealthInspectRequestSchema),
     output: schema<Types.HealthInspectOutput>(HealthInspectResponseSchema),
     callerCapabilities: ["trellis.health::read"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -65,7 +70,7 @@ export const HealthInspect = rpcAction(
 );
 
 export const HealthMetrics = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Health.Metrics",
   {
     subject: "rpc.v1.Health.Metrics",
@@ -81,13 +86,23 @@ export const HealthMetrics = rpcAction(
     callerCapabilities: ["trellis.health::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "HealthMetrics",
   ACTION_SOURCE,
 );
 
 export const HealthQuery = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Health.Query",
   {
     subject: "rpc.v1.Health.Query",
@@ -103,13 +118,23 @@ export const HealthQuery = rpcAction(
     callerCapabilities: ["trellis.health::read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "HealthQuery",
   ACTION_SOURCE,
 );
 
 export const HealthStatusChanged = eventActions(
-  CONTRACT_ID,
+  API_ID,
   "Health.StatusChanged",
   {
     subject: "events.v1.Health.StatusChanged",
@@ -139,7 +164,7 @@ export const HealthStatusChanged = eventActions(
 );
 
 export const HealthWatch = feedAction(
-  CONTRACT_ID,
+  API_ID,
   "Health.Watch",
   {
     subject: "feed.v1.Health.Watch",

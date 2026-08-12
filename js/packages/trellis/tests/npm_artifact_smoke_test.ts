@@ -160,7 +160,7 @@ Deno.test("trellis npm SDK exports contain owner-only vocabulary", async () => {
     assertEquals(mod.includes('export * from "./types.js"'), true);
     assertEquals(mod.includes('export * from "./schemas.js"'), true);
     assertEquals(mod.includes("manifest"), false);
-    await assertNotExists(new URL(`${generatedDir}api.js`, import.meta.url));
+    await Deno.stat(new URL(`${generatedDir}api.js`, import.meta.url));
     await assertNotExists(new URL(`${generatedDir}client.js`, import.meta.url));
     await assertNotExists(
       new URL(`${generatedDir}contract.js`, import.meta.url),

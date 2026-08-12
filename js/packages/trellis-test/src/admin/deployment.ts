@@ -1,7 +1,7 @@
 import { createAuth } from "@qlever-llc/trellis";
 import {
-  type CompiledProtocolArtifacts,
-  compileProtocolArtifacts,
+  type NativeProtocolPresentation,
+  nativeProtocolPresentation,
 } from "@qlever-llc/trellis/contracts";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
@@ -13,11 +13,15 @@ import type {
 } from "../types.ts";
 import { waitFor } from "../wait.ts";
 import { recordTrellisDuration } from "./metrics.ts";
-import type { AdminRpc, TrellisTestAdminRpcMethod } from "./methods.ts";
+import type {
+  AdminRpc,
+  AdminRpcInput,
+  TrellisTestAdminRpcMethod,
+} from "./methods.ts";
 
 export type AdminDeploymentRpc = <M extends TrellisTestAdminRpcMethod>(
   method: M,
-  input: AdminRpc[M]["input"],
+  input: AdminRpcInput<M>,
 ) => Promise<AdminRpc[M]["output"]>;
 
 export type AdminDeploymentContext = {
@@ -27,7 +31,7 @@ export type AdminDeploymentContext = {
   createdDeployments: Map<string, Promise<void>>;
   deploymentIds: Map<string, string>;
   authorityIds: Map<string, string>;
-  protocolApis: Map<string, CompiledProtocolArtifacts["api"]>;
+  protocolApis: Map<string, NativeProtocolPresentation["api"]>;
   rpc: AdminDeploymentRpc;
 };
 
@@ -98,10 +102,7 @@ export async function approveContract(
   if (!deploymentId) {
     throw new Error(`Trellis deployment '${deployment}' was not created`);
   }
-  const artifacts = await compileProtocolArtifacts(
-    args.contract,
-    Object.fromEntries(context.protocolApis),
-  );
+  const artifacts = nativeProtocolPresentation(args.contract);
   const referencedApis = new Map(context.protocolApis);
   for (const api of artifacts.referencedApis) {
     referencedApis.set(String(api.id), api);
@@ -112,10 +113,7 @@ export async function approveContract(
     expiresAt: null,
     idempotencyKey: crypto.randomUUID(),
     participantArtifact: artifacts.participant,
-    referencedApiArtifacts: [
-      artifacts.api,
-      ...referencedApis.values(),
-    ],
+    referencedApiArtifacts: [artifacts.api, ...referencedApis.values()],
   });
   context.protocolApis.set(String(artifacts.api.id), artifacts.api);
   const classification = planned.proposal.classification;

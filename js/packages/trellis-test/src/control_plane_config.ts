@@ -81,6 +81,8 @@ export type TrellisControlPlaneOAuthProvider =
     clientSecret?: string;
     displayName?: string;
     scopes?: string[];
+    /** JSON Pointers selecting verified ID-token role claims. */
+    roleClaims?: string[];
     organization?: string;
     logout?: {
       enabled?: boolean;
@@ -124,6 +126,7 @@ export function buildControlPlaneConfig(args: {
   port: number;
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
   failOnceHooks?: readonly string[];
+  webOrigins?: readonly string[];
 }): TrellisControlPlaneConfig {
   const natsDir = join(args.natsWorkdir ?? args.workdir, "nats");
   const publicOrigin = `http://127.0.0.1:${args.port}`;
@@ -132,9 +135,13 @@ export function buildControlPlaneConfig(args: {
     port: args.port,
     instanceName: "Trellis Test",
     web: {
-      origins: [publicOrigin],
+      origins: [publicOrigin, ...(args.webOrigins ?? [])],
       publicOrigin,
-      allowInsecureOrigins: [publicOrigin, args.websocketUrl],
+      allowInsecureOrigins: [
+        publicOrigin,
+        args.websocketUrl,
+        ...(args.webOrigins ?? []),
+      ],
     },
     httpRateLimit: { windowMs: 60_000, max: 0 },
     storage: { dbPath: join(args.workdir, "trellis", "trellis.sqlite") },
@@ -267,6 +274,9 @@ single_writer = true
     }
     if (provider.type === "oidc" && provider.scopes) {
       providers += `scopes = ${strings(provider.scopes)}\n`;
+    }
+    if (provider.type === "oidc" && provider.roleClaims) {
+      providers += `role_claims = ${strings(provider.roleClaims)}\n`;
     }
   }
 

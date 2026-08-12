@@ -20,8 +20,11 @@ pub(crate) struct BrowserFlowResponse {
 pub(crate) struct BrowserFlowUser {
     origin: &'static str,
     id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     image: Option<String>,
 }
 
@@ -99,8 +102,17 @@ pub(crate) struct LocalLoginRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccountFlowResponse {
     status: &'static str,
+    flow_id: Option<String>,
     kind: Option<super::super::super::AccountFlowKind>,
+    allowed_providers: Option<Vec<String>>,
     expires_at: Option<i64>,
+    password_policy: Option<AccountFlowPasswordPolicy>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountFlowPasswordPolicy {
+    min_length: usize,
 }
 
 pub(crate) async fn get_account_flow<R, E>(
@@ -128,8 +140,11 @@ where
     else {
         return Ok(Json(AccountFlowResponse {
             status: "expired",
+            flow_id: None,
             kind: None,
+            allowed_providers: None,
             expires_at: None,
+            password_policy: None,
         }));
     };
     let status = if flow.state == AccountFlowState::Consumed {
@@ -141,8 +156,25 @@ where
     };
     Ok(Json(AccountFlowResponse {
         status,
+        flow_id: Some(flow_token),
         kind: Some(flow.kind),
+        allowed_providers: flow
+            .payload
+            .get("allowedProviders")
+            .and_then(serde_json::Value::as_array)
+            .map(|providers| {
+                providers
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            }),
         expires_at: Some(flow.expires_at),
+        password_policy: (flow.kind == super::super::super::AccountFlowKind::PasswordReset).then(
+            || AccountFlowPasswordPolicy {
+                min_length: state.service.password_min_length(),
+            },
+        ),
     }))
 }
 
@@ -177,7 +209,12 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    require_portal_origin(&headers, &state.public_origin)?;
+    if std::iter::once(&state.public_origin)
+        .chain(&state.allowed_redirect_origins)
+        .all(|origin| require_portal_origin(&headers, origin).is_err())
+    {
+        return Err(HttpError::forbidden("origin_mismatch"));
+    }
     let (token_hash, flow) = load_account_flow_by_token(state.service.repository(), &flow_token)
         .await?
         .ok_or_else(|| HttpError::gone("account_flow_expired"))?;
@@ -193,12 +230,13 @@ where
     if flow.kind == super::super::super::AccountFlowKind::PasswordReset {
         let outcome = state
             .service
-            .complete_password_reset(
-                flow_token,
-                flow.version,
-                &request.password,
-                now,
-                idempotency(
+            .complete_password_reset(CompletePasswordResetInput {
+                token: flow_token,
+                expected_flow_version: flow.version,
+                username: request.username,
+                password: request.password,
+                consumed_at: now,
+                idempotency: idempotency(
                     &token_hash,
                     "account.password.reset",
                     flow.target_principal_id
@@ -208,7 +246,7 @@ where
                     &request_digest,
                     now,
                 )?,
-                session_revocation_actions(
+                actions: session_revocation_actions(
                     flow.target_principal_id
                         .as_deref()
                         .unwrap_or("account-flow"),
@@ -219,12 +257,65 @@ where
                         "reason": "password_reset",
                     }),
                 ),
-            )
+            })
             .await?;
         return match outcome {
             IdempotentOutcome::Applied(flow) => Ok(Json(json!({
                 "status": "updated",
                 "userId": flow.target_principal_id,
+            }))),
+            IdempotentOutcome::Replayed(_) => Err(HttpError::conflict("account_flow_consumed")),
+        };
+    }
+    if flow.kind == super::super::super::AccountFlowKind::IdentityLink {
+        let username = super::super::super::account::normalize_username(
+            request
+                .username
+                .as_deref()
+                .ok_or_else(|| HttpError::bad_request("username_required"))?,
+        )?;
+        let principal_id = flow
+            .target_principal_id
+            .clone()
+            .ok_or_else(|| HttpError::internal("identity_link_target_missing"))?;
+        if state
+            .service
+            .repository()
+            .get_provider_identity("local", &username)
+            .await?
+            .is_some()
+        {
+            return Err(HttpError::conflict("local_identity_exists"));
+        }
+        let outcome = state
+            .service
+            .complete_identity_link(CompleteIdentityLinkInput {
+                token: flow_token,
+                expected_flow_version: flow.version,
+                identity: super::super::super::ProviderIdentityLink {
+                    provider: "local".to_owned(),
+                    provider_subject: username,
+                    principal_id: principal_id.clone(),
+                    linked_at: now,
+                    last_seen_at: now,
+                },
+                local_password: Some(request.password),
+                completed_at: now,
+                idempotency: idempotency(
+                    &token_hash,
+                    "account.identity.link",
+                    &principal_id,
+                    &token_hash,
+                    &request_digest,
+                    now,
+                )?,
+                actions: Vec::new(),
+            })
+            .await?;
+        return match outcome {
+            IdempotentOutcome::Applied(_) => Ok(Json(json!({
+                "status": "created",
+                "userId": principal_id,
             }))),
             IdempotentOutcome::Replayed(_) => Err(HttpError::conflict("account_flow_consumed")),
         };
@@ -347,6 +438,27 @@ where
         .ephemeral
         .replace_browser_flow(expected, flow.clone())
         .await?;
+    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+        &state,
+        flow.clone(),
+        ProviderLoginAttributes {
+            provider_id: "local".to_owned(),
+            roles: Vec::new(),
+        },
+        now,
+    )
+    .await?
+    {
+        let expected = flow.version;
+        approved.version += 1;
+        state
+            .ephemeral
+            .replace_browser_flow(expected, approved.clone())
+            .await?;
+        let mut response = flow_response(approved);
+        response.providers = vec!["local".to_owned()];
+        return Ok(Json(response));
+    }
     let expected = flow.version;
     flow.state = AuthBrowserFlowState::ApprovalRequired;
     flow.version += 1;
@@ -454,6 +566,25 @@ where
         .ephemeral
         .replace_browser_flow(expected, flow.clone())
         .await?;
+    if let Some(mut approved) = super::consent::apply_trusted_portal_authority(
+        &state,
+        flow.clone(),
+        ProviderLoginAttributes {
+            provider_id: "local".to_owned(),
+            roles: Vec::new(),
+        },
+        now,
+    )
+    .await?
+    {
+        let expected = flow.version;
+        approved.version += 1;
+        state
+            .ephemeral
+            .replace_browser_flow(expected, approved.clone())
+            .await?;
+        return Ok(Json(flow_response(approved)));
+    }
     let expected = flow.version;
     flow.state = AuthBrowserFlowState::ApprovalRequired;
     flow.version += 1;

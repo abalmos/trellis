@@ -330,10 +330,10 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
   assertEquals(controller.view, {
     mode: "activated",
     flowId: "device-flow",
+    confirmationCode: "1234",
     instanceId: "dev_123",
     deploymentId: "reader.default",
     activatedAt: "2026-04-21T12:34:56.000Z",
-    confirmationCode: "1234",
   });
 });
 
@@ -428,9 +428,9 @@ Deno.test("DeviceActivationController shows pending review from operation progre
   assertEquals(controller.view, {
     mode: "activated",
     flowId: "device-flow",
+    confirmationCode: "1234",
     instanceId: "dev_123",
     deploymentId: "reader.default",
     activatedAt: "2026-04-21T12:00:03.000Z",
-    confirmationCode: "1234",
   });
 });

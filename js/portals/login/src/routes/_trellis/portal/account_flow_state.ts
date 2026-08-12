@@ -177,7 +177,10 @@ async function parseJson(response: Response): Promise<unknown> {
 
 function responseErrorBody(value: unknown): string | null {
   if (!isRecord(value)) return null;
-  return typeof value.error === "string" ? value.error : null;
+  if (typeof value.error === "string") return value.error;
+  return isRecord(value.error) && typeof value.error.code === "string"
+    ? value.error.code
+    : null;
 }
 
 function responseErrorDetails(value: unknown): Record<string, unknown> | null {
@@ -308,13 +311,16 @@ export function parseAccountFlowState(value: unknown): AccountFlowState {
   }
 
   if (
-    body.status === "active" &&
+    (body.status === "active" || body.status === "pending") &&
     typeof body.flowId === "string" &&
     typeof body.kind === "string" &&
-    typeof body.expiresAt === "string"
+    (typeof body.expiresAt === "string" ||
+      (typeof body.expiresAt === "number" &&
+        Number.isSafeInteger(body.expiresAt)))
   ) {
     const target = parseTarget(body.target);
     const passwordPolicy = parsePasswordPolicy(body.passwordPolicy);
+    const allowedProviders = parseAllowedProviders(body.allowedProviders);
     return {
       status: "active",
       flowId: body.flowId,
@@ -322,11 +328,15 @@ export function parseAccountFlowState(value: unknown): AccountFlowState {
       ...(typeof body.targetUserId === "string"
         ? { targetUserId: body.targetUserId }
         : {}),
-      allowedProviders: parseAllowedProviders(body.allowedProviders),
+      allowedProviders,
       profileHint: isRecord(body.profileHint) ? body.profileHint : null,
-      expiresAt: body.expiresAt,
+      expiresAt: typeof body.expiresAt === "number"
+        ? new Date(body.expiresAt).toISOString()
+        : body.expiresAt,
       ...(passwordPolicy ? { passwordPolicy } : {}),
-      providers: parseProviders(body.providers),
+      providers: Array.isArray(body.providers)
+        ? parseProviders(body.providers)
+        : (allowedProviders ?? []).map((id) => ({ id, displayName: id })),
       ...(target ? { target } : {}),
       ...(safeRelativeReturnTo(body.returnTo)
         ? { returnTo: safeRelativeReturnTo(body.returnTo) }
@@ -419,7 +429,8 @@ export async function completeAccountFlowLocalPassword(
     );
   }
   if (
-    isRecord(body) && body.status === "created" &&
+    isRecord(body) &&
+    (body.status === "created" || body.status === "updated") &&
     typeof body.userId === "string"
   ) {
     const returnTo = safeRelativeReturnTo(body.returnTo);

@@ -69,7 +69,9 @@
       backlog += group.queued ?? 0;
       running += group.running ?? 0;
       slow += group.slow ?? 0;
-      for (const [state, count] of Object.entries(group.byState)) byState[state] = (byState[state] ?? 0) + count;
+      for (const [state, count] of Object.entries(group.byState)) {
+        if (typeof count === "number") byState[state] = (byState[state] ?? 0) + count;
+      }
     }
     const processed = metrics?.buckets.reduce(
       (total, bucket) => total + bucket.groups.reduce((sum, group) => sum + group.completed, 0),

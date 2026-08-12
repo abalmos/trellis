@@ -10,7 +10,7 @@ order: 90
 
 - [trellis-patterns.md](./trellis-patterns.md) - Trellis architecture and
   runtime boundaries
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   contract-owned surfaces and permission derivation
 
 ## Design

@@ -12,7 +12,7 @@ order: 15
 - [auth-api.md](./auth-api.md) - auth HTTP and RPC surfaces
 - [auth-protocol.md](./auth-protocol.md) - proofs, connect payloads, and
   pre-auth wait rules
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   device lineage, presented contract, and implementation-offer rules
 
 ## Context

@@ -90,4 +90,10 @@ where
     pub(crate) fn repository(&self) -> &R {
         &self.repository
     }
+
+    /// Return the configured minimum local-password length.
+    #[must_use]
+    pub(crate) fn password_min_length(&self) -> usize {
+        self.config.password_min_length
+    }
 }

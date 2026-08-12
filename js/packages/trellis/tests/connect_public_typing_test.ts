@@ -66,11 +66,29 @@ if (false) {
 }
 
 Deno.test("caller contracts expose direct selected descriptors", () => {
-  assertEquals(
-    appContract.CONTRACT.uses?.required?.["trellis.connect-typing-selection@v1"]
-      ?.rpc?.call,
-    ["Selection.Selected"],
-  );
+  const uses = appContract.PARTICIPANT.uses;
+  if (uses === null || typeof uses !== "object" || Array.isArray(uses)) {
+    throw new Error("participant uses are missing");
+  }
+  const required = uses.required;
+  if (
+    required === null || typeof required !== "object" ||
+    Array.isArray(required)
+  ) {
+    throw new Error("participant required uses are missing");
+  }
+  const selection = required["trellis.connect-typing-selection@v1"];
+  if (
+    selection === null || typeof selection !== "object" ||
+    Array.isArray(selection)
+  ) {
+    throw new Error("participant selection is missing");
+  }
+  const rpc = selection.rpc;
+  if (rpc === null || typeof rpc !== "object" || Array.isArray(rpc)) {
+    throw new Error("participant selection RPC is missing");
+  }
+  assertEquals(rpc.call, ["Selection.Selected"]);
   assertEquals(
     selectionContract.SelectionSelected.connectedName,
     "selectionSelected",

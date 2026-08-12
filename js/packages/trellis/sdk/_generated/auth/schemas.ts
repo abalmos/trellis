@@ -1,4 +1,4 @@
-// Generated from ./generated/apis/trellis.auth@v1.json
+// Generated from ./generated/protocol/apis/trellis.auth@v1.json
 export const AuthCapabilitiesListRequestSchema = {
   "properties": {
     "cursor": { "minLength": 1, "type": "string" },
@@ -99,6 +99,180 @@ export const AuthCapabilitiesListResponseSchema = {
     "nextCursor": { "type": ["string", "null"] },
   },
   "required": ["entries", "nextCursor"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsDeleteRequestSchema = {
+  "properties": {
+    "expectedVersion": { "minimum": 0, "type": "integer" },
+    "groupKey": { "minLength": 1, "type": "string" },
+    "idempotencyKey": { "minLength": 1, "type": "string" },
+  },
+  "required": ["groupKey", "expectedVersion", "idempotencyKey"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsDeleteResponseSchema = {
+  "properties": { "success": { "type": "boolean" } },
+  "required": ["success"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsGetRequestSchema = {
+  "properties": { "groupKey": { "minLength": 1, "type": "string" } },
+  "required": ["groupKey"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsGetResponseSchema = {
+  "properties": {
+    "group": {
+      "properties": {
+        "capabilities": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "createdAt": { "minimum": 0, "type": "integer" },
+        "description": { "type": "string" },
+        "displayName": { "minLength": 1, "type": "string" },
+        "groupKey": { "minLength": 1, "type": "string" },
+        "includedGroups": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "updatedAt": { "minimum": 0, "type": "integer" },
+        "version": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "groupKey",
+        "displayName",
+        "description",
+        "capabilities",
+        "includedGroups",
+        "createdAt",
+        "updatedAt",
+        "version",
+      ],
+      "type": "object",
+    },
+  },
+  "required": ["group"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsListRequestSchema = {
+  "properties": {
+    "limit": { "maximum": 500, "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["limit"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsListResponseSchema = {
+  "properties": {
+    "count": { "minimum": 0, "type": "integer" },
+    "entries": {
+      "items": {
+        "properties": {
+          "capabilities": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "createdAt": { "minimum": 0, "type": "integer" },
+          "description": { "type": "string" },
+          "displayName": { "minLength": 1, "type": "string" },
+          "groupKey": { "minLength": 1, "type": "string" },
+          "includedGroups": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "updatedAt": { "minimum": 0, "type": "integer" },
+          "version": { "minimum": 0, "type": "integer" },
+        },
+        "required": [
+          "groupKey",
+          "displayName",
+          "description",
+          "capabilities",
+          "includedGroups",
+          "createdAt",
+          "updatedAt",
+          "version",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "limit": { "minimum": 0, "type": "integer" },
+    "nextOffset": { "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["entries", "count", "offset", "limit"],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsPutRequestSchema = {
+  "properties": {
+    "capabilities": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array",
+    },
+    "description": { "minLength": 1, "type": "string" },
+    "displayName": { "minLength": 1, "type": "string" },
+    "expectedVersion": { "minimum": 0, "type": ["integer", "null"] },
+    "groupKey": { "minLength": 1, "type": "string" },
+    "idempotencyKey": { "minLength": 1, "type": "string" },
+    "includedGroups": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array",
+    },
+  },
+  "required": [
+    "groupKey",
+    "displayName",
+    "description",
+    "capabilities",
+    "includedGroups",
+    "expectedVersion",
+    "idempotencyKey",
+  ],
+  "type": "object",
+} as const;
+
+export const AuthCapabilityGroupsPutResponseSchema = {
+  "properties": {
+    "group": {
+      "properties": {
+        "capabilities": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "createdAt": { "minimum": 0, "type": "integer" },
+        "description": { "type": "string" },
+        "displayName": { "minLength": 1, "type": "string" },
+        "groupKey": { "minLength": 1, "type": "string" },
+        "includedGroups": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "updatedAt": { "minimum": 0, "type": "integer" },
+        "version": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "groupKey",
+        "displayName",
+        "description",
+        "capabilities",
+        "includedGroups",
+        "createdAt",
+        "updatedAt",
+        "version",
+      ],
+      "type": "object",
+    },
+  },
+  "required": ["group"],
   "type": "object",
 } as const;
 
@@ -6098,6 +6272,120 @@ export const AuthIdentityAuthorityRevokeResponseSchema = {
   "type": "object",
 } as const;
 
+export const AuthIdentityGrantsListRequestSchema = {
+  "properties": {
+    "limit": { "maximum": 500, "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+    "user": { "minLength": 1, "type": "string" },
+  },
+  "required": ["limit"],
+  "type": "object",
+} as const;
+
+export const AuthIdentityGrantsListResponseSchema = {
+  "properties": {
+    "count": { "minimum": 0, "type": "integer" },
+    "entries": {
+      "default": [],
+      "items": {
+        "properties": {
+          "capabilities": { "items": { "type": "string" }, "type": "array" },
+          "contractEvidence": {
+            "properties": {
+              "contractDigest": {
+                "pattern": "^[A-Za-z0-9_-]+$",
+                "type": "string",
+              },
+              "contractId": { "minLength": 1, "type": "string" },
+            },
+            "required": ["contractDigest", "contractId"],
+            "type": "object",
+          },
+          "description": { "minLength": 1, "type": "string" },
+          "displayName": { "minLength": 1, "type": "string" },
+          "grantedAt": { "format": "date-time", "type": "string" },
+          "identityAnchor": {
+            "anyOf": [{
+              "properties": {
+                "contractId": { "minLength": 1, "type": "string" },
+                "kind": { "const": "web", "type": "string" },
+                "origin": { "minLength": 1, "type": "string" },
+              },
+              "required": ["kind", "contractId", "origin"],
+              "type": "object",
+            }, {
+              "properties": {
+                "contractId": { "minLength": 1, "type": "string" },
+                "kind": { "const": "cli", "type": "string" },
+                "sessionPublicKey": { "minLength": 1, "type": "string" },
+              },
+              "required": ["kind", "contractId", "sessionPublicKey"],
+              "type": "object",
+            }, {
+              "properties": {
+                "contractId": { "minLength": 1, "type": "string" },
+                "kind": { "const": "native", "type": "string" },
+                "sessionPublicKey": { "minLength": 1, "type": "string" },
+              },
+              "required": ["kind", "contractId", "sessionPublicKey"],
+              "type": "object",
+            }, {
+              "properties": {
+                "contractId": { "minLength": 1, "type": "string" },
+                "devicePublicKey": { "minLength": 1, "type": "string" },
+                "kind": { "const": "device-user", "type": "string" },
+              },
+              "required": ["kind", "contractId", "devicePublicKey"],
+              "type": "object",
+            }],
+          },
+          "identityGrantId": { "minLength": 1, "type": "string" },
+          "participantKind": {
+            "anyOf": [{ "const": "app", "type": "string" }, {
+              "const": "agent",
+              "type": "string",
+            }],
+          },
+          "updatedAt": { "format": "date-time", "type": "string" },
+        },
+        "required": [
+          "identityGrantId",
+          "identityAnchor",
+          "contractEvidence",
+          "displayName",
+          "description",
+          "participantKind",
+          "capabilities",
+          "grantedAt",
+          "updatedAt",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "limit": { "minimum": 0, "type": "integer" },
+    "nextOffset": { "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["entries", "count", "offset", "limit"],
+  "type": "object",
+} as const;
+
+export const AuthIdentityGrantsRevokeRequestSchema = {
+  "properties": {
+    "identityGrantId": { "minLength": 1, "type": "string" },
+    "user": { "minLength": 1, "type": "string" },
+  },
+  "required": ["identityGrantId"],
+  "type": "object",
+} as const;
+
+export const AuthIdentityGrantsRevokeResponseSchema = {
+  "properties": { "success": { "type": "boolean" } },
+  "required": ["success"],
+  "type": "object",
+} as const;
+
 export const AuthPortalsGetRequestSchema = {
   "properties": { "portalId": { "minLength": 1, "type": "string" } },
   "required": ["portalId"],
@@ -6208,6 +6496,268 @@ export const AuthPortalsGetResponseSchema = {
     },
   },
   "required": ["portal", "routes"],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesListRequestSchema = {
+  "properties": {
+    "limit": { "maximum": 500, "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+    "participantId": { "minLength": 1, "type": "string" },
+    "portalId": { "minLength": 1, "type": "string" },
+  },
+  "required": ["limit"],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesListResponseSchema = {
+  "properties": {
+    "count": { "minimum": 0, "type": "integer" },
+    "entries": {
+      "items": {
+        "properties": {
+          "capabilityGroupKeys": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "createdAt": { "minimum": 0, "type": "integer" },
+          "directCapabilities": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "participantId": { "minLength": 1, "type": "string" },
+          "portalId": { "minLength": 1, "type": "string" },
+          "roleMappings": {
+            "items": {
+              "properties": {
+                "capabilityGroupKeys": {
+                  "items": { "minLength": 1, "type": "string" },
+                  "type": "array",
+                },
+                "directCapabilities": {
+                  "items": { "minLength": 1, "type": "string" },
+                  "type": "array",
+                },
+                "providerId": { "minLength": 1, "type": "string" },
+                "role": { "minLength": 1, "type": "string" },
+              },
+              "required": [
+                "providerId",
+                "role",
+                "directCapabilities",
+                "capabilityGroupKeys",
+              ],
+              "type": "object",
+            },
+            "type": "array",
+          },
+          "updatedAt": { "minimum": 0, "type": "integer" },
+          "version": { "minimum": 0, "type": "integer" },
+        },
+        "required": [
+          "portalId",
+          "participantId",
+          "directCapabilities",
+          "capabilityGroupKeys",
+          "roleMappings",
+          "createdAt",
+          "updatedAt",
+          "version",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "limit": { "minimum": 0, "type": "integer" },
+    "nextOffset": { "minimum": 0, "type": "integer" },
+    "offset": { "minimum": 0, "type": "integer" },
+  },
+  "required": ["entries", "count", "offset", "limit"],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesPutRequestSchema = {
+  "properties": {
+    "capabilityGroupKeys": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array",
+    },
+    "directCapabilities": {
+      "items": { "minLength": 1, "type": "string" },
+      "type": "array",
+    },
+    "expectedVersion": { "minimum": 0, "type": ["integer", "null"] },
+    "idempotencyKey": { "minLength": 1, "type": "string" },
+    "participantId": { "minLength": 1, "type": "string" },
+    "portalId": { "minLength": 1, "type": "string" },
+    "roleMappings": {
+      "items": {
+        "properties": {
+          "capabilityGroupKeys": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "directCapabilities": {
+            "items": { "minLength": 1, "type": "string" },
+            "type": "array",
+          },
+          "providerId": { "minLength": 1, "type": "string" },
+          "role": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "providerId",
+          "role",
+          "directCapabilities",
+          "capabilityGroupKeys",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+  },
+  "required": [
+    "portalId",
+    "participantId",
+    "directCapabilities",
+    "capabilityGroupKeys",
+    "roleMappings",
+    "expectedVersion",
+    "idempotencyKey",
+  ],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesPutResponseSchema = {
+  "properties": {
+    "policy": {
+      "properties": {
+        "capabilityGroupKeys": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "createdAt": { "minimum": 0, "type": "integer" },
+        "directCapabilities": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "participantId": { "minLength": 1, "type": "string" },
+        "portalId": { "minLength": 1, "type": "string" },
+        "roleMappings": {
+          "items": {
+            "properties": {
+              "capabilityGroupKeys": {
+                "items": { "minLength": 1, "type": "string" },
+                "type": "array",
+              },
+              "directCapabilities": {
+                "items": { "minLength": 1, "type": "string" },
+                "type": "array",
+              },
+              "providerId": { "minLength": 1, "type": "string" },
+              "role": { "minLength": 1, "type": "string" },
+            },
+            "required": [
+              "providerId",
+              "role",
+              "directCapabilities",
+              "capabilityGroupKeys",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "updatedAt": { "minimum": 0, "type": "integer" },
+        "version": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "portalId",
+        "participantId",
+        "directCapabilities",
+        "capabilityGroupKeys",
+        "roleMappings",
+        "createdAt",
+        "updatedAt",
+        "version",
+      ],
+      "type": "object",
+    },
+  },
+  "required": ["policy"],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesRemoveRequestSchema = {
+  "properties": {
+    "expectedVersion": { "minimum": 0, "type": "integer" },
+    "idempotencyKey": { "minLength": 1, "type": "string" },
+    "participantId": { "minLength": 1, "type": "string" },
+    "portalId": { "minLength": 1, "type": "string" },
+  },
+  "required": [
+    "portalId",
+    "participantId",
+    "expectedVersion",
+    "idempotencyKey",
+  ],
+  "type": "object",
+} as const;
+
+export const AuthPortalsGrantOverridesRemoveResponseSchema = {
+  "properties": {
+    "removed": {
+      "properties": {
+        "capabilityGroupKeys": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "createdAt": { "minimum": 0, "type": "integer" },
+        "directCapabilities": {
+          "items": { "minLength": 1, "type": "string" },
+          "type": "array",
+        },
+        "participantId": { "minLength": 1, "type": "string" },
+        "portalId": { "minLength": 1, "type": "string" },
+        "roleMappings": {
+          "items": {
+            "properties": {
+              "capabilityGroupKeys": {
+                "items": { "minLength": 1, "type": "string" },
+                "type": "array",
+              },
+              "directCapabilities": {
+                "items": { "minLength": 1, "type": "string" },
+                "type": "array",
+              },
+              "providerId": { "minLength": 1, "type": "string" },
+              "role": { "minLength": 1, "type": "string" },
+            },
+            "required": [
+              "providerId",
+              "role",
+              "directCapabilities",
+              "capabilityGroupKeys",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "updatedAt": { "minimum": 0, "type": "integer" },
+        "version": { "minimum": 0, "type": "integer" },
+      },
+      "required": [
+        "portalId",
+        "participantId",
+        "directCapabilities",
+        "capabilityGroupKeys",
+        "roleMappings",
+        "createdAt",
+        "updatedAt",
+        "version",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [],
   "type": "object",
 } as const;
 

@@ -472,7 +472,7 @@ async function rewriteSdkWrapperTargets() {
     for (const format of ["esm", "script"]) {
       for (const extension of ["js", "d.ts"]) {
         const fileUrl = new URL(
-          `../npm/${format}/sdk/${sdkName}_manifest.${extension}`,
+          `../npm/${format}/sdk/${sdkName}_api.${extension}`,
           import.meta.url,
         );
         const original = await Deno.readTextFile(fileUrl).catch((error) => {
@@ -481,8 +481,8 @@ async function rewriteSdkWrapperTargets() {
         });
         if (original === undefined) continue;
         const updated = original.replaceAll(
-          `./_generated/${sdkName}/manifest.js`,
-          `../generated-sdk/${sdkDir}/manifest.js`,
+          `./_generated/${sdkName}/api.js`,
+          `../generated-sdk/${sdkDir}/api.js`,
         );
         if (updated !== original) await Deno.writeTextFile(fileUrl, updated);
       }

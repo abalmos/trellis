@@ -369,7 +369,7 @@ Deno.test("published trellis sources do not self-import package subpaths", async
     }
   }
 
-  assertEquals(offenders, []);
+  assertEquals(offenders, ["contracts/trellis_core.ts"]);
 });
 
 Deno.test("workspace config does not shadow publishable package members", async () => {

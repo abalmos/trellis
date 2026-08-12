@@ -25,17 +25,17 @@
   let selectedUserNkey = $state("");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const selectedConnection = $derived(connections.find((connection) => connection.userNkey === selectedUserNkey) ?? null);
+  const selectedConnection = $derived(connections.find((connection) => connection.connectionId === selectedUserNkey) ?? null);
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsList({ limit: 500, offset: 0 }).take();
+      const response = await trellis.authConnectionsList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       connections = response.entries ?? [];
       const requestedUserNkey = page.url.searchParams.get("userNkey");
-      selectedUserNkey = requestedUserNkey && connections.some((connection) => connection.userNkey === requestedUserNkey) ? requestedUserNkey : (connections[0]?.userNkey ?? "");
+      selectedUserNkey = requestedUserNkey && connections.some((connection) => connection.connectionId === requestedUserNkey) ? requestedUserNkey : (connections[0]?.connectionId ?? "");
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -49,7 +49,11 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsKick({ userNkey: selectedConnection.userNkey } satisfies AuthConnectionsKickInput).take();
+      const response = await trellis.authConnectionsKick({
+        connectionId: selectedConnection.connectionId,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
+      } satisfies AuthConnectionsKickInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Disconnected ${summary.title}.`, "Kicked");
       await load();
@@ -68,8 +72,8 @@
       message: "This immediately disconnects the selected active connection.",
       confirmLabel: "Kick connection",
       targetLabel: summary.title,
-      targetName: selectedConnection.userNkey,
-      expectedValue: selectedConnection.userNkey,
+      targetName: selectedConnection.connectionId,
+      expectedValue: selectedConnection.connectionId,
     });
     if (confirmed) await kickConnection();
   }
@@ -100,9 +104,9 @@
         <label class="form-control gap-1">
           <span class="label-text text-xs">Connection</span>
           <select class="select select-bordered select-sm" bind:value={selectedUserNkey} required>
-            {#each connections as connection (connection.key)}
+            {#each connections as connection (connection.connectionId)}
               {@const summary = describeSessionPrincipal(connection)}
-              <option value={connection.userNkey}>{summary.title} — {formatShortKey(connection.userNkey)}</option>
+              <option value={connection.connectionId}>{summary.title} — {formatShortKey(connection.userNkey)}</option>
             {/each}
           </select>
         </label>
@@ -111,7 +115,7 @@
           {@const summary = describeSessionPrincipal(selectedConnection)}
           <div class="rounded-box border border-base-300 p-3 text-sm">
             <div class="font-medium">{summary.title}</div>
-            <div class="text-base-content/60">{participantKindLabel(selectedConnection.participantKind)}</div>
+            <div class="text-base-content/60">Connection</div>
             <div class="trellis-identifier text-base-content/60">{selectedConnection.userNkey}</div>
             <div class="text-xs text-base-content/60">Connected {formatDate(selectedConnection.connectedAt)}</div>
           </div>

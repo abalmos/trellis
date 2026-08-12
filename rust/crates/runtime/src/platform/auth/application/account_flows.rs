@@ -154,6 +154,8 @@ pub struct CompleteIdentityLinkInput {
     pub expected_flow_version: u64,
     /// Exact provider identity link.
     pub identity: ProviderIdentityLink,
+    /// Password used only when linking a local identity.
+    pub local_password: Option<String>,
     /// Completion time in Unix milliseconds.
     pub completed_at: i64,
     /// Durable proof claim and replay result.
@@ -514,6 +516,35 @@ where
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("completedAt", input.completed_at)?;
         super::super::authority::validate_provider_identity(&input.identity)?;
+        let credential = match (input.identity.provider.as_str(), input.local_password) {
+            ("local", Some(password)) => {
+                let username = normalize_username(&input.identity.provider_subject)?;
+                if username != input.identity.provider_subject {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "local provider subject must be a normalized username".to_owned(),
+                    ));
+                }
+                let (password_hash, hash_profile) =
+                    hash_password(&password, Some(self.config.password_min_length))?;
+                Some(LocalCredentialRecord {
+                    principal_id: input.identity.principal_id.clone(),
+                    normalized_username: username,
+                    password_hash,
+                    hash_profile,
+                    failed_attempts: 0,
+                    locked_until: None,
+                    password_changed_at: input.completed_at,
+                    updated_at: input.completed_at,
+                    version: 1,
+                })
+            }
+            ("local", None) | (_, Some(_)) => {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "local identity links require a password".to_owned(),
+                ));
+            }
+            (_, None) => None,
+        };
         let token_hash = bearer_secret_digest(&input.token)?;
         input.idempotency.result = json!({
             "principalId": input.identity.principal_id,
@@ -524,6 +555,7 @@ where
                 token_hash,
                 expected_flow_version: input.expected_flow_version,
                 identity: input.identity,
+                credential,
                 consumed_at: input.completed_at,
                 idempotency: input.idempotency,
                 actions: input.actions,

@@ -22,7 +22,7 @@ time:
 - architecture and package-ownership decisions
 - invariants, lifecycle rules, and system rules
 - protocol, wire, and authorization semantics
-- durable data structures, manifest formats, and compatibility rules
+- durable data structures, native API formats, and compatibility rules
 - runtime behavior that language libraries must preserve
 
 Use the docs site for reader-facing and language-specific material:
@@ -55,14 +55,14 @@ These headings are intentionally named for fast human and AI lookup.
 
 ## Core Platform Docs
 
-| Document                                 | Read When                                                                | Why                                                                                 |
-| ---------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `core/trellis-patterns.md`               | You need Trellis-wide architecture rules                                 | Service categories, platform boundaries, communication patterns                     |
-| `auth/trellis-auth.md`                   | You are changing auth architecture                                       | Identity model, identity authority, deployment authority, auth subsystem boundaries |
-| `auth/rust-authorization-state.md`       | You are changing Rust-owned auth state or materialization                | Durable records, exact authority materialization, issuable-state boundary           |
-| `auth/rust-auth-service-ownership.md`    | You are changing external auth, bootstrap, session, or callout ownership | TypeScript inventory and permanent Rust cutover boundaries                          |
-| `auth/device-activation.md`              | You are changing device preregistration or device activation             | Known-device activation flow, connect info, profiles, online activation             |
-| `contracts/trellis-contracts-catalog.md` | You are changing manifests, codegen inputs, or permission derivation     | Canonical contract format, `uses`, subject ownership, activation rules              |
+| Document                                | Read When                                                                | Why                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `core/trellis-patterns.md`              | You need Trellis-wide architecture rules                                 | Service categories, platform boundaries, communication patterns                     |
+| `auth/trellis-auth.md`                  | You are changing auth architecture                                       | Identity model, identity authority, deployment authority, auth subsystem boundaries |
+| `auth/rust-authorization-state.md`      | You are changing Rust-owned auth state or materialization                | Durable records, exact authority materialization, issuable-state boundary           |
+| `auth/rust-auth-service-ownership.md`   | You are changing external auth, bootstrap, session, or callout ownership | TypeScript inventory and permanent Rust cutover boundaries                          |
+| `auth/device-activation.md`             | You are changing device preregistration or device activation             | Known-device activation flow, connect info, profiles, online activation             |
+| `contracts/trellis-api-participants.md` | You are changing manifests, codegen inputs, or permission derivation     | Canonical contract format, `uses`, subject ownership, activation rules              |
 
 ## Subsystem Design Docs
 
@@ -119,14 +119,14 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `operations/trellis-operations.md`
 2. `auth/trellis-auth.md`
-3. `contracts/trellis-contracts-catalog.md`
+3. `contracts/trellis-api-participants.md`
 4. `/api` for exact TypeScript signatures
 
 ### Implement Trellis operations in Rust
 
 1. `operations/trellis-operations.md`
 2. `auth/trellis-auth.md`
-3. `contracts/trellis-contracts-catalog.md`
+3. `contracts/trellis-api-participants.md`
 4. `/api` for Rustdoc links
 
 ### Implement Trellis jobs in TypeScript
@@ -135,7 +135,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 2. `core/service-development.md`
 3. `operations/trellis-operations.md` only if the jobs attach to public
    operations
-4. `contracts/trellis-contracts-catalog.md` when changing job-owned resources,
+4. `contracts/trellis-api-participants.md` when changing job-owned resources,
    bindings, or provisioning surfaces
 5. `/api` for exact TypeScript signatures
 
@@ -145,7 +145,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 2. `core/service-development.md`
 3. `operations/trellis-operations.md` only if the jobs attach to public
    operations
-4. `contracts/trellis-contracts-catalog.md` when changing job-owned resources,
+4. `contracts/trellis-api-participants.md` when changing job-owned resources,
    bindings, or provisioning surfaces
 5. `/api` for Rustdoc links
 
@@ -170,13 +170,13 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 ### Work on store resources
 
 1. `core/store-resource-patterns.md`
-2. `contracts/trellis-contracts-catalog.md`
+2. `contracts/trellis-api-participants.md`
 3. `/api` if the public runtime API changes
 
 ### Work on contract state
 
 1. `core/state-patterns.md`
-2. `contracts/trellis-contracts-catalog.md`
+2. `contracts/trellis-api-participants.md`
 3. `contracts/trellis-typescript-contract-authoring.md` when changing TS
    authoring
 4. `/api` for exact TypeScript state helper signatures
@@ -197,7 +197,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `core/service-development.md`
 2. `contracts/trellis-typescript-contract-authoring.md`
-3. `contracts/trellis-contracts-catalog.md`
+3. `contracts/trellis-api-participants.md`
 4. `core/platform-libraries.md`
 5. `/api` for exact TypeScript signatures
 
@@ -206,7 +206,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 1. `auth/device-activation.md`
 2. `auth/trellis-auth.md`
 3. `contracts/trellis-typescript-contract-authoring.md`
-4. `contracts/trellis-contracts-catalog.md`
+4. `contracts/trellis-api-participants.md`
 5. `core/platform-libraries.md`
 6. `/api` for exact TypeScript signatures
 
@@ -219,11 +219,11 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `core/capability-patterns.md`
 2. `auth/trellis-auth.md`
-3. `contracts/trellis-contracts-catalog.md`
+3. `contracts/trellis-api-participants.md`
 
 ### Change manifests, codegen, or discovery
 
-1. `contracts/trellis-contracts-catalog.md`
+1. `contracts/trellis-api-participants.md`
 2. `contracts/trellis-typescript-contract-authoring.md` or
    `contracts/trellis-rust-contract-libraries.md`
 3. relevant subsystem design doc
@@ -232,13 +232,13 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 ### Implement TypeScript contract/runtime surfaces
 
 1. `contracts/trellis-typescript-contract-authoring.md`
-2. `contracts/trellis-contracts-catalog.md`
+2. `contracts/trellis-api-participants.md`
 3. `/api` for exact TypeScript signatures
 
 ### Implement Rust contract/runtime surfaces
 
 1. `contracts/trellis-rust-contract-libraries.md`
-2. `contracts/trellis-contracts-catalog.md`
+2. `contracts/trellis-api-participants.md`
 3. `/api` for Rustdoc links
 
 ### Change auth or operation watch behavior
@@ -252,7 +252,7 @@ For ordinary app/service library usage, prefer `/guides/libraries/typescript`,
 
 1. `auth/trellis-auth.md`
 2. `auth/auth-protocol.md`
-3. `contracts/trellis-contracts-catalog.md`
+3. `contracts/trellis-api-participants.md`
 
 ### Implement auth HTTP or RPC APIs
 

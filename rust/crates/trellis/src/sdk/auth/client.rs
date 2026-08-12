@@ -60,6 +60,66 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
+    /// Call `Auth.CapabilityGroups.Delete`.
+    pub async fn capability_groups_delete(
+        &self,
+        input: &super::types::AuthCapabilityGroupsDeleteRequest,
+    ) -> Result<
+        super::types::AuthCapabilityGroupsDeleteResponse,
+        crate::generated::CallError<super::rpc::AuthCapabilityGroupsDeleteError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthCapabilityGroupsDeleteRpc,
+                super::rpc::AuthCapabilityGroupsDeleteError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.CapabilityGroups.Get`.
+    pub async fn capability_groups_get(
+        &self,
+        input: &super::types::AuthCapabilityGroupsGetRequest,
+    ) -> Result<
+        super::types::AuthCapabilityGroupsGetResponse,
+        crate::generated::CallError<super::rpc::AuthCapabilityGroupsGetError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthCapabilityGroupsGetRpc,
+                super::rpc::AuthCapabilityGroupsGetError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.CapabilityGroups.List`.
+    pub async fn capability_groups_list(
+        &self,
+        input: &super::types::AuthCapabilityGroupsListRequest,
+    ) -> Result<
+        super::types::AuthCapabilityGroupsListResponse,
+        crate::generated::CallError<super::rpc::AuthCapabilityGroupsListError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthCapabilityGroupsListRpc,
+                super::rpc::AuthCapabilityGroupsListError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.CapabilityGroups.Put`.
+    pub async fn capability_groups_put(
+        &self,
+        input: &super::types::AuthCapabilityGroupsPutRequest,
+    ) -> Result<
+        super::types::AuthCapabilityGroupsPutResponse,
+        crate::generated::CallError<super::rpc::AuthCapabilityGroupsPutError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthCapabilityGroupsPutRpc,
+                super::rpc::AuthCapabilityGroupsPutError,
+            >(input)
+            .await
+    }
     /// Call `Auth.Connections.Kick`.
     pub async fn connections_kick(
         &self,
@@ -486,6 +546,36 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
+    /// Call `Auth.IdentityGrants.List`.
+    pub async fn identity_grants_list(
+        &self,
+        input: &super::types::AuthIdentityGrantsListRequest,
+    ) -> Result<
+        super::types::AuthIdentityGrantsListResponse,
+        crate::generated::CallError<super::rpc::AuthIdentityGrantsListError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthIdentityGrantsListRpc,
+                super::rpc::AuthIdentityGrantsListError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.IdentityGrants.Revoke`.
+    pub async fn identity_grants_revoke(
+        &self,
+        input: &super::types::AuthIdentityGrantsRevokeRequest,
+    ) -> Result<
+        super::types::AuthIdentityGrantsRevokeResponse,
+        crate::generated::CallError<super::rpc::AuthIdentityGrantsRevokeError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthIdentityGrantsRevokeRpc,
+                super::rpc::AuthIdentityGrantsRevokeError,
+            >(input)
+            .await
+    }
     /// Call `Auth.Portals.Get`.
     pub async fn portals_get(
         &self,
@@ -496,6 +586,51 @@ impl<'a> AuthRpc<'a> {
     > {
         self.inner
             .call_typed::<super::rpc::AuthPortalsGetRpc, super::rpc::AuthPortalsGetError>(input)
+            .await
+    }
+    /// Call `Auth.Portals.GrantOverrides.List`.
+    pub async fn portals_grant_overrides_list(
+        &self,
+        input: &super::types::AuthPortalsGrantOverridesListRequest,
+    ) -> Result<
+        super::types::AuthPortalsGrantOverridesListResponse,
+        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesListError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthPortalsGrantOverridesListRpc,
+                super::rpc::AuthPortalsGrantOverridesListError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.Portals.GrantOverrides.Put`.
+    pub async fn portals_grant_overrides_put(
+        &self,
+        input: &super::types::AuthPortalsGrantOverridesPutRequest,
+    ) -> Result<
+        super::types::AuthPortalsGrantOverridesPutResponse,
+        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesPutError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthPortalsGrantOverridesPutRpc,
+                super::rpc::AuthPortalsGrantOverridesPutError,
+            >(input)
+            .await
+    }
+    /// Call `Auth.Portals.GrantOverrides.Remove`.
+    pub async fn portals_grant_overrides_remove(
+        &self,
+        input: &super::types::AuthPortalsGrantOverridesRemoveRequest,
+    ) -> Result<
+        super::types::AuthPortalsGrantOverridesRemoveResponse,
+        crate::generated::CallError<super::rpc::AuthPortalsGrantOverridesRemoveError>,
+    > {
+        self.inner
+            .call_typed::<
+                super::rpc::AuthPortalsGrantOverridesRemoveRpc,
+                super::rpc::AuthPortalsGrantOverridesRemoveError,
+            >(input)
             .await
     }
     /// Call `Auth.Portals.List`.

@@ -43,7 +43,6 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Identity(command) => auth::identity(format, command).await?,
         TopLevelCommand::Users(command) => auth::users(format, command).await?,
         TopLevelCommand::Portals(command) => auth::portals(format, command).await?,
-        TopLevelCommand::Grants(command) => deploy::run_grants(format, command).await?,
         TopLevelCommand::Svc(command) => deploy::run_svc(format, command).await?,
         TopLevelCommand::Dev(command) => deploy::run_dev(format, command).await?,
         TopLevelCommand::Infra(command) => bootstrap::infra(format, command).await?,

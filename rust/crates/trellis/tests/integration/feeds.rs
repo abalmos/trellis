@@ -3,24 +3,21 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
-use trellis_rs::service::GeneratedServiceContract;
 
 use crate::support::assertions::assert_case_registered;
 
 const FEEDS_SERVICE_ID: &str = "trellis.integration.feeds-service@v1";
 const FEEDS_CLIENT_ID: &str = "trellis.integration.feeds-client@v1";
 
-const FEEDS_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const FEEDS_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.feeds-service@v1",
   "displayName": "Trellis Integration Feeds Service",
   "description": "Exercises generated feed subscribe and handler surfaces.",
-  "kind": "service",
   "capabilities": {
-    "trellis.integration.feeds-service::readFeeds": {
-      "displayName": "Read feeds",
-      "description": "Subscribe to entity feed updates."
-    }
+    "readFeeds": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.feeds-service@v1", "surface": "feed", "name": "Entity.Live"}, "action": "subscribe"}
+    ]}
   },
   "schemas": {
     "FeedInput": {
@@ -41,21 +38,13 @@ const FEEDS_SERVICE_CONTRACT_JSON: &str = r#"{
   "feeds": {
     "Entity.Live": {
       "version": "v1",
-      "subject": "feeds.v1.Entity.Live",
       "input": { "schema": "FeedInput" },
-      "event": { "schema": "FeedFrame" },
-      "capabilities": { "subscribe": ["readFeeds"] }
+      "event": { "schema": "FeedFrame" }
     }
   }
 }"#;
 
 struct FeedsServiceContract;
-
-impl trellis_rs::service::GeneratedServiceContract for FeedsServiceContract {
-    const CONTRACT_ID: &'static str = FEEDS_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "qvVpkRAxOjqK8Ft6sV6Y_ZNfVtumEQwEkAF5awKgXO8";
-    const CONTRACT_JSON: &'static str = FEEDS_SERVICE_CONTRACT_JSON;
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityFeedInput {
@@ -124,15 +113,14 @@ async fn feeds_client_receives_first_frame() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(FEEDS_SERVICE_CONTRACT_JSON)
-            .expect("build feeds service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        FeedsServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build feeds service test contract");
 
-    let client_contract = feeds_client_contract().expect("build feeds client test contract");
+    let client_contract =
+        feeds_client_contract(&service_contract).expect("build feeds client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -192,15 +180,14 @@ async fn feeds_client_receives_ordered_frames() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(FEEDS_SERVICE_CONTRACT_JSON)
-            .expect("build feeds service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        FeedsServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build feeds service test contract");
 
-    let client_contract = feeds_client_contract().expect("build feeds client test contract");
+    let client_contract =
+        feeds_client_contract(&service_contract).expect("build feeds client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -275,15 +262,14 @@ async fn feeds_abort_stops_client_subscription() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(FEEDS_SERVICE_CONTRACT_JSON)
-            .expect("build feeds service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        FeedsServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build feeds service test contract");
 
-    let client_contract = feeds_client_contract().expect("build feeds client test contract");
+    let client_contract =
+        feeds_client_contract(&service_contract).expect("build feeds client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -356,15 +342,13 @@ async fn feeds_denies_subscribe_without_authority() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(FEEDS_SERVICE_CONTRACT_JSON)
-            .expect("build feeds service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        FeedsServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        FEEDS_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build feeds service test contract");
 
-    let unauthorized_client_contract = feeds_unauthorized_client_contract()
+    let unauthorized_client_contract = feeds_unauthorized_client_contract(&service_contract)
         .expect("build feeds unauthorized client test contract");
 
     admin
@@ -445,8 +429,9 @@ fn is_retryable_feed_error(error: &trellis_rs::generated::TrellisClientError) ->
 }
 
 fn feeds_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         FEEDS_CLIENT_ID,
         "Trellis Integration Feeds Client",
         "App/client participant for the feeds integration fixture.",
@@ -455,21 +440,26 @@ fn feeds_client_contract(
     .use_ref(
         "feedsService",
         trellis_rs::contracts::use_contract(FEEDS_SERVICE_ID).with_feed_subscribe(["Entity.Live"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }
 
 fn feeds_unauthorized_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.feeds-unauthorized-client@v1",
         "Trellis Integration Feeds Unauthorized Client",
         "App/client participant without feed subscribe authority.",
         trellis_rs::contracts::ContractKind::App,
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

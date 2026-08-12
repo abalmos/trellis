@@ -64,7 +64,11 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.authCapabilityGroupsDelete({ groupKey: group.groupKey }).take();
+      const response = await trellis.authCapabilityGroupsDelete({
+        groupKey: group.groupKey,
+        expectedVersion: group.version,
+        idempotencyKey: crypto.randomUUID(),
+      }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;

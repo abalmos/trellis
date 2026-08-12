@@ -16,27 +16,26 @@ use trellis_participant_demo_service::{
 };
 use trellis_rs::jobs;
 use trellis_rs::service::{
-    AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime,
-    KvHandle, OperationDescriptor, OperationFailure, OperationRefData, OperationSnapshot,
-    OperationState, OperationTransferProgress, RequestContext, ServerError, ServiceOperation,
+    AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime, KvHandle,
+    OperationDescriptor, OperationFailure, OperationRefData, OperationSnapshot, OperationState,
+    OperationTransferProgress, RequestContext, ServerError, ServiceOperation,
     ServiceOperationProvider, StoreHandle, StoreResourceClient, UploadTransferGrant,
     UploadTransferSession,
 };
 use trellis_sdk_demo_service::operations as sdk_operations;
 use trellis_sdk_demo_service::types::{
     AssignmentsListRequest, AssignmentsListResponse, AssignmentsListResponseEntriesItem,
-    AssignmentsListResponseEntriesItemPriority, AuditRecordedEvent,
-    EvidenceDeleteRequest, EvidenceDeleteResponse, EvidenceDownloadRequest,
-    EvidenceDownloadResponse, EvidenceDownloadResponseTransfer,
-    EvidenceDownloadResponseTransferDirection, EvidenceDownloadResponseTransferInfo,
-    EvidenceDownloadResponseTransferType, EvidenceListRequest, EvidenceListResponse,
-    EvidenceListResponseEntriesItem, EvidenceUploadInput, EvidenceUploadOutput,
-    EvidenceUploadProgress, EvidenceUploadedEvent, ReportsGenerateInput, ReportsGenerateOutput,
-    ReportsGenerateProgress, ReportsListRequest, ReportsListResponse,
-    ReportsListResponseEntriesItem, ReportsPublishedEvent, SitesGetRequest, SitesGetResponse,
-    SitesGetResponseSite, SitesListRequest, SitesListResponse, SitesListResponseEntriesItem,
-    SitesRefreshInput, SitesRefreshOutput, SitesRefreshOutputSite, SitesRefreshProgress,
-    SitesRefreshedEvent,
+    AssignmentsListResponseEntriesItemPriority, AuditRecordedEvent, EvidenceDeleteRequest,
+    EvidenceDeleteResponse, EvidenceDownloadRequest, EvidenceDownloadResponse,
+    EvidenceDownloadResponseTransfer, EvidenceDownloadResponseTransferDirection,
+    EvidenceDownloadResponseTransferInfo, EvidenceDownloadResponseTransferType,
+    EvidenceListRequest, EvidenceListResponse, EvidenceListResponseEntriesItem,
+    EvidenceUploadInput, EvidenceUploadOutput, EvidenceUploadProgress, EvidenceUploadedEvent,
+    ReportsGenerateInput, ReportsGenerateOutput, ReportsGenerateProgress, ReportsListRequest,
+    ReportsListResponse, ReportsListResponseEntriesItem, ReportsPublishedEvent, SitesGetRequest,
+    SitesGetResponse, SitesGetResponseSite, SitesListRequest, SitesListResponse,
+    SitesListResponseEntriesItem, SitesRefreshInput, SitesRefreshOutput, SitesRefreshOutputSite,
+    SitesRefreshProgress, SitesRefreshedEvent,
 };
 
 const SERVICE_NAME: &str = "rust-field-ops-demo";

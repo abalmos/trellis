@@ -40,6 +40,9 @@ pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrus
 
 #[cfg(test)]
 pub(crate) use authorization::inject_own_verified_for_test;
+#[cfg(feature = "integration-test-scoping")]
+#[doc(hidden)]
+pub use client::connect_captured_user_admission;
 pub(crate) use client::ServiceConnectWithContractOptions;
 pub(crate) use client::TrellisClient;
 pub use client::{

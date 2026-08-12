@@ -5,27 +5,39 @@ use serde_json::Value;
 use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
 
 fn state_api_value() -> Result<Value, AuthorizationStateError> {
-    let contract: Value = serde_json::from_str(trellis_rs::sdk::state::contract::CONTRACT_JSON)
+    let api: Value = serde_json::from_str(trellis_rs::sdk::state::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    trellis_rs::contracts::compile_protocol_artifacts(&contract, &BTreeMap::new())
-        .map(|artifacts| artifacts.api)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+    trellis_protocol::lint_api_v1_authoring(&api)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    Ok(api)
 }
 
 pub(crate) fn administration_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(include_str!("../../../trellis.api.json"))
+    let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let api = trellis_protocol::parse_api_v1(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let state_api_value = state_api_value()?;
     let state_api = trellis_protocol::parse_api_v1(&state_api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let participant_json =
-        include_str!("../../../../trellis/artifacts/trellis.admin.participant.json");
+    let mut participant_value: Value = serde_json::from_str(include_str!(
+        "../../../../trellis/artifacts/trellis.admin.participant.json"
+    ))
+    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    participant_value["uses"]["required"]["auth"]["apiDigest"] = Value::String(
+        api.digest()
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+    );
+    participant_value["uses"]["required"]["state"]["apiDigest"] = Value::String(
+        state_api
+            .digest()
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+    );
     builtin_participant_binding(
-        participant_json,
+        &serde_json::to_string(&participant_value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
         BTreeMap::from([
             (api.id().to_owned(), api_value),
             (state_api.id().to_owned(), state_api_value),
@@ -37,7 +49,7 @@ pub(crate) fn administration_participant_binding(
 pub(crate) fn auth_runtime_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(include_str!("../../../trellis.api.json"))
+    let api_value: Value = serde_json::from_str(trellis_rs::sdk::auth::API_JSON)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     trellis_protocol::lint_api_v1_authoring(&api_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -46,30 +58,22 @@ pub(crate) fn auth_runtime_participant_binding(
     let mut participant_value: Value =
         serde_json::from_str(include_str!("../../../trellis.participant.json"))
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    participant_value["implements"]["auth"]["apiDigest"] = Value::String(
+        api.digest()
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+    );
     let mut api_values = BTreeMap::from([(api.id().to_owned(), api_value)]);
-    for (alias, manifest) in [
-        ("core", trellis_rs::sdk::core::contract::contract_manifest()),
-        (
-            "eventlog",
-            trellis_rs::sdk::eventlog::contract::contract_manifest(),
-        ),
-        (
-            "health",
-            trellis_rs::sdk::health::contract::contract_manifest(),
-        ),
-        ("jobs", trellis_rs::sdk::jobs::contract::contract_manifest()),
-        (
-            "state",
-            trellis_rs::sdk::state::contract::contract_manifest(),
-        ),
+    for (alias, api_json) in [
+        ("core", trellis_rs::sdk::core::API_JSON),
+        ("eventlog", trellis_rs::sdk::eventlog::API_JSON),
+        ("health", trellis_rs::sdk::health::API_JSON),
+        ("jobs", trellis_rs::sdk::jobs::API_JSON),
+        ("state", trellis_rs::sdk::state::API_JSON),
     ] {
-        let api = trellis_rs::contracts::compile_protocol_artifacts(
-            &serde_json::to_value(manifest)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            &BTreeMap::new(),
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let value = api.api;
+        let value: Value = serde_json::from_str(api_json)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        trellis_protocol::lint_api_v1_authoring(&value)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let parsed = trellis_protocol::parse_api_v1(&value)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         participant_value["implements"][alias] = serde_json::json!({

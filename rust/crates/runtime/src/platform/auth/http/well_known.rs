@@ -124,24 +124,16 @@ where
     {
         return Err(HttpError::conflict("context_refresh_mismatch"));
     }
-    if let Some(current_digest) = request.current_context_digest.0.as_deref() {
-        let current = state
-            .authorization_contexts
-            .require_current_context(&request.session_id, current_digest, now / 1_000)
-            .await
-            .map_err(map_issuance_error)?;
-        let current = current.signed_context().map_err(map_issuance_error)?;
-        if request
-            .expected_participant_digest
+    if request
+        .expected_participant_digest
+        .as_deref()
+        .is_some_and(|expected| expected != session.participant_artifact_digest)
+        || request
+            .expected_needs_digest
             .as_deref()
-            .is_some_and(|expected| expected != current.unsigned.participant.artifact_digest)
-            || request
-                .expected_needs_digest
-                .as_deref()
-                .is_some_and(|expected| expected != current.unsigned.participant.needs_digest)
-        {
-            return Err(HttpError::conflict("context_refresh_mismatch"));
-        }
+            .is_some_and(|expected| expected != session.participant_needs_digest)
+    {
+        return Err(HttpError::conflict("context_refresh_mismatch"));
     }
     let authorization_context = state
         .authorization_contexts

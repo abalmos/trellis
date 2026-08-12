@@ -1,74 +1,95 @@
 use trellis_rs::client::FeedDescriptor;
-use trellis_rs::sdk::jobs::contract as generated_contract;
+use trellis_rs::sdk::jobs::api as generated_contract;
 #[path = "../contracts/trellis_jobs.rs"]
 mod jobs_contract_source;
 
 #[test]
-fn rust_builder_manifest_matches_generated_jobs_sdk() {
+fn rust_api_builder_matches_generated_jobs_sdk() {
+    let artifacts = jobs_contract_source::contract_artifacts().expect("jobs contract artifacts");
     assert_eq!(
-        jobs_contract_source::contract_manifest().expect("jobs contract builder manifest"),
-        generated_contract::contract_manifest()
+        artifacts
+            .api()
+            .normalized_value()
+            .expect("normalized jobs API"),
+        generated_contract::api_artifact()
     );
+    assert_eq!(artifacts.participant().id(), "trellis.jobs@v1");
 }
 
 #[test]
 fn generated_jobs_watch_subject_matches_canonical_feed_subject() {
-    let contract = generated_contract::contract_manifest();
-    let watch = contract.feeds.get("Jobs.Watch").expect("Jobs.Watch feed");
+    let api = generated_contract::api_artifact();
+    let watch = api
+        .get("feeds")
+        .and_then(|feeds| feeds.get("Jobs.Watch"))
+        .expect("Jobs.Watch feed");
 
-    assert_eq!(watch.subject, "feed.v1.Jobs.Watch");
+    assert!(watch.get("subject").is_none());
     assert_eq!(
         trellis_rs::sdk::jobs::feeds::JobsWatchFeedDescriptor::SUBJECT,
-        watch.subject
+        "feed.v1.Jobs.Watch"
     );
 }
 
 #[test]
 fn generated_jobs_contract_uses_scoped_rpc_capability_names() {
-    let contract = generated_contract::contract_manifest();
+    let api = generated_contract::api_artifact();
+    let capabilities = api
+        .get("capabilities")
+        .and_then(serde_json::Value::as_object)
+        .expect("jobs API capabilities");
 
-    assert!(contract
-        .capabilities
-        .contains_key("trellis.jobs::admin.read"));
-    assert!(contract
-        .capabilities
-        .contains_key("trellis.jobs::admin.mutate"));
+    assert!(capabilities.contains_key("trellis.jobs::admin.read"));
+    assert!(capabilities.contains_key("trellis.jobs::admin.mutate"));
 
-    let jobs_cancel = contract.rpc.get("Jobs.Cancel").expect("Jobs.Cancel rpc");
+    let jobs_cancel = capabilities
+        .get("trellis.jobs::admin.mutate")
+        .expect("jobs mutate capability");
     assert_eq!(
         jobs_cancel
-            .capabilities
-            .as_ref()
-            .and_then(|caps| caps.call.as_ref()),
-        Some(&vec!["trellis.jobs::admin.mutate".to_string()])
+            .get("allows")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|allows| allows.first())
+            .and_then(|allow| allow.get("target"))
+            .and_then(|target| target.get("name"))
+            .and_then(serde_json::Value::as_str),
+        Some("Jobs.Cancel")
     );
 
-    assert!(!contract.rpc.contains_key("Jobs.List"));
-    assert!(!contract.rpc.contains_key("Jobs.Get"));
+    let rpc = api.get("rpc").expect("jobs API RPC");
+    assert!(rpc.get("Jobs.List").is_none());
+    assert!(rpc.get("Jobs.Get").is_none());
 
-    let jobs_get = contract.rpc.get("Jobs.Inspect").expect("Jobs.Inspect rpc");
-    assert_eq!(
-        jobs_get
-            .capabilities
-            .as_ref()
-            .and_then(|caps| caps.call.as_ref()),
-        Some(&vec!["trellis.jobs::admin.read".to_string()])
-    );
+    let jobs_get = capabilities
+        .get("trellis.jobs::admin.read")
+        .expect("jobs read capability");
+    assert!(jobs_get
+        .get("allows")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|allows| {
+            allows.iter().any(|allow| {
+                allow
+                    .get("target")
+                    .and_then(|target| target.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("Jobs.Inspect")
+            })
+        }));
 }
 
 #[test]
 fn generated_jobs_contract_omits_runtime_bootstrap_uses() {
-    let contract = generated_contract::contract_manifest();
-
-    assert!(!contract.uses.contains_key("health"));
-    assert!(!contract.uses.contains_key("core"));
-    assert!(!contract.uses.contains_key("auth"));
+    let api = generated_contract::api_artifact();
+    assert!(api.get("uses").is_none());
 }
 
 #[test]
 fn generated_jobs_contract_declares_full_job_state_set() {
-    let contract = generated_contract::contract_manifest();
-    let schema = contract.schemas.get("JobState").expect("JobState schema");
+    let api = generated_contract::api_artifact();
+    let schema = api
+        .get("schemas")
+        .and_then(|schemas| schemas.get("JobState"))
+        .expect("JobState schema");
     let states = schema
         .get("anyOf")
         .and_then(|value| value.as_array())

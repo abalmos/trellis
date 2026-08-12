@@ -10,7 +10,7 @@ order: 10
 
 - [../core/trellis-patterns.md](./../core/trellis-patterns.md) - service and
   library patterns
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   contract model and permission derivation
 - [../auth/trellis-auth.md](./../auth/trellis-auth.md) - session proofs, inbox
   permissions, and reply-subject validation

@@ -44,33 +44,6 @@ pub struct TrellisRpc<'a> {
     inner: &'a crate::generated::Caller,
 }
 impl<'a> TrellisRpc<'a> {
-    /// Call `Trellis.Catalog`.
-    pub async fn catalog(
-        &self,
-    ) -> Result<
-        super::types::TrellisCatalogResponse,
-        crate::generated::CallError<super::rpc::TrellisCatalogError>,
-    > {
-        self.inner
-            .call_typed::<super::rpc::TrellisCatalogRpc, super::rpc::TrellisCatalogError>(
-                &super::rpc::Empty {},
-            )
-            .await
-    }
-    /// Call `Trellis.Contract.Get`.
-    pub async fn contract_get(
-        &self,
-        input: &super::types::TrellisContractGetRequest,
-    ) -> Result<
-        super::types::TrellisContractGetResponse,
-        crate::generated::CallError<super::rpc::TrellisContractGetError>,
-    > {
-        self.inner
-            .call_typed::<super::rpc::TrellisContractGetRpc, super::rpc::TrellisContractGetError>(
-                input,
-            )
-            .await
-    }
     /// Call `Trellis.Surface.Status`.
     pub async fn surface_status(
         &self,

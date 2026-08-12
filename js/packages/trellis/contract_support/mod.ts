@@ -4,13 +4,12 @@ import Type, {
   type TProperties,
   type TSchema,
 } from "typebox";
-import { Value } from "typebox/value";
 import type { BaseError } from "@qlever-llc/result";
 import { TrellisError } from "../errors/TrellisError.ts";
 import {
-  CONTRACT as TRELLIS_STATE_CONTRACT,
-  CONTRACT_DIGEST as TRELLIS_STATE_CONTRACT_DIGEST,
-} from "../sdk/state_manifest.ts";
+  API as TRELLIS_STATE_API,
+  API_DIGEST as TRELLIS_STATE_API_DIGEST,
+} from "../sdk/state_api.ts";
 import type {
   StateDeleteInput,
   StateDeleteResponse,
@@ -43,6 +42,7 @@ import {
   type ActionDescriptor,
   actionRuntimeDescriptor,
   type ActionSource,
+  actionSource,
   type ConnectedActionName,
   type EventActions,
   eventActions,
@@ -78,6 +78,11 @@ import {
   type SubjectParam,
 } from "./schema_pointers.ts";
 import type { PascalActionName } from "./surface_names.ts";
+import {
+  buildNativeProtocolArtifacts,
+  collectActionSources,
+  type NativeProtocolArtifacts,
+} from "./protocol_artifacts.ts";
 import {
   type ContractEventConsumerGroup,
   type ContractEventConsumers,
@@ -156,9 +161,6 @@ export {
 } from "./schema_pointers.ts";
 export * from "./descriptors.ts";
 export * from "./features.ts";
-
-export const CONTRACT_FORMAT_V1 = "trellis.contract.v1" as const;
-export const CATALOG_FORMAT_V1 = "trellis.catalog.v1" as const;
 
 const NonEmptyStringSchema = Type.String({ minLength: 1 });
 const VersionSchema = Type.String({ pattern: "^v[0-9]+$" });
@@ -323,53 +325,6 @@ const ContractFeedSchema = Type.Object({
   docs: Type.Optional(ContractDocsSchema),
 });
 
-export const TrellisContractV1Schema = Type.Object({
-  format: Type.Literal(CONTRACT_FORMAT_V1),
-  id: NonEmptyStringSchema,
-  displayName: NonEmptyStringSchema,
-  description: NonEmptyStringSchema,
-  docs: Type.Optional(ContractDocsSchema),
-  kind: Type.Union([
-    Type.Literal("service"),
-    Type.Literal("app"),
-    Type.Literal("device"),
-    Type.Literal("agent"),
-  ]),
-  capabilities: Type.Optional(ContractCapabilitiesSchema),
-  schemas: Type.Optional(
-    Type.Record(NonEmptyStringSchema, JsonSchemaValueSchema),
-  ),
-  exports: Type.Optional(ContractExportsSchema),
-  uses: Type.Optional(ContractUsesSchema),
-  state: Type.Optional(ContractStateSchema),
-  rpc: Type.Optional(
-    Type.Record(NonEmptyStringSchema, ContractRpcMethodSchema),
-  ),
-  operations: Type.Optional(
-    Type.Record(NonEmptyStringSchema, ContractOperationSchema),
-  ),
-  events: Type.Optional(Type.Record(NonEmptyStringSchema, ContractEventSchema)),
-  feeds: Type.Optional(Type.Record(NonEmptyStringSchema, ContractFeedSchema)),
-  errors: Type.Optional(
-    Type.Record(NonEmptyStringSchema, ContractErrorDeclSchema),
-  ),
-  jobs: Type.Optional(
-    Type.Record(NonEmptyStringSchema, ContractJobQueueSchema),
-  ),
-  eventConsumers: Type.Optional(ContractEventConsumersSchema),
-  resources: Type.Optional(ContractResourcesSchema),
-});
-
-export const TrellisCatalogV1Schema = Type.Object({
-  format: Type.Literal(CATALOG_FORMAT_V1),
-  contracts: Type.Array(Type.Object({
-    id: NonEmptyStringSchema,
-    digest: Type.String({ pattern: "^[A-Za-z0-9_-]+$" }),
-    displayName: NonEmptyStringSchema,
-    description: NonEmptyStringSchema,
-  })),
-});
-
 export const CONTRACT_JOBS_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/jobs",
 );
@@ -382,6 +337,12 @@ export const CONTRACT_STORE_METADATA = Symbol.for(
 export const CONTRACT_STATE_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/state",
 );
+export const CONTRACT_EVENT_CONSUMERS_METADATA = Symbol.for(
+  "@qlever-llc/trellis/contracts/event-consumers",
+);
+/** Internal runtime metadata attached to defined contracts. */
+export { CONTRACT_RUNTIME } from "./contract_runtime.ts";
+export { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
 const CONTRACT_ERROR_RUNTIME_METADATA = Symbol.for(
   "@qlever-llc/trellis/contracts/error-runtime",
 );
@@ -415,12 +376,6 @@ const RESERVED_DEFINED_ERROR_FIELD_NAMES: ReadonlySet<
 const DEFINED_ERROR_PAYLOAD = Symbol.for(
   "@qlever-llc/trellis/contracts/defined-error-payload",
 );
-
-export type ContractManifestMetadata = {
-  displayName: string;
-  description: string;
-  docs?: ContractDocs;
-};
 
 export type ContractDocs = {
   summary?: string;
@@ -659,40 +614,6 @@ export type ContractUsesGrouped = {
 };
 
 export type ContractUses = ContractUsesGrouped;
-
-export type TrellisContractV1 = {
-  format: typeof CONTRACT_FORMAT_V1;
-  id: string;
-  displayName: string;
-  description: string;
-  docs?: ContractDocs;
-  kind: ContractKind;
-  capabilities?: ContractCapabilities;
-  schemas?: ContractSchemas;
-  exports?: ContractExports;
-  state?: ContractState;
-  uses?: ContractUses;
-  rpc?: Record<string, ContractRpcMethod>;
-  operations?: Record<string, ContractOperation>;
-  events?: Record<string, ContractEvent>;
-  feeds?: Record<string, ContractFeed>;
-  errors?: Record<string, ContractErrorDecl>;
-  jobs?: ContractJobs;
-  eventConsumers?: ContractEventConsumers;
-  resources?: ContractResources;
-};
-
-export type TrellisCatalogEntry = {
-  id: string;
-  digest: string;
-  displayName: string;
-  description: string;
-};
-
-export type TrellisCatalogV1 = {
-  format: typeof CATALOG_FORMAT_V1;
-  contracts: TrellisCatalogEntry[];
-};
 
 export type ContractSourceErrorDecl<TSchemaName extends string = string> = {
   type: string;
@@ -1458,8 +1379,8 @@ type BuiltRpcDesc = {
 
 const TRELLIS_STATE_CONTRACT_ID = "trellis.state@v1";
 const TRELLIS_STATE_ACTION_SOURCE = {
-  artifact: TRELLIS_STATE_CONTRACT,
-  digest: TRELLIS_STATE_CONTRACT_DIGEST,
+  api: TRELLIS_STATE_API,
+  apiDigest: TRELLIS_STATE_API_DIGEST,
 } as const;
 
 const BASELINE_STATE_RPC_CALL = [
@@ -1840,8 +1761,11 @@ export type DefinedContract<
   TStore extends ContractStoreMetadata = ContractStoreMetadata,
 > = TActions & {
   readonly CONTRACT_ID: TContractId;
-  readonly CONTRACT: TrellisContractV1;
   readonly CONTRACT_DIGEST: string;
+  readonly API: Readonly<Record<string, JsonValue>>;
+  readonly API_DIGEST: string;
+  readonly PARTICIPANT: Readonly<Record<string, JsonValue>>;
+  readonly PARTICIPANT_NEEDS_DIGEST: string;
   readonly [CONTRACT_RUNTIME]: ContractRuntime<
     TSelectedAction,
     TOwnedApi,
@@ -1852,6 +1776,7 @@ export type DefinedContract<
   readonly [CONTRACT_STATE_METADATA]?: TState;
   readonly [CONTRACT_KV_METADATA]?: TKv;
   readonly [CONTRACT_STORE_METADATA]?: TStore;
+  readonly [CONTRACT_EVENT_CONSUMERS_METADATA]?: ContractEventConsumers;
 };
 
 export type DefineContractInput<
@@ -2599,454 +2524,6 @@ function localCapabilityNamespacePrefixes(contractId: string): string[] {
   return prefixes;
 }
 
-function projectCapabilities(
-  capabilities: readonly Capability[] | undefined,
-  contractId: string,
-  declaredCapabilities: ContractCapabilities | undefined,
-  context: string,
-): string[] | undefined {
-  if (!capabilities) {
-    return undefined;
-  }
-  return sortedUnique(
-    capabilities.map((capability) => {
-      if (
-        declaredCapabilities && Object.hasOwn(declaredCapabilities, capability)
-      ) {
-        return globalCapabilityName(contractId, capability);
-      }
-      if (
-        capability === "admin" || capability === "service" ||
-        capability.includes("::")
-      ) {
-        return capability;
-      }
-      throw new Error(
-        `${context} references undeclared local capability '${capability}'`,
-      );
-    }),
-  );
-}
-
-function emitCapabilities(
-  contractId: string,
-  capabilities: ContractCapabilities | undefined,
-): ContractCapabilities | undefined {
-  if (!capabilities) {
-    return undefined;
-  }
-
-  const entries: [string, ContractCapabilityMetadata][] = Object.entries(
-    capabilities,
-  )
-    .map(([localCapability, metadata]) => [
-      globalCapabilityName(contractId, localCapability),
-      { ...metadata },
-    ]);
-  entries.sort(([left], [right]) => left.localeCompare(right));
-  return Object.fromEntries(entries);
-}
-
-function collectSchemaRef(
-  reachableSchemas: Set<string>,
-  ref: ContractSchemaRef | undefined,
-): void {
-  if (ref) {
-    reachableSchemas.add(ref.schema);
-  }
-}
-
-function collectReachableSchemaNames(contract: TrellisContractV1): Set<string> {
-  const reachableSchemas = new Set<string>();
-
-  for (const store of Object.values(contract.state ?? {})) {
-    collectSchemaRef(reachableSchemas, store.schema);
-    for (const accepted of Object.values(store.acceptedVersions ?? {})) {
-      collectSchemaRef(reachableSchemas, accepted);
-    }
-  }
-
-  for (const method of Object.values(contract.rpc ?? {})) {
-    collectSchemaRef(reachableSchemas, method.input);
-    collectSchemaRef(reachableSchemas, method.output);
-    for (const error of method.errors ?? []) {
-      const declaration = Object.values(contract.errors ?? {}).find((decl) =>
-        decl.type === error.type
-      );
-      collectSchemaRef(reachableSchemas, declaration?.schema);
-    }
-  }
-
-  for (const operation of Object.values(contract.operations ?? {})) {
-    collectSchemaRef(reachableSchemas, operation.input);
-    collectSchemaRef(reachableSchemas, operation.progress);
-    collectSchemaRef(reachableSchemas, operation.update);
-    collectSchemaRef(reachableSchemas, operation.output);
-    for (const signal of Object.values(operation.signals ?? {})) {
-      collectSchemaRef(reachableSchemas, signal.input);
-    }
-    for (const error of operation.errors ?? []) {
-      const declaration = Object.values(contract.errors ?? {}).find((decl) =>
-        decl.type === error.type
-      );
-      collectSchemaRef(reachableSchemas, declaration?.schema);
-    }
-  }
-
-  for (const event of Object.values(contract.events ?? {})) {
-    collectSchemaRef(reachableSchemas, event.event);
-  }
-
-  for (const feed of Object.values(contract.feeds ?? {})) {
-    collectSchemaRef(reachableSchemas, feed.input);
-    collectSchemaRef(reachableSchemas, feed.event);
-  }
-
-  for (const job of Object.values(contract.jobs ?? {})) {
-    collectSchemaRef(reachableSchemas, job.payload);
-    collectSchemaRef(reachableSchemas, job.update);
-    collectSchemaRef(reachableSchemas, job.result);
-  }
-
-  for (const resource of Object.values(contract.resources?.kv ?? {})) {
-    collectSchemaRef(reachableSchemas, resource.schema);
-  }
-
-  return reachableSchemas;
-}
-
-function projectReachableSchemas(
-  contract: TrellisContractV1,
-): ContractSchemas | undefined {
-  const reachableNames = collectReachableSchemaNames(contract);
-  if (!contract.schemas || reachableNames.size === 0) {
-    return undefined;
-  }
-
-  const entries = Object.entries(contract.schemas).filter(([name]) =>
-    reachableNames.has(name)
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function projectRpcDeclaredErrors(
-  contract: TrellisContractV1,
-): Record<string, ContractErrorDecl> | undefined {
-  if (!contract.errors) {
-    return undefined;
-  }
-
-  const declaredErrorTypes = new Set<string>();
-  for (const method of Object.values(contract.rpc ?? {})) {
-    for (const error of method.errors ?? []) {
-      declaredErrorTypes.add(error.type);
-    }
-  }
-
-  const entries = Object.entries(contract.errors).filter(([, error]) =>
-    declaredErrorTypes.has(error.type)
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function projectOperationDeclaredErrors(
-  contract: TrellisContractV1,
-): Record<string, ContractErrorDecl> | undefined {
-  if (!contract.errors) {
-    return undefined;
-  }
-
-  const declaredErrorTypes = new Set<string>();
-  for (const operation of Object.values(contract.operations ?? {})) {
-    for (const error of operation.errors ?? []) {
-      declaredErrorTypes.add(error.type);
-    }
-  }
-
-  const entries = Object.entries(contract.errors).filter(([, error]) =>
-    declaredErrorTypes.has(error.type)
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function projectDigestResources(
-  resources: ContractResources | undefined,
-): ContractResources | undefined {
-  if (!resources?.kv && !resources?.store) {
-    return undefined;
-  }
-  return {
-    ...(resources.kv
-      ? {
-        kv: mapValues(resources.kv, omitDocs),
-      }
-      : {}),
-    ...(resources.store
-      ? {
-        store: mapValues(resources.store, omitDocs),
-      }
-      : {}),
-  };
-}
-
-function projectDigestState(
-  state: ContractState | undefined,
-): ContractState | undefined {
-  return state ? mapValues(state, omitDocs) : undefined;
-}
-
-function projectDigestJobs(
-  jobs: ContractJobs | undefined,
-): ContractJobs | undefined {
-  return jobs ? mapValues(jobs, omitDocs) : undefined;
-}
-
-function projectDigestEventConsumers(
-  eventConsumers: ContractEventConsumers | undefined,
-): ContractEventConsumers | undefined {
-  return eventConsumers
-    ? mapValues(eventConsumers, projectDigestEventConsumerGroup)
-    : undefined;
-}
-
-function projectDigestUsesFlat(
-  uses: ContractUsesFlat | undefined,
-): ContractUsesFlat | undefined {
-  if (!uses) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(uses).map(([alias, use]) => [
-      alias,
-      {
-        contract: use.contract,
-        ...(use.rpc?.call ? { rpc: { call: sortedUnique(use.rpc.call) } } : {}),
-        ...(use.operations?.call || use.operations?.cancel ||
-            use.operations?.control
-          ? {
-            operations: {
-              ...(use.operations.call
-                ? { call: sortedUnique(use.operations.call) }
-                : {}),
-              ...(use.operations.cancel
-                ? { cancel: sortedUnique(use.operations.cancel) }
-                : {}),
-              ...(use.operations.control
-                ? { control: sortedUnique(use.operations.control) }
-                : {}),
-            },
-          }
-          : {}),
-        ...((use.events?.publish || use.events?.subscribe)
-          ? {
-            events: {
-              ...(use.events.publish
-                ? { publish: sortedUnique(use.events.publish) }
-                : {}),
-              ...(use.events.subscribe
-                ? { subscribe: sortedUnique(use.events.subscribe) }
-                : {}),
-            },
-          }
-          : {}),
-        ...(use.feeds?.subscribe
-          ? { feeds: { subscribe: sortedUnique(use.feeds.subscribe) } }
-          : {}),
-      } satisfies ContractUse,
-    ]),
-  );
-}
-
-function omitRequiredUseAliases<TUse>(
-  optional: Record<string, TUse> | undefined,
-  required: Record<string, TUse> | undefined,
-): Record<string, TUse> | undefined {
-  if (!optional) {
-    return undefined;
-  }
-  if (!required) {
-    return optional;
-  }
-  const requiredAliases = new Set(Object.keys(required));
-  const entries = Object.entries(optional).filter(([alias]) =>
-    !requiredAliases.has(alias)
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function projectDigestUses(
-  uses: ContractUses | undefined,
-): ContractUses | undefined {
-  if (!uses) {
-    return undefined;
-  }
-
-  const required = projectDigestUsesFlat(uses.required);
-  const optional = omitRequiredUseAliases(
-    projectDigestUsesFlat(uses.optional),
-    required,
-  );
-  if (!required && !optional) {
-    return undefined;
-  }
-  return {
-    ...(required ? { required } : {}),
-    ...(optional ? { optional } : {}),
-  };
-}
-
-function projectDigestRpc(
-  rpc: Record<string, ContractRpcMethod> | undefined,
-): Record<string, ContractRpcMethod> | undefined {
-  if (!rpc) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(rpc).map(([name, method]) => {
-      const projected = omitDocs(method);
-      return [
-        name,
-        {
-          ...projected,
-          ...(method.capabilities?.call
-            ? { capabilities: { call: sortedUnique(method.capabilities.call) } }
-            : {}),
-          ...(method.errors
-            ? {
-              errors: sortedUnique(method.errors.map((error) => error.type))
-                .map((
-                  type,
-                ) => ({ type })),
-            }
-            : {}),
-        } satisfies ContractRpcMethod,
-      ];
-    }),
-  );
-}
-
-function projectDigestOperations(
-  operations: Record<string, ContractOperation> | undefined,
-): Record<string, ContractOperation> | undefined {
-  if (!operations) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(operations).map(([name, operation]) => {
-      const projected = omitDocs(operation);
-      return [
-        name,
-        {
-          ...projected,
-          ...(operation.signals
-            ? {
-              signals: mapValues(operation.signals, omitDocs),
-            }
-            : {}),
-          ...((operation.capabilities?.call ||
-              operation.capabilities?.observe ||
-              operation.capabilities?.cancel || operation.capabilities?.control)
-            ? {
-              capabilities: {
-                ...(operation.capabilities.call
-                  ? { call: sortedUnique(operation.capabilities.call) }
-                  : {}),
-                ...(operation.capabilities.observe
-                  ? { observe: sortedUnique(operation.capabilities.observe) }
-                  : {}),
-                ...(operation.capabilities.cancel
-                  ? { cancel: sortedUnique(operation.capabilities.cancel) }
-                  : {}),
-                ...(operation.capabilities.control
-                  ? { control: sortedUnique(operation.capabilities.control) }
-                  : {}),
-              },
-            }
-            : {}),
-          ...(operation.errors
-            ? {
-              errors: sortedUnique(operation.errors.map((error) => error.type))
-                .map((type) => ({ type })),
-            }
-            : {}),
-        } satisfies ContractOperation,
-      ];
-    }),
-  );
-}
-
-function projectDigestEvents(
-  events: Record<string, ContractEvent> | undefined,
-): Record<string, ContractEvent> | undefined {
-  if (!events) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(events).map(([name, event]) => {
-      const projected = omitDocs(event);
-      return [
-        name,
-        {
-          ...projected,
-          ...((event.capabilities?.publish || event.capabilities?.subscribe)
-            ? {
-              capabilities: {
-                ...(event.capabilities.publish
-                  ? { publish: sortedUnique(event.capabilities.publish) }
-                  : {}),
-                ...(event.capabilities.subscribe
-                  ? { subscribe: sortedUnique(event.capabilities.subscribe) }
-                  : {}),
-              },
-            }
-            : {}),
-        } satisfies ContractEvent,
-      ];
-    }),
-  );
-}
-
-function projectDigestFeeds(
-  feeds: Record<string, ContractFeed> | undefined,
-): Record<string, ContractFeed> | undefined {
-  if (!feeds) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(feeds).map(([name, feed]) => {
-      const projected = omitDocs(feed);
-      return [
-        name,
-        {
-          ...projected,
-          ...(feed.capabilities?.subscribe
-            ? {
-              capabilities: {
-                subscribe: sortedUnique(feed.capabilities.subscribe),
-              },
-            }
-            : {}),
-        } satisfies ContractFeed,
-      ];
-    }),
-  );
-}
-
-function mapValues<TInput, TOutput>(
-  values: Record<string, TInput> | undefined,
-  map: (value: TInput) => TOutput,
-): Record<string, TOutput> | undefined {
-  if (!values) return undefined;
-  return Object.fromEntries(
-    Object.entries(values).map(([key, value]) => [key, map(value)]),
-  );
-}
-
 function omitDocs<TValue extends { docs?: ContractDocs }>(
   value: TValue,
 ): Omit<TValue, "docs"> {
@@ -3086,6 +2563,17 @@ function useRpc(use: ContractUsesRpc | undefined): ContractUsesRpc | undefined {
   };
 }
 
+function useOperations(
+  use: ContractUse["operations"],
+): ContractUse["operations"] {
+  if (!use) return undefined;
+  return {
+    ...(use.call ? { call: [...use.call] } : {}),
+    ...(use.cancel ? { cancel: [...use.cancel] } : {}),
+    ...(use.control ? { control: [...use.control] } : {}),
+  };
+}
+
 function usePubSub(
   use: ContractUsesPubSub | undefined,
 ): ContractUsesPubSub | undefined {
@@ -3100,7 +2588,7 @@ function contractUse(use: ContractUse): ContractUse {
   return {
     contract: use.contract,
     ...(use.rpc ? { rpc: useRpc(use.rpc) } : {}),
-    ...(use.operations ? { operations: useRpc(use.operations) } : {}),
+    ...(use.operations ? { operations: useOperations(use.operations) } : {}),
     ...(use.events ? { events: usePubSub(use.events) } : {}),
     ...(use.feeds
       ? {
@@ -3461,159 +2949,6 @@ function storeResource(resource: ContractStoreResource): ContractStoreResource {
   };
 }
 
-/**
- * Return the canonical manifest shape used by Trellis runtimes before
- * validation, persistence, and digesting.
- *
- * This is not the digest projection: human-facing fields such as
- * `displayName` and `description` are preserved here even though they are not
- * part of contract identity. Unknown extension fields are intentionally omitted
- * until the runtime explicitly supports them.
- */
-export function normalizeContractManifest(
-  contract: TrellisContractV1,
-): TrellisContractV1 {
-  return {
-    format: contract.format,
-    id: contract.id,
-    displayName: contract.displayName,
-    description: contract.description,
-    ...(contract.docs ? { docs: contractDocs(contract.docs) } : {}),
-    kind: contract.kind,
-    ...(contract.capabilities
-      ? { capabilities: mapValues(contract.capabilities, capabilityMetadata) }
-      : {}),
-    ...(contract.schemas ? { schemas: contract.schemas } : {}),
-    ...(contract.exports
-      ? {
-        exports: {
-          ...(contract.exports.schemas
-            ? { schemas: [...contract.exports.schemas] }
-            : {}),
-        },
-      }
-      : {}),
-    ...(contract.uses ? { uses: contractUses(contract.uses) } : {}),
-    ...(contract.state ? { state: mapValues(contract.state, stateStore) } : {}),
-    ...(contract.rpc ? { rpc: mapValues(contract.rpc, rpcMethod) } : {}),
-    ...(contract.operations
-      ? { operations: mapValues(contract.operations, operation) }
-      : {}),
-    ...(contract.events ? { events: mapValues(contract.events, event) } : {}),
-    ...(contract.feeds ? { feeds: mapValues(contract.feeds, feed) } : {}),
-    ...(contract.jobs
-      ? {
-        jobs: Object.fromEntries(
-          Object.entries(contract.jobs).map(([queueType, queue]) => [
-            queueType,
-            jobQueue(queueType, queue),
-          ]),
-        ),
-      }
-      : {}),
-    ...(contract.eventConsumers
-      ? {
-        eventConsumers: mapValues(
-          contract.eventConsumers,
-          eventConsumerGroup,
-        ),
-      }
-      : {}),
-    ...(contract.resources
-      ? {
-        resources: {
-          ...(contract.resources.kv
-            ? { kv: mapValues(contract.resources.kv, kvResource) }
-            : {}),
-          ...(contract.resources.store
-            ? { store: mapValues(contract.resources.store, storeResource) }
-            : {}),
-        },
-      }
-      : {}),
-    ...(contract.errors
-      ? { errors: mapValues(contract.errors, errorDecl) }
-      : {}),
-  };
-}
-
-/**
- * Parse untrusted contract JSON into the current Trellis v1 manifest shape.
- *
- * Unknown extension fields are accepted for forward compatibility but are not
- * returned. Callers must use the returned value for persistence and digesting.
- */
-export function parseContractManifest(value: unknown): TrellisContractV1 {
-  let parsed: TrellisContractV1;
-  try {
-    parsed = Value.Parse(TrellisContractV1Schema, value) as TrellisContractV1;
-  } catch (error) {
-    const details = [...Value.Errors(TrellisContractV1Schema, value)].map((
-      entry,
-    ) => `${entry.instancePath || "#"}: ${entry.message}`);
-    throw new TypeError(
-      `Invalid contract${details.length > 0 ? `:\n${details.join("\n")}` : ""}`,
-      { cause: error },
-    );
-  }
-  const contract = normalizeContractManifest(parsed);
-  assertValidEventConsumers(
-    contract.eventConsumers,
-    contract.uses,
-    contract.events,
-  );
-  return contract;
-}
-
-/**
- * Build the normalized runtime/interface projection used for contract identity.
- */
-export function projectContractDigestManifest(
-  contract: TrellisContractV1,
-): JsonValue {
-  const schemas = projectReachableSchemas(contract);
-  const rpcDeclaredErrors = projectRpcDeclaredErrors(contract);
-  const operationDeclaredErrors = projectOperationDeclaredErrors(contract);
-  const combinedErrors = { ...rpcDeclaredErrors, ...operationDeclaredErrors };
-  const errors = Object.keys(combinedErrors).length > 0
-    ? combinedErrors
-    : undefined;
-  const state = projectDigestState(contract.state);
-  const resources = projectDigestResources(contract.resources);
-  const jobs = projectDigestJobs(contract.jobs);
-  const eventConsumers = projectDigestEventConsumers(contract.eventConsumers);
-  const uses = projectDigestUses(contract.uses);
-  const rpc = projectDigestRpc(contract.rpc);
-  const operations = projectDigestOperations(contract.operations);
-  const events = projectDigestEvents(contract.events);
-  const feeds = projectDigestFeeds(contract.feeds);
-
-  return {
-    format: contract.format,
-    id: contract.id,
-    kind: contract.kind,
-    ...(contract.capabilities ? { capabilities: contract.capabilities } : {}),
-    ...(schemas ? { schemas } : {}),
-    ...(state ? { state } : {}),
-    ...(uses ? { uses } : {}),
-    ...(rpc ? { rpc } : {}),
-    ...(operations ? { operations } : {}),
-    ...(events ? { events } : {}),
-    ...(feeds ? { feeds } : {}),
-    ...(errors ? { errors } : {}),
-    ...(jobs ? { jobs } : {}),
-    ...(eventConsumers ? { eventConsumers } : {}),
-    ...(resources ? { resources } : {}),
-  };
-}
-
-/** Compute the v1 contract digest from the normalized digest projection. */
-export function digestContractManifest(contract: TrellisContractV1): string {
-  return digestCanonicalJson(
-    projectContractDigestManifest(normalizeContractManifest(contract)),
-  );
-}
-
 function apiPermission(
   apiId: string,
   apiVersion: `v${number}`,
@@ -3920,368 +3255,17 @@ function emitState(
   );
 }
 
-function emitUsesFlat(
-  uses: ContractSourceUsesFlat | undefined,
-): ContractUsesFlat | undefined {
-  if (!uses) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(uses).map(([alias, use]) => [
-      alias,
-      {
-        contract: use.contract,
-        ...(use.rpc?.call ? { rpc: { call: sortedUnique(use.rpc.call) } } : {}),
-        ...(use.operations?.call || use.operations?.cancel ||
-            use.operations?.control
-          ? {
-            operations: {
-              ...(use.operations.call
-                ? { call: sortedUnique(use.operations.call) }
-                : {}),
-              ...(use.operations.cancel
-                ? { cancel: sortedUnique(use.operations.cancel) }
-                : {}),
-              ...(use.operations.control
-                ? { control: sortedUnique(use.operations.control) }
-                : {}),
-            },
-          }
-          : {}),
-        ...((use.events?.publish || use.events?.subscribe)
-          ? {
-            events: {
-              ...(use.events.publish
-                ? { publish: sortedUnique(use.events.publish) }
-                : {}),
-              ...(use.events.subscribe
-                ? { subscribe: sortedUnique(use.events.subscribe) }
-                : {}),
-            },
-          }
-          : {}),
-        ...(use.feeds?.subscribe
-          ? { feeds: { subscribe: sortedUnique(use.feeds.subscribe) } }
-          : {}),
-      } satisfies ContractUse,
-    ]),
-  );
-}
-
-function emitUses(
-  uses: ContractSourceUses | undefined,
-): ContractUses | undefined {
-  if (!uses) {
-    return undefined;
-  }
-
-  const required = emitUsesFlat(uses.required);
-  const optional = omitRequiredUseAliases(
-    emitUsesFlat(uses.optional),
-    required,
-  );
-  if (!required && !optional) {
-    return undefined;
-  }
-  return {
-    ...(required ? { required } : {}),
-    ...(optional ? { optional } : {}),
-  };
-}
-
-function emitContract(source: TrellisContractSource): TrellisContractV1 {
-  const capabilities = emitCapabilities(source.id, source.capabilities);
-  const rpc = source.rpc
-    ? Object.fromEntries(
-      Object.entries(source.rpc).map(([name, method]) => {
-        const emitted: ContractRpcMethod = {
-          version: method.version,
-          subject: rpcSubject(name, method.version),
-          input: { ...method.input },
-          output: { ...method.output },
-        };
-        if (method.capabilities?.call) {
-          emitted.capabilities = {
-            call: projectCapabilities(
-              method.capabilities.call,
-              source.id,
-              source.capabilities,
-              `rpc '${name}' call capabilities`,
-            ) ?? [],
-          };
-        }
-        if (method.transfer) {
-          emitted.transfer = { ...method.transfer };
-        }
-        if (method.errors && method.errors.length > 0) {
-          emitted.errors = sortedUnique(
-            method.errors.map((errorName) =>
-              source.errors?.[errorName]?.type ?? errorName
-            ),
-          ).map((type) => ({ type }));
-        }
-        if (method.internal) {
-          emitted.internal = true;
-        }
-        if (method.docs) {
-          emitted.docs = contractDocs(method.docs);
-        }
-        return [name, emitted];
-      }),
-    )
-    : undefined;
-
-  const operations = source.operations
-    ? Object.fromEntries(
-      Object.entries(source.operations).map(([name, operation]) => {
-        if (operation.transfer) {
-          const store = source.resources?.store?.[operation.transfer.store];
-          if (!store) {
-            throw new Error(
-              `Operation '${name}' references unknown store resource '${operation.transfer.store}'`,
-            );
-          }
-
-          const inputSchema = resolveSchemaRef(
-            source.schemas,
-            operation.input,
-            `operation '${name}' input`,
-          );
-          for (
-            const pointer of [
-              operation.transfer.key,
-              operation.transfer.contentType,
-              operation.transfer.metadata,
-            ]
-          ) {
-            if (!pointer) {
-              continue;
-            }
-            if (getSubschemaAtDataPointer(inputSchema, pointer) === undefined) {
-              throw new Error(
-                `Invalid transfer pointer '${pointer}' for operation '${name}' (path not found in input schema)`,
-              );
-            }
-          }
-        }
-
-        const emitted: ContractOperation = {
-          version: operation.version,
-          subject: operationSubject(name, operation.version),
-          input: { ...operation.input },
-          output: { ...operation.output },
-        };
-        if (operation.progress) {
-          emitted.progress = { ...operation.progress };
-        }
-        if (operation.update) {
-          emitted.update = { ...operation.update };
-        }
-        if (operation.transfer) {
-          emitted.transfer = { ...operation.transfer, direction: "send" };
-        }
-        if (
-          operation.capabilities?.call || operation.capabilities?.observe ||
-          operation.capabilities?.cancel || operation.capabilities?.control
-        ) {
-          emitted.capabilities = {
-            ...(operation.capabilities.call
-              ? {
-                call: projectCapabilities(
-                  operation.capabilities.call,
-                  source.id,
-                  source.capabilities,
-                  `operation '${name}' call capabilities`,
-                ) ?? [],
-              }
-              : {}),
-            ...(operation.capabilities.observe
-              ? {
-                observe: projectCapabilities(
-                  operation.capabilities.observe,
-                  source.id,
-                  source.capabilities,
-                  `operation '${name}' observe capabilities`,
-                ) ?? [],
-              }
-              : {}),
-            ...(operation.capabilities.cancel
-              ? {
-                cancel: projectCapabilities(
-                  operation.capabilities.cancel,
-                  source.id,
-                  source.capabilities,
-                  `operation '${name}' cancel capabilities`,
-                ) ?? [],
-              }
-              : {}),
-            ...(operation.capabilities.control
-              ? {
-                control: projectCapabilities(
-                  operation.capabilities.control,
-                  source.id,
-                  source.capabilities,
-                  `operation '${name}' control capabilities`,
-                ) ?? [],
-              }
-              : {}),
-          };
-        }
-        if (operation.signals) {
-          emitted.signals = Object.fromEntries(
-            Object.entries(operation.signals).map(([signalName, signal]) => [
-              signalName,
-              {
-                input: { ...signal.input },
-                ...(signal.docs ? { docs: contractDocs(signal.docs) } : {}),
-              },
-            ]),
-          );
-        }
-        if (operation.cancel !== undefined) {
-          emitted.cancel = operation.cancel;
-        }
-        if (operation.docs) {
-          emitted.docs = contractDocs(operation.docs);
-        }
-        if (operation.errors && operation.errors.length > 0) {
-          emitted.errors = sortedUnique(
-            operation.errors.map((errorName) =>
-              source.errors?.[errorName]?.type ?? errorName
-            ),
-          ).map((type) => ({ type }));
-        }
-        return [name, emitted];
-      }),
-    )
-    : undefined;
-
-  const events = source.events
-    ? Object.fromEntries(
-      Object.entries(source.events).map(([name, event]) => {
-        if (event.params && event.params.length > 0) {
-          assertDataPointersExistAndAreTokenable(
-            name,
-            resolveSchemaRef(source.schemas, event.event, `event '${name}'`),
-            event.params,
-          );
-        }
-
-        const emitted: ContractEvent = {
-          version: event.version,
-          subject: eventSubject(name, event.version, event.params),
-          event: { ...event.event },
-        };
-        if (event.params && event.params.length > 0) {
-          emitted.params = [...event.params];
-        }
-        if (event.capabilities?.publish || event.capabilities?.subscribe) {
-          emitted.capabilities = {
-            ...(event.capabilities.publish
-              ? {
-                publish: projectCapabilities(
-                  event.capabilities.publish,
-                  source.id,
-                  source.capabilities,
-                  `event '${name}' publish capabilities`,
-                ) ?? [],
-              }
-              : {}),
-            ...(event.capabilities.subscribe
-              ? {
-                subscribe: projectCapabilities(
-                  event.capabilities.subscribe,
-                  source.id,
-                  source.capabilities,
-                  `event '${name}' subscribe capabilities`,
-                ) ?? [],
-              }
-              : {}),
-          };
-        }
-        if (event.docs) {
-          emitted.docs = contractDocs(event.docs);
-        }
-
-        return [name, emitted];
-      }),
-    )
-    : undefined;
-
-  const feeds = source.feeds
-    ? Object.fromEntries(
-      Object.entries(source.feeds).map(([name, feed]) => {
-        const emitted: ContractFeed = {
-          version: feed.version,
-          subject: feedSubject(name, feed.version),
-          input: { ...feed.input },
-          event: { ...feed.event },
-        };
-        if (feed.capabilities?.subscribe) {
-          emitted.capabilities = {
-            subscribe: projectCapabilities(
-              feed.capabilities.subscribe,
-              source.id,
-              source.capabilities,
-              `feed '${name}' subscribe capabilities`,
-            ) ?? [],
-          };
-        }
-        if (feed.docs) {
-          emitted.docs = contractDocs(feed.docs);
-        }
-        return [name, emitted];
-      }),
-    )
-    : undefined;
-
-  const errors = source.errors
-    ? Object.fromEntries(
-      Object.entries(source.errors).map(([name, error]) => {
-        const emitted: ContractErrorDecl = { type: error.type };
-        const schemaRef = resolveErrorSchemaRef(source.schemas, name, error);
-        if (schemaRef) {
-          emitted.schema = { ...schemaRef };
-        }
-        return [name, emitted];
-      }),
-    )
-    : undefined;
-
-  const jobs = emitJobs(source.jobs);
-  const eventConsumers = emitEventConsumers(source.eventConsumers);
-  const state = emitState(source.state);
-  const resources = emitResources(source.resources);
-  const uses = emitUses(source.uses);
-  assertValidEventConsumers(eventConsumers, uses, events);
-
-  return {
-    format: CONTRACT_FORMAT_V1,
-    id: source.id,
-    displayName: source.displayName,
-    description: source.description,
-    ...(source.docs ? { docs: contractDocs(source.docs) } : {}),
-    kind: source.kind,
-    ...(capabilities ? { capabilities } : {}),
-    ...(source.schemas ? { schemas: cloneSchemas(source.schemas) } : {}),
-    ...(source.exports
-      ? { exports: cloneContractExports(source.exports) }
-      : {}),
-    ...(state ? { state } : {}),
-    ...(uses ? { uses } : {}),
-    ...(rpc ? { rpc } : {}),
-    ...(operations ? { operations } : {}),
-    ...(events ? { events } : {}),
-    ...(feeds ? { feeds } : {}),
-    ...(errors ? { errors } : {}),
-    ...(jobs ? { jobs } : {}),
-    ...(eventConsumers ? { eventConsumers } : {}),
-    ...(resources ? { resources } : {}),
-  };
-}
-
 function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
+  const capability = (
+    names: readonly string[] | undefined,
+  ): readonly string[] =>
+    sortedUnique(
+      (names ?? []).map((name) =>
+        source.capabilities?.[name]
+          ? globalCapabilityName(source.id, name)
+          : name
+      ),
+    );
   const localRuntimeErrors: Record<string, BuiltRuntimeErrorDesc> = {};
   for (const [name, errorDecl] of Object.entries(source.errors ?? {})) {
     const errorClass = getContractErrorRuntimeClass(errorDecl);
@@ -4339,12 +3323,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
         name,
         "call",
       ),
-      callerCapabilities: projectCapabilities(
-        method.capabilities?.call,
-        source.id,
-        source.capabilities,
-        `rpc '${name}' call capabilities`,
-      ) ?? [],
+      callerCapabilities: capability(method.capabilities?.call),
       transfer: method.transfer ? { ...method.transfer } : undefined,
       authRequired: method.authRequired ?? true,
       errors: method.errors,
@@ -4422,30 +3401,10 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
             ]),
           )
           : undefined,
-        callerCapabilities: projectCapabilities(
-          operation.capabilities?.call,
-          source.id,
-          source.capabilities,
-          `operation '${name}' call capabilities`,
-        ) ?? [],
-        observeCapabilities: projectCapabilities(
-          operation.capabilities?.observe,
-          source.id,
-          source.capabilities,
-          `operation '${name}' observe capabilities`,
-        ) ?? [],
-        cancelCapabilities: projectCapabilities(
-          operation.capabilities?.cancel,
-          source.id,
-          source.capabilities,
-          `operation '${name}' cancel capabilities`,
-        ) ?? [],
-        controlCapabilities: projectCapabilities(
-          operation.capabilities?.control,
-          source.id,
-          source.capabilities,
-          `operation '${name}' control capabilities`,
-        ) ?? [],
+        callerCapabilities: capability(operation.capabilities?.call),
+        observeCapabilities: capability(operation.capabilities?.observe),
+        cancelCapabilities: capability(operation.capabilities?.cancel),
+        controlCapabilities: capability(operation.capabilities?.control),
         cancel: operation.cancel,
         errors: operation.errors,
         declaredErrorTypes: operation.errors?.map((errorName) =>
@@ -4491,18 +3450,8 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
             name,
             "subscribe",
           ),
-          publishCapabilities: projectCapabilities(
-            event.capabilities?.publish,
-            source.id,
-            source.capabilities,
-            `event '${name}' publish capabilities`,
-          ) ?? [],
-          subscribeCapabilities: projectCapabilities(
-            event.capabilities?.subscribe,
-            source.id,
-            source.capabilities,
-            `event '${name}' subscribe capabilities`,
-          ) ?? [],
+          publishCapabilities: capability(event.capabilities?.publish),
+          subscribeCapabilities: capability(event.capabilities?.subscribe),
         },
       ];
     }),
@@ -4526,12 +3475,7 @@ function buildOwnedApi(source: TrellisContractSource): RuntimeApiLike {
           name,
           "subscribe",
         ),
-        subscribeCapabilities: projectCapabilities(
-          feed.capabilities?.subscribe,
-          source.id,
-          source.capabilities,
-          `feed '${name}' subscribe capabilities`,
-        ) ?? [],
+        subscribeCapabilities: capability(feed.capabilities?.subscribe),
       },
     ]),
   ) as Record<string, FeedDesc>;
@@ -5107,6 +4051,15 @@ function deriveImplicitTrellisUses(source: DefineContractSource): Record<
   return uses;
 }
 
+function mapValues<T, U>(
+  values: Record<string, T>,
+  map: (value: T, key: string) => U,
+): Record<string, U> {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, map(value, key)]),
+  );
+}
+
 function normalizeContractUses(source: DefineContractSource): {
   manifestUses: ContractSourceUses | undefined;
   usedApi: RuntimeApiLike;
@@ -5258,8 +4211,10 @@ function buildOwnedActionDescriptors(
   ) => {
     const exportName = actionExportName(name);
     if (
-      !exportName || exportName === "CONTRACT" ||
-      exportName === "CONTRACT_ID" || exportName === "CONTRACT_DIGEST" ||
+      !exportName || exportName === "API" ||
+      exportName === "PARTICIPANT" || exportName === "CONTRACT_ID" ||
+      exportName === "CONTRACT_DIGEST" || exportName === "API_DIGEST" ||
+      exportName === "PARTICIPANT_NEEDS_DIGEST" ||
       Object.hasOwn(actions, exportName)
     ) {
       throw new Error(`Owned action export name '${exportName}' collides`);
@@ -5434,12 +4389,28 @@ function defineContract(
     ...(source.resources ? { resources: source.resources } : {}),
   };
 
-  const CONTRACT = emitContract(emittedSource);
   const ownedApi = buildOwnedApi(emittedSource);
-  const CONTRACT_DIGEST = digestContractManifest(CONTRACT);
+  const referencedApis = Object.fromEntries(collectActionSources(
+    actions.flatMap((selected) => {
+      const source = actionSource(selected.action);
+      return source ? [source] : [];
+    }),
+  ));
+  const native: NativeProtocolArtifacts = buildNativeProtocolArtifacts(
+    emittedSource,
+    referencedApis,
+  );
+  const API = native.api;
+  const API_DIGEST = native.apiDigest;
+  const PARTICIPANT = native.participant;
+  const CONTRACT_DIGEST = native.participantDigest;
+  const participantId = PARTICIPANT.id;
+  if (typeof participantId !== "string" || participantId !== source.id) {
+    throw new Error("Native participant identity does not match its source");
+  }
   const ownedActions = buildOwnedActionDescriptors(emittedSource, ownedApi, {
-    artifact: CONTRACT,
-    digest: CONTRACT_DIGEST,
+    api: API,
+    apiDigest: API_DIGEST,
   });
   const trellisApi = mergeDerivedApis(
     ownedApi as RuntimeApiShape & RuntimeApiLike,
@@ -5456,9 +4427,12 @@ function defineContract(
   let contract!: ConcreteDefinedContract;
   contract = {
     ...ownedActions,
-    CONTRACT_ID: source.id,
-    CONTRACT,
+    CONTRACT_ID: participantId,
     CONTRACT_DIGEST,
+    API,
+    API_DIGEST,
+    PARTICIPANT,
+    PARTICIPANT_NEEDS_DIGEST: native.participantNeedsDigest,
     [CONTRACT_JOBS_METADATA]: buildContractJobsMetadata(
       source.schemas,
       source.jobs,
@@ -5472,6 +4446,7 @@ function defineContract(
       source.state,
       source.schemas,
     ),
+    [CONTRACT_EVENT_CONSUMERS_METADATA]: source.eventConsumers,
   } as ConcreteDefinedContract;
   Object.defineProperty(contract, CONTRACT_RUNTIME, {
     value: Object.freeze(
@@ -6085,6 +5060,10 @@ export {
   unwrapSchema,
 };
 export {
-  type CompiledProtocolArtifacts,
-  compileProtocolArtifacts,
+  apiDigest,
+  buildNativeProtocolArtifacts,
+  type NativeProtocolArtifacts,
+  type NativeProtocolContract,
+  type NativeProtocolPresentation,
+  nativeProtocolPresentation,
 } from "./protocol_artifacts.ts";

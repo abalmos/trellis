@@ -148,6 +148,71 @@ pub(super) async fn exercise_account_flows(
         None
     );
 
+    let initial_password_flow = AccountFlowRecord {
+        flow_id: "flow_initial_password".to_owned(),
+        kind: AccountFlowKind::PasswordReset,
+        token_hash: digest(247),
+        target_principal_id: Some(admin.principal_id.clone()),
+        target_provider_id: None,
+        return_location: None,
+        payload: json!({}),
+        state: AccountFlowState::Pending,
+        created_at: NOW,
+        expires_at: NOW + 100,
+        consumed_at: None,
+        version: 1,
+    };
+    store
+        .create_account_flow(AccountFlowCreation {
+            flow: initial_password_flow.clone(),
+            idempotency: proof(248, "account-flow.create"),
+            actions: Vec::new(),
+        })
+        .await?;
+    let initial_credential = LocalCredentialRecord {
+        principal_id: admin.principal_id.clone(),
+        normalized_username: "first-admin-local".to_owned(),
+        password_hash: "initial-password-hash".to_owned(),
+        hash_profile: 1,
+        failed_attempts: 0,
+        locked_until: None,
+        password_changed_at: NOW + 3,
+        updated_at: NOW + 3,
+        version: 1,
+    };
+    let initial_identity = ProviderIdentityLink {
+        provider: "local".to_owned(),
+        provider_subject: initial_credential.normalized_username.clone(),
+        principal_id: admin.principal_id.clone(),
+        linked_at: NOW + 3,
+        last_seen_at: NOW + 3,
+    };
+    assert!(matches!(
+        store
+            .complete_password_reset(PasswordResetCompletion {
+                token_hash: initial_password_flow.token_hash,
+                expected_flow_version: 1,
+                expected_credential_version: None,
+                replacement: initial_credential.clone(),
+                identity: Some(initial_identity.clone()),
+                consumed_at: NOW + 3,
+                idempotency: proof(250, "password-reset.complete"),
+                actions: Vec::new(),
+            })
+            .await?,
+        IdempotentOutcome::Applied(_)
+    ));
+    assert_eq!(
+        store.get_local_credential(&admin.principal_id).await?,
+        Some(initial_credential)
+    );
+    assert_eq!(
+        store
+            .get_provider_identity("local", "first-admin-local")
+            .await?,
+        Some(initial_identity)
+    );
+
     let password_flow = AccountFlowRecord {
         flow_id: "flow_password".to_owned(),
         kind: AccountFlowKind::PasswordReset,
@@ -187,7 +252,9 @@ pub(super) async fn exercise_account_flows(
             .complete_password_reset(PasswordResetCompletion {
                 token_hash: password_flow.token_hash.clone(),
                 expected_flow_version: 1,
+                expected_credential_version: Some(1),
                 replacement: replacement.clone(),
+                identity: None,
                 consumed_at: NOW + 3,
                 idempotency: password_proof.clone(),
                 actions: vec![conflicting_action, password_kick.clone()],
@@ -218,7 +285,9 @@ pub(super) async fn exercise_account_flows(
     let password_command = PasswordResetCompletion {
         token_hash: password_flow.token_hash.clone(),
         expected_flow_version: 1,
+        expected_credential_version: Some(1),
         replacement: replacement.clone(),
+        identity: None,
         consumed_at: NOW + 3,
         idempotency: password_proof.clone(),
         actions: vec![password_action.clone(), password_kick],
@@ -254,7 +323,9 @@ pub(super) async fn exercise_account_flows(
     let mut mismatch_command = PasswordResetCompletion {
         token_hash: password_flow.token_hash,
         expected_flow_version: 2,
+        expected_credential_version: Some(2),
         replacement: credential.clone(),
+        identity: None,
         consumed_at: NOW + 4,
         idempotency: mismatched_proof,
         actions: Vec::new(),
@@ -299,6 +370,7 @@ pub(super) async fn exercise_account_flows(
                 token_hash: identity_flow.token_hash,
                 expected_flow_version: 1,
                 identity: linked_identity.clone(),
+                credential: None,
                 consumed_at: NOW + 4,
                 idempotency: proof(44, "identity-link.complete"),
                 actions: Vec::new(),

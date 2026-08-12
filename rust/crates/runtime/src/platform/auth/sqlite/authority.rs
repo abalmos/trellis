@@ -26,6 +26,7 @@ use super::evidence::{
     put_sql_deployment_evidence,
 };
 use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay};
+use super::policy::decode_portal_authority_binding;
 use super::principals::load_principal;
 use super::validation::{next_version, validate_proposal_desired_authority};
 use super::SqliteAuthorizationStore;
@@ -304,8 +305,63 @@ impl AuthorityRepository for SqliteAuthorizationStore {
             if let Some(deployment) = command.deployment {
                 put_sql_deployment_evidence(&transaction, deployment)?;
             }
-            if let Some(desired) = command.desired_authority.filter(|_| !accepted_noop) {
-                put_sql_desired_authority(&transaction, desired)?;
+            if let Some(desired) = command.desired_authority.as_ref().filter(|_| !accepted_noop) {
+                put_sql_desired_authority(&transaction, desired.clone())?;
+            }
+            if let Some(portal_binding) = &command.portal_binding {
+                let Some(DesiredAuthorityRecord::Identity(authority)) = command.desired_authority.as_ref() else {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "portal authority provenance requires accepted identity authority".to_owned(),
+                    ));
+                };
+                if let Some(expected) = &command.expected_portal_binding {
+                    let actual = transaction
+                        .query_row(
+                            "SELECT principal_id, participant_id, authority_id, portal_id,
+                                    provider_id, roles_json, effective_policy_digest,
+                                    authority_version, updated_at
+                             FROM auth_portal_authority_bindings
+                             WHERE principal_id = ?1 AND participant_id = ?2",
+                            params![authority.principal_id, authority.participant_id],
+                            decode_portal_authority_binding,
+                        )
+                        .optional()
+                        .map_err(sql_error)?;
+                    if &actual != expected {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                }
+                transaction.execute(
+                    "DELETE FROM auth_portal_authority_bindings WHERE principal_id = ?1 AND participant_id = ?2",
+                    params![authority.principal_id, authority.participant_id],
+                ).map_err(map_write_error)?;
+                if let Some(binding) = portal_binding {
+                    if binding.principal_id != authority.principal_id
+                        || binding.participant_id != authority.participant_id
+                        || binding.authority_id != authority.authority_id
+                        || binding.authority_version != if accepted_noop {
+                            authority.version.saturating_sub(1)
+                        } else {
+                            authority.version
+                        }
+                    {
+                        return Err(AuthorizationStateError::InvalidRecord(
+                            "portal authority provenance does not match identity authority".to_owned(),
+                        ));
+                    }
+                    transaction.execute(
+                        "INSERT INTO auth_portal_authority_bindings (
+                            principal_id, participant_id, authority_id, portal_id, provider_id,
+                            roles_json, effective_policy_digest, authority_version, updated_at
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            binding.principal_id, binding.participant_id, binding.authority_id,
+                            binding.portal_id, binding.provider_id, encode_json(&binding.roles)?,
+                            binding.effective_policy_digest, to_sql_version(binding.authority_version)?,
+                            binding.updated_at,
+                        ],
+                    ).map_err(map_write_error)?;
+                }
             }
             transaction
                 .execute(

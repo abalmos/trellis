@@ -54,8 +54,6 @@ pub enum TopLevelCommand {
     Users(UsersCommand),
     /// Inspect and manage login portals.
     Portals(PortalsCommand),
-    /// Manage deployment grant overrides.
-    Grants(GrantsCommand),
     /// Manage service deployments.
     Svc(SvcCommand),
     /// Manage device deployments.

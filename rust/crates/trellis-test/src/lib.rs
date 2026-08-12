@@ -80,9 +80,11 @@ struct SharedRuntimeManifest {
     nats_url: String,
     websocket_url: String,
     workdir: PathBuf,
+    control_plane_sqlite_path: PathBuf,
     admin_password: String,
     admin_rpc_url: String,
     admin_rpc_token: String,
+    test_oidc_issuer: String,
     tenants: BTreeMap<String, SharedTenantManifest>,
     assignments: BTreeMap<String, SharedRuntimeAssignment>,
 }
@@ -363,34 +365,21 @@ pub async fn download_transfer(
 /// Connect an ad hoc service runtime through the normal authenticated bootstrap flow.
 pub async fn connect_service_runtime<C>(
     trellis_url: &str,
-    contract_json: &str,
     key: &TrellisTestServiceKey,
 ) -> Result<trellis_rs::service::ConnectedServiceRuntime<C>, trellis_rs::service::ServiceRuntimeError>
-where
-    C: trellis_rs::service::GeneratedServiceContract,
 {
     let session_seed = random_session_seed();
-    let scoped_contract_json = key
-        .integration_test_scope
-        .as_ref()
-        .map(|scope| {
-            let manifest = serde_json::from_str(contract_json)?;
-            Ok::<_, TrellisTestError>(serde_json::to_string(&scope_contract_manifest(
-                manifest, scope,
-            )?)?)
-        })
-        .transpose()
-        .map_err(|error| {
-            trellis_rs::service::ServiceRuntimeError::Client(TrellisClientError::Bootstrap(
-                error.to_string(),
-            ))
-        })?;
-    let contract_json = scoped_contract_json.as_deref().unwrap_or(contract_json);
     trellis_rs::generated::test_connect_service_runtime(
         trellis_url,
         &key.participant_id,
         &key.participant_digest,
-        contract_json,
+        &key.participant_json,
+        &key.api_json,
+        &key.api_digest,
+        &key.referenced_api_artifacts
+            .iter()
+            .map(|(json, digest)| (json.as_str(), digest.as_str()))
+            .collect::<Vec<_>>(),
         &key.deployment_id,
         &key.instance_id,
         &key.identity_seed,
@@ -516,6 +505,10 @@ pub struct TrellisTestRuntimeOptions {
     pub admin_password: Option<String>,
     /// OAuth/OIDC providers injected into the isolated test control-plane config.
     pub oauth_providers: Map<String, Value>,
+    /// Optional NATS user-JWT TTL injected into the platform config.
+    pub nats_user_jwt_ttl_ms: Option<u64>,
+    /// Whether an isolated process should use the shared standards-based test OIDC provider.
+    pub use_shared_test_oidc_provider: bool,
     /// Named fail-once hooks injected into the isolated test control-plane config.
     pub fail_once_hooks: Vec<String>,
 }
@@ -535,6 +528,8 @@ impl TrellisTestRuntimeOptions {
             reconciliation_timeout: DEFAULT_RECONCILIATION_TIMEOUT,
             admin_password: None,
             oauth_providers: Map::new(),
+            nats_user_jwt_ttl_ms: None,
+            use_shared_test_oidc_provider: false,
             fail_once_hooks: Vec::new(),
         }
     }
@@ -572,8 +567,10 @@ pub struct TrellisTestRuntime {
     shutdown_timeout: Duration,
     trellis_command: TrellisProcessCommand,
     admin_rpc: Option<AdminRpcProxy>,
+    test_control_rpc: Option<AdminRpcProxy>,
     attached: bool,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+    control_plane_path: PathBuf,
 }
 
 /// Row returned by a control-plane SQLite query.
@@ -758,10 +755,19 @@ pub struct TrellisNatsMessageFrame {
 /// Raw auth connection-presence entry seeded for malformed live-runtime tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrellisRawAuthConnectionPresence {
-    /// Raw key in the `trellis_connections` KV bucket.
+    /// Raw key in the `trellis_auth_connections` KV bucket.
     pub key: String,
-    /// Raw JSON value written to the `trellis_connections` KV bucket.
+    /// Raw JSON value written to the `trellis_auth_connections` KV bucket.
     pub value: Value,
+}
+
+/// Observable configuration and records for the auth connection-presence bucket.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrellisAuthConnectionPresenceStatus {
+    /// Configured retention for presence entries.
+    pub max_age: Duration,
+    /// Current raw presence records, keyed by physical connection identity.
+    pub records: BTreeMap<String, Value>,
 }
 
 /// Raw state entry seeded for malformed live-runtime tests.
@@ -888,7 +894,7 @@ fn shared_runtime_assignment() -> Result<
             )
         })?;
     let manifest: SharedRuntimeManifest = serde_json::from_slice(&fs::read(path)?)?;
-    if manifest.version != 3 {
+    if manifest.version != 4 {
         return Err(TrellisTestError::UnexpectedResponse(format!(
             "unsupported shared Rust integration runtime manifest version {}",
             manifest.version
@@ -1050,10 +1056,38 @@ fn shared_user(identity: &SharedIdentity) -> PublicUser {
 
 impl TrellisTestRuntime {
     /// Start an isolated NATS container and repo-local Trellis control plane.
-    pub async fn start(options: TrellisTestRuntimeOptions) -> Result<Self, TrellisTestError> {
+    pub async fn start(mut options: TrellisTestRuntimeOptions) -> Result<Self, TrellisTestError> {
         let resolved_runtime = options.container_runtime.resolve()?;
         let workdir = IntegrationWorkdir::create(options.keep_workdir)?;
         let shared_runtime = shared_runtime_assignment()?;
+        if options.use_shared_test_oidc_provider {
+            let issuer = shared_runtime
+                .as_ref()
+                .ok_or_else(|| {
+                    TrellisTestError::UnexpectedResponse(
+                        "shared test OIDC provider requires a shared runtime manifest".to_owned(),
+                    )
+                })?
+                .0
+                .test_oidc_issuer
+                .clone();
+            for provider_id in ["test-oidc", "other-oidc"] {
+                options.oauth_providers.insert(
+                    provider_id.to_owned(),
+                    json!({
+                        "type": "oidc",
+                        "issuer": issuer,
+                        "client_id": "trellis-test-client",
+                        "display_name": "Test OIDC",
+                        "role_claims": ["/roles"],
+                    }),
+                );
+            }
+        }
+        let test_control_rpc = shared_runtime.as_ref().map(|(shared, _, _)| AdminRpcProxy {
+            url: shared.admin_rpc_url.clone(),
+            token: shared.admin_rpc_token.clone(),
+        });
         let integration_test_scope = shared_runtime
             .as_ref()
             .map(|(_, _, assignment)| {
@@ -1111,8 +1145,10 @@ impl TrellisTestRuntime {
                         url: shared.admin_rpc_url.clone(),
                         token: shared.admin_rpc_token.clone(),
                     }),
+                    test_control_rpc,
                     attached: true,
                     integration_test_scope,
+                    control_plane_path: shared.control_plane_sqlite_path.clone(),
                 });
             }
         }
@@ -1168,6 +1204,7 @@ impl TrellisTestRuntime {
             }
         };
 
+        let control_plane_path = control_plane_sqlite_path(workdir.path());
         Ok(Self {
             workdir,
             nats,
@@ -1186,8 +1223,10 @@ impl TrellisTestRuntime {
             shutdown_timeout: options.shutdown_timeout,
             trellis_command: options.trellis_command,
             admin_rpc: None,
+            test_control_rpc,
             attached: false,
             integration_test_scope,
+            control_plane_path,
         })
     }
 
@@ -1239,7 +1278,7 @@ impl TrellisTestRuntime {
     /// Return direct SQLite access for the runtime-owned Trellis control plane.
     #[must_use]
     pub fn control_plane_sqlite(&self) -> TrellisControlPlaneSqlite {
-        TrellisControlPlaneSqlite::new(control_plane_sqlite_path(self.workdir.path()))
+        TrellisControlPlaneSqlite::new(self.control_plane_path.clone())
     }
 
     /// Publish one synthetic immutable authorization revocation for live watcher tests.
@@ -1423,20 +1462,47 @@ impl TrellisTestRuntime {
         entry: TrellisRawAuthConnectionPresence,
     ) -> Result<(), TrellisTestError> {
         let client = ConnectOptions::new()
-            .credentials_file(auth_creds_path(self.workdir.path()))
+            .credentials_file(trellis_creds_path(self.workdir.path()))
             .await?
             .connect(&self.nats_url)
             .await
             .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
         let js = jetstream::new(client);
         let kv = js
-            .get_key_value("trellis_connections")
+            .get_key_value("trellis_auth_connections")
             .await
             .map_err(io::Error::other)?;
         kv.put(entry.key, entry.value.to_string().into())
             .await
             .map_err(io::Error::other)?;
         Ok(())
+    }
+
+    /// Return the auth connection-presence bucket configuration and current records.
+    pub async fn auth_connection_presence_status(
+        &self,
+    ) -> Result<TrellisAuthConnectionPresenceStatus, TrellisTestError> {
+        let client = ConnectOptions::new()
+            .credentials_file(trellis_creds_path(self.workdir.path()))
+            .await?
+            .connect(&self.nats_url)
+            .await
+            .map_err(|error| io::Error::new(io::ErrorKind::ConnectionRefused, error))?;
+        let js = jetstream::new(client);
+        let kv = js
+            .get_key_value("trellis_auth_connections")
+            .await
+            .map_err(io::Error::other)?;
+        let max_age = kv.status().await.map_err(io::Error::other)?.max_age();
+        let mut keys = kv.keys().await.map_err(io::Error::other)?;
+        let mut records = BTreeMap::new();
+        while let Some(key) = keys.next().await {
+            let key = key.map_err(io::Error::other)?;
+            if let Some(value) = kv.get(&key).await.map_err(io::Error::other)? {
+                records.insert(key, serde_json::from_slice(&value)?);
+            }
+        }
+        Ok(TrellisAuthConnectionPresenceStatus { max_age, records })
     }
 
     /// Seeds one raw state KV entry for malformed-entry tests.
@@ -1505,6 +1571,7 @@ impl TrellisTestRuntime {
             default_mutable_dev: self.default_mutable_dev,
             reconciliation_timeout: self.reconciliation_timeout,
             admin_rpc: self.admin_rpc.clone(),
+            test_control_rpc: self.test_control_rpc.clone(),
             integration_test_scope: self.integration_test_scope.clone(),
         })
     }
@@ -1523,6 +1590,14 @@ impl TrellisTestRuntime {
             &service_key.participant_id,
             &service_key.participant_digest,
             &service_key.participant_needs_digest,
+            &service_key.participant_json,
+            &service_key.api_json,
+            &service_key.api_digest,
+            &service_key
+                .referenced_api_artifacts
+                .iter()
+                .map(|(json, digest)| (json.as_str(), digest.as_str()))
+                .collect::<Vec<_>>(),
             &service_key.identity_seed,
             &service_key.seed,
             Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
@@ -1619,6 +1694,7 @@ pub struct TrellisTestAdminOptions {
     /// Timeout for deployment-authority reconciliation polling.
     pub reconciliation_timeout: Duration,
     admin_rpc: Option<AdminRpcProxy>,
+    test_control_rpc: Option<AdminRpcProxy>,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
@@ -1635,6 +1711,7 @@ pub struct TrellisTestAdmin {
     deployment_authorities: std::collections::HashMap<String, String>,
     api_artifacts: std::collections::BTreeMap<String, Value>,
     admin_rpc: Option<AdminRpcProxy>,
+    test_control_rpc: Option<AdminRpcProxy>,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
@@ -1728,6 +1805,7 @@ impl TrellisTestAdmin {
             deployment_authorities: std::collections::HashMap::new(),
             api_artifacts: builtin_api_artifacts(),
             admin_rpc: options.admin_rpc,
+            test_control_rpc: options.test_control_rpc,
             integration_test_scope: options.integration_test_scope,
         }
     }
@@ -1764,7 +1842,13 @@ impl TrellisTestAdmin {
                 })
                 .await?;
             let flow_id = flow_id_from_url(challenge.login_url())?;
-            perform_local_login(&self.trellis_url, &flow_id, &self.admin_password).await?;
+            perform_local_login(
+                &self.trellis_url,
+                &flow_id,
+                ADMIN_USERNAME,
+                &self.admin_password,
+            )
+            .await?;
             submit_portal_approval(&self.trellis_url, &flow_id).await?;
             let outcome = challenge.complete_ephemeral(&self.trellis_url).await?;
             let state = outcome.state;
@@ -1912,14 +1996,15 @@ impl TrellisTestAdmin {
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{}-{}", self.default_deployment, &contract.digest[..8]));
         let contract = contract.scoped(self.integration_test_scope.as_ref())?;
-        let compiled = compile_test_contract(&contract, &mut self.api_artifacts)?;
-        let participant_artifact = value_map(&compiled.participant, "participant artifact")?;
+        let compiled = build_test_artifacts(&contract, &mut self.api_artifacts)?;
+        let participant_artifact =
+            value_map(&compiled.participant_value()?, "participant artifact")?;
         let mut referenced_api_artifacts = self
             .api_artifacts
             .values()
             .map(|value| value_map(value, "API artifact"))
             .collect::<Result<Vec<_>, _>>()?;
-        referenced_api_artifacts.push(value_map(&compiled.api, "API artifact")?);
+        referenced_api_artifacts.push(value_map(&compiled.api_value()?, "API artifact")?);
         let deployment = self
             .create_deployment(bootstrap_url, Some(&deployment_name), None)
             .await?;
@@ -1942,7 +2027,18 @@ impl TrellisTestAdmin {
                     .deployment_authority_plan(&plan_request)
                     .await?
             };
-        let plan = AuthorityPlanSummary::from_value(&serde_json::to_value(&planned.proposal)?)?;
+        let plan = AuthorityPlanSummary {
+            plan_id: planned.proposal.proposal_id,
+            classification: match planned.proposal.classification.as_str() {
+                "initial" | "update" => AuthorityPlanClassification::Update,
+                "migration" => AuthorityPlanClassification::Migration,
+                other => {
+                    return Err(TrellisTestError::UnexpectedResponse(format!(
+                        "unsupported authority plan classification '{other}'"
+                    )));
+                }
+            },
+        };
         let allowed = if allow_plan_classifications.is_empty() {
             vec![AuthorityPlanClassification::Update]
         } else {
@@ -1958,7 +2054,7 @@ impl TrellisTestAdmin {
                     .join(", "),
             });
         }
-        let accepted: auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateResponse = match plan
+        let _accepted: auth_sdk::types::AuthDeploymentAuthorityAcceptUpdateResponse = match plan
             .classification
         {
             AuthorityPlanClassification::Update => {
@@ -2004,37 +2100,68 @@ impl TrellisTestAdmin {
                 serde_json::from_value(serde_json::to_value(accepted)?)?
             }
         };
-        let accepted_value = serde_json::to_value(&accepted)?;
-        let authority_id = accepted_value
-            .get("authority")
-            .and_then(|authority| authority.get("authorityId"))
-            .and_then(Value::as_str)
+        let accepted_value = serde_json::to_value(&_accepted)?;
+        let authority_id = accepted_value["authority"]["authorityId"]
+            .as_str()
             .ok_or_else(|| {
                 TrellisTestError::UnexpectedResponse(
                     "accepted authority response missing authorityId".to_string(),
                 )
             })?
-            .to_string();
+            .to_owned();
         self.deployment_authorities
             .insert(deployment.clone(), authority_id);
-        self.api_artifacts.insert(
-            compiled.api["id"]
-                .as_str()
-                .expect("compiled API has an id")
-                .to_owned(),
-            compiled.api,
-        );
+        let compiled_api = compiled.api_value()?;
+        let compiled_participant = compiled.participant_value()?;
+        let compiled_participant_digest = compiled.participant_digest()?;
+        let compiled_participant_needs_digest = compiled.participant_needs_digest()?;
+        let api_id = compiled_api["id"]
+            .as_str()
+            .expect("compiled API has an id")
+            .to_owned();
+        self.api_artifacts
+            .insert(api_id.clone(), compiled_api.clone());
+        let participant_json = serde_json::to_string(&compiled_participant)?;
+        let api_json = serde_json::to_string(&compiled_api)?;
+        let api_digest = trellis_protocol::parse_api_v1(&compiled_api)?.digest()?;
+        let mut referenced_apis = selected_referenced_apis(&compiled)?;
+        for api_id in contract_reference_ids(&compiled_participant) {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                referenced_apis.entry(api_id.clone())
+            {
+                let artifact = self.api_artifacts.get(&api_id).ok_or_else(|| {
+                    TrellisTestError::UnexpectedResponse(format!(
+                        "API artifact '{api_id}' has not been approved"
+                    ))
+                })?;
+                entry.insert(trellis_rs::contracts::ApiBuilder::new(artifact.clone()).build()?);
+            }
+        }
+        let referenced_api_artifacts = referenced_apis
+            .values()
+            .map(|artifact| {
+                let artifact = artifact.normalized_value()?;
+                Ok((
+                    serde_json::to_string(&artifact)?,
+                    trellis_protocol::parse_api_v1(&artifact)?.digest()?,
+                ))
+            })
+            .collect::<Result<Vec<_>, TrellisTestError>>()?;
         self.reconcile(bootstrap_url, &deployment).await?;
         self.wait_ready(bootstrap_url, &deployment).await?;
         Ok(TrellisTestContractApproval {
             plan_id: plan.plan_id,
             classification: plan.classification,
-            participant_id: compiled.participant["id"]
+            participant_id: compiled_participant["id"]
                 .as_str()
                 .expect("compiled participant has an id")
                 .to_owned(),
-            participant_digest: compiled.participant_digest,
-            participant_needs_digest: compiled.participant_needs_digest,
+            participant_digest: compiled_participant_digest,
+            participant_needs_digest: compiled_participant_needs_digest,
+            participant_json,
+            api_json,
+            api_digest,
+            referenced_api_artifacts,
             deployment_id: deployment,
         })
     }
@@ -2065,7 +2192,7 @@ impl TrellisTestAdmin {
             idempotency_key: random_session_seed(),
         };
         if let Some(proxy) = &self.admin_rpc {
-            let _: auth_sdk::types::AuthDeploymentAuthorityReconcileResponse = proxy
+            let _: serde_json::Value = proxy
                 .call("authDeploymentAuthorityReconcile", &request)
                 .await?;
         } else {
@@ -2114,15 +2241,8 @@ impl TrellisTestAdmin {
                         .await?
                 };
             let authority = serde_json::to_value(&result.authority)?;
-            let materialized_authority = authority
-                .get("materialization")
-                .cloned()
-                .unwrap_or(Value::Null);
-            let authority_version = authority
-                .get("version")
-                .and_then(Value::as_i64)
-                .unwrap_or_default()
-                .to_string();
+            let materialized_authority = authority["materialization"].clone();
+            let authority_version = result.authority.version.to_string();
             if materialized_authority_is_current(&materialized_authority, &authority_version)? {
                 return Ok(());
             }
@@ -2161,15 +2281,14 @@ impl TrellisTestAdmin {
             .await?;
         let seed = session_key_seed.unwrap_or_else(random_session_seed);
         let auth_material = SessionAuth::from_seed_base64url(&seed)?;
-        let participant_id = Some(approval.participant_id.clone());
-        let instance_id = format!("inst_{}", &auth_material.session_key[..16]);
         let request = auth_sdk::types::AuthServiceInstancesProvisionRequest {
             deployment_id: approval.deployment_id.clone(),
-            instance_id: Some(instance_id.clone()),
+            instance_id: Some(format!("inst_{}", &auth_material.session_key[..16])),
             identity_public_key: auth_material.session_key.clone(),
-            participant_id,
+            participant_id: Some(approval.participant_id.clone()),
             idempotency_key: random_session_seed(),
         };
+        let mut provisioned = None;
         for attempt in 0..3 {
             let result: Result<auth_sdk::types::AuthServiceInstancesProvisionResponse, _> =
                 if let Some(proxy) = &self.admin_rpc {
@@ -2183,13 +2302,20 @@ impl TrellisTestAdmin {
                         .map_err(Into::into)
                 };
             match result {
-                Ok(_) => break,
+                Ok(response) => {
+                    provisioned = Some(response);
+                    break;
+                }
                 Err(error) if attempt < 2 && error.to_string().contains("WebSocket closed") => {
                     tokio::time::sleep(Duration::from_millis(100 * (attempt + 1))).await;
                 }
                 Err(error) => return Err(error),
             }
         }
+        let instance_id = provisioned
+            .expect("provisioning loop returns or succeeds")
+            .instance
+            .instance_id;
         Ok(TrellisTestServiceKey {
             seed: random_session_seed(),
             identity_seed: seed,
@@ -2199,6 +2325,10 @@ impl TrellisTestAdmin {
             participant_id: approval.participant_id,
             participant_digest: approval.participant_digest,
             participant_needs_digest: approval.participant_needs_digest,
+            participant_json: approval.participant_json,
+            api_json: approval.api_json,
+            api_digest: approval.api_digest,
+            referenced_api_artifacts: approval.referenced_api_artifacts,
             integration_test_scope: self.integration_test_scope.clone(),
         })
     }
@@ -2233,8 +2363,13 @@ impl TrellisTestAdmin {
         contract: &TrellisTestContract,
         session_seed: impl Into<String>,
     ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
-        self.connect_client_with_registration(bootstrap_url, contract, session_seed.into(), None)
-            .await
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            session_seed.into(),
+            LocalUserAuth::Administrator,
+        )
+        .await
     }
 
     /// Register and connect a distinct local user through public Auth browser surfaces.
@@ -2245,69 +2380,204 @@ impl TrellisTestAdmin {
         username: impl Into<String>,
         password: impl Into<String>,
     ) -> Result<Caller, TrellisTestError> {
-        self.complete_bootstrap(bootstrap_url).await?;
-        let list_request = auth_sdk::types::AuthPortalsListRequest {
-            cursor: None,
-            disabled: None,
-            limit: Some(100),
-        };
-        let portals: auth_sdk::types::AuthPortalsListResponse = if let Some(proxy) = &self.admin_rpc
-        {
-            proxy.call("authPortalsList", &list_request).await?
-        } else {
-            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
-                .rpc()
-                .auth()
-                .portals_list(&list_request)
-                .await?
-        };
-        let portal = portals
-            .entries
-            .into_iter()
-            .find(|portal| portal.built_in)
-            .ok_or_else(|| {
-                TrellisTestError::UnexpectedResponse(
-                    "built-in login portal was not found".to_owned(),
-                )
-            })?;
-        if !portal.login_settings.local_registration {
-            let put_request = auth_sdk::types::AuthPortalsPutRequest {
-                disabled: portal.disabled,
-                display_name: portal.display_name,
-                entry_url: portal.entry_url,
-                expected_version: Some(portal.version),
-                idempotency_key: random_session_seed(),
-                login_settings: auth_sdk::types::AuthPortalsPutRequestLoginSettings {
-                    federated_registration: portal.login_settings.federated_registration,
-                    local_login: true,
-                    local_registration: true,
-                    providers: Some(vec!["local".to_owned()]),
-                },
-                portal_id: portal.portal_id,
-            };
-            if let Some(proxy) = &self.admin_rpc {
-                let _: auth_sdk::types::AuthPortalsPutResponse =
-                    proxy.call("authPortalsPut", &put_request).await?;
-            } else {
-                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
-                    .rpc()
-                    .auth()
-                    .portals_put(&put_request)
-                    .await?;
-            }
-        }
+        self.enable_local_auth(bootstrap_url).await?;
         let (caller, _) = self
             .connect_client_with_registration(
                 bootstrap_url,
                 contract,
                 random_session_seed(),
-                Some(LocalUserRegistration {
+                LocalUserAuth::Register(LocalUserRegistration {
+                    portal_id: "builtin".to_owned(),
                     username: username.into(),
                     password: password.into(),
+                    trusted_capabilities: Vec::new(),
                 }),
             )
             .await?;
         Ok(caller)
+    }
+
+    /// Register and connect a local user whose trusted portal grants authority without consent.
+    pub async fn connect_new_trusted_local_user_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        portal_id: impl Into<String>,
+        username: impl Into<String>,
+        password: impl Into<String>,
+        direct_capabilities: Vec<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            random_session_seed(),
+            LocalUserAuth::Register(LocalUserRegistration {
+                portal_id: portal_id.into(),
+                username: username.into(),
+                password: password.into(),
+                trusted_capabilities: direct_capabilities,
+            }),
+        )
+        .await
+    }
+
+    /// Log in an existing local user and return a bound-only reconnect handle.
+    pub async fn connect_local_user_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.enable_local_auth(bootstrap_url).await?;
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            random_session_seed(),
+            LocalUserAuth::Login {
+                username: username.into(),
+                password: password.into(),
+            },
+        )
+        .await
+    }
+
+    /// Log in through an already configured participant-scoped portal.
+    pub async fn connect_local_user_for_portal_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            random_session_seed(),
+            LocalUserAuth::Login {
+                username: username.into(),
+                password: password.into(),
+            },
+        )
+        .await
+    }
+
+    /// Authenticate through a configured OIDC provider and return reconnect material.
+    pub async fn connect_oidc_user_reconnectable(
+        &mut self,
+        bootstrap_url: &str,
+        contract: &TrellisTestContract,
+        provider_id: impl Into<String>,
+    ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
+        self.connect_client_with_registration(
+            bootstrap_url,
+            contract,
+            random_session_seed(),
+            LocalUserAuth::Oidc {
+                provider_id: provider_id.into(),
+            },
+        )
+        .await
+    }
+
+    async fn enable_local_auth(&mut self, bootstrap_url: &str) -> Result<(), TrellisTestError> {
+        self.complete_bootstrap(bootstrap_url).await?;
+        for _ in 0..3 {
+            let request = auth_sdk::types::AuthPortalsListRequest {
+                cursor: None,
+                disabled: None,
+                limit: Some(100),
+            };
+            let portals: auth_sdk::types::AuthPortalsListResponse =
+                if let Some(proxy) = &self.admin_rpc {
+                    proxy.call("authPortalsList", &request).await?
+                } else {
+                    GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                        .rpc()
+                        .auth()
+                        .portals_list(&request)
+                        .await?
+                };
+            let current = portals
+                .entries
+                .into_iter()
+                .find(|entry| entry.portal_id == "builtin")
+                .ok_or_else(|| io::Error::other("built-in login portal is missing"))?;
+            let mut providers = current.login_settings.providers.unwrap_or_default();
+            let has_local_provider = providers.iter().any(|provider| provider == "local");
+            if current.login_settings.local_login
+                && current.login_settings.local_registration
+                && has_local_provider
+            {
+                return Ok(());
+            }
+            if !has_local_provider {
+                providers.push("local".to_owned());
+            }
+            let request = auth_sdk::types::AuthPortalsLoginSettingsUpdateRequest {
+                expected_version: current.version,
+                idempotency_key: random_session_seed(),
+                portal_id: "builtin".to_owned(),
+                settings: auth_sdk::types::AuthPortalsLoginSettingsUpdateRequestSettings {
+                    federated_registration: true,
+                    local_login: true,
+                    local_registration: true,
+                    providers: Some(providers),
+                },
+            };
+            let result = if let Some(proxy) = &self.admin_rpc {
+                proxy
+                    .call::<_, serde_json::Value>("authPortalsLoginSettingsUpdate", &request)
+                    .await
+                    .map(|_| ())
+            } else {
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .portals_login_settings_update(&request)
+                    .await
+                    .map(|_| ())
+                    .map_err(TrellisTestError::from)
+            };
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) if error.to_string().contains("conflict") => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::other("local authentication settings did not converge").into())
+    }
+
+    /// Update the built-in portal's enabled authentication providers.
+    pub async fn update_login_providers(
+        &mut self,
+        bootstrap_url: &str,
+        expected_version: i64,
+        providers: Vec<String>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthPortalsLoginSettingsUpdateRequest {
+            expected_version,
+            idempotency_key: random_session_seed(),
+            portal_id: "builtin".to_owned(),
+            settings: auth_sdk::types::AuthPortalsLoginSettingsUpdateRequestSettings {
+                federated_registration: true,
+                local_login: true,
+                local_registration: true,
+                providers: Some(providers),
+            },
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: Value = proxy
+                .call("authPortalsLoginSettingsUpdate", &request)
+                .await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .portals_login_settings_update(&request)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn connect_client_with_registration(
@@ -2315,14 +2585,17 @@ impl TrellisTestAdmin {
         bootstrap_url: &str,
         contract: &TrellisTestContract,
         session_seed: String,
-        registration: Option<LocalUserRegistration>,
+        local_auth: LocalUserAuth,
     ) -> Result<(Caller, TrellisTestClientReconnect), TrellisTestError> {
         self.complete_bootstrap(bootstrap_url).await?;
         let auth = SessionAuth::from_seed_base64url(&session_seed)?;
         let contract = contract.scoped(self.integration_test_scope.as_ref())?;
-        let compiled = compile_test_contract(&contract, &mut self.api_artifacts)?;
-        let mut referenced_api_artifacts = self.api_artifacts.values().cloned().collect::<Vec<_>>();
-        referenced_api_artifacts.push(compiled.api.clone());
+        let compiled = build_test_artifacts(&contract, &mut self.api_artifacts)?;
+        let mut referenced_api_artifacts = selected_referenced_apis(&compiled)?
+            .into_values()
+            .map(|api| api.normalized_value().map_err(TrellisTestError::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        referenced_api_artifacts.push(compiled.api_value()?);
         let redirect_to = format!("{}/_trellis/test/client-auth", self.trellis_url);
         let started = start_auth_request(
             &self.trellis_url,
@@ -2333,7 +2606,21 @@ impl TrellisTestAdmin {
         )
         .await?;
         let flow_id = started.flow_id;
-        if let Some(registration) = registration {
+        if let LocalUserAuth::Register(registration) = &local_auth {
+            if !registration.trusted_capabilities.is_empty() {
+                let participant_id = compiled.participant_value()?["id"]
+                    .as_str()
+                    .expect("compiled participant has an id")
+                    .to_owned();
+                self.put_portal_grant_override(
+                    bootstrap_url,
+                    &registration.portal_id,
+                    &participant_id,
+                    None,
+                    registration.trusted_capabilities.clone(),
+                )
+                .await?;
+            }
             register_local_user(
                 &self.trellis_url,
                 &flow_id,
@@ -2341,44 +2628,348 @@ impl TrellisTestAdmin {
                 &registration.password,
             )
             .await?;
-            submit_portal_approval(&self.trellis_url, &flow_id).await?;
-        } else if let Some(proxy) = &self.admin_rpc {
-            proxy
-                .complete_client_auth(&self.trellis_url, &flow_id, &auth.session_key)
-                .await?;
+            if registration.trusted_capabilities.is_empty() {
+                submit_portal_approval(&self.trellis_url, &flow_id).await?;
+            }
         } else {
-            perform_local_login(&self.trellis_url, &flow_id, &self.admin_password).await?;
-            submit_portal_approval(&self.trellis_url, &flow_id).await?;
+            let requires_approval = match local_auth {
+                LocalUserAuth::Login { username, password } => {
+                    let response =
+                        perform_local_login(&self.trellis_url, &flow_id, &username, &password)
+                            .await?;
+                    response["state"] == "approval_required"
+                }
+                LocalUserAuth::Administrator => {
+                    if let Some(proxy) = &self.admin_rpc {
+                        proxy
+                            .complete_client_auth(&self.trellis_url, &flow_id, &auth.session_key)
+                            .await?;
+                        false
+                    } else {
+                        perform_local_login(
+                            &self.trellis_url,
+                            &flow_id,
+                            ADMIN_USERNAME,
+                            &self.admin_password,
+                        )
+                        .await?;
+                        true
+                    }
+                }
+                LocalUserAuth::Oidc { provider_id } => {
+                    let mut start_url = reqwest::Url::parse(&format!(
+                        "{}/auth/login/{}",
+                        trim_url(&self.trellis_url),
+                        provider_id
+                    ))
+                    .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?;
+                    start_url.query_pairs_mut().append_pair("flowId", &flow_id);
+                    let client = reqwest::Client::builder()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .no_proxy()
+                        .build()?;
+                    let started = client.get(start_url).send().await?;
+                    let cookie = started
+                        .headers()
+                        .get(reqwest::header::SET_COOKIE)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.split(';').next())
+                        .ok_or_else(|| {
+                            TrellisTestError::UnexpectedResponse(
+                                "OIDC start omitted browser-binding cookie".to_owned(),
+                            )
+                        })?
+                        .to_owned();
+                    let authorization_url = started
+                        .headers()
+                        .get(reqwest::header::LOCATION)
+                        .and_then(|value| value.to_str().ok())
+                        .ok_or_else(|| {
+                            TrellisTestError::UnexpectedResponse(
+                                "OIDC start omitted authorization redirect".to_owned(),
+                            )
+                        })?;
+                    let authorized = client.get(authorization_url).send().await?;
+                    let callback_url = authorized
+                        .headers()
+                        .get(reqwest::header::LOCATION)
+                        .and_then(|value| value.to_str().ok())
+                        .ok_or_else(|| {
+                            TrellisTestError::UnexpectedResponse(
+                                "OIDC provider omitted callback redirect".to_owned(),
+                            )
+                        })?;
+                    let response = client
+                        .get(callback_url)
+                        .header(reqwest::header::COOKIE, cookie)
+                        .send()
+                        .await?;
+                    let final_status = response.status();
+                    let final_url = response.url().to_string();
+                    let final_body = response.text().await?;
+                    let flow_url = format!("{}/auth/flow/{}", trim_url(&self.trellis_url), flow_id);
+                    let flow_body = reqwest::Client::builder()
+                        .no_proxy()
+                        .build()?
+                        .get(&flow_url)
+                        .send()
+                        .await?
+                        .text()
+                        .await?;
+                    if !flow_body.contains("approved") {
+                        return Err(TrellisTestError::UnexpectedResponse(format!(
+                            "OIDC flow did not approve: final={final_status} {final_url} {final_body}; flow={flow_body}"
+                        )));
+                    }
+                    false
+                }
+                LocalUserAuth::Register(_) => unreachable!(),
+            };
+            if requires_approval {
+                submit_portal_approval(&self.trellis_url, &flow_id).await?;
+            }
         }
         let bound = bind_flow(&self.trellis_url, &flow_id).await?;
+        let compiled_api = compiled.api_value()?;
+        let compiled_participant_digest = compiled.participant_digest()?;
         self.api_artifacts.insert(
-            compiled.api["id"]
+            compiled_api["id"]
                 .as_str()
                 .expect("compiled API has an id")
                 .to_owned(),
-            compiled.api,
+            compiled_api,
         );
 
         let reconnect = TrellisTestClientReconnect {
             bound: bound.clone(),
             session_seed,
-            participant_digest: compiled.participant_digest,
+            participant_digest: compiled_participant_digest,
             integration_test_scope: self.integration_test_scope.clone(),
+            authorization_context_store: Arc::new(
+                trellis_rs::client::MemoryAuthorizationContextStore::default(),
+            ),
         };
         let client = connect_bound_user(
             &bound,
             &reconnect.session_seed,
             &reconnect.participant_digest,
             reconnect.integration_test_scope.clone(),
+            reconnect.authorization_context_store.clone(),
         )
         .await?;
         Ok((client, reconnect))
     }
+
+    /// Set claims returned by the shared live-test OIDC provider.
+    pub async fn set_test_oidc_claims(&self, claims: Value) -> Result<(), TrellisTestError> {
+        let proxy = self.test_control_rpc.as_ref().ok_or_else(|| {
+            TrellisTestError::UnexpectedResponse(
+                "test OIDC claims require the shared runtime provider".to_owned(),
+            )
+        })?;
+        let _: Value = proxy.call("testOidcSetClaims", &claims).await?;
+        Ok(())
+    }
+
+    /// Put one capability group through the public Auth RPC surface.
+    pub async fn put_capability_group(
+        &mut self,
+        bootstrap_url: &str,
+        group_key: &str,
+        capabilities: Vec<String>,
+        included_groups: Vec<String>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthCapabilityGroupsPutRequest {
+            capabilities,
+            description: format!("Live test capability group {group_key}"),
+            display_name: group_key.to_owned(),
+            expected_version: None,
+            group_key: group_key.to_owned(),
+            idempotency_key: random_session_seed(),
+            included_groups,
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: Value = proxy.call("authCapabilityGroupsPut", &request).await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .capability_groups_put(&request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Create one participant-scoped login portal and route through public Auth RPCs.
+    pub async fn put_test_login_portal(
+        &mut self,
+        bootstrap_url: &str,
+        portal_id: &str,
+        participant_id: &str,
+        providers: Vec<String>,
+    ) -> Result<(), TrellisTestError> {
+        self.complete_bootstrap(bootstrap_url).await?;
+        let portal = auth_sdk::types::AuthPortalsPutRequest {
+            disabled: false,
+            display_name: format!("Live test portal {portal_id}"),
+            entry_url: None,
+            expected_version: None,
+            idempotency_key: random_session_seed(),
+            login_settings: auth_sdk::types::AuthPortalsPutRequestLoginSettings {
+                federated_registration: true,
+                local_login: true,
+                local_registration: true,
+                providers: Some(providers),
+            },
+            portal_id: portal_id.to_owned(),
+        };
+        let route = auth_sdk::types::AuthPortalsRoutesPutRequest {
+            deployment_id: None,
+            expected_version: None,
+            idempotency_key: random_session_seed(),
+            origin: None,
+            participant_id: Some(participant_id.to_owned()),
+            portal_id: portal_id.to_owned(),
+            priority: 100,
+            route_id: None,
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: Value = proxy.call("authPortalsPut", &portal).await?;
+            let _: Value = proxy.call("authPortalsRoutesPut", &route).await?;
+        } else {
+            let client = GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?);
+            client.rpc().auth().portals_put(&portal).await?;
+            client.rpc().auth().portals_routes_put(&route).await?;
+        }
+        Ok(())
+    }
+
+    /// Put one role-mapped portal grant override through the public Auth RPC surface.
+    pub async fn put_portal_role_mappings(
+        &mut self,
+        bootstrap_url: &str,
+        portal_id: &str,
+        participant_id: &str,
+        expected_version: Option<i64>,
+        role_mappings: Vec<auth_sdk::types::AuthPortalsGrantOverridesPutRequestRoleMappingsItem>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
+            capability_group_keys: Vec::new(),
+            direct_capabilities: Vec::new(),
+            expected_version,
+            idempotency_key: random_session_seed(),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+            role_mappings,
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: Value = proxy.call("authPortalsGrantOverridesPut", &request).await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .portals_grant_overrides_put(&request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// List physical connections for one logical session.
+    pub async fn list_connections(
+        &mut self,
+        bootstrap_url: &str,
+        session_id: &str,
+    ) -> Result<Vec<auth_sdk::types::AuthConnectionsListResponseEntriesItem>, TrellisTestError>
+    {
+        let request = auth_sdk::types::AuthConnectionsListRequest {
+            cursor: None,
+            limit: Some(100),
+            session_id: Some(session_id.to_owned()),
+        };
+        let response: auth_sdk::types::AuthConnectionsListResponse =
+            if let Some(proxy) = &self.admin_rpc {
+                proxy.call("authConnectionsList", &request).await?
+            } else {
+                GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                    .rpc()
+                    .auth()
+                    .connections_list(&request)
+                    .await?
+            };
+        Ok(response.entries)
+    }
+
+    /// Remove one portal grant override through the public Auth RPC surface.
+    pub async fn put_portal_grant_override(
+        &mut self,
+        bootstrap_url: &str,
+        portal_id: &str,
+        participant_id: &str,
+        expected_version: Option<i64>,
+        direct_capabilities: Vec<String>,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthPortalsGrantOverridesPutRequest {
+            capability_group_keys: Vec::new(),
+            direct_capabilities,
+            expected_version,
+            idempotency_key: random_session_seed(),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+            role_mappings: Vec::new(),
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: serde_json::Value = proxy.call("authPortalsGrantOverridesPut", &request).await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .portals_grant_overrides_put(&request)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Remove one portal grant override through the public Auth RPC surface.
+    pub async fn remove_portal_grant_override(
+        &mut self,
+        bootstrap_url: &str,
+        portal_id: &str,
+        participant_id: &str,
+        expected_version: i64,
+    ) -> Result<(), TrellisTestError> {
+        let request = auth_sdk::types::AuthPortalsGrantOverridesRemoveRequest {
+            expected_version,
+            idempotency_key: random_session_seed(),
+            participant_id: participant_id.to_owned(),
+            portal_id: portal_id.to_owned(),
+        };
+        if let Some(proxy) = &self.admin_rpc {
+            let _: serde_json::Value = proxy
+                .call("authPortalsGrantOverridesRemove", &request)
+                .await?;
+        } else {
+            GeneratedAuthClient::new(self.connect_admin(bootstrap_url).await?)
+                .rpc()
+                .auth()
+                .portals_grant_overrides_remove(&request)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 struct LocalUserRegistration {
+    portal_id: String,
     username: String,
     password: String,
+    trusted_capabilities: Vec<String>,
+}
+
+enum LocalUserAuth {
+    Administrator,
+    Register(LocalUserRegistration),
+    Login { username: String, password: String },
+    Oidc { provider_id: String },
 }
 
 /// Bound client reconnect material captured from a completed public auth flow.
@@ -2388,6 +2979,7 @@ pub struct TrellisTestClientReconnect {
     session_seed: String,
     participant_digest: String,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+    authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
 }
 
 impl TrellisTestClientReconnect {
@@ -2403,48 +2995,125 @@ impl TrellisTestClientReconnect {
             &self.session_seed,
             &self.participant_digest,
             self.integration_test_scope.clone(),
+            self.authorization_context_store.clone(),
         )
         .await
     }
+
+    /// Attempt one raw NATS admission with captured routing material and no context refresh.
+    pub async fn connect_captured_admission(
+        &self,
+        context_digest: &str,
+    ) -> Result<async_nats::Client, TrellisTestError> {
+        let options = UserConnectOptions::new(
+            &self.bound.trellis_url,
+            &self.bound.nats_servers,
+            &self.bound.bootstrap_jwt,
+            &self.bound.session_id,
+            &self.bound.inbox_prefix,
+            &self.session_seed,
+            &self.participant_digest,
+            self.bound.authorization_context.clone(),
+            DEFAULT_ADMIN_RPC_TIMEOUT_MS,
+            format!("test-captured-admission:{}", self.bound.trellis_url),
+            Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+        );
+        let options = match self.integration_test_scope.clone() {
+            Some(scope) => options.with_integration_test_scope(scope),
+            None => options,
+        };
+        Ok(trellis_rs::client::connect_captured_user_admission(options, context_digest).await?)
+    }
 }
 
-/// Contract manifest and digest used by admin automation helpers.
+/// Authoring source and digest used by admin automation helpers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrellisTestContract {
-    manifest: Value,
+    api: Value,
+    participant: Value,
+    referenced_apis: Vec<Value>,
     digest: String,
 }
 
 impl TrellisTestContract {
-    /// Build a test contract from manifest JSON, computing its canonical digest.
-    pub fn from_manifest_json(manifest_json: &str) -> Result<Self, TrellisTestError> {
-        let manifest = serde_json::from_str(manifest_json)?;
-        let digest = trellis_rs::contracts::digest_contract_json(manifest_json)?;
-        Ok(Self { manifest, digest })
+    /// Build a self-implementing test participant from one exact native API.
+    pub fn from_native_api_json(
+        api_json: &str,
+        kind: trellis_rs::contracts::ContractKind,
+    ) -> Result<Self, TrellisTestError> {
+        let api = serde_json::from_str(api_json)?;
+        let artifacts = trellis_rs::contracts::ContractBuilder::from_api(api, kind)?.build()?;
+        Self::from_artifacts(artifacts)
     }
 
-    /// Build a test contract from a manifest value, computing its canonical digest.
-    pub fn from_manifest_value(manifest: Value) -> Result<Self, TrellisTestError> {
-        let digest = trellis_rs::contracts::digest_contract_value(&manifest)?;
-        Ok(Self { manifest, digest })
+    /// Build a test contract from exact native API and participant JSON.
+    pub fn from_native_json(
+        api_json: &str,
+        participant_json: &str,
+    ) -> Result<Self, TrellisTestError> {
+        let api = serde_json::from_str(api_json)?;
+        let participant = serde_json::from_str(participant_json)?;
+        let artifacts =
+            trellis_rs::contracts::ContractBuilder::from_native(api, participant).build()?;
+        Self::from_artifacts(artifacts)
     }
 
-    /// Return the manifest value sent to public Auth RPCs.
+    /// Build a test contract from finalized native artifacts.
+    pub fn from_artifacts(
+        artifacts: trellis_rs::contracts::ContractArtifacts,
+    ) -> Result<Self, TrellisTestError> {
+        build_test_contract(artifacts, vec![])
+    }
+
+    /// Finalize a typed builder with exact API evidence from referenced contracts.
+    pub fn from_builder_with_referenced_contracts(
+        builder: trellis_rs::contracts::ContractBuilder,
+        referenced_contracts: &[&Self],
+    ) -> Result<Self, TrellisTestError> {
+        let mut referenced_apis = builtin_api_artifacts();
+        referenced_apis.extend(
+            referenced_contracts
+                .iter()
+                .map(|contract| (contract.id().to_owned(), contract.api.clone())),
+        );
+        let artifacts = builder.referenced_apis(referenced_apis).build()?;
+        Self::from_artifacts_with_referenced_contracts(artifacts, referenced_contracts)
+    }
+
+    /// Build a test contract with exact API evidence from other test contracts.
+    pub fn from_artifacts_with_referenced_contracts(
+        artifacts: trellis_rs::contracts::ContractArtifacts,
+        referenced_contracts: &[&Self],
+    ) -> Result<Self, TrellisTestError> {
+        let referenced_apis = referenced_contracts
+            .iter()
+            .map(|contract| contract.api.clone())
+            .collect::<Vec<_>>();
+        build_test_contract(artifacts, referenced_apis)
+    }
+
+    /// Return the exact native participant artifact represented by this test contract.
     #[must_use]
-    pub fn manifest(&self) -> &Value {
-        &self.manifest
+    pub fn participant(&self) -> &Value {
+        &self.participant
     }
 
-    /// Return the canonical manifest digest.
+    /// Return the exact native API artifact represented by this test contract.
+    #[must_use]
+    pub fn api(&self) -> &Value {
+        &self.api
+    }
+
+    /// Return the canonical participant digest.
     #[must_use]
     pub fn digest(&self) -> &str {
         &self.digest
     }
 
-    /// Return the contract ID from this test manifest.
+    /// Return the contract ID from this test source.
     #[must_use]
     pub fn id(&self) -> &str {
-        self.manifest["id"]
+        self.participant["id"]
             .as_str()
             .expect("validated test contract has an id")
     }
@@ -2456,191 +3125,140 @@ impl TrellisTestContract {
         let Some(scope) = scope else {
             return Ok(self.clone());
         };
-        let manifest = scope_contract_manifest(self.manifest.clone(), scope)?;
-        Self::from_manifest_value(manifest)
+        let action_names = std::iter::once(&self.api)
+            .chain(self.referenced_apis.iter())
+            .filter(|api| {
+                api.get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.starts_with("trellis.integration."))
+            })
+            .flat_map(native_api_action_names)
+            .collect::<Vec<_>>();
+        let api = scope_authoring_source(self.api.clone(), scope)?;
+        let referenced_apis = self
+            .referenced_apis
+            .iter()
+            .cloned()
+            .map(|source| scope_authoring_source(source, scope))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut participant = scope_artifact(self.participant.clone(), scope, &action_names)?;
+        let scoped_apis = std::iter::once(&api)
+            .chain(referenced_apis.iter())
+            .map(|api| {
+                let artifact = trellis_rs::contracts::ApiBuilder::new(api.clone()).build()?;
+                Ok((artifact.id().to_owned(), artifact.digest()?))
+            })
+            .collect::<Result<std::collections::BTreeMap<_, _>, TrellisTestError>>()?;
+        for section in ["implements", "uses"] {
+            if let Some(entries) = participant.get_mut(section) {
+                refresh_scoped_api_digests(entries, &scoped_apis);
+            }
+        }
+        let artifacts = trellis_rs::contracts::ContractBuilder::from_native(api, participant)
+            .referenced_apis(
+                referenced_apis
+                    .iter()
+                    .map(|api| (api["id"].as_str().unwrap().to_owned(), api.clone()))
+                    .collect(),
+            )
+            .build()?;
+        build_test_contract(artifacts, referenced_apis)
     }
 }
 
-fn scope_contract_manifest(
-    mut manifest: Value,
+fn refresh_scoped_api_digests(value: &mut Value, scoped_apis: &BTreeMap<String, String>) {
+    if let Some(api_id) = value.get("api").and_then(Value::as_str) {
+        if let Some(digest) = scoped_apis.get(api_id) {
+            value["apiDigest"] = Value::String(digest.clone());
+        }
+        return;
+    }
+    if let Some(entries) = value.as_object_mut() {
+        for entry in entries.values_mut() {
+            refresh_scoped_api_digests(entry, scoped_apis);
+        }
+    }
+}
+
+fn scope_authoring_source(
+    source: Value,
     scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
 ) -> Result<Value, TrellisTestError> {
-    if !manifest
+    if !source
         .get("id")
         .and_then(Value::as_str)
         .is_some_and(|id| id.starts_with("trellis.integration."))
     {
-        return Ok(manifest);
+        return Ok(source);
     }
-    let mut contract_ids = Vec::new();
-    collect_contract_ids(&manifest, &mut contract_ids);
-    let action_names = ["rpc", "operations", "events", "feeds"]
+    let action_names = native_api_action_names(&source).collect::<Vec<_>>();
+    scope_artifact(source, scope, &action_names)
+}
+
+fn native_api_action_names(source: &Value) -> impl Iterator<Item = String> + '_ {
+    ["rpc", "operations", "events", "feeds"]
         .into_iter()
-        .flat_map(|key| {
-            manifest
-                .get(key)
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|actions| actions.keys().cloned())
-        })
-        .collect::<Vec<_>>();
-    let capability_names = manifest
+        .flat_map(|key| source.get(key).and_then(Value::as_object).into_iter())
+        .flat_map(|actions| actions.keys().cloned())
+}
+
+fn scope_artifact(
+    mut source: Value,
+    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
+    action_names: &[String],
+) -> Result<Value, TrellisTestError> {
+    let mut contract_ids = Vec::new();
+    collect_artifact_ids(&source, &mut contract_ids);
+    let capability_names = source
         .get("capabilities")
         .and_then(Value::as_object)
         .into_iter()
         .flat_map(|capabilities| capabilities.keys().cloned())
         .collect::<Vec<_>>();
-    scope_manifest_value(
-        &mut manifest,
+    scope_source_value(
+        &mut source,
         scope,
         &contract_ids,
-        &action_names,
+        action_names,
         &capability_names,
     )?;
-    if let Some(uses) = manifest.get_mut("uses") {
-        scope_use_selectors(uses, scope);
-    }
-    if let Some(event_consumers) = manifest.get_mut("eventConsumers") {
-        scope_event_consumer_events(event_consumers, scope);
-    }
     for key in ["rpc", "operations", "events", "feeds"] {
-        if let Some(actions) = manifest.get_mut(key).and_then(Value::as_object_mut) {
-            let scoped = std::mem::take(actions)
+        if let Some(actions) = source.get_mut(key).and_then(Value::as_object_mut) {
+            *actions = std::mem::take(actions)
                 .into_iter()
                 .map(|(name, value)| (scope.logical_name(&name), value))
                 .collect();
-            *actions = scoped;
         }
     }
-    Ok(manifest)
-}
-
-fn scope_use_selectors(
-    value: &mut Value,
-    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
-) {
-    match value {
-        Value::Object(fields) => {
-            if fields
-                .get("contract")
-                .and_then(Value::as_str)
-                .is_some_and(|contract| contract.starts_with("trellis.integration."))
-            {
-                scope_selector_value(value, scope);
-                return;
-            }
-            for value in fields.values_mut() {
-                scope_use_selectors(value, scope);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                scope_use_selectors(value, scope);
-            }
-        }
-        _ => {}
+    if source.get("format").and_then(Value::as_str) == Some("trellis.api.v1") {
+        source["id"] = Value::String(
+            scope.contract_id(
+                source["id"]
+                    .as_str()
+                    .expect("validated native API has an id"),
+            ),
+        );
     }
+    Ok(source)
 }
 
-fn scope_selector_value(
-    value: &mut Value,
-    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
-) {
+fn collect_artifact_ids(value: &Value, ids: &mut Vec<String>) {
     match value {
         Value::Object(fields) => {
             for (key, value) in fields {
-                if matches!(
-                    key.as_str(),
-                    "call"
-                        | "serve"
-                        | "start"
-                        | "watch"
-                        | "cancel"
-                        | "control"
-                        | "publish"
-                        | "subscribe"
-                ) {
-                    if let Value::Array(names) = value {
-                        for name in names {
-                            if let Value::String(name) = name {
-                                *name = scope.logical_name(name);
-                            }
-                        }
-                    }
-                } else {
-                    scope_selector_value(value, scope);
-                }
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                scope_selector_value(value, scope);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn scope_event_consumer_events(
-    value: &mut Value,
-    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
-) {
-    match value {
-        Value::Object(fields) => {
-            for (key, value) in fields {
-                if matches!(key.as_str(), "uses" | "self") {
-                    scope_logical_name_values(value, scope);
-                } else {
-                    scope_event_consumer_events(value, scope);
-                }
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                scope_event_consumer_events(value, scope);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn scope_logical_name_values(
-    value: &mut Value,
-    scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
-) {
-    match value {
-        Value::String(name) => *name = scope.logical_name(name),
-        Value::Object(fields) => {
-            for value in fields.values_mut() {
-                scope_logical_name_values(value, scope);
-            }
-        }
-        Value::Array(values) => {
-            for value in values {
-                scope_logical_name_values(value, scope);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_contract_ids(value: &Value, ids: &mut Vec<String>) {
-    match value {
-        Value::Object(fields) => {
-            for (key, value) in fields {
-                if matches!(key.as_str(), "id" | "contract")
+                if matches!(key.as_str(), "id" | "api")
                     && value
                         .as_str()
                         .is_some_and(|id| id.starts_with("trellis.integration."))
                 {
                     ids.push(value.as_str().expect("checked contract id").to_string());
                 }
-                collect_contract_ids(value, ids);
+                collect_artifact_ids(value, ids);
             }
         }
         Value::Array(values) => {
             for value in values {
-                collect_contract_ids(value, ids);
+                collect_artifact_ids(value, ids);
             }
         }
         _ => {}
@@ -2649,7 +3267,7 @@ fn collect_contract_ids(value: &Value, ids: &mut Vec<String>) {
     ids.dedup();
 }
 
-fn scope_manifest_value(
+fn scope_source_value(
     value: &mut Value,
     scope: &trellis_rs::integration_test_scoping::IntegrationTestScope,
     contract_ids: &[String],
@@ -2659,7 +3277,7 @@ fn scope_manifest_value(
     match value {
         Value::Object(fields) => {
             for value in fields.values_mut() {
-                scope_manifest_value(value, scope, contract_ids, action_names, capability_names)?;
+                scope_source_value(value, scope, contract_ids, action_names, capability_names)?;
             }
             let old = std::mem::take(fields);
             *fields = old
@@ -2674,6 +3292,8 @@ fn scope_manifest_value(
                         .unwrap_or(key);
                     let key = if capability_names.contains(&key) {
                         scope.capability(&key)
+                    } else if action_names.contains(&key) {
+                        scope.logical_name(&key)
                     } else {
                         key
                     };
@@ -2683,7 +3303,7 @@ fn scope_manifest_value(
         }
         Value::Array(values) => {
             for value in values {
-                scope_manifest_value(value, scope, contract_ids, action_names, capability_names)?;
+                scope_source_value(value, scope, contract_ids, action_names, capability_names)?;
             }
         }
         Value::String(text) => {
@@ -2713,22 +3333,97 @@ fn builtin_api_artifacts() -> std::collections::BTreeMap<String, Value> {
     )]
     .into_iter()
     .collect();
-    ensure_builtin_api(trellis_rs::sdk::state::CONTRACT_ID, &mut apis)
-        .expect("embedded State API artifact compiles");
+    ensure_builtin_api(trellis_rs::sdk::state::API_ID, &mut apis)
+        .expect("embedded State API artifact parses");
     apis
 }
 
-fn compile_test_contract(
+fn build_test_artifacts(
     contract: &TrellisTestContract,
     apis: &mut std::collections::BTreeMap<String, Value>,
-) -> Result<trellis_rs::contracts::CompiledProtocolArtifacts, TrellisTestError> {
-    for api_id in contract_reference_ids(contract.manifest()) {
+) -> Result<trellis_rs::contracts::ContractArtifacts, TrellisTestError> {
+    add_referenced_test_apis(&contract.referenced_apis, apis)?;
+    for api_id in native_participant_reference_ids(contract.participant()) {
         ensure_builtin_api(&api_id, apis)?;
     }
-    Ok(trellis_rs::contracts::compile_protocol_artifacts(
-        contract.manifest(),
-        apis,
-    )?)
+    let artifacts = trellis_rs::contracts::ContractBuilder::from_native(
+        contract.api.clone(),
+        contract.participant.clone(),
+    )
+    .referenced_apis(apis.clone())
+    .build()?;
+    Ok(artifacts)
+}
+
+fn native_participant_reference_ids(participant: &Value) -> Vec<String> {
+    ["required", "optional"]
+        .into_iter()
+        .flat_map(|group| {
+            participant
+                .pointer(&format!("/uses/{group}"))
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|uses| uses.values())
+                .filter_map(|selection| selection.get("api").and_then(Value::as_str))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn selected_referenced_apis(
+    artifacts: &trellis_rs::contracts::ContractArtifacts,
+) -> Result<
+    std::collections::BTreeMap<String, trellis_rs::contracts::ApiArtifactV1>,
+    TrellisTestError,
+> {
+    artifacts
+        .resolved()
+        .required_apis()
+        .iter()
+        .chain(artifacts.resolved().optional_apis())
+        .map(|api| api.api().to_owned())
+        .map(|id| {
+            artifacts
+                .referenced_apis()
+                .get(&id)
+                .cloned()
+                .map(|api| (id.clone(), api))
+                .ok_or_else(|| {
+                    TrellisTestError::UnexpectedResponse(format!(
+                        "API artifact '{id}' was not supplied"
+                    ))
+                })
+        })
+        .collect()
+}
+
+fn build_test_contract(
+    artifacts: trellis_rs::contracts::ContractArtifacts,
+    referenced_apis: Vec<Value>,
+) -> Result<TrellisTestContract, TrellisTestError> {
+    Ok(TrellisTestContract {
+        api: artifacts.api_value()?,
+        participant: artifacts.participant_value()?,
+        referenced_apis,
+        digest: artifacts.participant_digest()?,
+    })
+}
+
+fn add_referenced_test_apis(
+    sources: &[Value],
+    apis: &mut std::collections::BTreeMap<String, Value>,
+) -> Result<(), TrellisTestError> {
+    for source in sources {
+        let api = trellis_rs::contracts::ApiBuilder::new(source.clone())
+            .build()?
+            .normalized_value()?;
+        let id = api["id"]
+            .as_str()
+            .expect("validated API has an id")
+            .to_owned();
+        apis.insert(id, api);
+    }
+    Ok(())
 }
 
 fn ensure_builtin_api(
@@ -2738,24 +3433,27 @@ fn ensure_builtin_api(
     if apis.contains_key(api_id) {
         return Ok(());
     }
-    let contract_json = match api_id {
-        trellis_rs::sdk::core::CONTRACT_ID => trellis_rs::sdk::core::CONTRACT_JSON,
-        trellis_rs::sdk::state::CONTRACT_ID => trellis_rs::sdk::state::CONTRACT_JSON,
-        trellis_rs::sdk::jobs::CONTRACT_ID => trellis_rs::sdk::jobs::CONTRACT_JSON,
-        trellis_rs::sdk::health::CONTRACT_ID => trellis_rs::sdk::health::CONTRACT_JSON,
-        trellis_rs::sdk::eventlog::CONTRACT_ID => trellis_rs::sdk::eventlog::CONTRACT_JSON,
+    let api_json = match api_id {
+        trellis_rs::sdk::core::API_ID => trellis_rs::sdk::core::API_JSON,
+        trellis_rs::sdk::state::API_ID => trellis_rs::sdk::state::API_JSON,
+        trellis_rs::sdk::jobs::API_ID => trellis_rs::sdk::jobs::API_JSON,
+        trellis_rs::sdk::health::API_ID => trellis_rs::sdk::health::API_JSON,
+        trellis_rs::sdk::eventlog::API_ID => trellis_rs::sdk::eventlog::API_JSON,
         _ => {
             return Err(TrellisTestError::UnexpectedResponse(format!(
                 "API artifact '{api_id}' has not been approved"
             )))
         }
     };
-    let manifest: Value = serde_json::from_str(contract_json)?;
-    for dependency in contract_reference_ids(&manifest) {
-        ensure_builtin_api(&dependency, apis)?;
+    let artifact: Value = serde_json::from_str(api_json)?;
+    let parsed = trellis_protocol::parse_api_v1(&artifact)?;
+    if parsed.id() != api_id {
+        return Err(TrellisTestError::UnexpectedResponse(format!(
+            "embedded API id '{}' does not match '{api_id}'",
+            parsed.id()
+        )));
     }
-    let compiled = trellis_rs::contracts::compile_protocol_artifacts(&manifest, apis)?;
-    apis.insert(api_id.to_owned(), compiled.api);
+    apis.insert(api_id.to_owned(), artifact);
     Ok(())
 }
 
@@ -2802,6 +3500,14 @@ pub struct TrellisTestContractApproval {
     pub participant_digest: String,
     /// Exact accepted participant needs digest.
     pub participant_needs_digest: String,
+    /// Normalized native participant artifact used by service bootstrap.
+    pub participant_json: String,
+    /// Normalized native owned API artifact used by service bootstrap.
+    pub api_json: String,
+    /// Semantic digest of the owned API artifact.
+    pub api_digest: String,
+    /// Exact normalized referenced API artifacts and semantic digests.
+    pub referenced_api_artifacts: Vec<(String, String)>,
     /// Server-assigned deployment carrying the accepted authority.
     pub deployment_id: String,
 }
@@ -2837,6 +3543,14 @@ pub struct TrellisTestServiceKey {
     pub participant_digest: String,
     /// Exact participant needs digest accepted for this deployment.
     pub participant_needs_digest: String,
+    /// Normalized native participant artifact used by service bootstrap.
+    pub participant_json: String,
+    /// Normalized native owned API artifact used by service bootstrap.
+    pub api_json: String,
+    /// Semantic digest of the owned API artifact.
+    pub api_digest: String,
+    /// Exact normalized referenced API artifacts and semantic digests.
+    pub referenced_api_artifacts: Vec<(String, String)>,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
 }
 
@@ -2895,38 +3609,6 @@ struct BoundFlowSession {
 struct AuthorityPlanSummary {
     plan_id: String,
     classification: AuthorityPlanClassification,
-}
-
-impl AuthorityPlanSummary {
-    fn from_value(value: &Value) -> Result<Self, TrellisTestError> {
-        let plan_id = value
-            .get("proposalId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                TrellisTestError::UnexpectedResponse(
-                    "authority proposal response missing proposalId".to_string(),
-                )
-            })?
-            .to_string();
-        let classification = match value.get("classification").and_then(Value::as_str) {
-            Some("initial" | "update") => AuthorityPlanClassification::Update,
-            Some("migration") => AuthorityPlanClassification::Migration,
-            Some(other) => {
-                return Err(TrellisTestError::UnexpectedResponse(format!(
-                    "unsupported authority plan classification '{other}'"
-                )));
-            }
-            None => {
-                return Err(TrellisTestError::UnexpectedResponse(
-                    "authority plan response missing classification".to_string(),
-                ));
-            }
-        };
-        Ok(Self {
-            plan_id,
-            classification,
-        })
-    }
 }
 
 fn random_session_seed() -> String {
@@ -3037,7 +3719,7 @@ async fn start_auth_request(
     trellis_url: &str,
     redirect_to: &str,
     auth: &SessionAuth,
-    compiled: &trellis_rs::contracts::CompiledProtocolArtifacts,
+    compiled: &trellis_rs::contracts::ContractArtifacts,
     referenced_api_artifacts: Vec<Value>,
 ) -> Result<AuthStartResponse, TrellisTestError> {
     let request_id = format!("req_{}", random_session_seed());
@@ -3045,7 +3727,10 @@ async fn start_auth_request(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| TrellisTestError::UnexpectedResponse(error.to_string()))?
         .as_millis() as i64;
-    let participant_id = compiled.participant["id"]
+    let participant = compiled.participant_value()?;
+    let participant_digest = compiled.participant_digest()?;
+    let participant_needs_digest = compiled.participant_needs_digest()?;
+    let participant_id = participant["id"]
         .as_str()
         .expect("compiled participant has an id");
     let session_nkey = auth.session_nkey()?;
@@ -3055,9 +3740,9 @@ async fn start_auth_request(
         "sessionPublicKey": auth.session_key,
         "sessionNkey": session_nkey,
         "participantId": participant_id,
-        "participantArtifactDigest": compiled.participant_digest,
-        "participantNeedsDigest": compiled.participant_needs_digest,
-        "participantArtifact": compiled.participant,
+        "participantArtifactDigest": participant_digest,
+        "participantNeedsDigest": participant_needs_digest,
+        "participantArtifact": participant,
         "referencedApiArtifacts": referenced_api_artifacts,
         "redirectTarget": redirect_to,
         "proof": auth.sign_session_proof(&trellis_protocol::SessionProofInputV1::user_auth_request(
@@ -3066,9 +3751,9 @@ async fn start_auth_request(
             auth.session_key.clone(),
             session_nkey.clone(),
             participant_id.to_owned(),
-            compiled.participant_digest.clone(),
+            participant_digest.clone(),
             redirect_to.to_owned(),
-            compiled.participant_digest.clone(),
+            participant_digest.clone(),
         )?)?,
     });
     let request_digest = trellis_protocol::session_proof_request_digest_v1(&raw)?;
@@ -3078,7 +3763,7 @@ async fn start_auth_request(
         auth.session_key.clone(),
         session_nkey,
         participant_id.to_owned(),
-        compiled.participant_digest.clone(),
+        participant_digest,
         redirect_to.to_owned(),
         request_digest,
     )?;
@@ -3089,15 +3774,15 @@ async fn start_auth_request(
 async fn perform_local_login(
     trellis_url: &str,
     flow_id: &str,
+    username: &str,
     password: &str,
-) -> Result<(), TrellisTestError> {
-    let _: Value = post_json_with_origin(
+) -> Result<Value, TrellisTestError> {
+    post_json_with_origin(
         &format!("{}/auth/login/local", trim_url(trellis_url)),
         trellis_url,
-        &json!({ "flowId": flow_id, "username": ADMIN_USERNAME, "password": password }),
+        &json!({ "flowId": flow_id, "username": username, "password": password }),
     )
-    .await?;
-    Ok(())
+    .await
 }
 
 async fn register_local_user(
@@ -3183,6 +3868,7 @@ async fn connect_bound_user(
     session_seed: &str,
     participant_digest: &str,
     integration_test_scope: Option<trellis_rs::integration_test_scoping::IntegrationTestScope>,
+    authorization_context_store: Arc<trellis_rs::client::MemoryAuthorizationContextStore>,
 ) -> Result<Caller, TrellisTestError> {
     let _ = bound.expires_at;
     let options = UserConnectOptions::new(
@@ -3196,7 +3882,7 @@ async fn connect_bound_user(
         bound.authorization_context.clone(),
         DEFAULT_ADMIN_RPC_TIMEOUT_MS,
         format!("test-admin:{}", bound.trellis_url),
-        Arc::new(trellis_rs::client::MemoryAuthorizationContextStore::default()),
+        authorization_context_store,
     );
     let options = match integration_test_scope {
         Some(scope) => options.with_integration_test_scope(scope),
@@ -3638,6 +4324,13 @@ fn render_test_trellis_config(
         .expect("test public origin is a URL")
         .port_or_known_default()
         .expect("test public origin includes a port");
+    let platform = match runtime_options.nats_user_jwt_ttl_ms {
+        Some(nats_jwt) => json!({
+            "storage": test_storage_config("./data/platform.sqlite"),
+            "ttl_ms": { "nats_jwt": nats_jwt },
+        }),
+        None => json!({ "storage": test_storage_config("./data/platform.sqlite") }),
+    };
     let config = json!({
         "instance_name": "trellis-test",
         "event_session_seed_file": "./session.seed",
@@ -3698,7 +4391,7 @@ fn render_test_trellis_config(
             "redirect_base": format!("{}/auth/callback", options.public_origin.trim_end_matches('/')),
             "providers": runtime_options.oauth_providers,
         },
-        "platform": { "storage": test_storage_config("./data/platform.sqlite") },
+        "platform": platform,
         "jobs": { "storage": test_storage_config("./data/jobs.sqlite") },
         "health": {
             "storage": test_storage_config("./data/health.sqlite"),
@@ -3722,10 +4415,6 @@ fn test_storage_config(path: &str) -> Value {
 
 fn trellis_creds_path(workdir: &Path) -> PathBuf {
     workdir.join("nats/creds/trellis-auth.creds")
-}
-
-fn auth_creds_path(workdir: &Path) -> PathBuf {
-    workdir.join("nats/creds/auth-auth.creds")
 }
 
 fn control_plane_sqlite_path(workdir: &Path) -> PathBuf {
@@ -4164,9 +4853,9 @@ mod tests {
         auth_deployments_create_request_shape, container_mount, first_admin_bootstrap_body,
         flow_id_from_url, materialized_authority_failure, materialized_authority_is_current,
         parse_published_port, parse_trellis_bootstrap_url, pid_from_prefixed_name,
-        remove_stale_marked_workdirs, repo_trellis_command, scope_contract_manifest,
-        AuthorityPlanClassification, AuthorityPlanSummary, ContainerRuntime, MountMode,
-        ResolvedContainerRuntime, TrellisControlPlaneSqlite, WORKDIR_OWNER_MARKER,
+        remove_stale_marked_workdirs, repo_trellis_command, scope_authoring_source,
+        ContainerRuntime, MountMode, ResolvedContainerRuntime, TrellisControlPlaneSqlite,
+        WORKDIR_OWNER_MARKER,
     };
     use rusqlite::params;
     use serde_json::{json, Value};
@@ -4175,7 +4864,7 @@ mod tests {
     #[test]
     fn integration_scope_leaves_trellis_owned_contracts_unchanged() {
         let manifest = json!({
-            "format": "trellis.contract.v1",
+            "format": "trellis.api.v1",
             "id": "trellis.jobs@v1",
             "rpc": { "Jobs.Cancel": { "version": "v1" } }
         });
@@ -4183,7 +4872,7 @@ mod tests {
             trellis_rs::integration_test_scoping::IntegrationTestScope::new("run", "case").unwrap();
 
         assert_eq!(
-            scope_contract_manifest(manifest.clone(), &scope).unwrap(),
+            scope_authoring_source(manifest.clone(), &scope).unwrap(),
             manifest
         );
     }
@@ -4373,28 +5062,16 @@ mod tests {
                 .unwrap();
         assert_eq!(value["displayName"], json!("test"));
         assert_eq!(value["kind"], json!("service"));
-        assert_eq!(value["requiresDeviceDelegation"], json!(false));
+        assert!(value["idempotencyKey"].as_str().is_some());
     }
 
     #[test]
     fn built_in_contracts_compile_to_protocol_apis() {
         let mut apis = super::builtin_api_artifacts();
-        super::ensure_builtin_api(trellis_rs::sdk::core::CONTRACT_ID, &mut apis).unwrap();
-        super::ensure_builtin_api(trellis_rs::sdk::state::CONTRACT_ID, &mut apis).unwrap();
-        assert!(apis.contains_key(trellis_rs::sdk::core::CONTRACT_ID));
-        assert!(apis.contains_key(trellis_rs::sdk::state::CONTRACT_ID));
-    }
-
-    #[test]
-    fn authority_plan_summary_parses_supported_classifications() {
-        let plan = AuthorityPlanSummary::from_value(&json!({
-            "proposalId": "plan_123",
-            "classification": "migration"
-        }))
-        .unwrap();
-
-        assert_eq!(plan.plan_id, "plan_123");
-        assert_eq!(plan.classification, AuthorityPlanClassification::Migration);
+        super::ensure_builtin_api(trellis_rs::sdk::core::API_ID, &mut apis).unwrap();
+        super::ensure_builtin_api(trellis_rs::sdk::state::API_ID, &mut apis).unwrap();
+        assert!(apis.contains_key(trellis_rs::sdk::core::API_ID));
+        assert!(apis.contains_key(trellis_rs::sdk::state::API_ID));
     }
 
     #[test]
@@ -4404,7 +5081,7 @@ mod tests {
             "authorityVersion": 1,
             "reconciledAt": "2026-06-16T00:00:00Z"
         });
-        let failed = json!({ "state": "unavailable", "error": "resource failure" });
+        let failed = json!({ "state": "error", "error": "resource failure" });
 
         assert!(materialized_authority_is_current(&current, "1").unwrap());
         assert!(!materialized_authority_is_current(&Value::Null, "1").unwrap());

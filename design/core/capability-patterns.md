@@ -12,7 +12,7 @@ order: 70
   communication model
 - [../auth/trellis-auth.md](./../auth/trellis-auth.md) - identity, approval, and
   enforcement model
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   contract-level capability declarations
 
 ## Scope
@@ -22,13 +22,10 @@ metadata, and role/capability usage patterns.
 
 ## Capability Model
 
-Contracts declare capability requirements on RPCs, operations, events, and
-feeds. The owning contract may also declare human-facing metadata for each owned
-capability so planning and approval UIs can explain the requested authority
-without inventing a separate scope catalog. Accepted deployment authority stores
-the runtime capability view projected from those contracts. Deployments grant
-capabilities through roles, groups, grant overrides, or external identity
-mappings.
+APIs declare machine capability allows and human-facing consent metadata.
+Participants select required and optional concrete surfaces, and proposal
+resolution derives their concrete capability upper bound. Accepted authority
+stores the resulting capability view.
 
 Rules:
 
@@ -39,14 +36,14 @@ Rules:
   binding rather than from broader capability grants.
 - contracts SHOULD declare top-level metadata for every capability they own
 - deployments assign capability bundles to users and services
-- deployments MAY also assign auth-owned dynamic capability overlays through
-  grant overrides keyed by `contractId + origin` for web grants or
-  `contractId + sessionPublicKey` for session-keyed grants
+- capability groups are recursive administrative macros, not runtime authority
+- trusted portal policy is keyed by exact `portalId + participantId` and selects
+  only concrete capabilities from the participant's proposal
 - services receive deployment policy through deployment authority
   materialization and current materialized authority
-- authorization changes take effect after accepted authority is materialized or
-  stored grants change; runtime auth derives transport permissions from current
-  materialized authority and stored grants, not from active contracts
+- authorization changes take effect after accepted authority is materialized;
+  runtime auth derives transport permissions from current authority, exact API
+  descriptors, and resource evidence
 - auth-owned self-service RPCs may intentionally require zero granted
   capabilities when ordinary authenticated user context is sufficient, such as
   `Auth.Sessions.Me` and `Auth.Sessions.Logout`
@@ -54,9 +51,11 @@ Rules:
   strings; approval payloads carry capability metadata objects keyed by those
   strings
 
-Grant overrides are deployment policy, not user-owned grants. They must not be
-copied onto the user projection, and they may be revoked dynamically so affected
-delegated sessions must reconnect and re-evaluate current policy.
+Portal policy is not user-owned authority. Trusted autoapproval commits the
+selected concrete capabilities through the ordinary identity-authority
+transaction and records separate portal provenance. Policy changes revoke
+affected contexts and kick their exact active connections without revoking the
+underlying sessions.
 
 ## Capability Naming
 
@@ -64,8 +63,8 @@ Capability names have two forms:
 
 - local capability names are authored inside the owning contract, for example
   `users.read` or `admin.read`
-- global capability keys are emitted into canonical manifests and grant records
-  as `<contract namespace>::<local capability>`, for example
+- global capability keys are emitted into canonical native API artifacts and
+  grant records as `<contract namespace>::<local capability>`, for example
   `trellis.jobs::admin.read`
 
 The contract namespace is the contract `id` with a trailing major-version suffix
@@ -80,8 +79,8 @@ Rules:
 - local capability names MUST NOT start with the owning contract namespace plus
   `.`, so `trellis.core@v1` declares `catalog.read` rather than
   `trellis.core.catalog.read`
-- direct manifest authors SHOULD write global keys in canonical
-  `trellis.contract.v1` manifests
+- direct manifest authors SHOULD write global keys in canonical native
+  `trellis.api.v1` and `trellis.participant.v1` manifests
 - if a capability reference matches a declared top-level capability, tooling
   projects it to the global key in the emitted manifest
 - undeclared platform or external capability strings such as `service` and
@@ -92,8 +91,8 @@ Rules:
 - admin capability catalogs come from Trellis platform capabilities plus
   authority-owned projected capability definitions, not from the active catalog
   alone
-- changing capability metadata changes what users are asked to approve and
-  therefore changes the contract digest
+- changing machine capability allows changes the semantic API digest; changing
+  consent wording alone does not
 
 | Pattern                          | Example                      | Meaning                    | Who Can Claim   |
 | -------------------------------- | ---------------------------- | -------------------------- | --------------- |

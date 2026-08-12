@@ -19,10 +19,11 @@
     entryUrl: string | null;
     builtIn: boolean;
     disabled: boolean;
+    version: number;
     routeCount: number;
     activeRouteCount: number;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: number;
+    updatedAt: number;
   };
 
   const trellis = getTrellis();
@@ -48,12 +49,12 @@
     loading = true;
     error = null;
     try {
-      const portalsResponse = await trellis.authPortalsList({ limit: 500, offset: 0 }).take();
+      const portalsResponse = await trellis.authPortalsList({ limit: 500 }).take();
       if (isErr(portalsResponse)) {
         error = errorMessage(portalsResponse);
         return;
       }
-      portals = portalsResponse.entries;
+      portals = portalsResponse.entries.map((portal) => ({ ...portal, routeCount: 0, activeRouteCount: 0 }));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -67,12 +68,16 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.authPortalsRemove({ portalId: portal.portalId }).take();
+      const response = await trellis.authPortalsRemove({
+        portalId: portal.portalId,
+        expectedVersion: portal.version,
+        idempotencyKey: crypto.randomUUID(),
+      }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;
       }
-      saved = response.success ? "Portal removed." : "Portal was already absent.";
+      saved = response.removed ? "Portal removed." : "Portal was already absent.";
       await load();
     } catch (e) {
       error = errorMessage(e);

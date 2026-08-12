@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.health@v1.json
+// Generated from ./generated/protocol/apis/trellis.health@v1.json
 export const HealthHeartbeatSampleSchema = {
   "properties": {
     "checks": {
@@ -652,7 +652,7 @@ export const HealthWatchRequestSchema = {
 
 export const NotFoundErrorDataSchema = {
   "properties": {
-    "context": { "patternProperties": { "^.*$": {} }, "type": "object" },
+    "context": { "additionalProperties": true, "type": "object" },
     "id": { "minLength": 1, "type": "string" },
     "message": { "type": "string" },
     "resource": { "minLength": 1, "type": "string" },

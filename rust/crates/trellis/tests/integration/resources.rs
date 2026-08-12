@@ -2,20 +2,20 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::task::JoinHandle;
-use trellis_rs::service::{GeneratedServiceContract, ServerError};
+use trellis_rs::service::ServerError;
 
 use crate::support::assertions::assert_case_registered;
 
 const RESOURCES_SERVICE_ID: &str = "trellis.integration.resources-service@v1";
 const RESOURCES_CLIENT_ID: &str = "trellis.integration.resources-client@v1";
 
-const RESOURCES_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const RESOURCES_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.resources-service@v1",
   "displayName": "Trellis Integration Resources Service",
   "description": "Exercises service-bound KV and store resource handles.",
-  "kind": "service",
   "schemas": {
     "ResourceExerciseInput": {
       "type": "object",
@@ -42,58 +42,62 @@ const RESOURCES_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "resources": {
-    "kv": {
-      "records": {
-        "purpose": "Store integration resource records",
-        "schema": { "schema": "ResourceRecord" },
-        "required": true,
-        "history": 1,
-        "ttlMs": 0
-      },
-      "optionalRecords": {
-        "purpose": "Store optional integration resource records",
-        "schema": { "schema": "ResourceRecord" },
-        "required": false,
-        "history": 1,
-        "ttlMs": 0
-      }
-    },
-    "store": {
-      "blobs": {
-        "purpose": "Store integration resource blobs",
-        "required": true,
-        "ttlMs": 0,
-        "maxObjectBytes": 1048576,
-        "maxTotalBytes": 4194304
-      },
-      "optionalBlobs": {
-        "purpose": "Store optional integration resource blobs",
-        "required": false,
-        "ttlMs": 0,
-        "maxObjectBytes": 1048576,
-        "maxTotalBytes": 4194304
-      }
-    }
-  },
   "rpc": {
     "Resources.Exercise": {
       "version": "v1",
-      "subject": "rpc.v1.Resources.Exercise",
       "input": { "schema": "ResourceExerciseInput" },
       "output": { "schema": "ResourceExerciseOutput" },
-      "capabilities": { "call": [] },
       "errors": []
+    }
+  }
+}"#;
+
+const RESOURCES_SERVICE_PARTICIPANT_JSON: &str = r#"{
+  "format": "trellis.participant.v1",
+  "id": "trellis.integration.resources-service@v1",
+  "displayName": "Trellis Integration Resources Service",
+  "description": "Exercises service-bound KV and store resource handles.",
+  "kind": "service",
+  "implements": {},
+  "schemas": {
+    "ResourceRecord": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {"message": {"type": "string"}}
+    }
+  },
+  "resources": {
+    "kv": {
+      "records": {"purpose": "Store integration resource records", "schema": {"schema": "ResourceRecord"}, "required": true, "history": 1, "ttlMs": 0},
+      "optionalRecords": {"purpose": "Store optional integration resource records", "schema": {"schema": "ResourceRecord"}, "required": false, "history": 1, "ttlMs": 0}
+    },
+    "store": {
+      "blobs": {"purpose": "Store integration resource blobs", "required": true, "ttlMs": 0, "maxObjectBytes": 1048576, "maxTotalBytes": 4194304},
+      "optionalBlobs": {"purpose": "Store optional integration resource blobs", "required": false, "ttlMs": 0, "maxObjectBytes": 1048576, "maxTotalBytes": 4194304}
     }
   }
 }"#;
 
 struct ResourcesServiceContract;
 
-impl GeneratedServiceContract for ResourcesServiceContract {
-    const CONTRACT_ID: &'static str = RESOURCES_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "dAH7D3LHHELNMsQpJDYYXc20xWTC2jRvysUo3UQkq9U";
-    const CONTRACT_JSON: &'static str = RESOURCES_SERVICE_CONTRACT_JSON;
+fn resources_service_contract() -> trellis_test::TrellisTestContract {
+    let api: Value = serde_json::from_str(RESOURCES_SERVICE_API_SOURCE_JSON)
+        .expect("parse resources service API");
+    let api_digest = trellis_rs::contracts::ApiBuilder::new(api)
+        .build()
+        .expect("validate resources service API")
+        .digest()
+        .expect("digest resources service API");
+    let mut participant: Value = serde_json::from_str(RESOURCES_SERVICE_PARTICIPANT_JSON)
+        .expect("parse resources service participant");
+    participant["implements"] = serde_json::json!({
+        "self": {"api": RESOURCES_SERVICE_ID, "apiDigest": api_digest}
+    });
+    trellis_test::TrellisTestContract::from_native_json(
+        RESOURCES_SERVICE_API_SOURCE_JSON,
+        &participant.to_string(),
+    )
+    .expect("build resources service test contract")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -174,13 +178,7 @@ async fn resources_service_receives_required_bindings() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RESOURCES_SERVICE_CONTRACT_JSON)
-            .expect("build resources service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        ResourcesServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = resources_service_contract();
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -230,13 +228,7 @@ async fn resources_service_receives_optional_bindings() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RESOURCES_SERVICE_CONTRACT_JSON)
-            .expect("build resources service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        ResourcesServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = resources_service_contract();
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -287,16 +279,10 @@ async fn resources_service_store_create_read_list_delete() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RESOURCES_SERVICE_CONTRACT_JSON)
-            .expect("build resources service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        ResourcesServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = resources_service_contract();
 
     let client_contract =
-        resources_client_contract().expect("build resources client test contract");
+        resources_client_contract(&service_contract).expect("build resources client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -382,16 +368,10 @@ async fn resources_service_kv_create_put_get_delete() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RESOURCES_SERVICE_CONTRACT_JSON)
-            .expect("build resources service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        ResourcesServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = resources_service_contract();
 
     let client_contract =
-        resources_client_contract().expect("build resources client test contract");
+        resources_client_contract(&service_contract).expect("build resources client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -474,16 +454,10 @@ async fn resources_service_kv_stale_revision_rejected() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RESOURCES_SERVICE_CONTRACT_JSON)
-            .expect("build resources service test contract");
-    assert_eq!(
-        service_contract.digest(),
-        ResourcesServiceContract::CONTRACT_DIGEST
-    );
+    let service_contract = resources_service_contract();
 
     let client_contract =
-        resources_client_contract().expect("build resources client test contract");
+        resources_client_contract(&service_contract).expect("build resources client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -620,8 +594,9 @@ fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClie
 }
 
 fn resources_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RESOURCES_CLIENT_ID,
         "Trellis Integration Resources Client",
         "App/client participant for the resources integration fixture.",
@@ -631,8 +606,10 @@ fn resources_client_contract(
         "resourcesService",
         trellis_rs::contracts::use_contract(RESOURCES_SERVICE_ID)
             .with_rpc_call(["Resources.Exercise"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

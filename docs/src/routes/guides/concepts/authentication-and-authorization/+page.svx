@@ -19,7 +19,7 @@ Every runtime presents an exact `trellis.participant.v1` artifact binding. The
 artifact identifies the APIs the participant implements or uses and its resource
 needs. API definitions use `trellis.api.v1`. Normal TypeScript contract authoring
 is compiled to those protocol artifacts before bootstrap; the Rust auth runtime
-does not accept legacy contract manifests as authority evidence.
+does not accept legacy native contract artifactss as authority evidence.
 
 Authority decisions bind the participant id, artifact digest, and accepted needs
 digest. Changing that boundary requires a new proposal and decision rather than

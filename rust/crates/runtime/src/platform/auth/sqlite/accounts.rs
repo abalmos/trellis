@@ -482,11 +482,16 @@ impl AccountRepository for SqliteAuthorizationStore {
                     "password-reset flow has no target principal".to_owned(),
                 )
             })?;
-            let current = load_local_credential(&transaction, &principal_id)?
-                .ok_or(AuthorizationStateError::StorageConflict)?;
-            validate_replacement_credential(&current, &command.replacement, &principal_id)?;
-            let changed = transaction
-                .execute(
+            let current = load_local_credential(&transaction, &principal_id)?;
+            if current.as_ref().map(|current| current.version)
+                != command.expected_credential_version
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            if let Some(current) = current {
+                validate_replacement_credential(&current, &command.replacement, &principal_id)?;
+                let changed = transaction
+                    .execute(
                     "UPDATE auth_local_credentials SET password_hash = ?1, hash_profile = ?2, failed_attempts = ?3, locked_until = ?4, password_changed_at = ?5, updated_at = ?6, version = ?7
                  WHERE principal_id = ?8 AND version = ?9",
                     params![
@@ -500,10 +505,53 @@ impl AccountRepository for SqliteAuthorizationStore {
                         principal_id,
                         to_sql_version(current.version)?
                     ],
-                )
-                .map_err(map_write_error)?;
-            if changed != 1 {
-                return Err(AuthorizationStateError::StorageConflict);
+                    )
+                    .map_err(map_write_error)?;
+                if changed != 1 {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+            } else {
+                super::super::application::validation::validate_local_credential(
+                    &command.replacement,
+                )?;
+                let identity = command
+                    .identity
+                    .as_ref()
+                    .ok_or(AuthorizationStateError::StorageConflict)?;
+                if identity.principal_id != principal_id
+                    || identity.provider != "local"
+                    || identity.provider_subject != command.replacement.normalized_username
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                transaction
+                    .execute(
+                        "INSERT INTO auth_local_credentials (principal_id, normalized_username, password_hash, hash_profile, failed_attempts, locked_until, password_changed_at, updated_at, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            command.replacement.principal_id,
+                            command.replacement.normalized_username,
+                            command.replacement.password_hash,
+                            i64::from(command.replacement.hash_profile),
+                            i64::from(command.replacement.failed_attempts),
+                            command.replacement.locked_until,
+                            command.replacement.password_changed_at,
+                            command.replacement.updated_at,
+                            to_sql_version(command.replacement.version)?
+                        ],
+                    )
+                    .map_err(map_write_error)?;
+                transaction
+                    .execute(
+                        "INSERT INTO auth_provider_identities (provider, provider_subject, principal_id, linked_at, last_seen_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            identity.provider,
+                            identity.provider_subject,
+                            identity.principal_id,
+                            identity.linked_at,
+                            identity.last_seen_at
+                        ],
+                    )
+                    .map_err(map_write_error)?;
             }
             transaction
                 .execute(
@@ -547,8 +595,10 @@ impl AccountRepository for SqliteAuthorizationStore {
                 command.consumed_at,
             )?;
             if flow.target_principal_id.as_deref() != Some(command.identity.principal_id.as_str())
-                || flow.target_provider_id.as_deref()
-                    != Some(command.identity.provider.as_str())
+                || flow
+                    .target_provider_id
+                    .as_deref()
+                    .is_some_and(|provider| provider != command.identity.provider)
                 || load_principal(&transaction, &command.identity.principal_id)?.is_none_or(
                     |principal| principal.kind != PrincipalKind::User,
                 )
@@ -556,6 +606,32 @@ impl AccountRepository for SqliteAuthorizationStore {
                 return Err(AuthorizationStateError::InvalidRecord(
                     "identity-link flow target does not match the supplied identity".to_owned(),
                 ));
+            }
+            if let Some(credential) = command.credential {
+                if credential.principal_id != command.identity.principal_id
+                    || credential.normalized_username != command.identity.provider_subject
+                    || command.identity.provider != "local"
+                {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "local credential does not match the supplied identity".to_owned(),
+                    ));
+                }
+                transaction
+                    .execute(
+                        "INSERT INTO auth_local_credentials (principal_id, normalized_username, password_hash, hash_profile, failed_attempts, locked_until, password_changed_at, updated_at, version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            credential.principal_id,
+                            credential.normalized_username,
+                            credential.password_hash,
+                            i64::from(credential.hash_profile),
+                            i64::from(credential.failed_attempts),
+                            credential.locked_until,
+                            credential.password_changed_at,
+                            credential.updated_at,
+                            to_sql_version(credential.version)?
+                        ],
+                    )
+                    .map_err(map_write_error)?;
             }
             transaction
                 .execute(
@@ -1065,6 +1141,39 @@ impl PortalRepository for SqliteAuthorizationStore {
                 .map_err(sql_error)?;
             Ok(routes)
         })
+        .await
+    }
+
+    async fn get_portal_grant_override(
+        &self,
+        portal_id: &str,
+        participant_id: &str,
+    ) -> Result<Option<super::super::PortalGrantOverrideRecord>, AuthorizationStateError> {
+        SqliteAuthorizationStore::get_portal_grant_override(self, portal_id, participant_id).await
+    }
+
+    async fn list_capability_groups(
+        &self,
+    ) -> Result<Vec<super::super::CapabilityGroupRecord>, AuthorizationStateError> {
+        SqliteAuthorizationStore::list_capability_groups(self).await
+    }
+
+    async fn list_portal_authority_bindings(
+        &self,
+    ) -> Result<Vec<super::super::PortalAuthorityBindingRecord>, AuthorizationStateError> {
+        SqliteAuthorizationStore::list_portal_authority_bindings(self).await
+    }
+
+    async fn remove_portal_authority_binding(
+        &self,
+        principal_id: &str,
+        participant_id: &str,
+    ) -> Result<bool, AuthorizationStateError> {
+        SqliteAuthorizationStore::remove_portal_authority_binding(
+            self,
+            principal_id,
+            participant_id,
+        )
         .await
     }
 }

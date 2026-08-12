@@ -19,40 +19,14 @@ use ulid::Ulid;
 use crate::support::assertions::assert_runtime_case_registered;
 
 const CASE_ID: &str = "health.projection-lifecycle-and-recovery";
-const SERVICE_ID: &str = "trellis.integration.health-service@v1";
 const SERVICE_NAME: &str = "health-fixture-service";
-const SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.health-service@v1",
   "displayName": "Trellis Integration Health Service",
-  "description": "Publishes runtime health samples for projection coverage.",
-  "kind": "service"
+  "description": "Publishes runtime health samples for projection coverage."
 }"#;
-const OBSERVER_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.health-observer@v1",
-  "displayName": "Trellis Integration Health Observer",
-  "description": "Reads the Trellis health projection.",
-  "kind": "app",
-  "uses": {
-    "required": {
-      "health": {
-        "contract": "trellis.health@v1",
-        "rpc": { "call": ["Health.Query", "Health.Inspect", "Health.Metrics"] },
-        "feeds": { "subscribe": ["Health.Watch"] },
-        "events": { "subscribe": ["Health.StatusChanged"] }
-      }
-    }
-  }
-}"#;
-
 struct HealthFixtureContract;
-
-impl trellis_rs::service::GeneratedServiceContract for HealthFixtureContract {
-    const CONTRACT_ID: &'static str = SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "runtime";
-    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
-}
 
 struct HealthRuntimeProcess {
     child: Child,
@@ -196,12 +170,34 @@ async fn health_projection_lifecycle_and_recovery() {
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(SERVICE_CONTRACT_JSON)
-            .expect("build health service contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build health service contract");
+    let health_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::health::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build Health API evidence");
     let observer_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OBSERVER_CONTRACT_JSON)
-            .expect("build health observer contract");
+        trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+            trellis_rs::contracts::ContractBuilder::authoring(
+                "trellis.integration.health-observer@v1",
+                "Trellis Integration Health Observer",
+                "Reads the Trellis health projection.",
+                trellis_rs::contracts::ContractKind::App,
+            )
+            .use_ref(
+                "health",
+                trellis_rs::contracts::use_contract(trellis_rs::sdk::health::API_ID)
+                    .with_rpc_call(["Health.Query", "Health.Inspect", "Health.Metrics"])
+                    .with_feed_subscribe(["Health.Watch"])
+                    .with_event_subscribe(["Health.StatusChanged"]),
+            ),
+            &[&health_api],
+        )
+        .expect("build health observer contract");
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, Some(SERVICE_NAME), None)
         .await
@@ -235,7 +231,6 @@ async fn health_projection_lifecycle_and_recovery() {
     let service_id = service_key.participant_id.clone();
     let service_runtime = trellis_test::connect_service_runtime::<HealthFixtureContract>(
         runtime.trellis_url(),
-        SERVICE_CONTRACT_JSON,
         &service_key,
     )
     .await

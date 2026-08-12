@@ -7,11 +7,11 @@ import {
   CONTRACT_STATE_METADATA,
   type ContractStateMetadata,
 } from "./contract_support/mod.ts";
+import { getContractRuntime } from "./contract_support/contract_runtime.ts";
 import {
-  type ContractWithRuntime,
-  getContractRuntime,
-} from "./contract_support/contract_runtime.ts";
-import { compileProtocolArtifacts } from "./contract_support/protocol_artifacts.ts";
+  type NativeProtocolContract,
+  nativeProtocolPresentation,
+} from "./contract_support/protocol_artifacts.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   base64urlDecode,
@@ -45,7 +45,6 @@ import {
   publicKeyBase64urlFromSeed,
 } from "./auth/keys.ts";
 import type { ClientOpts } from "./client.ts";
-import type { TrellisContractV1 } from "./contracts.ts";
 import type { RuntimeApi } from "./contract_support/runtime.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
@@ -78,13 +77,9 @@ import {
 } from "./connection.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
-type ClientContract<TContract extends TrellisContractV1 = TrellisContractV1> =
-  & ContractWithRuntime
-  & {
-    CONTRACT: TContract;
-    CONTRACT_DIGEST?: string;
-    readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
-  };
+type ClientContract = NativeProtocolContract & {
+  readonly [CONTRACT_STATE_METADATA]?: ContractStateMetadata;
+};
 
 function createConnectedClient(args: {
   name: string;
@@ -238,9 +233,7 @@ type ClientConnectArgsFor<TContract extends ClientContract> =
   };
 
 export type TrellisClientConnectArgs<
-  TContract extends ClientContract<TrellisContractV1> = ClientContract<
-    TrellisContractV1
-  >,
+  TContract extends ClientContract = ClientContract,
 > = ClientConnectArgsFor<TContract>;
 
 type ClientRuntimeIdentity = {
@@ -282,8 +275,8 @@ const ClientBootstrapReadySchema = Type.Object({
   serverNow: Type.Integer(),
   connectInfo: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
-    contractId: Type.String({ minLength: 1 }),
-    contractDigest: Type.String({ minLength: 1 }),
+    participantId: Type.String({ minLength: 1 }),
+    participantDigest: Type.String({ minLength: 1 }),
     transports: ClientTransportsSchema,
     transport: Type.Object({
       inboxPrefix: Type.String({ minLength: 1 }),
@@ -549,6 +542,7 @@ async function resolveClientIdentity(
 
 async function bindClientFlow(args: {
   trellisUrl: string;
+  origin: string;
   flowId: string;
   identity: ClientRuntimeIdentity;
   participant: ClientConnectArgsFor<ClientContract>["participant"];
@@ -560,7 +554,7 @@ async function bindClientFlow(args: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: new URL(args.trellisUrl).origin,
+        Origin: args.origin,
       },
       body: JSON.stringify({ idempotencyKey: ulid() }),
     },
@@ -621,8 +615,8 @@ async function bindClientFlow(args: {
     serverNow: parsed.serverNow / 1_000,
     connectInfo: {
       sessionId: parsed.session.sessionId,
-      contractId: args.participant.id,
-      contractDigest: parsed.session.participantArtifactDigest,
+      participantId: args.participant.id,
+      participantDigest: parsed.session.participantArtifactDigest,
       transports: { websocket: { natsServers: parsed.nats.servers } },
       transport: {
         inboxPrefix: parsed.session.inboxPrefix,
@@ -707,8 +701,8 @@ async function recoverClientBootstrapWithRetry(args: {
         serverNow: result.response.serverNow / 1_000,
         connectInfo: {
           sessionId: session.sessionId,
-          contractId: session.participantId,
-          contractDigest: session.participantArtifactDigest,
+          participantId: session.participantId,
+          participantDigest: session.participantArtifactDigest,
           transports: nats.transports,
           transport: {
             inboxPrefix: session.inboxPrefix,
@@ -806,14 +800,14 @@ function needsReauth(
 }
 
 function bootstrapTargetsRequestedContract<
-  TContract extends ClientContract<TrellisContractV1>,
+  TContract extends ClientContract,
 >(
   bootstrap: ClientBootstrapResponse,
   args: ClientConnectArgsFor<TContract>,
 ): boolean {
   return bootstrap.status === "ready" &&
-    bootstrap.connectInfo.contractId === args.participant.id &&
-    bootstrap.connectInfo.contractDigest === args.participant.artifactDigest;
+    bootstrap.connectInfo.participantId === args.participant.id &&
+    bootstrap.connectInfo.participantDigest === args.contract.CONTRACT_DIGEST;
 }
 
 async function buildSessionKeyLoginUrl(args: {
@@ -828,9 +822,14 @@ async function buildSessionKeyLoginUrl(args: {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = args.participant.id === args.contract.CONTRACT.id
-    ? await compileProtocolArtifacts(args.contract)
-    : undefined;
+  if (
+    args.participant.id !== args.contract.CONTRACT_ID ||
+    args.participant.artifactDigest !== args.contract.CONTRACT_DIGEST ||
+    args.participant.needsDigest !== args.contract.PARTICIPANT_NEEDS_DIGEST
+  ) {
+    throw new Error("Client participant identity does not match its contract");
+  }
+  const presentation = nativeProtocolPresentation(args.contract);
   const unsigned = {
     requestId,
     issuedAt,
@@ -839,15 +838,8 @@ async function buildSessionKeyLoginUrl(args: {
     participantId: args.participant.id,
     participantArtifactDigest: args.participant.artifactDigest,
     participantNeedsDigest: args.participant.needsDigest,
-    ...(presentation
-      ? {
-        participantArtifact: presentation.participant,
-        referencedApiArtifacts: [
-          presentation.api,
-          ...presentation.referencedApis,
-        ],
-      }
-      : {}),
+    participantArtifact: presentation.participant,
+    referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
@@ -915,7 +907,7 @@ async function buildSessionKeyLoginUrl(args: {
 }
 
 export async function connectClientWithDeps<
-  TContract extends ClientContract<TrellisContractV1>,
+  TContract extends ClientContract,
 >(
   args: ClientConnectArgsFor<TContract>,
   deps: ClientConnectDeps,
@@ -974,6 +966,7 @@ export async function connectClientWithDeps<
     try {
       callbackBootstrap = await bindClientFlow({
         trellisUrl,
+        origin: currentUrl?.origin ?? new URL(trellisUrl).origin,
         flowId: callbackFlowId,
         identity,
         participant: args.participant,
@@ -1054,7 +1047,7 @@ export async function connectClientWithDeps<
     },
   );
   const runtimeState = {
-    participantDigest: bootstrap.connectInfo.contractDigest,
+    participantDigest: bootstrap.connectInfo.participantDigest,
     sessionId: bootstrap.connectInfo.sessionId,
     jwt: () => authorizationContexts.routingJwt(),
     contextDigest: () => authorizationContexts.current().contextDigest,
@@ -1092,6 +1085,7 @@ export async function connectClientWithDeps<
         bootstrap.connectInfo.transports,
       ),
       maxReconnectAttempts: DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
+      ignoreAuthErrorAbort: true,
       timeout: args.timeout ?? 10_000,
       inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
       authenticator: runtimeAuth.authenticators,
@@ -1104,13 +1098,6 @@ export async function connectClientWithDeps<
     );
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
-    stopContextRefresh = startAuthorizationContextRefresh({
-      trellisUrl: args.trellisUrl,
-      sessionId: runtimeState.sessionId,
-      auth: identity.auth,
-      cache: authorizationContexts,
-      onTerminalFailure: () => connectedNats.drain(),
-    });
     void connectedNats.closed().finally(() => {
       stopContextRefresh?.();
       authorizationProviderCache?.stop();
@@ -1168,6 +1155,15 @@ export async function connectClientWithDeps<
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
+  stopContextRefresh = startAuthorizationContextRefresh({
+    trellisUrl: args.trellisUrl,
+    sessionId: runtimeState.sessionId,
+    auth: identity.auth,
+    cache: authorizationContexts,
+    onRefresh: () =>
+      connection.status.phase === "connected" ? undefined : nc.reconnect(),
+    onTerminalFailure: () => nc.drain(),
+  });
 
   const api = getContractRuntime(args.contract).usedApi as RuntimeApi;
   const state = args.contract[CONTRACT_STATE_METADATA] as TrellisOpts<
@@ -1206,7 +1202,7 @@ export async function connectClientWithDeps<
 }
 
 async function resolveAuthRequired<
-  TContract extends ClientContract<TrellisContractV1>,
+  TContract extends ClientContract,
 >(
   args: ClientConnectArgsFor<TContract>,
   identity: ClientRuntimeIdentity,
@@ -1256,6 +1252,7 @@ async function resolveAuthRequired<
     const bindStartedAt = performance.now();
     const bootstrap = await bindClientFlow({
       trellisUrl: normalizeTrellisUrl(args.trellisUrl),
+      origin: new URL(redirectTo).origin,
       flowId: continuation.flowId,
       identity,
       participant: args.participant,
@@ -1285,7 +1282,7 @@ async function resolveAuthRequired<
 /** Connects user-facing participants to the Trellis caller runtime. */
 export class TrellisClient {
   static connect<
-    TContract extends ClientContract<TrellisContractV1>,
+    TContract extends ClientContract,
   >(
     args: ClientConnectArgsFor<TContract>,
   ): AsyncResult<

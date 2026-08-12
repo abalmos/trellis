@@ -196,6 +196,10 @@ fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationState
                 "../../../storage/sqlite/platform/V1003__authorization_context_runtime.sql"
             ),
         ),
+        (
+            "auth_capability_groups",
+            include_str!("../../../storage/sqlite/platform/V1004__auth_console_policy.sql"),
+        ),
     ] {
         let migrated = connection
             .query_row(

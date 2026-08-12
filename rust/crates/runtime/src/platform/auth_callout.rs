@@ -32,6 +32,7 @@ const DISCONNECT_SUBJECT: &str = "$SYS.ACCOUNT.*.DISCONNECT";
 const SERVER_XKEY_HEADER: &str = "Nats-Server-Xkey";
 const CONNECT_TOKEN_FORMAT: &str = "trellis.nats-connect-token.v1";
 const DEFAULT_USER_JWT_TTL_MS: i64 = 300_000;
+const CONNECTION_PRESENCE_GRACE_MS: i64 = 60_000;
 const MAX_CONCURRENT_REQUESTS: usize = 32;
 const SHUTDOWN_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
@@ -44,11 +45,19 @@ struct NatsConnectToken {
 
 #[derive(Debug, Deserialize)]
 struct DisconnectEvent {
+    server: Option<DisconnectedServer>,
     client: Option<DisconnectedClient>,
 }
 
 #[derive(Debug, Deserialize)]
+struct DisconnectedServer {
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct DisconnectedClient {
+    id: Option<u64>,
+    #[serde(alias = "user", alias = "userNkey")]
     user_nkey: Option<String>,
 }
 
@@ -123,12 +132,11 @@ impl CalloutKeys {
     fn authorized_user_jwt(
         &self,
         user_nkey: &str,
-        session_id: &str,
         principal_kind: AuthorizationPrincipalKindV1,
         permissions: super::auth::TransportPermissions,
         expires_at_seconds: i64,
     ) -> Result<String, AuthorizationStateError> {
-        let mut claims = User::new_claims(format!("trellis-{session_id}"), user_nkey.to_owned());
+        let mut claims = User::new_claims(user_nkey.to_owned(), user_nkey.to_owned());
         claims.exp = Some(expires_at_seconds);
         let payload = claims.payload_mut();
         payload.issuer_account = Some(self.target_account.clone());
@@ -141,14 +149,12 @@ impl CalloutKeys {
                 allow: permissions.subscribe,
                 deny: Vec::new(),
             },
-            resp: Some(ResponsePermission {
-                max_messages: if principal_kind == AuthorizationPrincipalKindV1::Service {
-                    65_535
-                } else {
-                    1
+            resp: (principal_kind == AuthorizationPrincipalKindV1::Service).then_some(
+                ResponsePermission {
+                    max_messages: 65_535,
+                    ttl: Duration::ZERO,
                 },
-                ttl: Duration::ZERO,
-            }),
+            ),
         };
         claims.encode(&self.target_signing_key).map_err(|error| {
             AuthorizationStateError::Storage(format!("failed to sign NATS user JWT: {error}"))
@@ -239,7 +245,7 @@ impl AuthCallout {
         xkey_seed_file: &Path,
         auth_user_creds_file: &Path,
         target_user_creds_file: &Path,
-        user_jwt_ttl_ms: Option<u64>,
+        user_jwt_ttl_ms: i64,
     ) -> Result<Self, AuthorizationStateError> {
         let keys = CalloutKeys::from_files(
             auth_signing_seed_file,
@@ -265,17 +271,6 @@ impl AuthCallout {
                         "failed to subscribe to NATS disconnect events: {error}"
                     ))
                 })?;
-        let user_jwt_ttl_ms = user_jwt_ttl_ms
-            .unwrap_or(DEFAULT_USER_JWT_TTL_MS as u64)
-            .try_into()
-            .map_err(|_| {
-                AuthorizationStateError::InvalidRecord(
-                    "NATS user JWT TTL exceeds i64 milliseconds".to_owned(),
-                )
-            })?;
-        if user_jwt_ttl_ms <= 0 {
-            return invalid("NATS user JWT TTL must be positive");
-        }
         Ok(Self {
             subscriber,
             disconnect_subscriber,
@@ -335,18 +330,64 @@ impl AuthCallout {
     }
 }
 
+pub(crate) fn resolve_user_jwt_ttl_ms(
+    configured: Option<u64>,
+) -> Result<i64, AuthorizationStateError> {
+    let ttl = configured
+        .unwrap_or(DEFAULT_USER_JWT_TTL_MS as u64)
+        .try_into()
+        .map_err(|_| {
+            AuthorizationStateError::InvalidRecord(
+                "NATS user JWT TTL exceeds i64 milliseconds".to_owned(),
+            )
+        })?;
+    if ttl <= 0 {
+        return invalid("NATS user JWT TTL must be positive");
+    }
+    Ok(ttl)
+}
+
+pub(crate) fn connection_presence_max_age(
+    user_jwt_ttl_ms: i64,
+) -> Result<Duration, AuthorizationStateError> {
+    let max_age = user_jwt_ttl_ms
+        .checked_add(CONNECTION_PRESENCE_GRACE_MS)
+        .ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "NATS user JWT TTL overflows connection presence retention".to_owned(),
+            )
+        })?;
+    let max_age = u64::try_from(max_age).map_err(|_| {
+        AuthorizationStateError::InvalidRecord(
+            "NATS connection presence retention must be positive".to_owned(),
+        )
+    })?;
+    Ok(Duration::from_millis(max_age))
+}
+
 impl CalloutProcessor {
     async fn process_disconnect(&self, payload: &[u8]) -> Result<(), AuthorizationStateError> {
         let Ok(event) = serde_json::from_slice::<DisconnectEvent>(payload) else {
             return Ok(());
         };
-        let Some(user_nkey) = event.client.and_then(|client| client.user_nkey) else {
+        let (Some(server), Some(client)) = (event.server, event.client) else {
             return Ok(());
         };
-        if user_nkey.is_empty() {
+        let (Some(server_id), Some(client_id), Some(user_nkey)) =
+            (server.id, client.id, client.user_nkey)
+        else {
+            return Ok(());
+        };
+        if server_id.is_empty() || user_nkey.is_empty() {
             return Ok(());
         }
-        self.ephemeral.delete_connection_presence(&user_nkey).await
+        self.ephemeral
+            .delete_connection_presence(&connection_id(
+                &server_id,
+                &client_id.to_string(),
+                &user_nkey,
+            )?)
+            .await
     }
 
     async fn process(&self, message: async_nats::Message) -> Result<(), AuthorizationStateError> {
@@ -491,18 +532,12 @@ impl CalloutProcessor {
         }
         let jwt = self.keys.authorized_user_jwt(
             &request.user_nkey,
-            verified_context.session_id(),
             verified_context.principal().kind,
             permissions,
             expires_at_seconds,
         )?;
         let client_id = request.client_info.id.to_string();
-        let connection_id = trellis_protocol::digest_json(&serde_json::json!({
-            "serverId": request.server.id,
-            "clientId": client_id,
-            "userNkey": request.user_nkey,
-        }))
-        .map_err(|error| denied(error.to_string()))?;
+        let connection_id = connection_id(&request.server.id, &client_id, &request.user_nkey)?;
         self.ephemeral
             .put_connection_presence(AuthConnectionPresence {
                 format: "trellis.auth-connection-presence.v1".to_owned(),
@@ -518,6 +553,18 @@ impl CalloutProcessor {
                 version: 1,
             })
             .await?;
+        if self
+            .contexts
+            .validator_cache()
+            .runtime_revocation_time(&token.context_digest)
+            .map_err(|error| denied(error.to_string()))?
+            .is_some()
+        {
+            self.ephemeral
+                .delete_connection_presence(&connection_id)
+                .await?;
+            return Err(denied("authorization context is not admissible"));
+        }
         tracing::debug!(
             session_id = %verified_context.session_id(),
             context_digest = %token.context_digest,
@@ -525,6 +572,19 @@ impl CalloutProcessor {
         );
         Ok(jwt)
     }
+}
+
+fn connection_id(
+    server_id: &str,
+    client_id: &str,
+    user_nkey: &str,
+) -> Result<String, AuthorizationStateError> {
+    trellis_protocol::digest_json(&serde_json::json!({
+        "serverId": server_id,
+        "clientId": client_id,
+        "userNkey": user_nkey,
+    }))
+    .map_err(|error| denied(error.to_string()))
 }
 
 fn handle_request_completion(
@@ -707,6 +767,46 @@ mod tests {
     use crate::platform::auth::TransportPermissions;
 
     #[test]
+    fn disconnect_advisory_reconstructs_exact_connection_identity() {
+        let advisory: DisconnectEvent = serde_json::from_value(serde_json::json!({
+            "server": { "id": "srv-A" },
+            "client": { "id": 42, "user": "USESSION" }
+        }))
+        .unwrap();
+        let server = advisory.server.unwrap();
+        let client = advisory.client.unwrap();
+        assert_eq!(server.id.as_deref(), Some("srv-A"));
+        assert_eq!(client.id, Some(42));
+        assert_eq!(client.user_nkey.as_deref(), Some("USESSION"));
+        assert_eq!(
+            connection_id(
+                server.id.as_deref().unwrap(),
+                &client.id.unwrap().to_string(),
+                client.user_nkey.as_deref().unwrap(),
+            ),
+            connection_id("srv-A", "42", "USESSION")
+        );
+    }
+
+    #[test]
+    fn connection_presence_retention_follows_resolved_user_jwt_ttl() {
+        let default_ttl = resolve_user_jwt_ttl_ms(None).unwrap();
+        assert_eq!(default_ttl, 300_000);
+        assert_eq!(
+            connection_presence_max_age(default_ttl).unwrap(),
+            Duration::from_millis(360_000)
+        );
+
+        let configured_ttl = resolve_user_jwt_ttl_ms(Some(45_000)).unwrap();
+        assert_eq!(configured_ttl, 45_000);
+        assert_eq!(
+            connection_presence_max_age(configured_ttl).unwrap(),
+            Duration::from_millis(105_000)
+        );
+        assert!(connection_presence_max_age(i64::MAX).is_err());
+    }
+
+    #[test]
     fn bootstrap_and_issued_jwts_preserve_the_account_boundary(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let auth_signing_key = Arc::new(KeyPair::new_account());
@@ -756,7 +856,6 @@ mod tests {
         let issued_user_nkey = KeyPair::new_user().public_key();
         let issued = keys.authorized_user_jwt(
             &issued_user_nkey,
-            "ses_01",
             AuthorizationPrincipalKindV1::Service,
             TransportPermissions {
                 publish: vec!["rpc.v1.Example".to_owned()],
@@ -771,6 +870,7 @@ mod tests {
         let claims: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?;
         assert_eq!(claims["iss"], target_signing_key.public_key());
         assert_eq!(claims["sub"], issued_user_nkey);
+        assert_eq!(claims["name"], issued_user_nkey);
         assert_eq!(claims["exp"], 200);
         assert_eq!(claims["nats"]["issuer_account"], target_account);
         assert_eq!(

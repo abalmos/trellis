@@ -133,7 +133,7 @@
 - Rust contract generation/facades:
   `design/contracts/trellis-rust-contract-libraries.md`
 - Contract catalog, manifests, and permission derivation:
-  `design/contracts/trellis-contracts-catalog.md`
+  `design/contracts/trellis-api-participants.md`
 - State semantics and migrations: `design/core/state-patterns.md`
 - Observability, correlation, and JSDoc expectations:
   `design/core/observability-patterns.md`

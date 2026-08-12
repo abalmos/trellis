@@ -137,7 +137,7 @@ never logs a default password.
 Service and device bootstrap may present one exact participant artifact plus all
 referenced API artifacts. The server parses, normalizes, resolves, and stores
 the binding through the same domain method used by administrative planning.
-Stable non-ready states are `manifest_required`, `authority_pending`,
+Stable non-ready states are `authority_pending`, `authority_pending`,
 `authority_rejected`, `migration_required`, `dependency_pending`,
 `resource_pending`, and `disabled`. Equivalent retries reuse one semantic
 proposal; additive compatible replacement is an update and incompatible API
@@ -198,8 +198,13 @@ current desired-authority projection and inserts its transition outbox record.
 Reconciliation resolves the exact participant artifact and needs against
 dependency/resource evidence, then atomically replaces materialized authority.
 
-Mutable capability groups, grant overrides, contract-era identity-grant objects,
-authored NATS ACLs, and session-owned authority are not API concepts.
+Deployment grant overrides, contract-era identity-grant objects, authored NATS
+ACLs, and session-owned authority are not API concepts.
+`Auth.CapabilityGroups.*` manages recursive administrative macros.
+`Auth.Portals.GrantOverrides.*` manages exact `portalId + participantId`
+trusted-login policy with base capabilities/groups and provider-scoped
+exact-role mappings. Both surfaces select only proposal-defined authority;
+neither creates a second runtime authorization object.
 
 Physical resource bindings never imply access. Exact participant-resource atoms
 must be present in `GrantSetV1`; optional evidence contributes only currently
@@ -233,5 +238,5 @@ failure retries after commit and never rolls the authoritative mutation back.
 
 - PostgreSQL and federation
 - compatibility adapters for retired TypeScript auth, sentinel credentials,
-  capability groups, grant overrides, or legacy binding RPCs
+  deployment grant overrides, or legacy binding RPCs
 - HTTP context-registry, revocation, logout, and client-bootstrap APIs

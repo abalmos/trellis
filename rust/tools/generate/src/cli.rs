@@ -102,7 +102,7 @@ pub enum RuntimeSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum PackageTarget {
-    Manifest,
+    Api,
     Jsr,
     Npm,
     Cargo,
@@ -111,20 +111,26 @@ pub enum PackageTarget {
 #[derive(Debug, Args, Clone)]
 #[group(required = true, multiple = false)]
 pub struct ContractInputArgs {
-    #[arg(long, value_name = "CONTRACT_JSON")]
-    pub manifest: Option<PathBuf>,
+    #[arg(long, value_name = "API_JSON")]
+    pub api: Option<PathBuf>,
 
-    #[arg(long, value_name = "CONTRACT_SOURCE")]
+    #[arg(long, value_name = "PARTICIPANT_JSON", requires = "api")]
+    pub participant: Option<PathBuf>,
+
+    #[arg(long, value_name = "API_JSON", requires = "api")]
+    pub referenced_api: Vec<PathBuf>,
+
+    #[arg(long, value_name = "API_SOURCE")]
     pub source: Option<PathBuf>,
 
     #[arg(long, value_name = "OCI_IMAGE")]
     pub image: Option<String>,
 
-    #[arg(long, default_value = "CONTRACT")]
+    #[arg(long, default_value = "API")]
     pub source_export: String,
 
-    #[arg(long, default_value = "/trellis/contract.json")]
-    pub image_contract_path: String,
+    #[arg(long, default_value = "/trellis/api.json")]
+    pub image_api_path: String,
 }
 
 #[derive(Debug, Args)]
@@ -135,7 +141,7 @@ pub struct GenerateCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum GenerateSubcommand {
-    Manifest(GenerateManifestArgs),
+    Api(GenerateApiArgs),
     Jsr(GenerateJsrPackageArgs),
     Npm(GenerateNpmPackageArgs),
     Cargo(GenerateCargoPackageArgs),
@@ -143,7 +149,7 @@ pub enum GenerateSubcommand {
 }
 
 #[derive(Debug, Args)]
-pub struct GenerateManifestArgs {
+pub struct GenerateApiArgs {
     #[command(flatten)]
     pub contract: ContractInputArgs,
 
@@ -220,7 +226,7 @@ pub struct GenerateAllArgs {
     pub contract: ContractInputArgs,
 
     #[arg(long)]
-    pub out_manifest: PathBuf,
+    pub out_api: PathBuf,
 
     #[arg(long)]
     pub artifact_version: Option<String>,
@@ -340,7 +346,7 @@ mod tests {
             "trellis-generate",
             "prepare",
             "--targets",
-            "manifest,jsr,npm,cargo",
+            "api,jsr,npm,cargo",
             ".",
         ])
         .expect("prepare --targets should parse");
@@ -352,7 +358,7 @@ mod tests {
         assert_eq!(
             args.targets,
             vec![
-                PackageTarget::Manifest,
+                PackageTarget::Api,
                 PackageTarget::Jsr,
                 PackageTarget::Npm,
                 PackageTarget::Cargo,

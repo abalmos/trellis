@@ -34,7 +34,29 @@ export type UserGrantRecord = {
   updatedAt: string;
 };
 
-type SessionLike = SessionRecord | ConnectionRecord;
+type LegacySessionRecord = {
+  key: string;
+  sessionKey: string;
+  principal: UserPrincipal | {
+    type: "device";
+    deviceId: string;
+    deviceType: string;
+    runtimePublicKey?: string;
+    deploymentId: string;
+  } | {
+    type: "service" | "app" | "agent";
+    id: string;
+    name: string;
+    deploymentId: string;
+    instanceId: string;
+  };
+  contractDisplayName?: string | null;
+  contractId?: string | null;
+  createdAt: number;
+  lastAuth: number;
+};
+
+type SessionLike = SessionRecord | ConnectionRecord | LegacySessionRecord;
 
 export function formatIdentityProviderSubject(
   identity: UserPrincipal["identity"],
@@ -105,10 +127,14 @@ export function participantKindBadgeClass(kind: ParticipantKind): string {
 }
 
 function contractLabel(record: SessionLike): string | null {
-  const displayName = "contractDisplayName" in record
+  const displayName = "contractDisplayName" in record &&
+      typeof record.contractDisplayName === "string"
     ? record.contractDisplayName
     : undefined;
-  const contractId = "contractId" in record ? record.contractId : undefined;
+  const contractId =
+    "contractId" in record && typeof record.contractId === "string"
+      ? record.contractId
+      : undefined;
 
   if (displayName && contractId) {
     return `${displayName} (${contractId})`;
@@ -126,6 +152,10 @@ export function describeSessionPrincipal(
   record: SessionLike,
 ): { title: string; details: string } {
   const contract = contractLabel(record);
+  if (!("principal" in record)) {
+    const title = "userNkey" in record ? record.userNkey : record.principalId;
+    return { title, details: joinDetails([record.sessionId, contract]) };
+  }
   const principal = record.principal;
 
   if (principal.type === "user") {

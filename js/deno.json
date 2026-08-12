@@ -20,7 +20,7 @@
     "fmt:integration": "deno fmt -c deno.json integration",
     "test:client-integration": "deno run -A -c integration/deno.json integration/runner.ts",
     "test:integration": "deno run -A -c integration/deno.json integration/all_runner.ts",
-    "test:contracts": "deno task prepare && deno test -A packages/trellis/contract_support/source_emission_test.ts packages/trellis/contract_support/conformance_test.ts",
+    "test:contracts": "deno task prepare && deno test -A packages/trellis/contract_support/protocol_test.ts packages/trellis/contract_support/protocol_artifacts_test.ts packages/trellis/contract_support/descriptors_test.ts",
     "test:auth": "deno task prepare && deno test -A packages/trellis/auth/conformance_test.ts packages/trellis/auth/session_auth_test.ts",
     "test:prepared:result": "deno test -A packages/result",
     "test:prepared:trellis": "deno test -A packages/trellis",

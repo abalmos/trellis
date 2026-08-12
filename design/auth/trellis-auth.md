@@ -123,8 +123,22 @@ participant-resource atom; it never creates authority. Runtime instance, device,
 delegation, and expiry eligibility are evaluated separately at issuance so one
 unhealthy instance does not rewrite shared authority.
 
-Mutable capability groups, deployment grant overrides, contract-era authority
-shapes, persisted subject ACLs, and session-owned authority are retired.
+Deployment grant overrides, contract-era authority shapes, persisted subject
+ACLs, and session-owned authority are retired. Capability groups remain mutable
+administrative macros for trusted-portal policy; they expand only capabilities
+already defined by the participant proposal and never enter runtime authority as
+group objects.
+
+Trusted-portal policy is keyed by exact `portalId + participantId`. Base policy
+and provider-scoped exact OIDC role mappings select proposal-bounded optional
+capabilities and groups, then use the same identity-authority proposal and
+decision transaction as manual consent. The resulting authority stores separate
+portal-policy provenance. Manual consent clears that provenance. Startup and
+committed policy changes wake one bounded reconciler, which reapplies or revokes
+portal-managed authority and uses normal context revocation and connection kicks
+for semantic changes. Removing the portal, provider allowance, or grant override
+revokes authority and atomically clears its portal provenance, so restoring
+configuration cannot resurrect cached roles without a new verified login.
 
 ## Sessions
 
@@ -169,13 +183,14 @@ session retains at most the current context plus one overlap for reconnect
 handoff. Refresh re-evaluates current state and never mutates authority.
 
 Every client durably pins the complete rollback floor: root key id, canonical
-root digest, minimum manifest generation, and canonical manifest digest at that
-generation. Same-generation manifest equivocation and root replacement fail
-closed. Clearing or replacing a session/context retains that floor; root reset
-is a separate explicit operation. Browser clients commit the floor and current
-context atomically in deployment-origin-scoped IndexedDB. Rust and TypeScript
-service, device, CLI, and non-browser clients require an explicit durable store;
-memory stores are opt-in for tests and deliberately ephemeral processes only.
+root digest, minimum manifest generation, and canonical native API artifact
+digest at that generation. Same-generation manifest equivocation and root
+replacement fail closed. Clearing or replacing a session/context retains that
+floor; root reset is a separate explicit operation. Browser clients commit the
+floor and current context atomically in deployment-origin-scoped IndexedDB. Rust
+and TypeScript service, device, CLI, and non-browser clients require an explicit
+durable store; memory stores are opt-in for tests and deliberately ephemeral
+processes only.
 
 Manifest generation is exact. The mutable `manifest.current` pointer names one
 immutable generation-addressed manifest and its digest. A context names the

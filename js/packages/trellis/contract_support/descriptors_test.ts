@@ -4,14 +4,59 @@ import { Type } from "typebox";
 import {
   as,
   defineAppContract,
+  defineServiceContract,
   eventActions,
   optional,
   rpcAction,
 } from "./mod.ts";
+import { apiDigest } from "./protocol_artifacts.ts";
 import { schema } from "./runtime.ts";
 import type { CallerRuntime } from "../caller.ts";
 
 const Empty = schema(Type.Object({}));
+
+function nativeApiSource(
+  id: string,
+  rpcName?: string,
+  eventName?: string,
+) {
+  const artifact = {
+    format: "trellis.api.v1",
+    id,
+    displayName: id,
+    description: id,
+    schemas: { Empty: { properties: {}, type: "object" } },
+    ...(rpcName
+      ? {
+        rpc: {
+          [rpcName]: {
+            version: "v1",
+            input: { schema: "Empty" },
+            output: { schema: "Empty" },
+          },
+        },
+      }
+      : {}),
+    ...(eventName
+      ? {
+        events: {
+          [eventName]: {
+            version: "v1",
+            event: { schema: "Empty" },
+          },
+        },
+      }
+      : {}),
+  };
+  return { api: artifact, apiDigest: apiDigest(artifact) };
+}
+
+const OrdersApi = nativeApiSource(
+  "orders@v1",
+  "Orders.Get",
+  "Orders.Changed",
+);
+const HealthApi = nativeApiSource("trellis.health@v1", "Health.Query");
 const OrdersGet = rpcAction(
   "orders@v1",
   "Orders.Get",
@@ -29,6 +74,7 @@ const OrdersGet = rpcAction(
     callerCapabilities: [],
   },
   "OrdersGet",
+  OrdersApi,
 );
 const OrdersChanged = eventActions(
   "orders@v1",
@@ -55,6 +101,7 @@ const OrdersChanged = eventActions(
   },
   "OrdersChanged",
   false,
+  OrdersApi,
 );
 const HealthQuery = rpcAction(
   "trellis.health@v1",
@@ -73,6 +120,7 @@ const HealthQuery = rpcAction(
     callerCapabilities: [],
   },
   "HealthQuery",
+  HealthApi,
 );
 
 const acronymActions = [
@@ -149,21 +197,7 @@ Deno.test("direct action descriptors emit deterministic canonical uses", () => {
   };
   void assertCallerTypes;
 
-  assertEquals(contract.CONTRACT.uses, {
-    required: {
-      "orders@v1": {
-        contract: "orders@v1",
-        rpc: { call: ["Orders.Get"] },
-        events: { subscribe: ["Orders.Changed"] },
-      },
-    },
-    optional: {
-      "trellis.health@v1": {
-        contract: "trellis.health@v1",
-        rpc: { call: ["Health.Query"] },
-      },
-    },
-  });
+  assertEquals(contract.PARTICIPANT.format, "trellis.participant.v1");
 });
 
 Deno.test("local aliases do not change canonical contract identity", () => {
@@ -186,8 +220,8 @@ Deno.test("local aliases do not change canonical contract identity", () => {
   };
   void assertAliasType;
 
-  assertEquals(aliased.CONTRACT, original.CONTRACT);
-  assertEquals(aliased.CONTRACT_DIGEST, original.CONTRACT_DIGEST);
+  assertEquals(aliased.API, original.API);
+  assertEquals(aliased.API_DIGEST, original.API_DIGEST);
 });
 
 Deno.test("optional groups reject actions from different owners", () => {

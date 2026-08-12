@@ -8,7 +8,7 @@ order: 10
 
 ## Prerequisites
 
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   canonical contract and catalog model
 - [../contracts/trellis-typescript-contract-authoring.md](./../contracts/trellis-typescript-contract-authoring.md) -
   source-first TypeScript contract authoring
@@ -41,8 +41,9 @@ Trellis uses two tools with different audiences:
 - `trellis-generate` is the bootstrap-safe developer/build companion used by
   repo-local prepare workflows
 
-Canonical `trellis.contract.v1` JSON remains an exchange artifact, but it is
-generated output rather than a committed source file.
+Canonical native `trellis.api.v1` and `trellis.participant.v1` JSON remains an
+exchange artifact, but it is generated output rather than a committed source
+file.
 
 ### Command structure
 
@@ -75,8 +76,8 @@ into prepare. It also ignores file changes that are not TypeScript, JavaScript,
 or Rust source unless they are recognized project/discovery inputs. When a batch
 maps safely to known contract source entries, watch mode prepares only those
 affected entries while preserving the full prepare plan order. It falls back to
-full prepare for project manifests and discovery-shape changes. Generator or
-tooling changes require restarting the watcher because the already-running
+full prepare for project native artifacts and discovery-shape changes. Generator
+or tooling changes require restarting the watcher because the already-running
 process is still using the old generator code. Change diagnostics are quiet by
 default; direct `trellis-generate` callers may add `--changes` with `--watch` to
 print the event paths plus the watch decision and reason.
@@ -88,7 +89,7 @@ convenience wrapper that runs `prepare` first and then invokes the default Rust
 workspace build. Live client-library integration is language-owned and is run
 outside `cargo xtask build`: use `deno task -c js/deno.json test:integration`
 for the TypeScript suite and
-`cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
+`cargo test --api-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
 for the Rust suite. Both suites are governed by the `kind: "client"` cases in
 `integration/client-test-matrix.json`; every supported client language must
 cover every client matrix case against a live Trellis runtime.
@@ -100,20 +101,20 @@ scripts, wrappers, and CI:
 trellis-generate
 trellis-generate prepare [--targets manifest,jsr,npm,cargo] [--no-npm] [--watch [--changes]] [path]
 trellis-generate discover <path>
-trellis-generate generate manifest (--source <file> | --manifest <file> | --image <ref>) --out <file>
-trellis-generate generate jsr (--source <file> | --manifest <file> | --image <ref>) --out <dir>
-trellis-generate generate npm (--source <file> | --manifest <file> | --image <ref>) --out <dir>
-trellis-generate generate cargo (--source <file> | --manifest <file> | --image <ref>) --out <dir>
-trellis-generate generate all (--source <file> | --manifest <file> | --image <ref>) --out-manifest <file> [--jsr-out <dir>] [--npm-out <dir>] [--cargo-out <dir>]
+trellis-generate generate api (--source <file> | --api <file> | --image <ref>) --out <file>
+trellis-generate generate jsr (--source <file> | --api <file> | --image <ref>) --out <dir>
+trellis-generate generate npm (--source <file> | --api <file> | --image <ref>) --out <dir>
+trellis-generate generate cargo (--source <file> | --api <file> | --image <ref>) --out <dir>
+trellis-generate generate all (--source <file> | --api <file> | --image <ref>) --out-api <file> [--jsr-out <dir>] [--npm-out <dir>] [--cargo-out <dir>]
 trellis-generate self check [--prerelease]
 trellis-generate self update [--prerelease]
 ```
 
 These commands:
 
-- resolve contract inputs from source modules, generated manifests, or OCI
-  images
-- validate canonical manifests against `trellis.contract.v1`
+- resolve contract inputs from source modules, generated APIs, or OCI images
+- validate canonical native API artifacts against native `trellis.api.v1` and
+  `trellis.participant.v1`
 - compute canonical JSON and digests
 - generate package-manager-specific SDK artifacts from the resolved contract
   inputs
@@ -123,8 +124,8 @@ These commands:
 - generate service/app-owned Cargo SDK crates that use the public `trellis`
   facade and its internal generator/runtime support
 - use required contract `kind` metadata to decide discovery behavior: `service`
-  generates manifest, JSR, npm, and Cargo artifacts; `app` generates manifest,
-  JSR, and npm artifacts; `agent` and `device` contracts are verified, with Rust
+  generates API, JSR, npm, and Cargo artifacts; `app` generates API, JSR, and
+  npm artifacts; `agent` and `device` contracts are verified, with Rust
   participant facades generated where applicable
 - when omitted, `prepare [path]` defaults to the current working directory
 - discovery uses configured package/workspace entries and explicit contract
@@ -167,7 +168,7 @@ trellis identity grants revoke <identity-grant-id> [--user <user-id>]
 trellis svc list [--disabled]
 trellis svc <id> show
 trellis svc <id> create [--namespace <ns>...]
-trellis svc <id> apply (--source <path> | --manifest <path> | --image <ref>)
+trellis svc <id> apply (--source <path> | --api <path> | --image <ref>)
 trellis svc <id> disable
 trellis svc <id> enable
 trellis svc <id> remove [-f] [--cascade] [--purge] [--purge-unused-contracts]
@@ -184,7 +185,7 @@ trellis svc <id> authority reconcile [--desired-version <version>]
 trellis dev list [--disabled]
 trellis dev <id> show
 trellis dev <id> create [--review-mode <none|required>]
-trellis dev <id> apply (--source <path> | --manifest <path> | --image <ref>)
+trellis dev <id> apply (--source <path> | --api <path> | --image <ref>)
 trellis dev <id> disable
 trellis dev <id> enable
 trellis dev <id> remove [-f] [--cascade] [--purge] [--purge-unused-contracts]
@@ -268,9 +269,9 @@ Operational command behavior:
 - `trellis svc` manages service deployments and `trellis dev` manages device
   deployments. Both use resource-first command shape: the deployment ID appears
   before the action for single-resource operations, for example
-  `trellis svc payments apply --manifest contract.json`.
+  `trellis svc payments apply --api contract.json`.
 - `trellis svc <id> apply` and `trellis dev <id> apply` resolve a contract
-  proposal from source, manifest, or OCI image, call
+  proposal from source, native API, or OCI image, call
   `Auth.DeploymentAuthority.Plan`, and require an explicit operator accept path
   for updates that grant new capabilities or add resource aliases, plus strict
   migrations. Safe updates and `mutable-dev` migrations may already be
@@ -282,16 +283,10 @@ Operational command behavior:
   authority plans, optionally filtered by `--state` or `--classification`, and
   `trellis <svc|dev> <id> authority plan show <PLAN_ID>` shows one plan for
   review before accepting or rejecting it.
-- `trellis grants list [--deployment <id>]`,
-  `trellis grants add --deployment <id> ...`, and
-  `trellis grants remove --deployment <id> ...` inspect and mutate deployment
-  grant overrides through `Auth.DeploymentAuthority.List`,
-  `Auth.DeploymentAuthority.Get`, `Auth.DeploymentAuthority.GrantOverrides.Put`,
-  `Auth.DeploymentAuthority.GrantOverrides.List`, and
-  `Auth.DeploymentAuthority.GrantOverrides.Remove`. Grant overrides are modeled
-  as deployment-owned policy rows rather than service or device subcommands.
-  They use `contractId + origin` for web grants and
-  `contractId + sessionPublicKey` for session-keyed grants.
+- the retired top-level `trellis grants` command tree is rejected. Trusted
+  browser authority is portal/application policy managed through
+  `Auth.Portals.GrantOverrides.*`; deployment authority changes continue through
+  immutable plan review and acceptance.
 - admin-triggered reconciliation uses `Auth.DeploymentAuthority.Reconcile` for
   repair, retry, or manual convergence. It is not the normal happy-path
   follow-up to every accept because accept already schedules reconciliation
@@ -412,12 +407,13 @@ Operational command behavior:
   ```
 
   The bundle is mounted read-only; its generated SQLite paths resolve inside
-  `/etc/trellis/trellis`, so the writable volume overlays `/etc/trellis/trellis/data`
-  for the runtime's databases. All mutable NATS files go to `/var/lib/trellis/nats`
-  via `--nats-state-dir`; the bundle's `nats/` directory (config, credentials,
-  resolver preloads) is only read. The image never downloads nats-server at
-  container runtime. Quadlet/external-NATS deployments keep running
-  `trellis-server` unchanged with their own NATS container.
+  `/etc/trellis/trellis`, so the writable volume overlays
+  `/etc/trellis/trellis/data` for the runtime's databases. All mutable NATS
+  files go to `/var/lib/trellis/nats` via `--nats-state-dir`; the bundle's
+  `nats/` directory (config, credentials, resolver preloads) is only read. The
+  image never downloads nats-server at container runtime. Quadlet/external-NATS
+  deployments keep running `trellis-server` unchanged with their own NATS
+  container.
 - runtime startup safely converges only the Trellis-owned resources selected by
   its mode. Platform owns the canonical event stream and Auth KV registries,
   Jobs owns its three streams, Health owns its transport stream, and Event Log
@@ -476,24 +472,23 @@ The developer-facing CLI boundary is the contract source.
   target Node/npm consumers and are produced without requiring Deno
 - npm package generation uses the Node TypeScript compiler (`tsc`), resolved
   from the project, `PATH`, or `TRELLIS_TSC_BIN`
-- Rust projects use `contracts/*.rs` source modules with a `contract_manifest()`
-  function, or another explicitly selected function, returning
-  `ContractManifest` or `Result<ContractManifest, ContractsError>`; those
-  modules may build manifests with Rust code or wrap checked-in manifest JSON
+- Rust projects use `contracts/*.rs` source modules with native API and
+  participant artifact functions; those modules build artifacts with Rust code
+  or wrap checked-in native API JSON
 - every contract source must declare a required `kind`
 - the `trellis` runtime service may own multiple logical contracts such as
   `trellis.core@v1`, `trellis.auth@v1`, and `trellis.state@v1`
-- `trellis-generate` emits canonical manifests into build output when a repo
-  needs a release artifact
+- `trellis-generate` emits canonical native API artifacts into build output when
+  a repo needs a release artifact
 - app and service repos SHOULD wrap contract preparation into their normal
   `dev`, `build`, and CI tasks rather than making end users run separate
   manifest commands during routine browser-app development
 - operators may plan authority updates or authority migrations from generated
-  manifests or OCI images that embed `/trellis/contract.json`
+  native API artifacts or OCI images that embed `/trellis/api.json`
 - OCI images may override that default path with the `io.trellis.contract.path`
   label
 
-`generated/` contains derived manifests and SDKs only.
+`generated/` contains derived native artifacts and SDKs only.
 
 ## Implementation
 
@@ -526,6 +521,6 @@ and self-update behavior.
 
 ## References
 
-- `design/contracts/trellis-contracts-catalog.md`
+- `design/contracts/trellis-api-participants.md`
 - `design/contracts/trellis-rust-contract-libraries.md`
 - `design/contracts/trellis-typescript-contract-authoring.md`

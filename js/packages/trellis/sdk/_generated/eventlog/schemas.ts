@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.eventlog@v1.json
+// Generated from ./generated/protocol/apis/trellis.eventlog@v1.json
 export const EventLogConsumersInspectRequestSchema = {
   "properties": {
     "consumerName": { "type": "string" },

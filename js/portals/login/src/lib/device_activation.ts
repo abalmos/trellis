@@ -18,10 +18,12 @@ type PortalAuthState = Omit<DeviceActivationAuth, "init"> & {
 const participant = {
   id: contract.CONTRACT_ID,
   artifactDigest: contract.CONTRACT_DIGEST,
-  needsDigest: contract.CONTRACT_DIGEST,
+  needsDigest: contract.PARTICIPANT_NEEDS_DIGEST,
 };
 
-function createPortalAuthState(): PortalAuthState {
+function createPortalAuthState(
+  onCallback: (flowId: string) => void,
+): PortalAuthState {
   let handle: SessionKeyHandle | null = null;
 
   async function init(): Promise<SessionKeyHandle> {
@@ -35,7 +37,8 @@ function createPortalAuthState(): PortalAuthState {
       const flowId = new URL(callbackUrl).searchParams.get("flowId");
       if (!flowId) return null;
 
-      return { status: "bound" };
+      onCallback(flowId);
+      return null;
     },
     async signIn(options) {
       const redirectTo = new URL(
@@ -47,9 +50,9 @@ function createPortalAuthState(): PortalAuthState {
         contract,
         participant,
         auth: { handle: await init(), redirectTo, context: options?.context },
-        onAuthRequired: (loginUrl) => {
+        onAuthRequired: ({ loginUrl }) => {
           window.location.href = loginUrl;
-          return { status: "handled" };
+          throw new Error("Browser authentication redirect started");
         },
       }).orThrow();
     },
@@ -60,7 +63,10 @@ function createPortalAuthState(): PortalAuthState {
  * Creates the device activation controller used by the portal route.
  */
 export function createPortalDeviceActivationController() {
-  const authState = createPortalAuthState();
+  let callbackFlowId: string | undefined;
+  const authState = createPortalAuthState((flowId) => {
+    callbackFlowId = flowId;
+  });
 
   return createDeviceActivationController({
     authState,
@@ -71,11 +77,13 @@ export function createPortalDeviceActivationController() {
           handle: await authState.init(),
           currentUrl: authUrlState.currentUrl,
           redirectTo: authUrlState.redirectTo,
+          flowId: callbackFlowId,
         },
         onAuthRequired: () => ({ status: "handled" }),
         contract,
         participant,
       }).orThrow();
+      callbackFlowId = undefined;
 
       return {
         async activateDevice(input): Promise<DeviceActivationOperationRef> {

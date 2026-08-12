@@ -1,7 +1,7 @@
 <script lang="ts">
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
-  import type { TrellisContractGetOutput } from "@qlever-llc/trellis/sdk/core";
+  import type { AuthDeploymentAuthorityPlansGetOutput } from "@qlever-llc/trellis/sdk/auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
@@ -30,7 +30,7 @@
 
   type PlanState = "pending" | "accepted" | "rejected" | "expired" | "superseded";
   type AuthorityKind = DeploymentAuthorityKind;
-  type ContractDetail = TrellisContractGetOutput["contract"];
+  type ContractDetail = Record<string, unknown> & { id: string };
   type DiffGroup = "contracts" | "surfaces" | "schemas" | "resources" | "capabilities";
   type SummaryField = PlanSummaryField;
   type SummaryEntry = PlanSummaryEntry;
@@ -45,7 +45,6 @@
     (method: "Auth.DeploymentAuthority.AcceptUpdate", input: { planId: string; expectedDesiredVersion?: string }): RpcTakeable<unknown>;
     (method: "Auth.DeploymentAuthority.AcceptMigration", input: { planId: string; expectedDesiredVersion?: string; acknowledgement: string }): RpcTakeable<unknown>;
     (method: "Auth.DeploymentAuthority.Reject", input: { planId: string; reason?: string }): RpcTakeable<unknown>;
-    (method: "Trellis.Contract.Get", input: { digest: string }): RpcTakeable<TrellisContractGetOutput>;
   };
 
   const trellis = getTrellis();
@@ -718,24 +717,41 @@
     return isRecord(value) && typeof value.id === "string" && value.id.length > 0 ? value as ContractDetail : null;
   }
 
-  async function contractByDigest(digest: string): Promise<ContractDetail | null> {
-    const response = await trellis.trellisContractGet({ digest }).take();
-    return isErr(response) ? null : response.contract;
+  function toPlan(proposal: AuthDeploymentAuthorityPlansGetOutput["proposal"]): DeploymentAuthorityPlan {
+    const common = {
+      planId: proposal.proposalId,
+      deploymentId: proposal.subjectId,
+      proposal: {
+        contractId: proposal.participantId,
+        contractDigest: proposal.participantArtifactDigest,
+        deploymentId: proposal.subjectId,
+        requestedNeeds: { contracts: [], surfaces: [], capabilities: proposal.proposedCapabilities.map((capability) => ({ capability, required: true })), resources: [] },
+        providedSurfaces: [],
+        contract: { id: proposal.participantId },
+        summary: { reasons: proposal.reasons },
+      },
+      desiredChange: {
+        capabilities: proposal.proposedCapabilities.map((capability) => ({ capability, required: true })),
+        contracts: [],
+        resources: [],
+        surfaces: [],
+      },
+      materializationPreview: { permissions: proposal.proposedGrantSet.permissions },
+      breakingChanges: [],
+      createdAt: new Date(proposal.createdAt).toISOString(),
+      expiresAt: proposal.expiresAt ? new Date(proposal.expiresAt).toISOString() : undefined,
+      state: proposal.state,
+      decisionAt: proposal.decisionAt ? new Date(proposal.decisionAt).toISOString() : null,
+      decisionBy: proposal.decisionBy ? { id: proposal.decisionBy } : null,
+      decisionReason: proposal.decisionReason,
+    };
+    return proposal.classification === "migration"
+      ? { ...common, classification: "migration", acknowledgementRequired: true }
+      : { ...common, classification: "update" };
   }
 
   async function previousContractFor(value: DeploymentAuthorityPlan): Promise<ContractDetail | null> {
-    const previousDigest = previousContractDigest(value);
-    if (previousDigest) {
-      const contract = await contractByDigest(previousDigest);
-      if (contract) return contract;
-    }
-    const response = await trellis.authDeploymentAuthorityPlansList({ deploymentId: value.deploymentId, state: "accepted", limit: 500 }).take();
-    if (isErr(response)) return null;
-    const accepted = response.entries
-      .filter((entry) => entry.planId !== value.planId && entry.proposal.contractId === value.proposal.contractId && entry.proposal.contractDigest !== value.proposal.contractDigest)
-      .filter((entry) => !previousDigest || entry.proposal.contractDigest === previousDigest)
-      .toSorted((left, right) => (right.decisionAt ?? right.createdAt).localeCompare(left.decisionAt ?? left.createdAt))[0];
-    return contractDetail(accepted?.proposal.contract);
+    return null;
   }
 
   function withTimeout<T>(promise: PromiseLike<T>, ms: number, message: string): Promise<T> {
@@ -755,23 +771,27 @@
     if (clearNotice) notice = null;
     try {
       const response = await withTimeout(
-        trellis.authDeploymentAuthorityPlansGet({ planId }).take(),
+        trellis.authDeploymentAuthorityPlansGet({ proposalId: planId }).take(),
         15000,
         "Loading the plan timed out.",
       );
       if (isErr(response)) { error = { kind: "load", message: errorMessage(response) }; return; }
-      plan = response.plan;
+      plan = toPlan(response.proposal);
       previousContract = await withTimeout(
-        previousContractFor(response.plan),
+        previousContractFor(plan),
         15000,
         "Loading the previous contract timed out.",
       );
       const authorityResponse = await withTimeout(
-        trellis.authDeploymentAuthorityGet({ deploymentId: response.plan.deploymentId }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
         15000,
         "Loading the deployment authority timed out.",
       );
-      authorityKind = isErr(authorityResponse) ? null : authorityResponse.authority.kind;
+      authorityKind = isErr(authorityResponse)
+        ? null
+        : authorityResponse.entries.find((authority) => authority.deploymentId === plan?.deploymentId)?.materialization?.participantKind === "service"
+        ? "service"
+        : "device";
     } catch (cause) {
       error = { kind: "load", message: errorMessage(cause) };
     } finally {
@@ -783,7 +803,12 @@
     const currentPlan = plan;
     if (!currentPlan || currentPlan.classification !== "update") return;
     await runDecision(
-      () => trellis.authDeploymentAuthorityAcceptUpdate({ planId: currentPlan.planId }).take(),
+      () => trellis.authDeploymentAuthorityAcceptUpdate({
+        proposalId: currentPlan.planId,
+        expectedBaseAuthorityVersion: null,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
+      }).take(),
       "Contract applied.",
     );
   }
@@ -792,7 +817,12 @@
     const currentPlan = plan;
     if (!currentPlan || currentPlan.classification !== "migration" || !migrationAcknowledged) return;
     await runDecision(
-      () => trellis.authDeploymentAuthorityAcceptMigration({ planId: currentPlan.planId, acknowledgement: `I have reviewed and approve migration of ${currentPlan.proposal.contractId} at ${new Date().toISOString()}.` }).take(),
+      () => trellis.authDeploymentAuthorityAcceptMigration({
+        proposalId: currentPlan.planId,
+        expectedBaseAuthorityVersion: null,
+        idempotencyKey: crypto.randomUUID(),
+        reason: `Reviewed migration of ${currentPlan.proposal.contractId}.`,
+      }).take(),
       "Migration applied.",
     );
   }
@@ -803,7 +833,7 @@
     const trimmedDetails = rejectDetails.trim();
     const reason = trimmedDetails.length > 0 ? `${rejectReason.trim()}: ${trimmedDetails}` : rejectReason.trim();
     await runDecision(
-      () => trellis.authDeploymentAuthorityReject({ planId: currentPlan.planId, reason }).take(),
+      () => trellis.authDeploymentAuthorityReject({ proposalId: currentPlan.planId, idempotencyKey: crypto.randomUUID(), reason }).take(),
       "Contract rejected.",
     );
   }

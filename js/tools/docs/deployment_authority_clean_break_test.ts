@@ -5,7 +5,7 @@ const docs = [
   "design/auth/auth-api.md",
   "design/auth/auth-protocol.md",
   "design/auth/device-activation.md",
-  "design/contracts/trellis-contracts-catalog.md",
+  "design/contracts/trellis-api-participants.md",
   "design/core/kv-resource-patterns.md",
   "design/jobs/trellis-jobs.md",
 ];

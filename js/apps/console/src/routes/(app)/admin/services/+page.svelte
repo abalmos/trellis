@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { isErr, type BaseError, type Result } from "@qlever-llc/result";
-  import type { DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
+  import { isErr } from "@qlever-llc/result";
   import type {
+    AuthDeploymentAuthorityListOutput,
+    AuthDeploymentAuthorityPlansListOutput,
     AuthDeploymentsListOutput,
     AuthServiceInstancesListOutput,
   } from "@qlever-llc/trellis/sdk/auth";
-  import type { TrellisCatalogOutput } from "@qlever-llc/trellis/sdk/core";
   import type { HealthQueryOutput } from "@qlever-llc/trellis/sdk/health";
   import { resolve } from "$app/paths";
   import { onMount } from "svelte";
@@ -16,56 +16,44 @@
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
-  import { deploymentAuthorityRows, type AuthorityRow } from "$lib/authority_console";
   import { errorMessage, formatDate } from "../../../../lib/format";
   import { getTrellis } from "../../../../lib/trellis";
 
-  type Deployment = Extract<AuthDeploymentsListOutput["entries"][number], { kind: "service" }>;
+  type Deployment = AuthDeploymentsListOutput["entries"][number];
   type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
-  type CatalogContract = TrellisCatalogOutput["catalog"]["contracts"][number];
-  type DeploymentAuthority = Parameters<typeof deploymentAuthorityRows>[0][number];
+  type DeploymentAuthority = AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type ContractRef = { contractId: string; digest: string };
   type HealthParticipant = HealthQueryOutput["entries"][number];
-  type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
-  type CoreRequest = {
-    (method: "Trellis.Catalog", input: Record<string, never>): RpcTakeable<TrellisCatalogOutput>;
-  };
-  type AuthorityRequest = {
-    (method: "Auth.DeploymentAuthority.List", input: { kind: "service"; limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthority[] }>;
-    (method: "Auth.DeploymentAuthority.Plans.List", input: { kind: "service"; state: "pending"; limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthorityPlan[] }>;
-  };
-
   const trellis = getTrellis();
   const RPC_TIMEOUT_MS = 10_000;
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   let subscriptionError = $state<string | null>(null);
-  let catalogError = $state<string | null>(null);
   let deployments = $state.raw<Deployment[]>([]);
   let instances = $state.raw<ServiceInstance[]>([]);
   let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
-  let pendingAuthorityPlans = $state.raw<DeploymentAuthorityPlan[]>([]);
-  let catalogContracts = $state.raw<CatalogContract[]>([]);
+  let pendingAuthorityPlans = $state.raw<AuthorityPlan[]>([]);
   let healthParticipants = $state.raw<HealthParticipant[]>([]);
   let search = $state("");
 
   const serviceDeploymentIds = $derived(new Set(deployments.map((deployment) => deployment.deploymentId)));
   const serviceAuthorityRows = $derived.by(() =>
-    deploymentAuthorityRows(deploymentAuthorities)
-      .filter((authority) => authority.kind === "service" && serviceDeploymentIds.has(authority.deploymentId))
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    deploymentAuthorities
+      .filter((authority) => authority.materialization?.participantKind === "service" && serviceDeploymentIds.has(authority.deploymentId))
+      .toSorted((left, right) => right.updatedAt - left.updatedAt)
   );
   const filteredDeployments = $derived.by(() => {
     const term = search.trim().toLowerCase();
     if (!term) return deployments;
     return deployments.filter((deployment) => deployment.deploymentId.toLowerCase().includes(term));
   });
-  const disabledCount = $derived(deployments.filter((deployment) => deployment.disabled).length);
+  const disabledCount = $derived(deployments.filter((deployment) => deployment.state === "disabled").length);
   const pendingPlanCounts = $derived.by(() => {
     const counts: Record<string, number> = {};
     for (const plan of pendingAuthorityPlans) {
-      counts[plan.deploymentId] = (counts[plan.deploymentId] ?? 0) + 1;
+      counts[plan.subjectId] = (counts[plan.subjectId] ?? 0) + 1;
     }
     return counts;
   });
@@ -119,36 +107,23 @@
     return typeof mode === "string" ? mode : "strict";
   }
 
-  function contractKind(contract: CatalogContract): string {
-    const kind = objectRecord(contract)?.kind;
-    return typeof kind === "string" ? kind : "contract";
-  }
-
   function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? "" : "s"}`;
   }
 
-  function authoritySummary(authority: AuthorityRow): string {
-    const contracts = authority.requiredContracts + authority.optionalContracts;
-    return [
-      plural(contracts, "contract"),
-      plural(authority.surfaces, "surface"),
-      plural(authority.resources, "resource"),
-      plural(authority.capabilities, "capability"),
-    ].join(" · ");
+  function authoritySummary(authority: DeploymentAuthority): string {
+    return plural(authority.desiredGrantSet.permissions.length, "permission");
   }
 
   async function load() {
     loading = true;
     error = null;
-    catalogError = null;
     try {
-      const [deploymentsRes, instancesRes, authoritiesRes, plansRes, catalogRes] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "service", limit: 500, offset: 0 }).take(),
-        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityList({ kind: "service", limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ kind: "service", state: "pending", limit: 500, offset: 0 }).take(),
-        trellis.trellisCatalog({}).take(),
+      const [deploymentsRes, instancesRes, authoritiesRes, plansRes] = await Promise.all([
+        trellis.authDeploymentsList({ kind: "service", limit: 500 }).take(),
+        trellis.authServiceInstancesList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: 500 }).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
@@ -158,12 +133,6 @@
       instances = instancesRes.entries ?? [];
       deploymentAuthorities = authoritiesRes.entries ?? [];
       pendingAuthorityPlans = plansRes.entries ?? [];
-      if (isErr(catalogRes)) {
-        catalogError = errorMessage(catalogRes);
-        catalogContracts = [];
-      } else {
-        catalogContracts = catalogRes.catalog.contracts ?? [];
-      }
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -217,17 +186,15 @@
 </script>
 
 <section class="space-y-4">
-  <PageToolbar title="Service runtime" description="Service deployments, runtime instances, active health, and contract documentation.">
+  <PageToolbar title="Service runtime" description="Service deployments, runtime instances, and active health.">
     {#snippet actions()}
       <button class="btn btn-ghost btn-sm" onclick={load} disabled={loading}>Refresh</button>
-      <a class="btn btn-ghost btn-sm" href={resolve("/(app)/admin/services/contracts")}>Contract docs</a>
       <a class="btn btn-outline btn-sm" href={resolve("/(app)/admin/services/new")}>Create service</a>
     {/snippet}
   </PageToolbar>
 
   {#if error}<Notice variant="error">{error}</Notice>{/if}
   {#if subscriptionError}<Notice variant="warning">Health projection unavailable: {subscriptionError}</Notice>{/if}
-  {#if catalogError}<Notice variant="warning">Contract catalog unavailable: {catalogError}</Notice>{/if}
 
   {#if loading}
     <Panel><LoadingState label="Loading services" /></Panel>
@@ -240,10 +207,10 @@
             {#each serviceAuthorityRows as authority (authority.deploymentId)}
               <tr class="hover:bg-base-200/60">
                 <td class="trellis-identifier font-medium">{authority.deploymentId}</td>
-                <td class="trellis-identifier text-xs text-base-content/60">{authority.desiredVersion}</td>
+                <td class="trellis-identifier text-xs text-base-content/60">{authority.version}</td>
                 <td>{authoritySummary(authority)}</td>
                 <td>{#if (pendingPlanCounts[authority.deploymentId] ?? 0) > 0}<span class="badge badge-warning badge-xs">{pendingPlanCounts[authority.deploymentId]} pending</span>{:else}<span class="text-xs text-base-content/40">none</span>{/if}</td>
-                <td><span class="badge badge-outline badge-xs">{authority.status}</span></td>
+                <td><span class="badge badge-outline badge-xs">{authority.state}</span></td>
                 <td class="text-base-content/60">{formatDate(authority.updatedAt)}</td>
                 <td><a class="btn btn-warning btn-outline btn-xs" href={resolve("/(app)/admin/services/[deploymentId]", { deploymentId: authority.deploymentId })}>Inspect</a></td>
               </tr>
@@ -273,9 +240,9 @@
           <tbody>
             {#each filteredDeployments as deployment (deployment.deploymentId)}
               {@const serviceInstances = instances.filter((instance) => instance.deploymentId === deployment.deploymentId)}
-              {@const activeServiceInstances = serviceInstances.filter((instance) => !instance.disabled)}
+              {@const activeServiceInstances = serviceInstances.filter((instance) => instance.state === "active")}
                {@const healthService = healthServiceForDeployment(deployment.deploymentId)}
-               {@const rowStatus = deployment.disabled ? "Disabled" : (healthService ? statusLabel(healthService.effectiveStatus) : (activeServiceInstances.length > 0 ? "Enabled" : "No instances"))}
+               {@const rowStatus = deployment.state === "disabled" ? "Disabled" : (healthService ? statusLabel(healthService.effectiveStatus) : (activeServiceInstances.length > 0 ? "Enabled" : "No instances"))}
               {@const refs = contractRefsForHealthService(healthService)}
               <tr class="hover:bg-base-200/60">
                 <td class="min-w-72">
@@ -290,7 +257,7 @@
                 <td>
                   <div class="flex flex-wrap gap-1">
                     {#each refs as ref (`${ref.contractId}:${ref.digest}`)}
-                      <a class="badge badge-outline badge-sm trellis-identifier" href={resolve("/(app)/admin/services/contracts/[digest]", { digest: ref.digest })}>{ref.contractId}</a>
+                      <span class="badge badge-outline badge-sm trellis-identifier" title={ref.digest}>{ref.contractId}</span>
                     {:else}
                       <span class="text-xs text-base-content/50">No live contract</span>
                     {/each}
@@ -305,22 +272,5 @@
       {/if}
     </Panel>
 
-    <Panel title="Contract documentation" eyebrow="Catalog">
-      <DataTable>
-        <thead><tr><th>Contract</th><th>Kind</th><th>Digest</th><th>Docs</th></tr></thead>
-        <tbody>
-          {#each catalogContracts as contract (contract.digest)}
-            <tr>
-              <td class="trellis-identifier font-medium">{contract.id}</td>
-              <td>{contractKind(contract)}</td>
-              <td class="trellis-identifier text-base-content/60">{contract.digest}</td>
-              <td><a class="btn btn-ghost btn-xs" href={resolve("/(app)/admin/services/contracts/[digest]", { digest: contract.digest })}>Open docs</a></td>
-            </tr>
-          {:else}
-            <tr><td colspan="4" class="text-base-content/50">No catalog contracts available.</td></tr>
-          {/each}
-        </tbody>
-      </DataTable>
-    </Panel>
   {/if}
 </section>

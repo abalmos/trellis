@@ -261,9 +261,12 @@ impl crate::client::OperationTransport for Caller {
 #[allow(clippy::too_many_arguments)]
 pub async fn test_connect_service_runtime<C>(
     trellis_url: &str,
-    contract_id: &str,
-    contract_digest: &str,
-    contract_json: &str,
+    participant_id: &str,
+    participant_digest: &str,
+    participant_json: &str,
+    api_json: &str,
+    api_digest: &str,
+    referenced_api_artifacts: &[(&str, &str)],
     deployment_id: &str,
     instance_id: &str,
     identity_seed: &str,
@@ -272,16 +275,16 @@ pub async fn test_connect_service_runtime<C>(
     #[cfg(feature = "integration-test-scoping")] integration_test_scope: Option<
         crate::integration_test_scoping::IntegrationTestScope,
     >,
-) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError>
-where
-    C: crate::service::GeneratedServiceContract,
-{
+) -> Result<crate::service::ConnectedServiceRuntime<C>, crate::service::ServiceRuntimeError> {
     let client = crate::client::TrellisClient::connect_service_with_contract(
         crate::client::ServiceConnectWithContractOptions {
             trellis_url,
-            contract_id,
-            contract_digest,
-            contract_json,
+            participant_id,
+            participant_digest,
+            participant_json,
+            api_json,
+            api_digest,
+            referenced_api_artifacts,
             deployment_id,
             instance_id,
             provisioned_identity_seed_base64url: identity_seed,
@@ -298,5 +301,5 @@ where
         },
     )
     .await?;
-    crate::service::ConnectedServiceRuntime::from_connected_client(contract_id, Arc::new(client))
+    crate::service::ConnectedServiceRuntime::from_connected_client(participant_id, Arc::new(client))
 }

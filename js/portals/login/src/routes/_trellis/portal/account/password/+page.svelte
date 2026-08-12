@@ -34,14 +34,15 @@
   let defaultsApplied = false;
 
   const active = $derived(flowState?.status === "active" ? flowState : null);
-  const isResetFlow = $derived(active?.kind === "local_password_reset");
+  const isResetFlow = $derived(active?.kind === "password_reset");
+  const supportsLocal = $derived(Boolean(active && (isResetFlow || hasLocalProvider(active))));
   const title = $derived(active ? passwordFlowTitle(active.kind) : "Set your password");
   const action = $derived(active ? passwordFlowAction(active.kind) : "Save password");
   const fixedUsername = $derived(active && !isResetFlow ? defaultProfileValue(active, "username").trim() : "");
   const passwordMinLength = $derived(active ? passwordMinimumLength(active) : null);
   const passwordCurrentError = $derived(active ? passwordPolicyError(active, password) : null);
   const passwordHelp = $derived(active ? passwordCurrentError ?? passwordPolicyHint(active) : "");
-  const canSubmit = $derived(Boolean(active && flowId && hasLocalProvider(active) && (isResetFlow || fixedUsername) && password && !passwordCurrentError && !submitting && !completion));
+  const canSubmit = $derived(Boolean(active && flowId && supportsLocal && (isResetFlow || fixedUsername) && password && !passwordCurrentError && !submitting && !completion));
 
   function currentFlowId(): string | null {
     if (!browser) return null;
@@ -50,7 +51,7 @@
 
   function applyDefaults(): void {
     if (!active || defaultsApplied) return;
-    username = active.kind === "local_password_reset" ? "" : defaultProfileValue(active, "username");
+    username = active.kind === "password_reset" ? "" : defaultProfileValue(active, "username");
     name = defaultProfileValue(active, "name");
     email = defaultProfileValue(active, "email");
     defaultsApplied = true;
@@ -134,7 +135,7 @@
         <div><h1 class="text-xl font-semibold tracking-[-0.025em] text-base-content">{title}</h1></div>
         {@render targetSummary()}
         {#if !isExpectedPasswordFlow(active)}<div class="alert alert-warning text-sm" role="alert"><span>This link is for {flowKindLabel(active.kind)}, not password setup or reset. Continue only if this is expected.</span></div>{/if}
-        {#if hasLocalProvider(active)}
+        {#if supportsLocal}
           <form class="grid gap-4" onsubmit={(event) => { event.preventDefault(); void submitLocal(); }}>
             {#if !isResetFlow && fixedUsername}
               <label class="form-control gap-1.5"><span class="label-text text-sm font-medium text-base-content">Username</span><input class="input input-bordered w-full" autocomplete="username" disabled readonly value={fixedUsername} /></label>

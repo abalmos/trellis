@@ -10,7 +10,7 @@ order: 30
 
 - [trellis-patterns.md](./trellis-patterns.md) - Trellis architecture and
   communication model
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   canonical contract model
 
 ## Scope
@@ -20,8 +20,8 @@ and error modeling.
 
 ## API Schema
 
-Each service owns a local contract definition that emits the canonical
-`trellis.contract.v1` artifact.
+Each service owns a local contract definition that emits the canonical native
+`trellis.api.v1` and `trellis.participant.v1` artifact.
 
 ```ts
 import { defineError, defineServiceContract } from "@qlever-llc/trellis";

@@ -11,21 +11,11 @@ export {
 export type { NatsConnectOptions, SessionKeyHandle } from "./auth.ts";
 export {
   canonicalizeJson,
-  CATALOG_FORMAT_V1,
-  CONTRACT_FORMAT_V1,
   digestJson,
   isJsonValue,
   schema,
   unwrapSchema,
 } from "./contracts.ts";
-export {
-  TrellisCatalogRequestSchema,
-  TrellisCatalogResponseSchema,
-} from "./models/trellis/rpc/TrellisCatalog.ts";
-export {
-  TrellisContractGetRequestSchema,
-  TrellisContractGetResponseSchema,
-} from "./models/trellis/rpc/TrellisContractGet.ts";
 export {
   TrellisSurfaceStatusRequestSchema,
   TrellisSurfaceStatusResponseSchema,
@@ -73,7 +63,7 @@ export {
   store,
 } from "./contract.ts";
 export { operationAccess, optional } from "./contract_support/descriptors.ts";
-export type { DefineContractInput, TrellisContractV1 } from "./contract.ts";
+export type { DefineContractInput } from "./contract.ts";
 export {
   AsyncResult,
   BaseError,

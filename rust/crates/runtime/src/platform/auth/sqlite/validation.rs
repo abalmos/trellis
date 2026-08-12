@@ -95,7 +95,7 @@ pub(crate) fn validate_proposal_desired_authority(
                 && proposal.participant_needs_digest == *needs_digest
                 && proposal.proposed_grant_set == *grants
                 && proposal.proposed_capabilities == *capabilities
-                && state == AuthorityState::Accepted
+                && matches!(state, AuthorityState::Accepted | AuthorityState::Revoked)
             {
                 return Ok(());
             }

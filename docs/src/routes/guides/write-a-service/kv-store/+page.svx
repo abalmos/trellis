@@ -111,13 +111,13 @@ fn order_schema() -> Value {
 }
 ```
 
-Add the schema and KV resource to `contract_manifest()`:
+Add the schema and KV resource to `contract_artifacts()`:
 
 ```rust
-use trellis_contracts::kv;
+use trellis_contracts::{kv, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError};
 
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = ApiBuilder::authoring(
         "orders-service@v1",
         "Orders Service",
         "A simple service for managing orders.",
@@ -131,7 +131,8 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             .history(1)
             .ttl_ms(0),
     )
-    .build()
+    .build()?;
+    ContractBuilder::from_api(api.normalized_value()?, ContractKind::Service)?.build()
 }
 ```
 

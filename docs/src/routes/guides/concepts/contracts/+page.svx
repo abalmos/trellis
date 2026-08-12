@@ -38,4 +38,4 @@ If a service instance presents a different digest for the same contract id, Trel
 
 ## Generated contract artifacts
 
-The canonical exchange artifact is `trellis.contract.v1` JSON, generated from contract source during build and release. TypeScript projects typically edit the contract module directly, while the current Rust workflow keeps a checked-in manifest JSON alongside a `contracts/*.rs` wrapper that exports it through `include_str!(...)`.
+The canonical exchange artifact is native `trellis.api.v1` and `trellis.participant.v1` JSON, generated from contract source during build and release. TypeScript projects typically edit the contract module directly, while the current Rust workflow keeps a checked-in native API JSON alongside a `contracts/*.rs` wrapper that exports it through `include_str!(...)`.

@@ -2071,9 +2071,9 @@ pub fn sign_authorization_event_v2(
 /// Verify event freshness, context binding, exact authority subsets, and
 /// session-key possession without storage access.
 ///
-/// The signed event time is evaluated against the verified context window and
-/// the optional revocation timestamp: events at or after `revoked_at` are
-/// denied while strictly earlier events remain eligible.
+/// The signed event time is evaluated against the verified context window.
+/// Any revocation evidence invalidates every event proof from that context so
+/// an old signed event cannot be replayed after authority changes.
 ///
 /// # Errors
 ///
@@ -2127,11 +2127,11 @@ pub fn verify_authorization_event_v2(
             "event is at or after the signed context expiresAt window",
         ));
     }
-    if revoked_at.is_some_and(|revoked_at| event_time_seconds >= revoked_at) {
+    if revoked_at.is_some() {
         return Err(authorization_error(
             AuthorizationErrorCodeV1::EventRevoked,
             ["event-time"],
-            "event is at or after the context revocation time",
+            "event authorization context is revoked",
         ));
     }
     if !context.allows_all(required_permissions) {

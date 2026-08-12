@@ -48,8 +48,8 @@
   let confirmNewPassword = $state("");
 
   const connectionStatus = $derived(connection.status.phase);
-  const hasLocalIdentity = $derived(identities.some((identity) => identity.provider.trim().toLowerCase() === "local"));
-  const capabilityCount = $derived(user?.capabilities?.length ?? 0);
+  const hasLocalIdentity = $derived(identities.some((identity) => identity.providerId.trim().toLowerCase() === "local"));
+  const capabilityCount: number = $derived(0);
   const accountRole = $derived(user ? getRoleLabel(user) : "Member");
   const sessionStatusLabel = $derived(
     connectionStatus === "connected" ? "Connected" : connectionStatus === "reconnecting" ? "Reconnecting" : "Disconnected",
@@ -60,16 +60,16 @@
   );
 
   function friendlyIdentityName(identity: IdentityRecord): string {
-    return identity.displayName?.trim() || identity.email?.trim() || formatIdentityProviderLabel(identity.provider);
+    return identity.observedName?.trim() || identity.observedEmail?.trim() || formatIdentityProviderLabel(identity.providerId);
   }
 
   function isLocalIdentity(identity: IdentityRecord): boolean {
-    return identity.provider.trim().toLowerCase() === "local";
+    return identity.providerId.trim().toLowerCase() === "local";
   }
 
   function identityTitle(identity: IdentityRecord): string {
     if (isLocalIdentity(identity)) {
-      return identity.subject.trim() || identity.displayName?.trim() || identity.email?.trim() || "Local account";
+      return identity.subject.trim() || identity.observedName?.trim() || identity.observedEmail?.trim() || "Local account";
     }
     return friendlyIdentityName(identity);
   }
@@ -103,13 +103,17 @@
     linkPending = true;
     linkError = null;
     try {
-      const response = await trellis.authUsersIdentityLinkCreate({ returnTo: currentReturnTarget() }).take();
+      const response = await trellis.authUsersIdentityLinkCreate({
+        allowedProviders: [],
+        idempotencyKey: crypto.randomUUID(),
+        returnTarget: currentReturnTarget(),
+      }).take();
       if (isErr(response)) {
         linkError = errorMessage(response);
         notifications.error(linkError, "Connect login failed");
         return;
       }
-      window.location.assign(response.url);
+      window.location.assign(response.flow.completionUrl);
     } catch (e) {
       linkError = errorMessage(e);
       notifications.error(linkError, "Connect login failed");
@@ -134,6 +138,7 @@
 
       const response = await trellis.authUsersPasswordChange({
         currentPassword,
+        idempotencyKey: crypto.randomUUID(),
         newPassword,
       }).take();
       if (isErr(response)) {
@@ -160,26 +165,19 @@
     try {
       const me = await getAuthenticatedUser(trellis);
       user = me.user ?? null;
-      participantKind = me.participantKind;
+      participantKind = me.session.participantKind;
       if (!me.user) {
         identities = [];
         grants = [];
         return;
       }
 
-      const [grantsResponse, identitiesResponse] = await Promise.all([
-        trellis.authIdentityGrantsList({ limit: 100, offset: 0 }).take(),
-        trellis.authUserIdentitiesList({ userId: me.user.userId, limit: 100, offset: 0 }).take(),
-      ]);
-      if (isErr(grantsResponse)) {
-        error = errorMessage(grantsResponse);
-        return;
-      }
+      const identitiesResponse = await trellis.authUserIdentitiesList({ limit: 100 }).take();
       if (isErr(identitiesResponse)) {
         error = errorMessage(identitiesResponse);
         return;
       }
-      grants = grantsResponse.entries ?? [];
+      grants = [];
       identities = identitiesResponse.entries ?? [];
     } catch (e) {
       error = errorMessage(e);
@@ -255,18 +253,18 @@
               {#if linkError}<Notice variant="error" class="text-sm" role="alert">{linkError}</Notice>{/if}
 
               <div class="divide-y divide-base-300 rounded-box border border-base-300">
-                {#each identities as identity (identity.identityId)}
+                {#each identities as identity (`${identity.providerId}:${identity.subject}`)}
                   <div class="p-3">
                     <div class="grid gap-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)] md:items-start">
                       <div class="min-w-0">
                         <div class="truncate font-medium">{identityTitle(identity)}</div>
-                        <div class="text-xs text-base-content/60">{isLocalIdentity(identity) ? "Local password" : formatIdentityProviderLabel(identity.provider)}</div>
+                        <div class="text-xs text-base-content/60">{isLocalIdentity(identity) ? "Local password" : formatIdentityProviderLabel(identity.providerId)}</div>
                       </div>
                         <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                           <dl class="grid gap-x-4 gap-y-1 text-xs text-base-content/60 sm:grid-cols-3">
-                            <div><dt class="font-semibold text-base-content/70">Email</dt><dd class="truncate">{identity.email || "Not provided"}</dd></div>
-                            <div><dt class="font-semibold text-base-content/70">Linked</dt><dd>{formatDate(identity.linkedAt)}</dd></div>
-                            <div><dt class="font-semibold text-base-content/70">Last used</dt><dd>{identity.lastLoginAt ? formatDate(identity.lastLoginAt) : "Not used yet"}</dd></div>
+                            <div><dt class="font-semibold text-base-content/70">Email</dt><dd class="truncate">{identity.observedEmail || "Not provided"}</dd></div>
+                            <div><dt class="font-semibold text-base-content/70">Linked</dt><dd>{formatDate(identity.createdAt)}</dd></div>
+                            <div><dt class="font-semibold text-base-content/70">Last used</dt><dd>{formatDate(identity.lastSeenAt)}</dd></div>
                           </dl>
                           {#if isLocalIdentity(identity)}
                             <button class="btn btn-outline btn-xs" type="button" onclick={openPasswordModal}>Change password</button>
@@ -316,7 +314,6 @@
                           <div><dt class="font-semibold text-base-content/70">Updated</dt><dd>{formatDate(grant.updatedAt)}</dd></div>
                         </dl>
                         <div class="lg:text-right">
-                          <a class="link link-error text-sm" href={resolve(`/profile/grants/revoke?grant=${encodeURIComponent(grant.identityGrantId)}`)}>Revoke</a>
                         </div>
                       </div>
                     </div>

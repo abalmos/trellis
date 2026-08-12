@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.health@v1.json
+// Generated from ./generated/protocol/apis/trellis.health@v1.json
 import type { SerializableErrorData } from "../../../contracts.ts";
 import { TrellisError } from "../../../errors/index.ts";
 import { NotFoundErrorDataSchema } from "./schemas.ts";
@@ -244,6 +244,44 @@ export class NotFoundError extends TrellisError<NotFoundErrorData> {
     return new NotFoundError(data);
   }
   override toSerializable(): NotFoundErrorData {
+    return this.data;
+  }
+}
+
+export type UnexpectedErrorData = SerializableErrorData;
+export class UnexpectedError extends TrellisError<UnexpectedErrorData> {
+  override readonly name = "UnexpectedError" as const;
+  readonly data: UnexpectedErrorData;
+  constructor(data: UnexpectedErrorData) {
+    super(data.message, {
+      id: data.id,
+      ...(data.context !== undefined ? { context: data.context } : {}),
+    });
+    this.data = data;
+  }
+  static fromSerializable(data: UnexpectedErrorData): UnexpectedError {
+    return new UnexpectedError(data);
+  }
+  override toSerializable(): UnexpectedErrorData {
+    return this.data;
+  }
+}
+
+export type ValidationErrorData = SerializableErrorData;
+export class ValidationError extends TrellisError<ValidationErrorData> {
+  override readonly name = "ValidationError" as const;
+  readonly data: ValidationErrorData;
+  constructor(data: ValidationErrorData) {
+    super(data.message, {
+      id: data.id,
+      ...(data.context !== undefined ? { context: data.context } : {}),
+    });
+    this.data = data;
+  }
+  static fromSerializable(data: ValidationErrorData): ValidationError {
+    return new ValidationError(data);
+  }
+  override toSerializable(): ValidationErrorData {
     return this.data;
   }
 }

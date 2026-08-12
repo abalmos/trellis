@@ -1,5 +1,15 @@
 import { type CallerRuntime, defineAppContract } from "@qlever-llc/trellis";
 import {
+  CONTRACT_RUNTIME,
+  resolveParticipantV1WasmSync,
+} from "@qlever-llc/trellis/contracts";
+import {
+  AuthCapabilityGroupsPut,
+  AuthCapabilityGroupsPutRequestSchema,
+  AuthCapabilityGroupsPutResponseSchema,
+  AuthConnectionsList,
+  AuthConnectionsListRequestSchema,
+  AuthConnectionsListResponseSchema,
   AuthDeploymentAuthorityAcceptMigration,
   AuthDeploymentAuthorityAcceptMigrationRequestSchema,
   AuthDeploymentAuthorityAcceptMigrationResponseSchema,
@@ -30,12 +40,24 @@ import {
   AuthDevicesProvision,
   AuthDevicesProvisionRequestSchema,
   AuthDevicesProvisionResponseSchema,
+  AuthPortalsGrantOverridesPut,
+  AuthPortalsGrantOverridesPutRequestSchema,
+  AuthPortalsGrantOverridesPutResponseSchema,
+  AuthPortalsGrantOverridesRemove,
+  AuthPortalsGrantOverridesRemoveRequestSchema,
+  AuthPortalsGrantOverridesRemoveResponseSchema,
   AuthPortalsList,
   AuthPortalsListRequestSchema,
   AuthPortalsListResponseSchema,
+  AuthPortalsLoginSettingsGetResponseSchema,
+  AuthPortalsLoginSettingsUpdate,
+  AuthPortalsLoginSettingsUpdateRequestSchema,
   AuthPortalsPut,
   AuthPortalsPutRequestSchema,
   AuthPortalsPutResponseSchema,
+  AuthPortalsRoutesPut,
+  AuthPortalsRoutesPutRequestSchema,
+  AuthPortalsRoutesPutResponseSchema,
   AuthServiceInstancesProvision,
   AuthServiceInstancesProvisionRequestSchema,
   AuthServiceInstancesProvisionResponseSchema,
@@ -54,16 +76,21 @@ import {
   StateAdminListRequestSchema,
   StateAdminListResponseSchema,
 } from "@qlever-llc/trellis/sdk/state";
-import type { Static, TSchema } from "typebox";
+import {
+  API as AUTH_API,
+  API_DIGEST as AUTH_API_DIGEST,
+} from "@qlever-llc/trellis/sdk/auth/api";
+import {
+  API as STATE_API,
+  API_DIGEST as STATE_API_DIGEST,
+} from "@qlever-llc/trellis/sdk/state/api";
+import administrationParticipantSource from "../../../../../rust/crates/trellis/artifacts/trellis.admin.participant.json" with {
+  type: "json",
+};
+import { type Static, type TSchema, Type } from "typebox";
 
 export const ADMIN_USERNAME = "admin";
-export const ADMIN_PARTICIPANT = {
-  id: "trellis-platform-administration",
-  artifactDigest: "TWSRwOznrzNvGenCJbm5tB9hoX-I__6MA5bOaGaV5BE",
-  needsDigest: "6G5DIvZCX41sEDxlNrtfAskJepMA-89WRIvVn1lSsog",
-} as const;
-
-export const adminContract = defineAppContract(() => ({
+const adminDescriptors = defineAppContract(() => ({
   id: "trellis.test.admin@v1",
   displayName: "Trellis Test Admin",
   description:
@@ -79,8 +106,14 @@ export const adminContract = defineAppContract(() => ({
     AuthDeploymentAuthorityReconcile,
     AuthDeploymentsCreate,
     AuthDevicesProvision,
+    AuthConnectionsList,
+    AuthCapabilityGroupsPut,
     AuthPortalsList,
+    AuthPortalsGrantOverridesPut,
+    AuthPortalsGrantOverridesRemove,
+    AuthPortalsLoginSettingsUpdate,
     AuthPortalsPut,
+    AuthPortalsRoutesPut,
     AuthServiceInstancesProvision,
     AuthSessionsRevoke,
     StateAdminDelete,
@@ -88,6 +121,52 @@ export const adminContract = defineAppContract(() => ({
     StateAdminList,
   ],
 }));
+
+const administrationParticipant = structuredClone(
+  administrationParticipantSource,
+);
+administrationParticipant.uses.required.auth.apiDigest = AUTH_API_DIGEST;
+administrationParticipant.uses.required.state.apiDigest = STATE_API_DIGEST;
+const administrationResolution = resolveParticipantV1WasmSync({
+  participant: administrationParticipant,
+  apis: {
+    [AUTH_API.id]: AUTH_API,
+    [STATE_API.id]: STATE_API,
+  },
+});
+
+export const adminContract = Object.defineProperty(
+  {
+    ...adminDescriptors,
+    CONTRACT_ID: administrationParticipant.id,
+    CONTRACT_DIGEST: administrationResolution.participantDigest,
+    PARTICIPANT: administrationParticipant,
+    PARTICIPANT_NEEDS_DIGEST: administrationResolution.participantNeedsDigest,
+  },
+  CONTRACT_RUNTIME,
+  {
+    value: adminDescriptors[CONTRACT_RUNTIME],
+  },
+) as
+  & Omit<
+    typeof adminDescriptors,
+    | "CONTRACT_ID"
+    | "CONTRACT_DIGEST"
+    | "PARTICIPANT"
+    | "PARTICIPANT_NEEDS_DIGEST"
+  >
+  & {
+    readonly CONTRACT_ID: "trellis-platform-administration";
+    readonly CONTRACT_DIGEST: string;
+    readonly PARTICIPANT: typeof administrationParticipant;
+    readonly PARTICIPANT_NEEDS_DIGEST: string;
+  };
+
+export const ADMIN_PARTICIPANT = {
+  id: adminContract.CONTRACT_ID,
+  artifactDigest: adminContract.CONTRACT_DIGEST,
+  needsDigest: adminContract.PARTICIPANT_NEEDS_DIGEST,
+} as const;
 
 export type AdminClient = CallerRuntime<typeof adminContract>;
 
@@ -106,15 +185,45 @@ function adminMethod<const I extends TSchema, const O extends TSchema>(
 
 /** @internal Concrete Auth RPCs available to the shared test host. */
 export const adminMethods = {
+  authCapabilityGroupsPut: adminMethod(
+    AuthCapabilityGroupsPutRequestSchema,
+    AuthCapabilityGroupsPutResponseSchema,
+    (client, input) => client.authCapabilityGroupsPut(input).orThrow(),
+  ),
+  authConnectionsList: adminMethod(
+    AuthConnectionsListRequestSchema,
+    AuthConnectionsListResponseSchema,
+    (client, input) => client.authConnectionsList(input).orThrow(),
+  ),
+  authPortalsGrantOverridesRemove: adminMethod(
+    AuthPortalsGrantOverridesRemoveRequestSchema,
+    AuthPortalsGrantOverridesRemoveResponseSchema,
+    (client, input) => client.authPortalsGrantOverridesRemove(input).orThrow(),
+  ),
+  authPortalsGrantOverridesPut: adminMethod(
+    AuthPortalsGrantOverridesPutRequestSchema,
+    AuthPortalsGrantOverridesPutResponseSchema,
+    (client, input) => client.authPortalsGrantOverridesPut(input).orThrow(),
+  ),
   authPortalsList: adminMethod(
     AuthPortalsListRequestSchema,
     AuthPortalsListResponseSchema,
     (client, input) => client.authPortalsList(input).orThrow(),
   ),
+  authPortalsLoginSettingsUpdate: adminMethod(
+    AuthPortalsLoginSettingsUpdateRequestSchema,
+    AuthPortalsLoginSettingsGetResponseSchema,
+    (client, input) => client.authPortalsLoginSettingsUpdate(input).orThrow(),
+  ),
   authPortalsPut: adminMethod(
     AuthPortalsPutRequestSchema,
     AuthPortalsPutResponseSchema,
     (client, input) => client.authPortalsPut(input).orThrow(),
+  ),
+  authPortalsRoutesPut: adminMethod(
+    AuthPortalsRoutesPutRequestSchema,
+    AuthPortalsRoutesPutResponseSchema,
+    (client, input) => client.authPortalsRoutesPut(input).orThrow(),
   ),
   authDevicesProvision: adminMethod(
     AuthDevicesProvisionRequestSchema,
@@ -201,5 +310,11 @@ export type AdminRpc = {
     output: Static<(typeof adminMethods)[M]["output"]>;
   };
 };
+
+export type AdminRpcInput<M extends TrellisTestAdminRpcMethod> = M extends
+  "authDeploymentAuthorityPlan" ? AdminRpc[M]["input"] & {
+    referencedApiArtifacts: readonly Record<string, unknown>[];
+  }
+  : AdminRpc[M]["input"];
 
 export type TrellisTestAdminRpcMethod = keyof typeof adminMethods;

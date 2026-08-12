@@ -26,12 +26,11 @@ const JOBS_SERVICE_ID: &str = "trellis.integration.jobs-service@v1";
 const JOBS_CLIENT_ID: &str = "trellis.integration.jobs-client@v1";
 const JOBS_ADMIN_CLIENT_ID: &str = "trellis.integration.jobs-admin-client@v1";
 
-const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const JOBS_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.jobs-service@v1",
   "displayName": "Trellis Integration Jobs Service",
   "description": "Exercises service-local jobs behind a client-visible RPC.",
-  "kind": "service",
     "schemas": {
     "WorkflowInput": {
       "type": "object",
@@ -123,75 +122,29 @@ const JOBS_SERVICE_CONTRACT_JSON: &str = r#"{
       }
     }
   },
-  "jobs": {
-    "processDocument": {
-      "payload": { "schema": "JobPayload" },
-      "update": { "schema": "JobUpdate" },
-      "result": { "schema": "JobResult" },
-      "progress": true,
-      "logs": true
-    },
-    "longProcessDocument": {
-      "payload": { "schema": "LongJobPayload" },
-      "result": { "schema": "JobResult" }
-    },
-    "failingProcessDocument": {
-      "payload": { "schema": "FailingJobPayload" },
-      "result": { "schema": "JobResult" },
-      "maxDeliver": 2,
-      "backoffMs": [0]
-    },
-    "keyedProcessDocument": {
-      "payload": { "schema": "KeyedJobPayload" },
-      "result": { "schema": "KeyedJobResult" },
-      "keyConcurrency": {
-        "key": ["/groupKey"],
-        "maxActive": 1,
-        "heartbeatIntervalMs": 1000,
-        "heartbeatTtlMs": 10000,
-        "stalePolicy": "fail-stale"
-      },
-      "queue": {
-        "maxQueuedPerKey": 1,
-        "whenFull": "reject"
-      }
-    }
-  },
   "rpc": {
     "Documents.Process": {
       "version": "v1",
-      "subject": "rpc.v1.Documents.Process",
       "input": { "schema": "WorkflowInput" },
       "output": { "schema": "WorkflowOutput" },
-      "capabilities": { "call": [] },
       "errors": []
     },
     "Documents.KeyedProcess": {
       "version": "v1",
-      "subject": "rpc.v1.Documents.KeyedProcess",
       "input": { "schema": "KeyedWorkflowInput" },
       "output": { "schema": "KeyedWorkflowOutput" },
-      "capabilities": { "call": [] },
       "errors": []
     },
     "Documents.SubmitLongProcess": {
       "version": "v1",
-      "subject": "rpc.v1.Documents.SubmitLongProcess",
       "input": { "schema": "WorkflowInput" },
       "output": { "schema": "WorkflowOutput" },
-      "capabilities": { "call": [] },
       "errors": []
     }
   }
 }"#;
 
 struct JobsFixtureContract;
-
-impl trellis_rs::service::GeneratedServiceContract for JobsFixtureContract {
-    const CONTRACT_ID: &'static str = JOBS_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "runtime";
-    const CONTRACT_JSON: &'static str = JOBS_SERVICE_CONTRACT_JSON;
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct JobPayload {
@@ -394,13 +347,38 @@ async fn setup_jobs_fixture() -> JobsFixture {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let manifest_value: Value =
-        serde_json::from_str(JOBS_SERVICE_CONTRACT_JSON).expect("parse jobs service contract JSON");
-    let normalized = trellis_rs::contracts::normalize_manifest_value(manifest_value.clone())
-        .expect("normalize jobs service contract");
-    let service_contract = trellis_test::TrellisTestContract::from_manifest_value(normalized)
-        .expect("build jobs service test contract");
-    let client_contract = jobs_client_contract().expect("build jobs client test contract");
+    let api: Value =
+        serde_json::from_str(JOBS_SERVICE_API_SOURCE_JSON).expect("parse jobs service API JSON");
+    let api = trellis_rs::contracts::ApiBuilder::new(api)
+        .build()
+        .expect("build jobs service API");
+    let mut participant = serde_json::json!({
+        "format": "trellis.participant.v1",
+        "id": JOBS_SERVICE_ID,
+        "displayName": "Trellis Integration Jobs Service",
+        "description": "Exercises service-local jobs behind a client-visible RPC.",
+        "kind": "service",
+        "schemas": api.normalized_value().expect("normalize jobs API")["schemas"],
+        "implements": {"self": {"api": JOBS_SERVICE_ID, "apiDigest": api.digest().expect("digest jobs API")}},
+        "jobQueues": {
+            "processDocument": {"payload": {"schema": "JobPayload"}, "update": {"schema": "JobUpdate"}, "result": {"schema": "JobResult"}, "progress": true, "logs": true},
+            "longProcessDocument": {"payload": {"schema": "LongJobPayload"}, "result": {"schema": "JobResult"}},
+            "failingProcessDocument": {"payload": {"schema": "FailingJobPayload"}, "result": {"schema": "JobResult"}, "maxDeliver": 2, "backoffMs": [0]},
+            "keyedProcessDocument": {"payload": {"schema": "KeyedJobPayload"}, "result": {"schema": "KeyedJobResult"}, "keyConcurrency": {"key": ["/groupKey"], "maxActive": 1, "heartbeatIntervalMs": 1000, "heartbeatTtlMs": 10000, "stalePolicy": "fail-stale"}, "queue": {"maxQueuedPerKey": 1, "whenFull": "reject"}}
+        }
+    });
+    participant["schemas"] = api.normalized_value().expect("normalize jobs API")["schemas"].clone();
+    let service_contract = trellis_test::TrellisTestContract::from_artifacts(
+        trellis_rs::contracts::ContractBuilder::from_native(
+            api.normalized_value().expect("normalize jobs API"),
+            participant,
+        )
+        .build()
+        .expect("build jobs service artifacts"),
+    )
+    .expect("build jobs service test contract");
+    let client_contract =
+        jobs_client_contract(&service_contract).expect("build jobs client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -409,7 +387,6 @@ async fn setup_jobs_fixture() -> JobsFixture {
 
     let mut service = trellis_test::connect_service_runtime::<JobsFixtureContract>(
         runtime.trellis_url(),
-        JOBS_SERVICE_CONTRACT_JSON,
         &service_key,
     )
     .await
@@ -1421,7 +1398,7 @@ fn is_retryable_jobs_admin_error<E: std::fmt::Debug>(
 
 fn jobs_admin_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_ADMIN_CLIENT_ID,
         "Trellis Integration Jobs Admin Client",
         "Uses Jobs admin ListServices for worker-presence coverage.",
@@ -1429,7 +1406,7 @@ fn jobs_admin_client_contract(
     )
     .use_ref(
         "jobs",
-        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::CONTRACT_ID).with_rpc_call([
+        trellis_rs::contracts::use_contract(trellis_rs::sdk::jobs::API_ID).with_rpc_call([
             "Jobs.GetKey",
             "Jobs.Inspect",
             "Jobs.ListDLQ",
@@ -1437,15 +1414,22 @@ fn jobs_admin_client_contract(
             "Jobs.Metrics",
             "Jobs.Query",
         ]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    let jobs_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::jobs::API_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )?;
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[&jobs_api],
+    )
 }
 
 fn jobs_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         JOBS_CLIENT_ID,
         "Trellis Integration Jobs Client",
         "App/client participant for the jobs integration fixture.",
@@ -1458,8 +1442,10 @@ fn jobs_client_contract(
             "Documents.KeyedProcess",
             "Documents.SubmitLongProcess",
         ]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

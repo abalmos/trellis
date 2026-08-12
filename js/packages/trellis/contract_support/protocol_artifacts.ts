@@ -1,14 +1,27 @@
-import { digestJson, isJsonValue, type JsonValue } from "./canonical.ts";
+import { resolveParticipantV1WasmSync } from "../auth/protocol_wasm.ts";
+import {
+  canonicalizeJson,
+  isJsonValue,
+  type JsonValue,
+  sha256Base64urlSync,
+} from "./canonical.ts";
 import { CONTRACT_RUNTIME, type ContractRuntime } from "./contract_runtime.ts";
-import { actionSource } from "./descriptors.ts";
+import { type ActionSource, actionSource } from "./descriptors.ts";
 
 type JsonObject = Record<string, JsonValue>;
 
-/** Canonical protocol artifacts compiled from a TypeScript contract manifest. */
-export type CompiledProtocolArtifacts = {
+/** Native protocol artifacts presented during client and service bootstrap. */
+export type NativeProtocolPresentation = {
   api: JsonObject;
   participant: JsonObject;
   referencedApis: readonly JsonObject[];
+};
+
+/** Native artifacts and identity values built from one authoring source. */
+export type NativeProtocolArtifacts = NativeProtocolPresentation & {
+  apiDigest: string;
+  participantDigest: string;
+  participantNeedsDigest: string;
 };
 
 function object(value: JsonValue | undefined): JsonObject | undefined {
@@ -24,33 +37,72 @@ function checkedObject(value: Readonly<Record<string, unknown>>): JsonObject {
   return value as JsonObject;
 }
 
-type ContractInput = Readonly<Record<string, unknown>> & {
-  readonly CONTRACT?: Readonly<Record<string, unknown>>;
-  readonly CONTRACT_DIGEST?: string;
-  readonly [CONTRACT_RUNTIME]?: ContractRuntime;
+export type NativeProtocolContract = {
+  readonly CONTRACT_ID: string;
+  readonly CONTRACT_DIGEST: string;
+  readonly API: Readonly<Record<string, unknown>>;
+  readonly API_DIGEST: string;
+  readonly PARTICIPANT: Readonly<Record<string, unknown>>;
+  readonly PARTICIPANT_NEEDS_DIGEST: string;
+  readonly [CONTRACT_RUNTIME]: ContractRuntime;
 };
 
-function sourceManifest(contract: ContractInput): JsonObject {
-  return checkedObject(contract.CONTRACT ?? contract);
+function nativeApi(contract: NativeProtocolContract): JsonObject {
+  if (!contract.API) {
+    throw new Error("Defined contract is missing native API artifact");
+  }
+  return checkedObject(contract.API);
 }
 
-async function compileReferencedApi(
-  source: Readonly<Record<string, unknown>> | {
-    readonly artifact: Readonly<Record<string, unknown>>;
-    readonly digest: string;
-  },
-): Promise<JsonObject> {
-  const artifact = Reflect.get(source, "artifact");
-  const digest = Reflect.get(source, "digest");
-  const wrapped = artifact !== null && typeof artifact === "object" &&
-    !Array.isArray(artifact) && typeof digest === "string";
-  const manifest = checkedObject(
-    wrapped ? artifact as Readonly<Record<string, unknown>> : source,
-  );
-  if (manifest.format === "trellis.api.v1") {
-    return structuredClone(manifest);
+function nativeParticipant(contract: NativeProtocolContract): JsonObject {
+  if (!contract.PARTICIPANT) {
+    throw new Error("Defined contract is missing native participant artifact");
   }
-  return await compileApi(manifest, wrapped ? digest as string : undefined);
+  return checkedObject(contract.PARTICIPANT);
+}
+
+function compileReferencedApi(
+  source: ActionSource,
+): JsonObject {
+  const api = checkedObject(source.api);
+  if (api.format !== "trellis.api.v1") {
+    throw new Error("Action source must contain a trellis.api.v1 artifact");
+  }
+  if (source.apiDigest !== apiDigest(api)) {
+    throw new Error("Action source API digest does not match its artifact");
+  }
+  return structuredClone(api);
+}
+
+/** Validate and coalesce exact action-source API evidence by API identity. */
+export function collectActionSources(
+  sources: Iterable<ActionSource>,
+): ReadonlyMap<string, ActionSource> {
+  const collected = new Map<string, ActionSource>();
+  for (const source of sources) {
+    const api = compileReferencedApi(source);
+    if (typeof api.id !== "string") {
+      throw new Error("Action source API artifact is missing an id");
+    }
+    const existing = collected.get(api.id);
+    if (existing) {
+      if (existing.apiDigest !== source.apiDigest) {
+        throw new Error(
+          `Conflicting action source revisions for API '${api.id}'`,
+        );
+      }
+      if (
+        canonicalizeJson(checkedObject(existing.api)) !== canonicalizeJson(api)
+      ) {
+        throw new Error(
+          `Conflicting action source artifacts for API '${api.id}'`,
+        );
+      }
+      continue;
+    }
+    collected.set(api.id, { api, apiDigest: source.apiDigest });
+  }
+  return collected;
 }
 
 function normalizeSchema(value: JsonValue): void {
@@ -73,13 +125,14 @@ function copy(source: JsonObject, target: JsonObject, key: string): void {
   if (
     value !== undefined && value !== null &&
     !(record && Object.keys(record).length === 0)
-  ) target[key] = structuredClone(value);
+  ) {
+    target[key] = record && !Array.isArray(value)
+      ? structuredClone({ ...record })
+      : structuredClone(value);
+  }
 }
 
-async function compileApi(
-  contract: JsonObject,
-  contractDigest?: string,
-): Promise<JsonObject> {
+function compileApi(contract: JsonObject): JsonObject {
   const api: JsonObject = { format: "trellis.api.v1" };
   for (
     const field of [
@@ -92,26 +145,32 @@ async function compileApi(
     ]
   ) copy(contract, api, field);
   Object.values(object(api.schemas) ?? {}).forEach(normalizeSchema);
-  const schemas = object(api.schemas) ?? {};
-  if ("TrellisContractArtifactIdentity" in schemas) {
-    throw new Error("TrellisContractArtifactIdentity is reserved");
-  }
-  schemas.TrellisContractArtifactIdentity = {
-    type: "string",
-    const: contractDigest ?? (await digestJson(contract)).digest,
+  const declaredCapabilities = object(contract.capabilities) ?? {};
+  const normalizeCapability = (name: string) => {
+    if (name in declaredCapabilities) {
+      return `${apiId.replace(/@v\d+$/, "")}::${name}`;
+    }
+    if (name === "admin" || name === "service" || name.includes("::")) {
+      return name;
+    }
+    throw new Error(`undeclared local capability '${name}'`);
   };
-  api.schemas = schemas;
-
   const capabilityAllows: Record<string, JsonValue[]> = {};
+  const apiId = String(contract.id);
+  for (const name of Object.keys(declaredCapabilities)) {
+    capabilityAllows[normalizeCapability(name)] = [];
+  }
   const addCapability = (
     capability: JsonValue,
     action: string,
     target: JsonObject,
   ) => {
     if (typeof capability !== "string") return;
-    (capabilityAllows[capability] ??= []).push({ action, target });
+    const normalized = normalizeCapability(capability);
+    const allows = capabilityAllows[normalized] ?? [];
+    allows.push({ action, target });
+    capabilityAllows[normalized] = allows;
   };
-  const apiId = String(contract.id);
   for (
     const [section, actionMap] of [
       ["rpc", { call: "call" }],
@@ -126,7 +185,7 @@ async function compileApi(
   ) {
     for (
       const [name, value] of Object.entries(object(contract[section]) ?? {})
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareProtocolStrings(left, right))
     ) {
       const definition = object(value);
       const capabilities = object(definition?.capabilities);
@@ -168,7 +227,7 @@ async function compileApi(
   if (Object.keys(capabilityAllows).length > 0) {
     api.capabilities = Object.fromEntries(
       Object.entries(capabilityAllows).sort(([left], [right]) =>
-        left.localeCompare(right)
+        compareProtocolStrings(left, right)
       ).map(([name, allows]) => {
         const keyed = new Map(
           allows.map((permission) => {
@@ -197,6 +256,20 @@ async function compileApi(
         );
         return [name, {
           allows: [...keyed.entries()].sort().map(([, value]) => value),
+        }];
+      }),
+    );
+  }
+  if (Object.keys(declaredCapabilities).length > 0) {
+    api.consent = Object.fromEntries(
+      Object.entries(declaredCapabilities).sort(([left], [right]) =>
+        compareProtocolStrings(left, right)
+      ).map(([name, value]) => {
+        const metadata = object(value) ?? {};
+        return [normalizeCapability(name), {
+          title: String(metadata.displayName ?? ""),
+          description: String(metadata.description ?? ""),
+          consequence: String(metadata.consequence ?? ""),
         }];
       }),
     );
@@ -256,7 +329,13 @@ async function compileApi(
   return api;
 }
 
-async function apiDigest(api: JsonObject): Promise<string> {
+/** Computes the semantic digest for a normalized native API artifact. */
+/** Return the semantic digest of a native API artifact. */
+export function apiDigest(api: Readonly<Record<string, unknown>>): string {
+  return apiDigestValue(checkedObject(api));
+}
+
+function apiDigestValue(api: JsonObject): string {
   const projection: JsonObject = { format: api.format, id: api.id };
   for (const field of ["schemas", "exports", "capabilities"]) {
     copy(api, projection, field);
@@ -278,6 +357,7 @@ async function apiDigest(api: JsonObject): Promise<string> {
       const definition = object(value);
       if (!definition) continue;
       delete definition.docs;
+      delete definition.subject;
       if (section === "operations") {
         for (const signal of Object.values(object(definition.signals) ?? {})) {
           const signalDefinition = object(signal);
@@ -287,30 +367,18 @@ async function apiDigest(api: JsonObject): Promise<string> {
     }
     projection[section] = lowered;
   }
-  return (await digestJson(projection)).digest;
+  return sha256Base64urlSync(canonicalizeJson(projection));
 }
 
-/**
- * Compile a contract manifest into canonical API and participant artifacts.
- * Referenced APIs are keyed by canonical API ID.
- */
-export async function compileProtocolArtifacts(
-  contract: ContractInput,
-  referencedApis: Readonly<Record<string, JsonObject>> = {},
-): Promise<CompiledProtocolArtifacts> {
-  const source = sourceManifest(contract);
-  const api = await compileApi(source, contract.CONTRACT_DIGEST);
-  const apis: Record<string, JsonObject> = {
-    ...referencedApis,
-    [String(api.id)]: api,
-  };
-  const discoveredApis: JsonObject[] = [];
-  for (const selected of contract[CONTRACT_RUNTIME]?.actions ?? []) {
-    const dependencySource = actionSource(selected.action);
-    if (!dependencySource) continue;
-    const dependencyApi = await compileReferencedApi(dependencySource);
-    apis[String(dependencyApi.id)] = dependencyApi;
-    discoveredApis.push(dependencyApi);
+function compileParticipant(
+  source: JsonObject,
+  api: JsonObject,
+  apis: Readonly<Record<string, JsonObject>>,
+  apiDigests: Readonly<Record<string, string>>,
+): JsonObject {
+  const apiId = api.id;
+  if (typeof apiId !== "string") {
+    throw new Error("Native API artifact is missing an id");
   }
   const participant: JsonObject = { format: "trellis.participant.v1" };
   for (
@@ -342,8 +410,8 @@ export async function compileProtocolArtifacts(
     }
     participant.implements = {
       self: {
-        api: api.id,
-        apiDigest: await apiDigest(api),
+        api: apiId,
+        apiDigest: apiDigest(api),
         ...(Object.keys(operationTransfers).length > 0
           ? { operationTransfers }
           : {}),
@@ -366,9 +434,15 @@ export async function compileProtocolArtifacts(
         );
       }
       const referencedApi = apis[apiId];
+      const referencedApiDigest = apiDigests[apiId];
+      if (!referencedApiDigest) {
+        throw new Error(
+          `Referenced API artifact '${apiId}' is missing its digest`,
+        );
+      }
       const used: JsonObject = {
         api: apiId,
-        apiDigest: await apiDigest(referencedApi),
+        apiDigest: referencedApiDigest,
       };
       copy(reference!, used, "rpc");
       const operations = object(reference!.operations);
@@ -425,5 +499,124 @@ export async function compileProtocolArtifacts(
       }),
     );
   }
-  return { api, participant, referencedApis: discoveredApis };
+  return participant;
+}
+
+function compareProtocolStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Returns native artifacts and exact dependency API evidence carried by a
+ * defined contract without compiling or converting an authoring manifest.
+ */
+export function nativeProtocolPresentation(
+  contract: NativeProtocolContract,
+): NativeProtocolPresentation {
+  const api = nativeApi(contract);
+  const participant = nativeParticipant(contract);
+  const discoveredApis = collectActionSources(
+    (contract[CONTRACT_RUNTIME]?.actions ?? []).flatMap((selected) => {
+      const source = actionSource(selected.action);
+      return source ? [source] : [];
+    }),
+  );
+  const ownedApiId = String(api.id);
+  const apis = Object.fromEntries(
+    [...discoveredApis].map(([id, source]) => [id, checkedObject(source.api)]),
+  );
+  if (
+    apis[ownedApiId] &&
+    canonicalizeJson(apis[ownedApiId]) !== canonicalizeJson(api)
+  ) {
+    throw new Error(`Conflicting API evidence for owned API '${ownedApiId}'`);
+  }
+  apis[ownedApiId] = api;
+  const resolved = resolveParticipantV1WasmSync({ participant, apis });
+  const resolvedApi = resolved.apiArtifacts[ownedApiId];
+  if (!resolvedApi || canonicalizeJson(resolvedApi) !== canonicalizeJson(api)) {
+    throw new Error(
+      "Resolved owned API does not match the defined contract API",
+    );
+  }
+  if (resolved.apiDigests[ownedApiId] !== contract.API_DIGEST) {
+    throw new Error("Defined contract API digest does not match resolution");
+  }
+  if (resolved.participantDigest !== contract.CONTRACT_DIGEST) {
+    throw new Error(
+      "Defined contract participant digest does not match resolution",
+    );
+  }
+  if (resolved.participantNeedsDigest !== contract.PARTICIPANT_NEEDS_DIGEST) {
+    throw new Error(
+      "Defined contract participant needs digest does not match resolution",
+    );
+  }
+  return {
+    api: resolvedApi,
+    participant: resolved.participant,
+    referencedApis: Object.entries(resolved.apiArtifacts)
+      .filter(([id]) => id !== ownedApiId)
+      .map(([, referencedApi]) => referencedApi),
+  };
+}
+
+/** Build native API and participant artifacts directly from an authoring source. */
+export function buildNativeProtocolArtifacts(
+  source: Readonly<Record<string, unknown>>,
+  referencedApis: Readonly<Record<string, ActionSource>> = {},
+): NativeProtocolArtifacts {
+  const contract = checkedObject(source);
+  const api = compileApi(contract);
+  const apiDigests: Record<string, string> = {};
+  const collectedSources = collectActionSources(Object.values(referencedApis));
+  const apis: Record<string, JsonObject> = Object.fromEntries(
+    [...collectedSources].map(([id, source]) => {
+      const artifact = compileReferencedApi(source);
+      if (artifact.id !== id) {
+        throw new Error(
+          `Action source API map key '${id}' does not match artifact id`,
+        );
+      }
+      apiDigests[id] = source.apiDigest;
+      return [id, artifact];
+    }),
+  );
+  Object.assign(apis, {
+    [String(api.id)]: api,
+  });
+  const contractUses = object(contract.uses);
+  for (
+    const value of Object.values(object(contractUses?.required) ?? {})
+      .concat(Object.values(object(contractUses?.optional) ?? {}))
+  ) {
+    const reference = object(value);
+    const apiId = reference?.contract;
+    if (typeof apiId !== "string" || !apis[apiId]) {
+      throw new Error(`Referenced API artifact '${String(apiId)}' is required`);
+    }
+  }
+  const participant = compileParticipant(contract, api, apis, apiDigests);
+  const resolved = resolveParticipantV1WasmSync({
+    participant,
+    apis,
+  });
+  const apiId = String(api.id);
+  const nativeApi = resolved.apiArtifacts[apiId];
+  const nativeApiDigest = resolved.apiDigests[apiId];
+  if (!nativeApi || !nativeApiDigest) {
+    throw new Error(
+      `Native API artifact '${apiId}' is missing from resolution`,
+    );
+  }
+  return {
+    api: nativeApi,
+    participant: resolved.participant,
+    referencedApis: Object.entries(resolved.apiArtifacts)
+      .filter(([id]) => id !== apiId)
+      .map(([, value]) => value),
+    apiDigest: nativeApiDigest,
+    participantDigest: resolved.participantDigest,
+    participantNeedsDigest: resolved.participantNeedsDigest,
+  };
 }

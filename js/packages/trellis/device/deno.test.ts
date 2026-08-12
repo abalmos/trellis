@@ -16,7 +16,7 @@ const identity = {
   principalId: "device_123",
   participantId: deviceContract.CONTRACT_ID,
   participantArtifactDigest: deviceContract.CONTRACT_DIGEST,
-  participantNeedsDigest: deviceContract.CONTRACT_DIGEST,
+  participantNeedsDigest: deviceContract.PARTICIPANT_NEEDS_DIGEST,
 };
 
 Deno.test("checkDeviceActivation persists provisioned activation state", async () => {

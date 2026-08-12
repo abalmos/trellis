@@ -51,7 +51,7 @@ export type DeviceActivationAuth = {
   handleCallback(
     callbackUrl: string,
   ): Promise<DeviceActivationBindResult | null>;
-  signIn(options?: DeviceActivationSignInOptions): Promise<never>;
+  signIn(options?: DeviceActivationSignInOptions): Promise<void>;
 };
 
 export type DeviceActivationControllerConfig = {

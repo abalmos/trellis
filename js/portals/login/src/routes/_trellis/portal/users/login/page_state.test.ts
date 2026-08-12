@@ -153,7 +153,7 @@ Deno.test("submitLocalLogin posts expected URL and payload", async () => {
       capturedUrl = input.toString();
       capturedInit = init;
       return Promise.resolve(
-        Response.json({ status: "authenticated", flowId: "flow-1" }),
+        Response.json({ state: "authenticated", flowId: "flow-1" }),
       );
     },
   );
@@ -165,6 +165,30 @@ Deno.test("submitLocalLogin posts expected URL and payload", async () => {
     capturedInit?.body,
     JSON.stringify({ flowId: "flow-1", username: "ada", password: "secret" }),
   );
+});
+
+Deno.test("submitLocalLogin accepts trusted portal approval", async () => {
+  const result = await submitLocalLogin(
+    "https://auth.example.com",
+    { flowId: "flow-1", username: "ada", password: "secret" },
+    () =>
+      Promise.resolve(Response.json({ state: "approved", flowId: "flow-1" })),
+  );
+
+  assertEquals(result, { state: "approved", flowId: "flow-1" });
+});
+
+Deno.test("submitLocalLogin accepts manual approval requirement", async () => {
+  const result = await submitLocalLogin(
+    "https://auth.example.com",
+    { flowId: "flow-1", username: "ada", password: "secret" },
+    () =>
+      Promise.resolve(
+        Response.json({ state: "approval_required", flowId: "flow-1" }),
+      ),
+  );
+
+  assertEquals(result, { state: "approval_required", flowId: "flow-1" });
 });
 
 Deno.test("registration gating requires explicit local availability", () => {

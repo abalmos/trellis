@@ -13,7 +13,7 @@ use trellis_rs::service::{
 };
 
 use super::auth::{
-    AuthService, AuthorityEvidenceRepository, DecideActivationReviewInput,
+    AuthService, AuthorityEvidenceRepository, DecideActivationReviewInput, DeploymentRepository,
     DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationMutation,
     DeviceDelegationRecord, DeviceDelegationState, IdempotencyResultRecord, PostCommitActionKind,
     PostCommitActionRecord, ProvisioningRepository, SqliteAuthorizationStore,
@@ -291,11 +291,62 @@ async fn resolve_snapshot(
                 Some(output),
             ))
         }
-        DeviceActivationReviewState::Rejected
-        | DeviceActivationReviewState::Cancelled
-        | DeviceActivationReviewState::Expired => Err(ServerError::Nats(
-            "activation review is no longer approvable".to_owned(),
-        )),
+        DeviceActivationReviewState::Rejected => {
+            let device = service
+                .repository()
+                .get_device(&review.principal_id, &review.deployment_id)
+                .await
+                .map_err(server_error)?
+                .ok_or_else(|| ServerError::Nats("activation device not found".to_owned()))?;
+            let profile = service
+                .repository()
+                .get_deployment_profile(&review.deployment_id)
+                .await
+                .map_err(server_error)?
+                .ok_or_else(|| ServerError::Nats("activation deployment not found".to_owned()))?;
+            let output = serde_json::from_value(json!({
+                "device": {
+                    "instanceId": review.instance_id,
+                    "deploymentId": review.deployment_id,
+                    "principalId": review.principal_id,
+                    "identityPublicKey": null,
+                    "identityKeyId": null,
+                    "participantId": profile.participant_id,
+                    "state": device.state,
+                    "administrativeApproval": "rejected",
+                    "delegationRequired": profile.requires_device_delegation,
+                    "delegationState": "missing",
+                    "delegationExpiresAt": null,
+                    "createdAt": device.created_at,
+                    "updatedAt": device.updated_at,
+                    "version": device.version,
+                },
+                "review": {
+                    "reviewId": review.review_id,
+                    "deploymentId": review.deployment_id,
+                    "instanceId": review.instance_id,
+                    "devicePrincipalId": review.principal_id,
+                    "state": "rejected",
+                    "confirmationCode": review.request_digest.chars().take(8).collect::<String>(),
+                    "requestedAt": review.requested_at,
+                    "expiresAt": review.requested_at + 900_000,
+                    "decidedAt": review.decided_at,
+                    "decidedBy": review.decided_by,
+                    "reason": review.reason,
+                    "version": review.version,
+                },
+                "authority": null,
+            }))?;
+            Ok(snapshot(
+                &review,
+                OperationState::Completed,
+                None,
+                Some(output),
+            ))
+        }
+        DeviceActivationReviewState::Cancelled | DeviceActivationReviewState::Expired => Err(
+            ServerError::Nats("activation review is no longer approvable".to_owned()),
+        ),
     }
 }
 

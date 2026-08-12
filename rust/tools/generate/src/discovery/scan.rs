@@ -265,7 +265,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discovers_paired_protocol_artifacts_as_one_source() {
+    fn discovers_paired_native_artifacts_as_one_source() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("Cargo.toml"),
@@ -292,16 +292,8 @@ mod tests {
         fs::create_dir_all(inner.join("contracts")).unwrap();
         fs::write(outer.join("deno.json"), "{}\n").unwrap();
         fs::write(inner.join("deno.json"), "{}\n").unwrap();
-        fs::write(
-            outer.join("contracts/outer.ts"),
-            "export const CONTRACT = {};\n",
-        )
-        .unwrap();
-        fs::write(
-            inner.join("contracts/inner.ts"),
-            "export const CONTRACT = {};\n",
-        )
-        .unwrap();
+        fs::write(outer.join("contracts/outer.ts"), "export const API = {};\n").unwrap();
+        fs::write(inner.join("contracts/inner.ts"), "export const API = {};\n").unwrap();
 
         let discovered = discover_local_contracts(&inner.join("src")).unwrap();
         assert_eq!(discovered.len(), 1);
@@ -353,7 +345,7 @@ mod tests {
         .unwrap();
         fs::write(
             rust_project.join("contracts/service.rs"),
-            "pub const CONTRACT_JSON: &str = include_str!(\"service.json\");\n",
+            "pub const API_JSON: &str = include_str!(\"service.json\");\n",
         )
         .unwrap();
 

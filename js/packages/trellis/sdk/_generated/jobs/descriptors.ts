@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
+// Generated from ./generated/protocol/apis/trellis.jobs@v1.json
 import {
   eventActions,
   feedAction,
@@ -32,20 +32,17 @@ import {
   JobsWatchRequestSchema,
   NotFoundErrorDataSchema,
 } from "./schemas.ts";
-import {
-  CONTRACT as ACTION_ARTIFACT,
-  CONTRACT_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
-const CONTRACT_ID = "trellis.jobs@v1" as const;
+const API_ID = "trellis.jobs@v1" as const;
 
 export const JobsCancel = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Cancel",
   {
     subject: "rpc.v1.Jobs.Cancel",
@@ -59,17 +56,25 @@ export const JobsCancel = rpcAction(
     input: schema<Types.JobsCancelInput>(JobsCancelRequestSchema),
     output: schema<Types.JobsCancelOutput>(JobsCancelResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -78,7 +83,7 @@ export const JobsCancel = rpcAction(
 );
 
 export const JobsDismissDLQ = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.DismissDLQ",
   {
     subject: "rpc.v1.Jobs.DismissDLQ",
@@ -92,17 +97,25 @@ export const JobsDismissDLQ = rpcAction(
     input: schema<Types.JobsDismissDLQInput>(JobsDismissDLQRequestSchema),
     output: schema<Types.JobsDismissDLQOutput>(JobsDismissDLQResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -111,7 +124,7 @@ export const JobsDismissDLQ = rpcAction(
 );
 
 export const JobsGetKey = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.GetKey",
   {
     subject: "rpc.v1.Jobs.GetKey",
@@ -125,17 +138,25 @@ export const JobsGetKey = rpcAction(
     input: schema<Types.JobsGetKeyInput>(JobsGetKeyRequestSchema),
     output: schema<Types.JobsGetKeyOutput>(JobsGetKeyResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -144,7 +165,7 @@ export const JobsGetKey = rpcAction(
 );
 
 export const JobsInspect = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Inspect",
   {
     subject: "rpc.v1.Jobs.Inspect",
@@ -158,17 +179,25 @@ export const JobsInspect = rpcAction(
     input: schema<Types.JobsInspectInput>(JobsInspectRequestSchema),
     output: schema<Types.JobsInspectOutput>(JobsInspectResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -177,7 +206,7 @@ export const JobsInspect = rpcAction(
 );
 
 export const JobsListDLQ = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.ListDLQ",
   {
     subject: "rpc.v1.Jobs.ListDLQ",
@@ -193,13 +222,23 @@ export const JobsListDLQ = rpcAction(
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "JobsListDLQ",
   ACTION_SOURCE,
 );
 
 export const JobsListServices = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.ListServices",
   {
     subject: "rpc.v1.Jobs.ListServices",
@@ -217,13 +256,23 @@ export const JobsListServices = rpcAction(
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "JobsListServices",
   ACTION_SOURCE,
 );
 
 export const JobsMetrics = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Metrics",
   {
     subject: "rpc.v1.Jobs.Metrics",
@@ -239,13 +288,23 @@ export const JobsMetrics = rpcAction(
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "JobsMetrics",
   ACTION_SOURCE,
 );
 
 export const JobsQuery = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Query",
   {
     subject: "rpc.v1.Jobs.Query",
@@ -261,13 +320,23 @@ export const JobsQuery = rpcAction(
     callerCapabilities: ["trellis.jobs::admin.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "JobsQuery",
   ACTION_SOURCE,
 );
 
 export const JobsReplayDLQ = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.ReplayDLQ",
   {
     subject: "rpc.v1.Jobs.ReplayDLQ",
@@ -281,17 +350,25 @@ export const JobsReplayDLQ = rpcAction(
     input: schema<Types.JobsReplayDLQInput>(JobsReplayDLQRequestSchema),
     output: schema<Types.JobsReplayDLQOutput>(JobsReplayDLQResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -300,7 +377,7 @@ export const JobsReplayDLQ = rpcAction(
 );
 
 export const JobsRetry = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Retry",
   {
     subject: "rpc.v1.Jobs.Retry",
@@ -314,17 +391,25 @@ export const JobsRetry = rpcAction(
     input: schema<Types.JobsRetryInput>(JobsRetryRequestSchema),
     output: schema<Types.JobsRetryOutput>(JobsRetryResponseSchema),
     callerCapabilities: ["trellis.jobs::admin.mutate"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -333,7 +418,7 @@ export const JobsRetry = rpcAction(
 );
 
 export const JobsWatch = feedAction(
-  CONTRACT_ID,
+  API_ID,
   "Jobs.Watch",
   {
     subject: "feed.v1.Jobs.Watch",

@@ -117,10 +117,14 @@ function selectedEvents<TEvents extends readonly EventSubscribeAction[]>(
     throw new Error("Trellis event capture requires at least one event action");
   }
   const seen = new Set<string>();
+  const apiId = contract.API.id;
+  if (typeof apiId !== "string") {
+    throw new Error("Native contract API is missing an id");
+  }
   for (const event of events) {
-    if (event.contractId !== contract.CONTRACT.id) {
+    if (event.contractId !== apiId) {
       throw new Error(
-        `Event '${event.name}' belongs to '${event.contractId}', not '${contract.CONTRACT.id}'`,
+        `Event '${event.name}' belongs to '${event.contractId}', not '${apiId}'`,
       );
     }
     if (seen.has(event.name)) {

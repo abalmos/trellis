@@ -10,7 +10,7 @@
     "required": {
       "auth": {
         "api": "trellis.auth@v1",
-        "apiDigest": "k-AVuZetf28XCxaYc2HEIzbafPeA63WeRgg0YmHtia0",
+        "apiDigest": "WtzvXn97fugvnlNNtvaLGl__oGbVl77GhFKBQYjkG64",
         "rpc": {
           "call": [
             "Auth.Sessions.Me",
@@ -29,9 +29,6 @@
             "Auth.Users.IdentityLink.Create",
             "Auth.UserIdentities.List",
             "Auth.UserIdentities.Unlink",
-            "Auth.IdentityAuthority.List",
-            "Auth.IdentityAuthority.Get",
-            "Auth.IdentityAuthority.Revoke",
             "Auth.Deployments.Create",
             "Auth.Deployments.List",
             "Auth.Deployments.Enable",
@@ -69,13 +66,20 @@
             "Auth.Portals.LoginSettings.Update",
             "Auth.Portals.Routes.Put",
             "Auth.Portals.Routes.Remove",
+            "Auth.Portals.GrantOverrides.List",
+            "Auth.Portals.GrantOverrides.Put",
+            "Auth.Portals.GrantOverrides.Remove",
+            "Auth.CapabilityGroups.Delete",
+            "Auth.CapabilityGroups.Get",
+            "Auth.CapabilityGroups.List",
+            "Auth.CapabilityGroups.Put",
             "Auth.Capabilities.List"
           ]
         }
       },
       "state": {
         "api": "trellis.state@v1",
-        "apiDigest": "p7I3D6uCe7wDhQXoWjEeP5_cOr31XgGKboam-v_8gjk",
+        "apiDigest": "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A",
         "rpc": {
           "call": [
             "State.Admin.Delete",

@@ -458,6 +458,88 @@ pub struct DeviceActivationReviewRecord {
     pub version: u64,
 }
 
+/// Reusable administrative capability selection macro.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityGroupRecord {
+    /// Stable canonical group key.
+    pub group_key: String,
+    /// Operator-facing group name.
+    pub display_name: String,
+    /// Operator-facing group description.
+    pub description: String,
+    /// Direct concrete Trellis capabilities.
+    pub capabilities: Vec<String>,
+    /// Transitively included capability-group keys.
+    pub included_groups: Vec<String>,
+    /// Creation time in Unix milliseconds.
+    pub created_at: i64,
+    /// Last update time in Unix milliseconds.
+    pub updated_at: i64,
+    /// Positive optimistic record version.
+    pub version: u64,
+}
+
+/// Exact provider role mapping in one trusted portal policy.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalRoleMapping {
+    /// Exact configured provider ID.
+    pub provider_id: String,
+    /// Exact case-sensitive provider role.
+    pub role: String,
+    /// Direct concrete Trellis capabilities.
+    pub direct_capabilities: Vec<String>,
+    /// Reusable capability-group keys.
+    pub capability_group_keys: Vec<String>,
+}
+
+/// Trusted first-party portal preauthorization policy for one participant.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalGrantOverrideRecord {
+    /// Selected login portal ID.
+    pub portal_id: String,
+    /// Exact app or agent participant ID.
+    pub participant_id: String,
+    /// Base direct concrete capabilities.
+    pub direct_capabilities: Vec<String>,
+    /// Base reusable capability-group keys.
+    pub capability_group_keys: Vec<String>,
+    /// Exact provider-role mappings.
+    pub role_mappings: Vec<PortalRoleMapping>,
+    /// Creation time in Unix milliseconds.
+    pub created_at: i64,
+    /// Last update time in Unix milliseconds.
+    pub updated_at: i64,
+    /// Positive optimistic record version.
+    pub version: u64,
+}
+
+/// Administrative provenance for one portal-managed identity authority.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortalAuthorityBindingRecord {
+    /// Stable user principal ID.
+    pub principal_id: String,
+    /// Exact app or agent participant ID.
+    pub participant_id: String,
+    /// Ordinary IdentityAuthority ID.
+    pub authority_id: String,
+    /// Portal that last established the authority.
+    pub portal_id: String,
+    /// Provider observed during the last trusted login.
+    pub provider_id: String,
+    /// Last verified provider roles.
+    pub roles: Vec<String>,
+    /// Semantic effective portal-policy digest.
+    pub effective_policy_digest: String,
+    /// IdentityAuthority version established by this binding.
+    pub authority_version: u64,
+    /// Last binding update time in Unix milliseconds.
+    pub updated_at: i64,
+}
+
 /// Durable result for one authenticated state-changing request ID.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

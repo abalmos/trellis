@@ -46,7 +46,7 @@ fn prepare_targets(args: &PrepareArgs) -> Option<Vec<PackageTarget>> {
 
     let mut targets = if args.targets.is_empty() {
         vec![
-            PackageTarget::Manifest,
+            PackageTarget::Api,
             PackageTarget::Jsr,
             PackageTarget::Npm,
             PackageTarget::Cargo,
@@ -534,7 +534,7 @@ mod tests {
         let filter = super::WatchPathFilter::empty(root);
 
         assert!(!filter.is_relevant(Path::new(
-            "/repo/generated/contracts/manifests/trellis.orders@v1.json"
+            "/repo/generated/protocol/apis/trellis.orders@v1.json"
         )));
         assert!(!filter.is_relevant(Path::new(
             "/repo/services/orders/generated/packages/jsr/orders/mod.ts"
@@ -570,7 +570,7 @@ mod tests {
         let root = Path::new("/repo");
         let filter = super::WatchPathFilter::empty(root);
         let paths = [
-            Path::new("/repo/generated/contracts/manifests/trellis.orders@v1.json").to_path_buf(),
+            Path::new("/repo/generated/protocol/apis/trellis.orders@v1.json").to_path_buf(),
             Path::new("/repo/services/orders/contracts/orders.ts").to_path_buf(),
         ];
 
@@ -1011,11 +1011,12 @@ mod tests {
             contract_id: contract_id.to_owned(),
             contract_kind,
             action: AutoAction::Generate,
-            out_manifest: None,
+            out_api: None,
             jsr_out: None,
             npm_out: None,
             cargo_out: None,
             cargo_participant_out: None,
+            protocol_participant_out: None,
             runtime_source: RuntimeSource::Local,
             runtime_repo_root: Some(PathBuf::from(".")),
         }

@@ -2,6 +2,8 @@
   import { isErr, type BaseError, type Result } from "@qlever-llc/result";
   import type { DeploymentAuthority, DeploymentAuthorityMaterialization } from "@qlever-llc/trellis/auth";
   import type {
+    AuthDeploymentAuthorityGetOutput,
+    AuthDeploymentAuthorityListOutput,
     AuthDeploymentsListOutput,
     AuthDevicesListOutput,
     AuthDeviceUserAuthoritiesListOutput,
@@ -27,13 +29,12 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type DeviceDeployment = Extract<AuthDeploymentsListOutput["entries"][number], { kind: "device" }>;
-  type DeviceInstance = AuthDevicesListOutput["entries"][number] & {
-    metadata?: Record<string, string>;
-  };
+  type DeviceDeployment = AuthDeploymentsListOutput["entries"][number];
+  type DeviceInstance = AuthDevicesListOutput["entries"][number];
   type Activation = AuthDeviceUserAuthoritiesListOutput["entries"][number];
   type Review = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type AuthorityDetail = { authority: DeploymentAuthority; materializedAuthority: DeploymentAuthorityMaterialization | null; portalRoute: unknown; grantOverrides: unknown[]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
+  type DeploymentAuthorityView = AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityDetail = { authority: AuthDeploymentAuthorityGetOutput["authority"]; capabilityDefinitions?: AuthorityCapabilityDefinition[] };
   type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
   type AuthorityRequest = {
     (method: "Auth.DeploymentAuthority.List", input: { kind: "device"; limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthority[] }>;
@@ -55,7 +56,7 @@
   let instances = $state.raw<DeviceInstance[]>([]);
   let activations = $state.raw<Activation[]>([]);
   let reviews = $state.raw<Review[]>([]);
-  let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
+  let deploymentAuthorities = $state.raw<DeploymentAuthorityView[]>([]);
   let selectedAuthorityDetail = $state.raw<AuthorityDetail | null>(null);
   let capabilityDefinitions = $state.raw<AuthorityCapabilityDefinition[]>([]);
 
@@ -68,29 +69,46 @@
   const selectedDeployment = $derived(deployments.find((deployment) => deployment.deploymentId === selectedDeploymentId) ?? null);
   const instancesById = $derived.by(() => new Map(instances.map((instance) => [instance.instanceId, instance])));
   const selectedInstances = $derived(instances.filter((instance) => instance.deploymentId === selectedDeploymentId));
-  const selectedActivations = $derived(activations.filter((activation) => activation.deploymentId === selectedDeploymentId));
+  const selectedActivations = $derived(activations.filter((activation) => activation.device.deploymentId === selectedDeploymentId));
   const selectedReviews = $derived(reviews.filter((review) => review.deploymentId === selectedDeploymentId));
   const selectedPendingReviews = $derived(selectedReviews.filter((review) => review.state === "pending"));
   const selectedDeploymentAuthority = $derived(selectedAuthorityDetail?.authority ?? deploymentAuthorities.find((authority) => authority.deploymentId === selectedDeploymentId) ?? null);
-  const selectedMaterializedAuthority = $derived(selectedAuthorityDetail?.materializedAuthority ?? null);
+  const selectedMaterializedAuthority = $derived(selectedAuthorityDetail?.authority.materialization ?? null);
   const selectedMaterializedGrantCount = $derived(
-    (selectedMaterializedAuthority?.grants.capabilities.length ?? 0) +
-      (selectedMaterializedAuthority?.grants.surfaces.length ?? 0) +
-      (selectedMaterializedAuthority?.grants.nats.length ?? 0),
+    selectedMaterializedAuthority?.effectiveGrantSet.permissions.length ?? 0,
   );
   const selectedCapabilityDefinitions = $derived(selectedAuthorityDetail?.capabilityDefinitions ?? capabilityDefinitions);
-  const createsRows = $derived(selectedDeploymentAuthority ? createsCapabilityRows(selectedDeploymentAuthority, selectedCapabilityDefinitions) : []);
-  const givenRows = $derived(selectedDeploymentAuthority ? givenCapabilityRows(selectedDeploymentAuthority, selectedMaterializedAuthority, selectedCapabilityDefinitions) : []);
+  const createsRows = $derived((selectedDeploymentAuthority?.desiredCapabilities ?? []).map((capability) => ({
+    id: capability,
+    capability,
+    consequence: null,
+    displayName: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.displayName ?? capability,
+    description: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.description ?? "Accepted deployment capability",
+    source: "authority",
+    contractId: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.sourceApi ?? null,
+    contractDigest: null,
+  })));
+  const givenRows = $derived((selectedMaterializedAuthority?.effectiveCapabilities ?? []).map((capability) => ({
+    id: capability,
+    capability,
+    consequence: null,
+    availability: "required",
+    materializedStatus: selectedMaterializedAuthority?.state ?? "unavailable",
+    materializedGrantCount: 1,
+    displayName: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.displayName ?? capability,
+    description: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.description ?? "Materialized deployment capability",
+    source: "authority",
+    contractId: selectedCapabilityDefinitions.find((definition) => definition.capability === capability)?.sourceApi ?? null,
+    contractDigest: null,
+  })));
   const filteredDeployments = $derived.by(() => {
     const term = search.trim().toLowerCase();
     if (!term) return deployments;
-    return deployments.filter((deployment) =>
-      deployment.deploymentId.toLowerCase().includes(term) || (deployment.reviewMode ?? "").toLowerCase().includes(term)
-    );
+    return deployments.filter((deployment) => deployment.deploymentId.toLowerCase().includes(term));
   });
   const selectedReview = $derived(selectedReviews.find((review) => review.reviewId === selectedReviewId) ?? selectedReviews[0] ?? null);
-  const activeInstanceCount = $derived(selectedInstances.filter((instance) => instance.state === "activated").length);
-  const revokedActivationCount = $derived(selectedActivations.filter((activation) => activation.state === "revoked").length);
+  const activeInstanceCount = $derived(selectedInstances.filter((instance) => instance.state === "active").length);
+  const revokedActivationCount = $derived(selectedActivations.filter((activation) => activation.authority?.state === "revoked").length);
 
   function syncSelectedDeployment(nextDeployments: DeviceDeployment[]): string {
     const nextDeploymentId = nextDeployments.some((deployment) => deployment.deploymentId === selectedDeploymentId)
@@ -116,14 +134,14 @@
   }
 
   function instanceStatus(state: DeviceInstance["state"]): StatusVariant {
-    if (state === "activated") return "healthy";
-    if (state === "registered") return "degraded";
+    if (state === "active") return "healthy";
+    if (state === "pending") return "degraded";
     if (state === "revoked") return "unhealthy";
     return "offline";
   }
 
-  function activationStatus(state: Activation["state"]): StatusVariant {
-    return state === "activated" ? "healthy" : "unhealthy";
+  function activationStatus(state: NonNullable<Activation["authority"]>["state"]): StatusVariant {
+    return state === "accepted" ? "healthy" : "unhealthy";
   }
 
   function reviewStatus(state: Review["state"]): StatusVariant {
@@ -161,19 +179,19 @@
   }
 
   function metadataValue(instanceId: string, key: (typeof understoodMetadataKeys)[number]): string | null {
-    return instancesById.get(instanceId)?.metadata?.[key] ?? null;
+    return null;
   }
 
   function metadataEntries(instanceId: string): Array<[string, string]> {
-    return Object.entries(instancesById.get(instanceId)?.metadata ?? {}).filter(([key]) => !understoodMetadataKeySet.has(key));
+    return [];
   }
 
   function instanceRowKey(instance: DeviceInstance): string {
-    return `${instance.instanceId}:${instance.createdAt}:${instance.publicIdentityKey}`;
+    return `${instance.instanceId}:${instance.createdAt}:${instance.identityPublicKey ?? ""}`;
   }
 
   function activationRowKey(activation: Activation): string {
-    return `${activation.instanceId}:${activation.activatedAt}:${activation.revokedAt ?? ""}:${activation.state}`;
+    return `${activation.device.instanceId}:${activation.authority?.authorityId ?? "none"}:${activation.device.updatedAt}`;
   }
 
   function tabLabel(tab: Tab): string {
@@ -188,8 +206,8 @@
     return `device-detail-panel-${tab}`;
   }
 
-  function formatActivatedBy(actor: Activation["activatedBy"]): string {
-    return actor ? `${actor.participantKind}:${actor.identity.provider}:${actor.identity.subject}` : "—";
+  function formatActivatedBy(actor: NonNullable<Activation["authority"]>["decision"]): string {
+    return actor?.decidedBy ?? "—";
   }
 
   async function loadAuthorityDetail(deploymentId: string) {
@@ -201,10 +219,14 @@
     }
     selectedAuthorityDetail = null;
     try {
-      const response = await trellis.authDeploymentAuthorityGet({ deploymentId }).take();
+      const authority = deploymentAuthorities.find((entry) => entry.deploymentId === deploymentId);
+      if (!authority) return;
+      const response = await trellis.authDeploymentAuthorityGet({ authorityId: authority.authorityId }).take();
       if (requestToken !== authorityDetailRequestToken) return;
       if (isErr(response)) { error = errorMessage(response); return; }
-      selectedAuthorityDetail = response;
+      selectedAuthorityDetail = {
+        authority: response.authority,
+      };
     } catch (cause) {
       if (requestToken !== authorityDetailRequestToken) return;
       error = errorMessage(cause);
@@ -216,12 +238,12 @@
     error = null;
     try {
       const [deploymentsResponse, instancesResponse, activationsResponse, reviewsResponse, authoritiesResponse, capabilitiesResponse] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "device", limit: 500, offset: 0 }).take(),
-        trellis.authDevicesList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeviceUserAuthoritiesList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityList({ kind: "device", limit: 500, offset: 0 }).take(),
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeploymentsList({ kind: "device", limit: 500 }).take(),
+        trellis.authDevicesList({ limit: 500 }).take(),
+        trellis.authDeviceUserAuthoritiesList({ limit: 500 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
+        trellis.authCapabilitiesList({ limit: 500 }).take(),
       ]);
 
       if (isErr(deploymentsResponse)) { error = errorMessage(deploymentsResponse); return; }
@@ -286,7 +308,7 @@
           <div class="space-y-2">
             {#each filteredDeployments as deployment (deployment.deploymentId)}
               {@const deploymentDeviceInstances = deploymentInstances(deployment.deploymentId)}
-              {@const activeDevices = deploymentDeviceInstances.filter((instance) => instance.state === "activated")}
+              {@const activeDevices = deploymentDeviceInstances.filter((instance) => instance.state === "active")}
               {@const pendingReviewCount = pendingReviewsForDeployment(deployment.deploymentId)}
               {@const trackedAuthority = deploymentAuthorities.find((authority) => authority.deploymentId === deployment.deploymentId)}
               <SelectableRecordButton
@@ -301,12 +323,12 @@
                     </div>
                     <div class="mt-1 text-xs text-base-content/60">{activeDevices.length}/{deploymentDeviceInstances.length} activated instances</div>
                     <div class="mt-1 flex flex-wrap gap-1">
-                      <span class="badge badge-outline badge-xs">review {deployment.reviewMode ?? "none"}</span>
+                      <span class="badge badge-outline badge-xs">delegation {deployment.requiresDeviceDelegation ? "required" : "none"}</span>
                       {#if pendingReviewCount > 0}<span class="badge badge-warning badge-xs">{pendingReviewCount} review</span>{/if}
-                      {#if trackedAuthority}<span class="badge badge-outline badge-xs">authority {trackedAuthority.disabled ? "disabled" : "tracked"}</span>{/if}
+                      {#if trackedAuthority}<span class="badge badge-outline badge-xs">authority {trackedAuthority.state}</span>{/if}
                     </div>
                   </div>
-                  <span class={["badge badge-sm", badgeClassForDeployment()]}>{deployment.disabled ? "Disabled" : "Enabled"}</span>
+                  <span class={["badge badge-sm", badgeClassForDeployment()]}>{deployment.state === "disabled" ? "Disabled" : "Enabled"}</span>
                 </div>
               </SelectableRecordButton>
             {:else}
@@ -316,7 +338,7 @@
         {/if}
 
         {#snippet footer()}
-          <span>{deployments.filter((deployment) => deployment.disabled).length} disabled / archived</span>
+          <span>{deployments.filter((deployment) => deployment.state === "disabled").length} disabled / archived</span>
         {/snippet}
       </SelectionRail>
 
@@ -331,13 +353,13 @@
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <h2 class="trellis-identifier truncate text-lg font-semibold">{selectedDeployment.deploymentId}</h2>
-                    <StatusBadge label={selectedDeployment.disabled ? "Disabled" : "Enabled"} status={deploymentStatus()} />
+                    <StatusBadge label={selectedDeployment.state === "disabled" ? "Disabled" : "Enabled"} status={deploymentStatus()} />
                   </div>
-                  <div class="mt-1 text-sm text-base-content/60">Review mode: <span class="badge badge-outline badge-sm">{selectedDeployment.reviewMode ?? "none"}</span></div>
+                  <div class="mt-1 text-sm text-base-content/60">Delegation: <span class="badge badge-outline badge-sm">{selectedDeployment.requiresDeviceDelegation ? "required" : "none"}</span></div>
                 </div>
               </div>
               <div class="flex flex-wrap gap-2">
-                {#if !selectedDeployment.disabled}
+                {#if selectedDeployment.state !== "disabled"}
                   <a class="btn btn-error btn-outline btn-sm" href={resolve(`/admin/devices/profiles/disable?deployment=${encodeURIComponent(selectedDeployment.deploymentId)}`)}>Disable deployment</a>
                 {/if}
               </div>
@@ -374,7 +396,7 @@
                   </div>
                   <div class="flex flex-wrap gap-1">
                     <span class="badge badge-outline badge-sm trellis-identifier">{selectedDeploymentAuthority.version}</span>
-                    {#if selectedMaterializedAuthority}<StatusBadge label={`materialized ${selectedMaterializedAuthority.status}`} status={materializedStatus(selectedMaterializedAuthority.status)} />{/if}
+                    {#if selectedMaterializedAuthority}<StatusBadge label={`materialized ${selectedMaterializedAuthority.state}`} status={materializedStatus(selectedMaterializedAuthority.state)} />{/if}
                     <button type="button" class="btn btn-ghost btn-xs" onclick={() => selectTab("authority")}>Open authority</button>
                   </div>
                 </div>
@@ -404,10 +426,10 @@
                         {#each selectedInstances as instance (instanceRowKey(instance))}
                           <tr>
                             <td class="trellis-identifier font-medium">{instance.instanceId}</td>
-                            <td class="trellis-identifier text-base-content/60">{instance.publicIdentityKey}</td>
-                            <td class="text-base-content/60">{instance.metadata?.name ?? "—"}</td>
-                            <td class="text-base-content/60">{instance.metadata?.serialNumber ?? "—"}</td>
-                            <td class="text-base-content/60">{instance.metadata?.modelNumber ?? "—"}</td>
+                            <td class="trellis-identifier text-base-content/60">{instance.identityPublicKey ?? "—"}</td>
+                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "name") ?? "—"}</td>
+                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "serialNumber") ?? "—"}</td>
+                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "modelNumber") ?? "—"}</td>
                             {#if showMetadata}
                               <td class="text-xs text-base-content/60">
                                 {#if metadataEntries(instance.instanceId).length > 0}
@@ -444,16 +466,16 @@
                       <tbody>
                         {#each selectedActivations as activation (activationRowKey(activation))}
                           <tr>
-                            <td><div class="trellis-identifier font-medium">{activation.instanceId}</div><div class="trellis-identifier text-xs text-base-content/60">{activation.publicIdentityKey}</div></td>
-                            <td class="text-base-content/60">{formatActivatedBy(activation.activatedBy)}</td>
-                            <td><StatusBadge label={activation.state} status={activationStatus(activation.state)} /></td>
-                            <td class="text-base-content/60">{formatDate(activation.activatedAt)}</td>
-                            <td class="text-base-content/60">{activation.revokedAt ? formatDate(activation.revokedAt) : "—"}</td>
+                            <td><div class="trellis-identifier font-medium">{activation.device.instanceId}</div><div class="trellis-identifier text-xs text-base-content/60">{activation.authority?.authorityId ?? "—"}</div></td>
+                            <td class="text-base-content/60">{formatActivatedBy(activation.authority?.decision ?? null)}</td>
+                            <td><StatusBadge label={activation.authority?.state ?? "missing"} status={activation.authority ? activationStatus(activation.authority.state) : "offline"} /></td>
+                            <td class="text-base-content/60">{formatDate(activation.authority?.createdAt)}</td>
+                            <td class="text-base-content/60">{activation.authority?.state === "revoked" ? formatDate(activation.authority.updatedAt) : "—"}</td>
                             <td>
-                              {#if activation.state === "revoked"}
+                              {#if !activation.authority || activation.authority.state === "revoked"}
                                 <span class="text-xs text-base-content/40">—</span>
                               {:else}
-                                <a class="btn btn-error btn-outline btn-xs" href={resolve(`/admin/devices/activations/revoke?instance=${encodeURIComponent(activation.instanceId)}`)}>Revoke</a>
+                                <a class="btn btn-error btn-outline btn-xs" href={resolve(`/admin/devices/activations/revoke?instance=${encodeURIComponent(activation.device.instanceId)}`)}>Revoke</a>
                               {/if}
                             </td>
                           </tr>
@@ -473,7 +495,7 @@
                             {#each selectedReviews as review (review.reviewId)}
                               <tr class={{ "bg-base-200/60": selectedReview?.reviewId === review.reviewId }}>
                                 <td><button class="trellis-identifier text-left hover:underline" onclick={() => (selectedReviewId = review.reviewId)}>{review.reviewId}</button></td>
-                                <td><div class="trellis-identifier">{review.instanceId}</div><div class="trellis-identifier text-xs text-base-content/60">{review.publicIdentityKey}</div></td>
+                                <td><div class="trellis-identifier">{review.instanceId}</div><div class="trellis-identifier text-xs text-base-content/60">{review.devicePrincipalId}</div></td>
                                 <td><StatusBadge label={review.state} status={reviewStatus(review.state)} /></td>
                                 <td class="text-base-content/60">{formatDate(review.requestedAt)}</td>
                                 <td>
@@ -499,7 +521,7 @@
                         <div>
                           <p class="text-[0.65rem] font-semibold uppercase tracking-wider text-base-content/50">Instance</p>
                           <p class="trellis-identifier">{selectedReview.instanceId}</p>
-                          <p class="trellis-identifier text-base-content/60">{selectedReview.publicIdentityKey}</p>
+                          <p class="trellis-identifier text-base-content/60">{selectedReview.devicePrincipalId}</p>
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-xs">
                           <div><span class="text-base-content/50">Requested</span><div>{formatDate(selectedReview.requestedAt)}</div></div>
@@ -528,7 +550,7 @@
                     <div class="flex flex-wrap items-center gap-2 text-sm">
                       <span class="badge badge-outline badge-sm trellis-identifier">desired {selectedDeploymentAuthority.version}</span>
                       {#if selectedMaterializedAuthority}
-                        <StatusBadge label={`materialized ${selectedMaterializedAuthority.status}`} status={materializedStatus(selectedMaterializedAuthority.status)} />
+                        <StatusBadge label={`materialized ${selectedMaterializedAuthority.state}`} status={materializedStatus(selectedMaterializedAuthority.state)} />
                         <span class="badge badge-outline badge-sm">{selectedMaterializedGrantCount} materialized grants</span>
                       {:else}
                         <StatusBadge label="materialized unknown" status="offline" />

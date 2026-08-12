@@ -17,7 +17,15 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number];
+  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & {
+    key: string;
+    source: "platform" | "contract" | "deployment";
+    deploymentId: string | null;
+    contractId: string | null;
+    contractDigest: string | null;
+    contractDisplayName: string | null;
+    direction: "creates" | "given" | null;
+  };
   type CapabilityGroupView = AuthCapabilityGroupsListOutput["entries"][number];
   type CapabilityDeploymentSection = {
     key: string;
@@ -198,14 +206,23 @@
     capabilitiesLoading = true;
     try {
       const capabilitiesResponse = await withLoadTimeout(
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+        trellis.authCapabilitiesList({ limit: 500 }).take(),
         "Capabilities",
       );
       if (isErr(capabilitiesResponse)) {
         error = errorMessage(capabilitiesResponse);
         return;
       }
-      capabilities = (capabilitiesResponse.entries ?? []).slice().sort((left, right) => left.key.localeCompare(right.key));
+      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+        ...capability,
+        key: capability.capability,
+        source: capability.sourceApi ? "contract" as const : "platform" as const,
+        deploymentId: null,
+        contractId: capability.sourceApi,
+        contractDigest: null,
+        contractDisplayName: null,
+        direction: null,
+      })).sort((left, right) => left.key.localeCompare(right.key));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -235,6 +252,8 @@
         description,
         capabilities: uniqueSorted(catalogedSelectedCapabilities),
         includedGroups: uniqueSorted(selectedIncludedGroups.filter((key) => key !== groupKey)),
+        expectedVersion: selectedGroup?.version ?? null,
+        idempotencyKey: crypto.randomUUID(),
       } satisfies AuthCapabilityGroupsPutInput;
       const response = await trellis.authCapabilityGroupsPut(input).take();
       if (isErr(response)) {

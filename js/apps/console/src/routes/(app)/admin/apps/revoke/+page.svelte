@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
-  import type { AuthIdentityGrantsListOutput } from "@qlever-llc/trellis/sdk/auth";
+  import type { AuthIdentityAuthorityListOutput } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
@@ -14,7 +14,7 @@
   import { getNotifications } from "../../../../../lib/notifications.svelte";
   import { getTrellis } from "../../../../../lib/trellis";
 
-  type IdentityGrantEntry = AuthIdentityGrantsListOutput["entries"][number];
+  type IdentityGrantEntry = AuthIdentityAuthorityListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -26,18 +26,18 @@
   let selectedKey = $state("");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const selectedGrant = $derived(identityGrants.find((entry) => entry.identityGrantId === selectedKey) ?? null);
+  const selectedGrant = $derived(identityGrants.find((entry) => entry.authorityId === selectedKey) ?? null);
 
   async function load() {
     loading = true;
     error = null;
     try {
       const requestedGrant = page.url.searchParams.get("grant");
-      const response = await trellis.authIdentityGrantsList({ limit: 500, offset: 0 }).take();
+      const response = await trellis.authIdentityAuthorityList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       identityGrants = response.entries ?? [];
-      const match = identityGrants.find((entry) => entry.identityGrantId === requestedGrant) ?? identityGrants[0] ?? null;
-      selectedKey = match?.identityGrantId ?? "";
+      const match = identityGrants.find((entry) => entry.authorityId === requestedGrant) ?? identityGrants[0] ?? null;
+      selectedKey = match?.authorityId ?? "";
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -50,8 +50,11 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authIdentityGrantsRevoke({
-        identityGrantId: selectedGrant.identityGrantId,
+      const response = await trellis.authIdentityAuthorityRevoke({
+        authorityId: selectedGrant.authorityId,
+        expectedVersion: selectedGrant.version,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success("Delegated grant revoked.", "Revoked");
@@ -69,9 +72,9 @@
       title: "Revoke delegated grant?",
       message: "This removes the selected delegated app or agent grant.",
       confirmLabel: "Revoke grant",
-      targetLabel: selectedGrant.displayName ?? selectedGrant.contractEvidence.contractId,
-      targetName: selectedGrant.identityGrantId,
-      expectedValue: selectedGrant.identityGrantId,
+      targetLabel: selectedGrant.participantId,
+      targetName: selectedGrant.authorityId,
+      expectedValue: selectedGrant.authorityId,
     });
     if (confirmed) await revokeGrant();
   }
@@ -102,19 +105,19 @@
         <label class="form-control gap-1">
           <span class="label-text text-xs">Delegated grant</span>
           <select class="select select-bordered select-sm" bind:value={selectedKey} required>
-            {#each identityGrants as entry (entry.identityGrantId)}
-              <option value={entry.identityGrantId}>{entry.displayName ?? entry.contractEvidence.contractId ?? entry.contractEvidence.contractDigest}</option>
+            {#each identityGrants as entry (entry.authorityId)}
+              <option value={entry.authorityId}>{entry.participantId}</option>
             {/each}
           </select>
         </label>
 
         {#if selectedGrant}
           <div class="rounded-box border border-base-300 p-3 text-sm">
-            <div class="font-medium">{selectedGrant.displayName ?? selectedGrant.contractEvidence.contractId ?? "Delegated grant"}</div>
-            <div class="text-base-content/60">{selectedGrant.description}</div>
-            <div class="trellis-identifier text-base-content/60">{selectedGrant.identityGrantId}</div>
-            <div class="trellis-identifier text-base-content/60">{selectedGrant.contractEvidence.contractDigest}</div>
-            <div class="text-xs text-base-content/60">Granted {formatDate(selectedGrant.grantedAt)}</div>
+            <div class="font-medium">{selectedGrant.participantId}</div>
+            <div class="text-base-content/60">{selectedGrant.state}</div>
+            <div class="trellis-identifier text-base-content/60">{selectedGrant.authorityId}</div>
+            <div class="trellis-identifier text-base-content/60">{selectedGrant.participantArtifactDigest}</div>
+            <div class="text-xs text-base-content/60">Granted {formatDate(selectedGrant.createdAt)}</div>
           </div>
         {/if}
 

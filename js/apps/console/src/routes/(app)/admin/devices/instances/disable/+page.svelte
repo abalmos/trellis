@@ -35,7 +35,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDevicesList({ limit: 500, offset: 0 }).take();
+      const response = await trellis.authDevicesList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedInstances = response.entries ?? [];
       const loadedDisableableInstances = loadedInstances.filter((instance) => instance.state !== "disabled");
@@ -58,7 +58,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDevicesDisable({ instanceId: selectedInstance.instanceId } satisfies AuthDevicesDisableInput,
+      const response = await trellis.authDevicesDisable({
+        expectedVersion: selectedInstance.version,
+        idempotencyKey: crypto.randomUUID(),
+        instanceId: selectedInstance.instanceId,
+        reason: null,
+      } satisfies AuthDevicesDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device instance ${selectedInstance.instanceId} disabled.`, "Disabled");

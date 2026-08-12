@@ -323,6 +323,26 @@ pub(crate) struct AuthConnectionPresence {
     pub version: u64,
 }
 
+pub(crate) fn validate_connection_kick_response(
+    payload: &[u8],
+) -> Result<(), AuthorizationStateError> {
+    let response: Value = serde_json::from_slice(payload)
+        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+    let Some(error) = response.get("error") else {
+        return Ok(());
+    };
+    let description = error
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown NATS system API error");
+    if description == "no such client or leafnode id" {
+        return Ok(());
+    }
+    Err(AuthorizationStateError::Storage(format!(
+        "NATS connection kick failed: {description}"
+    )))
+}
+
 impl AuthConnectionPresence {
     fn validate(&self) -> Result<(), AuthorizationStateError> {
         require_format(
@@ -443,12 +463,23 @@ pub(crate) trait AuthEphemeralRepository: Send + Sync {
     ) -> Result<(), AuthorizationStateError>;
     async fn delete_connection_presence(
         &self,
-        user_nkey: &str,
+        connection_id: &str,
     ) -> Result<(), AuthorizationStateError>;
     async fn list_connection_presence(
         &self,
         session_id: Option<&str>,
     ) -> Result<Vec<AuthConnectionPresence>, AuthorizationStateError>;
+    async fn list_connection_presence_by_context(
+        &self,
+        context_digest: &str,
+    ) -> Result<Vec<AuthConnectionPresence>, AuthorizationStateError> {
+        Ok(self
+            .list_connection_presence(None)
+            .await?
+            .into_iter()
+            .filter(|connection| connection.context_digest == context_digest)
+            .collect())
+    }
 }
 
 /// Atomically claims a pending OAuth callback state.
@@ -564,15 +595,15 @@ impl AuthEphemeralRepository for InMemoryAuthEphemeralRepository {
         record: AuthConnectionPresence,
     ) -> Result<(), AuthorizationStateError> {
         record.validate()?;
-        lock(&self.connections)?.insert(record.user_nkey.clone(), record);
+        lock(&self.connections)?.insert(record.connection_id.clone(), record);
         Ok(())
     }
 
     async fn delete_connection_presence(
         &self,
-        user_nkey: &str,
+        connection_id: &str,
     ) -> Result<(), AuthorizationStateError> {
-        lock(&self.connections)?.remove(user_nkey);
+        lock(&self.connections)?.remove(connection_id);
         Ok(())
     }
 
@@ -736,6 +767,7 @@ mod nats {
         /// Opens or creates and validates both auth-owned KV buckets.
         pub(crate) async fn ensure(
             client: async_nats::Client,
+            connection_max_age: Duration,
         ) -> Result<Self, AuthorizationStateError> {
             let jetstream = jetstream::new(client);
             let browser_flows = open_or_create(
@@ -752,13 +784,8 @@ mod nats {
                 16_384,
             )
             .await?;
-            let connections = open_or_create(
-                &jetstream,
-                CONNECTIONS_BUCKET,
-                Duration::from_millis(120_000),
-                16_384,
-            )
-            .await?;
+            let connections =
+                open_or_create(&jetstream, CONNECTIONS_BUCKET, connection_max_age, 16_384).await?;
             Ok(Self {
                 browser_flows,
                 oauth_states,
@@ -769,6 +796,7 @@ mod nats {
         /// Validates all required auth-owned KV buckets without creating or updating them.
         pub(crate) async fn check(
             client: async_nats::Client,
+            connection_max_age: Duration,
         ) -> Result<(), AuthorizationStateError> {
             let jetstream = jetstream::new(client);
             for (bucket, max_age, max_value_size) in [
@@ -778,7 +806,7 @@ mod nats {
                     65_536,
                 ),
                 (OAUTH_STATE_BUCKET, Duration::from_millis(900_000), 16_384),
-                (CONNECTIONS_BUCKET, Duration::from_millis(120_000), 16_384),
+                (CONNECTIONS_BUCKET, connection_max_age, 16_384),
             ] {
                 let store = jetstream.get_key_value(bucket).await.map_err(|error| {
                     storage(format!(
@@ -867,7 +895,7 @@ mod nats {
         ) -> Result<(), AuthorizationStateError> {
             record.validate()?;
             self.connections
-                .put(record.user_nkey.clone(), encode(&record)?)
+                .put(record.connection_id.clone(), encode(&record)?)
                 .await
                 .map(|_| ())
                 .map_err(|error| storage(format!("failed to write connection presence: {error}")))
@@ -875,10 +903,10 @@ mod nats {
 
         async fn delete_connection_presence(
             &self,
-            user_nkey: &str,
+            connection_id: &str,
         ) -> Result<(), AuthorizationStateError> {
             self.connections
-                .delete(user_nkey)
+                .delete(connection_id)
                 .await
                 .map_err(|error| storage(format!("failed to delete connection presence: {error}")))
         }

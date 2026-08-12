@@ -32,7 +32,6 @@ Deno.test("service and SDK subpaths expose the canonical wrapper API", () => {
   assertEquals("connectInternal" in DenoTrellisService, false);
   assertEquals("connectInternal" in NodeTrellisService, false);
   assertEquals(authSdk.AuthSessionsMe.kind, "rpc");
-  assertEquals(coreSdk.TrellisCatalog.kind, "rpc");
   assertEquals(healthSdk.HealthQuery.kind, "rpc");
   assertEquals(stateSdk.StateGet.kind, "rpc");
 });

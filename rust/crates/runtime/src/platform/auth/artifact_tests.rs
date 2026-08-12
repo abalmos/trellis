@@ -1,55 +1,211 @@
 use serde_json::Value;
-use trellis_protocol::{
-    lint_api_v1_authoring, lint_participant_v1_authoring, parse_api_v1, parse_participant_v1,
-};
+use trellis_protocol::{lint_participant_v1_authoring, parse_api_v1, parse_participant_v1};
 
-const AUTH_API_DIGEST: &str = "k-AVuZetf28XCxaYc2HEIzbafPeA63WeRgg0YmHtia0";
-const AUTH_PARTICIPANT_DIGEST: &str = "plMjQVw7Fp3Q5R---qSTLjypJJaUU7A5hT_ayaTpd0k";
-const ADMIN_PARTICIPANT_DIGEST: &str = "TWSRwOznrzNvGenCJbm5tB9hoX-I__6MA5bOaGaV5BE";
-const ADMIN_PARTICIPANT_NEEDS_DIGEST: &str = "6G5DIvZCX41sEDxlNrtfAskJepMA-89WRIvVn1lSsog";
+const AUTH_POLICY_RPCS: [&str; 9] = [
+    "Auth.CapabilityGroups.Delete",
+    "Auth.CapabilityGroups.Get",
+    "Auth.CapabilityGroups.List",
+    "Auth.CapabilityGroups.Put",
+    "Auth.Portals.GrantOverrides.List",
+    "Auth.Portals.GrantOverrides.Put",
+    "Auth.Portals.GrantOverrides.Remove",
+    "Auth.IdentityGrants.List",
+    "Auth.IdentityGrants.Revoke",
+];
 
 #[test]
 fn source_auth_artifacts_are_valid_and_digest_pinned() {
-    let api_value: Value = serde_json::from_str(include_str!("../../../trellis.api.json"))
-        .expect("parse auth API JSON");
-    lint_api_v1_authoring(&api_value).expect("lint auth API");
+    let api_value: Value =
+        serde_json::from_str(trellis_rs::sdk::auth::API_JSON).expect("parse auth API JSON");
     let api = parse_api_v1(&api_value).expect("validate auth API");
-    assert_eq!(api.digest().expect("digest auth API"), AUTH_API_DIGEST);
+    assert_eq!(
+        api.digest().expect("digest auth API"),
+        trellis_rs::sdk::auth::API_DIGEST
+    );
 
     let participant_value: Value =
         serde_json::from_str(include_str!("../../../trellis.participant.json"))
             .expect("parse auth participant JSON");
     lint_participant_v1_authoring(&participant_value).expect("lint auth participant");
     let participant = parse_participant_v1(&participant_value).expect("validate auth participant");
-    assert_eq!(
-        participant.digest().expect("digest auth participant"),
-        AUTH_PARTICIPANT_DIGEST
-    );
-    assert_eq!(
-        participant
-            .normalized_value()
-            .expect("normalize auth participant")["implements"]["auth"]["apiDigest"],
-        AUTH_API_DIGEST
-    );
+    assert_eq!(participant.id(), "trellis-auth-runtime");
 
-    let admin_value: Value = serde_json::from_str(include_str!(
+    let mut admin_value: Value = serde_json::from_str(include_str!(
         "../../../../trellis/artifacts/trellis.admin.participant.json"
     ))
     .expect("parse admin participant JSON");
+    admin_value["uses"]["required"]["auth"]["apiDigest"] =
+        Value::String(trellis_rs::sdk::auth::API_DIGEST.to_owned());
     lint_participant_v1_authoring(&admin_value).expect("lint admin participant");
     let admin = parse_participant_v1(&admin_value).expect("validate admin participant");
-    assert_eq!(
-        admin.digest().expect("digest admin participant"),
-        ADMIN_PARTICIPANT_DIGEST
-    );
-    let auth = parse_api_v1(&api_value).expect("validate auth API");
+    assert_eq!(admin.id(), "trellis-platform-administration");
     let resolved = trellis_protocol::resolve_participant_v1(
         &admin,
-        &std::collections::BTreeMap::from([(auth.id().to_owned(), auth)]),
+        &std::collections::BTreeMap::from([
+            (api.id().to_owned(), api),
+            (
+                trellis_rs::sdk::state::API_ID.to_owned(),
+                parse_api_v1(
+                    &serde_json::from_str(trellis_rs::sdk::state::API_JSON)
+                        .expect("parse state API JSON"),
+                )
+                .expect("validate state API"),
+            ),
+        ]),
     )
     .expect("resolve admin participant");
+    assert!(!resolved
+        .needs()
+        .digest()
+        .expect("admin needs digest")
+        .is_empty());
+}
+
+#[test]
+fn accepted_auth_machine_api_is_preserved() {
+    let baseline = normalized_api(include_str!(
+        "../../../../../../conformance/baselines/trellis-auth-3ef0aa94.api.json"
+    ));
+    let current = normalized_api(include_str!("../../../trellis.api.json"));
+
+    let mut projection = current.clone();
+    let mut policy_schemas = std::collections::BTreeSet::new();
+    for rpc_name in AUTH_POLICY_RPCS {
+        let rpc = projection["rpc"]
+            .as_object_mut()
+            .expect("RPC map")
+            .remove(rpc_name)
+            .expect("authorized additive policy RPC");
+        for direction in ["input", "output"] {
+            let schema = rpc[direction]["schema"]
+                .as_str()
+                .expect("policy RPC schema reference");
+            policy_schemas.insert(schema.to_owned());
+        }
+    }
+    for schema in policy_schemas {
+        projection["schemas"]
+            .as_object_mut()
+            .expect("schema map")
+            .remove(&schema)
+            .expect("policy RPC schema");
+    }
+    projection["capabilities"]["admin"]["allows"] =
+        baseline["capabilities"]["admin"]["allows"].clone();
+    projection["consent"] = baseline["consent"].clone();
+
+    assert_eq!(projection, baseline);
     assert_eq!(
-        resolved.needs().digest().expect("digest admin needs"),
-        ADMIN_PARTICIPANT_NEEDS_DIGEST
+        current["schemas"]["AuthSessionsRevokeRequest"]["required"],
+        serde_json::json!(["sessionId", "expectedVersion", "reason", "idempotencyKey"])
     );
+    assert_eq!(
+        current["schemas"]["AuthSessionsRevokeResponse"]["required"],
+        serde_json::json!(["session", "kickedConnections"])
+    );
+    assert!(current["schemas"]["AuthSessionsListRequest"]["properties"]["cursor"].is_object());
+    assert!(current["schemas"]["AuthConnectionsListRequest"]["properties"]["cursor"].is_object());
+    assert!(
+        current["schemas"]["AuthConnectionsListRequest"]["properties"]["sessionId"].is_object()
+    );
+    assert!(current["schemas"]["AuthSessionsLogoutResponse"]["properties"]["session"].is_object());
+    for rpc_name in [
+        "Auth.IdentityAuthority.Get",
+        "Auth.IdentityAuthority.List",
+        "Auth.IdentityAuthority.Revoke",
+        "Auth.Users.Get",
+    ] {
+        assert!(current["rpc"][rpc_name].is_object(), "missing {rpc_name}");
+    }
+}
+
+#[test]
+fn accepted_builtin_machine_apis_are_preserved() {
+    for (name, baseline_source, current_source) in [
+        (
+            "Jobs",
+            include_str!("../../../../../../conformance/baselines/trellis-jobs-3ef0aa94.api.json"),
+            trellis_rs::sdk::jobs::API_JSON,
+        ),
+        (
+            "Health",
+            include_str!(
+                "../../../../../../conformance/baselines/trellis-health-3ef0aa94.api.json"
+            ),
+            trellis_rs::sdk::health::API_JSON,
+        ),
+        (
+            "Event Log",
+            include_str!(
+                "../../../../../../conformance/baselines/trellis-eventlog-3ef0aa94.api.json"
+            ),
+            trellis_rs::sdk::eventlog::API_JSON,
+        ),
+        (
+            "State",
+            include_str!("../../../../../../conformance/baselines/trellis-state-3ef0aa94.api.json"),
+            trellis_rs::sdk::state::API_JSON,
+        ),
+    ] {
+        assert_eq!(
+            normalized_api(current_source),
+            normalized_api(baseline_source),
+            "{name} machine API drifted from accepted parent 3ef0aa94"
+        );
+    }
+}
+
+#[test]
+fn accepted_core_machine_api_is_preserved_except_removed_catalog_surfaces() {
+    let baseline = normalized_api(include_str!(
+        "../../../../../../conformance/baselines/trellis-core-3ef0aa94.api.json"
+    ));
+    let current = normalized_api(trellis_rs::sdk::core::API_JSON);
+
+    assert_eq!(current, baseline);
+    for rpc_name in ["Trellis.Catalog", "Trellis.Contract.Get"] {
+        assert!(current["rpc"].get(rpc_name).is_none());
+    }
+    for capability in ["trellis.core::catalog.read", "trellis.core::contract.read"] {
+        assert!(current["capabilities"].get(capability).is_none());
+    }
+}
+
+#[test]
+fn central_trellis_participant_resolves_all_builtin_apis_with_exact_pins() {
+    let mut participant_value: Value =
+        serde_json::from_str(include_str!("../../../trellis.participant.json"))
+            .expect("parse central Trellis participant JSON");
+    let mut apis = std::collections::BTreeMap::new();
+    for (alias, source) in [
+        ("auth", trellis_rs::sdk::auth::API_JSON),
+        ("core", trellis_rs::sdk::core::API_JSON),
+        ("jobs", trellis_rs::sdk::jobs::API_JSON),
+        ("health", trellis_rs::sdk::health::API_JSON),
+        ("eventlog", trellis_rs::sdk::eventlog::API_JSON),
+        ("state", trellis_rs::sdk::state::API_JSON),
+    ] {
+        let api = parse_api_v1(&serde_json::from_str(source).expect("parse built-in API JSON"))
+            .expect("validate built-in API");
+        let digest = api.digest().expect("digest built-in API");
+        participant_value["implements"][alias] = serde_json::json!({
+            "api": api.id(),
+            "apiDigest": digest,
+        });
+        assert_eq!(participant_value["implements"][alias]["apiDigest"], digest);
+        apis.insert(api.id().to_owned(), api);
+    }
+
+    let participant =
+        parse_participant_v1(&participant_value).expect("validate central participant");
+    let resolved = trellis_protocol::resolve_participant_v1(&participant, &apis)
+        .expect("resolve central participant against final built-ins");
+    assert_eq!(resolved.participant_id(), "trellis-auth-runtime");
+}
+
+fn normalized_api(source: &str) -> Value {
+    parse_api_v1(&serde_json::from_str(source).expect("parse API JSON"))
+        .expect("validate API")
+        .normalized_value()
+        .expect("normalize API")
 }

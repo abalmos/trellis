@@ -305,7 +305,7 @@ first-bootstrap side effect.
   rather than runtime stream bindings directly
 
 This document depends on the contract model in
-`../contracts/trellis-contracts-catalog.md` supporting top-level jobs,
+`../contracts/trellis-api-participants.md` supporting top-level jobs,
 binding-driven resource access, and runtime-owned JetStream infrastructure. Jobs
 streams and stream source transforms are Trellis-owned runtime details, not
 service-declared contract resources.
@@ -1258,7 +1258,7 @@ Jobs uses normal Trellis capabilities plus service-identity-aware permission
 derivation. The system does **not** grant broad end-user capabilities for direct
 jobs access.
 
-As in `../auth/trellis-auth.md` and `../contracts/trellis-contracts-catalog.md`,
+As in `../auth/trellis-auth.md` and `../contracts/trellis-api-participants.md`,
 runtime service ownership is derived from the service principal and materialized
 authority for the presented contract, not from contract metadata alone. The
 `<service>` subject segment used by Jobs must therefore be bound to the service

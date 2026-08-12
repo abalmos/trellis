@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.state@v1.json
+// Generated from ./generated/protocol/apis/trellis.state@v1.json
 import {
   eventActions,
   feedAction,
@@ -6,7 +6,7 @@ import {
   rpcAction,
   schema,
 } from "../../../contracts.ts";
-import type * as Types from "./types.ts";
+import * as Types from "./types.ts";
 import {
   StateAdminDeleteRequestSchema,
   StateAdminDeleteResponseSchema,
@@ -23,20 +23,17 @@ import {
   StatePutRequestSchema,
   StatePutResponseSchema,
 } from "./schemas.ts";
-import {
-  CONTRACT as ACTION_ARTIFACT,
-  CONTRACT_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
-const CONTRACT_ID = "trellis.state@v1" as const;
+const API_ID = "trellis.state@v1" as const;
 
 export const StateAdminDelete = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Admin.Delete",
   {
     subject: "rpc.v1.State.Admin.Delete",
@@ -58,13 +55,27 @@ export const StateAdminDelete = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateAdminDelete",
   ACTION_SOURCE,
 );
 
 export const StateAdminGet = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Admin.Get",
   {
     subject: "rpc.v1.State.Admin.Get",
@@ -84,13 +95,27 @@ export const StateAdminGet = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateAdminGet",
   ACTION_SOURCE,
 );
 
 export const StateAdminList = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Admin.List",
   {
     subject: "rpc.v1.State.Admin.List",
@@ -110,13 +135,27 @@ export const StateAdminList = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateAdminList",
   ACTION_SOURCE,
 );
 
 export const StateDelete = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Delete",
   {
     subject: "rpc.v1.State.Delete",
@@ -136,13 +175,27 @@ export const StateDelete = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateDelete",
   ACTION_SOURCE,
 );
 
 export const StateGet = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Get",
   {
     subject: "rpc.v1.State.Get",
@@ -162,13 +215,27 @@ export const StateGet = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateGet",
   ACTION_SOURCE,
 );
 
 export const StateList = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.List",
   {
     subject: "rpc.v1.State.List",
@@ -188,13 +255,27 @@ export const StateList = rpcAction(
       "UnexpectedError",
       "ValidationError",
     ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "StateList",
   ACTION_SOURCE,
 );
 
 export const StatePut = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "State.Put",
   {
     subject: "rpc.v1.State.Put",
@@ -213,6 +294,20 @@ export const StatePut = rpcAction(
       "AuthError",
       "UnexpectedError",
       "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
     ] as const,
   },
   "StatePut",

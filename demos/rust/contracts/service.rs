@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use trellis_contracts::{
-    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ContractKind, ContractManifest,
-    ContractManifestBuilder, ContractsError,
+    event, feed, job_queue, kv, operation, rpc, schema_ref, store, ApiArtifactV1,
+    ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
 };
 
 fn empty_object_schema() -> Value {
@@ -252,7 +252,7 @@ fn activity_live_feed_event_schema() -> Value {
     })
 }
 
-fn with_schemas(builder: ContractManifestBuilder) -> ContractManifestBuilder {
+fn with_schemas(builder: ContractBuilder) -> ContractBuilder {
     builder
         .schema(
             "AuditRecordedEvent",
@@ -508,9 +508,8 @@ fn service_operation(
     .with_observe_capabilities(Vec::<&str>::new())
 }
 
-/// Build the Rust-authored Field Ops demo service contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    let builder = ContractManifestBuilder::new(
+fn builder() -> ContractBuilder {
+    let builder = ContractBuilder::authoring(
         "trellis.demo-service@v1",
         "Field Ops Demo Service",
         "Consolidated Field Ops demo service for Trellis concepts.",
@@ -526,43 +525,6 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         .export_schema("InspectionAssignment")
         .export_schema("ReportRecord")
         .export_schema("SiteSummary")
-        .job_queue(
-            "refreshSiteSummary",
-            job_queue(
-                schema_ref("SiteRefreshJobPayload"),
-                Some(schema_ref("SiteRefreshJobResult")),
-            )
-            .docs_with_summary(
-                "Refresh a site summary.",
-                "Background work item that recomputes the latest summary for one site.",
-            ),
-        )
-        .kv_resource(
-            "siteSummaries",
-            kv(
-                "Latest site summaries for the Field Ops demo.",
-                "SiteSummary",
-            )
-            .required(true)
-            .history(1)
-            .ttl_ms(0)
-            .docs_with_summary(
-                "Cached site summaries.",
-                "Stores the current site summary records served by the demo APIs.",
-            ),
-        )
-        .store_resource(
-            "uploads",
-            store("Persistent evidence locker files for the Field Ops demo.")
-                .required(true)
-                .ttl_ms(0)
-                .max_object_bytes(64 * 1024 * 1024)
-                .max_total_bytes(256 * 1024 * 1024)
-                .docs_with_summary(
-                    "Evidence upload objects.",
-                    "Persists uploaded evidence files before they are listed or downloaded.",
-                ),
-        )
         .rpc(
             "Assignments.List",
             service_rpc(
@@ -702,5 +664,46 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
                 "Subscribes to live activity records from audit, evidence, report, and site refresh events.",
             ),
         )
-        .build()
+        .store_resource(
+            "uploads",
+            store("Persistent evidence locker files for the Field Ops demo.")
+                .ttl_ms(0)
+                .max_object_bytes(64 * 1024 * 1024)
+                .max_total_bytes(256 * 1024 * 1024)
+                .docs_with_summary(
+                    "Evidence upload objects.",
+                    "Persists uploaded evidence files before they are listed or downloaded.",
+                ),
+        )
+        .kv_resource(
+            "siteSummaries",
+            kv("Latest site summaries for the Field Ops demo.", "SiteSummary")
+                .history(1)
+                .ttl_ms(0)
+                .docs_with_summary(
+                    "Cached site summaries.",
+                    "Stores the current site summary records served by the demo APIs.",
+                ),
+        )
+        .job_queue(
+            "refreshSiteSummary",
+            job_queue(
+                schema_ref("SiteRefreshJobPayload"),
+                Some(schema_ref("SiteRefreshJobResult")),
+            )
+            .docs_with_summary(
+                "Refresh a site summary.",
+                "Background work item that recomputes the latest summary for one site.",
+            ),
+        )
+}
+
+/// Build the Rust-authored Field Ops demo service native API.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    Ok(builder().build()?.api().clone())
+}
+
+/// Build the service's native API and participant artifacts.
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    builder().build()
 }

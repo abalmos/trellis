@@ -945,6 +945,35 @@ Deno.test("provider cache reuses its installed context without registry I/O", as
   }
 });
 
+Deno.test("provider cache wakes refresh for own revocation and disconnect", async () => {
+  const revokedCache = await providerContextCache();
+  let revocationWakes = 0;
+  const unregisterRevocation = revokedCache.registerRefreshRequest(() => {
+    revocationWakes += 1;
+  });
+  const revoked = await readyProvider(
+    revokedCache,
+    [],
+    1_100,
+    [providerRevocation()],
+  );
+  assertEquals(revocationWakes, 1);
+  revoked.stop();
+  unregisterRevocation();
+
+  const disconnectedCache = await providerContextCache();
+  let disconnectWakes = 0;
+  const unregisterDisconnect = disconnectedCache.registerRefreshRequest(() => {
+    disconnectWakes += 1;
+  });
+  const disconnected = await readyProvider(disconnectedCache);
+  disconnected.observeConnectionPhase("reconnecting");
+  disconnected.observeConnectionPhase("disconnected");
+  assertEquals(disconnectWakes, 1);
+  disconnected.stop();
+  unregisterDisconnect();
+});
+
 Deno.test("provider cache reuses an installed client trust chain without registry I/O", async () => {
   const policy = vectors.defaults.policy;
   const installed = new AuthorizationContextCache(
@@ -1059,7 +1088,7 @@ Deno.test("provider cache fails closed for missing and revoked contexts", async 
   }
 });
 
-Deno.test("provider cache verifies historical events and the revocation boundary", async () => {
+Deno.test("provider cache verifies historical events and rejects revoked contexts", async () => {
   const chain = vectors.completeChain;
   const historicalCalls: string[] = [];
   const historical = await readyProvider(
@@ -1091,7 +1120,10 @@ Deno.test("provider cache verifies historical events and the revocation boundary
         "1970-01-01T00:19:00Z",
       ),
     );
-    assert(beforeRevocation.ok);
+    assert(!beforeRevocation.ok);
+    if (!beforeRevocation.ok) {
+      assertEquals(beforeRevocation.error.code, "EventRevoked");
+    }
     const atRevocation = await revoked.verifyEventV2(
       providerEvent(
         await eventProof("evt_at_revocation", vectors.defaults.event.eventTime),

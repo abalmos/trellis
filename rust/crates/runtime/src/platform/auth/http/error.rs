@@ -62,6 +62,13 @@ impl HttpError {
         }
     }
 
+    pub(super) fn unavailable(code: &'static str) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code,
+        }
+    }
+
     pub(super) fn internal(code: &'static str) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -87,10 +94,14 @@ impl From<AuthorizationStateError> for HttpError {
 
 pub(super) fn map_issuance_error(error: AuthorizationStateError) -> HttpError {
     tracing::warn!(%error, "auth issuance denied");
-    if error.is_expected_denial() {
-        HttpError::unauthorized("auth_required")
-    } else {
-        error.into()
+    match error {
+        AuthorizationStateError::AuthorityStale
+        | AuthorizationStateError::MaterializationStale
+        | AuthorizationStateError::ContextSnapshotChanged => {
+            HttpError::unavailable("authorization_pending")
+        }
+        error if error.is_expected_denial() => HttpError::unauthorized("auth_required"),
+        error => error.into(),
     }
 }
 

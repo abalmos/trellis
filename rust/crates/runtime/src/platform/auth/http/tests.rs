@@ -164,6 +164,18 @@ async fn http_errors_never_expose_internal_causes() {
 }
 
 #[test]
+fn stale_authority_issuance_is_retryable() {
+    assert_eq!(
+        super::map_issuance_error(AuthorizationStateError::AuthorityStale).status,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+    );
+    assert_eq!(
+        super::map_issuance_error(AuthorizationStateError::MaterializationStale).status,
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+    );
+}
+
+#[test]
 fn consent_wording_does_not_change_machine_authority() {
     let before = consent_with_view(serde_json::json!({ "title": "Read data" }));
     let after = consent_with_view(serde_json::json!({ "title": "View data" }));

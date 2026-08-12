@@ -1349,7 +1349,12 @@ fn workbench_stats_to_wire(
         by_state: stats
             .by_state
             .iter()
-            .map(|(key, value)| Ok((key.clone(), to_wire_integer(*value))))
+            .map(|(key, value)| {
+                Ok((
+                    key.clone(),
+                    serde_json::Value::from(to_wire_integer(*value)),
+                ))
+            })
             .collect::<Result<BTreeMap<_, _>, JobsQueryError>>()?,
         dead: stats.dead.map(to_wire_integer),
         failed: stats.failed.map(to_wire_integer),
@@ -1411,7 +1416,12 @@ fn metrics_summary_group_to_wire(
         by_state: group
             .by_state
             .iter()
-            .map(|(key, value)| Ok((key.clone(), to_wire_integer(*value))))
+            .map(|(key, value)| {
+                Ok((
+                    key.clone(),
+                    serde_json::Value::from(to_wire_integer(*value)),
+                ))
+            })
             .collect::<Result<BTreeMap<_, _>, JobsQueryError>>()?,
         dead: group.dead.map(to_wire_integer),
         failed: group.failed.map(to_wire_integer),

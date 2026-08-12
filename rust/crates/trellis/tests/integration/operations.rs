@@ -12,8 +12,8 @@ use trellis_rs::client::{
     OperationDescriptor, OperationEvent, OperationState as ClientOperationState,
 };
 use trellis_rs::service::{
-    AcceptedOperation, GeneratedServiceContract, OperationRefData, OperationSignalAccepted,
-    OperationSnapshot, OperationState as ServiceOperationState, ServerError,
+    AcceptedOperation, OperationRefData, OperationSignalAccepted, OperationSnapshot,
+    OperationState as ServiceOperationState, ServerError,
 };
 
 use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
@@ -25,21 +25,21 @@ const OP_PROCESS_CAPABILITY: &str = "process";
 const OP_CANCEL_CAPABILITY: &str = "cancelProcess";
 const OP_CONTROL_CAPABILITY: &str = "process";
 
-const OP_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const OP_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.operations-service@v1",
   "displayName": "Trellis Integration Operations Service",
   "description": "Exercises client-to-service operation start and watch through generated surfaces.",
-  "kind": "service",
   "capabilities": {
-    "process": {
-      "displayName": "Process entities",
-      "description": "Start and observe entity processing operations."
-    },
-    "cancelProcess": {
-      "displayName": "Cancel entity processing",
-      "description": "Cancel entity processing operations."
-    }
+    "process": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.operations-service@v1", "surface": "operation", "name": "Entity.Process"}, "action": "invoke"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.operations-service@v1", "surface": "operation", "name": "Entity.Status"}, "action": "invoke"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.operations-service@v1", "surface": "operation", "name": "Entity.Process"}, "action": "observe"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.operations-service@v1", "surface": "operation", "name": "Entity.Status"}, "action": "observe"},
+      {"target": {"kind": "operationSignal", "api": "trellis.integration.operations-service@v1", "operation": "Entity.Process", "signal": "updateMessage"}, "action": "control"},
+      {"target": {"kind": "operationSignal", "api": "trellis.integration.operations-service@v1", "operation": "Entity.Process", "signal": "appendMessage"}, "action": "control"}
+    ]},
+    "cancelProcess": {"allows": [{"target": {"kind": "apiSurface", "api": "trellis.integration.operations-service@v1", "surface": "operation", "name": "Entity.Process"}, "action": "cancel"}]}
   },
   "schemas": {
     "OperationInput": {
@@ -80,12 +80,10 @@ const OP_SERVICE_CONTRACT_JSON: &str = r#"{
   "operations": {
     "Entity.Process": {
       "version": "v1",
-      "subject": "operations.v1.Entity.Process",
       "input": { "schema": "OperationInput" },
       "update": { "schema": "OperationUpdate" },
       "progress": { "schema": "OperationProgress" },
       "output": { "schema": "OperationOutput" },
-      "capabilities": { "call": ["process"], "observe": ["process"], "cancel": ["cancelProcess"], "control": ["process"] },
       "signals": {
         "updateMessage": { "input": { "schema": "OperationSignalInput" } },
         "appendMessage": { "input": { "schema": "OperationSignalInput" } }
@@ -94,11 +92,9 @@ const OP_SERVICE_CONTRACT_JSON: &str = r#"{
     },
     "Entity.Status": {
       "version": "v1",
-      "subject": "operations.v1.Entity.Status",
       "input": { "schema": "OperationInput" },
       "progress": { "schema": "OperationProgress" },
       "output": { "schema": "OperationOutput" },
-      "capabilities": { "call": ["process"], "observe": ["process"] },
       "cancel": false
     }
   }
@@ -106,10 +102,8 @@ const OP_SERVICE_CONTRACT_JSON: &str = r#"{
 
 struct OperationsServiceContract;
 
-impl trellis_rs::service::GeneratedServiceContract for OperationsServiceContract {
-    const CONTRACT_ID: &'static str = OP_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "95L3etWwveNZKrUPhg7LNPME6l3X8BsZXzjuUYLAlOI";
-    const CONTRACT_JSON: &'static str = OP_SERVICE_CONTRACT_JSON;
+impl OperationsServiceContract {
+    const CONTRACT_DIGEST: &'static str = "59KjnB8x5ebK3UBJCTjDQevuImoyl2nB_jVia4nmJN4";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -912,14 +906,17 @@ async fn start_control_operation_fixture(
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -968,14 +965,17 @@ async fn operations_client_starts_operation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1027,14 +1027,17 @@ async fn operations_client_watches_progress() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1110,14 +1113,17 @@ async fn operations_live_updates_are_typed_ordered_and_transient() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
@@ -1240,14 +1246,17 @@ async fn operations_client_waits_for_completion() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1323,14 +1332,17 @@ async fn operations_watch_callbacks_deliver_accepted_first_in_order() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1441,14 +1453,17 @@ async fn operations_client_cancels_operation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1536,14 +1551,17 @@ async fn operations_cancel_uses_cancel_capability() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1594,14 +1612,17 @@ async fn operations_rejects_cancel_for_noncancelable_operation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1662,14 +1683,17 @@ async fn operations_client_signals_running_operation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1801,14 +1825,17 @@ async fn operations_signals_persist_and_consume_in_acceptance_order() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1871,14 +1898,17 @@ async fn operations_queued_signal_delivered_before_live_signal() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1951,14 +1981,17 @@ async fn operations_rejects_invalid_signal_payload() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -2018,14 +2051,17 @@ async fn operations_rejects_signal_after_terminal_state() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -2109,14 +2145,17 @@ async fn operations_service_attach_job_waits_for_completion() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_client_contract().expect("build operations client contract");
+    let client_contract =
+        operations_client_contract(&service_contract).expect("build operations client contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -2561,14 +2600,16 @@ async fn operations_denies_start_without_call_authority() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(OP_SERVICE_CONTRACT_JSON)
-            .expect("build operations service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        OP_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build operations service test contract");
     assert_eq!(
         service_contract.digest(),
         OperationsServiceContract::CONTRACT_DIGEST
     );
-    let client_contract = operations_unauthorized_client_contract()
+    let client_contract = operations_unauthorized_client_contract(&service_contract)
         .expect("build unauthorized operations client contract");
 
     let service_key = admin
@@ -2696,8 +2737,9 @@ fn service_operation_state_name(state: &ServiceOperationState) -> &'static str {
 }
 
 fn operations_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         OP_CLIENT_ID,
         "Trellis Integration Operations Client",
         "App/client participant for the operations integration fixture.",
@@ -2709,15 +2751,18 @@ fn operations_client_contract(
             .with_operation_call(["Entity.Process", "Entity.Status"])
             .with_operation_cancel(["Entity.Process"])
             .with_operation_control(["Entity.Process"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }
 
 fn operations_unauthorized_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         OP_UNAUTHORIZED_CLIENT_ID,
         "Trellis Integration Unauthorized Operations Client",
         "App/client without operation call authority for Entity.Process.",
@@ -2726,8 +2771,10 @@ fn operations_unauthorized_client_contract(
     .use_ref(
         "operationsService",
         trellis_rs::contracts::use_contract(OP_SERVICE_ID).with_operation_call(["Entity.Status"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

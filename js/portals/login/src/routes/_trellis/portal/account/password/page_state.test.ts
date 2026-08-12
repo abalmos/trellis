@@ -21,10 +21,10 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 
 Deno.test("password adapts reset copy", () => {
   assertEquals(
-    passwordFlowTitle("local_password_reset"),
+    passwordFlowTitle("password_reset"),
     "Reset your password",
   );
-  assertEquals(passwordFlowAction("local_password_reset"), "Reset password");
+  assertEquals(passwordFlowAction("password_reset"), "Reset password");
   assertEquals(passwordFlowTitle("other"), "Set local credentials");
   assertEquals(passwordFlowAction("other"), "Save credentials");
 });
@@ -33,7 +33,7 @@ Deno.test("password recognizes reset flows", () => {
   const state = parseAccountFlowState({
     status: "active",
     flowId: "flow-1",
-    kind: "local_password_reset",
+    kind: "password_reset",
     targetUserId: "usr_1",
     allowedProviders: ["local"],
     profileHint: { name: "Hint Name", email: "hint@example.com" },

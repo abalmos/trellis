@@ -22,8 +22,6 @@ export type {
 } from "./auth.ts";
 export {
   canonicalizeJson,
-  CATALOG_FORMAT_V1,
-  CONTRACT_FORMAT_V1,
   digestJson,
   isJsonValue,
   schema,
@@ -67,7 +65,7 @@ export {
   defineDeviceContract,
   defineServiceContract,
 } from "./contract.ts";
-export type { DefineContractInput, TrellisContractV1 } from "./contract.ts";
+export type { DefineContractInput } from "./contract.ts";
 export {
   AsyncResult,
   BaseError,

@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 The generated participant `connect(...)` helper authenticates the service
-instance, presents the embedded contract manifest, resolves deployment bindings,
+instance, presents the embedded native contract artifacts, resolves deployment bindings,
 prepares authenticated request validation, and polls until pending deployment
 authority becomes ready. Rust service connections wait indefinitely by default;
 use `with_authority_pending_timeout_ms(Some(milliseconds))` only when startup

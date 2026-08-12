@@ -22,7 +22,7 @@ liveTrellisTest({
           throw new Error("expected a verified caller");
         }
         assertEquals(caller.participant.kind, "app");
-        assertEquals(caller.participant.id, fixture.clientContract.CONTRACT.id);
+        assertEquals(caller.participant.id, fixture.clientContract.CONTRACT_ID);
         assert(caller.sessionId.length > 0);
         return Result.ok({ message: caller.type, done: true });
       });

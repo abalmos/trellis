@@ -1,0 +1,607 @@
+// Generated from ./generated/protocol/apis/trellis.state@v1.json
+
+export const API_ID = "trellis.state@v1" as const;
+export const API_DIGEST =
+  "qs1u5DVKbglPE25fTx77AadXTT-MDwSkmHVFJlCwE2A" as const;
+export const API = {
+  "capabilities": {
+    "admin": {
+      "allows": [{
+        "action": "call",
+        "target": {
+          "api": "trellis.state@v1",
+          "kind": "apiSurface",
+          "name": "State.Admin.Delete",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.state@v1",
+          "kind": "apiSurface",
+          "name": "State.Admin.Get",
+          "surface": "rpc",
+        },
+      }, {
+        "action": "call",
+        "target": {
+          "api": "trellis.state@v1",
+          "kind": "apiSurface",
+          "name": "State.Admin.List",
+          "surface": "rpc",
+        },
+      }],
+    },
+  },
+  "description":
+    "Trellis-managed app state for authenticated app and device participants.",
+  "displayName": "Trellis State",
+  "docs": {
+    "markdown":
+      "Provides authenticated read, write, list, delete, and admin inspection APIs for Trellis-managed participant state.",
+    "summary": "Participant state storage APIs.",
+  },
+  "errors": { "AuthError": {}, "UnexpectedError": {}, "ValidationError": {} },
+  "format": "trellis.api.v1",
+  "id": "trellis.state@v1",
+  "rpc": {
+    "State.Admin.Delete": {
+      "docs": {
+        "markdown":
+          "Deletes one state value across participants for authorized administrators.",
+        "summary": "Admin delete a state value.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateAdminDeleteRequest" },
+      "output": { "schema": "StateAdminDeleteResponse" },
+      "version": "v1",
+    },
+    "State.Admin.Get": {
+      "docs": {
+        "markdown":
+          "Returns one state value across participants for authorized administrators.",
+        "summary": "Admin read a state value.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateAdminGetRequest" },
+      "output": { "schema": "StateAdminGetResponse" },
+      "version": "v1",
+    },
+    "State.Admin.List": {
+      "docs": {
+        "markdown":
+          "Lists state values across participants for authorized administrators.",
+        "summary": "Admin list state values.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateAdminListRequest" },
+      "output": { "schema": "StateAdminListResponse" },
+      "version": "v1",
+    },
+    "State.Delete": {
+      "docs": {
+        "markdown":
+          "Deletes one state value from the caller's authorized scope.",
+        "summary": "Delete a state value.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateDeleteRequest" },
+      "output": { "schema": "StateDeleteResponse" },
+      "version": "v1",
+    },
+    "State.Get": {
+      "docs": {
+        "markdown": "Returns one state value in the caller's authorized scope.",
+        "summary": "Read a state value.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateGetRequest" },
+      "output": { "schema": "StateGetResponse" },
+      "version": "v1",
+    },
+    "State.List": {
+      "docs": {
+        "markdown":
+          "Lists state values visible to the caller for the requested scope and prefix.",
+        "summary": "List state values.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StateListRequest" },
+      "output": { "schema": "StateListResponse" },
+      "version": "v1",
+    },
+    "State.Put": {
+      "docs": {
+        "markdown":
+          "Creates or replaces one state value in an authorized scope.",
+        "summary": "Write a state value.",
+      },
+      "errors": ["AuthError", "UnexpectedError", "ValidationError"],
+      "input": { "schema": "StatePutRequest" },
+      "output": { "schema": "StatePutResponse" },
+      "version": "v1",
+    },
+  },
+  "schemas": {
+    "JsonValue": {},
+    "StateAdminDeleteRequest": {
+      "anyOf": [{
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "expectedRevision": { "minLength": 1, "type": "string" },
+          "key": { "minLength": 1, "type": "string" },
+          "scope": { "const": "userApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+          "userId": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "userId",
+        ],
+        "type": "object",
+      }, {
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "deviceId": { "minLength": 1, "type": "string" },
+          "expectedRevision": { "minLength": 1, "type": "string" },
+          "key": { "minLength": 1, "type": "string" },
+          "scope": { "const": "deviceApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "deviceId",
+        ],
+        "type": "object",
+      }],
+    },
+    "StateAdminDeleteResponse": {
+      "properties": { "deleted": { "type": "boolean" } },
+      "required": ["deleted"],
+      "type": "object",
+    },
+    "StateAdminGetRequest": {
+      "anyOf": [{
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "key": { "minLength": 1, "type": "string" },
+          "scope": { "const": "userApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+          "userId": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "userId",
+        ],
+        "type": "object",
+      }, {
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "deviceId": { "minLength": 1, "type": "string" },
+          "key": { "minLength": 1, "type": "string" },
+          "scope": { "const": "deviceApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "deviceId",
+        ],
+        "type": "object",
+      }],
+    },
+    "StateAdminGetResponse": {
+      "anyOf": [{
+        "properties": { "found": { "const": false, "type": "boolean" } },
+        "required": ["found"],
+        "type": "object",
+      }, {
+        "properties": {
+          "entry": {
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["value", "revision", "updatedAt"],
+            "type": "object",
+          },
+          "found": { "const": true, "type": "boolean" },
+        },
+        "required": ["found", "entry"],
+        "type": "object",
+      }, {
+        "properties": {
+          "currentStateVersion": { "minLength": 1, "type": "string" },
+          "entry": {
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["value", "revision", "updatedAt"],
+            "type": "object",
+          },
+          "migrationRequired": { "const": true, "type": "boolean" },
+          "stateVersion": { "minLength": 1, "type": "string" },
+          "writerContractDigest": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "migrationRequired",
+          "entry",
+          "stateVersion",
+          "currentStateVersion",
+          "writerContractDigest",
+        ],
+        "type": "object",
+      }],
+    },
+    "StateAdminListRequest": {
+      "anyOf": [{
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "limit": { "minimum": 0, "type": "integer" },
+          "offset": { "minimum": 0, "type": "integer" },
+          "prefix": { "minLength": 1, "type": "string" },
+          "scope": { "const": "userApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+          "userId": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "limit",
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "userId",
+        ],
+        "type": "object",
+      }, {
+        "properties": {
+          "contractDigest": { "minLength": 1, "type": "string" },
+          "contractId": { "minLength": 1, "type": "string" },
+          "deviceId": { "minLength": 1, "type": "string" },
+          "limit": { "minimum": 0, "type": "integer" },
+          "offset": { "minimum": 0, "type": "integer" },
+          "prefix": { "minLength": 1, "type": "string" },
+          "scope": { "const": "deviceApp", "type": "string" },
+          "store": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "limit",
+          "scope",
+          "contractId",
+          "contractDigest",
+          "store",
+          "deviceId",
+        ],
+        "type": "object",
+      }],
+    },
+    "StateAdminListResponse": {
+      "properties": {
+        "count": { "minimum": 0, "type": "integer" },
+        "entries": {
+          "default": [],
+          "items": {
+            "anyOf": [{
+              "properties": {
+                "expiresAt": { "format": "date-time", "type": "string" },
+                "key": { "minLength": 1, "type": "string" },
+                "revision": { "minLength": 1, "type": "string" },
+                "updatedAt": { "format": "date-time", "type": "string" },
+                "value": {},
+              },
+              "required": ["value", "revision", "updatedAt"],
+              "type": "object",
+            }, {
+              "properties": {
+                "currentStateVersion": { "minLength": 1, "type": "string" },
+                "entry": {
+                  "properties": {
+                    "expiresAt": { "format": "date-time", "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "revision": { "minLength": 1, "type": "string" },
+                    "updatedAt": { "format": "date-time", "type": "string" },
+                    "value": {},
+                  },
+                  "required": ["value", "revision", "updatedAt"],
+                  "type": "object",
+                },
+                "migrationRequired": { "const": true, "type": "boolean" },
+                "stateVersion": { "minLength": 1, "type": "string" },
+                "writerContractDigest": { "minLength": 1, "type": "string" },
+              },
+              "required": [
+                "migrationRequired",
+                "entry",
+                "stateVersion",
+                "currentStateVersion",
+                "writerContractDigest",
+              ],
+              "type": "object",
+            }],
+          },
+          "type": "array",
+        },
+        "limit": { "minimum": 0, "type": "integer" },
+        "nextOffset": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["entries", "count", "offset", "limit"],
+      "type": "object",
+    },
+    "StateDeleteRequest": {
+      "properties": {
+        "expectedRevision": { "minLength": 1, "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": ["store"],
+      "type": "object",
+    },
+    "StateDeleteResponse": {
+      "properties": { "deleted": { "type": "boolean" } },
+      "required": ["deleted"],
+      "type": "object",
+    },
+    "StateEntry": {
+      "properties": {
+        "expiresAt": { "format": "date-time", "type": "string" },
+        "key": { "minLength": 1, "type": "string" },
+        "revision": { "minLength": 1, "type": "string" },
+        "updatedAt": { "format": "date-time", "type": "string" },
+        "value": {},
+      },
+      "required": ["value", "revision", "updatedAt"],
+      "type": "object",
+    },
+    "StateGetRequest": {
+      "properties": {
+        "key": { "minLength": 1, "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": ["store"],
+      "type": "object",
+    },
+    "StateGetResponse": {
+      "anyOf": [{
+        "properties": { "found": { "const": false, "type": "boolean" } },
+        "required": ["found"],
+        "type": "object",
+      }, {
+        "properties": {
+          "entry": {
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["value", "revision", "updatedAt"],
+            "type": "object",
+          },
+          "found": { "const": true, "type": "boolean" },
+        },
+        "required": ["found", "entry"],
+        "type": "object",
+      }, {
+        "properties": {
+          "currentStateVersion": { "minLength": 1, "type": "string" },
+          "entry": {
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["value", "revision", "updatedAt"],
+            "type": "object",
+          },
+          "migrationRequired": { "const": true, "type": "boolean" },
+          "stateVersion": { "minLength": 1, "type": "string" },
+          "writerContractDigest": { "minLength": 1, "type": "string" },
+        },
+        "required": [
+          "migrationRequired",
+          "entry",
+          "stateVersion",
+          "currentStateVersion",
+          "writerContractDigest",
+        ],
+        "type": "object",
+      }],
+    },
+    "StateListRequest": {
+      "properties": {
+        "limit": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+        "prefix": { "minLength": 1, "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+      },
+      "required": ["limit", "store"],
+      "type": "object",
+    },
+    "StateListResponse": {
+      "properties": {
+        "count": { "minimum": 0, "type": "integer" },
+        "entries": {
+          "default": [],
+          "items": {
+            "anyOf": [{
+              "properties": {
+                "expiresAt": { "format": "date-time", "type": "string" },
+                "key": { "minLength": 1, "type": "string" },
+                "revision": { "minLength": 1, "type": "string" },
+                "updatedAt": { "format": "date-time", "type": "string" },
+                "value": {},
+              },
+              "required": ["value", "revision", "updatedAt"],
+              "type": "object",
+            }, {
+              "properties": {
+                "currentStateVersion": { "minLength": 1, "type": "string" },
+                "entry": {
+                  "properties": {
+                    "expiresAt": { "format": "date-time", "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "revision": { "minLength": 1, "type": "string" },
+                    "updatedAt": { "format": "date-time", "type": "string" },
+                    "value": {},
+                  },
+                  "required": ["value", "revision", "updatedAt"],
+                  "type": "object",
+                },
+                "migrationRequired": { "const": true, "type": "boolean" },
+                "stateVersion": { "minLength": 1, "type": "string" },
+                "writerContractDigest": { "minLength": 1, "type": "string" },
+              },
+              "required": [
+                "migrationRequired",
+                "entry",
+                "stateVersion",
+                "currentStateVersion",
+                "writerContractDigest",
+              ],
+              "type": "object",
+            }],
+          },
+          "type": "array",
+        },
+        "limit": { "minimum": 0, "type": "integer" },
+        "nextOffset": { "minimum": 0, "type": "integer" },
+        "offset": { "minimum": 0, "type": "integer" },
+      },
+      "required": ["entries", "count", "offset", "limit"],
+      "type": "object",
+    },
+    "StateMigrationRequired": {
+      "properties": {
+        "currentStateVersion": { "minLength": 1, "type": "string" },
+        "entry": {
+          "properties": {
+            "expiresAt": { "format": "date-time", "type": "string" },
+            "key": { "minLength": 1, "type": "string" },
+            "revision": { "minLength": 1, "type": "string" },
+            "updatedAt": { "format": "date-time", "type": "string" },
+            "value": {},
+          },
+          "required": ["value", "revision", "updatedAt"],
+          "type": "object",
+        },
+        "migrationRequired": { "const": true, "type": "boolean" },
+        "stateVersion": { "minLength": 1, "type": "string" },
+        "writerContractDigest": { "minLength": 1, "type": "string" },
+      },
+      "required": [
+        "migrationRequired",
+        "entry",
+        "stateVersion",
+        "currentStateVersion",
+        "writerContractDigest",
+      ],
+      "type": "object",
+    },
+    "StatePutRequest": {
+      "properties": {
+        "expectedRevision": {
+          "anyOf": [{ "minLength": 1, "type": "string" }, { "type": "null" }],
+        },
+        "key": { "minLength": 1, "type": "string" },
+        "store": { "minLength": 1, "type": "string" },
+        "ttlMs": { "minimum": 1, "type": "integer" },
+        "value": {},
+      },
+      "required": ["store", "value"],
+      "type": "object",
+    },
+    "StatePutResponse": {
+      "anyOf": [{
+        "properties": {
+          "applied": { "const": true, "type": "boolean" },
+          "entry": {
+            "properties": {
+              "expiresAt": { "format": "date-time", "type": "string" },
+              "key": { "minLength": 1, "type": "string" },
+              "revision": { "minLength": 1, "type": "string" },
+              "updatedAt": { "format": "date-time", "type": "string" },
+              "value": {},
+            },
+            "required": ["value", "revision", "updatedAt"],
+            "type": "object",
+          },
+        },
+        "required": ["applied", "entry"],
+        "type": "object",
+      }, {
+        "properties": {
+          "applied": { "const": false, "type": "boolean" },
+          "entry": {
+            "anyOf": [{
+              "properties": {
+                "expiresAt": { "format": "date-time", "type": "string" },
+                "key": { "minLength": 1, "type": "string" },
+                "revision": { "minLength": 1, "type": "string" },
+                "updatedAt": { "format": "date-time", "type": "string" },
+                "value": {},
+              },
+              "required": ["value", "revision", "updatedAt"],
+              "type": "object",
+            }, {
+              "properties": {
+                "currentStateVersion": { "minLength": 1, "type": "string" },
+                "entry": {
+                  "properties": {
+                    "expiresAt": { "format": "date-time", "type": "string" },
+                    "key": { "minLength": 1, "type": "string" },
+                    "revision": { "minLength": 1, "type": "string" },
+                    "updatedAt": { "format": "date-time", "type": "string" },
+                    "value": {},
+                  },
+                  "required": ["value", "revision", "updatedAt"],
+                  "type": "object",
+                },
+                "migrationRequired": { "const": true, "type": "boolean" },
+                "stateVersion": { "minLength": 1, "type": "string" },
+                "writerContractDigest": { "minLength": 1, "type": "string" },
+              },
+              "required": [
+                "migrationRequired",
+                "entry",
+                "stateVersion",
+                "currentStateVersion",
+                "writerContractDigest",
+              ],
+              "type": "object",
+            }],
+          },
+          "found": { "type": "boolean" },
+        },
+        "required": ["applied", "found"],
+        "type": "object",
+      }],
+    },
+  },
+} as const;

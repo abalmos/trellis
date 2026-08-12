@@ -5,6 +5,7 @@ import type {
   ClientAuthOptions,
   ClientAuthRequiredContext,
 } from "@qlever-llc/trellis";
+import type { NativeProtocolContract } from "@qlever-llc/trellis/contracts";
 
 import type { TrellisControlPlaneOAuthProvider } from "./control_plane_config.ts";
 import type { LocalNatsBootstrapManifest } from "./nats_bootstrap.ts";
@@ -12,15 +13,16 @@ import type { TrellisControlPlaneSqlite } from "./control_plane_sqlite.ts";
 
 /** Serializable contract descriptor accepted by test admin automation. */
 export type TrellisTestContractDescriptor = {
-  readonly CONTRACT: Record<string, unknown>;
-  readonly CONTRACT_DIGEST: string | undefined;
+  readonly CONTRACT_ID: string;
+  readonly CONTRACT_DIGEST: string;
+  readonly API: Readonly<Record<string, unknown>>;
+  readonly API_DIGEST: string;
+  readonly PARTICIPANT: Readonly<Record<string, unknown>>;
+  readonly PARTICIPANT_NEEDS_DIGEST: string;
 };
 
-/** A full contract module or a descriptor carrying only the fields admin needs. */
-export type TrellisTestContractLike = {
-  readonly CONTRACT: Record<string, unknown>;
-  readonly CONTRACT_DIGEST?: string;
-} & ({ readonly __brand?: never });
+/** Native contract artifacts accepted by Trellis test admin automation. */
+export type TrellisTestContractLike = NativeProtocolContract;
 
 /** Authority plan classifications the test runtime may approve automatically. */
 export type TrellisTestAuthorityPlanClassification =
@@ -93,6 +95,8 @@ export type TrellisTestRuntimeStartOptions = {
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
   /** Named fail-once hooks injected into the isolated test control-plane config. */
   failOnceHooks?: readonly string[];
+  /** Additional exact browser origins allowed by the test runtime. */
+  webOrigins?: readonly string[];
   timeouts?: {
     startupMs?: number;
     reconciliationMs?: number;

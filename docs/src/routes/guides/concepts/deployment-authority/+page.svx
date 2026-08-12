@@ -66,9 +66,10 @@ User/app, CLI, native, and device-user access uses the same proposal, decision,
 desired-authority, and materialization model. The stable principal is separate
 from the participant artifact being authorized.
 
-Mutable capability groups, deployment grant overrides, contract-era identity
-grants, and stored subject ACLs were retired. Review metadata may explain a
-complete capability bundle, but only the exact resolved permission atoms enter
+Capability groups and portal grant overrides are administrative authoring tools.
+Auth expands them against the participant's declared optional capabilities
+before applying an ordinary identity authority. Contract-era identity grants and
+stored subject ACLs remain retired; only exact resolved permission atoms enter
 `GrantSetV1`.
 
 ## Runtime issuance

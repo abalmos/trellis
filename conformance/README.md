@@ -7,7 +7,6 @@ Use this directory for values that should stay byte-for-byte identical across
 runtimes:
 
 - `canonical-json/` - canonical serialization and digest vectors
-- `contract-digest/` - Trellis contract digest projection vectors
 - `auth-proof/` - session-key proof and domain-signature vectors
 - `authorization-context/` - signed authorization trust chains, contexts, and
   request-proof v2 vectors

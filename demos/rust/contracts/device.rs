@@ -1,15 +1,15 @@
+use serde_json::{json, Value};
 use trellis_contracts::{
-    state, use_contract, ContractKind, ContractManifest, ContractManifestBuilder,
+    state, ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind,
     ContractStateKind, ContractsError,
 };
 
-/// Build the Rust-authored Field Device demo contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+/// Build the Rust-authored Field Device demo native API.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    ApiBuilder::authoring(
         "trellis.demo-device@v1",
         "Field Device Demo",
         "Activated Field Device TUI for the consolidated demo.",
-        ContractKind::Device,
     )
     .docs_with_summary(
         "Activated field device demo.",
@@ -59,33 +59,44 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
                 "Stores editable inspection draft notes keyed by inspection id.",
             ),
     )
-    .use_ref(
-        "trellis.demo-service@v1",
-        use_contract("trellis.demo-service@v1")
-            .with_rpc_call([
-                "Assignments.List",
-                "Evidence.Download",
-                "Evidence.List",
-                "Sites.Get",
-                "Sites.List",
-            ])
-            .with_operation_call(["Evidence.Upload", "Reports.Generate", "Sites.Refresh"])
-            .with_operation_cancel(["Reports.Generate"])
-            .with_event_subscribe([
-                "Audit.Recorded",
-                "Evidence.Uploaded",
-                "Reports.Published",
-                "Sites.Refreshed",
-            ]),
-    )
-    .use_ref(
-        "trellis.state@v1",
-        use_contract("trellis.state@v1").with_rpc_call([
-            "State.Delete",
-            "State.Get",
-            "State.List",
-            "State.Put",
-        ]),
-    )
     .build()
+}
+
+/// Build the device's native API and participant artifacts.
+pub fn contract_artifacts(
+) -> Result<ContractArtifacts, ContractsError> {
+    let service_api: Value = serde_json::from_str(include_str!(
+        "../../js/generated/protocol/apis/trellis.demo-service@v1.json"
+    ))?;
+    let state_api: Value = serde_json::from_str(include_str!(
+        "../../../generated/protocol/apis/trellis.state@v1.json"
+    ))?;
+    let api = api_artifact()?;
+    let api_value = api.normalized_value()?;
+    let base = ContractBuilder::from_api(api_value.clone(), ContractKind::Device)?.build()?;
+    let mut participant = base.participant_value()?;
+    participant["uses"] = json!({
+        "required": {
+            "trellis.demo-service@v1": {
+                "api": "trellis.demo-service@v1",
+                "apiDigest": ApiBuilder::new(service_api.clone()).build()?.digest()?,
+                "rpc": {"call": ["Assignments.List", "Evidence.Download", "Evidence.List", "Sites.Get", "Sites.List"]},
+                "operations": {
+                    "invoke": ["Evidence.Upload", "Reports.Generate", "Sites.Refresh"],
+                    "observe": ["Evidence.Upload", "Reports.Generate", "Sites.Refresh"],
+                    "cancel": ["Reports.Generate"]
+                },
+                "events": {"subscribe": ["Audit.Recorded", "Evidence.Uploaded", "Reports.Published", "Sites.Refreshed"]}
+            },
+            "trellis.state@v1": {
+                "api": "trellis.state@v1",
+                "apiDigest": ApiBuilder::new(state_api.clone()).build()?.digest()?,
+                "rpc": {"call": ["State.Delete", "State.Get", "State.List", "State.Put"]}
+            }
+        }
+    });
+    ContractBuilder::from_native(api_value, participant)
+        .referenced_api("trellis.demo-service@v1", service_api)
+        .referenced_api("trellis.state@v1", state_api)
+        .build()
 }

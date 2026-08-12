@@ -282,6 +282,7 @@ pub(crate) fn validate_account_flow(
             ),
             (AccountFlowKind::FirstAdmin, false, false)
                 | (AccountFlowKind::PasswordReset, true, false)
+                | (AccountFlowKind::IdentityLink, true, false)
                 | (AccountFlowKind::IdentityLink, true, true)
         )
     {

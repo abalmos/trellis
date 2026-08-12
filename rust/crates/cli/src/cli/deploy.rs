@@ -60,22 +60,6 @@ pub enum DeviceReviewState {
     Rejected,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
-/// Identity kinds supported by deployment grant overrides.
-pub enum DeploymentAuthorityGrantOverrideIdentityKind {
-    Web,
-    Session,
-}
-
-impl DeploymentAuthorityGrantOverrideIdentityKind {
-    pub fn as_wire_value(self) -> &'static str {
-        match self {
-            Self::Web => "web",
-            Self::Session => "session",
-        }
-    }
-}
-
 impl DeviceReviewState {
     pub fn as_wire_value(self) -> &'static str {
         match self {
@@ -120,41 +104,6 @@ impl DeploymentAuthorityPlanClassification {
             Self::Migration => "migration",
         }
     }
-}
-
-#[derive(Debug, Args)]
-/// Manage deployment grant overrides.
-pub struct GrantsCommand {
-    #[command(subcommand)]
-    pub command: GrantsSubcommand,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
-/// Deployment grant override operations.
-pub enum GrantsSubcommand {
-    /// List deployment grant overrides.
-    List(GrantsListArgs),
-    /// Add deployment grant overrides.
-    Add(TopLevelGrantMutationArgs),
-    /// Remove deployment grant overrides.
-    Remove(TopLevelGrantMutationArgs),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// List deployment grant overrides.
-pub struct GrantsListArgs {
-    #[arg(long)]
-    pub deployment: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Add or remove deployment grant overrides.
-pub struct TopLevelGrantMutationArgs {
-    #[arg(long)]
-    pub deployment: String,
-
-    #[command(flatten)]
-    pub grant: DeploymentGrantMutationArgs,
 }
 
 #[derive(Debug, Args)]
@@ -235,7 +184,7 @@ pub enum SvcResourceAction {
     #[command(override_usage = "trellis svc <ID> create [OPTIONS]")]
     Create(SvcCreateArgs),
     #[command(
-        override_usage = "trellis svc <ID> apply (--source <SOURCE>|--manifest <PATH>|--image <IMAGE>)"
+        override_usage = "trellis svc <ID> apply (--source <SOURCE>|--api <PATH> --participant <PATH>|--image <IMAGE>)"
     )]
     Apply(ApplyArgs),
     /// Disable one service deployment.
@@ -271,7 +220,7 @@ pub enum DevResourceAction {
     #[command(override_usage = "trellis dev <ID> create [OPTIONS]")]
     Create(DevCreateArgs),
     #[command(
-        override_usage = "trellis dev <ID> apply (--source <SOURCE>|--manifest <PATH>|--image <IMAGE>)"
+        override_usage = "trellis dev <ID> apply (--source <SOURCE>|--api <PATH> --participant <PATH>|--image <IMAGE>)"
     )]
     Apply(ApplyArgs),
     /// Disable one device deployment.
@@ -314,7 +263,7 @@ pub struct DevCreateArgs {
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
 #[command(group(
     clap::ArgGroup::new("contract_input")
-        .args(["source", "manifest", "image"])
+        .args(["source", "api", "image"])
         .required(true)
         .multiple(false)
 ))]
@@ -324,7 +273,13 @@ pub struct ApplyArgs {
     pub source: Option<String>,
 
     #[arg(long)]
-    pub manifest: Option<String>,
+    pub api: Option<String>,
+
+    #[arg(long, requires = "api")]
+    pub participant: Option<String>,
+
+    #[arg(long, requires = "api")]
+    pub referenced_api: Vec<String>,
 
     #[arg(long)]
     pub image: Option<String>,
@@ -463,28 +418,6 @@ pub struct AuthorityRejectArgs {
 pub struct AuthorityReconcileArgs {
     #[arg(long = "desired-version")]
     pub desired_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Add or remove deployment grant overrides.
-pub struct DeploymentGrantMutationArgs {
-    #[arg(long = "identity-kind")]
-    pub identity_kind: DeploymentAuthorityGrantOverrideIdentityKind,
-
-    #[arg(long = "contract")]
-    pub contract_id: Option<String>,
-
-    #[arg(long)]
-    pub origin: Option<String>,
-
-    #[arg(long = "session-public-key")]
-    pub session_public_key: Option<String>,
-
-    #[arg(long = "capability")]
-    pub capabilities: Vec<String>,
-
-    #[arg(long = "capability-group")]
-    pub capability_groups: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]

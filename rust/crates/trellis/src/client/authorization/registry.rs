@@ -227,7 +227,7 @@ impl AuthorizationRegistryReader {
         let Some(entry) = entry.filter(|entry| !entry.value.is_empty()) else {
             return Ok(None);
         };
-        let pointer = parse_manifest_pointer(&entry.value)?;
+        let pointer = parse_api_authoring_source_pointer(&entry.value)?;
         Ok(Some((pointer, entry.revision)))
     }
 
@@ -312,7 +312,9 @@ fn digest_key_is_valid(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-pub(crate) fn parse_manifest_pointer(value: &[u8]) -> Result<ManifestPointer, TrellisClientError> {
+pub(crate) fn parse_api_authoring_source_pointer(
+    value: &[u8],
+) -> Result<ManifestPointer, TrellisClientError> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields, rename_all = "camelCase")]
     struct Pointer {
@@ -371,10 +373,11 @@ mod tests {
 
     #[test]
     fn manifest_pointer_has_exact_wire_shape() {
-        let pointer = parse_manifest_pointer(br#"{"generation":7,"digest":"manifest-digest"}"#)
-            .expect("exact pointer");
+        let pointer =
+            parse_api_authoring_source_pointer(br#"{"generation":7,"digest":"manifest-digest"}"#)
+                .expect("exact pointer");
         assert_eq!(pointer.generation, 7);
-        assert!(parse_manifest_pointer(
+        assert!(parse_api_authoring_source_pointer(
             br#"{"format":"legacy","generation":7,"digest":"manifest-digest"}"#
         )
         .is_err());

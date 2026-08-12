@@ -320,7 +320,9 @@ export class TrellisTestRuntime implements AsyncDisposable {
         ? await NatsTestContainer.attach({
           ...options.nats,
           workdir,
-          manifest: sharedManifest!,
+          manifest: sharedManifest ?? (() => {
+            throw new Error("shared NATS manifest was not initialized");
+          })(),
         })
         : await NatsTestContainer.start(workdir, {
           startupMs: timeouts.startupMs,
@@ -335,6 +337,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
         port,
         oauthProviders: options.oauthProviders,
         failOnceHooks: options.failOnceHooks,
+        webOrigins: options.webOrigins,
       });
       const configPath = await writeTrellisConfig({ workdir, config });
       const deployment = options.deployment ?? "test";
@@ -364,7 +367,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
         keepWorkdir: options.keepWorkdir ?? false,
         timeouts,
         configPath,
-        controlPlaneSqlitePath: config.storage.dbPath,
+        controlPlaneSqlitePath: `${config.storage.dbPath}.platform`,
         trellisOptions: options.trellis,
         nats,
         controlPlane: startedControlPlane,

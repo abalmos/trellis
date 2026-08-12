@@ -4,6 +4,19 @@ use super::*;
 
 const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+#[test]
+fn connection_kick_response_rejects_system_errors() {
+    validate_connection_kick_response(br#"{"server":{}}"#).expect("successful response");
+    validate_connection_kick_response(
+        br#"{"error":{"code":500,"description":"no such client or leafnode id"}}"#,
+    )
+    .expect("already disconnected response");
+    assert!(validate_connection_kick_response(
+        br#"{"error":{"code":403,"description":"permission denied"}}"#
+    )
+    .is_err());
+}
+
 fn browser_flow() -> AuthBrowserFlow {
     AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),
@@ -223,20 +236,30 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         Some(completed)
     );
 
+    let connection = AuthConnectionPresence {
+        format: "trellis.auth-connection-presence.v1".to_owned(),
+        connection_id: DIGEST.to_owned(),
+        session_id: "ses_01".to_owned(),
+        context_digest: DIGEST.to_owned(),
+        server_id: "server-1".to_owned(),
+        client_id: "42".to_owned(),
+        user_nkey: "user-nkey".to_owned(),
+        remote_address: Some("127.0.0.1".to_owned()),
+        connected_at: 1_000,
+        last_seen_at: 1_000,
+        version: 1,
+    };
     repository
-        .put_connection_presence(AuthConnectionPresence {
-            format: "trellis.auth-connection-presence.v1".to_owned(),
-            connection_id: DIGEST.to_owned(),
-            session_id: "ses_01".to_owned(),
-            context_digest: DIGEST.to_owned(),
-            server_id: "server-1".to_owned(),
-            client_id: "42".to_owned(),
-            user_nkey: "user-nkey".to_owned(),
-            remote_address: Some("127.0.0.1".to_owned()),
-            connected_at: 1_000,
-            last_seen_at: 1_000,
-            version: 1,
-        })
+        .put_connection_presence(connection.clone())
+        .await
+        .unwrap();
+    let mut second_connection = connection;
+    let second_connection_id =
+        trellis_protocol::digest_json(&serde_json::json!("second connection")).unwrap();
+    second_connection.connection_id = second_connection_id.clone();
+    second_connection.client_id = "43".to_owned();
+    repository
+        .put_connection_presence(second_connection)
         .await
         .unwrap();
     assert_eq!(
@@ -245,12 +268,15 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
             .await
             .unwrap()
             .len(),
-        1
+        2
     );
-    repository
-        .delete_connection_presence("user-nkey")
+    repository.delete_connection_presence(DIGEST).await.unwrap();
+    let remaining = repository
+        .list_connection_presence(Some("ses_01"))
         .await
         .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].connection_id, second_connection_id);
 }
 
 #[tokio::test]
@@ -310,10 +336,22 @@ async fn nats_kv_repository_conforms() {
             Err(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
         }
     }
-    let repository = NatsAuthEphemeralRepository::ensure(client.expect("NATS did not start"))
-        .await
-        .unwrap();
+    let client = client.expect("NATS did not start");
+    let repository = NatsAuthEphemeralRepository::ensure(
+        client.clone(),
+        std::time::Duration::from_millis(120_000),
+    )
+    .await
+    .unwrap();
     repository_conformance(repository).await;
+    let error =
+        NatsAuthEphemeralRepository::ensure(client, std::time::Duration::from_millis(360_000))
+            .await
+            .expect_err("old connection presence retention must be incompatible");
+    let error = error.to_string();
+    assert!(error.contains("max_age"), "{error}");
+    assert!(error.contains("360000ms"), "{error}");
+    assert!(error.contains("120000ms"), "{error}");
     drop(server);
 }
 

@@ -29,10 +29,13 @@
     try {
       const nextDeploymentId = deploymentId.trim();
       const response = await trellis.authDeploymentsCreate({
-        deploymentId: nextDeploymentId,
+        displayName: nextDeploymentId,
+        expiresAt: null,
+        idempotencyKey: crypto.randomUUID(),
         kind: "service",
-        namespaces: parseNamespaces(namespaces),
-        contractCompatibilityMode,
+        participantId: null,
+        portalId: null,
+        requiresDeviceDelegation: false,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Service deployment ${nextDeploymentId} created.`, "Created");

@@ -50,9 +50,8 @@ fn administration_participant() -> Result<AdministrationParticipant, TrellisAuth
     let api = parse_api_v1(&api_value)?;
     let mut apis = BTreeMap::new();
     apis.insert(api.id().to_owned(), api.clone());
-    let state_manifest: Value = serde_json::from_str(crate::sdk::state::contract::CONTRACT_JSON)?;
-    let state = trellis_contracts::compile_protocol_artifacts(&state_manifest, &BTreeMap::new())?;
-    let state_api = parse_api_v1(&state.api)?;
+    let state_api_value: Value = serde_json::from_str(crate::sdk::state::api::API_JSON)?;
+    let state_api = parse_api_v1(&state_api_value)?;
     apis.insert(state_api.id().to_owned(), state_api);
     let resolved = resolve_participant_v1(&participant, &apis)?;
     Ok(AdministrationParticipant {
@@ -78,10 +77,11 @@ fn base64url_encode(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Compute the canonical Trellis contract digest for a JSON contract document.
+/// Compute the semantic digest for one native Trellis API artifact.
 #[doc = concat!("Trellis API operation `", stringify!(contract_digest), "`.")]
-pub fn contract_digest(contract_json: &str) -> Result<String, TrellisAuthError> {
-    Ok(trellis_contracts::digest_contract_json(contract_json)?)
+pub fn contract_digest(api_source_json: &str) -> Result<String, TrellisAuthError> {
+    let value = serde_json::from_str(api_source_json)?;
+    Ok(trellis_protocol::parse_api_v1(&value)?.digest()?)
 }
 
 /// Generate a new base64url-encoded Ed25519 session seed and public key.
@@ -346,21 +346,55 @@ impl AgentLoginChallenge {
             .sessions_me()
             .await
             .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
-        let user: super::AuthenticatedUser = response
-            .user
-            .ok_or_else(|| {
-                TrellisAuthError::NotUserSession(
-                    response.session.participant_kind.as_str().to_owned(),
-                )
-            })
-            .and_then(|user| Ok(serde_json::from_value(serde_json::to_value(user)?)?))?;
+        let user = response.user.ok_or_else(|| {
+            TrellisAuthError::NotUserSession(response.session.participant_kind.as_str().to_owned())
+        })?;
         if !user
-            .capabilities
-            .iter()
-            .any(|capability| capability == "admin")
+            .get("capabilities")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|capabilities| capabilities.iter().any(|value| value == "admin"))
         {
             return Err(TrellisAuthError::NotAdmin);
         }
+        let user = super::AuthenticatedUser {
+            user_id: user
+                .get("userId")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            principal_id: user
+                .get("identity")
+                .and_then(|identity| identity.get("identityId"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            state: if user.get("active").and_then(serde_json::Value::as_bool) == Some(true) {
+                "active"
+            } else {
+                "disabled"
+            }
+            .to_owned(),
+            capabilities: user
+                .get("capabilities")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            email: user
+                .get("email")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            image: user
+                .get("image")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            name: user
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        };
 
         Ok(AdminLoginOutcome { state, user })
     }

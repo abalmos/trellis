@@ -8,18 +8,31 @@ fn write_ts_contract(path: &Path, id: &str, display_name: &str, kind: &str) {
     fs::write(
         path,
         format!(
-            "const contract = {{\n  format: \"trellis.contract.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture contract\",\n  kind: \"{kind}\",\n}};\n\nexport default contract;\n"
+            "const API = {{\n  format: \"trellis.api.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture API\",\n}};\nconst PARTICIPANT = {{\n  format: \"trellis.participant.v1\",\n  id: \"{id}\",\n  displayName: \"{display_name}\",\n  description: \"Fixture participant\",\n  kind: \"{kind}\",\n  implements: {{ self: {{ api: \"{id}\", apiDigest: \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" }} }},\n}};\n\nexport default {{ API, PARTICIPANT }};\n"
         ),
     )
     .unwrap();
 }
 
-fn write_rust_contract(path: &Path, manifest_name: &str) {
+fn write_rust_contract(path: &Path, manifest_name: &str, kind: &str) {
     fs::write(
         path,
         format!(
-            r#"pub fn contract_manifest() -> trellis_contracts::ContractManifest {{
-    serde_json::from_str(include_str!("{manifest_name}")).expect("fixture manifest")
+            r#"pub fn api_artifact() -> Result<trellis_contracts::ApiArtifactV1, trellis_contracts::ContractsError> {{
+    let mut source: serde_json::Value = serde_json::from_str(include_str!("{manifest_name}"))?;
+    if let Some(source) = source.as_object_mut() {{
+        source.remove("kind");
+        source.remove("uses");
+        for method in source.get_mut("rpc").and_then(serde_json::Value::as_object_mut).into_iter().flat_map(|rpc| rpc.values_mut()) {{
+            method.as_object_mut().map(|method| method.remove("subject"));
+        }}
+    }}
+    trellis_contracts::ApiBuilder::new(source).build()
+}}
+
+pub fn contract_artifacts() -> Result<trellis_contracts::ContractArtifacts, trellis_contracts::ContractsError> {{
+    let api = api_artifact()?.normalized_value()?;
+    trellis_contracts::ContractBuilder::from_api(api, trellis_contracts::ContractKind::{kind})?.build()
 }}
 "#
         ),
@@ -124,7 +137,7 @@ fn explicit_generate_all_emits_buildable_sdk_packages() {
             "all",
             "--source",
             project.join("contracts/orders.ts").to_str().unwrap(),
-            "--out-manifest",
+            "--out-api",
             manifest_path.to_str().unwrap(),
             "--jsr-out",
             ts_out.to_str().unwrap(),
@@ -173,7 +186,7 @@ fn explicit_generate_all_defaults_out_of_tree_package_to_trellis_sdk_scope() {
             "all",
             "--source",
             project.join("contracts/cloud.ts").to_str().unwrap(),
-            "--out-manifest",
+            "--out-api",
             manifest_path.to_str().unwrap(),
             "--jsr-out",
             ts_out.to_str().unwrap(),
@@ -211,12 +224,11 @@ fn prepare_bootstraps_repo_without_discover_summary() {
     fs::write(apps.join("deno.json"), "{\n  \"version\": \"0.4.0\"\n}\n").unwrap();
     fs::write(
         services.join("contracts/orders.ts"),
-        r#"const contract = {
-  format: "trellis.contract.v1",
+        r#"const API = {
+  format: "trellis.api.v1",
   id: "trellis.orders@v1",
   displayName: "Orders",
   description: "Fixture contract",
-  kind: "service",
   schemas: {
     Empty: {
       type: "object",
@@ -232,7 +244,6 @@ fn prepare_bootstraps_repo_without_discover_summary() {
   rpc: {
     "Orders.Get": {
       version: "v1",
-      subject: "rpc.v1.Orders.Get",
       input: { schema: "Empty" },
       output: { schema: "Order" },
     },
@@ -240,34 +251,41 @@ fn prepare_bootstraps_repo_without_discover_summary() {
   operations: {},
   events: {},
 };
+const PARTICIPANT = {
+  format: "trellis.participant.v1",
+  id: API.id,
+  displayName: API.displayName,
+  description: "Fixture service participant",
+  kind: "service",
+  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+};
 
-export default contract;
+export default { API, PARTICIPANT };
 "#,
     )
     .unwrap();
     fs::write(
         apps.join("contracts/dashboard.ts"),
-        r#"const contract = {
-  format: "trellis.contract.v1",
+        r#"const API = {
+  format: "trellis.api.v1",
   id: "trellis.dashboard@v1",
   displayName: "Dashboard",
   description: "Fixture contract",
-  kind: "app",
   schemas: {},
   rpc: {},
   operations: {},
   events: {},
-  uses: {
-    required: {
-      orders: {
-        contract: "trellis.orders@v1",
-        rpc: { call: ["Orders.Get"] },
-      },
-    },
-  },
+};
+const PARTICIPANT = {
+  format: "trellis.participant.v1",
+  id: API.id,
+  displayName: API.displayName,
+  description: "Fixture app participant",
+  kind: "app",
+  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
 };
 
-export default contract;
+export default { API, PARTICIPANT };
 "#,
     )
     .unwrap();
@@ -286,11 +304,11 @@ export default contract;
     assert!(!stdout.contains("Plan"));
     assert!(temp
         .path()
-        .join("generated/contracts/manifests/trellis.orders@v1.json")
+        .join("generated/protocol/apis/trellis.orders@v1.json")
         .exists());
     assert!(temp
         .path()
-        .join("generated/contracts/manifests/trellis.dashboard@v1.json")
+        .join("generated/protocol/apis/trellis.dashboard@v1.json")
         .exists());
     assert!(temp
         .path()
@@ -325,12 +343,11 @@ fn prepare_warns_for_public_closed_intersect_schemas() {
     .unwrap();
     fs::write(
         service.join("contracts/orders.ts"),
-        r#"const contract = {
-  format: "trellis.contract.v1",
+        r#"const API = {
+  format: "trellis.api.v1",
   id: "trellis.orders@v1",
   displayName: "Orders",
   description: "Fixture contract",
-  kind: "service",
   schemas: {
     Merged: {
       allOf: [
@@ -350,27 +367,29 @@ fn prepare_warns_for_public_closed_intersect_schemas() {
   rpc: {
     "Orders.Get": {
       version: "v1",
-      subject: "rpc.v1.Orders.Get",
       input: { schema: "Merged" },
       output: { schema: "Merged" },
     },
   },
 };
+const PARTICIPANT = {
+  format: "trellis.participant.v1",
+  id: API.id,
+  displayName: API.displayName,
+  description: "Fixture service participant",
+  kind: "service",
+  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+};
 
-export default contract;
+export default { API, PARTICIPANT };
 "#,
     )
     .unwrap();
 
     let output = run_prepare(temp.path());
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("WARNING contract trellis.orders@v1 public schema schemas[\"Merged\"].allOf[0].additionalProperties sets additionalProperties: false; this may break forward compatibility"));
-    assert!(stderr.contains("schemas[\"Merged\"].allOf[1].additionalProperties"));
+    assert!(stderr.contains("wire schemas that accept objects must leave"));
 }
 
 #[test]
@@ -388,7 +407,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     fs::write(
         service.join("contracts/orders.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.orders@v1",
   "displayName": "Orders",
   "description": "Fixture service contract",
@@ -412,7 +431,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     fs::write(
         inventory.join("contracts/inventory.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.inventory@v1",
   "displayName": "Inventory",
   "description": "Fixture inventory contract",
@@ -436,7 +455,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     fs::write(
         device.join("contracts/device.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.device@v1",
   "displayName": "Device",
   "description": "Fixture device contract",
@@ -457,9 +476,17 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
 "#,
     )
     .unwrap();
-    write_rust_contract(&service.join("contracts/orders.rs"), "orders.json");
-    write_rust_contract(&inventory.join("contracts/inventory.rs"), "inventory.json");
-    write_rust_contract(&device.join("contracts/device.rs"), "device.json");
+    write_rust_contract(
+        &service.join("contracts/orders.rs"),
+        "orders.json",
+        "Service",
+    );
+    write_rust_contract(
+        &inventory.join("contracts/inventory.rs"),
+        "inventory.json",
+        "Service",
+    );
+    write_rust_contract(&device.join("contracts/device.rs"), "device.json", "Device");
 
     let output = run_prepare(temp.path());
     assert!(
@@ -477,8 +504,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
         .join("generated/packages/cargo-participants/device");
     assert!(participant.join("Cargo.toml").exists());
     assert!(participant.join("src/lib.rs").exists());
-    assert!(participant.join("contracts/orders.json").exists());
-    assert!(participant.join("contracts/inventory.json").exists());
+    assert_eq!(fs::read_dir(participant.join("apis")).unwrap().count(), 0);
     assert!(temp
         .path()
         .join("generated/packages/cargo/device/Cargo.toml")
@@ -486,18 +512,18 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
 
     let cargo_toml = fs::read_to_string(participant.join("Cargo.toml")).unwrap();
     assert!(cargo_toml.contains("name = \"trellis-participant-device\""));
-    assert!(cargo_toml.contains("trellis-sdk-orders = { path = "));
-    assert!(cargo_toml.contains("trellis-sdk-inventory = { path = "));
+    assert!(!cargo_toml.contains("trellis-sdk-orders"));
+    assert!(!cargo_toml.contains("trellis-sdk-inventory"));
     assert!(!cargo_toml.contains("trellis-sdk-auth"));
 
     assert!(!participant.join("build.rs").exists());
-    assert!(participant.join("src/uses/orders.rs").exists());
-    assert!(participant.join("src/uses/inventory.rs").exists());
+    assert!(!participant.join("src/uses/orders.rs").exists());
+    assert!(!participant.join("src/uses/inventory.rs").exists());
 
     fs::write(
         device.join("contracts/device.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.device@v1",
   "displayName": "Device",
   "description": "Fixture device contract",
@@ -520,14 +546,12 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     .unwrap();
 
     let output = run_prepare(temp.path());
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an explicit SDK mapping"));
-    assert!(!participant.exists());
+    assert!(output.status.success());
 
     fs::write(
         device.join("contracts/device.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.device@v1",
   "displayName": "Device",
   "description": "Fixture device contract",
@@ -550,9 +574,7 @@ fn prepare_generates_rust_participant_facade_for_local_device_uses() {
     .unwrap();
 
     let output = run_prepare(temp.path());
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("requires an explicit SDK mapping"));
-    assert!(!participant.exists());
+    assert!(output.status.success());
 }
 
 #[test]
@@ -564,7 +586,7 @@ fn prepare_generates_rust_participant_facade_without_uses() {
     fs::write(
         device.join("contracts/device.json"),
         r#"{
-  "format": "trellis.contract.v1",
+  "format": "trellis.api.v1",
   "id": "trellis.device@v1",
   "displayName": "Device",
   "description": "Fixture device contract",
@@ -573,7 +595,7 @@ fn prepare_generates_rust_participant_facade_without_uses() {
 "#,
     )
     .unwrap();
-    write_rust_contract(&device.join("contracts/device.rs"), "device.json");
+    write_rust_contract(&device.join("contracts/device.rs"), "device.json", "Device");
 
     let output = run_prepare(temp.path());
     assert!(
@@ -625,7 +647,7 @@ fn prepare_accepts_custom_output_root() {
     );
 
     assert!(out
-        .join("generated/contracts/manifests/trellis.orders@v1.json")
+        .join("generated/protocol/apis/trellis.orders@v1.json")
         .exists());
     assert!(out.join("generated/packages/jsr/orders/mod.ts").exists());
     assert!(out
@@ -673,7 +695,7 @@ fn prepare_ignores_sveltekit_lib_contract() {
     assert!(stdout.contains("No contracts found."));
     assert!(!temp
         .path()
-        .join("generated/contracts/manifests/trellis.console@v1.json")
+        .join("generated/protocol/apis/trellis.console@v1.json")
         .exists());
     assert!(!temp
         .path()
@@ -720,7 +742,7 @@ fn prepare_writes_demo_typescript_sdks_inside_demos_js_workspace() {
     );
 
     assert!(demos_root
-        .join("generated/contracts/manifests/trellis.demo-rpc-service@v1.json")
+        .join("generated/protocol/apis/trellis.demo-rpc-service@v1.json")
         .exists());
     assert!(demos_root
         .join("js/generated/packages/jsr/demo-rpc-service/mod.ts")
@@ -750,12 +772,11 @@ fn prepare_in_local_runtime_repo_keeps_typescript_package_specifiers() {
     fs::write(app.join("deno.json"), "{\n  \"version\": \"0.4.0\"\n}\n").unwrap();
     fs::write(
         app.join("contracts/dashboard.ts"),
-        r#"const contract = {
-  format: "trellis.contract.v1",
+        r#"const API = {
+  format: "trellis.api.v1",
   id: "trellis.dashboard@v1",
   displayName: "Dashboard",
   description: "Fixture contract",
-  kind: "app",
   schemas: {
     Empty: {
       type: "object",
@@ -766,7 +787,6 @@ fn prepare_in_local_runtime_repo_keeps_typescript_package_specifiers() {
   rpc: {
     "Dashboard.Ping": {
       version: "v1",
-      subject: "rpc.v1.Dashboard.Ping",
       input: { schema: "Empty" },
       output: { schema: "Empty" },
     },
@@ -774,8 +794,16 @@ fn prepare_in_local_runtime_repo_keeps_typescript_package_specifiers() {
   operations: {},
   events: {},
 };
+const PARTICIPANT = {
+  format: "trellis.participant.v1",
+  id: API.id,
+  displayName: API.displayName,
+  description: "Fixture app participant",
+  kind: "app",
+  implements: { self: { api: API.id, apiDigest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" } },
+};
 
-export default contract;
+export default { API, PARTICIPANT };
 "#,
     )
     .unwrap();
@@ -792,13 +820,13 @@ export default contract;
 
     let sdk = repo.join("generated/packages/jsr/dashboard");
     let descriptors = fs::read_to_string(sdk.join("descriptors.ts")).unwrap();
-    let manifest = fs::read_to_string(sdk.join("manifest.ts")).unwrap();
+    let api = fs::read_to_string(sdk.join("api.ts")).unwrap();
     let types = fs::read_to_string(sdk.join("types.ts")).unwrap();
     let deno = fs::read_to_string(sdk.join("deno.json")).unwrap();
-    let combined = format!("{descriptors}\n{manifest}\n{types}\n{deno}");
+    let combined = format!("{descriptors}\n{api}\n{types}\n{deno}");
 
     assert!(descriptors.contains("@qlever-llc/trellis/contracts"));
-    assert!(manifest.contains("@qlever-llc/trellis/contracts"));
+    assert!(api.contains("export const API_ID"));
     assert!(!sdk.join("scripts/build_npm.ts").exists());
     assert!(!deno.contains("build:npm"));
     assert!(!combined.contains("js/packages/trellis"));
@@ -833,7 +861,7 @@ fn local_mode_generates_app_typescript_client_without_rust_sdk() {
     assert!(stdout.contains("generate trellis.dashboard@v1"));
     assert!(stdout.contains("generated contract artifacts for trellis.dashboard@v1"));
     assert!(project
-        .join("generated/contracts/manifests/trellis.dashboard@v1.json")
+        .join("generated/protocol/apis/trellis.dashboard@v1.json")
         .exists());
     assert!(project
         .join("generated/packages/jsr/dashboard/descriptors.ts")
@@ -876,7 +904,7 @@ fn local_mode_generates_service_artifacts_from_nearest_project_root() {
     );
 
     assert!(project
-        .join("generated/contracts/manifests/trellis.orders@v1.json")
+        .join("generated/protocol/apis/trellis.orders@v1.json")
         .exists());
     assert!(project
         .join("generated/packages/jsr/orders/mod.ts")
@@ -920,7 +948,7 @@ fn local_mode_generates_service_artifacts_from_top_level_contract_ts() {
     );
 
     assert!(project
-        .join("generated/contracts/manifests/trellis.top-level-orders@v1.json")
+        .join("generated/protocol/apis/trellis.top-level-orders@v1.json")
         .exists());
     assert!(project
         .join("generated/packages/jsr/top-level-orders/mod.ts")
@@ -959,13 +987,21 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
         project.join("contracts/orders.ts"),
         concat!(
             "import { CONTRACT_ID, CONTRACT_KIND } from 'contract-support';\n",
-            "export const CONTRACT = {\n",
-            "  format: 'trellis.contract.v1',\n",
+            "export const API = {\n",
+            "  format: 'trellis.api.v1',\n",
             "  id: CONTRACT_ID,\n",
             "  displayName: 'Node Orders',\n",
             "  description: 'Orders from node project',\n",
-            "  kind: CONTRACT_KIND,\n",
             "};\n",
+            "export const PARTICIPANT = {\n",
+            "  format: 'trellis.participant.v1',\n",
+            "  id: CONTRACT_ID,\n",
+            "  displayName: 'Node Orders',\n",
+            "  description: 'Node Orders service',\n",
+            "  kind: CONTRACT_KIND,\n",
+            "  implements: { self: { api: CONTRACT_ID, apiDigest: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } },\n",
+            "};\n",
+            "export default { API, PARTICIPANT };\n",
         ),
     )
     .unwrap();
@@ -973,7 +1009,7 @@ fn local_mode_generates_service_artifacts_from_node_project_contracts() {
     write_executable(
         &tsx_path,
         "#!/bin/sh
-printf '{\"format\":\"trellis.contract.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\",\"kind\":\"service\"}'
+printf '{\"api\":{\"format\":\"trellis.api.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Orders from node project\"},\"participant\":{\"format\":\"trellis.participant.v1\",\"id\":\"trellis.node-orders@v1\",\"displayName\":\"Node Orders\",\"description\":\"Node Orders service\",\"kind\":\"service\",\"implements\":{\"self\":{\"api\":\"trellis.node-orders@v1\",\"apiDigest\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}}}'
 ",
     );
     write_executable(
@@ -1011,7 +1047,7 @@ done
     );
 
     assert!(project
-        .join("generated/contracts/manifests/trellis.node-orders@v1.json")
+        .join("generated/protocol/apis/trellis.node-orders@v1.json")
         .exists());
     assert!(project
         .join("generated/packages/jsr/node-orders/mod.ts")
@@ -1069,7 +1105,7 @@ fn discover_mode_summarizes_generation_actions_for_service_and_app_contracts() {
     assert!(stdout.contains("generate"));
     assert!(temp
         .path()
-        .join("generated/contracts/manifests/trellis.orders@v1.json")
+        .join("generated/protocol/apis/trellis.orders@v1.json")
         .exists());
     assert!(!apps.join("generated").exists());
 }
@@ -1136,7 +1172,7 @@ fn prepare_mode_supports_top_level_contract_js() {
 
     assert!(temp
         .path()
-        .join("generated/contracts/manifests/trellis.orders-js@v1.json")
+        .join("generated/protocol/apis/trellis.orders-js@v1.json")
         .exists());
     assert!(temp
         .path()
@@ -1192,12 +1228,13 @@ fn local_mode_generates_service_artifacts_from_rust_contract_sources() {
     write_rust_contract(
         &project.join("contracts/service.rs"),
         "service.manifest.json",
+        "Service",
     );
     fs::write(
         project.join("contracts/service.manifest.json"),
         concat!(
             "{\n",
-            "  \"format\": \"trellis.contract.v1\",\n",
+            "  \"format\": \"trellis.api.v1\",\n",
             "  \"id\": \"trellis.rust-service@v1\",\n",
             "  \"displayName\": \"Rust Service\",\n",
             "  \"description\": \"Fixture contract\",\n",
@@ -1215,7 +1252,7 @@ fn local_mode_generates_service_artifacts_from_rust_contract_sources() {
     );
 
     assert!(project
-        .join("generated/contracts/manifests/trellis.rust-service@v1.json")
+        .join("generated/protocol/apis/trellis.rust-service@v1.json")
         .exists());
     assert!(project
         .join("generated/packages/jsr/rust-service/mod.ts")
@@ -1249,8 +1286,7 @@ fn local_mode_skips_when_generated_artifacts_are_up_to_date() {
         String::from_utf8_lossy(&first.stderr)
     );
 
-    let metadata =
-        project.join("generated/contracts/manifests/trellis.orders@v1.trellis-generate.json");
+    let metadata = project.join("generated/protocol/apis/trellis.orders@v1.trellis-generate.json");
     assert!(metadata.exists());
 
     let second = trellis_generate().current_dir(&project).output().unwrap();
@@ -1426,7 +1462,7 @@ fn generate_all_skips_when_metadata_matches_outputs() {
             "all",
             "--source",
             project.join("contracts/orders.ts").to_str().unwrap(),
-            "--out-manifest",
+            "--out-api",
             manifest_path.to_str().unwrap(),
             "--jsr-out",
             ts_out.to_str().unwrap(),
@@ -1447,7 +1483,7 @@ fn generate_all_skips_when_metadata_matches_outputs() {
             "all",
             "--source",
             project.join("contracts/orders.ts").to_str().unwrap(),
-            "--out-manifest",
+            "--out-api",
             manifest_path.to_str().unwrap(),
             "--jsr-out",
             ts_out.to_str().unwrap(),

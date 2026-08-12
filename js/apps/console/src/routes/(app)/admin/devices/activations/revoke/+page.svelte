@@ -28,27 +28,27 @@
   let selectedInstanceId = $state(page.url.searchParams.get("instance") ?? "");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const activeActivations = $derived(activations.filter((activation) => activation.state === "activated"));
-  const selectedActivation = $derived(activeActivations.find((activation) => activation.instanceId === selectedInstanceId) ?? null);
+  const activeActivations = $derived(activations.filter((activation) => activation.authority?.state === "accepted"));
+  const selectedActivation = $derived(activeActivations.find((activation) => activation.device.instanceId === selectedInstanceId) ?? null);
 
-  function formatActivatedBy(actor: Activation["activatedBy"]): string {
-    return actor ? `${actor.participantKind}:${actor.identity.provider}:${actor.identity.subject}` : "—";
+  function formatActivatedBy(actor: NonNullable<Activation["authority"]>["decision"]): string {
+    return actor?.decidedBy ?? "—";
   }
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesList({ state: "activated", limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeviceUserAuthoritiesList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedActivations = response.entries ?? [];
-      const loadedActiveActivations = loadedActivations.filter((activation) => activation.state === "activated");
+      const loadedActiveActivations = loadedActivations.filter((activation) => activation.authority?.state === "accepted");
       activations = loadedActivations;
-      if (selectedInstanceId && !loadedActiveActivations.some((activation) => activation.instanceId === selectedInstanceId)) {
+      if (selectedInstanceId && !loadedActiveActivations.some((activation) => activation.device.instanceId === selectedInstanceId)) {
         selectedInstanceId = "";
       }
       if (!selectedInstanceId && loadedActiveActivations.length) {
-        selectedInstanceId = loadedActiveActivations[0]?.instanceId ?? "";
+        selectedInstanceId = loadedActiveActivations[0]?.device.instanceId ?? "";
       }
     } catch (e) {
       error = errorMessage(e);
@@ -62,10 +62,15 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesRevoke({ instanceId: selectedActivation.instanceId } satisfies AuthDeviceUserAuthoritiesRevokeInput,
+      const response = await trellis.authDeviceUserAuthoritiesRevoke({
+        deploymentId: selectedActivation.device.deploymentId,
+        devicePrincipalId: selectedActivation.device.principalId,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
+      } satisfies AuthDeviceUserAuthoritiesRevokeInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      notifications.success(`Device activation revoked for ${selectedActivation.instanceId}.`, "Revoked");
+      notifications.success(`Device activation revoked for ${selectedActivation.device.instanceId}.`, "Revoked");
       await load();
     } catch (e) {
       error = errorMessage(e);
@@ -81,8 +86,8 @@
       message: "This terminates the activated user authority for this device instance.",
       confirmLabel: "Revoke activation",
       targetLabel: "Device instance",
-      targetName: selectedActivation.instanceId,
-      expectedValue: selectedActivation.instanceId,
+      targetName: selectedActivation.device.instanceId,
+      expectedValue: selectedActivation.device.instanceId,
     });
     if (confirmed) await revokeActivation();
   }
@@ -113,18 +118,18 @@
         <label class="form-control gap-1">
           <span class="label-text text-xs">Activated instance</span>
           <select class="select select-bordered select-sm" bind:value={selectedInstanceId} required>
-            {#each activeActivations as activation (`${activation.instanceId}:${activation.activatedAt}`)}
-              <option value={activation.instanceId}>{activation.instanceId} · {activation.deploymentId}</option>
+            {#each activeActivations as activation (activation.device.instanceId)}
+              <option value={activation.device.instanceId}>{activation.device.instanceId} · {activation.device.deploymentId}</option>
             {/each}
           </select>
         </label>
 
         {#if selectedActivation}
           <div class="rounded-box border border-base-300 bg-base-200/40 p-3 text-sm">
-            <div class="trellis-identifier font-medium">{selectedActivation.instanceId}</div>
-            <div class="text-base-content/60">Deployment: {selectedActivation.deploymentId}</div>
-            <div class="text-base-content/60">Activated: {formatDate(selectedActivation.activatedAt)}</div>
-            <div class="text-base-content/60">Activated by: {formatActivatedBy(selectedActivation.activatedBy)}</div>
+            <div class="trellis-identifier font-medium">{selectedActivation.device.instanceId}</div>
+            <div class="text-base-content/60">Deployment: {selectedActivation.device.deploymentId}</div>
+            <div class="text-base-content/60">Activated: {formatDate(selectedActivation.authority?.createdAt)}</div>
+            <div class="text-base-content/60">Activated by: {formatActivatedBy(selectedActivation.authority?.decision ?? null)}</div>
           </div>
         {/if}
 

@@ -19,7 +19,7 @@
   import { getTrellis } from "$lib/trellis";
 
   type Review = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type DeviceInstance = AuthDevicesListOutput["entries"][number] & { metadata?: Record<string, string> };
+  type DeviceInstance = AuthDevicesListOutput["entries"][number];
 
   const understoodMetadataKeys = ["name", "serialNumber", "modelNumber"] as const;
   const trellis = getTrellis();
@@ -45,13 +45,11 @@
   }
 
   function understoodMetadataValue(instanceId: string, key: (typeof understoodMetadataKeys)[number]): string | null {
-    return deviceInstancesById.get(instanceId)?.metadata?.[key] ?? null;
+    return null;
   }
 
   function opaqueMetadataEntries(instanceId: string): Array<[string, string]> {
-    return Object.entries(deviceInstancesById.get(instanceId)?.metadata ?? {}).filter(
-      ([key]) => !understoodMetadataKeys.includes(key as (typeof understoodMetadataKeys)[number]),
-    ) as Array<[string, string]>;
+    return [];
   }
 
   async function load() {
@@ -59,8 +57,8 @@
     error = null;
     try {
       const [reviewsResponse, instancesResponse] = await Promise.all([
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500, offset: 0 }).take(),
-        trellis.authDevicesList({ limit: 500, offset: 0 }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500 }).take(),
+        trellis.authDevicesList({ limit: 500 }).take(),
       ]);
       if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
@@ -89,7 +87,9 @@
       const response = await trellis.authDeviceUserAuthoritiesReviewsDecide({
           reviewId: selectedReview.reviewId,
           decision,
-          ...(decision === "reject" && reason.trim() ? { reason: reason.trim() } : {}),
+          expectedVersion: selectedReview.version,
+          idempotencyKey: crypto.randomUUID(),
+          reason: decision === "reject" && reason.trim() ? reason.trim() : null,
         } satisfies AuthDeviceUserAuthoritiesReviewsDecideInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
@@ -186,7 +186,7 @@
             <div>
               <p class="text-[0.65rem] font-semibold uppercase tracking-wider text-base-content/50">Instance</p>
               <p class="trellis-identifier">{selectedReview.instanceId}</p>
-              <p class="trellis-identifier text-base-content/60">{selectedReview.publicIdentityKey}</p>
+              <p class="trellis-identifier text-base-content/60">{selectedReview.devicePrincipalId}</p>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div><span class="text-base-content/50">Deployment</span><div class="trellis-identifier">{selectedReview.deploymentId}</div></div>

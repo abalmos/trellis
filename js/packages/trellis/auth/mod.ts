@@ -46,8 +46,10 @@ export {
   isRecoverableBrowserAuthError,
 } from "./browser_recovery.ts";
 export {
+  buildDeviceActivationPayload,
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
+  startDeviceActivationRequest,
   waitForDeviceActivation,
 } from "./device_activation.ts";
 export {
@@ -58,6 +60,18 @@ export {
   submitPortalApproval,
 } from "./browser/portal.ts";
 export type {
+  AuthDeploymentAuthorityGetResponse,
+  DeploymentAuthority,
+  DeploymentAuthorityCapabilityNeed,
+  DeploymentAuthorityContractNeed,
+  DeploymentAuthorityKind,
+  DeploymentAuthorityMaterialization,
+  DeploymentAuthorityNeeds,
+  DeploymentAuthorityPlan,
+  DeploymentAuthorityPlanBreakingChange,
+  DeploymentAuthorityResourceNeed,
+  DeploymentAuthoritySurface,
+  DeploymentAuthoritySurfaceNeed,
   PortalFlowInsufficientCapabilitiesState,
   PortalFlowState,
 } from "./protocol.ts";

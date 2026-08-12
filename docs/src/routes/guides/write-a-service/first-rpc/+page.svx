@@ -151,7 +151,7 @@ fn create_order_response_schema() -> Value {
 }
 ```
 
-Declare the capability and RPC in `contract_manifest()`:
+Declare the capability and RPC in the native `ApiBuilder` source:
 
 ```rust
 use trellis_contracts::{rpc, ContractCapabilityMetadata};

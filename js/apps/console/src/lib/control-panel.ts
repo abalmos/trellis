@@ -2,7 +2,7 @@ type Profile =
   | {
     active?: boolean;
     capabilities?: readonly string[];
-    email?: string;
+    email?: string | null;
     id?: string;
     name?: string | null;
     origin?: string;
@@ -15,9 +15,7 @@ export const routeTitles = {
   "/admin": "Overview",
   "/admin/users": "Users",
   "/admin/users/edit": "Edit User",
-  "/admin/capability-groups": "Capability Groups",
   "/admin/sessions": "Sessions",
-  "/admin/grants": "Grants",
   "/admin/authority/plans": "Authority Plans",
   "/admin/services": "Services",
   "/admin/devices": "Devices",
@@ -31,8 +29,6 @@ export const routeTitles = {
   "/admin/devices/activations/revoke": "Revoke Device Activation",
   "/admin/devices/reviews/decide": "Decide Device Review",
   "/admin/health-events": "Health",
-  "/admin/apps": "Apps",
-  "/admin/apps/revoke": "Revoke App Approval",
   "/admin/events": "Events",
   "/admin/jobs": "Jobs",
   "/admin/portals": "Portals",
@@ -42,7 +38,6 @@ export const routeTitles = {
   "/admin/portals/devices": "Device Portal Policy",
   "/admin/portals/devices/default": "Default Device Portal",
   "/admin/portals/devices/selection": "Device Portal Selection",
-  "/profile/grants/revoke": "Revoke Account Access",
 } as const;
 
 type AppPathname = keyof typeof routeTitles;
@@ -74,16 +69,10 @@ const navSections: NavSection[] = [
       { href: "/admin/sessions", label: "Sessions", icon: "activity" },
       { href: "/admin/events", label: "Events", icon: "activity" },
       { href: "/admin/jobs", label: "Jobs", icon: "clipboard" },
-      { href: "/admin/grants", label: "Grants", icon: "key" },
       {
         href: "/admin/authority/plans",
         label: "Authority Plans",
         icon: "clipboard",
-      },
-      {
-        href: "/admin/capability-groups",
-        label: "Capability Groups",
-        icon: "shield",
       },
       { href: "/admin/portals", label: "Portals", icon: "database" },
     ],

@@ -42,8 +42,10 @@ import type {
   PermissionAtomV1,
   RuntimeApi,
 } from "../contract_support/runtime.ts";
-import type { TrellisContractV1 } from "../contract_support/mod.ts";
-import { compileProtocolArtifacts } from "../contract_support/protocol_artifacts.ts";
+import {
+  type NativeProtocolContract,
+  nativeProtocolPresentation,
+} from "../contract_support/protocol_artifacts.ts";
 import type {
   ContractEventConsumers,
   ContractJobsMetadata,
@@ -59,6 +61,7 @@ import {
   lowerCamelSurfaceName,
 } from "../contract_support/surface_names.ts";
 import {
+  CONTRACT_EVENT_CONSUMERS_METADATA,
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
 } from "../contract_support/mod.ts";
@@ -583,7 +586,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
   bootstrapUrl: URL;
   contractId: string;
   contractDigest: string;
-  contract?: TrellisContractV1;
+  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
   identity: TrellisServiceConnectOpts["identity"];
@@ -600,9 +603,15 @@ async function fetchServiceBootstrapInfoOnce(args: {
   const provisionedIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(args.identityAuth.sessionKey)),
   );
-  const presentation = args.contract === undefined
-    ? undefined
-    : await compileProtocolArtifacts(args.contract);
+  const presentation = nativeProtocolPresentation(args.contract);
+  if (
+    args.identity.participantId !== args.contract.CONTRACT_ID ||
+    args.identity.participantArtifactDigest !== args.contract.CONTRACT_DIGEST ||
+    args.identity.participantNeedsDigest !==
+      args.contract.PARTICIPANT_NEEDS_DIGEST
+  ) {
+    throw new Error("Service participant identity does not match its contract");
+  }
   const unsigned = {
     requestId,
     issuedAt,
@@ -612,12 +621,10 @@ async function fetchServiceBootstrapInfoOnce(args: {
     newSessionPublicKey: args.sessionAuth.sessionKey,
     newSessionNkey: args.sessionAuth.sessionNkey,
     participantId: args.identity.participantId,
-    participantArtifactDigest: args.identity.participantArtifactDigest,
-    participantNeedsDigest: args.identity.participantNeedsDigest,
-    participantArtifact: presentation?.participant ?? null,
-    referencedApiArtifacts: presentation === undefined
-      ? null
-      : [presentation.api, ...presentation.referencedApis],
+    participantArtifactDigest: args.contract.CONTRACT_DIGEST,
+    participantNeedsDigest: args.contract.PARTICIPANT_NEEDS_DIGEST,
+    participantArtifact: presentation.participant,
+    referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
   const requestDigest = await sessionProofRequestDigestV1(unsigned);
@@ -670,7 +677,7 @@ async function fetchServiceBootstrapInfo(args: {
   serviceName: string;
   contractId: string;
   contractDigest: string;
-  contract?: TrellisContractV1;
+  contract: ServiceContract<RuntimeApi, RuntimeApi | undefined>;
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
   identity: TrellisServiceConnectOpts["identity"];
@@ -727,11 +734,6 @@ async function fetchServiceBootstrapInfo(args: {
             serverNowSeconds: failure.serverNow / 1_000,
           }),
         );
-        continue;
-      }
-      if (
-        failure.reason === "manifest_required" && args.contract !== undefined
-      ) {
         continue;
       }
       if (
@@ -829,9 +831,6 @@ async function fetchServiceBootstrapInfo(args: {
       settled.payload && typeof settled.payload === "object"
         ? (settled.payload as { state?: unknown }).state
         : undefined;
-    if (bootstrapState === "manifest_required" && args.contract !== undefined) {
-      continue;
-    }
     if (
       bootstrapState === "authority_pending" ||
       bootstrapState === "migration_required" ||
@@ -1127,12 +1126,11 @@ export type ServiceContract<
     ActionDescriptor,
     TOwnedApi
   >
+  & NativeProtocolContract
   & {
-    CONTRACT_ID: string;
-    CONTRACT_DIGEST: string;
-    CONTRACT: TrellisContractV1;
     readonly [CONTRACT_JOBS_METADATA]?: TJobs;
     readonly [CONTRACT_KV_METADATA]?: TKv;
+    readonly [CONTRACT_EVENT_CONSUMERS_METADATA]?: ContractEventConsumers;
   };
 
 type ContractOwnedApi<
@@ -3334,7 +3332,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         serviceName: args.name,
         contractId: args.contract.CONTRACT_ID,
         contractDigest: args.contract.CONTRACT_DIGEST,
-        contract: args.contract.CONTRACT,
+        contract: args.contract,
         identityAuth,
         sessionAuth,
         identity: args.identity,
@@ -3389,6 +3387,7 @@ export function connectTrellisServiceWithRuntimeDeps<
             bootstrap.connectInfo.transports,
           ),
           maxReconnectAttempts: DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
+          ignoreAuthErrorAbort: true,
           waitOnFirstConnect: DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
           inboxPrefix,
           authenticator,
@@ -3406,13 +3405,6 @@ export function connectTrellisServiceWithRuntimeDeps<
           connectedNats,
           authorizationContexts,
         );
-        stopContextRefresh = startAuthorizationContextRefresh({
-          trellisUrl: args.trellisUrl,
-          sessionId: bootstrap.connectInfo.sessionId,
-          auth: sessionAuth,
-          cache: authorizationContexts,
-          onTerminalFailure: () => connectedNats.drain(),
-        });
         void connectedNats.closed().finally(() => {
           stopContextRefresh?.();
           authorizationProviderCache?.stop();
@@ -3484,7 +3476,8 @@ export function connectTrellisServiceWithRuntimeDeps<
             (args.contract[CONTRACT_KV_METADATA] ?? {}) as ContractKvOf<
               TContract
             >,
-          contractEventConsumers: args.contract.CONTRACT.eventConsumers,
+          contractEventConsumers:
+            args.contract[CONTRACT_EVENT_CONSUMERS_METADATA] ?? {},
           server,
           bindings: bootstrap.binding.resources,
           healthIdentity: {
@@ -3494,6 +3487,17 @@ export function connectTrellisServiceWithRuntimeDeps<
           durableEventConsumerBeforeReadinessCheck:
             runtimeDeps.durableEventConsumerBeforeReadinessCheck,
           authorizationProviderCache,
+        });
+        stopContextRefresh = startAuthorizationContextRefresh({
+          trellisUrl: args.trellisUrl,
+          sessionId: bootstrap.connectInfo.sessionId,
+          auth: sessionAuth,
+          cache: authorizationContexts,
+          onRefresh: () =>
+            service.connection.status.phase === "connected"
+              ? undefined
+              : nc.reconnect(),
+          onTerminalFailure: () => nc.drain(),
         });
         recordTrellisDuration(
           "trellis.connect.duration",

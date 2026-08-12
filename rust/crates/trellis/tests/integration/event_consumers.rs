@@ -17,27 +17,20 @@ const SOURCE_CONTRACT_ID: &str = "trellis.integration.event-consumers-source-rus
 
 struct EventConsumerContract;
 
-impl trellis_rs::service::GeneratedServiceContract for EventConsumerContract {
-    const CONTRACT_ID: &'static str = "trellis.integration.event-consumer@v1";
-    const CONTRACT_DIGEST: &'static str = "runtime";
-    const CONTRACT_JSON: &'static str = "{}";
-}
-
-const SOURCE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const SOURCE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.event-consumers-source-rust@v1",
   "displayName": "Trellis Rust Event Consumers Source",
   "description": "Publishes source events for Rust durable consumer integration tests.",
-  "kind": "service",
   "capabilities": {
-    "publishEvents": {
-      "displayName": "Publish event-consumer fixture events",
-      "description": "Publish source events for durable consumer tests."
-    },
-    "readEvents": {
-      "displayName": "Read event-consumer fixture events",
-      "description": "Subscribe to source events for durable consumer tests."
-    }
+    "publishEvents": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "publish"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "publish"}
+    ]},
+    "readEvents": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Pinged"}, "action": "subscribe"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.event-consumers-source-rust@v1", "surface": "event", "name": "Source.Ponged"}, "action": "subscribe"}
+    ]}
   },
   "schemas": {
     "EventRecord": {
@@ -52,231 +45,21 @@ const SOURCE_CONTRACT_JSON: &str = r#"{
     "events": {
     "Source.Pinged": {
       "version": "v1",
-      "subject": "events.v1.integration.event-consumers.rust.source.pinged",
-      "event": { "schema": "EventRecord" },
-      "capabilities": {
-        "publish": ["publishEvents"],
-        "subscribe": ["readEvents"]
-      }
+      "event": { "schema": "EventRecord" }
     },
     "Source.Ponged": {
       "version": "v1",
-      "subject": "events.v1.integration.event-consumers.rust.source.ponged",
-      "event": { "schema": "EventRecord" },
-      "capabilities": {
-        "publish": ["publishEvents"],
-        "subscribe": ["readEvents"]
-      }
-    }
-  }
-}"#;
-
-const MISSING_GROUP_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-missing-group-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Missing Group",
-  "description": "Uses source events but intentionally declares no durable event consumer group.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "uses": {
-    "required": {
-      "source": {
-        "contract": "trellis.integration.event-consumers-source-rust@v1",
-        "events": { "subscribe": ["Source.Pinged"] }
-      }
-    }
-  }
-}"#;
-
-const AMBIGUOUS_GROUP_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-ambiguous-group-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Ambiguous Group",
-  "description": "Declares two durable groups for one source event to require an explicit group.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "uses": {
-    "required": {
-      "source": {
-        "contract": "trellis.integration.event-consumers-source-rust@v1",
-        "events": { "subscribe": ["Source.Pinged"] }
-      }
-    }
-  },
-  "eventConsumers": {
-    "primary": {
-      "uses": { "source": ["Source.Pinged"] },
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    },
-    "secondary": {
-      "uses": { "source": ["Source.Pinged"] },
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    }
-  }
-}"#;
-
-const DEPENDENCY_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-dependency-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Dependency",
-  "description": "Consumes source events through one Trellis-provisioned durable group.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "uses": {
-    "required": {
-      "source": {
-        "contract": "trellis.integration.event-consumers-source-rust@v1",
-        "events": { "subscribe": ["Source.Pinged"] }
-      }
-    }
-  },
-  "eventConsumers": {
-    "ingest": {
-      "uses": { "source": ["Source.Pinged"] },
-      "ordering": "strict",
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    }
-  }
-}"#;
-
-const PARALLEL_DEPENDENCY_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-parallel-dependency-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Parallel Dependency",
-  "description": "Consumes source events through a parallel Trellis-provisioned durable group.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "uses": {
-    "required": {
-      "source": {
-        "contract": "trellis.integration.event-consumers-source-rust@v1",
-        "events": { "subscribe": ["Source.Pinged"] }
-      }
-    }
-  },
-  "eventConsumers": {
-    "ingest": {
-      "uses": { "source": ["Source.Pinged"] },
-      "ordering": "parallel",
-      "ackWaitMs": 10000,
-      "maxDeliver": 2
-    }
-  }
-}"#;
-
-const GROUPED_DEPENDENCY_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-grouped-dependency-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Grouped Dependency",
-  "description": "Consumes two source events through one Trellis-provisioned durable group.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "uses": {
-    "required": {
-      "source": {
-        "contract": "trellis.integration.event-consumers-source-rust@v1",
-        "events": { "subscribe": ["Source.Pinged", "Source.Ponged"] }
-      }
-    }
-  },
-  "eventConsumers": {
-    "paired": {
-      "uses": { "source": ["Source.Pinged", "Source.Ponged"] },
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    }
-  }
-}"#;
-
-const SELF_CONSUMER_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.event-consumers-self-rust@v1",
-  "displayName": "Trellis Rust Event Consumers Self",
-  "description": "Publishes and consumes self-owned events through durable groups.",
-  "kind": "service",
-  "schemas": {
-    "EventRecord": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "events": {
-    "Self.Pinged": {
-      "version": "v1",
-      "subject": "events.v1.integration.event-consumers.rust.self.pinged",
-      "event": { "schema": "EventRecord" }
-    },
-    "Self.Ponged": {
-      "version": "v1",
-      "subject": "events.v1.integration.event-consumers.rust.self.ponged",
       "event": { "schema": "EventRecord" }
     }
-  },
-  "eventConsumers": {
-    "ingest": {
-      "self": ["Self.Pinged"],
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    },
-    "paired": {
-      "self": ["Self.Pinged", "Self.Ponged"],
-      "ackWaitMs": 1000,
-      "maxDeliver": 2
-    }
   }
 }"#;
+
+const MISSING_GROUP_CONSUMER_JSON: &str = "missing-group";
+const AMBIGUOUS_GROUP_CONSUMER_JSON: &str = "ambiguous-group";
+const DEPENDENCY_CONSUMER_JSON: &str = "dependency";
+const PARALLEL_DEPENDENCY_CONSUMER_JSON: &str = "parallel-dependency";
+const GROUPED_DEPENDENCY_CONSUMER_JSON: &str = "grouped-dependency";
+const SELF_CONSUMER_JSON: &str = "self";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EventRecord {
@@ -337,7 +120,7 @@ async fn event_consumers_durable_listen_without_declared_group_returns_err() {
     );
 
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -379,7 +162,7 @@ async fn event_consumers_parallel_group_runs_messages_concurrently() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -501,7 +284,7 @@ async fn event_consumers_handler_failure_redelivers_same_event() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -576,7 +359,7 @@ async fn event_consumers_authorization_failures_redeliver_or_term() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -722,7 +505,7 @@ async fn event_consumers_strict_group_rejects_parallel_workers() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -765,7 +548,7 @@ async fn event_consumers_ambiguous_group_without_opts_group_returns_err_and_spec
     );
 
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -848,7 +631,7 @@ async fn event_consumers_caller_provided_durable_name_returns_err() {
     );
 
     let (_runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -894,7 +677,7 @@ async fn event_consumers_bound_dependency_consumer_uses_trellis_provisioned_cons
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -970,7 +753,7 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -983,7 +766,6 @@ async fn event_consumers_transient_missing_consumer_retries_after_reconcile() {
     let deployment_id = consumer_key.deployment_id.clone();
     let consumer = trellis_test::connect_service_runtime::<EventConsumerContract>(
         runtime.trellis_url(),
-        DEPENDENCY_CONSUMER_JSON,
         &consumer_key,
     )
     .await
@@ -1065,7 +847,7 @@ async fn event_consumers_readiness_lost_does_not_nak_delivered_group_message() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -1214,7 +996,7 @@ async fn event_consumers_ephemeral_listener_avoids_durable_metadata_and_jetstrea
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -1297,7 +1079,7 @@ async fn event_consumers_duplicate_handlers_share_single_group_waiter() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -1406,7 +1188,6 @@ async fn event_consumers_self_owned_durable_consumer_receives_self_published_eve
         .get("ingest")
         .expect("ingest self event consumer binding");
     let before = matching_consumers(&runtime, SelfPingedEvent::SUBJECT).await;
-    eprintln!("debug binding={binding:?} consumers={before:?}");
     assert!(
         before
             .iter()
@@ -1589,7 +1370,7 @@ async fn event_consumers_stop_teardown_stops_durable_delivery() {
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -1666,7 +1447,7 @@ async fn event_consumers_grouped_consumer_waits_for_all_handlers_before_consumin
     );
 
     let (runtime, bootstrap_url, mut admin) = start_runtime().await;
-    let source_contract = test_contract(SOURCE_CONTRACT_JSON);
+    let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
     admin
         .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
         .await
@@ -2026,22 +1807,154 @@ async fn connect_consumer(
         .provision_service_instance(bootstrap_url, &contract, None, None)
         .await
         .expect("provision event consumer service instance");
-    trellis_test::connect_service_runtime::<EventConsumerContract>(
-        trellis_url,
-        manifest_json,
-        &service_key,
-    )
-    .await
-    .expect("connect event consumer service runtime")
+    trellis_test::connect_service_runtime::<EventConsumerContract>(trellis_url, &service_key)
+        .await
+        .expect("connect event consumer service runtime")
 }
 
 fn test_contract(manifest_json: &str) -> trellis_test::TrellisTestContract {
-    trellis_test::TrellisTestContract::from_manifest_json(manifest_json)
-        .expect("build event consumer test contract")
+    let source = trellis_test::TrellisTestContract::from_native_api_json(
+        SOURCE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build event source test contract");
+    if manifest_json == SOURCE_API_SOURCE_JSON {
+        return source;
+    }
+
+    let (id, display_name, description) = match manifest_json {
+        MISSING_GROUP_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-missing-group-rust@v1",
+            "Trellis Rust Event Consumers Missing Group",
+            "Uses source events but intentionally declares no durable event consumer group.",
+        ),
+        AMBIGUOUS_GROUP_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-ambiguous-group-rust@v1",
+            "Trellis Rust Event Consumers Ambiguous Group",
+            "Declares two durable groups for one source event to require an explicit group.",
+        ),
+        DEPENDENCY_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-dependency-rust@v1",
+            "Trellis Rust Event Consumers Dependency",
+            "Consumes source events through one Trellis-provisioned durable group.",
+        ),
+        PARALLEL_DEPENDENCY_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-parallel-dependency-rust@v1",
+            "Trellis Rust Event Consumers Parallel Dependency",
+            "Consumes source events through a parallel Trellis-provisioned durable group.",
+        ),
+        GROUPED_DEPENDENCY_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-grouped-dependency-rust@v1",
+            "Trellis Rust Event Consumers Grouped Dependency",
+            "Consumes two source events through one Trellis-provisioned durable group.",
+        ),
+        SELF_CONSUMER_JSON => (
+            "trellis.integration.event-consumers-self-rust@v1",
+            "Trellis Rust Event Consumers Self",
+            "Publishes and consumes self-owned events through durable groups.",
+        ),
+        _ => panic!("unknown event consumer fixture"),
+    };
+    let mut builder = trellis_rs::contracts::ContractBuilder::authoring(id,
+    display_name,
+    description,
+    trellis_rs::contracts::ContractKind::Service,)
+    .schema(
+        "EventRecord",
+        serde_json::json!({"type": "object", "required": ["id", "value"], "properties": {"id": {"type": "string"}, "value": {"type": "string"}}}),
+    );
+    if manifest_json == SELF_CONSUMER_JSON {
+        builder = builder
+            .event(
+                "Self.Pinged",
+                trellis_rs::contracts::event("v1", "events.v1.Self.Pinged", "EventRecord"),
+            )
+            .event(
+                "Self.Ponged",
+                trellis_rs::contracts::event("v1", "events.v1.Self.Ponged", "EventRecord"),
+            )
+            .event_consumer("ingest", event_consumer_group(&[], &["Self.Pinged"], false))
+            .event_consumer(
+                "paired",
+                event_consumer_group(&[], &["Self.Pinged", "Self.Ponged"], false),
+            );
+        return trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+            builder,
+            &[],
+        )
+        .expect("build self event consumer test contract");
+    }
+
+    let events = if manifest_json == GROUPED_DEPENDENCY_CONSUMER_JSON {
+        vec!["Source.Pinged", "Source.Ponged"]
+    } else {
+        vec!["Source.Pinged"]
+    };
+    builder = builder.use_ref(
+        "source",
+        trellis_rs::contracts::use_contract(SOURCE_CONTRACT_ID)
+            .with_event_subscribe(events.clone()),
+    );
+    if manifest_json == AMBIGUOUS_GROUP_CONSUMER_JSON {
+        builder = builder
+            .event_consumer("primary", event_consumer_group(&events, &[], false))
+            .event_consumer("secondary", event_consumer_group(&events, &[], false));
+    } else if manifest_json != MISSING_GROUP_CONSUMER_JSON {
+        let name = if manifest_json == GROUPED_DEPENDENCY_CONSUMER_JSON {
+            "paired"
+        } else {
+            "ingest"
+        };
+        builder = builder.event_consumer(
+            name,
+            event_consumer_group(
+                &events,
+                &[],
+                manifest_json == PARALLEL_DEPENDENCY_CONSUMER_JSON,
+            ),
+        );
+    }
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(builder, &[&source])
+        .expect("build dependency event consumer test contract")
+}
+
+fn event_consumer_group(
+    used_events: &[&str],
+    self_events: &[&str],
+    parallel: bool,
+) -> trellis_rs::contracts::ContractEventConsumerGroup {
+    trellis_rs::contracts::ContractEventConsumerGroup {
+        uses: (!used_events.is_empty())
+            .then(|| {
+                (
+                    "source".to_owned(),
+                    used_events
+                        .iter()
+                        .map(|event| (*event).to_owned())
+                        .collect(),
+                )
+            })
+            .into_iter()
+            .collect(),
+        self_events: self_events
+            .iter()
+            .map(|event| (*event).to_owned())
+            .collect(),
+        replay: trellis_rs::contracts::ContractEventConsumerReplay::New,
+        ordering: if parallel {
+            trellis_rs::contracts::ContractEventConsumerOrdering::Parallel
+        } else {
+            trellis_rs::contracts::ContractEventConsumerOrdering::Strict
+        },
+        ack_wait_ms: Some(if parallel { 10_000 } else { 1_000 }),
+        max_deliver: Some(2),
+        backoff_ms: None,
+        docs: None,
+    }
 }
 
 fn publisher_contract() -> trellis_test::TrellisTestContract {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.event-consumers-publisher-rust@v1",
         "Trellis Rust Event Consumers Publisher",
         "Publishes source events through a Rust app facade.",
@@ -2051,14 +1964,11 @@ fn publisher_contract() -> trellis_test::TrellisTestContract {
         "source",
         trellis_rs::contracts::use_contract("trellis.integration.event-consumers-source-rust@v1")
             .with_event_publish(["Source.Pinged", "Source.Ponged"]),
-    )
-    .build()
-    .expect("build publisher manifest");
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(
-        serde_json::to_value(manifest).expect("serialize publisher manifest"),
-    )
-    .expect("build publisher test contract")
+    let source = test_contract(SOURCE_API_SOURCE_JSON);
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(manifest, &[&source])
+        .expect("build publisher test contract")
 }
 
 async fn wait_for_observed_id(observed: &Arc<Mutex<Option<String>>>, event_id: &str) {

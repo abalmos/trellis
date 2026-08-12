@@ -120,16 +120,28 @@ pub const DEFAULT_RETRY_DELAY_MS: u64 = 1_000;
 /// Default authority-pending wait limit. `None` waits until authority is ready.
 pub const DEFAULT_AUTHORITY_PENDING_TIMEOUT_MS: Option<u64> = None;
 
-/// Contract constants emitted by generated Rust service SDKs.
+/// Native participant and API evidence emitted by generated Rust service SDKs.
 pub trait GeneratedServiceContract {
-    /// Trellis contract id, for example `example.service@v1`.
-    const CONTRACT_ID: &'static str;
+    /// Trellis participant id, for example `example.service@v1`.
+    const PARTICIPANT_ID: &'static str;
 
-    /// Content digest for the generated contract manifest.
+    /// Content digest for the generated participant artifact.
     const CONTRACT_DIGEST: &'static str;
 
-    /// Canonical contract manifest JSON presented during service bootstrap.
-    const CONTRACT_JSON: &'static str;
+    /// Digest of the participant needs resolution.
+    const PARTICIPANT_NEEDS_DIGEST: &'static str;
+
+    /// Canonical participant artifact JSON presented during service bootstrap.
+    const PARTICIPANT_JSON: &'static str;
+
+    /// Canonical owned API artifact JSON presented during service bootstrap.
+    const API_JSON: &'static str;
+
+    /// Digest of the owned API artifact.
+    const API_DIGEST: &'static str;
+
+    /// Exact referenced API JSON and digest evidence.
+    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)];
 }
 
 /// High-level options for connecting a generated Rust service runtime.
@@ -147,6 +159,14 @@ pub struct ServiceConnectOptions<'a> {
     participant_digest: &'a str,
     /// Exact participant needs digest accepted by deployment authority.
     participant_needs_digest: &'a str,
+    /// Normalized native participant artifact.
+    participant_json: &'a str,
+    /// Normalized native owned API artifact.
+    api_json: &'a str,
+    /// Semantic digest of the owned API artifact.
+    api_digest: &'a str,
+    /// Exact referenced API JSON and digest evidence.
+    referenced_api_artifacts: Vec<(String, String)>,
     /// Base64url-encoded provisioned service identity seed.
     provisioned_identity_seed_base64url: &'a str,
     /// Base64url-encoded service session seed.
@@ -173,6 +193,10 @@ impl<'a> ServiceConnectOptions<'a> {
         participant_id: &'a str,
         participant_digest: &'a str,
         participant_needs_digest: &'a str,
+        participant_json: &'a str,
+        api_json: &'a str,
+        api_digest: &'a str,
+        referenced_api_artifacts: &[(&str, &str)],
         provisioned_identity_seed_base64url: &'a str,
         session_key_seed_base64url: &'a str,
         authorization_context_store: Arc<dyn AuthorizationContextStore>,
@@ -184,6 +208,13 @@ impl<'a> ServiceConnectOptions<'a> {
             participant_id,
             participant_digest,
             participant_needs_digest,
+            participant_json,
+            api_json,
+            api_digest,
+            referenced_api_artifacts: referenced_api_artifacts
+                .iter()
+                .map(|(json, digest)| ((*json).to_owned(), (*digest).to_owned()))
+                .collect(),
             provisioned_identity_seed_base64url,
             session_key_seed_base64url: Cow::Borrowed(session_key_seed_base64url),
             timeout_ms: DEFAULT_TIMEOUT_MS,
@@ -1035,10 +1066,7 @@ impl<C> ConnectedServiceRuntime<C> {
     pub(crate) fn from_connected_client(
         service_name: impl Into<String>,
         client: Arc<TrellisClient>,
-    ) -> Result<Self, ServiceRuntimeError>
-    where
-        C: GeneratedServiceContract,
-    {
+    ) -> Result<Self, ServiceRuntimeError> {
         let binding = parse_bootstrap_binding(client.as_ref())?;
         let service_name = service_name.into();
         Ok(Self::from_parts(
@@ -1751,7 +1779,7 @@ impl<C> ConnectedServiceRuntime<C> {
     {
         let resources = binding.resource_bindings();
         let event_listeners = SharedDurableEventListeners::default();
-        let auth = LocalAuthVerifier::new(None, C::CONTRACT_ID);
+        let auth = LocalAuthVerifier::new(None, C::PARTICIPANT_ID);
         Self {
             client: None,
             caller: None,
@@ -1762,7 +1790,7 @@ impl<C> ConnectedServiceRuntime<C> {
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router: {
                 let mut router = Router::new();
-                router.set_api_id(C::CONTRACT_ID);
+                router.set_api_id(C::PARTICIPANT_ID);
                 router
             },
             service_name: service_name.into(),
@@ -1773,18 +1801,23 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 }
 
-impl<C> ConnectedServiceRuntime<C>
-where
-    C: GeneratedServiceContract,
-{
+impl<C> ConnectedServiceRuntime<C> {
     /// Connect with generated contract constants and parse the returned bootstrap binding.
     pub async fn connect(options: ServiceConnectOptions<'_>) -> Result<Self, ServiceRuntimeError> {
+        let referenced_api_artifacts = options
+            .referenced_api_artifacts
+            .iter()
+            .map(|(json, digest)| (json.as_str(), digest.as_str()))
+            .collect::<Vec<_>>();
         let client =
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
-                contract_id: options.participant_id,
-                contract_digest: options.participant_digest,
-                contract_json: C::CONTRACT_JSON,
+                participant_id: options.participant_id,
+                participant_digest: options.participant_digest,
+                participant_json: options.participant_json,
+                api_json: options.api_json,
+                api_digest: options.api_digest,
+                referenced_api_artifacts: &referenced_api_artifacts,
                 deployment_id: options.deployment_id,
                 instance_id: options.name,
                 provisioned_identity_seed_base64url: options.provisioned_identity_seed_base64url,
@@ -2527,6 +2560,10 @@ mod tests {
             "svc@v1",
             "participant-digest",
             "participant-needs-digest",
+            "{\"format\":\"trellis.participant.v1\",\"id\":\"svc@v1\"}",
+            "{\"format\":\"trellis.api.v1\",\"id\":\"api@v1\"}",
+            "api-digest",
+            &[],
             "identity-seed",
             "session-seed",
             Arc::new(crate::client::MemoryAuthorizationContextStore::default()),
@@ -2611,9 +2648,14 @@ mod tests {
     struct TestContract;
 
     impl GeneratedServiceContract for TestContract {
-        const CONTRACT_ID: &'static str = "example.service@v1";
+        const PARTICIPANT_ID: &'static str = "example.service@v1";
         const CONTRACT_DIGEST: &'static str = "sha256:test";
-        const CONTRACT_JSON: &'static str = r#"{"id":"example.service@v1"}"#;
+        const PARTICIPANT_NEEDS_DIGEST: &'static str = "sha256:needs";
+        const PARTICIPANT_JSON: &'static str =
+            r#"{"format":"trellis.participant.v1","id":"example.service@v1"}"#;
+        const API_JSON: &'static str = r#"{"format":"trellis.api.v1","id":"example.service@v1"}"#;
+        const API_DIGEST: &'static str = "sha256:api";
+        const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = &[];
     }
 
     struct RecordingRunner {

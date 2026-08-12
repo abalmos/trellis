@@ -137,15 +137,12 @@ getContractRuntime(audit).usedApi.feeds["Auth.ConnectFeed"].subject;
 getContractRuntime(audit).api.rpc["Audit.List"].subject;
 getContractRuntime(audit).api.rpc["Auth.Sessions.Me"].subject;
 getContractRuntime(audit).api.feeds["Auth.ConnectFeed"].subject;
-auth.CONTRACT.feeds?.["Auth.ConnectFeed"]?.subject;
-auth.CONTRACT.feeds?.["Auth.ConnectFeed"]?.capabilities?.subscribe?.[0];
-auth.CONTRACT.exports?.schemas?.[0];
 
 type _AuthContractDoesNotExposeRawSubjects = Assert<
   Not<HasKey<typeof auth, "subjects">>
 >;
-type _AuthContractDoesNotExposeTrellisCatalog = Assert<
-  Not<HasKey<typeof auth, "TrellisCatalog">>
+type _AuthContractDoesNotExposeCatalog = Assert<
+  Not<HasKey<typeof auth, "catalog">>
 >;
 
 const dashboard = defineAppContract(() => ({
@@ -181,10 +178,6 @@ const preferencesApp = defineAppContract(
   }),
 );
 
-preferencesApp.CONTRACT.state?.preferences.kind;
-preferencesApp.CONTRACT.state?.preferences.schema.schema;
-preferencesApp.CONTRACT.state?.drafts.kind;
-preferencesApp.CONTRACT.state?.drafts.schema.schema;
 getContractRuntime(preferencesApp).usedApi.rpc["State.Get"].subject;
 getContractRuntime(preferencesApp).usedApi.rpc["State.Put"].subject;
 getContractRuntime(preferencesApp).usedApi.rpc["State.Delete"].subject;
@@ -345,7 +338,6 @@ const inlineSchemaContract = defineServiceContract(
   }),
 );
 
-inlineSchemaContract.CONTRACT.jobs?.import?.payload.schema;
 getContractRuntime(inlineSchemaContract).ownedApi.rpc["Inline.Run"].subject;
 getContractRuntime(inlineSchemaContract).ownedApi.operations["Inline.Import"]
   .subject;
@@ -372,9 +364,6 @@ const topLevelJobsContract = defineServiceContract(
     })],
   }),
 );
-
-topLevelJobsContract.CONTRACT.jobs?.import?.result?.schema;
-topLevelJobsContract.CONTRACT.jobs?.export?.payload.schema;
 
 if (false) {
   defineServiceContract(
@@ -448,7 +437,6 @@ const transferContract = defineServiceContract(
 
 getContractRuntime(transferContract).ownedApi.operations["Demo.Files.Upload"]
   .transfer?.store;
-transferContract.CONTRACT.resources?.kv?.uploadsByKey?.schema.schema;
 
 const builderContract = defineServiceContract(
   {

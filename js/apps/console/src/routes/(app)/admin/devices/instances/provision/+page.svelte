@@ -14,9 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = Extract<AuthDeploymentsListOutput["entries"][number], { kind: "device" }>;
-  type DeviceMetadata = Record<string, string>;
-
+  type Deployment = AuthDeploymentsListOutput["entries"][number];
   const trellis = getTrellis();
   const notifications = getNotifications();
 
@@ -25,23 +23,20 @@
   let pending = $state(false);
   let deployments = $state<Deployment[]>([]);
   let provisionDeploymentId = $state("");
-  let publicIdentityKey = $state("");
-  let activationKey = $state("");
-  let metadataName = $state("");
-  let metadataSerialNumber = $state("");
-  let metadataModelNumber = $state("");
-  let opaqueMetadata = $state("");
+  let instanceId = $state("");
+  let identityPublicKey = $state("");
+  let provisioningSecret = $state<string | null>(null);
 
-  const activeDeployments = $derived(deployments.filter((deployment) => !deployment.disabled));
+  const activeDeployments = $derived(deployments.filter((deployment) => deployment.state === "active"));
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsList({ kind: "device", limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeploymentsList({ kind: "device", limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
-      const loadedActiveDeployments = loadedDeployments.filter((deployment) => !deployment.disabled);
+      const loadedActiveDeployments = loadedDeployments.filter((deployment) => deployment.state === "active");
       deployments = loadedDeployments;
       if (!provisionDeploymentId && loadedActiveDeployments.length) {
         provisionDeploymentId = loadedActiveDeployments[0]?.deploymentId ?? "";
@@ -53,55 +48,23 @@
     }
   }
 
-  function parseProvisionMetadata(): DeviceMetadata | undefined {
-    const metadata: DeviceMetadata = {};
-    const understoodEntries = [
-      ["name", metadataName],
-      ["serialNumber", metadataSerialNumber],
-      ["modelNumber", metadataModelNumber],
-    ] as const;
-
-    for (const [key, rawValue] of understoodEntries) {
-      const value = rawValue.trim();
-      if (value) metadata[key] = value;
-    }
-
-    for (const [index, rawLine] of opaqueMetadata.split(/\r?\n/).entries()) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      const separatorIndex = line.indexOf("=");
-      if (separatorIndex < 0) throw new Error(`Metadata line ${index + 1} must be key=value.`);
-
-      const key = line.slice(0, separatorIndex).trim();
-      const value = line.slice(separatorIndex + 1).trim();
-      if (!key || !value) throw new Error(`Metadata line ${index + 1} must have a non-empty key and value.`);
-      if (key in metadata) throw new Error(`Metadata key "${key}" is duplicated.`);
-      metadata[key] = value;
-    }
-
-    return Object.keys(metadata).length > 0 ? metadata : undefined;
-  }
-
   async function provisionInstance() {
     pending = true;
     error = null;
     try {
-      const metadata = parseProvisionMetadata();
       const response = await trellis.authDevicesProvision({
-          deploymentId: provisionDeploymentId,
-          publicIdentityKey: publicIdentityKey.trim(),
-          activationKey: activationKey.trim(),
-          ...(metadata ? { metadata } : {}),
-        } satisfies AuthDevicesProvisionInput,
+        deploymentId: provisionDeploymentId,
+        idempotencyKey: crypto.randomUUID(),
+        instanceId: instanceId.trim() || null,
+        identityPublicKey: identityPublicKey.trim() || null,
+        participantId: null,
+      } satisfies AuthDevicesProvisionInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success("Device instance provisioned.", "Provisioned");
-      publicIdentityKey = "";
-      activationKey = "";
-      metadataName = "";
-      metadataSerialNumber = "";
-      metadataModelNumber = "";
-      opaqueMetadata = "";
+      provisioningSecret = response.provisioningSecret;
+      instanceId = "";
+      identityPublicKey = "";
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -115,7 +78,7 @@
 </script>
 
 <section class="space-y-4">
-  <PageToolbar title="Provision device instance" description="Register a known device identity and activation key.">
+  <PageToolbar title="Provision device instance" description="Create a device identity and one-time provisioning secret.">
     {#snippet actions()}
       <a class="btn btn-ghost btn-sm" href="/admin/devices">Back to devices</a>
     {/snippet}
@@ -123,6 +86,14 @@
 
   {#if error}
     <Notice variant="error">{error}</Notice>
+  {/if}
+
+  {#if provisioningSecret}
+    <Notice variant="success">
+      <strong>Provisioning secret:</strong>
+      <code class="ml-2 break-all select-all">{provisioningSecret}</code>
+      <span class="ml-2">Store it now. Trellis will not show it again.</span>
+    </Notice>
   {/if}
 
   {#if loading}
@@ -133,10 +104,10 @@
     <Panel title="Instance identity" eyebrow="Device identity">
       <form class="trellis-form" onsubmit={(event) => { event.preventDefault(); void provisionInstance(); }}>
         <div class="trellis-record-summary">
-          <div class="trellis-record-summary-title">{metadataName.trim() || "New device instance"}</div>
+          <div class="trellis-record-summary-title">{instanceId.trim() || "New device instance"}</div>
           <div class="trellis-metadata">Deployment {provisionDeploymentId || "not selected"}</div>
-          {#if publicIdentityKey.trim()}
-            <div class="trellis-identifier break-all">{publicIdentityKey.trim()}</div>
+          {#if identityPublicKey.trim()}
+            <div class="trellis-identifier break-all">{identityPublicKey.trim()}</div>
           {/if}
         </div>
 
@@ -151,33 +122,13 @@
           </label>
 
           <label class="trellis-field">
+            <span class="trellis-field-label">Instance ID</span>
+            <input class="input input-bordered input-sm font-mono" bind:value={instanceId} placeholder="Generated when omitted" />
+          </label>
+
+          <label class="trellis-field">
             <span class="trellis-field-label">Public identity key</span>
-            <input class="input input-bordered input-sm font-mono" bind:value={publicIdentityKey} placeholder="base64url public key" required />
-          </label>
-
-          <label class="trellis-field">
-            <span class="trellis-field-label">Activation key</span>
-            <input class="input input-bordered input-sm font-mono" bind:value={activationKey} placeholder="base64url activation key" required />
-          </label>
-
-          <label class="trellis-field">
-            <span class="trellis-field-label">Name</span>
-            <input class="input input-bordered input-sm" bind:value={metadataName} placeholder="Optional display name" />
-          </label>
-
-          <label class="trellis-field">
-            <span class="trellis-field-label">Serial number</span>
-            <input class="input input-bordered input-sm" bind:value={metadataSerialNumber} placeholder="Optional serial" />
-          </label>
-
-          <label class="trellis-field">
-            <span class="trellis-field-label">Model number</span>
-            <input class="input input-bordered input-sm" bind:value={metadataModelNumber} placeholder="Optional model" />
-          </label>
-
-          <label class="trellis-field trellis-form-wide">
-            <span class="trellis-field-label">Metadata</span>
-            <textarea class="textarea textarea-bordered textarea-sm font-mono" bind:value={opaqueMetadata} placeholder="assetTag=asset-42&#10;location=front-desk"></textarea>
+            <input class="input input-bordered input-sm font-mono" bind:value={identityPublicKey} placeholder="Generated by the device; optional" />
           </label>
         </div>
 

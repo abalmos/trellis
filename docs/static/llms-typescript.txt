@@ -141,6 +141,9 @@ Rules:
   historical evidence. There is no central Auth validation RPC on either hot
   path; do not add one or perform provider-side session database lookups solely
   for authorization.
+- Ordinary context expiry still permits delayed historical event verification;
+  explicit context revocation invalidates every RPC and event proof from that
+  context, including proofs created before revocation.
 - The deny-all bootstrap JWT grants no authority. Context refresh is restart
   recovery: it renews the route credential and installs its exact expiry
   atomically with the verified context. It only routes Auth Callout and remains
@@ -175,6 +178,14 @@ Rules:
   capabilities, resource atoms, or expiry. OIDC callbacks are browser-cookie and
   portal-policy bound. The server-owned consent proposal is immutable across flow
   state transitions.
+- Trusted portal policy is exact to portal + participant and may select only
+  proposal-defined capabilities through base policy or verified provider-role
+  mappings. Successful trusted local registration applies that policy immediately
+  like local or OIDC login. On policy changes, Trellis revokes superseded contexts;
+  removing a portal, provider allowance, or policy also clears verified-role
+  provenance. Restoring configuration alone cannot replay cached roles: a new
+  verified login is required. Retained sessions can refresh and reconnect after
+  eligible authority returns.
 - Treat bindings as physical evidence, never authority. Bootstrap replay
   revalidates current state and returns a newly generated credential.
 - TypeScript telemetry helpers are exported from `@qlever-llc/trellis/telemetry`.

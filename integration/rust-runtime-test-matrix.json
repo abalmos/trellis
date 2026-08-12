@@ -3588,7 +3588,10 @@
       "id": "state.distinct-user-namespaces-are-isolated",
       "fixture": "state",
       "title": "Distinct users have isolated State namespaces for the same contract",
-      "coverage": ["state-parity", "auth-protocol-matrix"],
+      "coverage": [
+        "state-parity",
+        "auth-protocol-matrix"
+      ],
       "description": "Two real local users use the same exact app contract, store, and key while retaining independent State values.",
       "scenario": {
         "participants": [
@@ -3606,10 +3609,16 @@
         "given": [
           "two distinct authenticated user principals use the same contract"
         ],
-        "when": ["both users read and write the same State store"],
-        "then": ["each user observes only its own value"]
+        "when": [
+          "both users read and write the same State store"
+        ],
+        "then": [
+          "each user observes only its own value"
+        ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "state",
@@ -3636,7 +3645,9 @@
             "contract": "trellis.integration.state-client@v1"
           }
         ],
-        "given": ["State.Get Call remains granted"],
+        "given": [
+          "State.Get Call remains granted"
+        ],
         "when": [
           "the exact participant-resource State Read atom is present and then absent"
         ],
@@ -3644,7 +3655,9 @@
           "the exact atom succeeds and the missing atom returns AuthError"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "state",
@@ -3658,7 +3671,11 @@
       "id": "state.malformed-envelope-and-unknown-version-are-unexpected",
       "fixture": "state",
       "title": "Malformed envelopes and unknown State versions fail closed",
-      "coverage": ["state-parity", "state-admin", "observability-trace-matrix"],
+      "coverage": [
+        "state-parity",
+        "state-admin",
+        "observability-trace-matrix"
+      ],
       "description": "Public State.Get returns UnexpectedError for an envelope missing stateVersion, an unaccepted stateVersion, and an invalid writerContractDigest; State Admin.Delete removes each and later reads report missing State.",
       "scenario": {
         "participants": [
@@ -3676,14 +3693,18 @@
         "given": [
           "raw missing-field, unknown-version, and invalid-writer-digest State envelopes are seeded"
         ],
-        "when": ["the app reads them and the admin deletes them"],
+        "when": [
+          "the app reads them and the admin deletes them"
+        ],
         "then": [
           "reads return UnexpectedError",
           "admin cleanup succeeds without trusting malformed metadata",
           "later reads report found false"
         ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "state",
@@ -3713,10 +3734,16 @@
         "given": [
           "the service is authenticated and has State.Get Call authority"
         ],
-        "when": ["it sends a signed State.Get request"],
-        "then": ["Platform returns AuthError"]
+        "when": [
+          "it sends a signed State.Get request"
+        ],
+        "then": [
+          "Platform returns AuthError"
+        ]
       },
-      "completion": { "rust": "implemented" },
+      "completion": {
+        "rust": "implemented"
+      },
       "implementations": {
         "rust": {
           "module": "state",
@@ -4347,7 +4374,7 @@
           {
             "name": "trellis control plane",
             "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and catalog"
+            "contract": "Trellis bootstrap/client HTTP route and participant authority"
           },
           {
             "name": "client app",
@@ -4367,8 +4394,8 @@
         ],
         "given": [
           "An app has a bound user session.",
-          "A known service contract exists in the control-plane catalog.",
-          "A known device contract exists in the control-plane catalog.",
+          "A known service participant exists in control-plane authority.",
+          "A known device participant exists in control-plane authority.",
           "The live app session row is updated to reference each non-client digest."
         ],
         "when": [
@@ -4404,7 +4431,7 @@
           {
             "name": "trellis control plane",
             "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and catalog"
+            "contract": "Trellis bootstrap/client HTTP route and participant authority"
           },
           {
             "name": "client app",
@@ -4667,13 +4694,13 @@
         "auth",
         "bootstrap-client"
       ],
-      "description": "A live app session bound to a known app contract digest succeeds even though user app contracts are not active service catalog entries.",
+      "description": "A live app session bound to a known app participant digest succeeds even though user app participants are not active service authority entries.",
       "scenario": {
         "participants": [
           {
             "name": "trellis control plane",
             "kind": "control-plane",
-            "contract": "Trellis bootstrap/client HTTP route and catalog"
+            "contract": "Trellis bootstrap/client HTTP route and participant authority"
           },
           {
             "name": "client app",
@@ -4683,63 +4710,13 @@
         ],
         "given": [
           "An app has a bound user session for a known app contract digest.",
-          "The app contract is not an active service catalog entry."
+          "The app participant is not an active service authority entry."
         ],
         "when": [
           "The client fetches /bootstrap/client with that session key."
         ],
         "then": [
           "The route returns ready for the known app digest."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-active-contracts-survive-restart",
-      "fixture": "control-plane",
-      "title": "Catalog active contracts survive control-plane restart",
-      "coverage": [
-        "catalog",
-        "authority",
-        "persistence",
-        "restart"
-      ],
-      "description": "Registers compatible service and client contracts, restarts the Trellis control plane, and verifies the active catalog still authorizes the client call.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis catalog and authority store"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped catalog provider contract"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped catalog client contract"
-          }
-        ],
-        "given": [
-          "A service and client contract are active and an RPC succeeds."
-        ],
-        "when": [
-          "Only the Trellis control plane process restarts against the same storage."
-        ],
-        "then": [
-          "The active catalog remains usable and the client RPC succeeds after restart."
         ]
       },
       "completion": {
@@ -4979,58 +4956,6 @@
       "isolationReason": "mutates process-global state or process lifecycle"
     },
     {
-      "id": "control-plane.catalog-resource-binding-projection",
-      "fixture": "control-plane",
-      "title": "Catalog resource binding projection reports current service resources",
-      "coverage": [
-        "catalog",
-        "resources",
-        "resource-bindings",
-        "generated-rpc"
-      ],
-      "description": "Uses a live service to call Trellis.Bindings.Get and return the generated projection for KV, store, and jobs bindings before and after a resource-removing migration.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Core Bindings.Get RPC"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped resource binding contract"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped binding projection client contract"
-          }
-        ],
-        "given": [
-          "A service deployment has resolved KV, store, and jobs resource bindings."
-        ],
-        "when": [
-          "The service calls Trellis.Bindings.Get through the live control plane.",
-          "A migration replacing the service contract with one that removes the resources is accepted."
-        ],
-        "then": [
-          "The generated binding projection includes KV, store, and jobs bindings before migration.",
-          "The generated binding projection has an empty resources object after migration."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
       "id": "control-plane.outbox-dispatches-after-control-plane-restart",
       "fixture": "control-plane",
       "title": "Outbox dispatches after control-plane restart",
@@ -5067,294 +4992,6 @@
         ],
         "then": [
           "The queued event is dispatched and observed by a public subscriber."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-dependency-issue-resolved-by-provider",
-      "fixture": "control-plane",
-      "title": "Catalog dependency issue is resolved by provider",
-      "coverage": [
-        "catalog",
-        "authority",
-        "dependency-resolution",
-        "rpc"
-      ],
-      "description": "Installs a client with a missing provider dependency, then registers the provider and verifies the same client call succeeds.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis catalog dependency resolver"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped dependency provider contract"
-          },
-          {
-            "name": "client app",
-            "kind": "app",
-            "contract": "case-scoped dependency client contract"
-          }
-        ],
-        "given": [
-          "A client contract depends on a provider that is not active yet."
-        ],
-        "when": [
-          "The missing provider contract is registered and connected."
-        ],
-        "then": [
-          "The dependency issue clears and the client RPC succeeds."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-active-use-issue-is-reported",
-      "fixture": "control-plane",
-      "title": "Catalog active-use issue is reported",
-      "coverage": [
-        "catalog",
-        "catalog-issues",
-        "dependency-resolution",
-        "authority"
-      ],
-      "description": "Expires an accepted provider implementation offer while a consumer remains active, then verifies the public catalog reports an invalid active uses issue for the consumer.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis catalog active-use validator"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped active-use provider contract"
-          },
-          {
-            "name": "service consumer",
-            "kind": "service",
-            "contract": "case-scoped active-use consumer contract"
-          },
-          {
-            "name": "catalog admin",
-            "kind": "app",
-            "contract": "case-scoped catalog admin app contract"
-          }
-        ],
-        "given": [
-          "A provider service and a consumer service with a required provider use are active."
-        ],
-        "when": [
-          "The provider's accepted implementation offer is expired in control-plane SQLite while the consumer remains active."
-        ],
-        "then": [
-          "The public catalog reports an invalid active contract uses issue for the consumer deployment.",
-          "Restoring the provider offer clears the issue."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-force-replace-resolves-catalog-issue",
-      "fixture": "control-plane",
-      "title": "Catalog force replace resolves a catalog issue",
-      "coverage": [
-        "catalog",
-        "catalog-issues",
-        "force-replace"
-      ],
-      "description": "Invokes the catalog issue resolver against incompatible active offers and verifies force-replace makes the replacement digest active.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis CatalogIssues admin RPC"
-          },
-          {
-            "name": "local admin",
-            "kind": "admin",
-            "contract": "Trellis built-in admin identity"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped incompatible catalog contracts"
-          }
-        ],
-        "given": [
-          "The catalog contains incompatible active offers and reports an issue."
-        ],
-        "when": [
-          "An admin resolves the issue with force-replace."
-        ],
-        "then": [
-          "The current effective offers are withdrawn, the replacement digest becomes active, and the catalog issue clears."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-surface-status-reports-provider-runtime",
-      "fixture": "control-plane",
-      "title": "Catalog Contract.Get and Surface.Status report provider runtime state",
-      "coverage": [
-        "catalog",
-        "surface-status",
-        "runtime-availability",
-        "capability-permission-matrix",
-        "generated-rpc"
-      ],
-      "description": "Uses generated Core Contract.Get, Core Surface.Status, and Auth admin RPCs against live services to verify catalog manifest projection, edge statuses, validation failures, no-live filtering, same-contract old-digest filtering, unrelated-live-service filtering, and provider runtime states.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Core Surface.Status and Auth admin RPC"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped provider RPC contract"
-          },
-          {
-            "name": "authorized client app",
-            "kind": "app",
-            "contract": "case-scoped app contract with Core Surface.Status and provider RPC authority"
-          },
-          {
-            "name": "observer client app",
-            "kind": "app",
-            "contract": "case-scoped app contract with Core Surface.Status but no provider RPC authority"
-          }
-        ],
-        "given": [
-          "A documented provider service contract shape is approved before the provider is active."
-        ],
-        "when": [
-          "An authorized client calls generated Trellis.Contract.Get for the provider digest.",
-          "An authorized client calls generated Trellis.Surface.Status for unknown and invalid surface requests.",
-          "An authorized client calls generated Trellis.Surface.Status before and after the provider connects.",
-          "An observer lacking provider RPC authority calls generated Trellis.Surface.Status.",
-          "The provider live connection is kicked through generated Auth connection RPCs.",
-          "An older same-contract provider digest without the requested surface connects while the provider remains no-live.",
-          "An unrelated service for another contract connects while the provider remains no-live.",
-          "The provider service instance is disabled through generated Auth admin RPCs."
-        ],
-        "then": [
-          "Contract.Get preserves canonical exports and contract, RPC, operation, and event docs.",
-          "Surface.Status reports unknown contract and unknown surface responses and rejects invalid actions.",
-          "Surface.Status reports the public pre-provider state.",
-          "Surface.Status reports the provider as available and live after connection.",
-          "Surface.Status reports valid event publish and feed subscribe requests as available when the provider is live.",
-          "Surface.Status reports unauthorized with the provider capability for the observer.",
-          "Surface.Status reports the provider as available without a live implementer after the provider connection is kicked.",
-          "Surface.Status keeps reporting the provider as no-live when an older same-contract digest without the requested surface is live.",
-          "Surface.Status keeps reporting the provider as no-live when an unrelated service is live.",
-          "Surface.Status reports the disabled provider runtime state after instance disable."
-        ]
-      },
-      "completion": {
-        "rust": "pending"
-      },
-      "pending": {
-        "reason": "The obsolete pre-Rust-auth test port was removed; this runtime behavior requires a current Rust live test.",
-        "owner": "Trellis Rust runtime",
-        "intendedMilestone": "post-M9 testing correction follow-up"
-      },
-      "classification": "isolated-process",
-      "isolationReason": "mutates process-global state or process lifecycle"
-    },
-    {
-      "id": "control-plane.catalog-admin-rpc-list-status-and-issue-filters",
-      "fixture": "control-plane",
-      "title": "Catalog admin RPC list, status, and issue filters",
-      "coverage": [
-        "catalog",
-        "catalog-issues",
-        "generated-rpc",
-        "surface-status",
-        "admin-list-filters"
-      ],
-      "description": "Uses generated Core catalog/status RPCs and Auth admin list RPCs against live provider and consumer services to verify catalog entries, deployment filters, runtime status, active-use issue filtering, and provider/consumer use relationships.",
-      "scenario": {
-        "participants": [
-          {
-            "name": "trellis control plane",
-            "kind": "control-plane",
-            "contract": "Trellis Core catalog/status and Auth admin list RPC"
-          },
-          {
-            "name": "service provider",
-            "kind": "service",
-            "contract": "case-scoped catalog admin provider contract"
-          },
-          {
-            "name": "service consumer",
-            "kind": "service",
-            "contract": "case-scoped catalog admin consumer contract"
-          },
-          {
-            "name": "catalog admin",
-            "kind": "app",
-            "contract": "case-scoped catalog admin app contract"
-          }
-        ],
-        "given": [
-          "A provider service and a consumer service with a required provider use are active."
-        ],
-        "when": [
-          "The admin lists catalog contracts and service deployments through generated RPCs.",
-          "The admin reads provider surface status and consumer contract uses through generated Core RPCs.",
-          "The provider offer is expired while the consumer remains active."
-        ],
-        "then": [
-          "Catalog and service deployment lists include the expected provider and consumer entries.",
-          "Surface.Status reports the provider as live before expiry.",
-          "Contract.Get includes the expected consumer-to-provider use relationship.",
-          "The catalog issue projection can be filtered to the invalid active-use issue for the consumer deployment."
         ]
       },
       "completion": {
@@ -5606,7 +5243,7 @@
         ],
         "given": [
           "A live Trellis control plane has an enabled service deployment with a connected service and ping client.",
-          "The service deployment validateActiveCatalog fail-once hook is enabled."
+          "The service deployment active-authority validation fail-once hook is enabled."
         ],
         "when": [
           "The admin disables the service deployment through generated Auth admin RPCs."
@@ -7106,6 +6743,214 @@
           "function": "runtime_check_is_mode_scoped_and_read_only"
         }
       }
+    },
+    {
+      "id": "auth.trusted-local-registration-applies-portal-policy",
+      "fixture": "auth",
+      "title": "Trusted local registration applies portal policy immediately",
+      "coverage": ["auth", "browser-auth-flow", "trusted-portals"],
+      "description": "A new local user registered through a trusted portal reaches approved state without a separate consent step and receives the portal-selected authority.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "a trusted portal policy and a previously unregistered local user"
+        ],
+        "when": ["the user completes local registration"],
+        "then": [
+          "the flow is approved immediately with the trusted portal authority"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "trusted_local_registration_applies_portal_policy"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.portal-policy-removal-requires-new-login",
+      "fixture": "auth",
+      "title": "Removed portal policy cannot resurrect cached authority",
+      "coverage": ["auth", "authorization-context", "trusted-portals"],
+      "description": "Removing trusted portal policy revokes authority, clears verified-role provenance, and prevents policy restoration from resurrecting authority without a new verified login.",
+      "scenario": {
+        "participants": [],
+        "given": ["an active trusted-portal authority and verified provenance"],
+        "when": ["the grant override is removed and later restored"],
+        "then": [
+          "authority and contexts are revoked, provenance is cleared, and cached roles cannot restore authority"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_policy_removal_requires_new_login"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.oidc-role-mapping-converges-authority",
+      "fixture": "auth",
+      "title": "OIDC role mapping converges trusted portal authority",
+      "coverage": ["auth", "browser-auth-flow", "oidc", "trusted-portals"],
+      "description": "Verified provider-scoped roles resolve direct capabilities and recursive capability groups, replace provenance on later login, and fail closed for malformed role claims.",
+      "scenario": {
+        "participants": [],
+        "given": ["an OIDC provider and trusted role mappings"],
+        "when": [
+          "verified roles change across logins or the configured claim is malformed"
+        ],
+        "then": [
+          "authority and provenance converge for valid roles and malformed claims are denied"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "oidc_role_mapping_converges_authority"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "mutates the shared test OIDC provider's process-global claims"
+    },
+    {
+      "id": "auth.portal-policy-reduction-and-expansion-converge",
+      "fixture": "auth",
+      "title": "Portal policy reduction and expansion converge live sessions",
+      "coverage": ["auth", "authorization-context", "trusted-portals"],
+      "description": "Reducing trusted portal policy removes authority from retained sessions, while later expansion issues fresh contexts and restores the selected authority without recreating sessions.",
+      "scenario": {
+        "participants": [],
+        "given": ["active retained sessions governed by trusted portal policy"],
+        "when": ["the policy is reduced and later expanded"],
+        "then": [
+          "old authority is denied and fresh contexts recover the expanded authority"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_policy_reduction_and_expansion_converge"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.hostile-old-context-and-proofs-are-denied",
+      "fixture": "auth",
+      "title": "Hostile old context and signed proofs are denied after reduction",
+      "coverage": ["auth", "authorization-context", "events", "security"],
+      "description": "After authority reduction, exact stale NATS admission material and old signed RPC and event proofs cannot exercise the removed authority before context expiry.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "captured context, routing, RPC, and event proof material from before reduction"
+        ],
+        "when": ["an adversarial client replays that material after reduction"],
+        "then": [
+          "NATS admission and local proof verification deny every stale attempt"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "hostile_old_context_is_denied_after_reduction"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.same-session-multiple-connections-are-kicked",
+      "fixture": "auth",
+      "title": "Every physical connection for one session is kicked",
+      "coverage": ["auth", "authorization-context", "connection-presence"],
+      "description": "Two physical NATS connections sharing one logical session are tracked independently and both are kicked when their authorization context is revoked.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "two physical connections authenticated by the same retained session"
+        ],
+        "when": ["the session authorization context is revoked"],
+        "then": [
+          "both physical connections are disconnected while the logical session remains"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "same_session_connections_survive_jwt_window_and_are_kicked"
+        }
+      },
+      "classification": "isolated-process",
+      "isolationReason": "requires a 10-second process-level NATS user-JWT lifetime to verify the live connection-presence bucket configuration"
+    },
+    {
+      "id": "auth.portal-reconciliation-a-b-a-converges",
+      "fixture": "auth",
+      "title": "Portal reconciliation distinguishes A to B to A transitions",
+      "coverage": [
+        "auth",
+        "idempotency",
+        "portal-reconciliation",
+        "trusted-portals"
+      ],
+      "description": "Portal policy reconciliation treats each complete source and target transition as distinct, allowing authority A to reduce to B and later return to A.",
+      "scenario": {
+        "participants": [],
+        "given": ["a trusted portal authority at policy A"],
+        "when": ["policy changes to B and later returns to A"],
+        "then": [
+          "both transitions commit and the final authority converges to A"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "portal_reconciliation_converges_a_b_a"
+        }
+      },
+      "classification": "shared"
+    },
+    {
+      "id": "auth.concurrent-portal-provenance-converges",
+      "fixture": "auth",
+      "title": "Concurrent trusted logins converge authority and provenance",
+      "coverage": [
+        "auth",
+        "browser-auth-flow",
+        "concurrency",
+        "trusted-portals"
+      ],
+      "description": "Concurrent trusted logins preserve one coherent authority and portal-binding postcondition, including provenance-only role changes that leave effective authority unchanged.",
+      "scenario": {
+        "participants": [],
+        "given": [
+          "concurrent verified logins for the same principal and participant"
+        ],
+        "when": [
+          "the logins apply equivalent authority or authority-equivalent role provenance"
+        ],
+        "then": [
+          "durable authority and portal provenance converge without a torn postcondition"
+        ]
+      },
+      "completion": { "rust": "implemented" },
+      "implementations": {
+        "rust": {
+          "module": "auth",
+          "function": "concurrent_portal_provenance_converges"
+        }
+      },
+      "classification": "shared"
     },
     {
       "id": "cli.server-managed-nats",

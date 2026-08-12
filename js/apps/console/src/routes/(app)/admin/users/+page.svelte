@@ -18,7 +18,7 @@
   const notifications = getNotifications();
 
   type UserView = AuthUsersListOutput["entries"][number];
-  type IdentityView = UserView["identities"][number];
+  type IdentityView = { provider: string; subject: string; displayName?: string | null; email?: string | null };
   type PasswordResetResult = {
     name: string | null;
     username: string | null;
@@ -36,11 +36,11 @@
   }
 
   function primaryIdentity(user: UserView): IdentityView | null {
-    return user.identities[0] ?? null;
+    return null;
   }
 
   function localIdentity(user: UserView): IdentityView | null {
-    return user.identities.find((identity) => identity.provider.trim().toLowerCase() === "local") ?? null;
+    return null;
   }
 
   function userDisplayName(user: UserView): string | null {
@@ -66,7 +66,7 @@
   }
 
   function identityProvidersLabel(user: UserView): string {
-    const providers = Array.from(new Set(user.identities.map((identity) => identity.provider.trim()).filter(Boolean)));
+    const providers: string[] = [];
     if (providers.length === 0) return "No providers";
     return providers.join(", ");
   }
@@ -80,7 +80,7 @@
   let resetResult = $state<PasswordResetResult | null>(null);
   let resetDialog = $state<HTMLDialogElement | null>(null);
 
-  const activeUserCount = $derived(users.filter((user) => user.active).length);
+  const activeUserCount = $derived(users.filter((user) => user.state === "active").length);
   const inactiveUserCount = $derived(users.length - activeUserCount);
 
   async function load() {
@@ -88,11 +88,11 @@
     error = null;
     sessionsWarning = null;
     try {
-      const usersResponse = await trellis.authUsersList({ limit: 500, offset: 0 }).take();
+      const usersResponse = await trellis.authUsersList({ limit: 500 }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       users = usersResponse.entries ?? [];
 
-      const sessionsResponse = await trellis.authSessionsList({ limit: 500, offset: 0 }).take();
+      const sessionsResponse = await trellis.authSessionsList({ limit: 500 }).take();
       if (isErr(sessionsResponse)) {
         sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
         userLastAuth = {};
@@ -101,10 +101,9 @@
 
       const lastAuthByUser: Record<string, string> = {};
       for (const session of sessionsResponse.entries ?? []) {
-        if (session.principal.type !== "user") continue;
-        const key = session.principal.userId;
-        if (!lastAuthByUser[key] || session.lastAuth > lastAuthByUser[key]) {
-          lastAuthByUser[key] = session.lastAuth;
+        const key = session.principalId;
+        if (!lastAuthByUser[key] || session.lastSeenAt > Number(lastAuthByUser[key])) {
+          lastAuthByUser[key] = String(session.lastSeenAt);
         }
       }
       userLastAuth = lastAuthByUser;
@@ -117,6 +116,8 @@
     resetPendingUserId = user.userId;
     try {
       const response = await trellis.authUsersPasswordResetCreate({
+        idempotencyKey: crypto.randomUUID(),
+        returnTarget: null,
         userId: user.userId,
       }).take();
       if (isErr(response)) {
@@ -128,8 +129,8 @@
         name: userDisplayName(user),
         username: userDisplayUsername(user),
         email: userDisplayEmail(user),
-        resetUrl: response.url,
-        expiresAt: response.expiresAt,
+        resetUrl: response.flow.completionUrl,
+        expiresAt: String(response.flow.expiresAt),
       };
       resetDialog?.showModal();
       notifications.success(`Created password reset link for ${identityLabel(user)}.`, "Password reset ready");
@@ -212,10 +213,10 @@
         </thead>
         <tbody>
           {#each users as user (user.userId)}
-            <tr class={["users-row", !user.active && "users-row-inactive"]}>
+            <tr class={["users-row", user.state !== "active" && "users-row-inactive"]}>
               <td class="max-w-0 align-top">
                 <div class="flex min-w-0 items-start gap-3">
-                  <span class={["mt-1.5 size-2 rounded-full", user.active ? "bg-success" : "bg-base-content/25"]} aria-hidden="true"></span>
+                  <span class={["mt-1.5 size-2 rounded-full", user.state === "active" ? "bg-success" : "bg-base-content/25"]} aria-hidden="true"></span>
                   <div class="min-w-0 space-y-1">
                     <div class="flex min-w-0 items-center gap-2">
                        <span class="truncate font-medium" title={identityLabel(user)}>{identityLabel(user)}</span>
@@ -228,7 +229,7 @@
               </td>
               <td class="hidden max-w-0 align-top md:table-cell">
                 <span class="block truncate text-xs text-base-content/70" title={userDisplayEmail(user) ?? "Not set"}>{userDisplayEmail(user) ?? "Not set"}</span>
-                <span class="mt-1 block truncate text-[0.68rem] uppercase tracking-[0.08em] text-base-content/40" title={identityProvidersLabel(user)}>{identityCountLabel(user.identities.length)} · {identityProvidersLabel(user)}</span>
+                <span class="mt-1 block truncate text-[0.68rem] uppercase tracking-[0.08em] text-base-content/40" title={identityProvidersLabel(user)}>{identityCountLabel(0)} · {identityProvidersLabel(user)}</span>
               </td>
               <td class="hidden w-36 align-top text-xs text-base-content/60 lg:table-cell">
                 {#if userLastAuth[userKey(user)]}
@@ -238,7 +239,7 @@
                 {/if}
               </td>
               <td class="w-28 align-top">
-                {#if user.active}
+                {#if user.state === "active"}
                   <span class="badge badge-success badge-sm">Active</span>
                 {:else}
                   <span class="badge badge-neutral badge-sm">Inactive</span>

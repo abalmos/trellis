@@ -53,6 +53,25 @@ pub struct CreateLocalUserInput {
     pub actions: Vec<PostCommitActionRecord>,
 }
 
+/// Input for atomically completing a local password account flow.
+#[derive(Clone, Debug)]
+pub struct CompletePasswordResetInput {
+    /// Plaintext account-flow token retained only for this call.
+    pub token: String,
+    /// Expected durable account-flow version.
+    pub expected_flow_version: u64,
+    /// Username required only when installing the first local credential.
+    pub username: Option<String>,
+    /// Plaintext password retained only for this call.
+    pub password: String,
+    /// Completion time in Unix milliseconds.
+    pub consumed_at: i64,
+    /// Durable request proof and replay result.
+    pub idempotency: IdempotencyResultRecord,
+    /// Deterministic post-commit actions.
+    pub actions: Vec<PostCommitActionRecord>,
+}
+
 /// OIDC-authenticated user registration input.
 #[derive(Clone, Debug)]
 pub struct CreateFederatedUserInput {
@@ -459,13 +478,17 @@ where
     /// conflict when the flow or credential changed concurrently.
     pub(crate) async fn complete_password_reset(
         &self,
-        token: String,
-        expected_flow_version: u64,
-        password: &str,
-        consumed_at: i64,
-        mut idempotency: IdempotencyResultRecord,
-        actions: Vec<PostCommitActionRecord>,
+        input: CompletePasswordResetInput,
     ) -> Result<IdempotentOutcome<AccountFlowRecord>, AuthorizationStateError> {
+        let CompletePasswordResetInput {
+            token,
+            expected_flow_version,
+            username,
+            password,
+            consumed_at,
+            mut idempotency,
+            actions,
+        } = input;
         super::validation::validate_idempotency_and_actions(&idempotency, &actions)?;
         super::super::domain::require_protocol_timestamp("consumedAt", consumed_at)?;
         let token_hash = bearer_secret_digest(&token)?;
@@ -478,38 +501,67 @@ where
             .target_principal_id
             .as_deref()
             .ok_or(AuthorizationStateError::StorageConflict)?;
-        let current = self
-            .repository
-            .get_local_credential(principal_id)
-            .await?
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        if verify_password(&current.password_hash, password) {
+        let current = self.repository.get_local_credential(principal_id).await?;
+        if current
+            .as_ref()
+            .is_some_and(|current| verify_password(&current.password_hash, &password))
+        {
             return Err(AuthorizationStateError::InvalidRecord(
                 "new password must differ from current password".to_owned(),
             ));
         }
         let (password_hash, hash_profile) =
-            hash_password(password, Some(self.config.password_min_length))?;
+            hash_password(&password, Some(self.config.password_min_length))?;
         let replacement = LocalCredentialRecord {
-            principal_id: current.principal_id.clone(),
-            normalized_username: current.normalized_username.clone(),
+            principal_id: principal_id.to_owned(),
+            normalized_username: match &current {
+                Some(current) => current.normalized_username.clone(),
+                None => normalize_username(username.as_deref().ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "username is required when installing a local credential".to_owned(),
+                    )
+                })?)?,
+            },
             password_hash,
             hash_profile,
             failed_attempts: 0,
             locked_until: None,
             password_changed_at: consumed_at,
             updated_at: consumed_at,
-            version: current.version.checked_add(1).ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("credential version overflow".to_owned())
-            })?,
+            version: match &current {
+                Some(current) => current.version.checked_add(1).ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord("credential version overflow".to_owned())
+                })?,
+                None => 1,
+            },
         };
-        super::validation::validate_replacement_credential(&current, &replacement, principal_id)?;
+        if let Some(current) = &current {
+            super::validation::validate_replacement_credential(
+                current,
+                &replacement,
+                principal_id,
+            )?;
+        } else {
+            super::validation::validate_local_credential(&replacement)?;
+        }
+        let identity = current.is_none().then(|| ProviderIdentityLink {
+            provider: "local".to_owned(),
+            provider_subject: replacement.normalized_username.clone(),
+            principal_id: principal_id.to_owned(),
+            linked_at: consumed_at,
+            last_seen_at: consumed_at,
+        });
+        if let Some(identity) = &identity {
+            super::super::authority::validate_provider_identity(identity)?;
+        }
         idempotency.result = json!({ "principalId": principal_id, "completed": true });
         self.repository
             .complete_password_reset(PasswordResetCompletion {
                 token_hash,
                 expected_flow_version,
+                expected_credential_version: current.as_ref().map(|current| current.version),
                 replacement,
+                identity,
                 consumed_at,
                 idempotency,
                 actions,

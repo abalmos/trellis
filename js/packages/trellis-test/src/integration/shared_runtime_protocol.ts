@@ -14,7 +14,7 @@ export type TrellisIntegrationRuntimeAssignment = {
 /** Shared NATS/Trellis host and explicit worker assignments. */
 export type TrellisIntegrationSharedRuntimeManifest = {
   /** Manifest format version. */
-  readonly version: 3;
+  readonly version: 4;
   /** Unique identifier for this host lifecycle. */
   readonly runId: string;
   /** HTTP endpoint of the shared Trellis runtime. */
@@ -25,12 +25,16 @@ export type TrellisIntegrationSharedRuntimeManifest = {
   readonly websocketUrl: string;
   /** Workdir containing NATS credentials and configuration. */
   readonly workdir: string;
+  /** SQLite database owned by the shared Trellis control plane. */
+  readonly controlPlaneSqlitePath: string;
   /** Local test-admin password for normal attached authentication. */
   readonly adminPassword: string;
   /** Localhost-only low-level Auth RPC adapter endpoint. */
   readonly adminRpcUrl: string;
   /** Bearer token protecting the low-level Auth RPC adapter. */
   readonly adminRpcToken: string;
+  /** Issuer URL of the shared standards-based test OIDC provider. */
+  readonly testOidcIssuer: string;
   /** NATS account pair keyed by tenant assignment. */
   readonly tenants: Record<string, LocalNatsBootstrapManifest>;
   /** Shared or isolated-process assignment keyed by executable test identity. */

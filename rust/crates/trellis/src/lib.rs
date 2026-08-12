@@ -41,6 +41,10 @@
 //!     "documents-worker@v1",
 //!     "participant-digest",
 //!     "participant-needs-digest",
+//!     r#"{"format":"trellis.participant.v1","id":"documents-worker@v1","kind":"service"}"#,
+//!     r#"{"format":"trellis.api.v1","id":"documents-worker@v1"}"#,
+//!     "api-digest",
+//!     &[],
 //!     "base64url-identity-seed",
 //!     "base64url-session-seed",
 //!     Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
@@ -61,25 +65,13 @@ pub mod integration_test_scoping;
 /// High-level service runtime and service-authoring support types.
 pub mod service;
 
-/// Contract manifest, pagination, and schema helper types.
+/// Native API and participant artifact helper types.
 pub mod contracts {
     pub use trellis_contracts::{
-        canonicalize_json, compile_protocol_artifacts, contract_capability_namespace,
-        digest_contract_json, digest_contract_value, digest_json, event, feed,
-        global_capability_name, job_queue, kv, load_json_value, load_manifest,
-        manifest_paths_in_dir, normalize_manifest_value, operation, parse_manifest,
-        project_contract_digest_manifest, rpc, schema_ref, sha256_base64url, state, store,
-        use_contract, validate_catalog, validate_manifest, Catalog, CatalogEntry, CatalogPack,
-        CompiledProtocolArtifacts, ContractCapabilities, ContractCapabilityMetadata,
-        ContractErrorDecl, ContractErrorRef, ContractEvent, ContractExports, ContractFeed,
-        ContractJobQueueResource, ContractKind, ContractKvResource, ContractManifest,
-        ContractManifestBuilder, ContractOperation, ContractOperationSignal,
-        ContractOperationTransfer, ContractOperationTransferDirection, ContractResources,
-        ContractRpcMethod, ContractRpcTransfer, ContractRpcTransferDirection, ContractSchemaRef,
-        ContractStateKind, ContractStateStore, ContractStoreResource, ContractUseFeed,
-        ContractUseOperation, ContractUsePubSub, ContractUseRef, ContractUseRpc, ContractUses,
-        ContractsError, FeedCapabilities, LoadedManifest, OperationCapabilities, PageRequest,
-        PageResponse, PubSubCapabilities, RpcCapabilities, CATALOG_FORMAT_V1, CONTRACT_FORMAT_V1,
+        canonicalize_json, digest_json, event, schema_ref, sha256_base64url, state, use_contract,
+        ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+        ContractEventConsumerGroup, ContractEventConsumerOrdering, ContractEventConsumerReplay,
+        ContractKind, ContractStateKind, ContractsError, PageRequest, PageResponse,
     };
 }
 
@@ -127,6 +119,10 @@ mod tests {
             "svc@v1",
             "participant-digest",
             "participant-needs-digest",
+            "{\"format\":\"trellis.participant.v1\",\"id\":\"svc@v1\"}",
+            "{\"format\":\"trellis.api.v1\",\"id\":\"api@v1\"}",
+            "api-digest",
+            &[],
             "identity-seed",
             "session-seed",
             std::sync::Arc::new(crate::client::MemoryAuthorizationContextStore::default()),

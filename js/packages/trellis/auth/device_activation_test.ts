@@ -28,7 +28,7 @@ import {
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./device_activation.ts";
-const PARTICIPANT_DIGEST = "A".repeat(43);
+const CONTRACT_DIGEST = "A".repeat(43);
 
 function unsupportedActivationOperationControl() {
   return AsyncResult.err(
@@ -116,12 +116,13 @@ function bootstrapWaitArgs(
     trellisUrl: "https://trellis.example.com",
     publicIdentityKey: identity.publicIdentityKey,
     identitySeed: identity.identitySeed,
+    activationKey: identity.activationKey,
     deploymentId: "reader.default",
     instanceId: "dev_123",
     principalId: "device_123",
     participantId: "acme.reader@v1",
-    participantArtifactDigest: PARTICIPANT_DIGEST,
-    participantNeedsDigest: PARTICIPANT_DIGEST,
+    participantArtifactDigest: CONTRACT_DIGEST,
+    participantNeedsDigest: CONTRACT_DIGEST,
     nonce: "nonce_123",
   };
 }

@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.jobs@v1.json
+// Generated from ./generated/protocol/apis/trellis.jobs@v1.json
 export const JobsCancelRequestSchema = {
   "description":
     "Jobs admin ids are globally addressable; callers identify jobs by id only.",
@@ -1458,12 +1458,7 @@ export const JobsMetricsResponseSchema = {
     "summary": {
       "items": {
         "properties": {
-          "byState": {
-            "patternProperties": {
-              "^.*$": { "minimum": 0, "type": "integer" },
-            },
-            "type": "object",
-          },
+          "byState": { "additionalProperties": true, "type": "object" },
           "dead": { "minimum": 0, "type": "integer" },
           "failed": { "minimum": 0, "type": "integer" },
           "failureRate": { "minimum": 0, "type": "number" },
@@ -1773,10 +1768,7 @@ export const JobsQueryResponseSchema = {
     "offset": { "minimum": 0, "type": "integer" },
     "stats": {
       "properties": {
-        "byState": {
-          "patternProperties": { "^.*$": { "minimum": 0, "type": "integer" } },
-          "type": "object",
-        },
+        "byState": { "additionalProperties": true, "type": "object" },
         "dead": { "minimum": 0, "type": "integer" },
         "failed": { "minimum": 0, "type": "integer" },
         "queued": { "minimum": 0, "type": "integer" },
@@ -2354,7 +2346,7 @@ export const JobsWatchRequestSchema = {
 
 export const NotFoundErrorDataSchema = {
   "properties": {
-    "context": { "patternProperties": { "^.*$": {} }, "type": "object" },
+    "context": { "additionalProperties": true, "type": "object" },
     "id": { "minLength": 1, "type": "string" },
     "jobId": { "minLength": 1, "type": "string" },
     "message": { "type": "string" },

@@ -644,7 +644,8 @@ Svelte-reactive `SvelteTrellisConnection`.
 
 Browser apps should pass the app source contract default export to Trellis
 helpers. The source contract returned by `defineAppContract(...)` already has the
-module shape Trellis needs: `CONTRACT`, `CONTRACT_DIGEST`, `API.trellis`, and
+native contract shape Trellis needs: `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`,
+`API_DIGEST`, `PARTICIPANT`, and `PARTICIPANT_NEEDS_DIGEST`, plus
 contract metadata.
 
 ```ts
@@ -671,7 +672,7 @@ If TypeScript reports that a contract is missing `API` or related contract
 properties, check whether the app passed the generated `CONTRACT` manifest
 constant instead of the app source contract default export. Avoid manually
 composing `{ CONTRACT, API: { owned: OWNED_API } }` for normal Svelte app
-bootstrap; that partial shape can lose `API.trellis`, `CONTRACT_DIGEST`, state
+bootstrap; that partial shape can lose native API/participant identity, state
 metadata, and clean inferred client types.
 
 Generated service SDKs are workspace artifacts. Use them from source contracts for

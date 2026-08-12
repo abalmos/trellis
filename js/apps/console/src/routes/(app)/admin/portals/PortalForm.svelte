@@ -2,7 +2,6 @@
   import { isErr } from "@qlever-llc/result";
   import type {
     AuthCapabilitiesListOutput,
-    AuthCapabilityGroupsListOutput,
   } from "@qlever-llc/trellis/sdk/auth";
   import { resolve } from "$app/paths";
   import { goto } from "$app/navigation";
@@ -23,8 +22,9 @@
     entryUrl: string | null;
     builtIn: boolean;
     disabled: boolean;
-    createdAt: string;
-    updatedAt: string;
+    createdAt: number;
+    updatedAt: number;
+    version: number;
   };
 
   type Settings = {
@@ -33,7 +33,7 @@
     federatedRegistrationEnabled: boolean;
     allowedFederatedProviders?: string[] | null;
     selfRegisteredAccountActive: boolean;
-    updatedAt: string;
+    updatedAt: number;
   };
 
   type FederatedProvider = {
@@ -46,13 +46,16 @@
     routeKey: string;
     portalId: string;
     contractId: string | null;
+    deploymentId?: string | null;
+    priority?: number;
+    version: number;
     origin: string | null;
     disabled: boolean;
-    updatedAt: string;
+    updatedAt: number;
   };
 
-  type CapabilityView = AuthCapabilitiesListOutput["entries"][number];
-  type CapabilityGroupView = AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityView = AuthCapabilitiesListOutput["entries"][number] & { key: string };
+  type CapabilityGroupView = { groupKey: string; displayName: string; capabilities: string[]; includedGroups: string[] };
 
   const CATALOG_PAGE_SIZE = 500;
 
@@ -235,38 +238,37 @@
       error = errorMessage(response);
       return;
     }
-    applySettingsResponse(response);
+    applySettingsResponse({
+      portal: response.portal,
+      settings: {
+        portalId: response.portal.portalId,
+        localRegistrationEnabled: response.portal.loginSettings.localRegistration,
+        federatedRegistrationEnabled: response.portal.loginSettings.federatedRegistration,
+        allowedFederatedProviders: response.portal.loginSettings.providers,
+        selfRegisteredAccountActive: true,
+        updatedAt: response.portal.updatedAt,
+      },
+      defaultCapabilities: [],
+      defaultCapabilityGroups: [],
+      routes: response.routes.map((route) => ({ ...route, routeKey: route.routeId, contractId: route.deploymentId, disabled: false })),
+    });
   }
 
   async function loadAllCapabilities(): Promise<CapabilityView[]> {
     const loaded: CapabilityView[] = [];
-    for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-      const response = await trellis.authCapabilitiesList({ limit: CATALOG_PAGE_SIZE, offset }).take();
+    for (let cursor: string | undefined; ;) {
+      const response = await trellis.authCapabilitiesList({ limit: CATALOG_PAGE_SIZE, cursor }).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       const page = response.entries ?? [];
-      loaded.push(...page);
-      if (page.length < CATALOG_PAGE_SIZE) return loaded.sort((left, right) => left.key.localeCompare(right.key));
-    }
-  }
-
-  async function loadAllCapabilityGroups(): Promise<CapabilityGroupView[]> {
-    const loaded: CapabilityGroupView[] = [];
-    for (let offset = 0; ; offset += CATALOG_PAGE_SIZE) {
-      const response = await trellis.authCapabilityGroupsList({ limit: CATALOG_PAGE_SIZE, offset }).take();
-      if (isErr(response)) throw new Error(errorMessage(response));
-      const page = response.entries ?? [];
-      loaded.push(...page);
-      if (page.length < CATALOG_PAGE_SIZE) return loaded;
+      loaded.push(...page.map((capability) => ({ ...capability, key: capability.capability })));
+      if (!response.nextCursor) return loaded.sort((left, right) => left.key.localeCompare(right.key));
+      cursor = response.nextCursor;
     }
   }
 
   async function loadCatalogs() {
-    const [loadedCapabilities, loadedCapabilityGroups] = await Promise.all([
-      loadAllCapabilities(),
-      loadAllCapabilityGroups(),
-    ]);
-    capabilities = loadedCapabilities;
-    capabilityGroups = loadedCapabilityGroups;
+    capabilities = await loadAllCapabilities();
+    capabilityGroups = [];
   }
 
   async function load() {
@@ -325,8 +327,16 @@
         const portalResponse = await trellis.authPortalsPut({
           portalId: target,
           displayName: trimmedDisplayName,
-          entryUrl: trimmedEntryUrl,
+          entryUrl: trimmedEntryUrl || null,
           disabled,
+          expectedVersion: portal?.version ?? null,
+          idempotencyKey: crypto.randomUUID(),
+          loginSettings: {
+            localLogin: true,
+            localRegistration: localRegistrationEnabled,
+            federatedRegistration: federatedRegistrationEnabled,
+            providers: providerRestrictionMode === "all" ? null : uniqueValues(selectedFederatedProviderIds),
+          },
         }).take();
         if (isErr(portalResponse)) {
           error = errorMessage(portalResponse);
@@ -336,18 +346,20 @@
 
       const settingsResponse = await trellis.authPortalsLoginSettingsUpdate({
         portalId: target,
-        localRegistrationEnabled,
-        federatedRegistrationEnabled,
-        allowedFederatedProviders: providerRestrictionMode === "all" ? null : uniqueValues(selectedFederatedProviderIds),
-        selfRegisteredAccountActive,
-        defaultCapabilities: uniqueValues(selectedDefaultCapabilities),
-        defaultCapabilityGroups: uniqueValues(selectedDefaultCapabilityGroups),
+        expectedVersion: portal?.version ?? 0,
+        idempotencyKey: crypto.randomUUID(),
+        settings: {
+          localLogin: true,
+          localRegistration: localRegistrationEnabled,
+          federatedRegistration: federatedRegistrationEnabled,
+          providers: providerRestrictionMode === "all" ? null : uniqueValues(selectedFederatedProviderIds),
+        },
       }).take();
       if (isErr(settingsResponse)) {
         error = errorMessage(settingsResponse);
         return;
       }
-      applySettingsResponse(settingsResponse);
+      if (portal) portal = { ...portal, version: settingsResponse.version };
       saved = metadataReadOnly ? "Portal settings saved." : "Portal saved.";
       if (!editingExisting) await goto(resolve("/admin/portals"));
     } catch (e) {
@@ -385,9 +397,13 @@
     try {
       const response = await trellis.authPortalsRoutesPut({
         portalId: portal.portalId,
-        contractId: selector.contractId,
+        deploymentId: selector.contractId,
         origin: selector.origin,
-        disabled: routeDisabled,
+        participantId: null,
+        priority: existingRoute?.priority ?? routePriority({ ...existingRoute, ...selector, disabled: routeDisabled } as Route),
+        routeId: existingRoute?.routeKey ?? null,
+        expectedVersion: existingRoute?.version ?? null,
+        idempotencyKey: crypto.randomUUID(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);
@@ -395,9 +411,9 @@
       }
       if (selectorChanged) {
         const removeResponse = await trellis.authPortalsRoutesRemove({
-          portalId: existingRoute.portalId,
-          contractId: existingRoute.contractId,
-          origin: existingRoute.origin,
+          routeId: existingRoute.routeKey,
+          expectedVersion: existingRoute.version,
+          idempotencyKey: crypto.randomUUID(),
         }).take();
         if (isErr(removeResponse)) {
           error = errorMessage(removeResponse);
@@ -420,15 +436,15 @@
     saved = null;
     try {
       const response = await trellis.authPortalsRoutesRemove({
-        portalId: route.portalId,
-        contractId: route.contractId,
-        origin: route.origin,
+        routeId: route.routeKey,
+        expectedVersion: route.version,
+        idempotencyKey: crypto.randomUUID(),
       }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;
       }
-      saved = response.success ? "Portal route removed." : "Portal route was already absent.";
+      saved = response.removed ? "Portal route removed." : "Portal route was already absent.";
       if (editingRouteKey === route.routeKey) resetRouteForm();
       await loadPortalDetail(route.portalId);
     } catch (e) {

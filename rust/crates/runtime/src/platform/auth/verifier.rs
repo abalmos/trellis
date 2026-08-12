@@ -1079,7 +1079,7 @@ mod tests {
             .await
             .is_err());
         let event_subject = "events.v1.Documents.Changed.doc-1";
-        // Events before the revocation remain eligible...
+        // Revocation denies proofs created both before and after its timestamp.
         let before_proof = auth
             .create_event_proof_v2(
                 &digest,
@@ -1089,7 +1089,7 @@ mod tests {
                 "1970-01-01T00:19:00Z",
             )
             .unwrap();
-        verifier
+        assert!(verifier
             .verify_event(
                 event_subject,
                 br#"{"id":"doc-1"}"#,
@@ -1100,8 +1100,7 @@ mod tests {
                 "1970-01-01T00:19:00Z",
             )
             .await
-            .expect("pre-revocation event remains eligible");
-        // ...while events at or after the revocation deny.
+            .is_err());
         let after_proof = auth
             .create_event_proof_v2(
                 &digest,

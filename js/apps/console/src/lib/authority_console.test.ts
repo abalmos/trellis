@@ -352,7 +352,7 @@ Deno.test("delta display helpers preserve exact authority needs", () => {
 
 Deno.test("contractManifestDiffRows shows schema-only contract changes", () => {
   const oldContract = {
-    format: "trellis.contract.v1",
+    format: "trellis.api.v1",
     id: "acme.billing@v1",
     displayName: "Acme Billing",
     description: "Billing contract",

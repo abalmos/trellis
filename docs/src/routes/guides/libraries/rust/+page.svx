@@ -30,7 +30,7 @@ A participant facade normally exposes:
 - generated modules for owned APIs, dependency aliases, state, resources, jobs,
   and event-consumer groups when declared
 
-The facade embeds the participant contract id, digest, and canonical manifest.
+The facade embeds the participant contract id, digest, and canonical native API artifact.
 Callers do not supply those values.
 
 ## Connect a service

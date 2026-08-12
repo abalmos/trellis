@@ -318,7 +318,7 @@ Deno.test("schema pointers", async (t) => {
     },
   );
 
-  await t.step("emitted contract constructs subject from params", () => {
+  await t.step("native API leaves subject derivation to protocol", () => {
     const contract = defineServiceContract(
       { schemas },
       () => ({
@@ -335,10 +335,20 @@ Deno.test("schema pointers", async (t) => {
           },
         },
       }),
-    ).CONTRACT;
-    assertEquals(
-      contract.events?.["Test.Subject"]?.subject,
-      "events.v1.Test.Subject.{/foo}",
-    );
+    ).API;
+    const events = contract.events;
+    if (
+      events === null || typeof events !== "object" || Array.isArray(events)
+    ) {
+      throw new Error("native API events are missing");
+    }
+    const subject = events["Test.Subject"];
+    if (
+      subject === null || typeof subject !== "object" ||
+      Array.isArray(subject)
+    ) {
+      throw new Error("native API event is missing");
+    }
+    assertEquals(subject.subject, undefined);
   });
 });

@@ -456,6 +456,29 @@ impl AuthorizationProviderCache {
         self.revocation_time(digest)
     }
 
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    pub fn apply_runtime_revocation(
+        &self,
+        digest: &str,
+        revoked_at: i64,
+    ) -> Result<(), TrellisClientError> {
+        let mut revocations = self.revocations.write().map_err(|_| {
+            TrellisClientError::Bootstrap("provider revocation lock poisoned".into())
+        })?;
+        revocations
+            .entry(digest.to_owned())
+            .and_modify(|current| *current = (*current).max(revoked_at))
+            .or_insert(revoked_at);
+        drop(revocations);
+        if let Some(own) = self.own.as_ref() {
+            if own.context_digest().is_ok_and(|current| current == digest) {
+                own.request_refresh();
+            }
+        }
+        Ok(())
+    }
+
     /// Return the verification policy bound to the current trust material.
     pub(crate) fn policy(&self) -> Result<AuthorizationVerificationPolicyV1, TrellisClientError> {
         let policy_floor = self
@@ -571,6 +594,11 @@ impl AuthorizationProviderCache {
                         nats.connection_state() == async_nats::connection::State::Connected
                     });
                     if !connected {
+                        if was_connected {
+                            if let Some(own) = self.own.as_ref() {
+                                own.request_refresh();
+                            }
+                        }
                         was_connected = false;
                         self.set_healthy(false);
                     } else if !was_connected {
@@ -788,6 +816,12 @@ impl AuthorizationProviderCache {
             .entry(digest.to_owned())
             .and_modify(|current| *current = (*current).max(revoked_at))
             .or_insert(revoked_at);
+        drop(revocations);
+        if let Some(own) = self.own.as_ref() {
+            if own.context_digest().is_ok_and(|current| current == digest) {
+                own.request_refresh();
+            }
+        }
         if let Ok(mut health) = self.health.write() {
             health.revocation_revision = health.revocation_revision.max(revision);
             health.last_update_at = self.now_seconds().unwrap_or(0);
@@ -806,10 +840,8 @@ impl AuthorizationProviderCache {
             .ok_or_else(|| {
                 TrellisClientError::Bootstrap("authorization revocation key is invalid".into())
             })?;
-        self.revocations
-            .write()
-            .map_err(|_| TrellisClientError::Bootstrap("provider revocation lock poisoned".into()))?
-            .remove(digest);
+        // Revocation is monotonic: registry cleanup must never make a revoked context valid again.
+        let _ = digest;
         if let Ok(mut health) = self.health.write() {
             health.revocation_revision = health.revocation_revision.max(revision);
             health.last_update_at = self.now_seconds().unwrap_or(0);
@@ -1289,7 +1321,7 @@ fn parse_revocation_record(value: &[u8]) -> Result<i64, TrellisClientError> {
 fn manifest_pointer_from_entry(
     entry: &super::registry::RegistryWatchEntry,
 ) -> Result<ManifestPointer, TrellisClientError> {
-    super::registry::parse_manifest_pointer(&entry.value)
+    super::registry::parse_api_authoring_source_pointer(&entry.value)
 }
 
 #[cfg(test)]

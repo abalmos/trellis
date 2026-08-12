@@ -9,7 +9,7 @@ order: 20
 ## Prerequisites
 
 - [trellis-auth.md](./trellis-auth.md) - auth architecture and trust model
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   contract-driven permission derivation
 - [../operations/trellis-operations.md](./../operations/trellis-operations.md) -
   operation watch and streaming reply semantics
@@ -321,11 +321,13 @@ session binding, event signature, and publisher projection without
 reconstructing arbitrary contract semantics.
 
 Request eligibility uses current time and denies any revoked context. Event
-eligibility uses the signed historical window:
-`notBefore <= eventTime <
-expiresAt` and, when revoked, `eventTime < revokedAt`.
-Retained context, manifest, and revocation values support the signed historical
-window. Durable listeners NAK retryable verification failures such as provider
+eligibility uses the signed historical window
+`notBefore <= eventTime < expiresAt`, so ordinary expiry does not invalidate a
+delayed event. Explicit context revocation invalidates every event proof from
+that context, including proofs signed before `revokedAt`, preventing stale proof
+replay after an authority change. Retained context and manifest values support
+the signed historical window; retained revocations enforce its security floor.
+Durable listeners NAK retryable verification failures such as provider
 readiness, registry transport, publication races, and storage availability;
 cryptographically invalid or unauthorized events are permanently rejected.
 JetStream owns publication deduplication and redelivery, so a redelivered event
@@ -483,12 +485,12 @@ Bind proof rules:
 
 Runtime storage responsibilities:
 
-| Storage                       | Logical contents                                                                                                                                                                                                                                                     | TTL                             |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| SQL                           | Users, credentials, sessions, principals, desired and materialized authority, proposals/decisions, deployments, instances, devices, delegations, portals/routes, provisioning records, idempotency results, post-commit actions, and hashed account-management flows | Durable, with explicit expiries |
-| `trellis_auth_oauth` KV       | PKCE/nonce state, browser-binding digest, portal-policy digest, CAS claim/result, and terminal unknown-outcome state                                                                                                                                                 | 15 min                          |
-| `trellis_auth_browser` KV     | Proof-bound browser flow and exact server-owned consent proposal keyed by `flowId`                                                                                                                                                                                   | Browser-flow TTL                |
-| `trellis_auth_connections` KV | Active connection presence keyed by NATS user key                                                                                                                                                                                                                    | 120 s                           |
+| Storage                       | Logical contents                                                                                                                                                                                                                                                     | TTL                                                     |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| SQL                           | Users, credentials, sessions, principals, desired and materialized authority, proposals/decisions, deployments, instances, devices, delegations, portals/routes, provisioning records, idempotency results, post-commit actions, and hashed account-management flows | Durable, with explicit expiries                         |
+| `trellis_auth_oauth` KV       | PKCE/nonce state, browser-binding digest, portal-policy digest, CAS claim/result, and terminal unknown-outcome state                                                                                                                                                 | 15 min                                                  |
+| `trellis_auth_browser` KV     | Proof-bound browser flow and exact server-owned consent proposal keyed by `flowId`                                                                                                                                                                                   | Browser-flow TTL                                        |
+| `trellis_auth_connections` KV | Active physical-connection presence keyed by exact connection id                                                                                                                                                                                                     | Resolved maximum user-JWT lifetime + 60 s cleanup grace |
 
 Ephemeral browser-binding and account-flow bearer secrets are stored by digest,
 not raw value. OAuth state ids are public correlation ids; the separate cookie
@@ -551,8 +553,25 @@ updates the current desired-authority projection and inserts its outbox record
 in one transaction. The accepted record binds the stable principal, exact
 participant artifact, needs digest, `GrantSetV1`, and expiry.
 
-Mutable capability groups, deployment grant overrides, stored NATS subject ACLs,
-and contract-era identity-grant objects are not part of the protocol.
+Deployment grant overrides, stored NATS subject ACLs, and contract-era
+identity-grant objects are not part of the protocol. Capability groups are
+administrative macros used only while resolving trusted-portal policy; expanded
+capability keys are bounded by the immutable participant proposal, and group or
+OIDC role objects never enter the resulting identity authority.
+
+Trusted-portal policy is exact to `portalId + participantId`. After normal OIDC
+signature, issuer, audience, nonce, and access-token-hash verification, each
+provider's configured `role_claims` JSON Pointers extracts scalar or array role
+strings from that same verified ID token. Exact provider + role pairs may select
+provider-scoped mappings. Trusted autoapproval and ordinary consent commit
+through the same identity-authority transaction, with separate portal-policy
+provenance used for reconciliation. A semantic policy change revokes superseded
+authorization contexts and disconnects connections using those exact context
+digests while retaining their sessions for refresh. If the portal, provider
+allowance, or grant override disappears, reconciliation revokes the authority
+and atomically clears its provider-role provenance. Restoring configuration
+alone cannot replay cached roles; a new verified login must supply fresh
+provider evidence before authority can be accepted again.
 
 ### Users Projection
 

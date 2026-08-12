@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,13 +10,13 @@ use trellis_contracts::ContractKind;
 use crate::artifacts::{
     current_generator_fingerprint, default_rust_crate_name_from_id, detect_output_root,
     detect_runtime_source, generated_artifacts_are_fresh, generated_artifacts_metadata,
-    generated_artifacts_metadata_path, required_owner_version, sdk_output_stem,
-    trellis_package_version, ts_package_name_from_id, write_contract_outputs,
-    write_contract_shell_outputs, write_participant_facade_outputs,
+    native_api_digest, required_owner_version, sdk_output_stem, trellis_package_version,
+    ts_package_name_from_id, write_contract_outputs, write_participant_facade_outputs,
+    write_protocol_participant,
 };
 use crate::cli::{PackageTarget, RuntimeSource};
 use crate::contract_input;
-use crate::discovery::{discover_contract_metadata, DiscoveredContractSource, SourceLanguage};
+use crate::discovery::{discover_contract_metadata, DiscoveredContractSource};
 use crate::output;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,11 +31,12 @@ pub struct AutoPlanEntry {
     pub contract_id: String,
     pub contract_kind: ContractKind,
     pub action: AutoAction,
-    pub out_manifest: Option<PathBuf>,
+    pub out_api: Option<PathBuf>,
     pub jsr_out: Option<PathBuf>,
     pub npm_out: Option<PathBuf>,
     pub cargo_out: Option<PathBuf>,
     pub cargo_participant_out: Option<PathBuf>,
+    pub protocol_participant_out: Option<PathBuf>,
     pub runtime_source: RuntimeSource,
     pub runtime_repo_root: Option<PathBuf>,
 }
@@ -73,69 +75,91 @@ pub fn build_auto_plan_with_targets(
         } else {
             RuntimeSource::Registry
         };
-        let (out_manifest, jsr_out, npm_out, cargo_out, cargo_participant_out) = match action {
-            AutoAction::Generate => {
-                let sdk_stem = sdk_output_stem(&contract_id);
-                let targets = targets_for_entry(&contract, &contract_kind, requested_targets);
-                let jsr_package_root = resolve_jsr_package_root(
-                    &output_root,
-                    &contract.project_root,
-                    runtime_repo_root.as_deref(),
-                );
-                let out_manifest = if !targets.is_empty() {
-                    Some(
-                        output_root
-                            .join(if contract.language == SourceLanguage::Protocol {
-                                "generated/apis"
-                            } else {
-                                "generated/contracts/manifests"
-                            })
-                            .join(format!("{}.json", contract_id)),
-                    )
-                } else {
-                    None
-                };
-                let jsr_out = if targets.contains(&PackageTarget::Jsr) {
-                    Some(jsr_package_root.join(&sdk_stem))
-                } else {
-                    None
-                };
-                let npm_out = if targets.contains(&PackageTarget::Npm) {
-                    Some(output_root.join("generated/packages/npm").join(&sdk_stem))
-                } else {
-                    None
-                };
-                let cargo_out = if targets.contains(&PackageTarget::Cargo) {
-                    Some(output_root.join("generated/packages/cargo").join(&sdk_stem))
-                } else {
-                    None
-                };
-                let cargo_participant_out =
-                    if matches!(contract.language, crate::discovery::SourceLanguage::Rust) {
+        let (out_api, jsr_out, npm_out, cargo_out, cargo_participant_out, protocol_participant_out) =
+            match action {
+                AutoAction::Generate => {
+                    let sdk_stem = sdk_output_stem(&contract_id);
+                    let targets = targets_for_entry(&contract, &contract_kind, requested_targets);
+                    let jsr_package_root = resolve_jsr_package_root(
+                        &output_root,
+                        &contract.project_root,
+                        runtime_repo_root.as_deref(),
+                    );
+                    let out_api = if !targets.is_empty() {
                         Some(
                             output_root
-                                .join("generated/packages/cargo-participants")
-                                .join(&sdk_stem),
+                                .join("generated/protocol/apis")
+                                .join(format!("{}.json", contract_id)),
                         )
                     } else {
                         None
                     };
-                (
-                    out_manifest,
-                    jsr_out,
-                    npm_out,
-                    cargo_out,
-                    cargo_participant_out,
-                )
-            }
-            AutoAction::Verify => (None, None, None, None, None),
-        };
+                    let jsr_out = if targets.contains(&PackageTarget::Jsr) {
+                        Some(jsr_package_root.join(&sdk_stem))
+                    } else {
+                        None
+                    };
+                    let npm_out = if targets.contains(&PackageTarget::Npm) {
+                        Some(output_root.join("generated/packages/npm").join(&sdk_stem))
+                    } else {
+                        None
+                    };
+                    let cargo_out = if targets.contains(&PackageTarget::Cargo) {
+                        Some(output_root.join("generated/packages/cargo").join(&sdk_stem))
+                    } else {
+                        None
+                    };
+                    let cargo_participant_out =
+                        if matches!(contract.language, crate::discovery::SourceLanguage::Rust) {
+                            Some(
+                                output_root
+                                    .join("generated/packages/cargo-participants")
+                                    .join(&sdk_stem),
+                            )
+                        } else {
+                            None
+                        };
+                    let participant_id = contract
+                        .source_path
+                        .with_file_name("trellis.participant.json")
+                        .is_file()
+                        .then(|| {
+                            trellis_contracts::load_participant_source(
+                                contract
+                                    .source_path
+                                    .with_file_name("trellis.participant.json"),
+                            )
+                            .map(|participant| participant.participant.id().to_owned())
+                            .map_err(|error| miette::miette!(error.to_string()))
+                        })
+                        .transpose()?;
+                    let protocol_participant_out = cargo_participant_out
+                        .as_ref()
+                        .map(|_| contract_id.clone())
+                        .or(participant_id)
+                        .map(|participant_id| {
+                            output_root
+                                .join("generated/protocol/participants")
+                                .join(format!("{participant_id}.json"))
+                        });
+                    (
+                        out_api,
+                        jsr_out,
+                        npm_out,
+                        cargo_out,
+                        cargo_participant_out,
+                        protocol_participant_out,
+                    )
+                }
+                AutoAction::Verify => (None, None, None, None, None, None),
+            };
         let action = if matches!(action, AutoAction::Generate)
-            && out_manifest.is_none()
+            && out_api.is_none()
             && jsr_out.is_none()
             && npm_out.is_none()
             && cargo_out.is_none()
             && cargo_participant_out.is_none()
+            && protocol_participant_out.is_none()
         {
             AutoAction::Verify
         } else {
@@ -146,11 +170,12 @@ pub fn build_auto_plan_with_targets(
             contract_id,
             contract_kind,
             action,
-            out_manifest,
+            out_api,
             jsr_out,
             npm_out,
             cargo_out,
             cargo_participant_out,
+            protocol_participant_out,
             runtime_source,
             runtime_repo_root,
         });
@@ -166,7 +191,7 @@ fn targets_for_entry(
 ) -> Vec<PackageTarget> {
     let defaults = if matches!(kind, ContractKind::Service) {
         vec![
-            PackageTarget::Manifest,
+            PackageTarget::Api,
             PackageTarget::Jsr,
             PackageTarget::Npm,
             PackageTarget::Cargo,
@@ -174,13 +199,9 @@ fn targets_for_entry(
     } else if matches!(kind, ContractKind::App)
         && !matches!(contract.language, crate::discovery::SourceLanguage::Rust)
     {
-        vec![
-            PackageTarget::Manifest,
-            PackageTarget::Jsr,
-            PackageTarget::Npm,
-        ]
+        vec![PackageTarget::Api, PackageTarget::Jsr, PackageTarget::Npm]
     } else if matches!(contract.language, crate::discovery::SourceLanguage::Rust) {
-        vec![PackageTarget::Manifest, PackageTarget::Cargo]
+        vec![PackageTarget::Api, PackageTarget::Cargo]
     } else {
         Vec::new()
     };
@@ -343,29 +364,32 @@ pub fn execute_auto_plan(
 
     let generator_fingerprint = current_generator_fingerprint();
     let mut summary = AutoExecutionSummary::default();
-    write_auto_plan_shells(plan, prefix, generator_fingerprint)?;
+    cleanup_legacy_protocol_outputs(plan)?;
     for entry in plan {
         let resolved = contract_input::resolve_contract_input(
             None,
+            None,
+            &[],
             Some(entry.discovered.source_path.as_path()),
             None,
-            "CONTRACT",
-            contract_input::default_image_contract_path(),
+            "API",
+            contract_input::default_image_api_path(),
         )?;
-        contract_input::warn_forward_incompatible_public_schemas(&resolved.loaded);
+        contract_input::warn_forward_incompatible_public_schemas(&resolved.api);
         match entry.action {
             AutoAction::Generate => {
                 let artifact_version = required_owner_version(
                     &resolved,
                     "generate contract artifacts from local discovery",
                 )?;
-                let package_name = ts_package_name_from_id(&resolved.loaded.manifest.id, prefix);
-                let crate_name = default_rust_crate_name_from_id(&resolved.loaded.manifest.id);
-                let out_manifest = entry.out_manifest.as_ref().ok_or_else(|| {
+                let package_name = ts_package_name_from_id(&resolved.api.render_model.id, prefix);
+                let crate_name = default_rust_crate_name_from_id(&resolved.api.render_model.id);
+                let out_api = entry.out_api.as_ref().ok_or_else(|| {
                     miette::miette!("missing manifest output for generated contract")
                 })?;
                 let metadata = generated_artifacts_metadata(
                     &resolved,
+                    &native_api_digest(&resolved)?,
                     &artifact_version,
                     entry.runtime_source,
                     &trellis_package_version(),
@@ -377,10 +401,9 @@ pub fn execute_auto_plan(
                     generator_fingerprint,
                 );
                 if !force
-                    && entry.cargo_participant_out.is_none()
                     && generated_artifacts_are_fresh(
                         &metadata,
-                        out_manifest,
+                        out_api,
                         entry.jsr_out.as_deref(),
                         entry.npm_out.as_deref(),
                         entry.cargo_out.as_deref(),
@@ -388,7 +411,7 @@ pub fn execute_auto_plan(
                 {
                     output::print_success(&format!(
                         "artifacts already up to date for {}",
-                        resolved.loaded.manifest.id
+                        resolved.api.render_model.id
                     ));
                     summary.skipped += 1;
                     continue;
@@ -397,7 +420,7 @@ pub fn execute_auto_plan(
                 write_contract_outputs(
                     &resolved,
                     artifact_version.clone(),
-                    out_manifest,
+                    out_api,
                     entry.jsr_out.as_deref(),
                     entry.npm_out.as_deref(),
                     entry.cargo_out.as_deref(),
@@ -408,39 +431,46 @@ pub fn execute_auto_plan(
                     generator_fingerprint,
                     "generated contract artifacts",
                 )?;
-                if entry.discovered.language == SourceLanguage::Protocol {
-                    let generated_root = out_manifest
-                        .parent()
-                        .and_then(Path::parent)
-                        .ok_or_else(|| miette::miette!("API output has no generated root"))?;
-                    let legacy_manifest = generated_root
-                        .join("contracts/manifests")
-                        .join(format!("{}.json", resolved.loaded.manifest.id));
-                    if legacy_manifest.exists() {
-                        fs::remove_file(&legacy_manifest).into_diagnostic()?;
-                    }
-                }
                 if let Some(cargo_participant_out) = &entry.cargo_participant_out {
-                    match participant_alias_mappings(entry, plan) {
-                        Ok(mappings) => write_participant_facade_outputs(
-                            out_manifest,
-                            cargo_participant_out,
-                            &format!(
-                                "trellis-participant-{}",
-                                sdk_output_stem(&resolved.loaded.manifest.id)
-                            ),
-                            &artifact_version,
-                            entry.runtime_source,
-                            entry.runtime_repo_root.clone(),
-                            Some(crate_name.clone()),
-                            entry.cargo_out.clone(),
-                            mappings,
-                        )?,
-                        Err(error) => {
-                            remove_stale_participant_facade_outputs(cargo_participant_out)?;
-                            return Err(error);
-                        }
-                    }
+                    let participant_source = resolved
+                        .participant_path
+                        .as_deref()
+                        .unwrap_or(&resolved.api.path);
+                    let mappings = participant_alias_mappings(entry, plan, participant_source)?;
+                    write_participant_facade_outputs(
+                        &resolved.api_path,
+                        participant_source,
+                        entry.protocol_participant_out.as_deref().ok_or_else(|| {
+                            miette::miette!("missing protocol participant output")
+                        })?,
+                        cargo_participant_out,
+                        &format!(
+                            "trellis-participant-{}",
+                            sdk_output_stem(&resolved.api.render_model.id)
+                        ),
+                        &artifact_version,
+                        entry.runtime_source,
+                        entry.runtime_repo_root.clone(),
+                        Some(crate_name.clone()),
+                        entry.cargo_out.clone(),
+                        mappings,
+                    )?;
+                } else if let Some(protocol_participant_out) =
+                    entry.protocol_participant_out.as_deref()
+                {
+                    let sibling_participant = entry
+                        .discovered
+                        .source_path
+                        .with_file_name("trellis.participant.json");
+                    let participant_source = resolved
+                        .participant_path
+                        .as_deref()
+                        .unwrap_or(&sibling_participant);
+                    write_protocol_participant(
+                        &resolved.api_path,
+                        participant_source,
+                        protocol_participant_out,
+                    )?;
                 }
                 summary.generated += 1;
             }
@@ -448,7 +478,7 @@ pub fn execute_auto_plan(
                 if show_title {
                     print_auto_entry(entry);
                 }
-                output::print_success(&format!("verified {}", resolved.loaded.manifest.id));
+                output::print_success(&format!("verified {}", resolved.api.render_model.id));
                 summary.verified += 1;
             }
         }
@@ -456,85 +486,29 @@ pub fn execute_auto_plan(
     Ok(summary)
 }
 
-fn write_auto_plan_shells(
-    plan: &[AutoPlanEntry],
-    prefix: &str,
-    generator_fingerprint: &str,
-) -> miette::Result<()> {
-    for entry in plan {
-        if !matches!(entry.action, AutoAction::Generate) {
-            continue;
+fn cleanup_legacy_protocol_outputs(plan: &[AutoPlanEntry]) -> miette::Result<()> {
+    let roots = plan
+        .iter()
+        .filter_map(|entry| entry.out_api.as_deref())
+        .filter_map(|path| {
+            path.parent()?
+                .parent()?
+                .parent()?
+                .parent()
+                .map(Path::to_path_buf)
+        })
+        .collect::<BTreeSet<_>>();
+    for root in roots {
+        for legacy in [
+            root.join("generated/apis"),
+            root.join("generated/contracts"),
+        ] {
+            if legacy.exists() {
+                fs::remove_dir_all(legacy).into_diagnostic()?;
+            }
         }
-        if shell_outputs_are_not_needed(entry, generator_fingerprint) {
-            continue;
-        }
-        let package_name = ts_package_name_from_id(&entry.contract_id, prefix);
-        let crate_name = default_rust_crate_name_from_id(&entry.contract_id);
-        write_contract_shell_outputs(
-            &entry.contract_id,
-            "0.0.0-shell",
-            entry.out_manifest.as_deref(),
-            entry.jsr_out.as_deref(),
-            entry.npm_out.as_deref(),
-            entry.cargo_out.as_deref(),
-            &package_name,
-            &crate_name,
-            entry.runtime_source,
-            entry.runtime_repo_root.clone(),
-        )?;
     }
     Ok(())
-}
-
-fn shell_outputs_are_not_needed(entry: &AutoPlanEntry, generator_fingerprint: &str) -> bool {
-    let Some(out_manifest) = &entry.out_manifest else {
-        return false;
-    };
-    generated_artifacts_metadata_matches_generator(out_manifest, generator_fingerprint)
-        && ts_shell_key_outputs_exist(entry.jsr_out.as_deref())
-        && npm_shell_key_outputs_exist(entry.npm_out.as_deref())
-        && rust_shell_key_outputs_exist(entry.cargo_out.as_deref())
-}
-
-fn generated_artifacts_metadata_matches_generator(
-    out_manifest: &Path,
-    generator_fingerprint: &str,
-) -> bool {
-    let Ok(contents) = fs::read_to_string(generated_artifacts_metadata_path(out_manifest)) else {
-        return false;
-    };
-    let Ok(metadata) = serde_json::from_str::<Value>(&contents) else {
-        return false;
-    };
-    metadata
-        .get("generator_fingerprint")
-        .and_then(Value::as_str)
-        == Some(generator_fingerprint)
-}
-
-fn ts_shell_key_outputs_exist(ts_out: Option<&Path>) -> bool {
-    let Some(ts_out) = ts_out else {
-        return true;
-    };
-    ts_out.join("mod.ts").exists()
-        && ts_out.join("descriptors.ts").exists()
-        && ts_out.join("types.ts").exists()
-        && ts_out.join("schemas.ts").exists()
-        && ts_out.join("manifest.ts").exists()
-}
-
-fn npm_shell_key_outputs_exist(npm_out: Option<&Path>) -> bool {
-    let Some(npm_out) = npm_out else {
-        return true;
-    };
-    npm_out.join("package.json").exists()
-}
-
-fn rust_shell_key_outputs_exist(rust_out: Option<&Path>) -> bool {
-    let Some(rust_out) = rust_out else {
-        return true;
-    };
-    rust_out.join("Cargo.toml").exists() && rust_out.join("src/lib.rs").exists()
 }
 
 pub fn discover_summary_lines(plan: &[AutoPlanEntry]) -> Vec<String> {
@@ -581,19 +555,24 @@ fn action_for_discovered_kind(
 fn participant_alias_mappings(
     entry: &AutoPlanEntry,
     plan: &[AutoPlanEntry],
+    source_path: &Path,
 ) -> miette::Result<Vec<trellis_codegen_rust::ParticipantAliasMapping>> {
-    let local_manifest = entry
-        .out_manifest
-        .as_ref()
-        .ok_or_else(|| miette::miette!("missing participant manifest output"))?;
-    let loaded = trellis_contracts::load_manifest(local_manifest).into_diagnostic()?;
+    let local_manifest = source_path;
+    let loaded = trellis_contracts::load_participant_source(local_manifest).into_diagnostic()?;
+    let uses = loaded
+        .render_model
+        .uses
+        .iter()
+        .map(|(alias, used)| (alias.clone(), used.clone()))
+        .collect::<Vec<_>>();
     let mut mappings = Vec::new();
-    for (alias, use_ref) in loaded.manifest.uses.iter() {
-        if let Some(mapped) = plan.iter().find(|candidate| {
-            candidate.contract_id == use_ref.contract && candidate.cargo_out.is_some()
-        }) {
+    for (alias, use_ref) in &uses {
+        if let Some(mapped) = plan
+            .iter()
+            .find(|candidate| candidate.contract_id == use_ref.api && candidate.cargo_out.is_some())
+        {
             let manifest_path = mapped
-                .out_manifest
+                .out_api
                 .as_ref()
                 .ok_or_else(|| {
                     miette::miette!("missing mapped manifest for {}", mapped.contract_id)
@@ -602,7 +581,7 @@ fn participant_alias_mappings(
             mappings.push(trellis_codegen_rust::ParticipantAliasMapping {
                 alias: alias.clone(),
                 crate_name: default_rust_crate_name_from_id(&mapped.contract_id),
-                manifest_path,
+                api_path: manifest_path,
                 crate_path: mapped.cargo_out.clone(),
                 cargo_dependency: None,
             });
@@ -613,12 +592,12 @@ fn participant_alias_mappings(
             continue;
         }
 
-        if let Some(mapping) = built_in_rust_alias_mapping(entry, alias, &use_ref.contract) {
+        if let Some(mapping) = built_in_rust_alias_mapping(entry, alias, &use_ref.api) {
             mappings.push(mapping);
             continue;
         }
 
-        if let Some(mapping) = external_rust_alias_mapping(entry, alias, &use_ref.contract)? {
+        if let Some(mapping) = external_rust_alias_mapping(entry, alias, &use_ref.api)? {
             mappings.push(mapping);
             continue;
         }
@@ -626,7 +605,7 @@ fn participant_alias_mappings(
         return Err(miette::miette!(
             "Rust participant alias '{}' requires an explicit SDK mapping for contract '{}'",
             alias,
-            use_ref.contract
+            use_ref.api
         ));
     }
     Ok(mappings)
@@ -735,19 +714,19 @@ fn external_rust_alias_mapping(
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| miette::miette!("resolved SDK package is missing manifest_path"))?,
     );
-    let contract_manifest = package
+    let api_authoring_source = package
         .pointer("/metadata/trellis/contract-manifest")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("contract.json");
+        .unwrap_or("api.json");
     let manifest_path = package_manifest
         .parent()
         .unwrap_or(Path::new("."))
-        .join(contract_manifest);
+        .join(api_authoring_source);
 
     Ok(Some(trellis_codegen_rust::ParticipantAliasMapping {
         alias: alias.to_string(),
         crate_name: dependency_key,
-        manifest_path,
+        api_path: manifest_path,
         crate_path: None,
         cargo_dependency: Some(dependency_spec),
     }))
@@ -776,7 +755,7 @@ fn built_in_rust_alias_mapping(
         .join("generated/packages/cargo")
         .join(sdk_output_stem(contract_id));
     let manifest_path = repo_root
-        .join("generated/contracts/manifests")
+        .join("generated/protocol/apis")
         .join(format!("{contract_id}.json"));
     if !sdk_root.join("Cargo.toml").exists() || !manifest_path.exists() {
         return None;
@@ -785,17 +764,10 @@ fn built_in_rust_alias_mapping(
     Some(trellis_codegen_rust::ParticipantAliasMapping {
         alias: alias.to_string(),
         crate_name: default_rust_crate_name_from_id(contract_id),
-        manifest_path,
+        api_path: manifest_path,
         crate_path: Some(sdk_root),
         cargo_dependency: None,
     })
-}
-
-fn remove_stale_participant_facade_outputs(out: &Path) -> miette::Result<()> {
-    if out.exists() {
-        fs::remove_dir_all(out).into_diagnostic()?;
-    }
-    Ok(())
 }
 
 pub fn contract_kind_label(kind: &ContractKind) -> &'static str {
@@ -817,8 +789,8 @@ fn print_auto_entry(entry: &AutoPlanEntry) {
     ));
     output::print_detail("kind", contract_kind_label(&entry.contract_kind));
     output::print_detail("source", entry.discovered.source_path.display().to_string());
-    if let Some(out_manifest) = &entry.out_manifest {
-        output::print_detail("manifest", out_manifest.display().to_string());
+    if let Some(out_api) = &entry.out_api {
+        output::print_detail("api", out_api.display().to_string());
     }
     if let Some(jsr_out) = &entry.jsr_out {
         output::print_detail("jsr package", jsr_out.display().to_string());

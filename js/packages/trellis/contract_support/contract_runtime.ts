@@ -7,7 +7,9 @@ type RuntimeApiShape = {
   subjects: Record<string, unknown>;
 };
 
-export const CONTRACT_RUNTIME = Symbol("trellis.contract.runtime");
+export const CONTRACT_RUNTIME: unique symbol = Symbol.for(
+  "trellis.contract.runtime",
+);
 
 export type RuntimeSelectedAction<
   TAction extends ActionDescriptor = ActionDescriptor,

@@ -3754,7 +3754,7 @@ pub struct JobsMetricsResponseSummaryItemRuntime {
 pub struct JobsMetricsResponseSummaryItem {
     /// The `byState` wire field.
     #[serde(rename = "byState")]
-    pub by_state: BTreeMap<String, i64>,
+    pub by_state: BTreeMap<String, Value>,
     /// The `dead` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead: Option<i64>,
@@ -4657,7 +4657,7 @@ pub struct JobsQueryResponseGroupsItem {
 pub struct JobsQueryResponseStats {
     /// The `byState` wire field.
     #[serde(rename = "byState")]
-    pub by_state: BTreeMap<String, i64>,
+    pub by_state: BTreeMap<String, Value>,
     /// The `dead` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dead: Option<i64>,

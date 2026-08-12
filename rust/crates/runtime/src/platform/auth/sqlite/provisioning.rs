@@ -185,7 +185,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
     ) -> Result<Vec<DeviceActivationReviewRecord>, AuthorizationStateError> {
         self.run_read(move |connection| {
             let mut statement = connection
-                .prepare("SELECT review_id FROM auth_activation_reviews ORDER BY review_id")
+                .prepare("SELECT review_id FROM auth_device_activation_reviews ORDER BY review_id")
                 .map_err(sql_error)?;
             let ids = statement
                 .query_map([], |row| row.get::<_, String>(0))

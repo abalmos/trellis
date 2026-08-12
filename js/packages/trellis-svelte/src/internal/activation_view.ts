@@ -98,7 +98,7 @@ export function mapDeviceActivationOutput(
   flowId: string,
   result: AuthDeviceUserAuthoritiesResolveOutput,
 ): DeviceActivationView {
-  if (result.device.state === "active") {
+  if (result.review.state === "approved") {
     return {
       mode: "activated",
       flowId,
@@ -108,23 +108,6 @@ export function mapDeviceActivationOutput(
         result.review.decidedAt ?? result.device.updatedAt,
       ),
       confirmationCode: result.review.confirmationCode,
-    };
-  }
-
-  if (result.review.state === "expired") {
-    return {
-      mode: "expired",
-      flowId,
-      reason:
-        "The activation request expired. Start again from the auth service.",
-    };
-  }
-
-  if (result.review.state === "revoked") {
-    return {
-      mode: "rejected",
-      flowId,
-      reason: "The activation request was revoked.",
     };
   }
 

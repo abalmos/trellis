@@ -185,7 +185,7 @@ To sign in to Trellis, your app needs a screen that kicks off the flow. Create `
       authUrl: trellisUrl,
       redirectTo: redirectTo.toString(),
       handle: await getOrCreateSessionKey(),
-      contract: contract.CONTRACT,
+      contract,
       context: { subtitle: "Welcome back to the spring preview" },
     });
 

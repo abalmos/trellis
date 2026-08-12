@@ -1116,7 +1116,7 @@ mod tests {
             .await
             .expect("historical event remains eligible");
 
-        // Events at or after the revocation are denied; earlier events remain eligible.
+        // Revocation invalidates all event proofs from the context, including replays.
         let revoked = verifier_at(&chain, &defaults, Some(1_150), 1_100);
         let before_proof = auth
             .create_event_proof_v2(
@@ -1127,7 +1127,7 @@ mod tests {
                 "1970-01-01T00:19:00Z",
             )
             .unwrap();
-        revoked
+        assert!(revoked
             .verify_event(
                 subject,
                 payload,
@@ -1143,7 +1143,7 @@ mod tests {
                 &[],
             )
             .await
-            .expect("pre-revocation event remains eligible");
+            .is_err());
         let boundary_time = "1970-01-01T00:19:10Z";
         let boundary_proof = auth
             .create_event_proof_v2(

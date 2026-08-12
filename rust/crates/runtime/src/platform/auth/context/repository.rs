@@ -1028,15 +1028,16 @@ mod tests {
         AccountCreation, AccountFlowCreation, AccountFlowKind, AccountFlowRecord, AccountFlowState,
         AccountRepository, AuthService, AuthServiceConfig, AuthorityDecision,
         AuthorityDecisionOutcome, AuthorityEvidenceRepository, AuthorityProposalKind,
-        AuthorityRepository, AuthorityState, AuthorityTarget, ContextRepository,
-        CreateAuthorityProposalInput, DecideAuthorityProposalInput, DesiredAuthorityRecord,
-        DeviceDelegationMutation, DeviceDelegationRecord, DeviceDelegationState, DeviceRecord,
-        DeviceState, IdempotencyResultRecord, IdentityAuthorityRecord, LocalCredentialRecord,
-        ParticipantBindingRecord, ParticipantBindingState, PasswordChange, PasswordResetCompletion,
-        PostCommitActionKind, PrincipalKind, PrincipalState, ProviderIdentityLink,
-        ProvisionedInstanceMutation, ProvisioningRepository, SessionCreation, SessionRecord,
-        SessionRepository, SessionRevocation, SessionState, SqliteAuthorizationStore,
-        UpdateUserInput, UserProfileRecord,
+        AuthorityRepository, AuthorityState, AuthorityTarget, CompletePasswordResetInput,
+        ContextRepository, CreateAuthorityProposalInput, DecideAuthorityProposalInput,
+        DesiredAuthorityRecord, DeviceDelegationMutation, DeviceDelegationRecord,
+        DeviceDelegationState, DeviceRecord, DeviceState, IdempotencyResultRecord,
+        IdentityAuthorityRecord, LocalCredentialRecord, ParticipantBindingRecord,
+        ParticipantBindingState, PasswordChange, PasswordResetCompletion, PostCommitActionKind,
+        PrincipalKind, PrincipalState, ProviderIdentityLink, ProvisionedInstanceMutation,
+        ProvisioningRepository, SessionCreation, SessionRecord, SessionRepository,
+        SessionRevocation, SessionState, SqliteAuthorizationStore, UpdateUserInput,
+        UserProfileRecord,
     };
 
     const NOW_MS: i64 = 1_735_689_600_000;
@@ -1948,12 +1949,13 @@ mod tests {
             .await?;
         assert_eq!(
             service
-                .complete_password_reset(
-                    reset_token,
-                    1,
-                    "current password",
-                    NOW_MS + 2,
-                    IdempotencyResultRecord {
+                .complete_password_reset(CompletePasswordResetInput {
+                    token: reset_token,
+                    expected_flow_version: 1,
+                    username: None,
+                    password: "current password".to_owned(),
+                    consumed_at: NOW_MS + 2,
+                    idempotency: IdempotencyResultRecord {
                         scope_key: URL_SAFE_NO_PAD.encode([48; 32]),
                         purpose: "password-reset.complete".to_owned(),
                         signer_id: "usr_context".to_owned(),
@@ -1963,8 +1965,8 @@ mod tests {
                         created_at: NOW_MS,
                         expires_at: NOW_MS + 60_000,
                     },
-                    Vec::new(),
-                )
+                    actions: Vec::new(),
+                })
                 .await,
             Err(AuthorizationStateError::InvalidRecord(
                 "new password must differ from current password".to_owned()
@@ -2258,7 +2260,9 @@ mod tests {
                 .complete_password_reset(PasswordResetCompletion {
                     token_hash: token_hash.clone(),
                     expected_flow_version: 1,
+                    expected_credential_version: Some(1),
                     replacement: wrong_identity,
+                    identity: None,
                     consumed_at: NOW_MS + 3,
                     idempotency: IdempotencyResultRecord {
                         scope_key: URL_SAFE_NO_PAD.encode([32; 32]),
@@ -2281,7 +2285,9 @@ mod tests {
             .complete_password_reset(PasswordResetCompletion {
                 token_hash: token_hash.clone(),
                 expected_flow_version: 1,
+                expected_credential_version: Some(1),
                 replacement: replacement.clone(),
+                identity: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {
                     scope_key: URL_SAFE_NO_PAD.encode([17; 32]),
@@ -2322,7 +2328,9 @@ mod tests {
             .complete_password_reset(PasswordResetCompletion {
                 token_hash,
                 expected_flow_version: 1,
+                expected_credential_version: Some(1),
                 replacement,
+                identity: None,
                 consumed_at: NOW_MS + 3,
                 idempotency: IdempotencyResultRecord {
                     scope_key: URL_SAFE_NO_PAD.encode([18; 32]),
@@ -2881,6 +2889,8 @@ mod tests {
                     created_at: NOW_MS,
                     expires_at: NOW_MS + 60_000,
                 },
+                portal_binding: None,
+                expected_portal_binding: None,
                 actions: Vec::new(),
             })
             .await?;

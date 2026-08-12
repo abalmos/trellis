@@ -232,9 +232,9 @@
       } else if (name === "retry") {
         await retryJob({ action: (input) => trellis.jobsRetry(input) }, actionJobId);
       } else if (name === "replay") {
-        await replayDlqJob({ action: (input) => trellis.jobsReplayDLQ(input) }, actionJobId);
+        await replayDlqJob({ action: (input) => trellis.jobsReplayDlq(input) }, actionJobId);
       } else {
-        await dismissDlqJob({ action: (input) => trellis.jobsDismissDLQ(input) }, actionJobId);
+        await dismissDlqJob({ action: (input) => trellis.jobsDismissDlq(input) }, actionJobId);
       }
       await load(actionJobId);
     } catch (e) {

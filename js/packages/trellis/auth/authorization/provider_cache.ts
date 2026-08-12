@@ -289,10 +289,12 @@ export class AuthorizationProviderCache {
     // NATS reports denied publishes and other request-scoped failures as
     // `error` while the connection and registry watches remain healthy.
     if (phase === "error") return;
+    const wasConnected = this.#connected;
     this.#connected = phase === "connected";
     if (!this.#connected) {
       this.#markUnhealthy();
       this.#restartWatch?.();
+      if (wasConnected && phase !== "closed") this.#cache.requestRefresh();
     }
   }
 
@@ -537,12 +539,19 @@ export class AuthorizationProviderCache {
     const contextDigest = key.slice(REVOCATION_PREFIX.length);
     assertDigest(contextDigest);
     if ("operation" in update && update.operation === "delete") {
-      this.#revocations.delete(contextDigest);
+      // Revocation is monotonic: registry cleanup must never restore authority.
       return;
     }
     const value = "value" in update ? update.value : undefined;
     if (!value) throw new Error("authorization revocation value is missing");
     this.#revocations.set(contextDigest, parseRevocation(value));
+    try {
+      if (this.#cache.current().contextDigest === contextDigest) {
+        this.#cache.requestRefresh();
+      }
+    } catch {
+      // No current context is installed.
+    }
   }
 
   #evictExpiredContexts(): void {

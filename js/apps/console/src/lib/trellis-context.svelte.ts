@@ -19,7 +19,7 @@ export const trellisApp = createTrellisApp({
   participant: {
     id: contract.CONTRACT_ID,
     artifactDigest: contract.CONTRACT_DIGEST,
-    needsDigest: contract.CONTRACT_DIGEST,
+    needsDigest: contract.PARTICIPANT_NEEDS_DIGEST,
   },
   trellisUrl: () => selectedTrellisUrl,
 });

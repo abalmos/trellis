@@ -1,6 +1,8 @@
 use super::super::{AuthorizationContextBundle, AuthorizationContextIssueRequest};
 use super::*;
 
+const DEVICE_ACTIVATION_REVIEW_TTL_MS: i64 = 15 * 60_000;
+
 fn device_activation_url(
     portal: &LoginPortalRecord,
     public_origin: &str,
@@ -58,6 +60,7 @@ pub(super) struct DeviceBootstrapRequest {
     participant_artifact: Option<Value>,
     referenced_api_artifacts: Option<Vec<Value>>,
     challenge_digest: Option<String>,
+    confirmation_code: Option<String>,
     proof: Value,
 }
 
@@ -79,6 +82,7 @@ struct BootstrapInput {
     participant_artifact: Option<Value>,
     referenced_api_artifacts: Option<Vec<Value>>,
     challenge_digest: Option<String>,
+    confirmation_code: Option<String>,
     proof: Value,
     request_digest: String,
     kind: ProvisionedIdentityKind,
@@ -172,6 +176,7 @@ where
             participant_artifact: request.participant_artifact,
             referenced_api_artifacts: request.referenced_api_artifacts,
             challenge_digest: None,
+            confirmation_code: None,
             proof: request.proof,
             request_digest,
             kind: ProvisionedIdentityKind::Service,
@@ -232,6 +237,7 @@ fn device_bootstrap_input(
         participant_artifact: request.participant_artifact,
         referenced_api_artifacts: request.referenced_api_artifacts,
         challenge_digest: request.challenge_digest,
+        confirmation_code: request.confirmation_code,
         proof: request.proof,
         request_digest,
         kind: ProvisionedIdentityKind::Device,
@@ -382,9 +388,6 @@ where
         .get_participant_binding(&input.participant_id, &input.participant_artifact_digest)
         .await?;
     let Some(binding) = binding else {
-        if input.participant_artifact.is_none() && input.referenced_api_artifacts.is_none() {
-            return Ok(bootstrap_state(now, "manifest_required", None));
-        }
         let proposal = present_bootstrap_authority(
             state,
             &input,
@@ -464,6 +467,22 @@ where
                 .challenge_digest
                 .clone()
                 .ok_or_else(|| HttpError::bad_request("activation_challenge_required"))?;
+            let confirmation_code = input
+                .confirmation_code
+                .as_deref()
+                .ok_or_else(|| HttpError::bad_request("activation_confirmation_code_required"))?;
+            if confirmation_code.len() != 8
+                || !confirmation_code
+                    .bytes()
+                    .all(|byte| b"0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(&byte))
+            {
+                return Err(HttpError::bad_request(
+                    "invalid_activation_confirmation_code",
+                ));
+            }
+            let expires_at = now
+                .checked_add(DEVICE_ACTIVATION_REVIEW_TTL_MS)
+                .ok_or_else(|| HttpError::internal("device_activation_expiry_overflow"))?;
             let review = state
                 .service
                 .create_activation_review(CreateActivationReviewInput {
@@ -476,6 +495,8 @@ where
                         "publicIdentityKey": input.identity_public_key.clone(),
                         "participantId": input.participant_id.clone(),
                         "contractDigest": input.participant_artifact_digest.clone(),
+                        "confirmationCode": confirmation_code,
+                        "expiresAt": expires_at,
                     }),
                     requested_at: now,
                     idempotency: idempotency(
@@ -691,7 +712,7 @@ where
                     .map_err(|_| HttpError::internal("stored_participant_invalid"))?;
             (participant, apis.into_values().collect())
         }
-        (None, None, None) => return Err(HttpError::conflict("manifest_required")),
+        (None, None, None) => return Err(HttpError::conflict("participant_artifacts_required")),
         _ => unreachable!(),
     };
     let outcome = state

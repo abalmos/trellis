@@ -61,9 +61,13 @@ Rules:
   Treat the returned consent proposal as immutable for the lifetime of the flow.
 - OIDC provider links must navigate the same browser so Trellis can verify its
   state-specific `HttpOnly` cookie and current portal policy at callback.
+- Trusted portal policy is administered for one exact portal + participant.
+  Capability groups and provider-role mappings are server-side macros bounded by
+  the immutable proposal; Svelte portal code never expands or applies them.
 - `TrellisClientFor<typeof contract>` and
   `createTrellisApp(...)` require a module-shaped contract with `CONTRACT`,
-  `CONTRACT_DIGEST`, and `API.trellis`. The source contract returned by
+  `CONTRACT_ID`, `CONTRACT_DIGEST`, `API`, `API_DIGEST`, `PARTICIPANT`, and
+  `PARTICIPANT_NEEDS_DIGEST`. The source contract returned by
   `defineAppContract(...)` already has that shape.
 - Import `defineAppContract(...)` from the browser-safe `@qlever-llc/trellis`
   root. Keep generated SDKs and browser auth helpers on their explicit subpaths
@@ -72,8 +76,8 @@ Rules:
   `CONTRACT` alone is only the manifest and will fail with missing `API`, digest,
   or metadata properties.
 - Do not manually compose `{ CONTRACT, API: { owned: OWNED_API } }` for normal
-  Svelte app bootstrap. That partial shape can lose `API.trellis`,
-  `CONTRACT_DIGEST`, state metadata, and clean inferred client types.
+  Svelte app bootstrap. That partial shape can lose native API/participant
+  identity, state metadata, and clean inferred client types.
 - Do not generate or import the app's own generated SDK just to type
   `getTrellis()` or `createTrellisApp(...)`. The app source contract is the
   client type source; use `TrellisClientFor<typeof contract>`.

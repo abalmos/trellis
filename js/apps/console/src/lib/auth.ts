@@ -91,7 +91,7 @@ class ConsoleAuthState {
       authUrl: this.#requireAuthUrl(),
       redirectTo: options.redirectTo,
       handle: await this.init(),
-      contract: contract.CONTRACT,
+      contract,
     });
 
     if (response.status === "flow_started") {
@@ -116,10 +116,8 @@ class ConsoleAuthState {
     });
 
     return await completeSessionLogout({
-      authUrl: this.#requireAuthUrl(),
       handle: await this.init(),
       returnTo,
-      providerLogout: true,
     });
   }
 

@@ -35,7 +35,7 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authIdentityGrantsList({ limit: 100, offset: 0 }).take();
+      const response = await trellis.authIdentityGrantsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       grants = response.entries ?? [];
       const requestedGrant = page.url.searchParams.get("grant");

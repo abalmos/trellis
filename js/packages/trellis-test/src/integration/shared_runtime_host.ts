@@ -15,6 +15,7 @@ import {
   type TrellisIntegrationSharedRuntimeManifest,
 } from "./shared_runtime_protocol.ts";
 import type { TrellisIntegrationRuntimeOptions } from "./types.ts";
+import { startTestOidcProvider } from "./oidc_provider.ts";
 
 const WORKDIR_PREFIX = "trellis-test-pool-";
 const WORKDIR_OWNER_MARKER = ".trellis-test-owner";
@@ -79,6 +80,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
 
   let nats: NatsTestContainer | undefined;
   let runtime: TrellisTestRuntime | undefined;
+  const oidc = await startTestOidcProvider({ roles: ["direct"] });
   const adminRpcAbort = new AbortController();
   let adminRpcFinished: Promise<void> | undefined;
   const persistRetainedOutput = async () => {
@@ -99,6 +101,23 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     });
     runtime = await TrellisTestRuntime.start({
       ...args.runtime,
+      oauthProviders: {
+        ...args.runtime.oauthProviders,
+        "test-oidc": {
+          type: "oidc",
+          issuer: oidc.issuer,
+          clientId: "trellis-test-client",
+          displayName: "Test OIDC",
+          roleClaims: ["/roles"],
+        },
+        "other-oidc": {
+          type: "oidc",
+          issuer: oidc.issuer,
+          clientId: "trellis-test-client",
+          displayName: "Other OIDC",
+          roleClaims: ["/roles"],
+        },
+      },
       timeouts: {
         ...args.runtime.timeouts,
         reconciliationMs: args.runtime.timeouts?.reconciliationMs ?? 120_000,
@@ -159,6 +178,14 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
             mode: body.input.mode,
           } as const;
           output = await runtime?.completeClientAuth(authInput);
+        } else if (body.method === "testOidcSetClaims") {
+          if (typeof body.input !== "object" || body.input === null) {
+            return Response.json({ ok: false, error: "invalid OIDC claims" }, {
+              status: 400,
+            });
+          }
+          oidc.setClaims(Object.fromEntries(Object.entries(body.input)));
+          output = {};
         } else {
           for (let attempt = 1;; attempt += 1) {
             try {
@@ -189,15 +216,20 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     adminRpcFinished = adminRpcServer.finished;
 
     const manifest: TrellisIntegrationSharedRuntimeManifest = {
-      version: 3,
+      version: 4,
       runId,
       trellisUrl: runtime.trellisUrl,
       natsUrl: nats.natsUrl,
       websocketUrl: nats.websocketUrl,
       workdir,
+      controlPlaneSqlitePath: join(
+        runtime.workdir,
+        "trellis/trellis.sqlite.platform",
+      ),
       adminPassword,
       adminRpcUrl: `http://127.0.0.1:${adminRpcServer.addr.port}`,
       adminRpcToken,
+      testOidcIssuer: oidc.issuer,
       tenants: { ...nats.manifests },
       assignments,
     };
@@ -219,6 +251,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
         await adminRpcFinished?.catch(() => undefined);
         await runtime?.stop().catch((error) => errors.push(error));
         await nats?.stop().catch((error) => errors.push(error));
+        await oidc.shutdown().catch((error) => errors.push(error));
         await persistRetainedOutput().catch((error) => errors.push(error));
         if (args.runtime.keepWorkdir !== true) {
           await Deno.remove(workdir, { recursive: true }).catch((error) =>
@@ -239,6 +272,7 @@ export async function startTrellisIntegrationSharedRuntimeHost(args: {
     await adminRpcFinished?.catch(() => undefined);
     await runtime?.stop().catch(() => undefined);
     await nats?.stop().catch(() => undefined);
+    await oidc.shutdown().catch(() => undefined);
     await persistRetainedOutput().catch(() => undefined);
     if (args.runtime.keepWorkdir !== true) {
       await Deno.remove(workdir, { recursive: true }).catch(() => undefined);

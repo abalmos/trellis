@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.eventlog@v1.json
+// Generated from ./generated/protocol/apis/trellis.eventlog@v1.json
 import {
   eventActions,
   feedAction,
@@ -22,20 +22,17 @@ import {
   EventLogWatchRequestSchema,
   NotFoundErrorDataSchema,
 } from "./schemas.ts";
-import {
-  CONTRACT as ACTION_ARTIFACT,
-  CONTRACT_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
-const CONTRACT_ID = "trellis.eventlog@v1" as const;
+const API_ID = "trellis.eventlog@v1" as const;
 
 export const EventLogConsumersInspect = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Consumers.Inspect",
   {
     subject: "rpc.v1.EventLog.Consumers.Inspect",
@@ -53,17 +50,25 @@ export const EventLogConsumersInspect = rpcAction(
       EventLogConsumersInspectResponseSchema,
     ),
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -72,7 +77,7 @@ export const EventLogConsumersInspect = rpcAction(
 );
 
 export const EventLogConsumersQuery = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Consumers.Query",
   {
     subject: "rpc.v1.EventLog.Consumers.Query",
@@ -92,13 +97,23 @@ export const EventLogConsumersQuery = rpcAction(
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "EventLogConsumersQuery",
   ACTION_SOURCE,
 );
 
 export const EventLogInspect = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Inspect",
   {
     subject: "rpc.v1.EventLog.Inspect",
@@ -112,17 +127,25 @@ export const EventLogInspect = rpcAction(
     input: schema<Types.EventLogInspectInput>(EventLogInspectRequestSchema),
     output: schema<Types.EventLogInspectOutput>(EventLogInspectResponseSchema),
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
-    errors: ["UnexpectedError", "ValidationError", "NotFoundError"] as const,
+    errors: ["NotFoundError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
+      "NotFoundError",
       "UnexpectedError",
       "ValidationError",
-      "NotFoundError",
     ] as const,
     runtimeErrors: [
       {
         type: "NotFoundError",
         schema: schema<Types.NotFoundErrorData>(NotFoundErrorDataSchema),
         fromSerializable: Types.NotFoundError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
       },
     ] as const,
   },
@@ -131,7 +154,7 @@ export const EventLogInspect = rpcAction(
 );
 
 export const EventLogMetrics = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Metrics",
   {
     subject: "rpc.v1.EventLog.Metrics",
@@ -147,13 +170,23 @@ export const EventLogMetrics = rpcAction(
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "EventLogMetrics",
   ACTION_SOURCE,
 );
 
 export const EventLogQuery = rpcAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Query",
   {
     subject: "rpc.v1.EventLog.Query",
@@ -169,16 +202,26 @@ export const EventLogQuery = rpcAction(
     callerCapabilities: ["trellis.eventlog::events.read"] as const,
     errors: ["UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: ["UnexpectedError", "ValidationError"] as const,
+    runtimeErrors: [
+      {
+        type: "UnexpectedError",
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
   },
   "EventLogQuery",
   ACTION_SOURCE,
 );
 
 export const EventLogWatch = feedAction(
-  CONTRACT_ID,
+  API_ID,
   "EventLog.Watch",
   {
-    subject: "feeds.v1.EventLog.Watch",
+    subject: "feed.v1.EventLog.Watch",
     permission: Object.freeze({
       apiId: "trellis.eventlog@v1",
       apiVersion: "v1",

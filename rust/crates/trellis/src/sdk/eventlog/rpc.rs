@@ -17,32 +17,32 @@ impl RpcDescriptor for EventLogConsumersInspectRpc {
     const SUBJECT: &'static str = "rpc.v1.EventLog.Consumers.Inspect";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
     const ERRORS: &'static [&'static str] =
-        &["UnexpectedError", "ValidationError", "NotFoundError"];
+        &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `EventLog.Consumers.Inspect`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventLogConsumersInspectError {
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
     /// `UnexpectedError` error payload.
     UnexpectedError(crate::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
     ValidationError(crate::generated::DeclaredErrorPayload),
-    /// `NotFoundError` error payload.
-    NotFoundError(super::types::NotFoundErrorData),
 }
 impl crate::generated::DeclaredError for EventLogConsumersInspectError {
     fn decode(
         payload: &crate::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
             Some("UnexpectedError") => payload
                 .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
                 .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
-            Some("NotFoundError") => payload
-                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
-                .map(|value| value.map(Self::NotFoundError)),
             _ => Ok(None),
         }
     }
@@ -95,32 +95,32 @@ impl RpcDescriptor for EventLogInspectRpc {
     const SUBJECT: &'static str = "rpc.v1.EventLog.Inspect";
     const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.eventlog::events.read"];
     const ERRORS: &'static [&'static str] =
-        &["UnexpectedError", "ValidationError", "NotFoundError"];
+        &["NotFoundError", "UnexpectedError", "ValidationError"];
 }
 /// Errors declared by `EventLog.Inspect`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventLogInspectError {
+    /// `NotFoundError` error payload.
+    NotFoundError(super::types::NotFoundErrorData),
     /// `UnexpectedError` error payload.
     UnexpectedError(crate::generated::DeclaredErrorPayload),
     /// `ValidationError` error payload.
     ValidationError(crate::generated::DeclaredErrorPayload),
-    /// `NotFoundError` error payload.
-    NotFoundError(super::types::NotFoundErrorData),
 }
 impl crate::generated::DeclaredError for EventLogInspectError {
     fn decode(
         payload: &crate::generated::RemoteErrorPayload,
     ) -> Result<Option<Self>, serde_json::Error> {
         match payload.error_type() {
+            Some("NotFoundError") => payload
+                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
+                .map(|value| value.map(Self::NotFoundError)),
             Some("UnexpectedError") => payload
                 .decode_declared::<crate::generated::DeclaredErrorPayload>("UnexpectedError")
                 .map(|value| value.map(Self::UnexpectedError)),
             Some("ValidationError") => payload
                 .decode_declared::<crate::generated::DeclaredErrorPayload>("ValidationError")
                 .map(|value| value.map(Self::ValidationError)),
-            Some("NotFoundError") => payload
-                .decode_declared::<super::types::NotFoundErrorData>("NotFoundError")
-                .map(|value| value.map(Self::NotFoundError)),
             _ => Ok(None),
         }
     }

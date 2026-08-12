@@ -43,7 +43,7 @@ Create `contracts/service.rs`:
 ```rust
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ContractKind, ContractManifest, ContractManifestBuilder, ContractsError,
+    ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
 };
 
 fn empty_object_schema() -> Value {
@@ -53,19 +53,20 @@ fn empty_object_schema() -> Value {
     })
 }
 
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = ApiBuilder::authoring(
         "orders-service@v1",
         "Orders Service",
         "A simple service for managing orders.",
         ContractKind::Service,
     )
     .schema("Empty", empty_object_schema())
-    .build()
+    .build()?;
+    ContractBuilder::from_api(api.normalized_value()?, ContractKind::Service)?.build()
 }
 ```
 
-This is a valid, nearly empty service contract. Rust services should keep this Rust source as the authoring surface and treat generated manifests and SDK crates as artifacts.
+This is a valid, nearly empty service contract. Rust services should keep this Rust source as the authoring surface and treat generated native API/participant JSON and SDK crates as artifacts.
 
 Prepare the generated artifacts once so the SDK crate exists:
 

@@ -112,8 +112,11 @@ export const AuthStartRequestSchema = Type.Object({
   redirectTo: Type.String(),
   sessionKey: SessionKeySchema,
   sig: SignatureSchema,
-  contractDigest: Type.Optional(ContractDigestSchema),
-  contract: Type.Optional(OpenObjectSchema),
+  participantId: Type.String({ minLength: 1 }),
+  participantArtifactDigest: ContractDigestSchema,
+  participantNeedsDigest: ContractDigestSchema,
+  participantArtifact: OpenObjectSchema,
+  referencedApiArtifacts: Type.Array(OpenObjectSchema, { minItems: 1 }),
   context: Type.Optional(OpenObjectSchema),
 });
 

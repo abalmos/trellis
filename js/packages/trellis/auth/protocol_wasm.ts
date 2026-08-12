@@ -1,7 +1,15 @@
-import init, * as protocolWasmModule from "./protocol_wasm/trellis_protocol_wasm.js";
-import { base64urlDecode } from "./utils.ts";
+import init, {
+  initSync,
+  type SyncInitInput,
+} from "./protocol_wasm/trellis_protocol_wasm.js";
+import * as protocolWasmModule from "./protocol_wasm/trellis_protocol_wasm.js";
+import { PROTOCOL_WASM_BASE64 } from "./protocol_wasm/trellis_protocol_wasm_bytes.ts";
+import { base64urlDecode, type JsonValue } from "./utils.ts";
+
+type JsonObject = { [key: string]: JsonValue };
 
 type ProtocolWasmModule = typeof protocolWasmModule & {
+  resolve_participant_v1(participantJson: string, apisJson: string): string;
   verify_authorization_event_v2(inputJson: string): string;
   verify_authorization_request_v2(inputJson: string): string;
 };
@@ -78,6 +86,19 @@ export type PermissionAtomV1 = {
 export type GrantSetV1 = {
   format: "trellis.grant-set.v1";
   permissions: PermissionAtomV1[];
+};
+
+/** Native participant resolution returned by the Rust protocol boundary. */
+export type ResolvedParticipantV1 = {
+  apiArtifacts: Record<string, JsonObject>;
+  apiDigests: Record<string, string>;
+  participant: JsonObject;
+  participantDigest: string;
+  participantNeeds: JsonObject;
+  participantNeedsDigest: string;
+  requiredGrants: GrantSetV1;
+  optionalGrants: GrantSetV1;
+  authorityProposal: JsonObject;
 };
 
 /** Stable principal projection returned by the protocol verifier. */
@@ -240,6 +261,7 @@ export type VerifiedAuthorizationContextTokenProjection = {
 };
 
 let initialized: Promise<void> | undefined;
+let initializedSync = false;
 
 async function wasmBytes(): Promise<Uint8Array> {
   const url = new URL(
@@ -278,6 +300,59 @@ async function initialize(): Promise<void> {
     await init({ module_or_path: await wasmBytes() });
   })();
   await initialized;
+}
+
+function initializeSync(): void {
+  if (initializedSync) return;
+  const url = new URL(
+    "./protocol_wasm/trellis_protocol_wasm_bg.wasm",
+    import.meta.url,
+  );
+  const runtime = globalThis as Record<string, unknown>;
+  const deno = runtime["De" + "no"] as
+    | { readFileSync(path: URL): Uint8Array }
+    | undefined;
+  if (deno) {
+    initSync({ module: deno.readFileSync(url) as SyncInitInput });
+    initializedSync = true;
+    return;
+  }
+  const process = runtime["pro" + "cess"] as
+    | {
+      versions?: { node?: string };
+      getBuiltinModule?: (name: string) => {
+        readFileSync(path: URL): Uint8Array;
+      };
+    }
+    | undefined;
+  if (process?.versions?.node && process.getBuiltinModule) {
+    initSync({
+      module: process.getBuiltinModule("fs").readFileSync(url) as SyncInitInput,
+    });
+    initializedSync = true;
+    return;
+  }
+  const binary = atob(PROTOCOL_WASM_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  initSync({ module: bytes as SyncInitInput });
+  initializedSync = true;
+}
+
+/** Resolve a native participant through the authoritative Rust protocol resolver. */
+export function resolveParticipantV1WasmSync(args: {
+  participant: unknown;
+  apis: Record<string, unknown>;
+}): ResolvedParticipantV1 {
+  initializeSync();
+  return JSON.parse(
+    protocolWasm.resolve_participant_v1(
+      JSON.stringify(args.participant),
+      JSON.stringify(args.apis),
+    ),
+  ) as ResolvedParticipantV1;
 }
 
 /** Verify a complete signed authorization context through Rust/WASM. */

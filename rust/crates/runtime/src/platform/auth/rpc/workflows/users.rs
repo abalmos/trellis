@@ -23,6 +23,18 @@ pub(super) async fn dispatch(
         "rpc.v1.Auth.UserIdentities.Unlink" => {
             processor.user_identities_unlink(payload, &caller).await
         }
+        "rpc.v1.Auth.CapabilityGroups.List" => processor.capability_groups_list(payload).await,
+        "rpc.v1.Auth.CapabilityGroups.Get" => processor.capability_groups_get(payload).await,
+        "rpc.v1.Auth.CapabilityGroups.Put" => {
+            processor.capability_groups_put(payload, &caller).await
+        }
+        "rpc.v1.Auth.CapabilityGroups.Delete" => {
+            processor.capability_groups_delete(payload, &caller).await
+        }
+        "rpc.v1.Auth.IdentityGrants.List" => processor.identity_grants_list(payload, &caller).await,
+        "rpc.v1.Auth.IdentityGrants.Revoke" => {
+            processor.identity_grants_revoke(payload, &caller).await
+        }
         _ => unknown(subject),
     }
 }

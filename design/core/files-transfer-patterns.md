@@ -12,7 +12,7 @@ order: 46
   communication model
 - [store-resource-patterns.md](./store-resource-patterns.md) - service-owned
   blob-store resources
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md) -
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
   contract ownership and permission rules
 
 ## Context

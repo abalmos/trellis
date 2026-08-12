@@ -262,7 +262,7 @@ async fn sqlite_platform_store_upgrades_populated_accepted_m7_schema(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
     let connection = rusqlite::Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let foreign_key_errors = connection
@@ -416,7 +416,7 @@ fn sqlite_platform_store_upgrades_accepted_m8_and_preserves_post_commit_actions(
     store.migrate()?;
     store.migrate()?;
 
-    assert_migration_order(&path, &[1000, 1001, 1002, 1003])?;
+    assert_migration_order(&path, &[1000, 1001, 1002, 1003, 1004])?;
     let connection = Connection::open(&path)?;
     connection.pragma_update(None, "foreign_keys", true)?;
     let actions = connection
@@ -538,7 +538,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&health_path, "trellis_health_projection_store_marker")?;
     assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003])?;
+    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004])?;
     assert_migration_order(&jobs_path, &[2000])?;
     assert_migration_order(&health_path, &[3000, 3001])?;
     assert_migration_order(&eventlog_path, &[4000])?;

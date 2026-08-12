@@ -42,9 +42,8 @@
     try {
       currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
       const response = await trellis.authSessionsList({
-        user: sessionFilterUser.trim() || undefined,
+        principalId: sessionFilterUser.trim() || undefined,
         limit: 500,
-        offset: 0,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       sessions = response.entries ?? [];
@@ -60,10 +59,8 @@
     error = null;
     try {
       const response = await trellis.authConnectionsList({
-        user: connFilterUser.trim() || undefined,
-        sessionKey: connFilterSessionKey.trim() || undefined,
+        sessionId: connFilterSessionKey.trim() || undefined,
         limit: 500,
-        offset: 0,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       connections = response.entries ?? [];
@@ -80,7 +77,7 @@
   }
 
   function isCurrentSession(session: SessionRecord): boolean {
-    return !!currentSessionKey && session.sessionKey === currentSessionKey;
+    return !!currentSessionKey && session.sessionKeyId === currentSessionKey;
   }
 
   onMount(() => { void loadSessions(); });
@@ -152,7 +149,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each sessions as session (session.key)}
+            {#each sessions as session (session.sessionId)}
               {@const summary = describeSessionPrincipal(session)}
               <tr>
                 <td class="min-w-0">
@@ -166,9 +163,9 @@
                     {participantKindLabel(session.participantKind)}
                   </span>
                 </td>
-                <td class="trellis-identifier text-base-content/60">{formatShortKey(session.sessionKey)}</td>
+                <td class="trellis-identifier text-base-content/60">{formatShortKey(session.sessionKeyId)}</td>
                 <td class="text-xs text-base-content/60">
-                  <div>Last auth {formatDate(session.lastAuth)}</div>
+                  <div>Last auth {formatDate(session.lastSeenAt)}</div>
                   <div>Created {formatDate(session.createdAt)}</div>
                 </td>
                 <td class="text-right">
@@ -177,7 +174,7 @@
                       <span class="badge badge-info badge-sm">Current</span>
                     {/if}
                     <ActionMenu menuClass="z-10" widthClass="w-48">
-                      <li><a class="text-error" href={resolve(`/admin/sessions/revoke?sessionKey=${encodeURIComponent(session.sessionKey)}`)}>Revoke</a></li>
+                      <li><a class="text-error" href={resolve(`/admin/sessions/revoke?sessionKey=${encodeURIComponent(session.sessionId)}`)}>Revoke</a></li>
                     </ActionMenu>
                   </div>
                 </td>
@@ -218,7 +215,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each connections as connection (connection.key)}
+            {#each connections as connection (connection.connectionId)}
               {@const summary = describeSessionPrincipal(connection)}
               <tr>
                 <td>
@@ -228,11 +225,9 @@
                   {/if}
                 </td>
                 <td>
-                  <span class={["badge badge-sm", participantKindBadgeClass(connection.participantKind)]}>
-                    {participantKindLabel(connection.participantKind)}
-                  </span>
+                  <span class="badge badge-sm">Connection</span>
                 </td>
-                <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.sessionKey)}</td>
+                <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.sessionId)}</td>
                 <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.userNkey)}</td>
                 <td>
                   <span class="text-sm">{connection.serverId}</span>
@@ -241,7 +236,7 @@
                 <td class="text-base-content/60">{formatDate(connection.connectedAt)}</td>
                 <td class="text-right">
                   <ActionMenu menuClass="z-10" widthClass="w-48">
-                      <li><a class="text-error" href={resolve(`/admin/sessions/kick?userNkey=${encodeURIComponent(connection.userNkey)}`)}>Kick</a></li>
+                      <li><a class="text-error" href={resolve(`/admin/sessions/kick?userNkey=${encodeURIComponent(connection.connectionId)}`)}>Kick</a></li>
                   </ActionMenu>
                 </td>
               </tr>

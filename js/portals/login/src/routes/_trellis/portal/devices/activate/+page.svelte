@@ -142,8 +142,7 @@
           </div>
 
           {@render technicalDetails([
-            { label: "Deployment id", value: controller.view.deploymentId },
-            { label: "Device id", value: controller.view.instanceId },
+            { label: "Request handle", value: controller.view.flowId },
           ])}
           <p class="portal-copy text-xs">
             Activation is bound to this deployment request and contract digest.

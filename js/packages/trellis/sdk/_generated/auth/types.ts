@@ -1,4 +1,4 @@
-// Generated from ./generated/apis/trellis.auth@v1.json
+// Generated from ./generated/protocol/apis/trellis.auth@v1.json
 import type { SerializableErrorData } from "../../../contracts.ts";
 import { TrellisError } from "../../../errors/index.ts";
 import { AuthErrorDetailsSchema } from "./schemas.ts";
@@ -52,6 +52,69 @@ export type AuthCapabilitiesListOutput = {
     }
   >;
   nextCursor: string | null;
+};
+
+export type AuthCapabilityGroupsDeleteInput = {
+  expectedVersion: number;
+  groupKey: string;
+  idempotencyKey: string;
+};
+export type AuthCapabilityGroupsDeleteOutput = { success: boolean };
+
+export type AuthCapabilityGroupsGetInput = { groupKey: string };
+export type AuthCapabilityGroupsGetOutput = {
+  group: {
+    capabilities: Array<string>;
+    createdAt: number;
+    description: string;
+    displayName: string;
+    groupKey: string;
+    includedGroups: Array<string>;
+    updatedAt: number;
+    version: number;
+  };
+};
+
+export type AuthCapabilityGroupsListInput = { limit: number; offset?: number };
+export type AuthCapabilityGroupsListOutput = {
+  count: number;
+  entries: Array<
+    {
+      capabilities: Array<string>;
+      createdAt: number;
+      description: string;
+      displayName: string;
+      groupKey: string;
+      includedGroups: Array<string>;
+      updatedAt: number;
+      version: number;
+    }
+  >;
+  limit: number;
+  nextOffset?: number;
+  offset: number;
+};
+
+export type AuthCapabilityGroupsPutInput = {
+  capabilities: Array<string>;
+  description: string;
+  displayName: string;
+  expectedVersion: number | null;
+  groupKey: string;
+  idempotencyKey: string;
+  includedGroups: Array<string>;
+};
+export type AuthCapabilityGroupsPutOutput = {
+  group: {
+    capabilities: Array<string>;
+    createdAt: number;
+    description: string;
+    displayName: string;
+    groupKey: string;
+    includedGroups: Array<string>;
+    updatedAt: number;
+    version: number;
+  };
 };
 
 export type AuthConnectionsKickInput = {
@@ -1941,6 +2004,41 @@ export type AuthIdentityAuthorityRevokeOutput = {
   };
 };
 
+export type AuthIdentityGrantsListInput = {
+  limit: number;
+  offset?: number;
+  user?: string;
+};
+export type AuthIdentityGrantsListOutput = {
+  count: number;
+  entries: Array<
+    {
+      capabilities: Array<string>;
+      contractEvidence: { contractDigest: string; contractId: string };
+      description: string;
+      displayName: string;
+      grantedAt: string;
+      identityAnchor:
+        | { contractId: string; kind: "web"; origin: string }
+        | { contractId: string; kind: "cli"; sessionPublicKey: string }
+        | { contractId: string; kind: "native"; sessionPublicKey: string }
+        | { contractId: string; devicePublicKey: string; kind: "device-user" };
+      identityGrantId: string;
+      participantKind: "app" | "agent";
+      updatedAt: string;
+    }
+  >;
+  limit: number;
+  nextOffset?: number;
+  offset: number;
+};
+
+export type AuthIdentityGrantsRevokeInput = {
+  identityGrantId: string;
+  user?: string;
+};
+export type AuthIdentityGrantsRevokeOutput = { success: boolean };
+
 export type AuthPortalsGetInput = { portalId: string };
 export type AuthPortalsGetOutput = {
   portal: {
@@ -1972,6 +2070,100 @@ export type AuthPortalsGetOutput = {
       version: number;
     }
   >;
+};
+
+export type AuthPortalsGrantOverridesListInput = {
+  limit: number;
+  offset?: number;
+  participantId?: string;
+  portalId?: string;
+};
+export type AuthPortalsGrantOverridesListOutput = {
+  count: number;
+  entries: Array<
+    {
+      capabilityGroupKeys: Array<string>;
+      createdAt: number;
+      directCapabilities: Array<string>;
+      participantId: string;
+      portalId: string;
+      roleMappings: Array<
+        {
+          capabilityGroupKeys: Array<string>;
+          directCapabilities: Array<string>;
+          providerId: string;
+          role: string;
+        }
+      >;
+      updatedAt: number;
+      version: number;
+    }
+  >;
+  limit: number;
+  nextOffset?: number;
+  offset: number;
+};
+
+export type AuthPortalsGrantOverridesPutInput = {
+  capabilityGroupKeys: Array<string>;
+  directCapabilities: Array<string>;
+  expectedVersion: number | null;
+  idempotencyKey: string;
+  participantId: string;
+  portalId: string;
+  roleMappings: Array<
+    {
+      capabilityGroupKeys: Array<string>;
+      directCapabilities: Array<string>;
+      providerId: string;
+      role: string;
+    }
+  >;
+};
+export type AuthPortalsGrantOverridesPutOutput = {
+  policy: {
+    capabilityGroupKeys: Array<string>;
+    createdAt: number;
+    directCapabilities: Array<string>;
+    participantId: string;
+    portalId: string;
+    roleMappings: Array<
+      {
+        capabilityGroupKeys: Array<string>;
+        directCapabilities: Array<string>;
+        providerId: string;
+        role: string;
+      }
+    >;
+    updatedAt: number;
+    version: number;
+  };
+};
+
+export type AuthPortalsGrantOverridesRemoveInput = {
+  expectedVersion: number;
+  idempotencyKey: string;
+  participantId: string;
+  portalId: string;
+};
+export type AuthPortalsGrantOverridesRemoveOutput = {
+  removed?: {
+    capabilityGroupKeys: Array<string>;
+    createdAt: number;
+    directCapabilities: Array<string>;
+    participantId: string;
+    portalId: string;
+    roleMappings: Array<
+      {
+        capabilityGroupKeys: Array<string>;
+        directCapabilities: Array<string>;
+        providerId: string;
+        role: string;
+      }
+    >;
+    updatedAt: number;
+    version: number;
+  };
 };
 
 export type AuthPortalsListInput = {

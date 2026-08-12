@@ -8,7 +8,9 @@ import {
 
 export type { ConnectedActionName } from "./surface_names.ts";
 
-export const ACTION_METADATA: unique symbol = Symbol("trellis.action.metadata");
+export const ACTION_METADATA: unique symbol = Symbol.for(
+  "trellis.action.metadata",
+);
 
 /** The callable direction represented by a contract action descriptor. */
 export type ActionKind =
@@ -20,13 +22,11 @@ export type ActionKind =
 
 type RuntimeDescriptor = RPCDesc | OperationDesc | FeedDesc | EventDesc;
 
-/** Canonical source artifact carried by portable generated actions. */
-export type ActionSource =
-  | Readonly<Record<string, unknown>>
-  | {
-    readonly artifact: Readonly<Record<string, unknown>>;
-    readonly digest: string;
-  };
+/** Exact native API evidence carried by portable generated actions. */
+export type ActionSource = {
+  readonly api: Readonly<Record<string, unknown>>;
+  readonly apiDigest: string;
+};
 
 type ActionMetadata<TDescriptor extends RuntimeDescriptor> = {
   descriptor: TDescriptor;

@@ -1,4 +1,4 @@
-// Generated from ./generated/apis/trellis.auth@v1.json
+// Generated from ./generated/protocol/apis/trellis.auth@v1.json
 import {
   eventActions,
   feedAction,
@@ -10,6 +10,14 @@ import * as Types from "./types.ts";
 import {
   AuthCapabilitiesListRequestSchema,
   AuthCapabilitiesListResponseSchema,
+  AuthCapabilityGroupsDeleteRequestSchema,
+  AuthCapabilityGroupsDeleteResponseSchema,
+  AuthCapabilityGroupsGetRequestSchema,
+  AuthCapabilityGroupsGetResponseSchema,
+  AuthCapabilityGroupsListRequestSchema,
+  AuthCapabilityGroupsListResponseSchema,
+  AuthCapabilityGroupsPutRequestSchema,
+  AuthCapabilityGroupsPutResponseSchema,
   AuthConnectionsClosedEventSchema,
   AuthConnectionsKickedEventSchema,
   AuthConnectionsKickRequestSchema,
@@ -79,8 +87,18 @@ import {
   AuthIdentityAuthorityListResponseSchema,
   AuthIdentityAuthorityRevokeRequestSchema,
   AuthIdentityAuthorityRevokeResponseSchema,
+  AuthIdentityGrantsListRequestSchema,
+  AuthIdentityGrantsListResponseSchema,
+  AuthIdentityGrantsRevokeRequestSchema,
+  AuthIdentityGrantsRevokeResponseSchema,
   AuthPortalsGetRequestSchema,
   AuthPortalsGetResponseSchema,
+  AuthPortalsGrantOverridesListRequestSchema,
+  AuthPortalsGrantOverridesListResponseSchema,
+  AuthPortalsGrantOverridesPutRequestSchema,
+  AuthPortalsGrantOverridesPutResponseSchema,
+  AuthPortalsGrantOverridesRemoveRequestSchema,
+  AuthPortalsGrantOverridesRemoveResponseSchema,
   AuthPortalsListRequestSchema,
   AuthPortalsListResponseSchema,
   AuthPortalsLoginSettingsGetRequestSchema,
@@ -135,14 +153,11 @@ import {
   AuthUsersUpdateRequestSchema,
   AuthUsersUpdateResponseSchema,
 } from "./schemas.ts";
-import {
-  API as ACTION_ARTIFACT,
-  API_DIGEST as ACTION_DIGEST,
-} from "./manifest.ts";
+import { API as ACTION_ARTIFACT, API_DIGEST as ACTION_DIGEST } from "./api.ts";
 
 const ACTION_SOURCE = {
-  artifact: ACTION_ARTIFACT,
-  digest: ACTION_DIGEST,
+  api: ACTION_ARTIFACT,
+  apiDigest: ACTION_DIGEST,
 } as const;
 
 const API_ID = "trellis.auth@v1" as const;
@@ -165,7 +180,7 @@ export const AuthCapabilitiesList = rpcAction(
     output: schema<Types.AuthCapabilitiesListOutput>(
       AuthCapabilitiesListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -194,6 +209,194 @@ export const AuthCapabilitiesList = rpcAction(
   ACTION_SOURCE,
 );
 
+export const AuthCapabilityGroupsDelete = rpcAction(
+  API_ID,
+  "Auth.CapabilityGroups.Delete",
+  {
+    subject: "rpc.v1.Auth.CapabilityGroups.Delete",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.CapabilityGroups.Delete",
+      action: "call",
+    }),
+    input: schema<Types.AuthCapabilityGroupsDeleteInput>(
+      AuthCapabilityGroupsDeleteRequestSchema,
+    ),
+    output: schema<Types.AuthCapabilityGroupsDeleteOutput>(
+      AuthCapabilityGroupsDeleteResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthCapabilityGroupsDelete",
+  ACTION_SOURCE,
+);
+
+export const AuthCapabilityGroupsGet = rpcAction(
+  API_ID,
+  "Auth.CapabilityGroups.Get",
+  {
+    subject: "rpc.v1.Auth.CapabilityGroups.Get",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.CapabilityGroups.Get",
+      action: "call",
+    }),
+    input: schema<Types.AuthCapabilityGroupsGetInput>(
+      AuthCapabilityGroupsGetRequestSchema,
+    ),
+    output: schema<Types.AuthCapabilityGroupsGetOutput>(
+      AuthCapabilityGroupsGetResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthCapabilityGroupsGet",
+  ACTION_SOURCE,
+);
+
+export const AuthCapabilityGroupsList = rpcAction(
+  API_ID,
+  "Auth.CapabilityGroups.List",
+  {
+    subject: "rpc.v1.Auth.CapabilityGroups.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.CapabilityGroups.List",
+      action: "call",
+    }),
+    input: schema<Types.AuthCapabilityGroupsListInput>(
+      AuthCapabilityGroupsListRequestSchema,
+    ),
+    output: schema<Types.AuthCapabilityGroupsListOutput>(
+      AuthCapabilityGroupsListResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthCapabilityGroupsList",
+  ACTION_SOURCE,
+);
+
+export const AuthCapabilityGroupsPut = rpcAction(
+  API_ID,
+  "Auth.CapabilityGroups.Put",
+  {
+    subject: "rpc.v1.Auth.CapabilityGroups.Put",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.CapabilityGroups.Put",
+      action: "call",
+    }),
+    input: schema<Types.AuthCapabilityGroupsPutInput>(
+      AuthCapabilityGroupsPutRequestSchema,
+    ),
+    output: schema<Types.AuthCapabilityGroupsPutOutput>(
+      AuthCapabilityGroupsPutResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthCapabilityGroupsPut",
+  ACTION_SOURCE,
+);
+
 export const AuthConnectionsKick = rpcAction(
   API_ID,
   "Auth.Connections.Kick",
@@ -212,7 +415,7 @@ export const AuthConnectionsKick = rpcAction(
     output: schema<Types.AuthConnectionsKickOutput>(
       AuthConnectionsKickResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -259,7 +462,7 @@ export const AuthConnectionsList = rpcAction(
     output: schema<Types.AuthConnectionsListOutput>(
       AuthConnectionsListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -306,7 +509,7 @@ export const AuthDeploymentAuthorityAcceptMigration = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityAcceptMigrationOutput>(
       AuthDeploymentAuthorityAcceptMigrationResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -353,7 +556,7 @@ export const AuthDeploymentAuthorityAcceptUpdate = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityAcceptUpdateOutput>(
       AuthDeploymentAuthorityAcceptUpdateResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -400,7 +603,7 @@ export const AuthDeploymentAuthorityGet = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityGetOutput>(
       AuthDeploymentAuthorityGetResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -447,7 +650,7 @@ export const AuthDeploymentAuthorityList = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityListOutput>(
       AuthDeploymentAuthorityListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -494,7 +697,7 @@ export const AuthDeploymentAuthorityPlan = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityPlanOutput>(
       AuthDeploymentAuthorityPlanResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -541,7 +744,7 @@ export const AuthDeploymentAuthorityPlansGet = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityPlansGetOutput>(
       AuthDeploymentAuthorityPlansGetResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -588,7 +791,7 @@ export const AuthDeploymentAuthorityPlansList = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityPlansListOutput>(
       AuthDeploymentAuthorityPlansListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -635,7 +838,7 @@ export const AuthDeploymentAuthorityReconcile = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityReconcileOutput>(
       AuthDeploymentAuthorityReconcileResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -682,7 +885,7 @@ export const AuthDeploymentAuthorityReject = rpcAction(
     output: schema<Types.AuthDeploymentAuthorityRejectOutput>(
       AuthDeploymentAuthorityRejectResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -729,7 +932,7 @@ export const AuthDeploymentsCreate = rpcAction(
     output: schema<Types.AuthDeploymentsCreateOutput>(
       AuthDeploymentsCreateResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -776,7 +979,7 @@ export const AuthDeploymentsDisable = rpcAction(
     output: schema<Types.AuthDeploymentsDisableOutput>(
       AuthDeploymentsDisableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -823,7 +1026,7 @@ export const AuthDeploymentsEnable = rpcAction(
     output: schema<Types.AuthDeploymentsEnableOutput>(
       AuthDeploymentsEnableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -870,7 +1073,7 @@ export const AuthDeploymentsList = rpcAction(
     output: schema<Types.AuthDeploymentsListOutput>(
       AuthDeploymentsListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -917,7 +1120,7 @@ export const AuthDeploymentsRemove = rpcAction(
     output: schema<Types.AuthDeploymentsRemoveOutput>(
       AuthDeploymentsRemoveResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -964,7 +1167,7 @@ export const AuthDeviceUserAuthoritiesList = rpcAction(
     output: schema<Types.AuthDeviceUserAuthoritiesListOutput>(
       AuthDeviceUserAuthoritiesListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1011,7 +1214,7 @@ export const AuthDeviceUserAuthoritiesReviewsDecide = rpcAction(
     output: schema<Types.AuthDeviceUserAuthoritiesReviewsDecideOutput>(
       AuthDeviceUserAuthoritiesReviewsDecideResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin", "trellis.auth::device.review"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1058,7 +1261,7 @@ export const AuthDeviceUserAuthoritiesReviewsList = rpcAction(
     output: schema<Types.AuthDeviceUserAuthoritiesReviewsListOutput>(
       AuthDeviceUserAuthoritiesReviewsListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin", "trellis.auth::device.review"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1105,7 +1308,7 @@ export const AuthDeviceUserAuthoritiesRevoke = rpcAction(
     output: schema<Types.AuthDeviceUserAuthoritiesRevokeOutput>(
       AuthDeviceUserAuthoritiesRevokeResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1199,7 +1402,7 @@ export const AuthDevicesDisable = rpcAction(
     output: schema<Types.AuthDevicesDisableOutput>(
       AuthDevicesDisableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1244,7 +1447,7 @@ export const AuthDevicesEnable = rpcAction(
     output: schema<Types.AuthDevicesEnableOutput>(
       AuthDevicesEnableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1287,7 +1490,7 @@ export const AuthDevicesList = rpcAction(
     }),
     input: schema<Types.AuthDevicesListInput>(AuthDevicesListRequestSchema),
     output: schema<Types.AuthDevicesListOutput>(AuthDevicesListResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1334,7 +1537,7 @@ export const AuthDevicesProvision = rpcAction(
     output: schema<Types.AuthDevicesProvisionOutput>(
       AuthDevicesProvisionResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1379,7 +1582,7 @@ export const AuthDevicesRemove = rpcAction(
     output: schema<Types.AuthDevicesRemoveOutput>(
       AuthDevicesRemoveResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1426,7 +1629,7 @@ export const AuthIdentityAuthorityGet = rpcAction(
     output: schema<Types.AuthIdentityAuthorityGetOutput>(
       AuthIdentityAuthorityGetResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1473,7 +1676,7 @@ export const AuthIdentityAuthorityList = rpcAction(
     output: schema<Types.AuthIdentityAuthorityListOutput>(
       AuthIdentityAuthorityListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1520,7 +1723,7 @@ export const AuthIdentityAuthorityRevoke = rpcAction(
     output: schema<Types.AuthIdentityAuthorityRevokeOutput>(
       AuthIdentityAuthorityRevokeResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1549,6 +1752,91 @@ export const AuthIdentityAuthorityRevoke = rpcAction(
   ACTION_SOURCE,
 );
 
+export const AuthIdentityGrantsList = rpcAction(
+  API_ID,
+  "Auth.IdentityGrants.List",
+  {
+    subject: "rpc.v1.Auth.IdentityGrants.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.IdentityGrants.List",
+      action: "call",
+    }),
+    input: schema<Types.AuthIdentityGrantsListInput>(
+      AuthIdentityGrantsListRequestSchema,
+    ),
+    output: schema<Types.AuthIdentityGrantsListOutput>(
+      AuthIdentityGrantsListResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError"] as const,
+    declaredErrorTypes: ["AuthError", "UnexpectedError"] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthIdentityGrantsList",
+  ACTION_SOURCE,
+);
+
+export const AuthIdentityGrantsRevoke = rpcAction(
+  API_ID,
+  "Auth.IdentityGrants.Revoke",
+  {
+    subject: "rpc.v1.Auth.IdentityGrants.Revoke",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.IdentityGrants.Revoke",
+      action: "call",
+    }),
+    input: schema<Types.AuthIdentityGrantsRevokeInput>(
+      AuthIdentityGrantsRevokeRequestSchema,
+    ),
+    output: schema<Types.AuthIdentityGrantsRevokeOutput>(
+      AuthIdentityGrantsRevokeResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthIdentityGrantsRevoke",
+  ACTION_SOURCE,
+);
+
 export const AuthPortalsGet = rpcAction(
   API_ID,
   "Auth.Portals.Get",
@@ -1563,7 +1851,7 @@ export const AuthPortalsGet = rpcAction(
     }),
     input: schema<Types.AuthPortalsGetInput>(AuthPortalsGetRequestSchema),
     output: schema<Types.AuthPortalsGetOutput>(AuthPortalsGetResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1592,6 +1880,147 @@ export const AuthPortalsGet = rpcAction(
   ACTION_SOURCE,
 );
 
+export const AuthPortalsGrantOverridesList = rpcAction(
+  API_ID,
+  "Auth.Portals.GrantOverrides.List",
+  {
+    subject: "rpc.v1.Auth.Portals.GrantOverrides.List",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.GrantOverrides.List",
+      action: "call",
+    }),
+    input: schema<Types.AuthPortalsGrantOverridesListInput>(
+      AuthPortalsGrantOverridesListRequestSchema,
+    ),
+    output: schema<Types.AuthPortalsGrantOverridesListOutput>(
+      AuthPortalsGrantOverridesListResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthPortalsGrantOverridesList",
+  ACTION_SOURCE,
+);
+
+export const AuthPortalsGrantOverridesPut = rpcAction(
+  API_ID,
+  "Auth.Portals.GrantOverrides.Put",
+  {
+    subject: "rpc.v1.Auth.Portals.GrantOverrides.Put",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.GrantOverrides.Put",
+      action: "call",
+    }),
+    input: schema<Types.AuthPortalsGrantOverridesPutInput>(
+      AuthPortalsGrantOverridesPutRequestSchema,
+    ),
+    output: schema<Types.AuthPortalsGrantOverridesPutOutput>(
+      AuthPortalsGrantOverridesPutResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthPortalsGrantOverridesPut",
+  ACTION_SOURCE,
+);
+
+export const AuthPortalsGrantOverridesRemove = rpcAction(
+  API_ID,
+  "Auth.Portals.GrantOverrides.Remove",
+  {
+    subject: "rpc.v1.Auth.Portals.GrantOverrides.Remove",
+    permission: Object.freeze({
+      apiId: "trellis.auth@v1",
+      apiVersion: "v1",
+      surfaceKind: "rpc",
+      surfaceName: "Auth.Portals.GrantOverrides.Remove",
+      action: "call",
+    }),
+    input: schema<Types.AuthPortalsGrantOverridesRemoveInput>(
+      AuthPortalsGrantOverridesRemoveRequestSchema,
+    ),
+    output: schema<Types.AuthPortalsGrantOverridesRemoveOutput>(
+      AuthPortalsGrantOverridesRemoveResponseSchema,
+    ),
+    callerCapabilities: ["admin"] as const,
+    errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+    declaredErrorTypes: [
+      "AuthError",
+      "UnexpectedError",
+      "ValidationError",
+    ] as const,
+    runtimeErrors: [
+      {
+        type: "AuthError",
+        schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.AuthError.fromSerializable,
+      },
+      {
+        type: "UnexpectedError",
+        schema: schema<Types.UnexpectedErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.UnexpectedError.fromSerializable,
+      },
+      {
+        type: "ValidationError",
+        schema: schema<Types.ValidationErrorData>(AuthErrorDetailsSchema),
+        fromSerializable: Types.ValidationError.fromSerializable,
+      },
+    ] as const,
+  },
+  "AuthPortalsGrantOverridesRemove",
+  ACTION_SOURCE,
+);
+
 export const AuthPortalsList = rpcAction(
   API_ID,
   "Auth.Portals.List",
@@ -1606,7 +2035,7 @@ export const AuthPortalsList = rpcAction(
     }),
     input: schema<Types.AuthPortalsListInput>(AuthPortalsListRequestSchema),
     output: schema<Types.AuthPortalsListOutput>(AuthPortalsListResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1653,7 +2082,7 @@ export const AuthPortalsLoginSettingsGet = rpcAction(
     output: schema<Types.AuthPortalsLoginSettingsGetOutput>(
       AuthPortalsLoginSettingsGetResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1700,7 +2129,7 @@ export const AuthPortalsLoginSettingsUpdate = rpcAction(
     output: schema<Types.AuthPortalsLoginSettingsUpdateOutput>(
       AuthPortalsLoginSettingsUpdateResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1743,7 +2172,7 @@ export const AuthPortalsPut = rpcAction(
     }),
     input: schema<Types.AuthPortalsPutInput>(AuthPortalsPutRequestSchema),
     output: schema<Types.AuthPortalsPutOutput>(AuthPortalsPutResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1788,7 +2217,7 @@ export const AuthPortalsRemove = rpcAction(
     output: schema<Types.AuthPortalsRemoveOutput>(
       AuthPortalsRemoveResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1835,7 +2264,7 @@ export const AuthPortalsRoutesPut = rpcAction(
     output: schema<Types.AuthPortalsRoutesPutOutput>(
       AuthPortalsRoutesPutResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1882,7 +2311,7 @@ export const AuthPortalsRoutesRemove = rpcAction(
     output: schema<Types.AuthPortalsRoutesRemoveOutput>(
       AuthPortalsRoutesRemoveResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1929,7 +2358,7 @@ export const AuthServiceInstancesDisable = rpcAction(
     output: schema<Types.AuthServiceInstancesDisableOutput>(
       AuthServiceInstancesDisableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -1976,7 +2405,7 @@ export const AuthServiceInstancesEnable = rpcAction(
     output: schema<Types.AuthServiceInstancesEnableOutput>(
       AuthServiceInstancesEnableResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2023,7 +2452,7 @@ export const AuthServiceInstancesList = rpcAction(
     output: schema<Types.AuthServiceInstancesListOutput>(
       AuthServiceInstancesListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2070,7 +2499,7 @@ export const AuthServiceInstancesProvision = rpcAction(
     output: schema<Types.AuthServiceInstancesProvisionOutput>(
       AuthServiceInstancesProvisionResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2117,7 +2546,7 @@ export const AuthServiceInstancesRemove = rpcAction(
     output: schema<Types.AuthServiceInstancesRemoveOutput>(
       AuthServiceInstancesRemoveResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2162,7 +2591,7 @@ export const AuthSessionsList = rpcAction(
     output: schema<Types.AuthSessionsListOutput>(
       AuthSessionsListResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2299,7 +2728,7 @@ export const AuthSessionsRevoke = rpcAction(
     output: schema<Types.AuthSessionsRevokeOutput>(
       AuthSessionsRevokeResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2436,7 +2865,7 @@ export const AuthUsersCreate = rpcAction(
     }),
     input: schema<Types.AuthUsersCreateInput>(AuthUsersCreateRequestSchema),
     output: schema<Types.AuthUsersCreateOutput>(AuthUsersCreateResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2479,7 +2908,7 @@ export const AuthUsersGet = rpcAction(
     }),
     input: schema<Types.AuthUsersGetInput>(AuthUsersGetRequestSchema),
     output: schema<Types.AuthUsersGetOutput>(AuthUsersGetResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2569,7 +2998,7 @@ export const AuthUsersList = rpcAction(
     }),
     input: schema<Types.AuthUsersListInput>(AuthUsersListRequestSchema),
     output: schema<Types.AuthUsersListOutput>(AuthUsersListResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2663,7 +3092,7 @@ export const AuthUsersPasswordResetCreate = rpcAction(
     output: schema<Types.AuthUsersPasswordResetCreateOutput>(
       AuthUsersPasswordResetCreateResponseSchema,
     ),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2751,7 +3180,7 @@ export const AuthUsersUpdate = rpcAction(
     }),
     input: schema<Types.AuthUsersUpdateInput>(AuthUsersUpdateRequestSchema),
     output: schema<Types.AuthUsersUpdateOutput>(AuthUsersUpdateResponseSchema),
-    callerCapabilities: [] as const,
+    callerCapabilities: ["admin"] as const,
     errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
     declaredErrorTypes: [
       "AuthError",
@@ -2874,7 +3303,7 @@ export const AuthConnectionsClosed = eventActions(
       AuthConnectionsClosedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: ["trellis.auth::events.observe"] as const,
   },
   "AuthConnectionsClosed",
   false,
@@ -2904,7 +3333,7 @@ export const AuthConnectionsKicked = eventActions(
       AuthConnectionsKickedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: ["trellis.auth::events.observe"] as const,
   },
   "AuthConnectionsKicked",
   false,
@@ -2934,7 +3363,7 @@ export const AuthConnectionsOpened = eventActions(
       AuthConnectionsOpenedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: ["trellis.auth::events.observe"] as const,
   },
   "AuthConnectionsOpened",
   false,
@@ -2965,7 +3394,10 @@ export const AuthDeviceUserAuthoritiesApproved = eventActions(
       AuthDeviceUserAuthoritiesApprovedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: [
+      "trellis.auth::device.review",
+      "trellis.auth::events.observe",
+    ] as const,
   },
   "AuthDeviceUserAuthoritiesApproved",
   false,
@@ -2996,7 +3428,10 @@ export const AuthDeviceUserAuthoritiesRequested = eventActions(
       AuthDeviceUserAuthoritiesRequestedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: [
+      "trellis.auth::device.review",
+      "trellis.auth::events.observe",
+    ] as const,
   },
   "AuthDeviceUserAuthoritiesRequested",
   false,
@@ -3027,7 +3462,10 @@ export const AuthDeviceUserAuthoritiesResolved = eventActions(
       AuthDeviceUserAuthoritiesResolvedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: [
+      "trellis.auth::device.review",
+      "trellis.auth::events.observe",
+    ] as const,
   },
   "AuthDeviceUserAuthoritiesResolved",
   false,
@@ -3058,7 +3496,10 @@ export const AuthDeviceUserAuthoritiesReviewRequested = eventActions(
       AuthDeviceUserAuthoritiesReviewRequestedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: [
+      "trellis.auth::device.review",
+      "trellis.auth::events.observe",
+    ] as const,
   },
   "AuthDeviceUserAuthoritiesReviewRequested",
   false,
@@ -3088,7 +3529,7 @@ export const AuthSessionsRevoked = eventActions(
       AuthSessionsRevokedEventSchema,
     ),
     publishCapabilities: [] as const,
-    subscribeCapabilities: [] as const,
+    subscribeCapabilities: ["trellis.auth::events.observe"] as const,
   },
   "AuthSessionsRevoked",
   false,

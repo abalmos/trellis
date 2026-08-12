@@ -401,6 +401,7 @@ export async function waitForDeviceActivation(args: {
   trellisUrl: string;
   publicIdentityKey: string;
   identitySeed: Uint8Array | string;
+  activationKey: Uint8Array | string;
   deploymentId: string;
   instanceId: string;
   principalId: string;
@@ -415,6 +416,11 @@ export async function waitForDeviceActivation(args: {
   const nonce = args.nonce ?? ulid();
   const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
   const challengeDigest = base64urlEncode(await sha256(utf8(nonce)));
+  const confirmationCode = await deriveDeviceConfirmationCode({
+    activationKey: args.activationKey,
+    publicIdentityKey: args.publicIdentityKey,
+    nonce,
+  });
   while (true) {
     const requestId = ulid();
     const issuedAt = Date.now();
@@ -445,6 +451,7 @@ export async function waitForDeviceActivation(args: {
       participantArtifactDigest: args.participantArtifactDigest,
       participantNeedsDigest: args.participantNeedsDigest,
       challengeDigest,
+      confirmationCode,
       proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
     };
     const requestDigest = await sessionProofRequestDigestV1(unsigned);

@@ -2,8 +2,8 @@
 
 use serde_json::{json, Value};
 use trellis_contracts::{
-    ContractCapabilityMetadata, ContractKind, ContractManifest, ContractManifestBuilder,
-    ContractsError,
+    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractCapabilityMetadata,
+    ContractKind, ContractsError,
 };
 
 const READ_CAPABILITY: &str = "events.read";
@@ -12,13 +12,12 @@ const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 const NOT_FOUND_ERROR: &str = "NotFoundError";
 
-/// Build the canonical Event Log contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    let mut manifest = ContractManifestBuilder::new(
+/// Build the canonical Event Log API artifact.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    ApiBuilder::authoring(
         "trellis.eventlog@v1",
         "Trellis Event Log",
         "Read-only Event Log API for Trellis event stream observability.",
-        ContractKind::Service,
     )
     .docs_with_summary(
         "Event stream observability APIs.",
@@ -67,11 +66,13 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
             .docs_with_summary("Watch event changes.", "Streams ready and invalidation frames for Event Log clients.")
             .with_subscribe_capabilities([STREAM_CAPABILITY]),
     )
-    .build()?;
+    .build()
+}
 
-    manifest.uses.required_mut().remove("core");
-    manifest.uses.optional_mut().remove("core");
-    Ok(manifest)
+/// Build the native Event Log participant and API artifacts.
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = api_artifact()?.normalized_value()?;
+    ContractBuilder::from_api(api, ContractKind::Service)?.build()
 }
 
 fn read_rpc(

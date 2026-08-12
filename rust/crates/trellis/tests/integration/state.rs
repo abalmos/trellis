@@ -8,6 +8,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use trellis_rs::client::{
     DeleteStateOptions, ExpectedPutRevision, ListStateOptions, MapStateStore, PutStateOptions,
     StateGetResult, StateValue, ValueStateStore,
@@ -15,194 +16,145 @@ use trellis_rs::client::{
 use trellis_rs::sdk::state::types::{
     StateAdminDeleteRequest, StateAdminGetRequest, StateAdminGetResponse, StateAdminListRequest,
 };
-use trellis_rs::service::GeneratedServiceContract;
 
-const CLIENT_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-client@v1",
-  "displayName": "Trellis Integration State Client",
-  "description": "Exercises Trellis-managed State.",
-  "kind": "app",
-  "schemas": {
-    "Preferences": {
-      "type": "object",
-      "required": ["theme"],
-      "properties": { "theme": { "type": "string" } }
-    },
-    "Draft": {
-      "type": "object",
-      "required": ["title"],
-      "properties": { "title": { "type": "string" } }
-    }
-  },
-  "state": {
-    "preferences": { "kind": "value", "schema": { "schema": "Preferences" } },
-    "drafts": { "kind": "map", "schema": { "schema": "Draft" } }
-  },
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Delete", "State.Get", "State.List", "State.Put"] }
-      }
-    }
-  }
-}"#;
+#[derive(Clone, Copy)]
+enum StateFixture {
+    Client,
+    Migration,
+    Compatible,
+    Other,
+    Agent,
+    Service,
+}
 
-const MIGRATION_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-client@v1",
-  "displayName": "Trellis Integration State Client V2",
-  "description": "Exercises Trellis-managed State migration.",
-  "kind": "app",
-  "schemas": {
-    "PreferencesV1": {
-      "type": "object",
-      "required": ["theme"],
-      "properties": { "theme": { "type": "string" } }
-    },
-    "Preferences": {
-      "type": "object",
-      "required": ["theme", "compact"],
-      "properties": { "theme": { "type": "string" }, "compact": { "type": "boolean" } }
-    },
-    "DraftV1": {
-      "type": "object",
-      "required": ["title"],
-      "properties": { "title": { "type": "string" } }
-    },
-    "Draft": {
-      "type": "object",
-      "required": ["title", "pinned"],
-      "properties": { "title": { "type": "string" }, "pinned": { "type": "boolean" } }
-    }
-  },
-  "state": {
-    "preferences": {
-      "kind": "value",
-      "schema": { "schema": "Preferences" },
-      "stateVersion": "preferences.v2",
-      "acceptedVersions": { "v1": { "schema": "PreferencesV1" } }
-    },
-    "drafts": {
-      "kind": "map",
-      "schema": { "schema": "Draft" },
-      "stateVersion": "drafts.v2",
-      "acceptedVersions": { "v1": { "schema": "DraftV1" } }
-    }
-  },
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Delete", "State.Get", "State.List", "State.Put"] }
-      }
-    }
-  }
-}"#;
+fn state_contract(
+    fixture: StateFixture,
+) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
+    use trellis_rs::contracts::{state, ContractBuilder, ContractKind, ContractStateKind};
 
-const COMPATIBLE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-client@v1",
-  "displayName": "Trellis Integration State Client Compatible",
-  "description": "Exercises compatible State lineage changes.",
-  "kind": "app",
-  "schemas": {
-    "Preferences": {
-      "type": "object",
-      "required": ["theme"],
-      "properties": {
-        "theme": { "type": "string" },
-        "compact": { "type": "boolean" }
-      }
-    },
-    "Draft": {
-      "type": "object",
-      "required": ["title"],
-      "properties": { "title": { "type": "string" } }
+    let (id, display_name, description, kind) = match fixture {
+        StateFixture::Client => (
+            "trellis.integration.state-client@v1",
+            "Trellis Integration State Client",
+            "Exercises Trellis-managed State.",
+            ContractKind::App,
+        ),
+        StateFixture::Migration => (
+            "trellis.integration.state-client@v1",
+            "Trellis Integration State Client V2",
+            "Exercises Trellis-managed State migration.",
+            ContractKind::App,
+        ),
+        StateFixture::Compatible => (
+            "trellis.integration.state-client@v1",
+            "Trellis Integration State Client Compatible",
+            "Exercises compatible State lineage changes.",
+            ContractKind::App,
+        ),
+        StateFixture::Other => (
+            "trellis.integration.state-other@v1",
+            "Trellis Integration Other State Client",
+            "Exercises State contract namespace isolation.",
+            ContractKind::App,
+        ),
+        StateFixture::Agent => (
+            "trellis.integration.state-agent@v1",
+            "Trellis Integration State Agent",
+            "Proves agents cannot use normal State.",
+            ContractKind::Agent,
+        ),
+        StateFixture::Service => (
+            "trellis.integration.state-service@v1",
+            "Trellis Integration State Service",
+            "Proves services cannot use normal State.",
+            ContractKind::Service,
+        ),
+    };
+    let mut builder = ContractBuilder::authoring(id, display_name, description, kind).use_ref(
+        "state",
+        trellis_rs::contracts::use_contract("trellis.state@v1").with_rpc_call(
+            match fixture {
+                StateFixture::Other => ["State.Delete", "State.Get", "State.Put"].as_slice(),
+                StateFixture::Agent | StateFixture::Service => ["State.Get"].as_slice(),
+                _ => ["State.Delete", "State.Get", "State.List", "State.Put"].as_slice(),
+            }
+            .iter()
+            .copied(),
+        ),
+    );
+    match fixture {
+        StateFixture::Service => {}
+        StateFixture::Agent => {
+            builder = builder
+                .schema("Value", serde_json::json!({"type": "string"}))
+                .state("value", state(ContractStateKind::Value, "Value"));
+        }
+        StateFixture::Other => {
+            builder = builder
+                .schema("Preferences", preferences_schema(false))
+                .state(
+                    "preferences",
+                    state(ContractStateKind::Value, "Preferences"),
+                );
+        }
+        StateFixture::Migration => {
+            let mut preferences = state(ContractStateKind::Value, "Preferences");
+            preferences.state_version = Some("preferences.v2".to_owned());
+            preferences.accepted_versions.insert(
+                "v1".to_owned(),
+                trellis_rs::contracts::schema_ref("PreferencesV1"),
+            );
+            let mut drafts = state(ContractStateKind::Map, "Draft");
+            drafts.state_version = Some("drafts.v2".to_owned());
+            drafts.accepted_versions.insert(
+                "v1".to_owned(),
+                trellis_rs::contracts::schema_ref("DraftV1"),
+            );
+            builder = builder
+                .schema("PreferencesV1", preferences_schema(false))
+                .schema("Preferences", serde_json::json!({"type": "object", "required": ["theme", "compact"], "properties": {"theme": {"type": "string"}, "compact": {"type": "boolean"}}}))
+                .schema("DraftV1", draft_schema(false))
+                .schema("Draft", serde_json::json!({"type": "object", "required": ["title", "pinned"], "properties": {"title": {"type": "string"}, "pinned": {"type": "boolean"}}}))
+                .state("preferences", preferences)
+                .state("drafts", drafts);
+        }
+        StateFixture::Client | StateFixture::Compatible => {
+            builder = builder
+                .schema(
+                    "Preferences",
+                    preferences_schema(matches!(fixture, StateFixture::Compatible)),
+                )
+                .schema("Draft", draft_schema(false))
+                .state(
+                    "preferences",
+                    state(ContractStateKind::Value, "Preferences"),
+                )
+                .state("drafts", state(ContractStateKind::Map, "Draft"));
+        }
     }
-  },
-  "state": {
-    "preferences": { "kind": "value", "schema": { "schema": "Preferences" } },
-    "drafts": { "kind": "map", "schema": { "schema": "Draft" } }
-  },
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Delete", "State.Get", "State.List", "State.Put"] }
-      }
-    }
-  }
-}"#;
+    let state_api = trellis_test::TrellisTestContract::from_native_api_json(
+        trellis_rs::sdk::state::API_JSON,
+        ContractKind::Service,
+    )?;
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        builder,
+        &[&state_api],
+    )
+}
 
-const OTHER_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-other@v1",
-  "displayName": "Trellis Integration Other State Client",
-  "description": "Exercises State contract namespace isolation.",
-  "kind": "app",
-  "schemas": {
-    "Preferences": {
-      "type": "object",
-      "required": ["theme"],
-      "properties": { "theme": { "type": "string" } }
+fn preferences_schema(optional_compact: bool) -> Value {
+    let mut schema = serde_json::json!({"type": "object", "required": ["theme"], "properties": {"theme": {"type": "string"}}});
+    if optional_compact {
+        schema["properties"]["compact"] = serde_json::json!({"type": "boolean"});
     }
-  },
-  "state": {
-    "preferences": { "kind": "value", "schema": { "schema": "Preferences" } }
-  },
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Delete", "State.Get", "State.Put"] }
-      }
-    }
-  }
-}"#;
+    schema
+}
 
-const AGENT_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-agent@v1",
-  "displayName": "Trellis Integration State Agent",
-  "description": "Proves agents cannot use normal State.",
-  "kind": "agent",
-  "schemas": { "Value": { "type": "string" } },
-  "state": { "value": { "kind": "value", "schema": { "schema": "Value" } } },
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Get"] }
-      }
-    }
-  }
-}"#;
-
-const SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.state-service@v1",
-  "displayName": "Trellis Integration State Service",
-  "description": "Proves services cannot use normal State.",
-  "kind": "service",
-  "uses": {
-    "required": {
-      "state": {
-        "contract": "trellis.state@v1",
-        "rpc": { "call": ["State.Get"] }
-      }
-    }
-  }
-}"#;
+fn draft_schema(_optional_pinned: bool) -> Value {
+    serde_json::json!({"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}})
+}
 
 struct StateServiceContract;
-
-impl GeneratedServiceContract for StateServiceContract {
-    const CONTRACT_ID: &'static str = "trellis.integration.state-service@v1";
-    const CONTRACT_DIGEST: &'static str = "";
-    const CONTRACT_JSON: &'static str = SERVICE_CONTRACT_JSON;
-}
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 struct Preferences {
@@ -227,8 +179,7 @@ async fn client() -> (
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("observe first admin bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("build State client contract");
+    let contract = state_contract(StateFixture::Client).expect("build State client contract");
     let caller = runtime
         .admin()
         .connect_client(&bootstrap_url, &contract)
@@ -384,8 +335,7 @@ async fn state_value_and_map_conflict_shapes_live() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("State client contract");
+    let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
     let (caller, first_session) = admin
         .connect_client_with_session_seed_reconnectable(
@@ -517,24 +467,21 @@ async fn state_value_and_map_conflict_shapes_live() {
         .revoke_session(
             &bootstrap_url,
             &trellis_rs::sdk::auth::AuthSessionsRevokeRequest {
-                expected_version: None,
-                idempotency_key: "state-independent-session-revoke".to_owned(),
-                reason: Some("verify sibling session isolation".to_owned()),
                 session_id: first_session.session_id().to_owned(),
+                expected_version: None,
+                reason: Some("integration test revocation".to_string()),
+                idempotency_key: ulid::Ulid::new().to_string(),
             },
         )
         .await
         .expect("revoke only the first State session");
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if first_store.get("concurrent").await.is_err() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("first State session remained authorized after revocation");
+    assert!(
+        !matches!(
+            tokio::time::timeout(Duration::from_secs(5), first_store.get("concurrent")).await,
+            Ok(Ok(_))
+        ),
+        "revoked State session completed a stale request"
+    );
     assert!(matches!(
         second_store
             .get("concurrent")
@@ -800,10 +747,7 @@ async fn state_ttl_expiry_is_logically_absent() {
         .await
         .expect("bootstrap URL");
     let contract = runtime
-        .scoped_contract(
-            &trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-                .expect("client contract"),
-        )
+        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
         .expect("scope client contract");
     assert!(
         !runtime
@@ -907,8 +851,7 @@ async fn state_agent_normal_access_is_denied() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(AGENT_CONTRACT_JSON)
-        .expect("agent contract");
+    let contract = state_contract(StateFixture::Agent).expect("agent contract");
     let agent = runtime
         .admin()
         .connect_client(&bootstrap_url, &contract)
@@ -931,20 +874,16 @@ async fn state_service_normal_access_is_denied() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(SERVICE_CONTRACT_JSON)
-        .expect("service contract");
+    let contract = state_contract(StateFixture::Service).expect("service contract");
     let key = runtime
         .admin()
         .provision_service_instance(&bootstrap_url, &contract, Some("state-service"), None)
         .await
         .expect("provision State service");
-    let service = trellis_test::connect_service_runtime::<StateServiceContract>(
-        runtime.trellis_url(),
-        SERVICE_CONTRACT_JSON,
-        &key,
-    )
-    .await
-    .expect("connect State service");
+    let service =
+        trellis_test::connect_service_runtime::<StateServiceContract>(runtime.trellis_url(), &key)
+            .await
+            .expect("connect State service");
     let result = service
         .integration_test_request_json_value(
             "rpc.v1.State.Get",
@@ -970,10 +909,7 @@ async fn state_migration_required_is_returned_live() {
         .expect("write v1 map State value");
     let old_map_revision = put_revision(&map_written);
     let v1_contract = runtime
-        .scoped_contract(
-            &trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-                .expect("v1 contract"),
-        )
+        .scoped_contract(&state_contract(StateFixture::Client).expect("v1 contract"))
         .expect("scope v1 contract");
     let old_writer_digest = v1_contract.digest().to_owned();
     let context = caller_v1
@@ -988,9 +924,7 @@ async fn state_migration_required_is_returned_live() {
         .wait_for_bootstrap_url(Duration::from_secs(2))
         .await
         .expect("bootstrap URL");
-    let v2_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(MIGRATION_CONTRACT_JSON)
-            .expect("v2 contract");
+    let v2_contract = state_contract(StateFixture::Migration).expect("v2 contract");
     let mut admin = runtime.admin();
     let caller_v2 = admin
         .connect_client(&bootstrap_url, &v2_contract)
@@ -1160,8 +1094,7 @@ async fn state_lineage_survives_compatible_contract_digest_change() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("v1 contract");
+    let contract = state_contract(StateFixture::Client).expect("v1 contract");
     let (caller, reconnect) = runtime
         .admin()
         .connect_client_with_session_seed_reconnectable(
@@ -1189,9 +1122,7 @@ async fn state_lineage_survives_compatible_contract_digest_change() {
             .expect("read after reconnect"),
         StateGetResult::Found { .. }
     ));
-    let compatible =
-        trellis_test::TrellisTestContract::from_manifest_json(COMPATIBLE_CONTRACT_JSON)
-            .expect("compatible contract");
+    let compatible = state_contract(StateFixture::Compatible).expect("compatible contract");
     let upgraded = runtime
         .admin()
         .connect_client(&bootstrap_url, &compatible)
@@ -1219,8 +1150,7 @@ async fn state_contract_namespaces_are_isolated() {
         .wait_for_bootstrap_url(Duration::from_secs(2))
         .await
         .expect("bootstrap URL");
-    let other = trellis_test::TrellisTestContract::from_manifest_json(OTHER_CONTRACT_JSON)
-        .expect("other contract");
+    let other = state_contract(StateFixture::Other).expect("other contract");
     let second = runtime
         .admin()
         .connect_client(&bootstrap_url, &other)
@@ -1246,8 +1176,7 @@ async fn state_distinct_users_with_same_contract_are_isolated() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("State client contract");
+    let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
     let user_a = admin
         .connect_client(&bootstrap_url, &contract)
@@ -1315,8 +1244,7 @@ async fn state_exact_resource_permission_is_required() {
         .wait_for_bootstrap_url(Duration::from_secs(10))
         .await
         .expect("bootstrap URL");
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("State client contract");
+    let contract = state_contract(StateFixture::Client).expect("State client contract");
     let mut admin = runtime.admin();
     let allowed = admin
         .connect_client(&bootstrap_url, &contract)
@@ -1414,8 +1342,7 @@ async fn state_admin_inspect_and_delete_state() {
         .await
         .expect("bootstrap URL");
     let mut admin = runtime.admin();
-    let contract = trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-        .expect("client contract");
+    let contract = state_contract(StateFixture::Client).expect("client contract");
     let contract = runtime
         .scoped_contract(&contract)
         .expect("scope client contract");
@@ -1519,10 +1446,7 @@ async fn state_admin_deletes_corrupt_state_entry() {
         .expect("user principal id");
     let key = raw_value_state_key(&caller, "preferences");
     let contract = runtime
-        .scoped_contract(
-            &trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-                .expect("client contract"),
-        )
+        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
         .expect("scope client contract");
     runtime
         .seed_raw_state_entry(trellis_test::TrellisRawStateEntry {
@@ -1587,10 +1511,7 @@ async fn state_malformed_envelope_and_unknown_version_are_unexpected() {
         .await
         .expect("bootstrap URL");
     let contract = runtime
-        .scoped_contract(
-            &trellis_test::TrellisTestContract::from_manifest_json(CLIENT_CONTRACT_JSON)
-                .expect("client contract"),
-        )
+        .scoped_contract(&state_contract(StateFixture::Client).expect("client contract"))
         .expect("scope client contract");
     let target = |contract_digest: String| StateAdminDeleteRequest::UserApp {
         contract_digest,

@@ -6,10 +6,10 @@ use time::OffsetDateTime;
 use trellis_rs::client::SessionAuth;
 
 use super::auth::{
-    AuthConnectionPresence, AuthEphemeralRepository, AuthorityEvidenceRepository,
-    AuthorizationContextService, AuthorizationStateError, NatsAuthEphemeralRepository,
-    OutboxRepository, PostCommitActionKind, PostCommitActionRecord, SessionRepository,
-    SqliteAuthorizationStore,
+    validate_connection_kick_response, AuthConnectionPresence, AuthEphemeralRepository,
+    AuthorityEvidenceRepository, AuthorizationContextService, AuthorizationStateError,
+    NatsAuthEphemeralRepository, OutboxRepository, PostCommitActionKind, PostCommitActionRecord,
+    SessionRepository, SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -133,6 +133,15 @@ impl AuthPostCommitRuntime {
         self.contexts
             .dispatch_registry_action(digest, revocation, now_millis()? / 1_000)
             .await?;
+        if revocation {
+            for connection in self
+                .ephemeral
+                .list_connection_presence_by_context(digest)
+                .await?
+            {
+                self.kick_connection(&connection).await?;
+            }
+        }
         tracing::debug!(
             context_digest = digest,
             revocation,
@@ -285,7 +294,8 @@ impl AuthPostCommitRuntime {
             .client_id
             .parse::<u64>()
             .map_err(|_| AuthorizationStateError::InvalidRecord("invalid client id".to_owned()))?;
-        self.system_client
+        let response = self
+            .system_client
             .request(
                 format!("$SYS.REQ.SERVER.{}.KICK", connection.server_id),
                 Bytes::from(
@@ -295,7 +305,10 @@ impl AuthPostCommitRuntime {
             )
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        Ok(())
+        validate_connection_kick_response(&response.payload)?;
+        self.ephemeral
+            .delete_connection_presence(&connection.connection_id)
+            .await
     }
 }
 

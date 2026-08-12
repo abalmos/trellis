@@ -107,12 +107,13 @@ impl AuthorizationContextService {
                 Ok(resources)
             })
             .await?;
-        compile_transport_permissions(
+        let permissions = compile_transport_permissions(
             signed,
             &binding,
             &resources,
             &AuthorizationRegistryBinding::from_config(&self.config),
-        )
+        )?;
+        Ok(permissions)
     }
 
     pub(crate) fn manifest_generation(&self) -> u64 {
@@ -404,7 +405,17 @@ impl AuthorizationContextService {
                 AuthorizationStateError::Storage("context action is missing".to_owned())
             })?;
         if revocation {
-            self.registry.publish_revocation(&context).await
+            self.registry.publish_revocation(&context).await?;
+            self.validator_cache
+                .apply_runtime_revocation(
+                    digest,
+                    context.revoked_at.ok_or_else(|| {
+                        AuthorizationStateError::Storage(
+                            "revoked context has no revocation time".to_owned(),
+                        )
+                    })?,
+                )
+                .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
         } else if context.expires_at <= now_seconds {
             Ok(())
         } else {

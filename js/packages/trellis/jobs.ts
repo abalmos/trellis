@@ -379,13 +379,14 @@ type ActiveJobContext = {
   waitFor<T>(target: JobWaitTarget, fn: () => Promise<T>): Promise<T>;
 };
 
-const activeJobStorage = new AsyncLocalStorage<ActiveJobContext>();
+let activeJobStorage: AsyncLocalStorage<ActiveJobContext> | undefined;
 
 /** @internal Runs work with the current active job available to child job creation and waits. */
 export function runWithActiveJobContext<T>(
   context: ActiveJobContext,
   fn: () => Promise<T>,
 ): Promise<T> {
+  activeJobStorage ??= new AsyncLocalStorage<ActiveJobContext>();
   return activeJobStorage.run(context, fn);
 }
 
@@ -393,7 +394,7 @@ export function runWithActiveJobContext<T>(
 export function getActiveJobSnapshot():
   | JobSnapshot<unknown, unknown>
   | undefined {
-  return activeJobStorage.getStore()?.job;
+  return activeJobStorage?.getStore()?.job;
 }
 
 /** @internal Records a current active-job wait if called inside a job handler. */
@@ -401,7 +402,7 @@ export function runActiveJobWait<T>(
   target: JobWaitTarget,
   fn: () => Promise<T>,
 ): Promise<T> | undefined {
-  return activeJobStorage.getStore()?.waitFor(target, fn);
+  return activeJobStorage?.getStore()?.waitFor(target, fn);
 }
 
 setActiveJobWaitHook(runActiveJobWait);

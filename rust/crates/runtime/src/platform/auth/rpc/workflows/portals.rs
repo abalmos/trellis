@@ -19,6 +19,17 @@ pub(super) async fn dispatch(
         "rpc.v1.Auth.Portals.Routes.Remove" => {
             processor.portal_route_remove(payload, &caller).await
         }
+        "rpc.v1.Auth.Portals.GrantOverrides.List" => {
+            processor.portal_grant_overrides_list(payload).await
+        }
+        "rpc.v1.Auth.Portals.GrantOverrides.Put" => {
+            processor.portal_grant_overrides_put(payload, &caller).await
+        }
+        "rpc.v1.Auth.Portals.GrantOverrides.Remove" => {
+            processor
+                .portal_grant_overrides_remove(payload, &caller)
+                .await
+        }
         "rpc.v1.Auth.Capabilities.List" => processor.capabilities_list(payload).await,
         _ => unknown(subject),
     }

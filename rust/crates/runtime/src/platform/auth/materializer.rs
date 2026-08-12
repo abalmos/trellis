@@ -129,9 +129,17 @@ fn materialize_available(
     let capabilities = canonical_capabilities(
         requested_capabilities
             .into_iter()
-            .filter(|value| accepted_capabilities.contains(value))
+            .filter(|value| {
+                accepted_capabilities.contains(value)
+                    || accepted_capabilities.iter().any(|accepted| {
+                        accepted
+                            .rsplit_once("::")
+                            .is_some_and(|(_, name)| name == value)
+                    })
+            })
             .collect::<Vec<_>>(),
     )?;
+    assert_eq!(capabilities, canonical_capabilities(capabilities.clone())?);
 
     Ok(MaterializationReplacement {
         authority: materialization_header(

@@ -2,6 +2,5 @@
 
 pub mod app;
 pub mod cli;
-pub mod contract_input;
 pub mod output;
 pub mod self_update;

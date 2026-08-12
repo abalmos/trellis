@@ -7,46 +7,51 @@ use tokio::task::JoinHandle;
 
 use crate::support::assertions::assert_case_registered;
 
-const EVENTS_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
-  "id": "trellis.integration.events-service@v1",
-  "displayName": "Trellis Integration Events Service",
-  "description": "Exercises generated event publish and subscribe surfaces.",
-  "kind": "service",
-  "capabilities": {
-    "publishRecords": {
-      "displayName": "Publish records",
-      "description": "Publish entity change records in the events fixture."
-    },
-    "readRecords": {
-      "displayName": "Read records",
-      "description": "Subscribe to entity change records in the events fixture."
-    }
-  },
-  "schemas": {
-    "EntityChanged": {
-      "type": "object",
-      "required": ["id", "value"],
-      "properties": {
-        "id": { "type": "string" },
-        "value": { "type": "string" }
-      }
-    }
-  },
-  "events": {
-    "Entity.Changed": {
-      "version": "v1",
-      "subject": "events.v1.Entity.Changed",
-      "event": { "schema": "EntityChanged" },
-      "capabilities": {
-        "publish": ["publishRecords"],
-        "subscribe": ["readRecords"]
-      }
-    }
-  }
-}"#;
-
-const EVENTS_SERVICE_CONTRACT_DIGEST: &str = "Qdc-dRpd1pJ-Bll7QWOng4tC5Ls0PF9Mmzrj8WaXuzU";
+fn events_service_contract() -> trellis_test::TrellisTestContract {
+    let artifacts = trellis_rs::contracts::ContractBuilder::authoring(
+        "trellis.integration.events-service@v1",
+        "Trellis Integration Events Service",
+        "Exercises generated event publish and subscribe surfaces.",
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .capability(
+        "publishRecords",
+        trellis_rs::contracts::ContractCapabilityMetadata {
+            display_name: "Publish records".to_string(),
+            description: "Publish entity change records in the events fixture.".to_string(),
+            consequence: None,
+        },
+    )
+    .capability(
+        "readRecords",
+        trellis_rs::contracts::ContractCapabilityMetadata {
+            display_name: "Read records".to_string(),
+            description: "Subscribe to entity change records in the events fixture.".to_string(),
+            consequence: None,
+        },
+    )
+    .schema(
+        "EntityChanged",
+        serde_json::json!({
+            "type": "object",
+            "required": ["id", "value"],
+            "properties": {
+                "id": {"type": "string"},
+                "value": {"type": "string"}
+            }
+        }),
+    )
+    .event(
+        "Entity.Changed",
+        trellis_rs::contracts::event("v1", "events.v1.Entity.Changed", "EntityChanged")
+            .with_publish_capabilities(["publishRecords"])
+            .with_subscribe_capabilities(["readRecords"]),
+    )
+    .build()
+    .expect("build events service artifacts");
+    trellis_test::TrellisTestContract::from_artifacts(artifacts)
+        .expect("build events service test contract")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityChangedEvent {
@@ -66,12 +71,6 @@ impl trellis_rs::client::EventDescriptor for EntityChangedEventDescriptor {
 }
 
 struct EventsServiceContract;
-
-impl trellis_rs::service::GeneratedServiceContract for EventsServiceContract {
-    const CONTRACT_ID: &'static str = "trellis.integration.events-service@v1";
-    const CONTRACT_DIGEST: &'static str = EVENTS_SERVICE_CONTRACT_DIGEST;
-    const CONTRACT_JSON: &'static str = EVENTS_SERVICE_CONTRACT_JSON;
-}
 
 struct AbortOnDrop<T> {
     handle: Option<JoinHandle<T>>,
@@ -118,13 +117,10 @@ async fn events_client_publishes_and_subscriber_receives() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(EVENTS_SERVICE_CONTRACT_JSON)
-            .expect("build events service test contract");
-    assert_eq!(service_contract.digest(), EVENTS_SERVICE_CONTRACT_DIGEST);
+    let service_contract = events_service_contract();
 
-    let pubsub_client_contract =
-        events_pubsub_client_contract().expect("build events pubsub client test contract");
+    let pubsub_client_contract = events_pubsub_client_contract(&service_contract)
+        .expect("build events pubsub client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -220,11 +216,9 @@ async fn events_denies_publish_without_authority() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(EVENTS_SERVICE_CONTRACT_JSON)
-            .expect("build events service test contract");
+    let service_contract = events_service_contract();
 
-    let subscribe_only_client_contract = events_subscribe_only_client_contract()
+    let subscribe_only_client_contract = events_subscribe_only_client_contract(&service_contract)
         .expect("build events subscribe-only client test contract");
 
     admin
@@ -254,8 +248,9 @@ async fn events_denies_publish_without_authority() {
 }
 
 fn events_pubsub_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.events-pubsub-client@v1",
         "Trellis Integration Events PubSub Client",
         "App/client participant with event publish and subscribe authority.",
@@ -266,15 +261,18 @@ fn events_pubsub_client_contract(
         trellis_rs::contracts::use_contract("trellis.integration.events-service@v1")
             .with_event_publish(["Entity.Changed"])
             .with_event_subscribe(["Entity.Changed"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }
 
 fn events_subscribe_only_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.events-subscribe-only-client@v1",
         "Trellis Integration Events Subscribe-Only Client",
         "App/client participant without event publish authority.",
@@ -284,10 +282,12 @@ fn events_subscribe_only_client_contract(
         "eventsService",
         trellis_rs::contracts::use_contract("trellis.integration.events-service@v1")
             .with_event_subscribe(["Entity.Changed"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }
 
 #[tokio::test]
@@ -308,14 +308,12 @@ async fn events_denies_subscribe_without_authority() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(EVENTS_SERVICE_CONTRACT_JSON)
-            .expect("build events service test contract");
+    let service_contract = events_service_contract();
 
-    let publish_only_client_contract = events_publish_only_client_contract()
+    let publish_only_client_contract = events_publish_only_client_contract(&service_contract)
         .expect("build events publish-only client test contract");
-    let pubsub_client_contract =
-        events_pubsub_client_contract().expect("build events pubsub client test contract");
+    let pubsub_client_contract = events_pubsub_client_contract(&service_contract)
+        .expect("build events pubsub client test contract");
 
     admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -352,8 +350,9 @@ async fn events_denies_subscribe_without_authority() {
 }
 
 fn events_publish_only_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         "trellis.integration.events-publish-only-client@v1",
         "Trellis Integration Events Publish-Only Client",
         "App/client participant without event subscribe authority.",
@@ -363,8 +362,10 @@ fn events_publish_only_client_contract(
         "eventsService",
         trellis_rs::contracts::use_contract("trellis.integration.events-service@v1")
             .with_event_publish(["Entity.Changed"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

@@ -17,7 +17,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = Extract<AuthDeploymentsListOutput["entries"][number], { kind: "device" }>;
+  type Deployment = AuthDeploymentsListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -29,17 +29,17 @@
   let selectedDeploymentId = $state(page.url.searchParams.get("deployment") ?? "");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const activeDeployments = $derived(deployments.filter((deployment) => !deployment.disabled));
+  const activeDeployments = $derived(deployments.filter((deployment) => deployment.state === "active"));
   const selectedDeployment = $derived(activeDeployments.find((deployment) => deployment.deploymentId === selectedDeploymentId) ?? null);
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsList({ kind: "device", disabled: false, limit: 500, offset: 0 }).take();
+      const response = await trellis.authDeploymentsList({ kind: "device", state: "active", limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
-      const loadedActiveDeployments = loadedDeployments.filter((deployment) => !deployment.disabled);
+      const loadedActiveDeployments = loadedDeployments.filter((deployment) => deployment.state === "active");
       deployments = loadedDeployments;
       if (selectedDeploymentId && !loadedActiveDeployments.some((deployment) => deployment.deploymentId === selectedDeploymentId)) {
         selectedDeploymentId = "";
@@ -59,7 +59,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsDisable({ deploymentId: selectedDeployment.deploymentId, kind: "device" } satisfies AuthDeploymentsDisableInput,
+      const response = await trellis.authDeploymentsDisable({
+        deploymentId: selectedDeployment.deploymentId,
+        expectedVersion: selectedDeployment.version,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
+      } satisfies AuthDeploymentsDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${selectedDeployment.deploymentId} disabled.`, "Disabled");
@@ -119,7 +124,7 @@
         {#if selectedDeployment}
           <div class="rounded-box border border-base-300 bg-base-200/40 p-3 text-sm">
             <div class="trellis-identifier font-medium">{selectedDeployment.deploymentId}</div>
-            <div class="text-base-content/60">Review mode: {selectedDeployment.reviewMode ?? "none"}</div>
+            <div class="text-base-content/60">Delegation: {selectedDeployment.requiresDeviceDelegation ? "required" : "not required"}</div>
             <div class="text-base-content/60">Authority: review the deployment authority desired state.</div>
           </div>
         {/if}

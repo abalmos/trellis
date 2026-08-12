@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinHandle;
 use trellis_rs::client::RpcDescriptor;
-use trellis_rs::service::{
-    ConnectedServiceRuntime, DeclaredRpcError, GeneratedServiceContract, ServerError,
-};
+use trellis_rs::service::{ConnectedServiceRuntime, DeclaredRpcError, ServerError};
 
 use crate::support::assertions::{assert_case_registered, assert_runtime_case_registered};
 
@@ -17,17 +15,17 @@ const RPC_CLIENT_ID: &str = "trellis.integration.rpc-client@v1";
 const RPC_UNAUTHORIZED_CLIENT_ID: &str = "trellis.integration.rpc-unauthorized-client@v1";
 const RPC_READ_CAPABILITY: &str = "trellis.integration.rpc-service::read";
 
-const RPC_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const RPC_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.rpc-service@v1",
   "displayName": "Trellis Integration RPC Service",
   "description": "Exercises client-to-service RPC through generated surfaces.",
-  "kind": "service",
   "capabilities": {
-    "trellis.integration.rpc-service::read": {
-      "displayName": "Read entities",
-      "description": "Read entity records in the RPC integration fixture."
-    }
+    "trellis.integration.rpc-service::read": {"allows": [
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Entity.Get"}, "action": "call"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Annotated"}, "action": "call"},
+      {"target": {"kind": "apiSurface", "api": "trellis.integration.rpc-service@v1", "surface": "rpc", "name": "Validation.Mixed"}, "action": "call"}
+    ]}
   },
   "schemas": {
     "EntityGetInput": {
@@ -92,45 +90,32 @@ const RPC_SERVICE_CONTRACT_JSON: &str = r#"{
   },
   "errors": {
     "NOT_FOUND": {
-      "type": "NOT_FOUND",
       "schema": { "schema": "EntityGetInput" }
     }
   },
   "rpc": {
     "Entity.Get": {
       "version": "v1",
-      "subject": "rpc.v1.Entity.Get",
       "input": { "schema": "EntityGetInput" },
       "output": { "schema": "EntityGetOutput" },
-      "capabilities": { "call": ["trellis.integration.rpc-service::read"] },
-      "errors": [{ "type": "NOT_FOUND" }]
+      "errors": ["NOT_FOUND"]
     },
     "Validation.Annotated": {
       "version": "v1",
-      "subject": "rpc.v1.Validation.Annotated",
       "input": { "schema": "AnnotatedValidationInput" },
       "output": { "schema": "ValidationOutput" },
-      "capabilities": { "call": ["trellis.integration.rpc-service::read"] },
       "errors": []
     },
     "Validation.Mixed": {
       "version": "v1",
-      "subject": "rpc.v1.Validation.Mixed",
       "input": { "schema": "MixedValidationInput" },
       "output": { "schema": "ValidationOutput" },
-      "capabilities": { "call": ["trellis.integration.rpc-service::read"] },
       "errors": []
     }
   }
 }"#;
 
 struct RpcServiceContract;
-
-impl GeneratedServiceContract for RpcServiceContract {
-    const CONTRACT_ID: &'static str = RPC_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "";
-    const CONTRACT_JSON: &'static str = RPC_SERVICE_CONTRACT_JSON;
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct EntityGetInput {
@@ -283,13 +268,9 @@ async fn connect_rpc_service(
     trellis_url: &str,
     key: &trellis_test::TrellisTestServiceKey,
 ) -> RpcServiceRuntime {
-    trellis_test::connect_service_runtime::<RpcServiceContract>(
-        trellis_url,
-        RPC_SERVICE_CONTRACT_JSON,
-        key,
-    )
-    .await
-    .expect("connect live Rust RPC service runtime")
+    trellis_test::connect_service_runtime::<RpcServiceContract>(trellis_url, key)
+        .await
+        .expect("connect live Rust RPC service runtime")
 }
 
 #[tokio::test]
@@ -306,10 +287,13 @@ async fn rpc_client_calls_service_success() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -418,10 +402,10 @@ async fn auth_post_commit_event_publish_uses_jetstream_puback() {
         .revoke_session(
             &bootstrap_url,
             &trellis_rs::sdk::auth::AuthSessionsRevokeRequest {
-                expected_version: None,
-                idempotency_key: "auth-post-commit-puback".to_owned(),
-                reason: Some("verify durable publication".to_owned()),
                 session_id: target_session_id.clone(),
+                expected_version: None,
+                reason: Some("integration test revocation".to_string()),
+                idempotency_key: ulid::Ulid::new().to_string(),
             },
         )
         .await
@@ -486,10 +470,13 @@ async fn authorization_registry_provider_cache_is_nats_local_and_revocation_live
         .await
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
         .await
@@ -649,10 +636,13 @@ async fn rpc_service_receives_caller_context() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -723,10 +713,13 @@ async fn rpc_client_receives_declared_error() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -796,9 +789,11 @@ async fn rpc_denies_client_without_call_authority() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
     let client_contract =
         rpc_unauthorized_client_contract().expect("build unauthorized RPC client test contract");
 
@@ -853,10 +848,13 @@ async fn rpc_invalid_annotated_input_schema_validation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -912,10 +910,13 @@ async fn rpc_invalid_mixed_input_validation() {
         .expect("observe first admin bootstrap URL");
     let mut admin = runtime.admin();
 
-    let service_contract =
-        trellis_test::TrellisTestContract::from_manifest_json(RpcServiceContract::CONTRACT_JSON)
-            .expect("build RPC service test contract");
-    let client_contract = rpc_client_contract().expect("build RPC client test contract");
+    let service_contract = trellis_test::TrellisTestContract::from_native_api_json(
+        RPC_SERVICE_API_SOURCE_JSON,
+        trellis_rs::contracts::ContractKind::Service,
+    )
+    .expect("build RPC service test contract");
+    let client_contract =
+        rpc_client_contract(&service_contract).expect("build RPC client test contract");
 
     let service_key = admin
         .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -1043,9 +1044,10 @@ fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClie
     }
 }
 
-fn rpc_client_contract() -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError>
-{
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+fn rpc_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
+) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RPC_CLIENT_ID,
         "Trellis Integration RPC Client",
         "App/client participant for the RPC integration fixture.",
@@ -1058,21 +1060,22 @@ fn rpc_client_contract() -> Result<trellis_test::TrellisTestContract, trellis_te
             "Validation.Annotated",
             "Validation.Mixed",
         ]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }
 
 fn rpc_unauthorized_client_contract(
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         RPC_UNAUTHORIZED_CLIENT_ID,
         "Trellis Integration Unauthorized RPC Client",
         "App/client without rpc.call authority for Entity.Get.",
         trellis_rs::contracts::ContractKind::App,
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(manifest, &[])
 }

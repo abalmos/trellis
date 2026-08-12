@@ -1,4 +1,4 @@
-// Generated from ./generated/contracts/manifests/trellis.state@v1.json
+// Generated from ./generated/protocol/apis/trellis.state@v1.json
 export const StateAdminDeleteRequestSchema = {
   "anyOf": [{
     "properties": {

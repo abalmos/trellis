@@ -42,6 +42,9 @@ mod state;
 #[path = "integration/cli.rs"]
 mod cli;
 
+#[path = "integration/auth.rs"]
+mod auth;
+
 fn generated_caller(client: &trellis_rs::generated::Caller) -> &trellis_rs::generated::Caller {
     client
 }

@@ -531,52 +531,6 @@ export type DeploymentPortalRoute = StaticDecode<
   typeof DeploymentPortalRouteSchema
 >;
 
-export const DeploymentAuthorityGrantOverrideSchema = Type.Union([
-  Type.Object({
-    deploymentId: Type.String({ minLength: 1 }),
-    identityKind: Type.Literal("web"),
-    grantKind: Type.Literal("capability"),
-    contractId: Type.String({ minLength: 1 }),
-    origin: Type.String({ minLength: 1 }),
-    sessionPublicKey: Type.Null(),
-    capability: Type.String({ minLength: 1 }),
-    capabilityGroupKey: Type.Null(),
-  }),
-  Type.Object({
-    deploymentId: Type.String({ minLength: 1 }),
-    identityKind: Type.Literal("web"),
-    grantKind: Type.Literal("capability-group"),
-    contractId: Type.String({ minLength: 1 }),
-    origin: Type.String({ minLength: 1 }),
-    sessionPublicKey: Type.Null(),
-    capability: Type.Null(),
-    capabilityGroupKey: Type.String({ minLength: 1 }),
-  }),
-  Type.Object({
-    deploymentId: Type.String({ minLength: 1 }),
-    identityKind: Type.Literal("session"),
-    grantKind: Type.Literal("capability"),
-    contractId: Type.String({ minLength: 1 }),
-    origin: Type.Null(),
-    sessionPublicKey: Type.String({ minLength: 1 }),
-    capability: Type.String({ minLength: 1 }),
-    capabilityGroupKey: Type.Null(),
-  }),
-  Type.Object({
-    deploymentId: Type.String({ minLength: 1 }),
-    identityKind: Type.Literal("session"),
-    grantKind: Type.Literal("capability-group"),
-    contractId: Type.String({ minLength: 1 }),
-    origin: Type.Null(),
-    sessionPublicKey: Type.String({ minLength: 1 }),
-    capability: Type.Null(),
-    capabilityGroupKey: Type.String({ minLength: 1 }),
-  }),
-]);
-export type DeploymentAuthorityGrantOverride = StaticDecode<
-  typeof DeploymentAuthorityGrantOverrideSchema
->;
-
 export const AuthDeploymentAuthorityListSchema = Type.Object({
   kind: Type.Optional(DeploymentAuthorityKindSchema),
   disabled: Type.Optional(Type.Boolean()),
@@ -640,7 +594,6 @@ export const AuthDeploymentAuthorityGetResponseSchema = Type.Object({
     Type.Null(),
   ]),
   portalRoute: Type.Union([DeploymentPortalRouteSchema, Type.Null()]),
-  grantOverrides: Type.Array(DeploymentAuthorityGrantOverrideSchema),
 });
 export type AuthDeploymentAuthorityGetResponse = StaticDecode<
   typeof AuthDeploymentAuthorityGetResponseSchema
@@ -759,45 +712,6 @@ export const AuthDeploymentAuthorityReconcileResponseSchema = Type.Object({
 });
 export type AuthDeploymentAuthorityReconcileResponse = StaticDecode<
   typeof AuthDeploymentAuthorityReconcileResponseSchema
->;
-
-export const AuthDeploymentAuthorityGrantOverridesPutSchema = Type.Object({
-  deploymentId: Type.String({ minLength: 1 }),
-  overrides: Type.Array(DeploymentAuthorityGrantOverrideSchema),
-});
-export type AuthDeploymentAuthorityGrantOverridesPutInput = StaticDecode<
-  typeof AuthDeploymentAuthorityGrantOverridesPutSchema
->;
-
-export const AuthDeploymentAuthorityGrantOverridesListSchema = Type.Object({
-  offset: Type.Optional(Type.Integer({ minimum: 0 })),
-  limit: Type.Integer({ minimum: 0, maximum: 500 }),
-});
-export type AuthDeploymentAuthorityGrantOverridesListInput = StaticDecode<
-  typeof AuthDeploymentAuthorityGrantOverridesListSchema
->;
-
-export const AuthDeploymentAuthorityGrantOverridesListResponseSchema = Type
-  .Object({
-    ...PageResponseSchema(DeploymentAuthorityGrantOverrideSchema).properties,
-  });
-export type AuthDeploymentAuthorityGrantOverridesListResponse = StaticDecode<
-  typeof AuthDeploymentAuthorityGrantOverridesListResponseSchema
->;
-
-export const AuthDeploymentAuthorityGrantOverridesResponseSchema = Type.Object({
-  grantOverrides: Type.Array(DeploymentAuthorityGrantOverrideSchema),
-});
-export type AuthDeploymentAuthorityGrantOverridesResponse = StaticDecode<
-  typeof AuthDeploymentAuthorityGrantOverridesResponseSchema
->;
-
-export const AuthDeploymentAuthorityGrantOverridesRemoveSchema = Type.Object({
-  deploymentId: Type.String({ minLength: 1 }),
-  overrides: Type.Array(DeploymentAuthorityGrantOverrideSchema),
-});
-export type AuthDeploymentAuthorityGrantOverridesRemoveInput = StaticDecode<
-  typeof AuthDeploymentAuthorityGrantOverridesRemoveSchema
 >;
 
 export const AuthServiceInstancesProvisionSchema = Type.Object({

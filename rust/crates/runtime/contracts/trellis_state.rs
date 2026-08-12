@@ -1,19 +1,20 @@
 //! Rust source for the `trellis.state@v1` contract manifest.
 
 use serde_json::{json, Value};
-use trellis_contracts::{ContractKind, ContractManifest, ContractManifestBuilder, ContractsError};
+use trellis_contracts::{
+    ApiArtifactV1, ApiBuilder, ContractArtifacts, ContractBuilder, ContractKind, ContractsError,
+};
 
 const AUTH_ERROR: &str = "AuthError";
 const UNEXPECTED_ERROR: &str = "UnexpectedError";
 const VALIDATION_ERROR: &str = "ValidationError";
 
-/// Build the canonical State service contract manifest.
-pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
-    ContractManifestBuilder::new(
+/// Build the canonical State service API artifact.
+pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
+    ApiBuilder::authoring(
         "trellis.state@v1",
         "Trellis State",
         "Trellis-managed app state for authenticated app and device participants.",
-        ContractKind::Service,
     )
     .docs_with_summary(
         "Participant state storage APIs.",
@@ -105,6 +106,12 @@ pub fn contract_manifest() -> Result<ContractManifest, ContractsError> {
         ),
     )
     .build()
+}
+
+/// Build the native State participant and API artifacts.
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let api = api_artifact()?.normalized_value()?;
+    ContractBuilder::from_api(api, ContractKind::Service)?.build()
 }
 
 fn state_rpc(name: &str, input: &str, output: &str) -> trellis_contracts::ContractRpcMethod {

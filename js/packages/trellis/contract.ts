@@ -16,5 +16,4 @@ export type {
   ContractStateKind,
   ContractStateStore,
   DefineContractInput,
-  TrellisContractV1,
 } from "./contract_support/mod.ts";

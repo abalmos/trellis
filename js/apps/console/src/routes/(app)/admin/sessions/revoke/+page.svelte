@@ -28,7 +28,7 @@
   let currentSessionKey = $state<string | null>(null);
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const selectedSession = $derived(sessions.find((session) => session.sessionKey === selectedSessionKey) ?? null);
+  const selectedSession = $derived(sessions.find((session) => session.sessionId === selectedSessionKey) ?? null);
   const selectedSessionIsCurrent = $derived(!!currentSessionKey && selectedSessionKey === currentSessionKey);
 
   async function load() {
@@ -36,11 +36,11 @@
     error = null;
     try {
       currentSessionKey = (await loadSessionKey())?.sessionKey ?? null;
-      const response = await trellis.authSessionsList({ limit: 500, offset: 0 }).take();
+      const response = await trellis.authSessionsList({ limit: 500 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       sessions = response.entries ?? [];
       const requestedSessionKey = page.url.searchParams.get("sessionKey");
-      selectedSessionKey = requestedSessionKey && sessions.some((session) => session.sessionKey === requestedSessionKey) ? requestedSessionKey : (sessions[0]?.sessionKey ?? "");
+      selectedSessionKey = requestedSessionKey && sessions.some((session) => session.sessionId === requestedSessionKey) ? requestedSessionKey : (sessions[0]?.sessionId ?? "");
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -54,7 +54,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authSessionsRevoke({ sessionKey: selectedSession.sessionKey } satisfies AuthSessionsRevokeInput).take();
+      const response = await trellis.authSessionsRevoke({
+        expectedVersion: selectedSession.version,
+        idempotencyKey: crypto.randomUUID(),
+        reason: null,
+        sessionId: selectedSession.sessionId,
+      } satisfies AuthSessionsRevokeInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Session revoked for ${summary.title}.`, "Revoked");
       await goto(resolve("/admin/sessions"));
@@ -74,7 +79,7 @@
         message: "This is the session currently powering this console. If you continue and revoke it, the console will lose auth and force you to sign in again.",
         confirmLabel: "Continue to revoke",
         targetLabel: "Current session",
-        targetName: selectedSession.sessionKey,
+        targetName: selectedSession.sessionId,
       });
       if (!selfRevokeConfirmed) return;
     }
@@ -85,8 +90,8 @@
         : "This immediately invalidates the selected active session.",
       confirmLabel: "Revoke session",
       targetLabel: summary.title,
-      targetName: selectedSession.sessionKey,
-      expectedValue: selectedSession.sessionKey,
+      targetName: selectedSession.sessionId,
+      expectedValue: selectedSession.sessionId,
     });
     if (confirmed) await revokeSession();
   }
@@ -117,9 +122,9 @@
         <label class="form-control gap-1">
           <span class="label-text text-xs">Session</span>
           <select class="select select-bordered select-sm" bind:value={selectedSessionKey} required>
-            {#each sessions as session (session.key)}
+            {#each sessions as session (session.sessionId)}
               {@const summary = describeSessionPrincipal(session)}
-              <option value={session.sessionKey}>{summary.title} — {formatShortKey(session.sessionKey)}{session.sessionKey === currentSessionKey ? " — Current" : ""}</option>
+              <option value={session.sessionId}>{summary.title} — {formatShortKey(session.sessionKeyId)}{session.sessionKeyId === currentSessionKey ? " — Current" : ""}</option>
             {/each}
           </select>
         </label>
@@ -140,8 +145,8 @@
               {/if}
             </div>
             <div class="text-base-content/60">{participantKindLabel(selectedSession.participantKind)}</div>
-            <div class="trellis-identifier text-base-content/60">{selectedSession.sessionKey}</div>
-            <div class="text-xs text-base-content/60">Last auth {formatDate(selectedSession.lastAuth)}</div>
+            <div class="trellis-identifier text-base-content/60">{selectedSession.sessionKeyId}</div>
+            <div class="text-xs text-base-content/60">Last auth {formatDate(selectedSession.lastSeenAt)}</div>
           </div>
         {/if}
 

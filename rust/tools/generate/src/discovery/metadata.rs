@@ -20,14 +20,16 @@ pub fn discover_contract_metadata(
 fn discover_typescript_contract_metadata(
     path: &std::path::Path,
 ) -> miette::Result<(String, ContractKind)> {
+    let source = fs::read_to_string(path).into_diagnostic()?;
     match resolve_contract_metadata(path) {
-        Ok(metadata) => Ok(metadata),
-        Err(resolve_error) => {
-            let source = fs::read_to_string(path).into_diagnostic()?;
-            let contract_id = extract_quoted_source_field(&source, "id").ok_or(resolve_error)?;
-            let kind = discover_typescript_contract_kind(&source, path)?;
-            Ok((contract_id, kind))
-        }
+        Ok((id, resolved_kind)) => Ok((
+            id,
+            discover_typescript_contract_kind(&source, path).unwrap_or(resolved_kind),
+        )),
+        Err(error) => Ok((
+            extract_quoted_source_field(&source, "id").ok_or(error)?,
+            discover_typescript_contract_kind(&source, path)?,
+        )),
     }
 }
 
@@ -52,18 +54,36 @@ fn discover_typescript_contract_kind(
 fn discover_rust_contract_metadata(
     path: &std::path::Path,
 ) -> miette::Result<(String, ContractKind)> {
-    resolve_contract_metadata(path)
+    let (id, resolved_kind) = resolve_contract_metadata(path)?;
+    let source = fs::read_to_string(path).into_diagnostic()?;
+    let kind = [
+        ("ContractKind::Service", ContractKind::Service),
+        ("ContractKind::App", ContractKind::App),
+        ("ContractKind::Device", ContractKind::Device),
+        ("ContractKind::Agent", ContractKind::Agent),
+    ]
+    .into_iter()
+    .find_map(|(needle, kind)| source.contains(needle).then_some(kind))
+    .unwrap_or(resolved_kind);
+    Ok((id, kind))
 }
 
 fn resolve_contract_metadata(path: &std::path::Path) -> miette::Result<(String, ContractKind)> {
     let resolved = contract_input::resolve_contract_input(
         None,
+        None,
+        &[],
         Some(path),
         None,
-        "CONTRACT",
-        contract_input::default_image_contract_path(),
+        "API",
+        contract_input::default_image_api_path(),
     )?;
-    Ok((resolved.loaded.manifest.id, resolved.loaded.manifest.kind))
+    let participant_path = resolved.participant_path.ok_or_else(|| {
+        miette::miette!("{} does not export a native participant", path.display())
+    })?;
+    let participant =
+        trellis_contracts::load_participant_source(participant_path).into_diagnostic()?;
+    Ok((resolved.api.render_model.id, participant.render_model.kind))
 }
 
 fn extract_quoted_source_field(source: &str, field: &str) -> Option<String> {
@@ -128,15 +148,22 @@ mod tests {
         fs::write(
             contracts.join("orders.ts"),
             concat!(
-                "const CONTRACT_ID = ['trellis', 'node-orders@v1'].join('.');\n",
-                "const CONTRACT_KIND = ['ser', 'vice'].join('');\n",
-                "export const CONTRACT = {\n",
-                "  format: 'trellis.contract.v1',\n",
-                "  id: CONTRACT_ID,\n",
+                "const API_ID = ['trellis', 'node-orders@v1'].join('.');\n",
+                "const API = {\n",
+                "  format: 'trellis.api.v1',\n",
+                "  id: API_ID,\n",
                 "  displayName: 'Orders',\n",
                 "  description: 'Orders',\n",
-                "  kind: CONTRACT_KIND,\n",
                 "};\n",
+                "const PARTICIPANT = {\n",
+                "  format: 'trellis.participant.v1',\n",
+                "  id: API_ID,\n",
+                "  displayName: 'Orders',\n",
+                "  description: 'Orders service',\n",
+                "  kind: 'service',\n",
+                "  implements: { self: { api: API_ID, apiDigest: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } },\n",
+                "};\n",
+                "export default { API, PARTICIPANT };\n",
             ),
         )
         .unwrap();

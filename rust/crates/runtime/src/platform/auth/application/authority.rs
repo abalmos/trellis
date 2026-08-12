@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use serde_json::{json, Value};
+use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
     canonicalize_json, compare_api_replacement_v1, parse_api_v1, parse_participant_v1,
     resolve_participant_v1, ApiArtifactV1, GrantSetV1,
@@ -80,12 +83,56 @@ pub struct DecideAuthorityProposalInput {
     pub reason: Option<String>,
     /// Exact desired authority for acceptance; absent for rejection.
     pub desired_authority: Option<DesiredAuthorityRecord>,
+    /// Portal provenance replacement for identity authority; outer `None` preserves it.
+    pub portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
+    /// Exact portal provenance expected before replacement; outer `None` skips the check.
+    pub expected_portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
     /// Decision time in Unix milliseconds.
     pub decided_at: i64,
     /// Durable proof claim; its result is replaced with the terminal decision.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
     pub actions: Vec<PostCommitActionRecord>,
+}
+
+/// Portal provenance supplied while applying one identity-authority selection.
+#[derive(Clone, Debug)]
+pub(crate) struct PortalAuthoritySource {
+    pub portal_id: String,
+    pub provider_id: String,
+    pub roles: Vec<String>,
+    pub effective_policy_digest: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PortalBindingMutation {
+    #[allow(dead_code)]
+    Preserve,
+    Set(PortalAuthoritySource),
+    Clear,
+    CompareAndSet {
+        expected: Option<super::super::PortalAuthorityBindingRecord>,
+        replacement: Option<PortalAuthoritySource>,
+    },
+}
+
+/// Service-owned input for applying a browser identity-authority selection.
+#[derive(Clone, Debug)]
+pub(crate) struct ApplyIdentityAuthoritySelectionInput {
+    pub principal_id: String,
+    pub participant_id: String,
+    pub participant_artifact_digest: String,
+    pub participant_needs_digest: String,
+    pub grant_set: GrantSetV1,
+    pub capabilities: Vec<String>,
+    pub state: AuthorityState,
+    pub decided_by: String,
+    pub source_payload: Value,
+    pub portal_binding: PortalBindingMutation,
+    pub decided_at: i64,
+    pub expires_at: Option<i64>,
+    pub proposal_idempotency: IdempotencyResultRecord,
+    pub decision_idempotency: IdempotencyResultRecord,
 }
 
 fn protocol_digest(value: &Value) -> Result<String, AuthorizationStateError> {
@@ -176,8 +223,244 @@ fn authority_target(authority: &DesiredAuthorityRecord) -> AuthorityTarget {
 
 impl<R> AuthService<R>
 where
-    R: AuthorityRepository + AuthorityEvidenceRepository + ContextRepository + Clone,
+    R: AuthorityRepository
+        + AuthorityEvidenceRepository
+        + ContextRepository
+        + PortalRepository
+        + Clone,
 {
+    pub(crate) async fn apply_identity_authority_selection(
+        &self,
+        input: ApplyIdentityAuthoritySelectionInput,
+    ) -> Result<IdentityAuthorityRecord, AuthorizationStateError> {
+        let current = self
+            .repository
+            .get_identity_authority(&input.principal_id, &input.participant_id)
+            .await?;
+        let current_portal_binding = self
+            .repository
+            .list_portal_authority_bindings()
+            .await?
+            .into_iter()
+            .find(|binding| {
+                binding.principal_id == input.principal_id
+                    && binding.participant_id == input.participant_id
+            });
+        let authority_id = current.as_ref().map_or_else(
+            || {
+                format!(
+                    "ida_{}",
+                    digest_parts(&[&input.principal_id, &input.participant_id])
+                )
+            },
+            |authority| authority.authority_id.clone(),
+        );
+        let expires_at = input
+            .expires_at
+            .or_else(|| current.as_ref().and_then(|authority| authority.expires_at));
+        let desired = IdentityAuthorityRecord {
+            authority_id: authority_id.clone(),
+            principal_id: input.principal_id.clone(),
+            participant_id: input.participant_id.clone(),
+            participant_artifact_digest: input.participant_artifact_digest.clone(),
+            accepted_needs_digest: input.participant_needs_digest.clone(),
+            desired_grant_set: input.grant_set.clone(),
+            desired_capabilities: input.capabilities.clone(),
+            state: input.state,
+            version: current
+                .as_ref()
+                .map_or(1, |authority| authority.version + 1),
+            created_at: current
+                .as_ref()
+                .map_or(input.decided_at, |authority| authority.created_at),
+            updated_at: input.decided_at,
+            expires_at,
+            decision: Some(AuthorityDecision {
+                decided_at: input.decided_at,
+                decided_by: input.decided_by.clone(),
+                reason: None,
+            }),
+        };
+        let semantic_noop = current.as_ref().is_some_and(|authority| {
+            super::super::authority::identity_enforceability_equal(authority, &desired)
+        });
+        let base_authority_version = current.as_ref().map(|authority| authority.version);
+        let mut payload = input.source_payload;
+        payload
+            .as_object_mut()
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "identity authority source payload must be an object".to_owned(),
+                )
+            })?
+            .insert(
+                "baseAuthorityVersion".to_owned(),
+                base_authority_version.map_or(Value::Null, Value::from),
+            );
+        let proposal = self
+            .create_authority_proposal(CreateAuthorityProposalInput {
+                authority_kind: AuthorityKind::Identity,
+                authority_id: authority_id.clone(),
+                deployment_id: None,
+                proposal_kind: if current.is_some() {
+                    AuthorityProposalKind::Update
+                } else {
+                    AuthorityProposalKind::Initial
+                },
+                participant_id: input.participant_id.clone(),
+                participant_artifact_digest: input.participant_artifact_digest,
+                participant_needs_digest: input.participant_needs_digest,
+                grant_set: input.grant_set,
+                capabilities: input.capabilities,
+                base_authority_version,
+                payload,
+                created_at: input.decided_at,
+                expires_at,
+                idempotency: input.proposal_idempotency,
+                actions: Vec::new(),
+            })
+            .await?;
+        let proposal_id = match proposal {
+            IdempotentOutcome::Applied(proposal) => proposal.proposal_id,
+            IdempotentOutcome::Replayed(value) => value
+                .get("proposalId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    AuthorizationStateError::Storage("invalid proposal replay".to_owned())
+                })?
+                .to_owned(),
+        };
+        let (proposal, _) = self
+            .repository
+            .get_authority_proposal(&proposal_id)
+            .await?
+            .ok_or_else(|| {
+                AuthorizationStateError::Storage("authority proposal missing".to_owned())
+            })?;
+        let portal_record = |source: PortalAuthoritySource| PortalAuthorityBindingRecord {
+            principal_id: input.principal_id.clone(),
+            participant_id: input.participant_id.clone(),
+            authority_id: authority_id.clone(),
+            portal_id: source.portal_id,
+            provider_id: source.provider_id,
+            roles: source.roles,
+            effective_policy_digest: source.effective_policy_digest,
+            authority_version: if semantic_noop {
+                current.as_ref().expect("no-op has current").version
+            } else {
+                desired.version
+            },
+            updated_at: input.decided_at,
+        };
+        let (portal_binding, expected_portal_binding) = match input.portal_binding {
+            PortalBindingMutation::Preserve => (None, None),
+            PortalBindingMutation::Set(source) => (
+                Some(Some(portal_record(source))),
+                Some(current_portal_binding.clone()),
+            ),
+            PortalBindingMutation::Clear => (Some(None), Some(current_portal_binding.clone())),
+            PortalBindingMutation::CompareAndSet {
+                expected,
+                replacement,
+            } => (Some(replacement.map(portal_record)), Some(expected)),
+        };
+        let intended_portal_binding = portal_binding.clone();
+        let decision = self
+            .decide_authority_proposal(DecideAuthorityProposalInput {
+                proposal_id,
+                expected_version: proposal.version,
+                expected_base_authority_version: Some(
+                    current.as_ref().map(|authority| authority.version),
+                ),
+                outcome: AuthorityDecisionOutcome::Accepted,
+                decided_by: input.decided_by,
+                reason: None,
+                desired_authority: Some(DesiredAuthorityRecord::Identity(desired.clone())),
+                portal_binding,
+                expected_portal_binding,
+                decided_at: input.decided_at,
+                idempotency: input.decision_idempotency,
+                actions: Vec::new(),
+            })
+            .await;
+        if !matches!(
+            decision,
+            Ok(_) | Err(AuthorizationStateError::StorageConflict)
+        ) {
+            decision?;
+        }
+        let durable = self
+            .repository
+            .get_identity_authority(&input.principal_id, &input.participant_id)
+            .await?;
+        if !durable.as_ref().is_some_and(|authority| {
+            super::super::authority::identity_enforceability_equal(authority, &desired)
+        }) {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
+        let durable = durable.expect("validated above");
+        if let Some(intended) = intended_portal_binding {
+            let durable_binding = self
+                .repository
+                .list_portal_authority_bindings()
+                .await?
+                .into_iter()
+                .find(|binding| {
+                    binding.principal_id == input.principal_id
+                        && binding.participant_id == input.participant_id
+                });
+            let postcondition_holds = match (durable_binding.as_ref(), intended.as_ref()) {
+                (None, None) => true,
+                (Some(durable), Some(intended)) => {
+                    durable.principal_id == intended.principal_id
+                        && durable.participant_id == intended.participant_id
+                        && durable.authority_id == intended.authority_id
+                        && durable.portal_id == intended.portal_id
+                        && durable.provider_id == intended.provider_id
+                        && durable.roles == intended.roles
+                        && durable.effective_policy_digest == intended.effective_policy_digest
+                        && durable.authority_version == intended.authority_version
+                }
+                _ => false,
+            };
+            if !postcondition_holds {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+        }
+        let binding = self
+            .repository
+            .get_participant_binding(
+                &durable.participant_id,
+                &durable.participant_artifact_digest,
+            )
+            .await?
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "identity authority participant binding is missing".to_owned(),
+                )
+            })?;
+        let target = AuthorityTarget::new(AuthorityKind::Identity, durable.authority_id.clone())?;
+        let scope = AuthorityEvidenceScope {
+            target: target.clone(),
+            participant_id: durable.participant_id.clone(),
+            participant_artifact_digest: durable.participant_artifact_digest.clone(),
+            participant_needs_digest: durable.accepted_needs_digest.clone(),
+        };
+        ensure_identity_resources(
+            &self.repository,
+            scope.clone(),
+            &binding,
+            &durable.principal_id,
+            input.decided_at,
+        )
+        .await?;
+        ensure_authority_dependencies(&self.repository, scope, &binding, input.decided_at).await?;
+        self.authorization()
+            .reconcile_authority(&target, input.decided_at)
+            .await?;
+        Ok(durable)
+    }
+
     /// Parse, bind, classify, and create or reuse one deployment-authority proposal.
     ///
     /// # Errors
@@ -319,6 +602,15 @@ where
     }
 }
 
+fn digest_parts(parts: &[&str]) -> String {
+    let mut digest = Sha256::new();
+    for part in parts {
+        digest.update((part.len() as u64).to_be_bytes());
+        digest.update(part.as_bytes());
+    }
+    URL_SAFE_NO_PAD.encode(digest.finalize())
+}
+
 impl<R> AuthService<R>
 where
     R: AuthorityRepository + AuthorityEvidenceRepository + ContextRepository + Clone,
@@ -447,6 +739,8 @@ where
                 },
                 desired_authority: input.desired_authority,
                 deployment,
+                portal_binding: input.portal_binding,
+                expected_portal_binding: input.expected_portal_binding,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })

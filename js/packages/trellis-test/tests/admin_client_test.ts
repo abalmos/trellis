@@ -13,8 +13,14 @@ import {
 } from "../src/admin_client.ts";
 
 const expectedAdminMethods = [
+  "authCapabilityGroupsPut",
+  "authConnectionsList",
+  "authPortalsGrantOverridesRemove",
+  "authPortalsGrantOverridesPut",
   "authPortalsList",
+  "authPortalsLoginSettingsUpdate",
   "authPortalsPut",
+  "authPortalsRoutesPut",
   "authDevicesProvision",
   "stateAdminDelete",
   "stateAdminGet",

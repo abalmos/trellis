@@ -10,10 +10,10 @@ use tokio::task::JoinHandle;
 use trellis_rs::client::OperationState as ClientOpState;
 use trellis_rs::client::{OperationDescriptor, TransferOperationDescriptor};
 use trellis_rs::service::{
-    AcceptedOperation, FileTransferInfo, GeneratedServiceContract, OperationRefData,
-    OperationSnapshot, OperationState as ServiceOpState, ServerError, ServiceHandlerContext,
-    ServiceRuntimeError, TransferDownloadGrantArgs, TransferUploadGrantArgs,
-    UploadTransferCompletion, UploadTransferSession,
+    AcceptedOperation, FileTransferInfo, OperationRefData, OperationSnapshot,
+    OperationState as ServiceOpState, ServerError, ServiceHandlerContext, ServiceRuntimeError,
+    TransferDownloadGrantArgs, TransferUploadGrantArgs, UploadTransferCompletion,
+    UploadTransferSession,
 };
 
 use crate::support::assertions::assert_case_registered;
@@ -21,12 +21,11 @@ use crate::support::assertions::assert_case_registered;
 const TRANSFER_SERVICE_ID: &str = "trellis.integration.transfer-service@v1";
 const TRANSFER_CLIENT_ID: &str = "trellis.integration.transfer-client@v1";
 
-const TRANSFER_SERVICE_CONTRACT_JSON: &str = r#"{
-  "format": "trellis.contract.v1",
+const TRANSFER_SERVICE_API_SOURCE_JSON: &str = r#"{
+  "format": "trellis.api.v1",
   "id": "trellis.integration.transfer-service@v1",
   "displayName": "Trellis Integration Transfer Service",
   "description": "Exercises generated operation and RPC transfer surfaces.",
-  "kind": "service",
   "schemas": {
     "DownloadGrant": {
       "properties": {
@@ -74,6 +73,33 @@ const TRANSFER_SERVICE_CONTRACT_JSON: &str = r#"{
       "type": "object"
     }
   },
+  "operations": {
+    "Files.Upload": {
+      "version": "v1",
+      "input": { "schema": "UploadInput" },
+      "output": { "schema": "UploadOutput" },
+      "transfer": { "direction": "send" },
+      "cancel": false
+    }
+  },
+  "rpc": {
+    "Files.Download": {
+      "version": "v1",
+      "input": { "schema": "DownloadInput" },
+      "output": { "schema": "DownloadGrant" },
+      "transfer": { "direction": "receive" },
+      "errors": []
+    }
+  }
+}"#;
+
+const TRANSFER_SERVICE_PARTICIPANT_JSON: &str = r#"{
+  "format": "trellis.participant.v1",
+  "id": "trellis.integration.transfer-service@v1",
+  "displayName": "Trellis Integration Transfer Service",
+  "description": "Exercises generated operation and RPC transfer surfaces.",
+  "kind": "service",
+  "implements": {},
   "resources": {
     "store": {
       "uploads": {
@@ -84,45 +110,10 @@ const TRANSFER_SERVICE_CONTRACT_JSON: &str = r#"{
         "maxTotalBytes": 4194304
       }
     }
-  },
-  "operations": {
-    "Files.Upload": {
-      "version": "v1",
-      "subject": "operations.v1.Files.Upload",
-      "input": { "schema": "UploadInput" },
-      "output": { "schema": "UploadOutput" },
-      "transfer": {
-        "direction": "send",
-        "store": "uploads",
-        "key": "/key",
-        "contentType": "/contentType",
-        "expiresInMs": 60000,
-        "maxBytes": 1048576
-      },
-      "capabilities": { "call": [], "observe": [], "cancel": [] },
-      "cancel": false
-    }
-  },
-  "rpc": {
-    "Files.Download": {
-      "version": "v1",
-      "subject": "rpc.v1.Files.Download",
-      "input": { "schema": "DownloadInput" },
-      "output": { "schema": "DownloadGrant" },
-      "transfer": { "direction": "receive" },
-      "capabilities": { "call": [] },
-      "errors": []
-    }
   }
 }"#;
 
 struct TransferServiceContract;
-
-impl GeneratedServiceContract for TransferServiceContract {
-    const CONTRACT_ID: &'static str = TRANSFER_SERVICE_ID;
-    const CONTRACT_DIGEST: &'static str = "bq8Xs8YdOJ2e5tWXbH6K7FXtyJhqSBCoh3SiXvV6SEY";
-    const CONTRACT_JSON: &'static str = TRANSFER_SERVICE_CONTRACT_JSON;
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -242,15 +233,9 @@ impl TransferFixture {
             .expect("observe first admin bootstrap URL");
         let mut admin = runtime.admin();
 
-        let service_contract =
-            trellis_test::TrellisTestContract::from_manifest_json(TRANSFER_SERVICE_CONTRACT_JSON)
-                .expect("build transfer service test contract");
-        assert_eq!(
-            service_contract.digest(),
-            TransferServiceContract::CONTRACT_DIGEST
-        );
-        let client_contract =
-            transfer_client_contract().expect("build transfer client test contract");
+        let service_contract = transfer_service_contract();
+        let client_contract = transfer_client_contract(&service_contract)
+            .expect("build transfer client test contract");
 
         let service_key = admin
             .provision_service_instance(&bootstrap_url, &service_contract, None, None)
@@ -297,6 +282,38 @@ impl TransferFixture {
     async fn stored_upload(&self, key: &str) -> Option<StoredUpload> {
         self.shared.stored_uploads.lock().await.get(key).cloned()
     }
+}
+
+fn transfer_service_contract() -> trellis_test::TrellisTestContract {
+    let api: Value =
+        serde_json::from_str(TRANSFER_SERVICE_API_SOURCE_JSON).expect("parse transfer service API");
+    let api_digest = trellis_rs::contracts::ApiBuilder::new(api)
+        .build()
+        .expect("validate transfer service API")
+        .digest()
+        .expect("digest transfer service API");
+    let mut participant: Value = serde_json::from_str(TRANSFER_SERVICE_PARTICIPANT_JSON)
+        .expect("parse transfer service participant");
+    participant["implements"] = serde_json::json!({
+        "self": {
+            "api": TRANSFER_SERVICE_ID,
+            "apiDigest": api_digest,
+            "operationTransfers": {
+                "Files.Upload": {
+                    "store": "uploads",
+                    "key": "/key",
+                    "contentType": "/contentType",
+                    "expiresInMs": 60000,
+                    "maxBytes": 1048576
+                }
+            }
+        }
+    });
+    trellis_test::TrellisTestContract::from_native_json(
+        TRANSFER_SERVICE_API_SOURCE_JSON,
+        &participant.to_string(),
+    )
+    .expect("build transfer service test contract")
 }
 
 fn register_upload_handler(
@@ -800,8 +817,9 @@ fn is_retryable_service_startup_error(error: &trellis_rs::generated::TrellisClie
 }
 
 fn transfer_client_contract(
+    service_contract: &trellis_test::TrellisTestContract,
 ) -> Result<trellis_test::TrellisTestContract, trellis_test::TrellisTestError> {
-    let manifest = trellis_rs::contracts::ContractManifestBuilder::new(
+    let manifest = trellis_rs::contracts::ContractBuilder::authoring(
         TRANSFER_CLIENT_ID,
         "Trellis Integration Transfer Client",
         "App/client participant for the transfer integration fixture.",
@@ -812,8 +830,10 @@ fn transfer_client_contract(
         trellis_rs::contracts::use_contract(TRANSFER_SERVICE_ID)
             .with_operation_call(["Files.Upload"])
             .with_rpc_call(["Files.Download"]),
-    )
-    .build()?;
+    );
 
-    trellis_test::TrellisTestContract::from_manifest_value(serde_json::to_value(manifest)?)
+    trellis_test::TrellisTestContract::from_builder_with_referenced_contracts(
+        manifest,
+        &[service_contract],
+    )
 }

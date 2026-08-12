@@ -31,6 +31,22 @@ Deno.test("link recognizes identity_link active state", () => {
   }
 });
 
+Deno.test("link accepts the Rust pending account-flow response", () => {
+  const state = parseAccountFlowState({
+    status: "pending",
+    flowId: "flow-token",
+    kind: "identity_link",
+    allowedProviders: ["local"],
+    expiresAt: 4_071_859_200_000,
+  });
+
+  assertEquals(state.status, "active");
+  if (state.status === "active") {
+    assertEquals(state.providers, [{ id: "local", displayName: "local" }]);
+    assertEquals(state.expiresAt, "2099-01-12T00:00:00.000Z");
+  }
+});
+
 Deno.test("link labels flow kinds for user copy", () => {
   assertEquals(flowKindLabel("identity_link"), "account link");
   assertEquals(flowKindLabel("custom_flow"), "custom flow");

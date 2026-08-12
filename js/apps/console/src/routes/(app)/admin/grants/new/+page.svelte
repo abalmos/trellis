@@ -1,501 +1,230 @@
 <script lang="ts">
-  import { isErr, type AsyncResult, type BaseError } from "@qlever-llc/result";
-  import type { DeploymentAuthorityGrantOverride } from "@qlever-llc/trellis/auth";
+  import { isErr } from "@qlever-llc/result";
+  import type {
+    AuthCapabilitiesListOutput,
+    AuthCapabilityGroupsListOutput,
+    AuthPortalsGrantOverridesListOutput,
+    AuthPortalsGrantOverridesPutInput,
+    AuthPortalsListOutput,
+  } from "@qlever-llc/trellis/sdk/auth";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
+  import { page } from "$app/state";
   import { onMount } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import ChoiceRow from "$lib/components/ChoiceRow.svelte";
+  import DataTable from "$lib/components/DataTable.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import Panel from "$lib/components/Panel.svelte";
   import SelectionGroup from "$lib/components/SelectionGroup.svelte";
-  import SelectionSectionHeader from "$lib/components/SelectionSectionHeader.svelte";
   import { errorMessage } from "$lib/format";
+  import { hasDuplicateRoleMapping } from "$lib/portal-grants";
   import { getTrellis } from "$lib/trellis";
 
-  type GrantIdentityKind = "web" | "session";
-  type DeploymentAuthority = { deploymentId: string; disabled: boolean };
-  type ListPageInput = {
-    offset?: number;
-    limit: number;
-  };
-  type CapabilityView = {
-    key: string;
-    displayName: string;
-    description: string;
-    consequence?: string;
-    source: "contract" | "platform";
-    contractId?: string;
-    contractDigest?: string;
-    contractDisplayName?: string;
-  };
-  type CapabilityGroupView = {
-    groupKey: string;
-    displayName: string;
-    description: string;
-    capabilities: string[];
-    includedGroups: string[];
-    createdAt: string;
-    updatedAt: string;
-  };
-  type CapabilityListOutput = {
-    entries: CapabilityView[];
-  };
-  type CapabilityGroupListOutput = {
-    entries: CapabilityGroupView[];
-  };
-  type AuthorityListOutput = {
-    entries: DeploymentAuthority[];
-  };
-  type AuthorityGetOutput = {
-    grantOverrides: DeploymentAuthorityGrantOverride[];
-  };
-  type AuthorityGetInput = {
-    deploymentId: string;
-  };
-  type GrantOverrideMutationInput = {
-    deploymentId: string;
-    overrides: DeploymentAuthorityGrantOverride[];
-  };
-  type GrantOverrideMutationOutput = {
-    grantOverrides: DeploymentAuthorityGrantOverride[];
-  };
-  type CapabilitySection = {
-    key: string;
-    title: string;
-    subtitle: string | null;
-    capabilities: CapabilityView[];
+  type Capability = AuthCapabilitiesListOutput["entries"][number];
+  type Group = AuthCapabilityGroupsListOutput["entries"][number];
+  type Portal = AuthPortalsListOutput["entries"][number];
+  type Policy = AuthPortalsGrantOverridesListOutput["entries"][number];
+  type RoleDraft = {
+    id: string;
+    providerId: string;
+    role: string;
+    directCapabilities: string;
+    capabilityGroupKeys: string;
   };
 
   const trellis = getTrellis();
-  const grantIdentityKinds: GrantIdentityKind[] = ["web", "session"];
-
   let loading = $state(true);
   let saving = $state(false);
   let error = $state<string | null>(null);
-  let saved = $state<string | null>(null);
-  let deployments = $state.raw<DeploymentAuthority[]>([]);
-  let existingOverrides = $state.raw<DeploymentAuthorityGrantOverride[]>([]);
-  let identityKind = $state<GrantIdentityKind>("web");
-  let contractId = $state("");
-  let origin = $state("");
-  let sessionPublicKey = $state("");
-  let selectedCapabilities = $state<string[]>([]);
-  let selectedCapabilityGroups = $state<string[]>([]);
-  let selectedDeploymentId = $state("");
-  let capabilities = $state.raw<CapabilityView[]>([]);
-  let capabilityGroups = $state.raw<CapabilityGroupView[]>([]);
+  let portals = $state.raw<Portal[]>([]);
+  let capabilities = $state.raw<Capability[]>([]);
+  let groups = $state.raw<Group[]>([]);
+  let existing = $state.raw<Policy | null>(null);
+  let portalId = $state("");
+  let participantId = $state("");
+  let directCapabilities = $state<string[]>([]);
+  let capabilityGroupKeys = $state<string[]>([]);
+  let roleMappings = $state<RoleDraft[]>([]);
+  let providerIds = $state.raw<string[]>([]);
 
   const busy = $derived(loading || saving);
-  const deploymentOptions = $derived(deployments.toSorted((left, right) => left.deploymentId.localeCompare(right.deploymentId)));
-  const storageDeployment = $derived(deploymentOptions.find((deployment) => deployment.deploymentId === selectedDeploymentId) ?? null);
-  const storageDeploymentId = $derived(storageDeployment?.deploymentId ?? "");
-  const selectedEnabledDeployment = $derived(storageDeployment && !storageDeployment.disabled ? storageDeployment : null);
-  const requiredIdentityValue = $derived(identityKind === "web" ? origin.trim() : sessionPublicKey.trim());
-  const sortedCapabilityGroups = $derived(capabilityGroups.slice().sort((left, right) => {
-    if ((left.groupKey === "admin") !== (right.groupKey === "admin")) return left.groupKey === "admin" ? -1 : 1;
-    return left.groupKey.localeCompare(right.groupKey);
-  }));
-  const pendingDirectCapabilityKeys = $derived(uniqueGrantReferences(selectedCapabilities));
-  const pendingCapabilityGroupKeys = $derived(uniqueGrantReferences(selectedCapabilityGroups));
-  const pendingGrantReferenceCount = $derived(pendingDirectCapabilityKeys.length + pendingCapabilityGroupKeys.length);
-  const capabilitySections = $derived.by(() => {
-    const sections: CapabilitySection[] = [];
-    for (const capability of capabilities) {
-      const key = capabilitySectionKey(capability);
-      const existing = sections.find((section) => section.key === key);
-      if (existing) {
-        existing.capabilities.push(capability);
-      } else {
-        sections.push({
-          key,
-          title: capabilitySectionTitle(capability),
-          subtitle: capabilitySectionSubtitle(capability),
-          capabilities: [capability],
-        });
-      }
+  const sortedCapabilities = $derived(capabilities.toSorted((left, right) => left.capability.localeCompare(right.capability)));
+  const sortedGroups = $derived(groups.toSorted((left, right) => left.groupKey.localeCompare(right.groupKey)));
+  const providerOptions = $derived(providerIds);
+  const effectivePreview = $derived.by(() => {
+    const selected = new SvelteSet(expand(directCapabilities, capabilityGroupKeys));
+    for (const mapping of roleMappings) {
+      for (const capability of expand(list(mapping.directCapabilities), list(mapping.capabilityGroupKeys))) selected.add(capability);
     }
-    return sections
-      .map((section) => ({
-        ...section,
-        capabilities: section.capabilities.slice().sort((left, right) =>
-          localCapabilityKey(left.key).localeCompare(localCapabilityKey(right.key))
-        ),
-      }))
-      .sort((left, right) => {
-        if (left.key === "platform") return -1;
-        if (right.key === "platform") return 1;
-        return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
-      });
+    return [...selected].sort((left, right) => left.localeCompare(right));
   });
 
-  function trimmedRequired(value: string): string | null {
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
+  function list(value: string): string[] {
+    return [...new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))].sort();
   }
 
-  function capabilitySectionKey(capability: CapabilityView): string {
-    if (capability.source === "platform") return "platform";
-    return capability.contractId ?? capability.contractDisplayName ?? "contract";
+  function caughtMessage(cause: unknown): string {
+    return cause instanceof Error ? cause.message : "Portal grant request failed.";
   }
 
-  function capabilitySectionTitle(capability: CapabilityView): string {
-    if (capability.source === "platform") return "Platform";
-    return capability.contractDisplayName ?? capability.contractId ?? "Contract";
-  }
-
-  function capabilitySectionSubtitle(capability: CapabilityView): string | null {
-    if (capability.source === "platform") return null;
-    return capability.contractId ?? null;
-  }
-
-  function localCapabilityKey(key: string): string {
-    return key.includes("::") ? key.split("::").slice(1).join("::") : key;
-  }
-
-  function uniqueGrantReferences(values: string[]): string[] {
-    return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
-  }
-
-  function grantOverrideReference(override: DeploymentAuthorityGrantOverride): string {
-    return override.grantKind === "capability" ? override.capability : override.capabilityGroupKey;
-  }
-
-  function grantIdentityKey(override: DeploymentAuthorityGrantOverride): string {
-    return [
-      override.identityKind,
-      override.grantKind,
-      override.contractId,
-      override.origin ?? "-",
-      override.sessionPublicKey ?? "-",
-      grantOverrideReference(override),
-    ].join("|");
-  }
-
-  function sameGrantIdentity(left: DeploymentAuthorityGrantOverride, right: DeploymentAuthorityGrantOverride): boolean {
-    return grantIdentityKey(left) === grantIdentityKey(right);
-  }
-
-  function cleanGrantOverride(override: DeploymentAuthorityGrantOverride): DeploymentAuthorityGrantOverride {
-    if (override.identityKind === "web") {
-      if (override.grantKind === "capability") {
-        return {
-          deploymentId: override.deploymentId,
-          identityKind: "web",
-          grantKind: "capability",
-          contractId: override.contractId,
-          origin: override.origin,
-          sessionPublicKey: null,
-          capability: override.capability,
-          capabilityGroupKey: null,
-        };
-      }
-      return {
-        deploymentId: override.deploymentId,
-        identityKind: "web",
-        grantKind: "capability-group",
-        contractId: override.contractId,
-        origin: override.origin,
-        sessionPublicKey: null,
-        capability: null,
-        capabilityGroupKey: override.capabilityGroupKey,
-      };
+  async function loadProviders(): Promise<void> {
+    if (!portalId) {
+      providerIds = [];
+      return;
     }
-    if (override.grantKind === "capability") {
-      return {
-        deploymentId: override.deploymentId,
-        identityKind: "session",
-        grantKind: "capability",
-        contractId: override.contractId,
-        origin: null,
-        sessionPublicKey: override.sessionPublicKey,
-        capability: override.capability,
-        capabilityGroupKey: null,
-      };
-    }
-    return {
-      deploymentId: override.deploymentId,
-      identityKind: "session",
-      grantKind: "capability-group",
-      contractId: override.contractId,
-      origin: null,
-      sessionPublicKey: override.sessionPublicKey,
-      capability: null,
-      capabilityGroupKey: override.capabilityGroupKey,
-    };
+    const response = await trellis.authPortalsGet({ portalId }).take();
+    if (isErr(response)) throw new Error(errorMessage(response));
+    providerIds = response.portal.loginSettings.providers ?? [];
   }
 
-  function buildOverrides(): DeploymentAuthorityGrantOverride[] {
-    const grantContractId = trimmedRequired(contractId);
-    const grantOrigin = trimmedRequired(origin);
-    const grantSessionPublicKey = trimmedRequired(sessionPublicKey);
-    if (!selectedEnabledDeployment || pendingGrantReferenceCount === 0 || !grantContractId) return [];
-    if (identityKind === "web") {
-      if (!grantOrigin) return [];
-      return [
-        ...pendingDirectCapabilityKeys.map((grantCapability): DeploymentAuthorityGrantOverride => ({
-          deploymentId: selectedEnabledDeployment.deploymentId,
-          identityKind: "web",
-          grantKind: "capability",
-          contractId: grantContractId,
-          origin: grantOrigin,
-          sessionPublicKey: null,
-          capability: grantCapability,
-          capabilityGroupKey: null,
-        })),
-        ...pendingCapabilityGroupKeys.map((capabilityGroupKey): DeploymentAuthorityGrantOverride => ({
-          deploymentId: selectedEnabledDeployment.deploymentId,
-          identityKind: "web",
-          grantKind: "capability-group",
-          contractId: grantContractId,
-          origin: grantOrigin,
-          sessionPublicKey: null,
-          capability: null,
-          capabilityGroupKey,
-        })),
-      ];
+  function expand(direct: string[], groupKeys: string[]): string[] {
+    const selected = new SvelteSet(direct);
+    const groupMap = new Map(groups.map((group) => [group.groupKey, group]));
+    const pending = [...groupKeys];
+    const visited = new SvelteSet<string>();
+    while (pending.length > 0) {
+      const key = pending.pop();
+      if (!key || visited.has(key)) continue;
+      visited.add(key);
+      const group = groupMap.get(key);
+      if (!group) continue;
+      for (const capability of group.capabilities) selected.add(capability);
+      pending.push(...group.includedGroups);
     }
-    if (!grantSessionPublicKey) return [];
-    return [
-      ...pendingDirectCapabilityKeys.map((grantCapability): DeploymentAuthorityGrantOverride => ({
-        deploymentId: selectedEnabledDeployment.deploymentId,
-        identityKind: "session",
-        grantKind: "capability",
-        contractId: grantContractId,
-        origin: null,
-        sessionPublicKey: grantSessionPublicKey,
-        capability: grantCapability,
-        capabilityGroupKey: null,
-      })),
-      ...pendingCapabilityGroupKeys.map((capabilityGroupKey): DeploymentAuthorityGrantOverride => ({
-        deploymentId: selectedEnabledDeployment.deploymentId,
-        identityKind: "session",
-        grantKind: "capability-group",
-        contractId: grantContractId,
-        origin: null,
-        sessionPublicKey: grantSessionPublicKey,
-        capability: null,
-        capabilityGroupKey,
-      })),
-    ];
+    return [...selected];
+  }
+
+  function addRoleMapping(): void {
+    roleMappings.push({ id: crypto.randomUUID(), providerId: providerOptions[0] ?? "", role: "", directCapabilities: "", capabilityGroupKeys: "" });
+  }
+
+  function applyPolicy(policy: Policy): void {
+    existing = policy;
+    portalId = policy.portalId;
+    participantId = policy.participantId;
+    directCapabilities = [...policy.directCapabilities];
+    capabilityGroupKeys = [...policy.capabilityGroupKeys];
+    roleMappings = policy.roleMappings.map((mapping) => ({
+      id: crypto.randomUUID(), providerId: mapping.providerId, role: mapping.role,
+      directCapabilities: mapping.directCapabilities.join(", "),
+      capabilityGroupKeys: mapping.capabilityGroupKeys.join(", "),
+    }));
   }
 
   async function load(): Promise<void> {
-    loading = true;
-    error = null;
-    saved = null;
     try {
-      const [listResponse, capabilitiesResponse, groupsResponse] = await Promise.all([
-        trellis.authDeploymentAuthorityList({ limit: 500, offset: 0 }).take(),
-        trellis.authCapabilitiesList({ limit: 500, offset: 0 }).take(),
+      const [portalResponse, capabilityResponse, groupResponse, policyResponse] = await Promise.all([
+        trellis.authPortalsList({ limit: 500 }).take(),
+        trellis.authCapabilitiesList({ limit: 500 }).take(),
         trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
+        trellis.authPortalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
       ]);
-      if (isErr(listResponse)) {
-        error = errorMessage(listResponse);
-        deployments = [];
-        existingOverrides = [];
-        return;
-      }
-      if (isErr(capabilitiesResponse)) {
-        error = errorMessage(capabilitiesResponse);
-        capabilities = [];
-        return;
-      }
-      if (isErr(groupsResponse)) {
-        error = errorMessage(groupsResponse);
-        capabilityGroups = [];
-        return;
-      }
-
-      deployments = listResponse.entries;
-      capabilities = (capabilitiesResponse.entries ?? []).slice().sort((left, right) => left.key.localeCompare(right.key));
-      capabilityGroups = groupsResponse.entries ?? [];
-      const details = await Promise.all(deployments.map((deployment) => loadDeploymentAuthorityGrantOverrides(deployment)));
-      existingOverrides = details.flat().map(cleanGrantOverride);
-    } catch (e) {
-      error = errorMessage(e);
+      if (isErr(portalResponse)) throw new Error(errorMessage(portalResponse));
+      if (isErr(capabilityResponse)) throw new Error(errorMessage(capabilityResponse));
+      if (isErr(groupResponse)) throw new Error(errorMessage(groupResponse));
+      if (isErr(policyResponse)) throw new Error(errorMessage(policyResponse));
+      portals = portalResponse.entries;
+      capabilities = capabilityResponse.entries;
+      groups = groupResponse.entries;
+      const targetPortal = page.url.searchParams.get("portalId");
+      const targetParticipant = page.url.searchParams.get("participantId");
+      const policy = policyResponse.entries.find((item) => item.portalId === targetPortal && item.participantId === targetParticipant);
+      if (policy) applyPolicy(policy);
+      else portalId = portals.find((portal) => !portal.disabled)?.portalId ?? "";
+      await loadProviders();
+    } catch (cause) {
+      error = caughtMessage(cause);
     } finally {
       loading = false;
     }
   }
 
-  async function loadDeploymentAuthorityGrantOverrides(deployment: DeploymentAuthority): Promise<DeploymentAuthorityGrantOverride[]> {
-    const response = await trellis.authDeploymentAuthorityGet({ deploymentId: deployment.deploymentId }).take();
-    if (isErr(response)) throw new Error(`Failed to load ${deployment.deploymentId}: ${errorMessage(response)}`);
-    return response.grantOverrides.map(cleanGrantOverride);
-  }
-
-  async function addGrantOverride(event?: SubmitEvent): Promise<void> {
-    event?.preventDefault();
-    const newOverrides = buildOverrides();
-    if (newOverrides.length === 0) {
-      error = storageDeploymentId
-        ? "Select an enabled deployment authority, enter a contract id and grant mode value, and choose at least one capability or capability group."
-        : "Choose the enabled deployment authority that should own this override.";
-      saved = null;
-      return;
-    }
-
-    const uniqueNewOverrides = newOverrides.filter((nextOverride) =>
-      !existingOverrides.some((override) => override.deploymentId === storageDeploymentId && sameGrantIdentity(override, nextOverride))
-    );
-    if (uniqueNewOverrides.length === 0) {
-      saved = "Grant override already exists; no changes saved.";
-      error = null;
-      return;
-    }
-
-    const existingForStorageDeployment = existingOverrides
-      .filter((override) => override.deploymentId === storageDeploymentId)
-      .map(cleanGrantOverride);
-    saving = true;
+  async function save(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
     error = null;
-    saved = null;
+    const mappings = roleMappings.map((mapping) => ({
+      providerId: mapping.providerId.trim(), role: mapping.role.trim(),
+      directCapabilities: list(mapping.directCapabilities), capabilityGroupKeys: list(mapping.capabilityGroupKeys),
+    }));
+    if (!portalId || !participantId.trim() || mappings.some((mapping) => !mapping.providerId || !mapping.role)) {
+      error = "Portal, application participant, provider, and role values are required.";
+      return;
+    }
+    if (hasDuplicateRoleMapping(mappings)) {
+      error = "Each provider and role pair may appear only once.";
+      return;
+    }
+    saving = true;
     try {
-      const response = await trellis.authDeploymentAuthorityGrantOverridesPut({
-        deploymentId: storageDeploymentId,
-        overrides: [...existingForStorageDeployment, ...uniqueNewOverrides.map(cleanGrantOverride)],
-      }).take();
-      if (isErr(response)) {
-        error = errorMessage(response);
-        return;
-      }
-      saved = `Added ${uniqueNewOverrides.length} grant override${uniqueNewOverrides.length === 1 ? "" : "s"} stored with ${storageDeploymentId}.`;
+      const input = {
+        portalId, participantId: participantId.trim(), directCapabilities: directCapabilities.toSorted(),
+        capabilityGroupKeys: capabilityGroupKeys.toSorted(), roleMappings: mappings,
+        expectedVersion: existing?.version ?? null, idempotencyKey: crypto.randomUUID(),
+      } satisfies AuthPortalsGrantOverridesPutInput;
+      const response = await trellis.authPortalsGrantOverridesPut(input).take();
+      if (isErr(response)) throw new Error(errorMessage(response));
       await goto(resolve("/admin/grants"));
-    } catch (e) {
-      error = errorMessage(e);
+    } catch (cause) {
+      error = caughtMessage(cause);
     } finally {
       saving = false;
     }
   }
 
-  onMount(() => { void load(); });
+  onMount(() => void load());
 </script>
 
-<section class="mx-auto max-w-5xl space-y-4">
-  <div>
-    <a class="btn btn-ghost btn-sm" href={resolve("/admin/grants")}>Back to grants</a>
-  </div>
-
-  {#if error}
-    <Notice variant="error">{error}</Notice>
-  {/if}
-  {#if saved}
-    <Notice variant="success">{saved}</Notice>
-  {/if}
-
+<section class="mx-auto max-w-6xl space-y-4">
+  <a class="btn btn-ghost btn-sm" href={resolve("/admin/grants")}>Back to portal grants</a>
+  {#if error}<Notice variant="error">{error}</Notice>{/if}
   {#if loading}
-    <Panel><LoadingState label="Loading grant catalog" /></Panel>
+    <Panel><LoadingState label="Loading portal policy inputs" /></Panel>
   {:else}
-    <form class="space-y-4" onsubmit={addGrantOverride}>
-      <Panel title="New grant override" eyebrow="Append to deployment authority override set">
-        {#snippet actions()}
-          {#if storageDeployment}
-            <span class="trellis-metadata text-[0.65rem]">Deployment authority {storageDeployment.deploymentId}</span>
-          {:else}
-            <span class="badge badge-warning badge-sm">Select authority</span>
-          {/if}
-        {/snippet}
-
-        <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <label class="form-control">
-            <span class="label-text text-xs">Deployment authority</span>
-            <select class="select select-bordered select-sm trellis-identifier" bind:value={selectedDeploymentId} disabled={busy} required>
-              <option value="">Select authority…</option>
-              {#each deploymentOptions as deployment (deployment.deploymentId)}
-                <option value={deployment.deploymentId} disabled={deployment.disabled}>{deployment.deploymentId}{deployment.disabled ? " (disabled)" : ""}</option>
-              {/each}
-            </select>
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">Identity kind</span>
-            <select class="select select-bordered select-sm" bind:value={identityKind} disabled={busy}>
-              {#each grantIdentityKinds as kind (kind)}<option value={kind}>{kind}</option>{/each}
-            </select>
-          </label>
-          <label class="form-control">
-            <span class="label-text text-xs">Contract id</span>
-            <input class="input input-bordered input-sm trellis-identifier" placeholder="contract.id" bind:value={contractId} disabled={busy} required />
-          </label>
-          {#if identityKind === "web"}
-            <label class="form-control">
-              <span class="label-text text-xs">Web origin</span>
-              <input class="input input-bordered input-sm trellis-identifier" placeholder="https://app.example" bind:value={origin} disabled={busy} required />
-            </label>
-          {:else}
-            <label class="form-control">
-              <span class="label-text text-xs">Session key</span>
-              <input class="input input-bordered input-sm trellis-identifier" placeholder="session public key" bind:value={sessionPublicKey} disabled={busy} required />
-            </label>
-          {/if}
+    <form class="space-y-4" onsubmit={save}>
+      <Panel title={existing ? "Edit portal grant policy" : "New portal grant policy"} eyebrow="Trusted browser authority">
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="form-control"><span class="trellis-field-label">Login portal</span><select class="select select-bordered select-sm mt-1" value={portalId} onchange={(event) => { portalId = event.currentTarget.value; void loadProviders(); }} disabled={busy || existing !== null} required><option value="">Select portal...</option>{#each portals as portal (portal.portalId)}<option value={portal.portalId} disabled={portal.disabled}>{portal.displayName} · {portal.portalId}</option>{/each}</select></label>
+          <label class="form-control"><span class="trellis-field-label">Application participant</span><input class="input input-bordered input-sm trellis-identifier mt-1" bind:value={participantId} disabled={busy || existing !== null} placeholder="example.app@v1" required /></label>
         </div>
+        <p class="trellis-field-help mt-2">The policy is exact to this portal and participant. Missing policies always fall back to ordinary consent.</p>
       </Panel>
 
       <div class="grid gap-3 lg:grid-cols-2">
-        <Panel title="Capability groups" eyebrow="Group references">
-          {#snippet actions()}
-            <span class="trellis-metadata text-[0.65rem]">{selectedCapabilityGroups.length} selected</span>
-          {/snippet}
-          <SelectionGroup title="Capability groups" count={selectedCapabilityGroups.length} bodyClass="max-h-64 overflow-y-auto rounded border border-base-300 bg-base-100/40">
-            {#each sortedCapabilityGroups as group (group.groupKey)}
-              <ChoiceRow>
-                {#snippet input()}
-                  <input class="checkbox checkbox-sm mt-0.5" type="checkbox" bind:group={selectedCapabilityGroups} value={group.groupKey} disabled={busy} />
-                {/snippet}
-                <span class="min-w-0">
-                  <span class="trellis-identifier block truncate font-medium text-base-content">{group.groupKey}</span>
-                  <span class="mt-0.5 block truncate text-base-content/60" title={group.displayName}>{group.displayName}</span>
-                  <span class="trellis-field-help block">{group.capabilities.length} capabilities · {group.includedGroups.length} included groups</span>
-                </span>
-              </ChoiceRow>
-            {:else}
-              <div class="px-2 py-3 trellis-metadata text-xs">No capability groups were returned.</div>
-            {/each}
+        <Panel title="Base capability groups" eyebrow="All logins">
+          <SelectionGroup title="Capability groups" count={capabilityGroupKeys.length} bodyClass="max-h-72 overflow-y-auto rounded border border-base-300 bg-base-100/40">
+            {#each sortedGroups as group (group.groupKey)}<ChoiceRow>{#snippet input()}<input class="checkbox checkbox-sm" type="checkbox" bind:group={capabilityGroupKeys} value={group.groupKey} disabled={busy} />{/snippet}<span class="min-w-0"><span class="trellis-identifier block truncate">{group.groupKey}</span><span class="trellis-field-help">{group.capabilities.length} direct · {group.includedGroups.length} nested</span></span></ChoiceRow>{:else}<p class="p-3 text-xs text-base-content/55">No capability groups.</p>{/each}
           </SelectionGroup>
         </Panel>
-
-        <Panel title="Direct capabilities" eyebrow="Concrete grants">
-          {#snippet actions()}
-            <span class="trellis-metadata text-[0.65rem]">{selectedCapabilities.length} selected</span>
-          {/snippet}
-          <SelectionGroup title="Direct capabilities" count={selectedCapabilities.length} bodyClass="max-h-64 overflow-y-auto rounded border border-base-300 bg-base-100/40">
-            {#each capabilitySections as section (section.key)}
-              <SelectionSectionHeader title={section.title} subtitle={section.subtitle ?? undefined} count={section.capabilities.length} />
-              {#each section.capabilities as item (item.key)}
-                <ChoiceRow>
-                  {#snippet input()}
-                    <input class="checkbox checkbox-sm mt-0.5" type="checkbox" bind:group={selectedCapabilities} value={item.key} disabled={busy} />
-                  {/snippet}
-                  <span class="min-w-0">
-                    <span class="block truncate font-medium text-base-content" title={item.description}>{item.description}</span>
-                    <span class="trellis-identifier mt-0.5 block break-all text-base-content/50">{localCapabilityKey(item.key)}</span>
-                  </span>
-                </ChoiceRow>
-              {/each}
-            {:else}
-              <div class="px-2 py-3 trellis-metadata text-xs">No catalog capabilities were returned.</div>
-            {/each}
+        <Panel title="Base direct capabilities" eyebrow="All logins">
+          <SelectionGroup title="Direct capabilities" count={directCapabilities.length} bodyClass="max-h-72 overflow-y-auto rounded border border-base-300 bg-base-100/40">
+            {#each sortedCapabilities as capability (capability.capability)}<ChoiceRow>{#snippet input()}<input class="checkbox checkbox-sm" type="checkbox" bind:group={directCapabilities} value={capability.capability} disabled={busy} />{/snippet}<span class="min-w-0"><span class="trellis-identifier block truncate" title={capability.capability}>{capability.capability}</span><span class="trellis-field-help">{capability.description}</span></span></ChoiceRow>{:else}<p class="p-3 text-xs text-base-content/55">No capabilities.</p>{/each}
           </SelectionGroup>
         </Panel>
       </div>
 
-      <Panel title="Grant behavior" eyebrow="Persistence">
-        <div class="flex items-center justify-between gap-3">
-          <div class="space-y-1 text-xs text-base-content/55">
-            {#if selectedEnabledDeployment}
-              <p>Grants are keyed by contract+origin for web or contract+session key for session clients. Direct capabilities are stored as concrete capability grants; capability groups are stored by group key so future group membership changes apply.</p>
-            {:else if storageDeployment?.disabled}
-              <p class="text-warning">Select an enabled deployment authority before saving overrides.</p>
-            {:else}
-              <p class="text-warning">Choose the enabled deployment authority that should own this override.</p>
-            {/if}
-            <p>Selection will store {pendingDirectCapabilityKeys.length} direct capability grant{pendingDirectCapabilityKeys.length === 1 ? "" : "s"} and {pendingCapabilityGroupKeys.length} capability group grant{pendingCapabilityGroupKeys.length === 1 ? "" : "s"}.</p>
-          </div>
-          <div class="flex shrink-0 gap-2">
-            <a class="btn btn-ghost btn-sm" href={resolve("/admin/grants")}>Cancel</a>
-            <button class="btn btn-primary btn-sm" type="submit" disabled={busy || !selectedEnabledDeployment || !contractId.trim() || !requiredIdentityValue || pendingGrantReferenceCount === 0}>{saving ? "Saving..." : "Add grant"}</button>
-          </div>
-        </div>
+      <Panel title="Provider role mappings" eyebrow="Exact verified roles">
+        {#snippet actions()}<button class="btn btn-outline btn-xs" type="button" onclick={addRoleMapping} disabled={busy}>Add role</button>{/snippet}
+        <DataTable size="xs" fixed class="min-w-[900px] border border-base-300">
+          <colgroup><col style="width: 18%" /><col style="width: 18%" /><col style="width: 29%" /><col style="width: 29%" /><col style="width: 6%" /></colgroup>
+          <thead><tr><th>Provider</th><th>Exact role</th><th>Direct capabilities</th><th>Capability groups</th><th></th></tr></thead>
+          <tbody>
+            {#each roleMappings as mapping (mapping.id)}
+              <tr>
+                <td><select class="select select-bordered select-xs w-full" bind:value={mapping.providerId} disabled={busy} required><option value="">Select...</option>{#each providerOptions as provider (provider)}<option value={provider}>{provider}</option>{/each}</select></td>
+                <td><input class="input input-bordered input-xs trellis-identifier w-full" bind:value={mapping.role} placeholder="Engineering" disabled={busy} required /></td>
+                <td><textarea class="textarea textarea-bordered textarea-xs trellis-identifier min-h-14 w-full" bind:value={mapping.directCapabilities} placeholder="api::read, api::write" disabled={busy}></textarea></td>
+                <td><textarea class="textarea textarea-bordered textarea-xs trellis-identifier min-h-14 w-full" bind:value={mapping.capabilityGroupKeys} placeholder="operators, auditors" disabled={busy}></textarea></td>
+                <td class="text-right"><button class="btn btn-ghost btn-xs" type="button" onclick={() => roleMappings = roleMappings.filter((item) => item.id !== mapping.id)} disabled={busy}>Remove</button></td>
+              </tr>
+            {:else}<tr><td colspan="5" class="text-base-content/55">No role mappings. Base policy applies to every authenticated provider identity.</td></tr>{/each}
+          </tbody>
+        </DataTable>
+      </Panel>
+
+      <Panel title="Effective preview" eyebrow="Configured upper bound">
+        <div class="flex items-start justify-between gap-4"><div><p class="text-sm font-medium">{effectivePreview.length} configured capabilities</p><p class="trellis-field-help">Required participant authority is always added at runtime. Optional bundles are never autoapproved.</p><div class="trellis-identifier mt-2 max-h-28 overflow-auto text-xs text-base-content/65">{effectivePreview.join(", ") || "Required participant authority only"}</div></div><div class="flex shrink-0 gap-2"><a class="btn btn-ghost btn-sm" href={resolve("/admin/grants")}>Cancel</a><button class="btn btn-primary btn-sm" type="submit" disabled={busy}>{saving ? "Saving..." : "Save policy"}</button></div></div>
       </Panel>
     </form>
   {/if}

@@ -844,6 +844,9 @@ pub struct OAuthProviderConfig {
     /// Requested OAuth scopes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scopes: Option<Vec<String>>,
+    /// JSON Pointers selecting provider role claims from the verified ID token.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_claims: Vec<String>,
 }
 
 /// Configuration for a built-in runtime subsystem.

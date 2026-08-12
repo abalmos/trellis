@@ -296,138 +296,8 @@ fn parses_portal_admin_commands() {
 }
 
 #[test]
-fn parses_top_level_grant_commands() {
-    let cli = Cli::parse_from(["trellis", "grants", "list", "--deployment", "billing"]);
-    match cli.command {
-        TopLevelCommand::Grants(command) => match command.command {
-            GrantsSubcommand::List(args) => {
-                assert_eq!(args.deployment.as_deref(), Some("billing"));
-            }
-            other => panic!("unexpected grants command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "grants",
-        "add",
-        "--deployment",
-        "billing",
-        "--identity-kind",
-        "web",
-        "--contract",
-        "trellis.billing@v1",
-        "--origin",
-        "https://billing.example.com",
-        "--capability",
-        "trellis.billing::invoice.read",
-    ]);
-    match cli.command {
-        TopLevelCommand::Grants(command) => match command.command {
-            GrantsSubcommand::Add(args) => {
-                assert_eq!(args.deployment, "billing");
-                assert_eq!(
-                    args.grant.identity_kind,
-                    DeploymentAuthorityGrantOverrideIdentityKind::Web
-                );
-                assert_eq!(
-                    args.grant.contract_id.as_deref(),
-                    Some("trellis.billing@v1")
-                );
-                assert_eq!(
-                    args.grant.origin.as_deref(),
-                    Some("https://billing.example.com")
-                );
-                assert_eq!(
-                    args.grant.capabilities,
-                    vec!["trellis.billing::invoice.read".to_string()]
-                );
-                assert!(args.grant.capability_groups.is_empty());
-            }
-            other => panic!("unexpected grants command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "grants",
-        "remove",
-        "--deployment",
-        "reader",
-        "--identity-kind",
-        "session",
-        "--contract",
-        "trellis.reader@v1",
-        "--session-public-key",
-        "reader-session",
-        "--capability",
-        "trellis.reader::scan",
-    ]);
-    match cli.command {
-        TopLevelCommand::Grants(command) => match command.command {
-            GrantsSubcommand::Remove(args) => {
-                assert_eq!(args.deployment, "reader");
-                assert_eq!(
-                    args.grant.identity_kind,
-                    DeploymentAuthorityGrantOverrideIdentityKind::Session
-                );
-                assert_eq!(args.grant.contract_id.as_deref(), Some("trellis.reader@v1"));
-                assert_eq!(
-                    args.grant.session_public_key.as_deref(),
-                    Some("reader-session")
-                );
-                assert_eq!(
-                    args.grant.capabilities,
-                    vec!["trellis.reader::scan".to_string()]
-                );
-                assert!(args.grant.capability_groups.is_empty());
-            }
-            other => panic!("unexpected grants command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "grants",
-        "add",
-        "--deployment",
-        "billing",
-        "--identity-kind",
-        "web",
-        "--contract",
-        "trellis.billing@v1",
-        "--origin",
-        "https://billing.example.com",
-        "--capability-group",
-        "billing-admin",
-    ]);
-    match cli.command {
-        TopLevelCommand::Grants(command) => match command.command {
-            GrantsSubcommand::Add(args) => {
-                assert!(args.grant.capabilities.is_empty());
-                assert_eq!(
-                    args.grant.capability_groups,
-                    vec!["billing-admin".to_string()]
-                );
-            }
-            other => panic!("unexpected grants command: {other:?}"),
-        },
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-}
-
-#[test]
-fn top_level_grants_help_shows_deployment_first_policy_shape() {
-    let error = Cli::try_parse_from(["trellis", "grants", "--help"])
-        .expect_err("grants help should render as a clap error");
-    let help = error.to_string();
-    assert!(help.contains("Manage deployment grant overrides"));
-    assert!(help.contains("list"));
-    assert!(help.contains("add"));
-    assert!(help.contains("remove"));
+fn rejects_removed_top_level_grant_commands() {
+    assert!(Cli::try_parse_from(["trellis", "grants", "list"]).is_err());
 }
 
 #[test]
@@ -504,21 +374,37 @@ fn parses_target_first_service_and_device_resource_tokens() {
         "svc",
         "api",
         "apply",
-        "--manifest",
-        "./trellis.contract.json",
+        "--api",
+        "./trellis.api.json",
+        "--participant",
+        "./trellis.participant.json",
     ]);
     match cli.command {
         TopLevelCommand::Svc(command) => {
             assert_eq!(command.id.as_deref(), Some("api"));
             match command.command {
                 SvcSubcommand::Resource(SvcResourceAction::Apply(args)) => {
-                    assert_eq!(args.manifest.as_deref(), Some("./trellis.contract.json"));
+                    assert_eq!(args.api.as_deref(), Some("./trellis.api.json"));
+                    assert_eq!(
+                        args.participant.as_deref(),
+                        Some("./trellis.participant.json")
+                    );
                 }
                 other => panic!("unexpected svc command: {other:?}"),
             }
         }
         other => panic!("unexpected top-level command: {other:?}"),
     }
+
+    assert!(Cli::try_parse_from([
+        "trellis",
+        "svc",
+        "api",
+        "apply",
+        "--manifest",
+        "./trellis.contract.json",
+    ])
+    .is_err());
 
     let cli = Cli::parse_from([
         "trellis",

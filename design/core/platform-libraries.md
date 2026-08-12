@@ -232,6 +232,6 @@ contract re-exports. See:
 - advanced tooling, SDK generation, and low-level contract-model consumers
   should use `@qlever-llc/trellis/contracts`
 
-- [../contracts/trellis-contracts-catalog.md](./../contracts/trellis-contracts-catalog.md)
+- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md)
 - [../contracts/trellis-typescript-contract-authoring.md](./../contracts/trellis-typescript-contract-authoring.md)
 - [../contracts/trellis-rust-contract-libraries.md](./../contracts/trellis-rust-contract-libraries.md)

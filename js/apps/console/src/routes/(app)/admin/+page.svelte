@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { isErr, type BaseError, type Result } from "@qlever-llc/result";
+  import { isErr } from "@qlever-llc/result";
   import type {
+    AuthDeploymentAuthorityListOutput,
+    AuthDeploymentAuthorityPlansListOutput,
     AuthDeviceUserAuthoritiesReviewsListOutput,
     AuthServiceInstancesListOutput,
   } from "@qlever-llc/trellis/sdk/auth";
@@ -18,11 +20,6 @@
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import { errorMessage } from "$lib/format";
   import { loadJobsPageData } from "$lib/jobs_page.ts";
-  import {
-    contractDependencyProviderContract,
-    contractDependencyRequiredThing,
-    isContractDependencyBlock,
-  } from "$lib/catalog_issues";
   import { getTrellis } from "$lib/trellis";
   import type {
     JobsQueryOutput,
@@ -31,28 +28,9 @@
   type ServiceInstance = AuthServiceInstancesListOutput["entries"][number];
   type JobGroup = JobsQueryOutput["groups"][number];
   type JobStats = JobsQueryOutput["stats"];
-  type DeploymentAuthority = { deploymentId: string; kind: DeploymentAuthorityKind; disabled: boolean };
+  type DeploymentAuthority = AuthDeploymentAuthorityListOutput["entries"][number];
+  type AuthorityPlan = AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type DeviceReview = AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type CatalogIssue = {
-    issueId: string;
-    kind: string;
-    contractId?: string;
-    message: string;
-    deploymentIds?: string[];
-  };
-  type CatalogOutput = {
-    catalog: {
-      issues?: CatalogIssue[];
-    };
-  };
-  type RpcTakeable<T> = { take(): Promise<T | Result<never, BaseError>> };
-  type CoreRequest = {
-    (method: "Trellis.Catalog", input: Record<string, never>): RpcTakeable<CatalogOutput>;
-  };
-  type AuthorityRequest = {
-    (method: "Auth.DeploymentAuthority.List", input: { limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthority[] }>;
-    (method: "Auth.DeploymentAuthority.Plans.List", input: { state: "pending"; limit: number; offset: number }): RpcTakeable<{ entries?: DeploymentAuthorityPlan[] }>;
-  };
   type OverviewInstance = {
     service: string;
     id: string;
@@ -74,20 +52,18 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let catalogIssueError = $state<string | null>(null);
   let instances = $state<ServiceInstance[]>([]);
   let sessionCount = $state(0);
   let connectionCount = $state(0);
   let jobsUnavailableMessage = $state<string | null>(null);
   let jobGroups = $state.raw<JobGroup[]>([]);
   let jobStats = $state.raw<JobStats>({ byState: {}, total: 0 });
-  let catalogIssues = $state.raw<CatalogIssue[]>([]);
   let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
-  let pendingAuthorityPlans = $state.raw<DeploymentAuthorityPlan[]>([]);
+  let pendingAuthorityPlans = $state.raw<AuthorityPlan[]>([]);
   let pendingDeviceReviews = $state.raw<DeviceReview[]>([]);
 
-  const activeInstances = $derived(instances.filter((instance) => !instance.disabled).length);
-  const disabledInstances = $derived(instances.filter((instance) => instance.disabled).length);
+  const activeInstances = $derived(instances.filter((instance) => instance.state === "active").length);
+  const disabledInstances = $derived(instances.filter((instance) => instance.state === "disabled").length);
   const displayInstances = $derived(instances.map(toOverviewInstance));
   const displayJobs = $derived(toOverviewJobs(jobGroups));
   const serviceInstanceTotal = $derived(instances.length);
@@ -95,10 +71,8 @@
   const activeJobCount = $derived(jobStats.byState.active ?? 0);
   const totalJobCount = $derived(jobStats.total);
   const pendingWorkTotal = $derived(pendingDeviceReviews.length + pendingAuthorityPlans.length);
-  const serviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.kind === "service" && !authority.disabled).length);
-  const deviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.kind === "device" && !authority.disabled).length);
-  const dependencyBlocks = $derived(catalogIssues.filter(isContractDependencyBlock));
-  const catalogWarningCount = $derived(dependencyBlocks.length);
+  const serviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.materialization?.participantKind === "service" && authority.state === "accepted").length);
+  const deviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.materialization?.participantKind === "device" && authority.state === "accepted").length);
 
   const topology = $derived([
     { icon: "box", label: "Service instances", value: serviceInstanceTotal, detail: `${activeInstances} enabled / ${disabledTotal} disabled`, tone: "text-neutral bg-base-300/60" },
@@ -112,27 +86,13 @@
     { label: "Sessions", value: sessionCount },
     { label: "Connections", value: connectionCount },
     { label: "Jobs", value: totalJobCount, badge: `${activeJobCount} active`, badgeClass: "badge-neutral" },
-    { label: "Warnings", value: catalogWarningCount, detail: catalogIssueError ? "Catalog unavailable" : "contract blocks" },
   ]);
-
-  function dependencyKindText(requiredThing: string): string | null {
-    if (requiredThing === "a required surface") return null;
-    const separator = requiredThing.indexOf(" ");
-    if (separator < 1) return null;
-    const kind = requiredThing.slice(0, separator);
-    return kind === "RPC" ? "RPC" : kind.toLowerCase();
-  }
-
-  function dependencySurfaceName(requiredThing: string): string | null {
-    const separator = requiredThing.indexOf(" ");
-    return separator > 0 ? requiredThing.slice(separator + 1) : null;
-  }
 
   function toOverviewInstance(instance: ServiceInstance): OverviewInstance {
     return {
       service: instance.deploymentId,
       id: instance.instanceId,
-      status: instance.disabled ? "Disabled" : "Enabled",
+      status: instance.state === "disabled" ? "Disabled" : "Enabled",
       version: "—",
       seen: "known",
       type: "service",
@@ -190,17 +150,15 @@
   async function load() {
     loading = true;
     error = null;
-    catalogIssueError = null;
     jobsUnavailableMessage = null;
     try {
-      const [sessionsRes, connectionsRes, instancesRes, authoritiesRes, authorityPlansRes, deviceReviewsRes, catalogRes] = await Promise.all([
-        trellis.authSessionsList({ limit: 500, offset: 0 }).take(),
-        trellis.authConnectionsList({ limit: 500, offset: 0 }).take(),
-        trellis.authServiceInstancesList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 500, offset: 0 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: authorityPlanPreviewLimit, offset: 0 }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500, offset: 0 }).take(),
-        trellis.trellisCatalog({}).take(),
+      const [sessionsRes, connectionsRes, instancesRes, authoritiesRes, authorityPlansRes, deviceReviewsRes] = await Promise.all([
+        trellis.authSessionsList({ limit: 500 }).take(),
+        trellis.authConnectionsList({ limit: 500 }).take(),
+        trellis.authServiceInstancesList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityList({ limit: 500 }).take(),
+        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: authorityPlanPreviewLimit }).take(),
+        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 500 }).take(),
       ]);
       if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
       if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
@@ -208,14 +166,12 @@
       if (isErr(authoritiesRes)) { error = errorMessage(authoritiesRes); return; }
       if (isErr(authorityPlansRes)) { error = errorMessage(authorityPlansRes); return; }
       if (isErr(deviceReviewsRes)) { error = errorMessage(deviceReviewsRes); return; }
-      if (isErr(catalogRes)) catalogIssueError = errorMessage(catalogRes);
       sessionCount = sessionsRes.entries?.length ?? 0;
       connectionCount = connectionsRes.entries?.length ?? 0;
       instances = instancesRes.entries ?? [];
       deploymentAuthorities = authoritiesRes.entries ?? [];
       pendingAuthorityPlans = authorityPlansRes.entries ?? [];
       pendingDeviceReviews = deviceReviewsRes.entries ?? [];
-      catalogIssues = isErr(catalogRes) ? [] : catalogRes.catalog.issues ?? [];
 
       const jobsData = await loadJobsPageData({
         listServices: (input) => trellis.jobsListServices(input),
@@ -261,34 +217,6 @@
 
     {#if error}
       <Notice variant="error" class="mb-4">{error}</Notice>
-    {/if}
-
-    {#if dependencyBlocks.length > 0 || catalogIssueError}
-      <Notice variant="warning" class="mb-4 items-start">
-        <div class="min-w-0">
-          <div class="font-medium">Contract dependency block</div>
-          <div class="mt-1 text-sm">
-            {#if catalogIssueError}
-              Catalog issue status is unavailable: {catalogIssueError}
-            {:else if dependencyBlocks[0]}
-              {@const issue = dependencyBlocks[0]}
-              {@const blockedDeployment = issue.deploymentIds?.[0] ?? issue.contractId ?? "Service"}
-              {@const requiredThing = contractDependencyRequiredThing(issue)}
-              {@const requiredKind = dependencyKindText(requiredThing)}
-              {@const requiredName = dependencySurfaceName(requiredThing)}
-              {@const providerContract = contractDependencyProviderContract(issue)}
-              A <span class="trellis-identifier font-semibold">{blockedDeployment}</span> instance was blocked because its contract
-              {#if requiredKind && requiredName}
-                requires an undefined {requiredKind} <span class="trellis-identifier font-semibold">{requiredName}</span> from
-                <span class="trellis-identifier font-semibold">{providerContract}</span>.
-              {:else}
-                requires <span class="trellis-identifier font-semibold">{providerContract}</span>, but that contract is not currently active or did not advertise the required API.
-              {/if}
-            {/if}
-          </div>
-        </div>
-        <a class="btn btn-warning btn-outline btn-sm" href={resolve("/admin/services")}>Open services</a>
-      </Notice>
     {/if}
 
     <Panel title="Runtime Topology" class="overflow-hidden">

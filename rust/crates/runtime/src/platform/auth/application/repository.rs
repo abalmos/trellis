@@ -70,8 +70,12 @@ pub(crate) struct PasswordResetCompletion {
     pub token_hash: String,
     /// Expected pending flow version.
     pub expected_flow_version: u64,
+    /// Credential version observed before hashing; `None` requires first install.
+    pub expected_credential_version: Option<u64>,
     /// Complete replacement credential with version `current + 1`.
     pub replacement: LocalCredentialRecord,
+    /// Local identity installed atomically with a first credential.
+    pub identity: Option<ProviderIdentityLink>,
     /// Completion time in Unix milliseconds.
     pub consumed_at: i64,
     /// Durable proof claim and replay result.
@@ -89,6 +93,8 @@ pub(crate) struct IdentityLinkCompletion {
     pub expected_flow_version: u64,
     /// Exact provider identity to attach.
     pub identity: ProviderIdentityLink,
+    /// Local credential installed atomically for a local identity.
+    pub credential: Option<LocalCredentialRecord>,
     /// Completion time in Unix milliseconds.
     pub consumed_at: i64,
     /// Durable proof claim and replay result.
@@ -137,6 +143,10 @@ pub(crate) struct AuthorityProposalDecision {
     pub desired_authority: Option<DesiredAuthorityRecord>,
     /// Deployment evidence installed atomically with initial deployment authority.
     pub deployment: Option<DeploymentRecord>,
+    /// Portal provenance replacement for an identity authority; outer `None` preserves it.
+    pub portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
+    /// Exact portal provenance expected before replacement; outer `None` skips the check.
+    pub expected_portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
     /// Durable proof claim and replay result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -579,6 +589,30 @@ pub(crate) trait PortalRepository: Send + Sync {
 
     /// List routes in deterministic selection order.
     async fn list_portal_routes(&self) -> Result<Vec<PortalRouteRecord>, AuthorizationStateError>;
+
+    /// Load one trusted portal policy for a participant.
+    async fn get_portal_grant_override(
+        &self,
+        portal_id: &str,
+        participant_id: &str,
+    ) -> Result<Option<super::super::PortalGrantOverrideRecord>, AuthorizationStateError>;
+
+    /// List capability groups for trusted portal policy resolution.
+    async fn list_capability_groups(
+        &self,
+    ) -> Result<Vec<super::super::CapabilityGroupRecord>, AuthorizationStateError>;
+
+    /// List durable trusted-portal authority provenance in stable order.
+    async fn list_portal_authority_bindings(
+        &self,
+    ) -> Result<Vec<super::super::PortalAuthorityBindingRecord>, AuthorizationStateError>;
+
+    /// Remove stale portal provenance that has no authority to reconcile.
+    async fn remove_portal_authority_binding(
+        &self,
+        principal_id: &str,
+        participant_id: &str,
+    ) -> Result<bool, AuthorizationStateError>;
 }
 
 /// Persistence contract for authenticated sessions and their runtime selection.

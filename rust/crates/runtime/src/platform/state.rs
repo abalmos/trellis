@@ -74,6 +74,7 @@ impl Scope {
     }
 }
 
+#[derive(Clone)]
 struct Declaration {
     scope: Scope,
     owner_id: String,
@@ -818,17 +819,11 @@ fn declaration_from_binding(
                 .ok_or_else(|| unexpected("accepted State schema is missing"))?,
         );
     }
-    let contract_digest = api
-        .schema("TrellisContractArtifactIdentity")
-        .and_then(|schema| schema.get("const"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| unexpected("contract artifact identity is invalid"))?
-        .to_owned();
     Ok(Declaration {
         scope,
         owner_id,
         contract_id,
-        contract_digest,
+        contract_digest: binding.artifact_digest,
         store: store.to_owned(),
         kind: definition.kind(),
         schema,
@@ -1161,6 +1156,7 @@ fn kv_error(error: impl std::fmt::Display) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use trellis_protocol::{parse_participant_v1, resolve_participant_v1};
 
     fn test_declaration(digest: &str) -> Declaration {
         Declaration {
@@ -1242,5 +1238,74 @@ mod tests {
         .err()
         .expect("conflicting candidates must fail");
         assert!(format!("{incoherent:?}").contains("UnexpectedError"));
+    }
+
+    #[test]
+    fn state_declaration_admin_and_writer_digests_match_participant_binding() {
+        let api = json!({
+            "format": "trellis.api.v1",
+            "id": "example.device@v1",
+            "displayName": "Example Device",
+            "description": "State test API",
+            "schemas": {"State": {"type": "string"}},
+            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
+        });
+        let parsed_api = parse_api_v1(&api).expect("API");
+        let api_digest = parsed_api.digest().expect("API digest");
+        let participant = json!({
+            "format": "trellis.participant.v1",
+            "id": "example.device@v1",
+            "displayName": "Example Device",
+            "description": "State test participant",
+            "kind": "device",
+            "implements": {"self": {"api": "example.device@v1", "apiDigest": api_digest}}
+        });
+        let parsed_participant = parse_participant_v1(&participant).expect("participant");
+        let participant_digest = parsed_participant.digest().expect("participant digest");
+        let resolved = resolve_participant_v1(
+            &parsed_participant,
+            &BTreeMap::from([("example.device@v1".to_owned(), parsed_api)]),
+        )
+        .expect("resolved participant");
+        let binding = ParticipantBindingRecord {
+            participant_id: "example.device@v1".to_owned(),
+            participant_kind: ParticipantKindV1::Device,
+            artifact_digest: participant_digest.clone(),
+            needs_digest: resolved.needs().digest().expect("needs digest"),
+            participant_json: serde_json::to_string(&participant).expect("participant JSON"),
+            api_artifacts_json: serde_json::to_string(&json!({
+                "example.device@v1": api
+            }))
+            .expect("API map JSON"),
+            resolved_at: 0,
+            state: ParticipantBindingState::Resolved,
+            error: None,
+        };
+        let declaration = declaration_from_binding(
+            binding,
+            Scope::DeviceApp,
+            "device-1".to_owned(),
+            "example.device@v1".to_owned(),
+            "preferences",
+        )
+        .expect("declaration");
+        assert_eq!(declaration.contract_digest, participant_digest);
+        assert!(validate_admin_digest(declaration.clone(), &participant_digest).is_ok());
+        let writer = StoredEnvelope {
+            value: json!("value"),
+            state_version: declaration.state_version.clone(),
+            writer_contract_digest: declaration.contract_digest.clone(),
+            updated_at: "2025-01-01T00:00:00Z".to_owned(),
+            expires_at: None,
+        };
+        assert_eq!(writer.writer_contract_digest, participant_digest);
+    }
+
+    #[test]
+    fn compatible_participant_digest_changes_keep_state_namespace() {
+        assert_eq!(
+            namespace_digest(&test_declaration("digest-a")).expect("namespace"),
+            namespace_digest(&test_declaration("digest-b")).expect("namespace"),
+        );
     }
 }
