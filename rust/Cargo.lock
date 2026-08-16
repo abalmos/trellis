@@ -4638,7 +4638,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-bootstrap"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "base64 0.22.1",
@@ -4657,7 +4657,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "base64 0.22.1",
@@ -4697,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-codegen-rust"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "prettyplease",
  "serde",
@@ -4710,7 +4710,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-codegen-ts"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "oxc_allocator",
  "oxc_parser",
@@ -4722,7 +4722,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-contracts"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4732,7 +4732,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-eventlog-runtime"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "futures-util",
@@ -4747,7 +4747,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-generate"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "clap",
  "ignore",
@@ -4766,7 +4766,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-generate-runner"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "self_update",
  "sha2 0.11.0",
@@ -4774,7 +4774,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-jobs"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "bytes",
@@ -4792,7 +4792,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-jobs-runtime"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "futures-util",
@@ -4809,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-local-bootstrap"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4824,7 +4824,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-local-nats"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "flate2",
  "libc",
@@ -4839,7 +4839,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-protocol"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -4856,7 +4856,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-protocol-wasm"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-rs"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "base64 0.22.1",
@@ -4899,7 +4899,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-runtime"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "argon2",
  "async-nats",
@@ -4943,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-sdk-auth"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -4954,7 +4954,7 @@ dependencies = [
 
 [[package]]
 name = "trellis-test"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-nats",
  "futures-util",

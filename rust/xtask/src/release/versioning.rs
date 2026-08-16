@@ -489,6 +489,9 @@ fn collect_cargo_versions(
         }
         if matches!(section, CargoSection::WorkspacePackage) {
             if let Some(version) = cargo_version_assignment(trimmed) {
+                if is_non_release_sentinel_version(&version) {
+                    continue;
+                }
                 versions.push(VersionEntry::new(
                     "rust workspace version".to_string(),
                     version,
@@ -499,6 +502,9 @@ fn collect_cargo_versions(
             && package_name.as_deref().is_some_and(is_internal_rust_crate)
         {
             if let Some(version) = cargo_version_assignment(trimmed) {
+                if is_non_release_sentinel_version(&version) {
+                    continue;
+                }
                 versions.push(VersionEntry::new(
                     format!("{} package version", display_repo_path(repo_root, path)),
                     version,
@@ -542,6 +548,10 @@ pub(super) fn rewrite_cargo_manifest_versions(
                 && package_name.as_deref().is_some_and(is_internal_rust_crate));
         if should_update_package_version {
             if let Some(version) = cargo_version_assignment(trimmed) {
+                if is_non_release_sentinel_version(&version) {
+                    lines.push(line.to_string());
+                    continue;
+                }
                 if version != from {
                     if version == to {
                         lines.push(line.to_string());
@@ -614,6 +624,10 @@ pub(super) fn rewrite_cargo_manifest_versions_for_release(
                 && package_name.as_deref().is_some_and(is_internal_rust_crate));
         if should_update_package_version {
             if let Some(version) = cargo_version_assignment(trimmed) {
+                if is_non_release_sentinel_version(&version) {
+                    lines.push(line.to_string());
+                    continue;
+                }
                 require_version_base(&version, expected_base_version, path, "version")?;
                 lines.push(line.replacen(
                     &format!("\"{version}\""),

@@ -16,4 +16,4 @@ thiserror.workspace = true
 tokio.workspace = true
 time.workspace = true
 tracing.workspace = true
-trellis-rs = { path = "../trellis", version = "0.11.0" }
+trellis-rs = { path = "../trellis", version = "0.12.0" }

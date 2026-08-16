@@ -846,6 +846,22 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_cargo_manifest_preserves_non_release_sentinel_version() {
+        let original = "[package]\nname = \"trellis-sdk-console\"\nversion = \"0.0.0\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\n";
+        let updated = rewrite_cargo_manifest_versions(
+            original,
+            "0.8.2",
+            "0.9.0",
+            std::path::Path::new("Cargo.toml"),
+        )
+        .expect("rewrite cargo versions");
+        assert_eq!(
+            updated,
+            "[package]\nname = \"trellis-sdk-console\"\nversion = \"0.0.0\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.9.0\" }\n"
+        );
+    }
+
+    #[test]
     fn rewrite_cargo_manifest_for_release_updates_generated_sdk_dependencies() {
         let original = "[workspace.package]\nversion = \"0.8.2\"\n\n[dependencies]\ntrellis-rs = { path = \"../trellis\", version = \"0.8.2\" }\ntrellis-bootstrap = { path = \"../bootstrap\", version = \"0.8.2\" }\ntrellis-sdk-health = { path = \"../generated/packages/cargo/health\", version = \"0.8.2\" }\ntrellis-sdk-state = { path = \"../generated/packages/cargo/state\", version = \"0.8.2\" }\nserde = { version = \"1.0\" }\n";
         let updated = rewrite_cargo_manifest_versions_for_release(

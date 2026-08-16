@@ -33,15 +33,15 @@ jsonschema.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "sync"] }
-trellis-contracts = { path = "../contracts", version = "0.11.0" }
-trellis-protocol = { path = "../protocol", version = "0.11.0" }
+trellis-contracts = { path = "../contracts", version = "0.12.0" }
+trellis-protocol = { path = "../protocol", version = "0.12.0" }
 tracing.workspace = true
 ulid = "1.2.1"
 url = "2.5.8"
 
 [dev-dependencies]
 trellis-test = { path = "../trellis-test" }
-trellis-local-nats = { path = "../local-nats", version = "0.11.0" }
+trellis-local-nats = { path = "../local-nats", version = "0.12.0" }
 
 [lints]
 workspace = true
