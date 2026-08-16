@@ -217,7 +217,7 @@ export function createAuthLocalLoginFixture(
       name: serviceName,
       identity: serviceKey,
       telemetry: false,
-      server: { log: false },
+      runtime: { log: false },
     }).orThrow();
 
     service.handleAuthLoginPing(async ({ input, client }) => {

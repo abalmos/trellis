@@ -168,18 +168,18 @@ async function normalizeExportTargets(
 
     const importPath = `./esm/sdk/${sdkName}.js`;
     const requirePath = `./script/sdk/${sdkName}.js`;
-    const legacyImportPath = `./esm/npm/src/sdk/${sdkName}.js`;
-    const legacyRequirePath = `./script/npm/src/sdk/${sdkName}.js`;
+    const nestedImportPath = `./esm/npm/src/sdk/${sdkName}.js`;
+    const nestedRequirePath = `./script/npm/src/sdk/${sdkName}.js`;
     return {
       ...(await pathExists(importPath)
         ? { import: importPath }
-        : await pathExists(legacyImportPath)
-        ? { import: legacyImportPath }
+        : await pathExists(nestedImportPath)
+        ? { import: nestedImportPath }
         : {}),
       ...(await pathExists(requirePath)
         ? { require: requirePath }
-        : await pathExists(legacyRequirePath)
-        ? { require: legacyRequirePath }
+        : await pathExists(nestedRequirePath)
+        ? { require: nestedRequirePath }
         : {}),
     };
   }
@@ -276,7 +276,7 @@ async function normalizeModuleSpecifiers() {
 
 async function stageCanonicalGeneratedSdkArtifacts() {
   for (const format of ["esm", "script"]) {
-    const legacySourceRoot = new URL(
+    const nestedSourceRoot = new URL(
       `../npm/${format}/npm/src/.build/generated-sdk/`,
       import.meta.url,
     );
@@ -300,11 +300,11 @@ async function stageCanonicalGeneratedSdkArtifacts() {
     await Deno.mkdir(targetRoot, { recursive: true });
 
     for (const [sdkName, sdkDir] of Object.entries(sdkExportDirs)) {
-      const legacySource = new URL(`${sdkDir}/`, legacySourceRoot);
+      const nestedSource = new URL(`${sdkDir}/`, nestedSourceRoot);
       const packageSource = new URL(`${sdkName}/`, packageSourceRoot);
       const directSource = new URL(`${sdkName}/`, directSourceRoot);
-      const source = await urlExists(legacySource)
-        ? legacySource
+      const source = await urlExists(nestedSource)
+        ? nestedSource
         : await urlExists(packageSource)
         ? packageSource
         : directSource;
@@ -316,7 +316,7 @@ async function stageCanonicalGeneratedSdkArtifacts() {
       await copyDir(source, new URL(`${sdkDir}/`, targetRoot));
     }
 
-    await Deno.remove(legacySourceRoot, { recursive: true }).catch((error) => {
+    await Deno.remove(nestedSourceRoot, { recursive: true }).catch((error) => {
       if (!(error instanceof Deno.errors.NotFound)) {
         throw error;
       }
@@ -710,8 +710,6 @@ await buildDntPackage({
     "./ts/packages/trellis/sdk/jobs.ts",
     "./ts/packages/trellis/sdk/state.ts",
     "./ts/packages/trellis/errors/index.ts",
-    "./ts/packages/trellis/host/mod.ts",
-    "./ts/packages/trellis/host/node.ts",
     "./ts/packages/trellis/service/mod.ts",
     "./ts/packages/trellis/service/drizzle.ts",
     "./ts/packages/trellis/service/deno.ts",

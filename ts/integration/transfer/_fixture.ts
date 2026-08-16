@@ -231,7 +231,7 @@ export function createTransferFixture(
         name: serviceName,
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow(),
     );
 

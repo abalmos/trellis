@@ -585,7 +585,7 @@ export type TrellisAuth = {
   authorizationProviderCache?: AuthorizationProviderCache;
 };
 
-export type TrellisMode = "client" | "server";
+export type TrellisMode = "client" | "service";
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 type OwnedApiFor<TContract> = TContract extends {
   readonly [CONTRACT_RUNTIME]: ContractRuntime<
@@ -1048,7 +1048,7 @@ export type OperationSurface<
   TA extends RuntimeApi,
   TMode extends TrellisMode,
   O extends OperationsOf<TA>,
-> = TMode extends "server" ? OperationRegistration<
+> = TMode extends "service" ? OperationRegistration<
     OperationInputOf<TA, O>,
     OperationProgressOf<TA, O>,
     OperationOutputOf<TA, O>,
@@ -1727,7 +1727,7 @@ export type FeedSurface<
   TA extends RuntimeApi,
   TMode extends TrellisMode,
   F extends FeedsOf<TA>,
-> = TMode extends "server"
+> = TMode extends "service"
   ? FeedRegistration<FeedInputOf<TA, F>, FeedEventOf<TA, F>>
   : FeedInputBuilder<FeedInputOf<TA, F>, FeedEventOf<TA, F>>;
 

@@ -71,7 +71,7 @@ const service = await TrellisService.connect({
   contract: documentsService,
   name: "documents-service",
   sessionKeySeed: Deno.env.get("DOCUMENTS_SERVICE_SESSION_KEY_SEED")!,
-  server: {},
+  runtime: {},
 });
 
 const opened = await service.store.uploads.open();

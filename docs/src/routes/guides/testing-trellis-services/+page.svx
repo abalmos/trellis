@@ -183,7 +183,7 @@ trellisIntegrationTest({
       name: serviceName,
       sessionKeySeed: serviceKey.seed,
       telemetry: false,
-      server: {},
+      runtime: {},
     }).orThrow();
 
     try {

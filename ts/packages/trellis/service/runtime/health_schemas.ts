@@ -1,7 +1,5 @@
 import { Type } from "typebox";
 
-export const HealthRpcSchema = Type.Object({});
-
 export const HealthInfoSchema = Type.Record(Type.String(), Type.Unknown());
 
 export const HealthCheckResultSchema = Type.Object({

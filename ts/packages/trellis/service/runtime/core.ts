@@ -3,7 +3,7 @@ import { Pointer } from "typebox/value";
 import type {
   PermissionAtomV1,
   RuntimeApi,
-} from "./contract_support/runtime.ts";
+} from "../../contract_support/runtime.ts";
 import {
   AsyncResult,
   BaseError,
@@ -14,7 +14,7 @@ import {
 } from "@qlever-llc/result";
 import { ulid } from "ulid";
 
-import { type JsonValue, parseSchema } from "./codec.ts";
+import { type JsonValue, parseSchema } from "../../codec.ts";
 import {
   AuthError,
   OperationAlreadyTerminalError,
@@ -24,13 +24,13 @@ import {
   type TrellisErrorInstance,
   UnexpectedError,
   ValidationError,
-} from "./errors/index.ts";
-import type { LoggerLike } from "./globals.ts";
-import { serverLogger } from "./server_logger.ts";
+} from "../../errors/index.ts";
+import type { LoggerLike } from "../../globals.ts";
+import { serviceRuntimeLogger } from "./logger.ts";
 import {
   recordTrellisError,
   type TrellisErrorMetricAttributes,
-} from "./telemetry/mod.ts";
+} from "../../telemetry/mod.ts";
 import {
   type AcceptedOperation,
   annotateHandlerBoundaryError,
@@ -65,8 +65,8 @@ import {
   type TrellisOpts,
   type VerifiedCaller,
   verifyLocalAuthorization,
-} from "./session.ts";
-import type { SendTransferGrant } from "./transfer.ts";
+} from "../../session.ts";
+import type { SendTransferGrant } from "../../transfer.ts";
 
 type TrellisServiceRuntimeOpts<TA extends RuntimeApi> =
   & Omit<TrellisOpts<TA>, "api">
@@ -231,7 +231,7 @@ function traceIdFromTraceparent(
   return traceId;
 }
 
-function recordOperationServerError(
+function recordOperationServiceError(
   error: unknown,
   attributes: TrellisErrorMetricAttributes,
 ): void {
@@ -259,11 +259,16 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     auth: TrellisAuth,
     opts?: TrellisServiceRuntimeOpts<RuntimeApi>,
   ) {
-    super(name, nats, auth, { ...opts, log: opts?.log ?? serverLogger });
+    super(name, nats, auth, {
+      ...opts,
+      log: opts?.log ?? serviceRuntimeLogger,
+    });
     if (opts?.operationStoreId) this.setOperationStoreId(opts.operationStoreId);
     this.#nats = nats;
     this.#version = opts?.version;
-    this.#log = (opts?.log ?? serverLogger).child({ lib: "trellis-server" });
+    this.#log = (opts?.log ?? serviceRuntimeLogger).child({
+      lib: "trellis-service-runtime",
+    });
     this.#transferSupport = opts?.transferSupport;
     this.operations = {
       get: (operationId) =>
@@ -972,7 +977,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       const trellisError = error instanceof BaseError
         ? error
         : new UnexpectedError({ cause: error });
-      recordOperationServerError(trellisError, {
+      recordOperationServiceError(trellisError, {
         operation,
         phase: "control",
       });
@@ -1328,7 +1333,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             const validated = await authenticate(msg, true);
             const value = validated.take();
             if (isErr(value)) {
-              recordOperationServerError(value.error, {
+              recordOperationServiceError(value.error, {
                 operation: String(operation),
                 phase: "start",
               });
@@ -1346,7 +1351,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                     }' declared transfer support but no runtime transfer support is configured`,
                   ),
                 });
-                recordOperationServerError(error, {
+                recordOperationServiceError(error, {
                   operation: String(operation),
                   phase: "start",
                 });
@@ -1364,7 +1369,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 "key",
               ).take();
               if (isErr(key)) {
-                recordOperationServerError(key.error, {
+                recordOperationServiceError(key.error, {
                   operation: String(operation),
                   phase: "start",
                 });
@@ -1377,7 +1382,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 ctx.transfer.contentType,
               ).take();
               if (isErr(contentType)) {
-                recordOperationServerError(contentType.error, {
+                recordOperationServiceError(contentType.error, {
                   operation: String(operation),
                   phase: "start",
                 });
@@ -1390,7 +1395,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 ctx.transfer.metadata,
               ).take();
               if (isErr(metadata)) {
-                recordOperationServerError(metadata.error, {
+                recordOperationServiceError(metadata.error, {
                   operation: String(operation),
                   phase: "start",
                 });
@@ -1413,7 +1418,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                   ...(metadata !== undefined ? { metadata } : {}),
                 }).take();
               if (isErr(openedTransferValue)) {
-                recordOperationServerError(openedTransferValue.error, {
+                recordOperationServiceError(openedTransferValue.error, {
                   operation: String(operation),
                   phase: "start",
                 });
@@ -1514,7 +1519,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                       traceId: operationContext.traceId,
                     },
                   );
-                  recordOperationServerError(error, {
+                  recordOperationServiceError(error, {
                     operation: String(operation),
                     phase: "handler_result",
                   });
@@ -1546,7 +1551,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                   contractDigest: this.contractDigest,
                   traceId: operationContext.traceId,
                 });
-                recordOperationServerError(error, {
+                recordOperationServiceError(error, {
                   operation: String(operation),
                   phase: "handler_throw",
                 });

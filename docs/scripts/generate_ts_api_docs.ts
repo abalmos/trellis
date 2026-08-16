@@ -7,18 +7,14 @@ const workspaceConfigUrl = new URL("deno.json", tsRoot);
 type PackageExports = string | Record<string, string>;
 
 const npmOnlyPublicEntrypointsByPackage: Record<string, string[]> = {
-  "packages/trellis": [
-    "device.ts",
-    "host/mod.ts",
-    "host/node.ts",
-  ],
+  "packages/trellis": ["device.ts"],
 };
 
-interface JsWorkspaceConfig {
+interface TsWorkspaceConfig {
   workspace: string[];
 }
 
-interface JsPackageConfig {
+interface TsPackageConfig {
   name: string;
   exports: PackageExports;
 }
@@ -32,7 +28,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
     Object.values(value).every((entry) => typeof entry === "string");
 }
 
-function isJsWorkspaceConfig(value: unknown): value is JsWorkspaceConfig {
+function isTsWorkspaceConfig(value: unknown): value is TsWorkspaceConfig {
   return isRecord(value) && Array.isArray(value.workspace) &&
     value.workspace.every((entry) => typeof entry === "string");
 }
@@ -41,7 +37,7 @@ function isPackageExports(value: unknown): value is PackageExports {
   return typeof value === "string" || isStringRecord(value);
 }
 
-function isJsPackageConfig(value: unknown): value is JsPackageConfig {
+function isTsPackageConfig(value: unknown): value is TsPackageConfig {
   if (!isRecord(value) || typeof value.name !== "string") {
     return false;
   }
@@ -78,7 +74,7 @@ const workspaceConfig: unknown = JSON.parse(
   await Deno.readTextFile(workspaceConfigUrl),
 );
 
-if (!isJsWorkspaceConfig(workspaceConfig)) {
+if (!isTsWorkspaceConfig(workspaceConfig)) {
   throw new Error("Expected ts/deno.json to contain a string workspace list");
 }
 
@@ -93,7 +89,7 @@ const packageEntryPoints = await Promise.all(
       await Deno.readTextFile(packageConfigUrl),
     );
 
-    if (!isJsPackageConfig(packageConfig)) {
+    if (!isTsPackageConfig(packageConfig)) {
       throw new Error(
         `Expected ${workspace}/deno.json to contain a package name and string exports`,
       );

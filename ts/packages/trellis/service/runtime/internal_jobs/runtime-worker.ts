@@ -2,7 +2,7 @@ import { jetstream, jetstreamManager } from "@nats-io/jetstream";
 import type { ConsumerInfo, JsMsg } from "@nats-io/jetstream";
 import type { NatsConnection, Subscription } from "@nats-io/nats-core";
 
-import { recordTrellisError } from "../../telemetry/mod.ts";
+import { recordTrellisError } from "../../../telemetry/mod.ts";
 import type { JobsQueueBinding, JobsRuntimeBinding } from "./bindings.ts";
 import { ActiveJobCancellationRegistry } from "./cancellation-registry.ts";
 import { startWorkerHeartbeatLoop } from "./heartbeat.ts";

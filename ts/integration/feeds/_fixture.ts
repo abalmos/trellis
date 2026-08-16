@@ -103,7 +103,7 @@ export function createFeedsFixture(caseId: string) {
         name: caseScopedName("feeds-fixture-service", caseId),
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow(),
     );
   }

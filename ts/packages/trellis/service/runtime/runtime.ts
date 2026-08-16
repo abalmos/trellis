@@ -2,12 +2,12 @@ import type { NatsConnection } from "@nats-io/nats-core";
 import type {
   AuthorizationContextCache,
   AuthorizationProviderCache,
-} from "../auth/authorization_context.ts";
-import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../session.ts";
+} from "../../auth/authorization_context.ts";
+import type { TrellisDurableEventConsumerBeforeReadinessCheckHook } from "../../session.ts";
 
-// Keep the public server package runtime-neutral.
+// Keep the public service package runtime-neutral.
 //
-// Third-party service authors may use Deno or Node, so the shared server core cannot
+// Third-party service authors may use Deno or Node, so the shared service core cannot
 // hard-code a transport or file system API. Environment-specific modules wire
 // these adapters in from `./deno.ts` or `./node.ts`.
 export type NatsConnectOpts = {

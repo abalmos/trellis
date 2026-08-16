@@ -184,7 +184,7 @@ export function createOperationsFixture(
         name: serviceName,
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow(),
     );
   }

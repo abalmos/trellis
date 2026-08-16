@@ -78,6 +78,24 @@ Deno.test("trellis npm artifact only depends on allowed published Trellis packag
     ),
     false,
   );
+  assertEquals(
+    Object.keys(packageJson.exports).some((name: string) =>
+      name.startsWith("./host") || name.startsWith("./internal/") ||
+      name.startsWith("./server")
+    ),
+    false,
+  );
+
+  for (const format of ["esm", "script"]) {
+    await assertNotExists(new URL(`../npm/${format}/host`, import.meta.url));
+    await assertNotExists(new URL(`../npm/${format}/server`, import.meta.url));
+    await assertNotExists(
+      new URL(`../npm/${format}/server.js`, import.meta.url),
+    );
+    await assertNotExists(
+      new URL(`../npm/${format}/server_logger.js`, import.meta.url),
+    );
+  }
 
   for await (const filePath of walkFiles(join(npmDir.pathname, "esm"))) {
     if (!filePath.endsWith(".js") && !filePath.endsWith(".d.ts")) continue;

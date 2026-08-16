@@ -6,12 +6,12 @@ import {
   JobNotEnqueuedError,
   type JobSnapshot,
   runWithActiveJobContext,
-} from "../../jobs.ts";
+} from "../../../jobs.ts";
 import {
   createMapCarrier,
   injectTraceContext,
-} from "../../telemetry/carrier.ts";
-import { recordTrellisError } from "../../telemetry/mod.ts";
+} from "../../../telemetry/carrier.ts";
+import { recordTrellisError } from "../../../telemetry/mod.ts";
 import {
   ActiveJob,
   ActiveJobRuntimeError,

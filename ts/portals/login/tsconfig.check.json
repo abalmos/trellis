@@ -8,7 +8,7 @@
   },
   "exclude": [
     "src/**/*.test.ts",
-    "../../packages/trellis/server/**/*.ts",
+    "../../packages/trellis/service/runtime/**/*.ts",
     "../../services/**/*.ts"
   ]
 }

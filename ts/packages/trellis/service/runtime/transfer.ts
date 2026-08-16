@@ -12,21 +12,21 @@ import {
 } from "@nats-io/nats-core";
 import { ulid } from "ulid";
 
-import type { PermissionAtomV1 } from "../contract_support/runtime.ts";
+import type { PermissionAtomV1 } from "../../contract_support/runtime.ts";
 import {
   type OperationTransferHandle,
   type RuntimeOperationTransferProgress,
   type TrellisAuth,
   verifyLocalAuthorization,
-} from "../session.ts";
-import type { StoreError } from "../errors/StoreError.ts";
-import { TransferError } from "../errors/TransferError.ts";
-import { type StoreInfo, TypedStore, TypedStoreEntry } from "../store.ts";
+} from "../../session.ts";
+import type { StoreError } from "../../errors/StoreError.ts";
+import { TransferError } from "../../errors/TransferError.ts";
+import { type StoreInfo, TypedStore, TypedStoreEntry } from "../../store.ts";
 import type {
   FileInfo,
   ReceiveTransferGrant,
   SendTransferGrant,
-} from "../transfer.ts";
+} from "../../transfer.ts";
 
 const UPLOAD_SUBJECT_PREFIX = "transfer.v1.upload";
 const DOWNLOAD_SUBJECT_PREFIX = "transfer.v1.download";

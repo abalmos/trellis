@@ -1,28 +1,28 @@
 /**
- * Tests for the Trellis server package entry point.
+ * Tests for the Trellis service runtime entry point.
  * @module
  */
 
 import { assertEquals, assertExists } from "jsr:@std/assert";
 import { Type } from "typebox";
 import { AsyncResult, Result } from "@qlever-llc/result";
-import { defineServiceContract, jobs, kv, store } from "../contract.ts";
+import { defineServiceContract, jobs, kv, store } from "../../contract.ts";
 import {
   eventActions,
   feedAction,
   operationAction,
   rpcAction,
-} from "../contracts.ts";
+} from "../../contracts.ts";
 import {
   CONTRACT_JOBS_METADATA,
   CONTRACT_KV_METADATA,
-} from "../contract_support/mod.ts";
-import { getContractRuntime } from "../contract_support/contract_runtime.ts";
-import { UnexpectedError } from "../errors/index.ts";
+} from "../../contract_support/mod.ts";
+import { getContractRuntime } from "../../contract_support/contract_runtime.ts";
+import { UnexpectedError } from "../../errors/index.ts";
 import type { StoreError } from "@qlever-llc/trellis";
-import type { TypedKV } from "../kv.ts";
-import type { TypedStore } from "../store.ts";
-import type { ProviderRuntime } from "../provider.ts";
+import type { TypedKV } from "../../kv.ts";
+import type { TypedStore } from "../../store.ts";
+import type { ProviderRuntime } from "../../provider.ts";
 import type { TrellisServiceSession } from "./service.ts";
 
 // Import the module under test
@@ -54,8 +54,8 @@ const typeTestSchemas = {
 const typeTestContract = defineServiceContract(
   { schemas: typeTestSchemas },
   (ref) => ({
-    id: "trellis.server.type-test@v1",
-    displayName: "Server Type Test",
+    id: "trellis.service-runtime.type-test@v1",
+    displayName: "Service Runtime Type Test",
     description: "Verify typed service surface.",
     rpc: {
       "Test.Ping": {
@@ -100,7 +100,7 @@ const jobsTypeTestSchemas = {
 const jobsTypeTestContract = defineServiceContract(
   { schemas: jobsTypeTestSchemas },
   (ref) => ({
-    id: "trellis.server.jobs-type-test@v1",
+    id: "trellis.service-runtime.jobs-type-test@v1",
     displayName: "Jobs Type Test",
     description: "Verify typed service.jobs surface.",
     uses: [
@@ -128,7 +128,7 @@ const jobsTypeTestContract = defineServiceContract(
 const optionalKvTypeTestContract = defineServiceContract(
   { schemas: typeTestSchemas },
   (ref) => ({
-    id: "trellis.server.optional-kv-type-test@v1",
+    id: "trellis.service-runtime.optional-kv-type-test@v1",
     displayName: "Optional KV Type Test",
     description:
       "Verify optional KV aliases stay optional in the service type.",
@@ -156,7 +156,7 @@ const operationsTypeTestSchemas = {
 const operationsTypeTestContract = defineServiceContract(
   { schemas: operationsTypeTestSchemas },
   (ref) => ({
-    id: "trellis.server.operations-type-test@v1",
+    id: "trellis.service-runtime.operations-type-test@v1",
     displayName: "Operations Type Test",
     description: "Verify typed service.operation surface.",
     operations: {
@@ -197,7 +197,7 @@ const depsTypeTestSchemas = {
 const depsTypeTestContract = defineServiceContract(
   { schemas: depsTypeTestSchemas },
   (ref) => ({
-    id: "trellis.server.deps-type-test@v1",
+    id: "trellis.service-runtime.deps-type-test@v1",
     displayName: "Deps Type Test",
     description: "Verify bound service dependency injection types.",
     rpc: {
@@ -472,7 +472,7 @@ Deno.test("bound service wrapper injects deps across handler surfaces", () => {
   assertExists(expectProviderService);
 });
 
-Deno.test("server RPC helper types support extracted handlers", () => {
+Deno.test("service RPC helper types support extracted handlers", () => {
   type PingHandler = RpcHandler<typeof typeTestContract, "Test.Ping">;
 
   const pingHandler: PingHandler = ({ input, context, client }) => {

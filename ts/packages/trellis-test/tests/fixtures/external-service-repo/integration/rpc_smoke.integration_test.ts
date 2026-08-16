@@ -104,7 +104,7 @@ trellisIntegrationTest({
       name: serviceName,
       identity: serviceKey,
       telemetry: false,
-      server: {},
+      runtime: {},
     }).orThrow();
 
     try {

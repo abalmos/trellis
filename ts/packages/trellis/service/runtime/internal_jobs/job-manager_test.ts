@@ -12,7 +12,7 @@ import {
   JobNotEnqueuedError,
   JobRef,
   runWithActiveJobContext,
-} from "../../jobs.ts";
+} from "../../../jobs.ts";
 import type { JobsBinding } from "./bindings.ts";
 import {
   JobCancellationToken,

@@ -23,7 +23,7 @@ liveTrellisTest({
         name: fixture.serviceName,
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow(),
     );
 

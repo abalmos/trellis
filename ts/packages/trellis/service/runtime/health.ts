@@ -8,23 +8,11 @@
  * @module
  */
 
-import { type Result } from "@qlever-llc/result";
-import type { JsonValue } from "../contracts.ts";
-import { type TrellisError } from "../errors/index.ts";
+import type { JsonValue } from "../../contracts.ts";
 import { ulid } from "ulid";
-import type { HealthHeartbeatSample } from "../sdk/health.ts";
+import type { HealthHeartbeatSample } from "../../sdk/health.ts";
 
 type MaybePromise<T> = T | Promise<T>;
-
-/**
- * A health check function that returns a Result indicating health status.
- *
- * The function should return:
- * - `Result.ok(true)` when the check passes
- * - `Result.ok(false)` when the check fails without an error
- * - `Result.err(error)` when the check fails with an error
- */
-export type HealthCheckFn = () => Promise<Result<boolean, TrellisError>>;
 
 /**
  * Result of a single health check.
@@ -80,23 +68,6 @@ function summarizeHealthChecks(
   return `${failedCount} check${failedCount === 1 ? "" : "s"} failing`;
 }
 
-function normalizeLegacyHealthCheck(
-  check: HealthCheckFn,
-): ServiceHealthCheckFn {
-  return async () => {
-    const result = await check();
-    if (result.isErr()) {
-      return {
-        status: "failed",
-        error: result.error.message,
-        summary: result.error.message,
-      };
-    }
-
-    return { status: result.take() ? "ok" : "failed" };
-  };
-}
-
 function detectRuntime(): {
   runtime: HealthHeartbeatSample["participant"]["runtime"];
   runtimeVersion?: string;
@@ -132,32 +103,6 @@ export type HealthResponse = {
   checks: HealthCheckResult[];
 };
 
-/**
- * Runs a single health check and returns the result.
- *
- * @param name - Name to identify this health check
- * @param check - The health check function to run
- * @returns A HealthCheckResult with status, latency, and optional error
- *
- * @example
- * ```typescript
- * const result = await runHealthCheck("database", async () => {
- *   const connected = await db.ping();
- *   return Result.ok(connected);
- * });
- *
- * if (result.status === "ok") {
- *   console.log(`Database check passed in ${result.latencyMs}ms`);
- * }
- * ```
- */
-export async function runHealthCheck(
-  name: string,
-  check: HealthCheckFn,
-): Promise<HealthCheckResult> {
-  return await runServiceHealthCheck(name, normalizeLegacyHealthCheck(check));
-}
-
 export async function runServiceHealthCheck(
   name: string,
   check: ServiceHealthCheckFn,
@@ -185,42 +130,6 @@ export async function runServiceHealthCheck(
       latencyMs,
     };
   }
-}
-
-/**
- * Runs all health checks and returns an aggregated health response.
- *
- * @param service - Name of the service being checked
- * @param checks - Record of check names to check functions
- * @returns A HealthResponse with overall status and individual check results
- *
- * @example
- * ```typescript
- * const health = await runAllHealthChecks("api-service", {
- *   database: async () => Result.ok(await db.ping()),
- *   cache: async () => Result.ok(await redis.ping()),
- *   queue: async () => Result.ok(await rabbit.ping()),
- * });
- *
- * if (health.status === "healthy") {
- *   console.log("All systems operational");
- * } else if (health.status === "degraded") {
- *   console.warn("Some systems are failing");
- * } else {
- *   console.error("Service is unhealthy");
- * }
- * ```
- */
-export async function runAllHealthChecks(
-  service: string,
-  checks: Record<string, HealthCheckFn>,
-): Promise<HealthResponse> {
-  const normalizedChecks = Object.fromEntries(
-    Object.entries(checks).map((
-      [name, check],
-    ) => [name, normalizeLegacyHealthCheck(check)]),
-  );
-  return await runAllServiceHealthChecks(service, normalizedChecks);
 }
 
 export async function runAllServiceHealthChecks(
@@ -305,7 +214,6 @@ export class ServiceHealthRuntime implements ServiceHealth {
     contractId: string;
     contractDigest: string;
     publishIntervalMs: number;
-    checks?: Record<string, HealthCheckFn>;
   }) {
     this.serviceName = args.serviceName;
     this.kind = args.kind ?? "service";
@@ -314,10 +222,6 @@ export class ServiceHealthRuntime implements ServiceHealth {
     this.contractDigest = args.contractDigest;
     this.startedAt = new Date().toISOString();
     this.publishIntervalMs = args.publishIntervalMs;
-
-    for (const [name, check] of Object.entries(args.checks ?? {})) {
-      this.#checks.set(name, normalizeLegacyHealthCheck(check));
-    }
   }
 
   setInfo(info: ServiceHealthInfo | ServiceHealthInfoFn): void {

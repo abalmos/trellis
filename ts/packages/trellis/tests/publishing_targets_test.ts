@@ -458,7 +458,8 @@ Deno.test("trellis package exports public runtime subpaths", async () => {
 
   assertStringIncludes(source, '"./errors": "./errors/index.ts"');
   assertEquals(source.includes('"./health":'), false);
-  assertStringIncludes(source, '"./host": "./host/mod.ts"');
+  assertEquals(source.includes('"./host'), false);
+  assertEquals(source.includes('"./internal/'), false);
   assertStringIncludes(source, '"./jobs": "./jobs.ts"');
   assertStringIncludes(source, '"./service": "./service/mod.ts"');
   assertStringIncludes(source, '"./service/drizzle": "./service/drizzle.ts"');

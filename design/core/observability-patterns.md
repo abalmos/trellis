@@ -41,7 +41,7 @@ const service = await TrellisService.connect({
   contract: graph,
   name: "graph",
   sessionKeySeed: config.sessionKeySeed,
-  server: {
+  runtime: {
     log,
     healthChecks: {
       db: () => db.ping(),

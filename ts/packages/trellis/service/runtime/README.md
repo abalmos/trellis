@@ -1,6 +1,6 @@
 # Trellis Service Source Package
 
-Server-side helpers for Trellis services.
+Internal runtime implementation for TypeScript Trellis services.
 
 - `@qlever-llc/trellis/service` — shared service core, types, and service
   helpers

@@ -8,7 +8,7 @@ import type {
   AuthorizationProviderCache,
 } from "../../packages/trellis/auth/authorization_context.ts";
 import { integrationTestResolvedContexts } from "../../packages/trellis/auth/authorization/provider_cache.ts";
-import { connectTrellisServiceWithAuthorizationTestHook } from "../../packages/trellis/server/service.ts";
+import { connectTrellisServiceWithAuthorizationTestHook } from "../../packages/trellis/service/runtime/service.ts";
 import { liveTrellisTest, runtimeScopeForCase } from "../_support/runtime.ts";
 import { createRpcFixture } from "../rpc/_fixture.ts";
 
@@ -62,7 +62,7 @@ liveTrellisTest({
           name: fixture.serviceName,
           identity: serviceKey,
           telemetry: false,
-          server: {},
+          runtime: {},
         }, (cache, nc, context) => {
           provider = cache;
           connection = nc;

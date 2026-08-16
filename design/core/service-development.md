@@ -90,7 +90,7 @@ const service = await TrellisService.connect({
   contract: myService,
   name: "<name>",
   sessionKeySeed: config.sessionKeySeed,
-  server: {},
+  runtime: {},
 });
 
 const itemsKV = service.kv.items;
@@ -308,7 +308,7 @@ const service = await TrellisService.connect({
   contract: serviceContract,
   name: "echo",
   sessionKeySeed,
-  server: {},
+  runtime: {},
 });
 
 export async function ping({ input }) {

@@ -33,7 +33,7 @@ liveTrellisTest({
         name: fixture.serviceName,
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow(),
     );
     let otherService: typeof service | undefined;
@@ -112,7 +112,7 @@ liveTrellisTest({
           name: fixture.otherServiceName,
           identity: serviceKey,
           telemetry: false,
-          server: {},
+          runtime: {},
         }).orThrow(),
       );
       const wrongService = await otherService.handleEntityProcess.control(

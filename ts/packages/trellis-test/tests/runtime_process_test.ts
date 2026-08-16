@@ -181,7 +181,7 @@ Deno.test({
         name: SERVICE_NAME,
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow();
 
       try {
@@ -223,7 +223,7 @@ Deno.test({
         name: "entity-live",
         identity: serviceKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow();
 
       try {
@@ -370,7 +370,7 @@ Deno.test({
         name: "entity-live-source",
         identity: entityKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow();
       const subscriberKey = await runtime.registerService({
         name: "entity-live-subscriber",
@@ -383,7 +383,7 @@ Deno.test({
         name: "entity-live-subscriber",
         identity: subscriberKey,
         telemetry: false,
-        server: {},
+        runtime: {},
       }).orThrow();
       const controller = new AbortController();
       let observedId: string | undefined;

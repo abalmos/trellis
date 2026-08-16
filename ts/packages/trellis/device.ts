@@ -36,7 +36,10 @@ import {
   loadDefaultRuntimeTransport,
   selectRuntimeTransportServers,
 } from "./runtime_transport.ts";
-import { type ServiceHealth, ServiceHealthRuntime } from "./server/health.ts";
+import {
+  type ServiceHealth,
+  ServiceHealthRuntime,
+} from "./service/runtime/health.ts";
 import { publishHealthHeartbeatSample } from "./health_transport.ts";
 import { type RuntimeStateStoresForContract, Trellis } from "./session.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";

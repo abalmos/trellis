@@ -1,12 +1,12 @@
 import type { NatsConnection } from "@nats-io/nats-core";
-import { createAuth } from "../auth.ts";
+import { createAuth } from "../../auth.ts";
 
-import type { RuntimeApi } from "../contract_support/runtime.ts";
-import type { ContractKvMetadata } from "../contract_support/mod.ts";
+import type { RuntimeApi } from "../../contract_support/runtime.ts";
+import type { ContractKvMetadata } from "../../contract_support/mod.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
-} from "../runtime_transport.ts";
+} from "../../runtime_transport.ts";
 import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
 import {
   createConnectedService,
@@ -64,7 +64,7 @@ export async function connectTrellisServiceInternal<
     .natsConnectOptions({
       sessionId: name,
       contextDigest: opts.authorizationContextDigest,
-      jwt: "retired-control-plane-test",
+      jwt: "internal-service-test",
     });
 
   const nc = await connectFn({
@@ -90,7 +90,7 @@ export async function connectTrellisServiceInternal<
       contractDigest: opts.contractDigest,
       contractJobs: {},
       contractKv,
-      server: opts.server,
+      runtime: opts.runtime,
       bindings,
       healthIdentity: opts.healthIdentity,
     });

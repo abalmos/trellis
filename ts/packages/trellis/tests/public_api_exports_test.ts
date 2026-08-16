@@ -57,7 +57,7 @@ import type { TrellisServer } from "../index.ts";
 // @ts-expect-error resolved resource bindings are internal bootstrap state.
 import type { ResourceBindings as ServiceResourceBindings } from "../service/deno.ts";
 // @ts-expect-error resolved KV bindings are internal bootstrap state.
-import type { ResourceBindingKV } from "../server/mod.ts";
+import type { ResourceBindingKV } from "../service/runtime/mod.ts";
 // @ts-expect-error resolved object-store bindings are internal bootstrap state.
 import type { ResourceBindingStore } from "../service/mod.ts";
 
@@ -164,7 +164,7 @@ Deno.test("defineError creates a typed runtime class", () => {
   assertEquals(revived.message, "Workspace ws_123 not found");
 });
 
-Deno.test("root public API stays browser-safe and excludes server runtime exports", () => {
+Deno.test("root public API stays browser-safe and excludes service runtime exports", () => {
   assertEquals("TrellisServiceRuntime" in trellis, false);
   assert(!("TrellisServer" in trellis));
   assertEquals("NatsConnection" in trellis, false);

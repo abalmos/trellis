@@ -2,7 +2,7 @@
  * Trellis service authoring entry point.
  *
  * This subpath exposes the service wrapper and service-side helpers without the
- * low-level runtime used by the internal server package.
+ * internal service runtime implementation.
  *
  * @module
  */
@@ -16,11 +16,11 @@ export {
   type ServiceHealthCheckFn,
   type ServiceHealthInfo,
   type ServiceHealthInfoFn,
-} from "../server/health.ts";
+} from "./runtime/health.ts";
 export {
   HealthCheckResultSchema,
   HealthInfoSchema,
-} from "../server/health_schemas.ts";
+} from "./runtime/health_schemas.ts";
 export {
   type ConnectedTrellisService,
   type FeedHandler,
@@ -46,7 +46,7 @@ export {
   type TrellisServiceSqlOutboxCommonOptions,
   type TrellisServiceSqlOutboxExecutorOptions,
   type TrellisServiceSqlOutboxOptions,
-} from "../server/service.ts";
+} from "./runtime/service.ts";
 export {
   createPostgresOutboxSchema,
   createSqliteOutboxSchema,
@@ -96,4 +96,4 @@ export {
   type OrderingGroup,
   type SingleSubscription,
   type SubscribeOpts,
-} from "../server/subscription.ts";
+} from "./runtime/subscription.ts";

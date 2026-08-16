@@ -1,6 +1,6 @@
 import type { JsMsg } from "@nats-io/jetstream";
-import type { InferSchemaType } from "../contracts.ts";
-import type { RuntimeApi } from "../contract_support/runtime.ts";
+import type { InferSchemaType } from "../../contracts.ts";
+import type { RuntimeApi } from "../../contract_support/runtime.ts";
 
 /**
  * Context provided to event handlers with message metadata and acknowledgment controls.

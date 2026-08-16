@@ -1301,7 +1301,7 @@ configured.
 ```text
 ts/packages/trellis/
 ├── jobs.ts                     # Public TS jobs types and admin helpers
-└── server/
+└── service/runtime/
     ├── service.ts              # Typed service.jobs facade and JobRef wiring
     └── internal_jobs/          # Internal transport-aware jobs runtime pieces
 

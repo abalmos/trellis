@@ -88,18 +88,6 @@ const config = {
         rootDir,
         "../../packages/trellis/jobs.ts",
       ),
-      "@qlever-llc/trellis/host/deno": resolve(
-        rootDir,
-        "../../packages/trellis/host/deno.ts",
-      ),
-      "@qlever-llc/trellis/host/node": resolve(
-        rootDir,
-        "../../packages/trellis/host/node.ts",
-      ),
-      "@qlever-llc/trellis/host": resolve(
-        rootDir,
-        "../../packages/trellis/host/mod.ts",
-      ),
       "@qlever-llc/trellis/telemetry": resolve(
         rootDir,
         "../../packages/trellis/telemetry.ts",

@@ -7,17 +7,14 @@
  * @module
  */
 
-export { TrellisServiceRuntime } from "../server.ts";
-export type { TrellisServiceRuntimeFor } from "../server.ts";
+export { TrellisServiceRuntime } from "./core.ts";
+export type { TrellisServiceRuntimeFor } from "./core.ts";
 // Re-export health types
 export {
   createHealthHeartbeatSample,
-  type HealthCheckFn,
   type HealthCheckResult,
   type HealthResponse,
-  runAllHealthChecks,
   runAllServiceHealthChecks,
-  runHealthCheck,
   runServiceHealthCheck,
   type ServiceHealth,
   type ServiceHealthCheck,
@@ -29,10 +26,9 @@ export {
   HealthCheckResultSchema,
   HealthInfoSchema,
   HealthResponseSchema,
-  HealthRpcSchema,
 } from "./health_schemas.ts";
-export type { HealthHeartbeatSample } from "../sdk/_generated/health/types.ts";
-export { HealthHeartbeatSampleSchema } from "../sdk/_generated/health/schemas.ts";
+export type { HealthHeartbeatSample } from "../../sdk/_generated/health/types.ts";
+export { HealthHeartbeatSampleSchema } from "../../sdk/_generated/health/schemas.ts";
 export {
   type FeedHandler,
   type HealthCheckHandler,
