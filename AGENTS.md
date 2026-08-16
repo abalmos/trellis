@@ -59,7 +59,7 @@
   `design/core/observability-patterns.md`.
 - Format files as part of the normal edit loop, before type checks and tests.
   For JS, TS, Svelte, JSON, Markdown, CSS, and SVG files, run
-  `deno fmt -c js/deno.json <changed files>`. For Rust files, run
+  `deno fmt -c ts/deno.json <changed files>`. For Rust files, run
   `cargo fmt --manifest-path rust/Cargo.toml --package <crate>` when the crate
   is known, or `rustfmt --edition 2021 <changed .rs files>` for narrow
   file-scoped edits. If generated artifacts are affected, run prepare first and

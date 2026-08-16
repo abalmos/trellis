@@ -235,7 +235,7 @@ Approval decides the standard authority proposal, and bind calls the shared
 session constructor. The server-owned consent proposal is part of the immutable
 browser-flow transcript and cannot change during a state transition.
 
-The built-in portal is compiled reproducibly from `js/portals/login` and
+The built-in portal is compiled reproducibly from `ts/portals/login` and
 embedded in the Rust binary. A development-only `TRELLIS_BUILTIN_PORTAL_DIR`
 override may serve local assets.
 

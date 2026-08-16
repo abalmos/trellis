@@ -137,7 +137,7 @@ pub(super) fn collect_versions(repo_root: &Path) -> Result<Vec<VersionEntry>> {
 fn release_manifest_paths(repo_root: &Path) -> Result<Vec<PathBuf>> {
     let mut paths = Vec::new();
     collect_manifest_paths(&repo_root.join("generated"), &mut paths)?;
-    collect_manifest_paths(&repo_root.join("js"), &mut paths)?;
+    collect_manifest_paths(&repo_root.join("ts"), &mut paths)?;
     collect_manifest_paths(&repo_root.join("rust"), &mut paths)?;
     for relative_path in RELEASE_JS_INTERNAL_NPM_VERSION_FILES {
         let path = repo_root.join(relative_path);

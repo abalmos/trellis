@@ -1299,7 +1299,7 @@ configured.
 ### Library Structure
 
 ```text
-js/packages/trellis/
+ts/packages/trellis/
 ├── jobs.ts                     # Public TS jobs types and admin helpers
 └── server/
     ├── service.ts              # Typed service.jobs facade and JobRef wiring

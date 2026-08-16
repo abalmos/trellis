@@ -7,8 +7,8 @@ COPY generated /src/generated
 COPY art /src/art
 
 RUN mkdir -p /src/rust/crates/runtime/generated \
-    && deno install --config js/deno.json --lock js/deno.lock --frozen \
-    && deno task --config js/portals/login/deno.json build:embedded
+    && deno install --config ts/deno.json --lock ts/deno.lock --frozen \
+    && deno task --config ts/portals/login/deno.json build:embedded
 
 FROM docker.io/library/rust:bookworm AS build
 

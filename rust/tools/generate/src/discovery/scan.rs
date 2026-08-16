@@ -323,7 +323,7 @@ mod tests {
     fn discover_contracts_finds_ts_and_rust_sources_in_contracts_dirs() {
         let temp = tempfile::tempdir().unwrap();
         let repo_root = temp.path();
-        let ts_project = repo_root.join("js/service");
+        let ts_project = repo_root.join("ts/service");
         let rust_project = repo_root.join("rust/service");
         fs::create_dir_all(ts_project.join("contracts")).unwrap();
         fs::create_dir_all(rust_project.join("contracts")).unwrap();
@@ -538,8 +538,8 @@ mod tests {
     fn discover_contracts_skips_nested_demos_dir() {
         let temp = tempfile::tempdir().unwrap();
         let repo_root = temp.path();
-        let service = repo_root.join("js/service");
-        let demo_service = repo_root.join("demos/js/service/demo");
+        let service = repo_root.join("ts/service");
+        let demo_service = repo_root.join("demos/ts/service/demo");
         fs::create_dir_all(service.join("contracts")).unwrap();
         fs::create_dir_all(demo_service.join("contracts")).unwrap();
         fs::write(service.join("deno.json"), "{}\n").unwrap();
@@ -560,15 +560,15 @@ mod tests {
         assert_eq!(discovered.len(), 1);
         assert!(discovered[0]
             .source_path
-            .ends_with("js/service/contracts/service.ts"));
+            .ends_with("ts/service/contracts/service.ts"));
     }
 
     #[test]
     fn discover_contracts_skips_worktrees_dir() {
         let temp = tempfile::tempdir().unwrap();
         let repo_root = temp.path();
-        let service = repo_root.join("js/service");
-        let worktree_service = repo_root.join(".worktrees/feature/js/service");
+        let service = repo_root.join("ts/service");
+        let worktree_service = repo_root.join(".worktrees/feature/ts/service");
         fs::create_dir_all(service.join("contracts")).unwrap();
         fs::create_dir_all(worktree_service.join("contracts")).unwrap();
         fs::write(service.join("deno.json"), "{}\n").unwrap();
@@ -589,6 +589,6 @@ mod tests {
         assert_eq!(discovered.len(), 1);
         assert!(discovered[0]
             .source_path
-            .ends_with("js/service/contracts/service.ts"));
+            .ends_with("ts/service/contracts/service.ts"));
     }
 }

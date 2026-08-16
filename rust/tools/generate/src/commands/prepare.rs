@@ -551,7 +551,7 @@ mod tests {
         let filter = super::WatchPathFilter::empty(root);
 
         assert!(filter.is_relevant(Path::new("/repo/services/orders/contracts/orders.ts")));
-        assert!(filter.is_relevant(Path::new("/repo/js/apps/console/contract.ts")));
+        assert!(filter.is_relevant(Path::new("/repo/ts/apps/console/contract.ts")));
     }
 
     #[test]

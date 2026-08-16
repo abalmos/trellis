@@ -281,7 +281,7 @@ idempotent.
 - Test runtime-observable behavior with live integration tests. Do not use fake
   NATS, fake Trellis runtimes, fake auth, or fake generated clients.
 - In the Trellis repository, the complete TypeScript and Rust live matrices run
-  against one host with `deno run -A -c js/deno.json integration/live_runner.ts`.
+  against one host with `deno run -A -c ts/deno.json integration/live_runner.ts`.
   The harness runs NATS as a managed child process from pinned, checksum-verified
   nats-server and nsc binaries (cached under `TRELLIS_TEST_CACHE_DIR`, default
   `~/.cache/trellis-test`; first use downloads them, requiring network; every reuse revalidates the cached archive sha256 against the pin and byte-checks the cached binary against a fresh extraction, so corrupted or replaced cache entries are reinstalled, and and `sh`

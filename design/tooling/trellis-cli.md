@@ -65,7 +65,7 @@ cargo xtask build
 Those tasks route to `trellis-generate`, which can run before the main `trellis`
 CLI is buildable from a clean checkout. `cargo xtask prepare` shells into the
 bootstrap generator from the Rust workspace. `deno task prepare` does the same
-for the JS workspace.
+for the TypeScript workspace.
 
 During active contract development, `prepare:watch` and
 `cargo xtask prepare-watch` keep the same prepare workflow running in the
@@ -87,7 +87,7 @@ Rust contributors should run `cargo xtask prepare` before `cargo build` or
 generated SDK crates under `generated/packages/cargo/`. `cargo xtask build` is a
 convenience wrapper that runs `prepare` first and then invokes the default Rust
 workspace build. Live client-library integration is language-owned and is run
-outside `cargo xtask build`: use `deno task -c js/deno.json test:integration`
+outside `cargo xtask build`: use `deno task -c ts/deno.json test:integration`
 for the TypeScript suite and
 `cargo test --api-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture`
 for the Rust suite. Both suites are governed by the `kind: "client"` cases in

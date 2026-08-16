@@ -110,7 +110,7 @@ fn build_embedded_login_portal() -> Result<()> {
     let root = repo_root()?;
     let status = Command::new("deno")
         .current_dir(root)
-        .args(["task", "-c", "js/portals/login/deno.json", "build:embedded"])
+        .args(["task", "-c", "ts/portals/login/deno.json", "build:embedded"])
         .status()
         .into_diagnostic()
         .wrap_err("failed to build embedded login portal")?;
@@ -144,7 +144,7 @@ fn generate_protocol_wasm() -> Result<()> {
         return Err(miette::miette!("protocol WASM build failed with {status}"));
     }
     let input = rust.join("target/wasm32-unknown-unknown/release/trellis_protocol_wasm.wasm");
-    let output = root.join("js/packages/trellis/auth/protocol_wasm");
+    let output = root.join("ts/packages/trellis/auth/protocol_wasm");
     std::fs::create_dir_all(&output).into_diagnostic()?;
     let mut bindgen = wasm_bindgen_cli_support::Bindgen::new();
     bindgen
@@ -239,7 +239,7 @@ fn repo_root() -> Result<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for ancestor in manifest_dir.ancestors() {
         if ancestor.join("rust/tools/generate/Cargo.toml").exists()
-            && ancestor.join("js/deno.json").exists()
+            && ancestor.join("ts/deno.json").exists()
         {
             return Ok(ancestor.to_path_buf());
         }

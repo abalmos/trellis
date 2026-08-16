@@ -8,10 +8,10 @@ scopes, and runtime wiring from those contract sources.
 ## Repository layout
 
 ```
-conformance/    Shared JS/Rust test vectors (canonical JSON, auth proofs)
+conformance/    Shared TypeScript/Rust test vectors (canonical JSON, auth proofs)
 demos/          Shared demo app plus TypeScript and Rust service/device examples
 docs/           Trellis documentation site (SvelteKit static site, published to GitHub Pages)
-js/             TypeScript packages, services, and apps (Deno workspace)
+ts/             TypeScript packages, services, and apps (Deno workspace)
 rust/           Rust crates (public facades plus internal CLI, codegen, and runtime support)
 generated/      Derived manifests and SDKs when generated locally (usually absent from a clean checkout)
 deploy/         Deployment assets, including quadlets and NATS templates
@@ -82,7 +82,7 @@ Live client-library integration coverage is language-owned. Run these peer
 suites when you need that coverage:
 
 ```sh
-deno task -c js/deno.json test:integration
+deno task -c ts/deno.json test:integration
 cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- --nocapture
 ```
 

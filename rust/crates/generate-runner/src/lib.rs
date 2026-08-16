@@ -87,7 +87,7 @@ fn find_local_trellis_repo_root() -> Option<PathBuf> {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     for ancestor in manifest_dir.ancestors() {
         if ancestor.join("rust/tools/generate/Cargo.toml").exists()
-            && ancestor.join("js/deno.json").exists()
+            && ancestor.join("ts/deno.json").exists()
         {
             return Some(ancestor.to_path_buf());
         }

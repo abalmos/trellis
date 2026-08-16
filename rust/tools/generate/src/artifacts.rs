@@ -23,7 +23,7 @@ use crate::cli::{ContractInputArgs, RuntimeSource};
 use crate::contract_input::{self, ResolvedNativeInput};
 use crate::output;
 
-const TRELLIS_DENO_JSON: &str = include_str!("../../../../js/packages/trellis/deno.json");
+const TRELLIS_DENO_JSON: &str = include_str!("../../../../ts/packages/trellis/deno.json");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneratedArtifactsMetadata {
@@ -63,7 +63,7 @@ pub fn detect_output_root(project_root: &Path) -> PathBuf {
 
 pub fn detect_runtime_source(output_root: &Path) -> RuntimeSource {
     if output_root.join("rust/Cargo.toml").exists()
-        && output_root.join("js/packages/trellis").exists()
+        && output_root.join("ts/packages/trellis").exists()
     {
         RuntimeSource::Local
     } else {
@@ -512,7 +512,7 @@ fn rewrite_local_generated_ts_sdk_imports(
         .into_diagnostic()?
         .components()
         .count();
-    let errors_import = format!("{}js/packages/trellis/errors/index.ts", "../".repeat(depth));
+    let errors_import = format!("{}ts/packages/trellis/errors/index.ts", "../".repeat(depth));
     for entry in fs::read_dir(ts_out).into_diagnostic()? {
         let entry = entry.into_diagnostic()?;
         let path = entry.path();
@@ -539,7 +539,7 @@ fn ts_shell_extends(runtime_deps: &TsRuntimeDeps) -> Option<String> {
     }
     Some(
         repo_root
-            .join("js/deno.json")
+            .join("ts/deno.json")
             .to_string_lossy()
             .replace('\\', "/"),
     )
@@ -840,7 +840,7 @@ fn find_tsc_in_node_modules(start: &Path) -> Option<OsString> {
     loop {
         for candidate in [
             current.join("node_modules/.bin/tsc"),
-            current.join("js/node_modules/.bin/tsc"),
+            current.join("ts/node_modules/.bin/tsc"),
         ] {
             if candidate.exists() {
                 return Some(candidate.into_os_string());
@@ -962,7 +962,7 @@ fn embedded_trellis_owned_ts_sdk_key_outputs_exist(
     };
     let repo_root = detect_output_root(out_api.parent().unwrap_or(out_api));
     let embedded_dir = repo_root
-        .join("js/packages/trellis/sdk/_generated")
+        .join("ts/packages/trellis/sdk/_generated")
         .join(module);
     embedded_dir.join("mod.ts").exists() && embedded_dir.join("descriptors.ts").exists()
 }
@@ -1090,7 +1090,7 @@ fn copy_embedded_trellis_owned_ts_sdk(
         return Ok(());
     };
     let dest_dir = repo_root
-        .join("js/packages/trellis/sdk/_generated")
+        .join("ts/packages/trellis/sdk/_generated")
         .join(module);
     if dest_dir.exists() {
         fs::remove_dir_all(&dest_dir).into_diagnostic()?;
@@ -1124,7 +1124,7 @@ fn rewrite_embedded_trellis_owned_ts_sdk_source(contents: &str) -> String {
             "from \"../../../contracts.ts\"",
         )
         .replace(
-            "from \"../../../../js/packages/trellis/errors/index.ts\"",
+            "from \"../../../../ts/packages/trellis/errors/index.ts\"",
             "from \"../../../errors/index.ts\"",
         )
         .replace(
@@ -1162,7 +1162,7 @@ pub fn format_generated_typescript_artifacts(
         return Ok(());
     }
     let Some(config) = runtime_repo_root
-        .map(|root| root.join("js/deno.json"))
+        .map(|root| root.join("ts/deno.json"))
         .filter(|config| config.exists())
     else {
         return Ok(());
@@ -1190,7 +1190,7 @@ fn format_generated_npm_artifacts(
     runtime_repo_root: Option<&Path>,
 ) -> miette::Result<()> {
     let Some(config) = runtime_repo_root
-        .map(|root| root.join("js/deno.json"))
+        .map(|root| root.join("ts/deno.json"))
         .filter(|config| config.exists())
     else {
         return Ok(());
@@ -1483,9 +1483,9 @@ mod tests {
     }
 
     #[test]
-    fn tsc_lookup_finds_js_workspace_node_modules_from_repo_root() {
+    fn tsc_lookup_finds_ts_workspace_node_modules_from_repo_root() {
         let temp = tempfile::tempdir().expect("create temp dir");
-        let tsc = temp.path().join("js/node_modules/.bin/tsc");
+        let tsc = temp.path().join("ts/node_modules/.bin/tsc");
         fs::create_dir_all(tsc.parent().expect("tsc parent")).expect("create tsc parent");
         fs::write(&tsc, "#!/bin/sh\n").expect("write tsc");
 

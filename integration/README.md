@@ -33,14 +33,14 @@ review.
 TypeScript cases are selected from the client matrix:
 
 ```sh
-deno task -c js/deno.json test:integration -- --fixture rpc
-deno task -c js/deno.json test:integration -- --case rpc.client-calls-service-success
+deno task -c ts/deno.json test:integration -- --fixture rpc
+deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service-success
 ```
 
 Rust uses exact `libtest` filters through the shared-host runner:
 
 ```sh
-deno run -A -c js/deno.json integration/live_runner.ts --typescript-prefix __none --rust-filter rpc::
+deno run -A -c ts/deno.json integration/live_runner.ts --typescript-prefix __none --rust-filter rpc::
 ```
 
 The complete release-owned live schedule is:

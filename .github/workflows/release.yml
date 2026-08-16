@@ -23,7 +23,7 @@ on:
       - "art/**"
       - "conformance/**"
       - "integration/**"
-      - "js/**"
+      - "ts/**"
       - "rust/**"
       - "scripts/**"
       - "xtask/**"
@@ -140,8 +140,8 @@ jobs:
         with:
           path: |
             ~/.cache/deno
-            js/node_modules
-          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('js/deno.lock') }}
+            ts/node_modules
+          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('ts/deno.lock') }}
           restore-keys: |
             deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
 
@@ -200,11 +200,11 @@ jobs:
         run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Build embedded login portal
-        run: deno task -c js/portals/login/deno.json build:embedded
+        run: deno task -c ts/portals/login/deno.json build:embedded
 
       - name: Verify formatting
         run: |
-          time deno fmt -c js/deno.json --check
+          time deno fmt -c ts/deno.json --check
           time cargo fmt --manifest-path rust/Cargo.toml --all --check
           time cargo fmt --manifest-path rust/tools/generate/Cargo.toml --check
           time cargo fmt --manifest-path rust/xtask/Cargo.toml --check
@@ -337,8 +337,8 @@ jobs:
         with:
           path: |
             ~/.cache/deno
-            js/node_modules
-          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('js/deno.lock') }}
+            ts/node_modules
+          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('ts/deno.lock') }}
           restore-keys: |
             deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
 
@@ -347,17 +347,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Run JavaScript release lane
-        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane javascript
+      - name: Run TypeScript release lane
+        run: cargo run --manifest-path rust/xtask/Cargo.toml -- release lane typescript
 
       - name: Upload npm package artifact
         uses: actions/upload-artifact@v4
         with:
           name: npm-packages
           path: |
-            js/packages/result/npm
-            js/packages/trellis/npm
-            js/packages/trellis-svelte/npm
+            ts/packages/result/npm
+            ts/packages/trellis/npm
+            ts/packages/trellis-svelte/npm
             dist/npm
 
   build-cli:
@@ -478,7 +478,7 @@ jobs:
             title: trellis
             description: Trellis Rust runtime
           - image: console
-            file: js/apps/console/Containerfile
+            file: ts/apps/console/Containerfile
             title: console
             description: Trellis administrative web console
 
@@ -738,7 +738,7 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Verify live artifact inventory
-        run: deno run -A -c js/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
+        run: deno run -A -c ts/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
 
   verify-live:
     name: Verify shared live lane
@@ -770,7 +770,7 @@ jobs:
           deno-version: ${{ env.DENO_VERSION }}
 
       - name: Run shared live lane
-        run: deno run -A -c js/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
+        run: deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
 
   release-gate:
     name: Release gate
@@ -1125,9 +1125,9 @@ jobs:
           fi
 
           packages=(
-            js/packages/result/npm
-            js/packages/trellis/npm
-            js/packages/trellis-svelte/npm
+            ts/packages/result/npm
+            ts/packages/trellis/npm
+            ts/packages/trellis-svelte/npm
           )
           for pkg in "${packages[@]}"; do
             package_json="$pkg/package.json"
@@ -1180,8 +1180,8 @@ jobs:
         with:
           path: |
             ~/.cache/deno
-            js/node_modules
-          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('js/deno.lock') }}
+            ts/node_modules
+          key: deno-${{ runner.os }}-${{ env.DENO_VERSION }}-${{ hashFiles('ts/deno.lock') }}
           restore-keys: |
             deno-${{ runner.os }}-${{ env.DENO_VERSION }}-
 
@@ -1240,13 +1240,13 @@ jobs:
             wait_for_jsr_package "$package_name" "$package_version"
           }
 
-          publish_or_skip js/packages/result
-          publish_or_skip js/packages/trellis
-          publish_or_skip js/packages/trellis-test
+          publish_or_skip ts/packages/result
+          publish_or_skip ts/packages/trellis
+          publish_or_skip ts/packages/trellis-test
 
           TRELLIS_SVELTE_JSR_RUNTIME_DEPENDENCY_VERSION="${RELEASE_VERSION}" \
-            deno task -c js/packages/trellis-svelte/deno.json build:npm
-          publish_or_skip js/packages/trellis-svelte/jsr
+            deno task -c ts/packages/trellis-svelte/deno.json build:npm
+          publish_or_skip ts/packages/trellis-svelte/jsr
 
           echo "Published ${#published[@]} JSR package(s)"
           for item in "${published[@]}"; do

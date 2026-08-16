@@ -16,43 +16,43 @@ const config = {
     alias: {
       "@qlever-llc/result": resolve(
         rootDir,
-        "../../js/packages/result/mod.ts",
+        "../../ts/packages/result/mod.ts",
       ),
       "@qlever-llc/trellis/auth/browser": resolve(
         rootDir,
-        "../../js/packages/trellis/auth/browser.ts",
+        "../../ts/packages/trellis/auth/browser.ts",
       ),
       "@qlever-llc/trellis/auth": resolve(
         rootDir,
-        "../../js/packages/trellis/auth.ts",
+        "../../ts/packages/trellis/auth.ts",
       ),
       "@qlever-llc/trellis/browser": resolve(
         rootDir,
-        "../../js/packages/trellis/browser.ts",
+        "../../ts/packages/trellis/browser.ts",
       ),
       "@qlever-llc/trellis/contracts": resolve(
         rootDir,
-        "../../js/packages/trellis/contracts.ts",
+        "../../ts/packages/trellis/contracts.ts",
       ),
       "@qlever-llc/trellis/device/deno": resolve(
         rootDir,
-        "../../js/packages/trellis/device/deno.ts",
+        "../../ts/packages/trellis/device/deno.ts",
       ),
       "@qlever-llc/trellis/errors": resolve(
         rootDir,
-        "../../js/packages/trellis/errors/index.ts",
+        "../../ts/packages/trellis/errors/index.ts",
       ),
       "@qlever-llc/trellis/service/deno": resolve(
         rootDir,
-        "../../js/packages/trellis/service/deno.ts",
+        "../../ts/packages/trellis/service/deno.ts",
       ),
       "@qlever-llc/trellis/service": resolve(
         rootDir,
-        "../../js/packages/trellis/service/mod.ts",
+        "../../ts/packages/trellis/service/mod.ts",
       ),
       "@qlever-llc/trellis-svelte": resolve(
         rootDir,
-        "../../js/packages/trellis-svelte/src/index.ts",
+        "../../ts/packages/trellis-svelte/src/index.ts",
       ),
       "@qlever-llc/trellis/sdk/auth": resolve(
         rootDir,
@@ -76,11 +76,11 @@ const config = {
       ),
       "@qlever-llc/trellis": resolve(
         rootDir,
-        "../../js/packages/trellis/index.ts",
+        "../../ts/packages/trellis/index.ts",
       ),
       "@trellis-sdk/trellis-demo-service": resolve(
         rootDir,
-        "../js/generated/packages/jsr/demo-service/mod.ts",
+        "../ts/generated/packages/jsr/demo-service/mod.ts",
       ),
     },
   },

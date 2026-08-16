@@ -8,9 +8,9 @@ import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" w
 import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
-} from "../../../js/packages/trellis-test/src/integration/metrics.ts";
-import { startTrellisIntegrationSharedRuntimeHost } from "../../../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
-import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../js/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
+} from "../../../ts/packages/trellis-test/src/integration/metrics.ts";
+import { startTrellisIntegrationSharedRuntimeHost } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
+import { TRELLIS_TEST_SHARED_RUNTIME_ENV } from "../../../ts/packages/trellis-test/src/integration/shared_runtime_protocol.ts";
 
 const repoRoot = fromFileUrl(new URL("../../../", import.meta.url));
 const INTEGRATION_BINARY_ENV = "TRELLIS_TEST_INTEGRATION_BIN";

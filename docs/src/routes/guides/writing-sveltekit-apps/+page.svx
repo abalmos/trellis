@@ -49,8 +49,8 @@ const config = {
   kit: {
     alias: {
       // Only needed when developing against a local Trellis checkout.
-      "@qlever-llc/trellis": aliasPath("../trellis/js/packages/trellis/index.ts"),
-      "@qlever-llc/trellis/sdk/auth": aliasPath("../trellis/js/packages/trellis/sdk/auth.ts"),
+      "@qlever-llc/trellis": aliasPath("../trellis/ts/packages/trellis/index.ts"),
+      "@qlever-llc/trellis/sdk/auth": aliasPath("../trellis/ts/packages/trellis/sdk/auth.ts"),
 
       // Needed for local generated SDKs that are not installed packages.
       "@my-org/orders-service-sdk": aliasPath("generated/packages/jsr/orders-service/mod.ts"),

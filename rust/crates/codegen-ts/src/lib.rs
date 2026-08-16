@@ -1028,7 +1028,7 @@ fn trellis_contracts_import(_opts: &GenerateTsSdkOpts) -> String {
 }
 
 fn runtime_config_path(repo_root: &Path) -> Result<PathBuf, CodegenTsError> {
-    let js_deno = repo_root.join("js/deno.json");
+    let js_deno = repo_root.join("ts/deno.json");
     if js_deno.exists() {
         return Ok(js_deno);
     }
@@ -1325,9 +1325,9 @@ mod path_tests {
         assert_eq!(
             relative_path_string(
                 Path::new("/repo/generated/packages/jsr/trellis-core"),
-                Path::new("/repo/js/packages/contracts/npm"),
+                Path::new("/repo/ts/packages/contracts/npm"),
             ),
-            "../../../../js/packages/contracts/npm"
+            "../../../../ts/packages/contracts/npm"
         );
     }
 }
@@ -2115,9 +2115,9 @@ mod tests {
     fn local_mode_derives_extends_from_repo_root() {
         let repo_root = unique_temp_dir("repo-root");
         let out_dir = repo_root.join("generated/packages/jsr/auth");
-        fs::create_dir_all(repo_root.join("js")).unwrap();
+        fs::create_dir_all(repo_root.join("ts")).unwrap();
         fs::create_dir_all(&out_dir).unwrap();
-        fs::write(repo_root.join("js/deno.json"), "{}\n").unwrap();
+        fs::write(repo_root.join("ts/deno.json"), "{}\n").unwrap();
 
         let manifest_path = repo_root.join("generated/protocol/apis/trellis.auth@v1.json");
         fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
@@ -2142,7 +2142,7 @@ mod tests {
 
         assert_eq!(
             deno.get("extends").and_then(Value::as_str),
-            Some("../../../../js/deno.json")
+            Some("../../../../ts/deno.json")
         );
         assert!(deno.get("imports").is_none());
 
@@ -2153,9 +2153,9 @@ mod tests {
     fn local_mode_emits_package_runtime_imports() {
         let repo_root = unique_temp_dir("repo-root-local-imports");
         let out_dir = repo_root.join("workspaces/demo/generated/packages/jsr/auth");
-        fs::create_dir_all(repo_root.join("js/packages/trellis")).unwrap();
+        fs::create_dir_all(repo_root.join("ts/packages/trellis")).unwrap();
         fs::create_dir_all(&out_dir).unwrap();
-        fs::write(repo_root.join("js/deno.json"), "{}\n").unwrap();
+        fs::write(repo_root.join("ts/deno.json"), "{}\n").unwrap();
 
         let (mut opts, loaded, root) =
             sample_opts_and_loaded("@qlever-llc/trellis-sdk-auth", "trellis.auth@v1");
@@ -2172,9 +2172,9 @@ mod tests {
 
         assert!(owned_api.contains("@qlever-llc/trellis/contracts"));
         assert!(!contract.contains("@qlever-llc/trellis"));
-        assert!(!owned_api.contains("js/packages/trellis"));
-        assert!(!contract.contains("js/packages/trellis"));
-        assert!(!types.contains("js/packages/trellis"));
+        assert!(!owned_api.contains("ts/packages/trellis"));
+        assert!(!contract.contains("ts/packages/trellis"));
+        assert!(!types.contains("ts/packages/trellis"));
 
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(repo_root).unwrap();

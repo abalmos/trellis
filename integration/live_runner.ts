@@ -1,9 +1,9 @@
 import { fromFileUrl } from "@std/path";
-import { startTrellisIntegrationSharedRuntimeHost } from "../js/packages/trellis-test/src/integration/shared_runtime_host.ts";
+import { startTrellisIntegrationSharedRuntimeHost } from "../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
-} from "../js/packages/trellis-test/src/integration/metrics.ts";
+} from "../ts/packages/trellis-test/src/integration/metrics.ts";
 import {
   buildIntegrationLiveArtifacts,
   buildIntegrationTest,
@@ -133,8 +133,8 @@ async function main(args: readonly string[]): Promise<number> {
             "run",
             "-A",
             "-c",
-            "js/integration/deno.json",
-            "js/integration/runner.ts",
+            "ts/integration/deno.json",
+            "ts/integration/runner.ts",
             "--parallel",
             "--jobs",
             String(workers),
@@ -159,7 +159,7 @@ async function main(args: readonly string[]): Promise<number> {
             "run",
             "-A",
             "-c",
-            "js/deno.json",
+            "ts/deno.json",
             "rust/crates/trellis-test/integration_runner.ts",
             "--jobs",
             String(workers),
@@ -277,8 +277,8 @@ async function verifyTypeScriptInventory(
       "run",
       "-A",
       "-c",
-      "js/integration/deno.json",
-      "js/integration/runner.ts",
+      "ts/integration/deno.json",
+      "ts/integration/runner.ts",
       "--inventory-only",
     ],
     cwd: repoRoot,

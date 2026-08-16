@@ -6,15 +6,15 @@ close to out-of-tree development as possible while remaining in this repository.
 
 - `demos/app`: the shared Svelte Field Inspection Desk browser app, with its own
   Deno config.
-- `demos/js/service`: the TypeScript Field Ops service.
-- `demos/js/device`: the TypeScript activated field-device TUI.
-- `demos/js/shared`: sample data and helpers for the TypeScript participants.
-- `demos/js`: the Deno workspace for TypeScript demo participants.
+- `demos/ts/service`: the TypeScript Field Ops service.
+- `demos/ts/device`: the TypeScript activated field-device TUI.
+- `demos/ts/shared`: sample data and helpers for the TypeScript participants.
+- `demos/ts`: the Deno workspace for TypeScript demo participants.
 - `demos/rust`: the Rust Field Ops service and field-device TUI Cargo workspace.
 
 The TypeScript and Rust service/device contracts are authored in source code and
 are checked for canonical parity in the Rust generator tests. The shared browser
-app consumes the generated demo service SDK from `demos/js/generated`.
+app consumes the generated demo service SDK from `demos/ts/generated`.
 
 ## Browser App
 
@@ -43,7 +43,7 @@ The TypeScript demo is the full end-to-end runtime path today. It includes:
 - integration-harness coverage for prepared event outbox dispatch and inbox
   duplicate suppression
 
-See `demos/js/README.md` for the complete walkthrough.
+See `demos/ts/README.md` for the complete walkthrough.
 
 ## Rust Demo
 

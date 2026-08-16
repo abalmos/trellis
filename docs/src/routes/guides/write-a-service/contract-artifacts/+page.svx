@@ -125,7 +125,7 @@ generated/
   packages/npm/orders-service/
 ```
 
-Other Rust services can depend on the generated Cargo package and use its typed descriptors, request/response structs, client helpers, service-runtime registration, event descriptors, and feed descriptors. Other language targets can use the generated JS packages.
+Other Rust services can depend on the generated Cargo package and use its typed descriptors, request/response structs, client helpers, service-runtime registration, event descriptors, and feed descriptors. Other language targets can use the generated TypeScript packages.
 
 For active contract editing, keep prepare running in watch mode:
 

@@ -160,7 +160,7 @@ pub(super) fn release_lane_for_stage(stage: StageId) -> Option<ReleaseLane> {
         | StageId::PreparedUiTools
         | StageId::NpmPackageBuild
         | StageId::NpmPackagingSmoke
-        | StageId::PackagePublicationDryRuns => Some(ReleaseLane::JavaScript),
+        | StageId::PackagePublicationDryRuns => Some(ReleaseLane::TypeScript),
         StageId::LiveBuild => Some(ReleaseLane::LiveBuild),
         StageId::LiveArtifactValidation | StageId::SharedLiveIntegration => Some(ReleaseLane::Live),
         StageId::ReleaseMetadata | StageId::Prepare => None,
@@ -171,7 +171,7 @@ pub(super) const fn release_lane_name(lane: ReleaseLane) -> &'static str {
     match lane {
         ReleaseLane::Static => "static",
         ReleaseLane::Rust => "rust",
-        ReleaseLane::JavaScript => "javascript",
+        ReleaseLane::TypeScript => "typescript",
         ReleaseLane::LiveBuild => "live-build",
         ReleaseLane::Live => "live",
     }
@@ -415,7 +415,7 @@ fn command_specs(
         ]);
     }
     specs.extend([
-        CommandSpec::new("deno", vec!["fmt", "-c", "js/deno.json", "--check"])
+        CommandSpec::new("deno", vec!["fmt", "-c", "ts/deno.json", "--check"])
             .stage(StageId::DenoFormatting),
         CommandSpec::new(
             "cargo",
@@ -486,45 +486,45 @@ fn command_specs(
             vec![
                 "check",
                 "-c",
-                "js/deno.json",
-                "js/packages/trellis/index.ts",
-                "js/packages/trellis-svelte/src/index.ts",
-                "js/packages/trellis-svelte/src/context.svelte.ts",
+                "ts/deno.json",
+                "ts/packages/trellis/index.ts",
+                "ts/packages/trellis-svelte/src/index.ts",
+                "ts/packages/trellis-svelte/src/context.svelte.ts",
             ],
         )
         .stage(StageId::TypeScriptCompile),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "packages:build:npm"],
+            vec!["task", "-c", "ts/deno.json", "packages:build:npm"],
         )
         .stage(StageId::NpmPackageBuild),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:result"],
+            vec!["task", "-c", "ts/deno.json", "test:prepared:result"],
         )
         .stage(StageId::PreparedResult)
         .parallel(ParallelGroup::PreparedJavaScript),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:trellis"],
+            vec!["task", "-c", "ts/deno.json", "test:prepared:trellis"],
         )
         .stage(StageId::PreparedTrellis)
         .parallel(ParallelGroup::PreparedJavaScript),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:trellis-svelte"],
+            vec!["task", "-c", "ts/deno.json", "test:prepared:trellis-svelte"],
         )
         .stage(StageId::PreparedTrellisSvelte)
         .parallel(ParallelGroup::PreparedJavaScript),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:trellis-test"],
+            vec!["task", "-c", "ts/deno.json", "test:prepared:trellis-test"],
         )
         .stage(StageId::PreparedTrellisTest)
         .parallel(ParallelGroup::PreparedJavaScript),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:ui-tools"],
+            vec!["task", "-c", "ts/deno.json", "test:prepared:ui-tools"],
         )
         .stage(StageId::PreparedUiTools)
         .parallel(ParallelGroup::PreparedJavaScript),
@@ -533,12 +533,12 @@ fn command_specs(
             vec![
                 "task",
                 "-c",
-                "js/deno.json",
+                "ts/deno.json",
                 "test:prepared:packaging:built",
             ],
         )
         .stage(StageId::NpmPackagingSmoke),
-        CommandSpec::new("bash", vec!["scripts/release-js-dry-run.sh"])
+        CommandSpec::new("bash", vec!["scripts/release-ts-dry-run.sh"])
             .stage(StageId::PackagePublicationDryRuns),
         CommandSpec::new(
             "cargo",
@@ -637,7 +637,7 @@ fn command_specs(
                     "run",
                     "-A",
                     "-c",
-                    "js/deno.json",
+                    "ts/deno.json",
                     "integration/live_runner.ts",
                     "--build-only",
                     "--artifacts-manifest",
@@ -653,7 +653,7 @@ fn command_specs(
                     "run",
                     "-A",
                     "-c",
-                    "js/deno.json",
+                    "ts/deno.json",
                     "integration/live_runner.ts",
                     "--inventory-only",
                     "--prebuilt-only",
@@ -667,7 +667,7 @@ fn command_specs(
             "run".to_string(),
             "-A".to_string(),
             "-c".to_string(),
-            "js/deno.json".to_string(),
+            "ts/deno.json".to_string(),
             "integration/live_runner.ts".to_string(),
             "--prebuilt-only".to_string(),
             "--artifacts-manifest".to_string(),

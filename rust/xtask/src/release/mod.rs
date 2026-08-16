@@ -20,9 +20,9 @@ use versioning::{
 };
 
 const RELEASE_JS_INTERNAL_NPM_VERSION_FILES: &[&str] = &[
-    "js/packages/trellis/scripts/build_npm.ts",
-    "js/packages/trellis-svelte/scripts/build_npm.ts",
-    "js/packages/trellis/tests/publishing_targets_test.ts",
+    "ts/packages/trellis/scripts/build_npm.ts",
+    "ts/packages/trellis-svelte/scripts/build_npm.ts",
+    "ts/packages/trellis/tests/publishing_targets_test.ts",
 ];
 const INTEGRATION_LIVE_ARTIFACTS_MANIFEST: &str = "dist/integration-runtime/manifest.json";
 
@@ -102,8 +102,8 @@ pub(crate) enum ReleaseLane {
     Static,
     #[value(name = "rust")]
     Rust,
-    #[value(name = "javascript")]
-    JavaScript,
+    #[value(name = "typescript")]
+    TypeScript,
     #[value(name = "live-build")]
     LiveBuild,
     #[value(name = "live")]
@@ -487,14 +487,14 @@ mod tests {
             "test:prepared:trellis-test",
             "test:prepared:ui-tools",
         ] {
-            assert!(commands.contains(&format!("deno task -c js/deno.json {task}")));
+            assert!(commands.contains(&format!("deno task -c ts/deno.json {task}")));
         }
         assert!(commands.contains(&"cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --all-features -- -D warnings".to_string()));
         assert!(commands.contains(&"cargo check --manifest-path rust/Cargo.toml --package trellis-protocol-wasm --target wasm32-unknown-unknown".to_string()));
         assert!(commands.contains(&"actionlint".to_string()));
-        assert!(commands.contains(&"deno task -c js/deno.json packages:build:npm".to_string()));
+        assert!(commands.contains(&"deno task -c ts/deno.json packages:build:npm".to_string()));
         assert!(commands
-            .contains(&"deno task -c js/deno.json test:prepared:packaging:built".to_string()));
+            .contains(&"deno task -c ts/deno.json test:prepared:packaging:built".to_string()));
         assert!(commands.contains(
             &"cargo test --manifest-path rust/Cargo.toml --workspace --no-run".to_string()
         ));
@@ -518,14 +518,14 @@ mod tests {
         ));
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "deno run -A -c js/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
+            "deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
         );
-        assert!(commands.contains(&"deno run -A -c js/deno.json integration/live_runner.ts --build-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
-        assert!(commands.contains(&"deno run -A -c js/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
+        assert!(commands.contains(&"deno run -A -c ts/deno.json integration/live_runner.ts --build-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
+        assert!(commands.contains(&"deno run -A -c ts/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
     }
 
     #[test]
-    fn verify_prepared_javascript_commands_share_one_bounded_parallel_stage() {
+    fn verify_prepared_typescript_commands_share_one_bounded_parallel_stage() {
         let specs = verify_command_specs("0.9.0", "v0.8.2", true, false);
         let parallel = specs
             .iter()
@@ -585,7 +585,7 @@ mod tests {
                 vec![
                     ReleaseLane::Static,
                     ReleaseLane::Rust,
-                    ReleaseLane::JavaScript,
+                    ReleaseLane::TypeScript,
                     ReleaseLane::LiveBuild,
                 ],
                 vec![ReleaseLane::Live],
@@ -629,7 +629,7 @@ mod tests {
             vec![vec![
                 ReleaseLane::Static,
                 ReleaseLane::Rust,
-                ReleaseLane::JavaScript
+                ReleaseLane::TypeScript
             ]]
         );
     }
@@ -706,7 +706,7 @@ mod tests {
 
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c js/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
         );
     }
 
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     fn prepare_release_updates_internal_jsr_dependency_versions() {
         let root = temp_repo_root();
-        let manifest = root.join("js/packages/trellis-test/deno.json");
+        let manifest = root.join("ts/packages/trellis-test/deno.json");
         fs::create_dir_all(manifest.parent().expect("manifest parent"))
             .expect("mkdir manifest parent");
         fs::write(
@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn prepare_release_updates_internal_npm_dependency_versions() {
         let root = temp_repo_root();
-        let script = root.join("js/packages/trellis/scripts/build_npm.ts");
+        let script = root.join("ts/packages/trellis/scripts/build_npm.ts");
         fs::create_dir_all(script.parent().expect("script parent")).expect("mkdir script parent");
         fs::write(
             &script,
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     fn collect_versions_includes_internal_npm_dependency_specs() {
         let root = temp_repo_root();
-        let script = root.join("js/packages/trellis/scripts/build_npm.ts");
+        let script = root.join("ts/packages/trellis/scripts/build_npm.ts");
         fs::create_dir_all(script.parent().expect("script parent")).expect("mkdir script parent");
         fs::create_dir_all(root.join("rust")).expect("mkdir rust");
         fs::write(
@@ -962,18 +962,18 @@ mod tests {
     #[test]
     fn collect_versions_skips_zero_version_apps() {
         let root = temp_repo_root();
-        fs::create_dir_all(root.join("js/packages/trellis")).expect("mkdir package");
-        fs::create_dir_all(root.join("js/apps/console")).expect("mkdir app");
+        fs::create_dir_all(root.join("ts/packages/trellis")).expect("mkdir package");
+        fs::create_dir_all(root.join("ts/apps/console")).expect("mkdir app");
         fs::create_dir_all(root.join("generated/packages/jsr/portal-activation"))
             .expect("mkdir generated shell package");
         fs::create_dir_all(root.join("rust")).expect("mkdir rust");
         fs::write(
-            root.join("js/packages/trellis/deno.json"),
+            root.join("ts/packages/trellis/deno.json"),
             "{\"version\":\"0.8.2\"}\n",
         )
         .expect("write package manifest");
         fs::write(
-            root.join("js/apps/console/deno.json"),
+            root.join("ts/apps/console/deno.json"),
             "{\"version\":\"0.0.0\"}\n",
         )
         .expect("write app manifest");

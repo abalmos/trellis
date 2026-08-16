@@ -34,7 +34,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/trellis/pages-generator
-          key: pages-generator-${{ runner.os }}-${{ hashFiles('js/packages/trellis/deno.json') }}
+          key: pages-generator-${{ runner.os }}-${{ hashFiles('ts/packages/trellis/deno.json') }}
           restore-keys: |
             pages-generator-${{ runner.os }}-
 
@@ -81,7 +81,7 @@ jobs:
           package_version() {
             local repo_root="$1"
 
-            deno eval 'const manifest = JSON.parse(await Deno.readTextFile(Deno.args[0])); console.log(manifest.version);' "${repo_root}/js/packages/trellis/deno.json"
+            deno eval 'const manifest = JSON.parse(await Deno.readTextFile(Deno.args[0])); console.log(manifest.version);' "${repo_root}/ts/packages/trellis/deno.json"
           }
 
           try_release_generator() {
@@ -197,7 +197,7 @@ jobs:
             local out_dir="$3"
 
             (
-              cd "${repo_root}/js/apps/console"
+              cd "${repo_root}/ts/apps/console"
               SITE_BASE_PATH="${base_path}" deno run -A vite build
               mkdir -p "${out_dir}"
               cp -R build/. "${out_dir}/"
@@ -211,10 +211,10 @@ jobs:
           fi
 
           release_console_root="${release_worktree}"
-          if [ ! -f "${release_worktree}/js/apps/console/svelte.config.js" ]; then
+          if [ ! -f "${release_worktree}/ts/apps/console/svelte.config.js" ]; then
             echo "Latest release tag worktree is missing console sources; using current main console until the next release tag"
             release_console_root="${current_root}"
-          elif ! grep -q 'SITE_BASE_PATH' "${release_worktree}/js/apps/console/svelte.config.js"; then
+          elif ! grep -q 'SITE_BASE_PATH' "${release_worktree}/ts/apps/console/svelte.config.js"; then
             echo "Latest release tag predates Pages console base-path support; using current main console until the next release tag"
             release_console_root="${current_root}"
           fi

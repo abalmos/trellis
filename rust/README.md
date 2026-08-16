@@ -69,7 +69,7 @@ The bootstrap-safe `trellis-generate` helper lives under `rust/tools/generate/`
 and is used by repo-local generation and clean-checkout workflows.
 
 Run `cargo xtask prepare` from the repository root to execute that repo-local
-prepare workflow through Cargo. For JS-first repo workflows, use
+prepare workflow through Cargo. For TypeScript-first repo workflows, use
 `cd js && deno task prepare`.
 
 Before `cargo build` or `cargo install --path rust/crates/cli`, run
@@ -84,5 +84,5 @@ cargo test --manifest-path rust/Cargo.toml -p trellis-rs --test integration -- -
 ```
 
 That Rust suite is a peer of the TypeScript/Deno suite
-(`deno task -c js/deno.json test:integration`) and must conform to the shared
+(`deno task -c ts/deno.json test:integration`) and must conform to the shared
 client cases in `integration/client-test-matrix.json`.

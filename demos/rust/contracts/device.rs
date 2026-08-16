@@ -66,7 +66,7 @@ pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
 pub fn contract_artifacts(
 ) -> Result<ContractArtifacts, ContractsError> {
     let service_api: Value = serde_json::from_str(include_str!(
-        "../../js/generated/protocol/apis/trellis.demo-service@v1.json"
+        "../../ts/generated/protocol/apis/trellis.demo-service@v1.json"
     ))?;
     let state_api: Value = serde_json::from_str(include_str!(
         "../../../generated/protocol/apis/trellis.state@v1.json"

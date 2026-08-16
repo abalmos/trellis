@@ -215,7 +215,7 @@ Each response should include fields like `version` and `mode`.
 In another terminal from the source checkout:
 
 ```sh
-cd js/apps/console
+cd ts/apps/console
 cp .env.example .env
 deno task dev
 ```

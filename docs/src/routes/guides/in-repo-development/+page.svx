@@ -78,7 +78,7 @@ Use a runtime path that explicitly includes the auth and portal services for end
 ## 5. Start Console
 
 ```sh
-cd js/apps/console
+cd ts/apps/console
 cp .env.example .env
 deno task dev
 ```
@@ -88,11 +88,11 @@ Open `http://localhost:5173` for Console UI development. Console cannot complete
 ## Development workflow
 
 - **Runtime changes**: edit files under `rust/crates/runtime/`; rebuild and restart the `trellis server` process after changes.
-- **Console changes**: edit files under `js/apps/console/`; Vite HMR applies changes in place.
+- **Console changes**: edit files under `ts/apps/console/`; Vite HMR applies changes in place.
 - **Contract changes**: run `cd js && deno task prepare`, or keep `cd js && deno task prepare:watch` running.
 - **CLI changes**: run `cargo build -p trellis-cli` in the `rust/` directory, then re-run `trellis ...` commands.
-- **Type checking**: run `deno task -c js/deno.json check`.
-- **Tests**: run `deno task -c js/deno.json test:contracts` or `deno task -c js/deno.json test:auth`.
+- **Type checking**: run `deno task -c ts/deno.json check`.
+- **Tests**: run `deno task -c ts/deno.json test:contracts` or `deno task -c ts/deno.json test:auth`.
 
 ## Verify
 

@@ -36,7 +36,7 @@ named `trellis-test` helper and prove the behavior through a live control plane.
 Before committing or ending an implementation cycle, run the focused checks that match the files touched. The complete live lane starts one host, runs TypeScript with up to eight case slots, then runs Rust with up to eight case slots against the retained host:
 
 ```sh
-deno run -A -c js/deno.json integration/live_runner.ts
+deno run -A -c ts/deno.json integration/live_runner.ts
 ```
 
 Focused language-only runs may use all eight slots. Process-isolated cases run
@@ -49,39 +49,39 @@ If the full integration suites cannot be run, record the reason and the last foc
 
 `integration/client-test-matrix.json` is the cross-language client-interoperability contract. `integration/rust-runtime-test-matrix.json` owns Rust runtime correctness. Implemented Rust mappings must equal the compiled executable list and executed result IDs; source annotations and hidden skips cannot prove conformance.
 
-For focused local debugging, inspect `integration/client-test-matrix.json` and run the smallest matching fixture, case, or coverage slice. The JS runner supports repeated `--fixture`, `--case`, and `--coverage` filters, and keeps matrix conformance enabled by default:
+For focused local debugging, inspect `integration/client-test-matrix.json` and run the smallest matching fixture, case, or coverage slice. The TypeScript runner supports repeated `--fixture`, `--case`, and `--coverage` filters, and keeps matrix conformance enabled by default:
 
 ```sh
-deno task -c js/deno.json test:integration -- --fixture rpc
-deno task -c js/deno.json test:integration -- --case rpc.client-calls-service-success
-deno task -c js/deno.json test:integration -- --coverage cross-runtime-rpc
-deno task -c js/deno.json test:integration -- --fixture events --fixture feeds
+deno task -c ts/deno.json test:integration -- --fixture rpc
+deno task -c ts/deno.json test:integration -- --case rpc.client-calls-service-success
+deno task -c ts/deno.json test:integration -- --coverage cross-runtime-rpc
+deno task -c ts/deno.json test:integration -- --fixture events --fixture feeds
 ```
 
 The Rust integration runner prebuilds the test and runtime binaries before starting the shared host, then forwards Cargo's normal integration-test filter. Use the fixture module name or a concrete test function name as the single positional filter before `--`; hyphenated matrix fixture IDs use underscore module names in Rust filters:
 
 ```sh
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc_client_calls_service_success -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 service_approval -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 app_identity_approval -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rust_integration_manifest_conforms_to_shared_matrix -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc_client_calls_service_success -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 service_approval -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 app_identity_approval -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rust_integration_manifest_conforms_to_shared_matrix -- --nocapture
 ```
 
 For coverage-focused Rust diagnostics, map the coverage ID back to matrix cases and run the corresponding fixture or test filters. Cargo accepts one test-filter substring per invocation; run multiple commands for multi-fixture slices.
 
-When experimenting with CI sharding, keep the JS and Rust suites as peer jobs against the same matrix. Start with a few conservative JS filter groups and matching Rust filter groups, then prove equivalence against the full unfiltered peer commands before treating shards as release-equivalent:
+When experimenting with CI sharding, keep the TypeScript and Rust suites as peer jobs against the same matrix. Start with a few conservative TypeScript filter groups and matching Rust filter groups, then prove equivalence against the full unfiltered peer commands before treating shards as release-equivalent:
 
 ```sh
-deno task -c js/deno.json test:integration -- --fixture rpc --fixture operations --fixture events --fixture feeds
-deno task -c js/deno.json test:integration -- --fixture state --fixture transfer --fixture resources --fixture jobs
-deno task -c js/deno.json test:integration -- --fixture health --fixture service-approval --fixture app-identity-approval --fixture device-activation
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 operations -- --nocapture
-deno run -A -c js/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 events -- --nocapture
+deno task -c ts/deno.json test:integration -- --fixture rpc --fixture operations --fixture events --fixture feeds
+deno task -c ts/deno.json test:integration -- --fixture state --fixture transfer --fixture resources --fixture jobs
+deno task -c ts/deno.json test:integration -- --fixture health --fixture service-approval --fixture app-identity-approval --fixture device-activation
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 rpc -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 operations -- --nocapture
+deno run -A -c ts/deno.json rust/crates/trellis-test/integration_runner.ts --jobs 1 events -- --nocapture
 ```
 
-Shards are a speed aid only; release verification still requires the full unsharded JS and Rust integration suites until shard equivalence is proven against the shared matrix.
+Shards are a speed aid only; release verification still requires the full unsharded TypeScript and Rust integration suites until shard equivalence is proven against the shared matrix.
 
 ## Formatting policy
 
@@ -90,7 +90,7 @@ Formatting is part of the normal implementation loop, not just release verificat
 Use targeted formatting for the files changed by the task:
 
 ```sh
-deno fmt -c js/deno.json <changed js/ts/svelte/json/md/css/svg files>
+deno fmt -c ts/deno.json <changed ts/ts/svelte/json/md/css/svg files>
 cargo fmt --manifest-path rust/Cargo.toml --package <crate>
 rustfmt --edition 2021 <changed .rs files>
 ```
@@ -123,7 +123,7 @@ That single tag drives:
 
 JSR publication is enabled for the publishable package set.
 
-Release-managed JS packages and Rust crates use one checked-in base version. Stable releases usually bump that checked-in base version. Prerelease tags use a suffix such as `-rc.1`; they normally keep the checked-in base version unchanged.
+Release-managed TypeScript packages and Rust crates use one checked-in base version. Stable releases usually bump that checked-in base version. Prerelease tags use a suffix such as `-rc.1`; they normally keep the checked-in base version unchanged.
 
 The GitHub `Release` workflow runs the same Rust release tooling used locally:
 
@@ -131,7 +131,7 @@ The GitHub `Release` workflow runs the same Rust release tooling used locally:
 - `release check-metadata` checks release metadata before expensive verification
 - `release write-notes` extracts the matching `CHANGELOG.md` section for GitHub release notes
 
-The normal release path is a `release/vX.Y.Z` or `release/vX.Y.Z-rc.1` branch marker. The workflow prepares the release workspace once, uploads it as an artifact, and reuses it for formatting checks, Rust tests, Deno checks and tests, the peer JS and Rust integration suites, npm and JSR package checks, CLI binary builds, image dry-runs, and publish jobs. After the release gate passes, GitHub Actions creates an unsigned lightweight release tag on the marked commit and publishes from the already verified artifacts. If the gate fails, no release tag is created and the same version can be retried. Pull request runs keep the formatting, package, unit, and integration test coverage, but skip the release artifact matrix jobs for CLI binaries and image dry-runs unless a release tag is being verified.
+The normal release path is a `release/vX.Y.Z` or `release/vX.Y.Z-rc.1` branch marker. The workflow prepares the release workspace once, uploads it as an artifact, and reuses it for formatting checks, Rust tests, Deno checks and tests, the peer TypeScript and Rust integration suites, npm and JSR package checks, CLI binary builds, image dry-runs, and publish jobs. After the release gate passes, GitHub Actions creates an unsigned lightweight release tag on the marked commit and publishes from the already verified artifacts. If the gate fails, no release tag is created and the same version can be retried. Pull request runs keep the formatting, package, unit, and integration test coverage, but skip the release artifact matrix jobs for CLI binaries and image dry-runs unless a release tag is being verified.
 
 Release CI intentionally keeps both the pre-`release prepare` generator bootstrap and the post-`release prepare` generator pass. Removing the first pass is a follow-up optimization only after a generated-artifact freshness check proves `release prepare` no longer depends on bootstrapped artifacts.
 
@@ -142,7 +142,7 @@ The JSR publish set is:
 - `@qlever-llc/result`
 - `@qlever-llc/trellis`
 - `@qlever-llc/trellis-test`
-- `@qlever-llc/trellis-svelte` from `js/packages/trellis-svelte/jsr`
+- `@qlever-llc/trellis-svelte` from `ts/packages/trellis-svelte/jsr`
 
 The workflow runs JSR dry-runs for the publishable core packages before the release gate. The source `@qlever-llc/trellis-svelte` package is built and smoke-tested before release, then staged and published after the matching core JSR version is available; a prepublication JSR dry-run cannot resolve that unreleased dependency.
 
@@ -217,7 +217,7 @@ First verify that release-managed versions are currently consistent:
 cargo run --manifest-path xtask/Cargo.toml -- release check-versions
 ```
 
-For a new stable base release, bump release-managed JS and Rust manifests together:
+For a new stable base release, bump release-managed TypeScript and Rust manifests together:
 
 ```sh
 CURRENT_BASE_VERSION=<current-base-version>
@@ -270,7 +270,7 @@ a second command graph. Rust uses the current stable toolchain only.
 ```sh
 cargo run --manifest-path rust/xtask/Cargo.toml -- release lane static
 cargo run --manifest-path rust/xtask/Cargo.toml -- release lane rust
-cargo run --manifest-path rust/xtask/Cargo.toml -- release lane javascript
+cargo run --manifest-path rust/xtask/Cargo.toml -- release lane typescript
 cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live-build
 cargo run --manifest-path rust/xtask/Cargo.toml -- release lane live
 ```
@@ -290,18 +290,18 @@ The registry is checked by both xtask suites. New workspace members must inherit
 For focused local Deno loops after a single prepare, use the prepared partitions instead of rerunning generation before every slice:
 
 ```sh
-deno task -c js/deno.json prepare
-deno task -c js/deno.json test:prepared:result
-deno task -c js/deno.json test:prepared:trellis
-deno task -c js/deno.json test:prepared:trellis-svelte
-deno task -c js/deno.json test:prepared:trellis-test
-deno task -c js/deno.json test:prepared:ui-tools
-deno task -c js/deno.json packages:build:npm
-deno task -c js/deno.json test:prepared:packaging:built
+deno task -c ts/deno.json prepare
+deno task -c ts/deno.json test:prepared:result
+deno task -c ts/deno.json test:prepared:trellis
+deno task -c ts/deno.json test:prepared:trellis-svelte
+deno task -c ts/deno.json test:prepared:trellis-test
+deno task -c ts/deno.json test:prepared:ui-tools
+deno task -c ts/deno.json packages:build:npm
+deno task -c ts/deno.json test:prepared:packaging:built
 ```
 
 The prepared partitions are the non-integration Deno release-test set. Keep
-JS client-library integration coverage in `deno task -c js/deno.json
+TypeScript client-library integration coverage in `deno task -c ts/deno.json
 test:integration` so live integration tests (which run NATS as a managed
 binary) run only in the intended integration suite.
 
@@ -322,12 +322,12 @@ If packaging changed, add the relevant package or image smoke checks before comm
 
 ```sh
 cargo run --manifest-path xtask/Cargo.toml -- build --workspace --release
-deno task -c js/deno.json build:npm
-(cd js/packages/result && deno publish --dry-run --allow-slow-types --allow-dirty)
-(cd js/packages/trellis && deno publish --dry-run --allow-slow-types --allow-dirty)
-(cd js/packages/trellis-test && deno publish --dry-run --allow-slow-types --allow-dirty)
+deno task -c ts/deno.json build:npm
+(cd ts/packages/result && deno publish --dry-run --allow-slow-types --allow-dirty)
+(cd ts/packages/trellis && deno publish --dry-run --allow-slow-types --allow-dirty)
+(cd ts/packages/trellis-test && deno publish --dry-run --allow-slow-types --allow-dirty)
 docker build -f rust/crates/runtime/Containerfile .
-docker build -f js/apps/console/Containerfile .
+docker build -f ts/apps/console/Containerfile .
 ```
 
 If the full integration suites cannot be run, record why and list the focused checks that did run.

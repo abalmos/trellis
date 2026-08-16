@@ -23,7 +23,7 @@ fn evaluate_contract(source: &str) -> Value {
                 "const m=await import('file://{}');const c=m.default;const r=c[Symbol.for('trellis.contract.runtime')];const a=[...new Map(r.actions.flatMap(({{action}})=>{{const s=action[Symbol.for('trellis.action.metadata')]?.source;return s?[[s.api.id,s.api]]:[]}})).values()];console.log(JSON.stringify({{api:c.API,participant:c.PARTICIPANT,referencedApis:a}}))",
                 source.canonicalize().unwrap().display()
             ))
-            .current_dir(root.join("demos/js"))
+            .current_dir(root.join("demos/ts"))
             .output()
             .expect("evaluate TypeScript contract")
     } else {
@@ -69,9 +69,9 @@ fn generate_demo_service_jsr_package(root: &std::path::Path) {
             "generate",
             "jsr",
             "--source",
-            root.join("demos/js/service/contract.ts").to_str().unwrap(),
+            root.join("demos/ts/service/contract.ts").to_str().unwrap(),
             "--out",
-            root.join("demos/js/generated/packages/jsr/demo-service")
+            root.join("demos/ts/generated/packages/jsr/demo-service")
                 .to_str()
                 .unwrap(),
         ])
@@ -140,7 +140,7 @@ fn assert_manifest_parity(js_source: &str, rust_source: &str) {
 fn rust_authored_demo_service_contract_matches_js_contract() {
     let root = repo_root();
     assert_manifest_parity(
-        root.join("demos/js/service/contract.ts").to_str().unwrap(),
+        root.join("demos/ts/service/contract.ts").to_str().unwrap(),
         root.join("demos/rust/contracts/service.rs")
             .to_str()
             .unwrap(),
@@ -152,7 +152,7 @@ fn rust_authored_demo_device_contract_matches_js_contract() {
     let root = repo_root();
     generate_demo_service_jsr_package(&root);
     assert_manifest_parity(
-        root.join("demos/js/device/contract.ts").to_str().unwrap(),
+        root.join("demos/ts/device/contract.ts").to_str().unwrap(),
         root.join("demos/rust/contracts/device.rs")
             .to_str()
             .unwrap(),

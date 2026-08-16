@@ -662,10 +662,10 @@ fn prepare_accepts_custom_output_root() {
 #[test]
 fn prepare_ignores_sveltekit_lib_contract() {
     let temp = tempfile::tempdir().unwrap();
-    let app = temp.path().join("js/apps/console");
+    let app = temp.path().join("ts/apps/console");
     fs::create_dir_all(app.join("src/lib")).unwrap();
     fs::write(
-        temp.path().join("js/deno.json"),
+        temp.path().join("ts/deno.json"),
         "{\n  \"version\": \"0.4.0\",\n  \"workspace\": [\"./apps/console\"]\n}\n",
     )
     .unwrap();
@@ -699,7 +699,7 @@ fn prepare_ignores_sveltekit_lib_contract() {
         .exists());
     assert!(!temp
         .path()
-        .join("js/generated/packages/jsr/console")
+        .join("ts/generated/packages/jsr/console")
         .exists());
     assert!(!temp
         .path()
@@ -708,14 +708,14 @@ fn prepare_ignores_sveltekit_lib_contract() {
 }
 
 #[test]
-fn prepare_writes_demo_typescript_sdks_inside_demos_js_workspace() {
+fn prepare_writes_demo_typescript_sdks_inside_demos_ts_workspace() {
     let temp = tempfile::tempdir().unwrap();
     let demos_root = temp.path().join("demos");
-    let js_workspace = demos_root.join("js");
-    let service = js_workspace.join("rpc/service");
+    let ts_workspace = demos_root.join("ts");
+    let service = ts_workspace.join("rpc/service");
     fs::create_dir_all(service.join("contracts")).unwrap();
     fs::write(
-        js_workspace.join("deno.json"),
+        ts_workspace.join("deno.json"),
         "{\n  \"version\": \"0.4.0\",\n  \"workspace\": [\"./rpc/service\"]\n}\n",
     )
     .unwrap();
@@ -745,10 +745,10 @@ fn prepare_writes_demo_typescript_sdks_inside_demos_js_workspace() {
         .join("generated/protocol/apis/trellis.demo-rpc-service@v1.json")
         .exists());
     assert!(demos_root
-        .join("js/generated/packages/jsr/demo-rpc-service/mod.ts")
+        .join("ts/generated/packages/jsr/demo-rpc-service/mod.ts")
         .exists());
     assert!(demos_root
-        .join("js/generated/packages/jsr/demo-rpc-service/descriptors.ts")
+        .join("ts/generated/packages/jsr/demo-rpc-service/descriptors.ts")
         .exists());
     assert!(demos_root
         .join("generated/packages/cargo/demo-rpc-service/Cargo.toml")
@@ -761,9 +761,9 @@ fn prepare_in_local_runtime_repo_keeps_typescript_package_specifiers() {
     let repo = temp.path();
     let app = repo.join("apps/dashboard");
     fs::create_dir_all(app.join("contracts")).unwrap();
-    fs::create_dir_all(repo.join("js/packages/trellis")).unwrap();
+    fs::create_dir_all(repo.join("ts/packages/trellis")).unwrap();
     fs::create_dir_all(repo.join("rust")).unwrap();
-    fs::write(repo.join("js/deno.json"), "{}\n").unwrap();
+    fs::write(repo.join("ts/deno.json"), "{}\n").unwrap();
     fs::write(
         repo.join("rust/Cargo.toml"),
         "[workspace]\nmembers = []\nresolver = \"2\"\n",
@@ -829,7 +829,7 @@ export default { API, PARTICIPANT };
     assert!(api.contains("export const API_ID"));
     assert!(!sdk.join("scripts/build_npm.ts").exists());
     assert!(!deno.contains("build:npm"));
-    assert!(!combined.contains("js/packages/trellis"));
+    assert!(!combined.contains("ts/packages/trellis"));
     assert!(!combined.contains("file:"));
 }
 

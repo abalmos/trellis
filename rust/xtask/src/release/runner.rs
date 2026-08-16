@@ -26,7 +26,7 @@ pub(super) fn run_verify(
     check_workspace_lint_policy(repo_root)?;
     if skip_integration {
         println!(
-            "WARNING: --skip-integration was set; release verification is incomplete until the JS and Rust integration suites pass."
+            "WARNING: --skip-integration was set; release verification is incomplete until the TypeScript and Rust integration suites pass."
         );
     }
 

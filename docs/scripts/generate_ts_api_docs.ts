@@ -1,8 +1,8 @@
 const repoRoot = new URL("../../", import.meta.url);
-const jsRoot = new URL("js/", repoRoot);
+const tsRoot = new URL("ts/", repoRoot);
 const output = new URL("docs/static/api/typescript", repoRoot);
 const outputParent = new URL("./", output);
-const workspaceConfigUrl = new URL("deno.json", jsRoot);
+const workspaceConfigUrl = new URL("deno.json", tsRoot);
 
 type PackageExports = string | Record<string, string>;
 
@@ -61,7 +61,7 @@ async function existingNpmOnlyEntrypoints(
     entrypoints.map(async (entrypoint) => {
       try {
         const stat = await Deno.stat(
-          new URL(`${packageRoot}/${entrypoint}`, jsRoot),
+          new URL(`${packageRoot}/${entrypoint}`, tsRoot),
         );
         return stat.isFile ? `${packageRoot}/${entrypoint}` : null;
       } catch (error) {
@@ -79,7 +79,7 @@ const workspaceConfig: unknown = JSON.parse(
 );
 
 if (!isJsWorkspaceConfig(workspaceConfig)) {
-  throw new Error("Expected js/deno.json to contain a string workspace list");
+  throw new Error("Expected ts/deno.json to contain a string workspace list");
 }
 
 const packageWorkspaces = workspaceConfig.workspace.filter((workspace) =>
@@ -88,7 +88,7 @@ const packageWorkspaces = workspaceConfig.workspace.filter((workspace) =>
 
 const packageEntryPoints = await Promise.all(
   packageWorkspaces.map(async (workspace) => {
-    const packageConfigUrl = new URL(`${workspace}/deno.json`, jsRoot);
+    const packageConfigUrl = new URL(`${workspace}/deno.json`, tsRoot);
     const packageConfig: unknown = JSON.parse(
       await Deno.readTextFile(packageConfigUrl),
     );
@@ -118,7 +118,7 @@ await Deno.remove(output, { recursive: true }).catch((error) => {
 });
 
 const command = new Deno.Command(Deno.execPath(), {
-  cwd: jsRoot,
+  cwd: tsRoot,
   args: [
     "doc",
     "--html",
