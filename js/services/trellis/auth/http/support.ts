@@ -82,6 +82,7 @@ export type ApprovalResolution = {
   identityProvider: string;
   identitySubject: string;
   userEmail: string;
+  emailVerified?: boolean;
   userName: string;
   sessionPublicKey: string;
   app?: AppIdentity;
@@ -655,6 +656,7 @@ export async function getApprovalResolution(
     identityProvider: pending.identity.provider,
     identitySubject: pending.identity.subject,
     userEmail,
+    emailVerified: pending.user.emailVerified ?? false,
     userName,
     sessionPublicKey: pending.sessionKey,
     app,

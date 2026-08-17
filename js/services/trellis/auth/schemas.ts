@@ -156,6 +156,7 @@ export const OAuthUserSchema = Type.Object({
   origin: Type.String(),
   id: Type.String(),
   email: Type.Optional(Type.String()),
+  emailVerified: Type.Optional(Type.Boolean()),
   name: Type.Optional(Type.String()),
   image: Type.Optional(Type.String()),
 });
@@ -944,6 +945,7 @@ export const UserSessionSchema = Type.Object({
   userId: Type.String({ minLength: 1 }),
   identity: SessionIdentitySchema,
   email: Type.String(),
+  emailVerified: Type.Optional(Type.Boolean()),
   name: Type.String(),
   image: Type.Optional(Type.String()),
   createdAt: IsoDateSchema,

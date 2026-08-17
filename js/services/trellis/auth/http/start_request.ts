@@ -57,6 +57,7 @@ export type CurrentUserSession = {
   origin: string;
   id: string;
   email: string;
+  emailVerified?: boolean;
   name: string;
   image?: string;
   contractId: string;
@@ -335,6 +336,7 @@ export function createAuthStartRequestHandler(deps: {
           origin: existingSession.origin,
           id: existingSession.id,
           email: existingSession.email,
+          emailVerified: existingSession.emailVerified ?? false,
           name: existingSession.name,
           ...(existingSession.image ? { image: existingSession.image } : {}),
         },

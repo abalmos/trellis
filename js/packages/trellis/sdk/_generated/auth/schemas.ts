@@ -5126,6 +5126,7 @@ export const AuthEventsValidateResponseSchema = {
           "active": { "type": "boolean" },
           "capabilities": { "items": { "type": "string" }, "type": "array" },
           "email": { "type": "string" },
+          "emailVerified": { "type": "boolean" },
           "identity": {
             "properties": {
               "identityId": { "minLength": 1, "type": "string" },
@@ -5155,6 +5156,7 @@ export const AuthEventsValidateResponseSchema = {
           "active",
           "name",
           "email",
+          "emailVerified",
           "capabilities",
           "lastAuth",
         ],
@@ -5898,6 +5900,7 @@ export const AuthRequestsValidateResponseSchema = {
           "active": { "type": "boolean" },
           "capabilities": { "items": { "type": "string" }, "type": "array" },
           "email": { "type": "string" },
+          "emailVerified": { "type": "boolean" },
           "identity": {
             "properties": {
               "identityId": { "minLength": 1, "type": "string" },
@@ -5927,6 +5930,7 @@ export const AuthRequestsValidateResponseSchema = {
           "active",
           "name",
           "email",
+          "emailVerified",
           "capabilities",
           "lastAuth",
         ],

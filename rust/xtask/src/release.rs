@@ -1334,7 +1334,7 @@ fn verify_command_specs(
         ),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "test:prepared:packages"],
+            vec!["task", "-c", "js/deno.json", "packages:build:npm"],
         ),
         CommandSpec::new(
             "deno",
@@ -1355,7 +1355,7 @@ fn verify_command_specs(
         ),
         CommandSpec::new(
             "deno",
-            vec!["task", "-c", "js/deno.json", "packages:build:npm"],
+            vec!["task", "-c", "js/deno.json", "test:prepared:packages"],
         ),
         CommandSpec::new(
             "deno",

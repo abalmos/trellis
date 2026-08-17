@@ -166,6 +166,7 @@ export async function ensureBoundUserSession(args: {
   userId: string;
   identity: UserSession["identity"];
   email: string;
+  emailVerified: boolean;
   name: string;
   image?: string;
   participantKind: UserSession["participantKind"];
@@ -231,6 +232,7 @@ export async function ensureBoundUserSession(args: {
     userId: args.userId,
     identity: args.identity,
     email: args.email,
+    emailVerified: args.emailVerified,
     name: args.name,
     ...(args.image ? { image: args.image } : {}),
     participantKind: args.participantKind,
@@ -272,6 +274,7 @@ export async function ensureBoundUserSession(args: {
   const updated: UserSession = {
     ...existingSession,
     email: args.email,
+    emailVerified: args.emailVerified,
     name: args.name,
     ...(args.image ? { image: args.image } : {}),
     participantKind: args.participantKind,

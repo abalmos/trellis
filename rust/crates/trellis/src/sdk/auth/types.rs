@@ -14276,6 +14276,9 @@ pub enum AuthEventsValidateResponseCaller {
         capabilities: Vec<String>,
         /// The `email` wire field.
         email: String,
+        /// The `emailVerified` wire field.
+        #[serde(rename = "emailVerified")]
+        email_verified: bool,
         /// The `identity` wire field.
         identity: AuthEventsValidateResponseCallerUserIdentity,
         /// The `image` wire field.
@@ -15438,6 +15441,9 @@ pub enum AuthRequestsValidateResponseCaller {
         capabilities: Vec<String>,
         /// The `email` wire field.
         email: String,
+        /// The `emailVerified` wire field.
+        #[serde(rename = "emailVerified")]
+        email_verified: bool,
         /// The `identity` wire field.
         identity: AuthRequestsValidateResponseCallerUserIdentity,
         /// The `image` wire field.

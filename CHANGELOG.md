@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.10] - 2026-08-17
+
+### Changed
+
+- Propagated OAuth email-verification state through browser approval, pending
+  flows, sessions, and validated caller views in the generated TypeScript and
+  Rust Auth SDKs.
+
+### Fixed
+
+- Replaced raw authorization-flow identifiers and provider errors in Auth logs
+  with a correlation hash and safe structured outcome fields.
+
 ## [0.11.0-rc.9] - 2026-08-04
 
 ### Fixed

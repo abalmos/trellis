@@ -1341,19 +1341,9 @@
           "npm:@nats-io/nats-core@^3.3.1"
         ]
       },
-      "jsr:@qlever-llc/trellis/sdk/auth@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/core@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/health@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/jobs@0.11.0": {},
-      "jsr:@qlever-llc/trellis/sdk/state@0.11.0": {},
       "jsr:@qlever-llc/trellis@0.11.0": {
         "dependencies": [
           "npm:drizzle-orm@0.44.7"
-        ]
-      },
-      "jsr:@trellis-sdk/trellis-demo-service@0.0.0": {
-        "dependencies": [
-          "jsr:@qlever-llc/trellis@0.11"
         ]
       }
     }

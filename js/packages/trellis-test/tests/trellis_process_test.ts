@@ -81,11 +81,11 @@ Deno.test("startTrellisProcess reports readiness timeout with output tails", asy
             ],
           },
         },
-        startupTimeoutMs: 100,
+        startupTimeoutMs: 1_000,
         shutdownTimeoutMs: 1_000,
       }),
     Error,
-    "Timed out after 100ms waiting for Trellis process readiness",
+    "Timed out after 1000ms waiting for Trellis process readiness",
   );
 
   assertStringIncludes(error.message, "http://127.0.0.1:9/version");

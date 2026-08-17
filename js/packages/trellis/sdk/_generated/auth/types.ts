@@ -1676,6 +1676,7 @@ export type AuthEventsValidateOutput = {
     active: boolean;
     capabilities: Array<string>;
     email: string;
+    emailVerified: boolean;
     identity: { identityId: string; provider: string; subject: string };
     image?: string;
     lastAuth: string;
@@ -1957,6 +1958,7 @@ export type AuthRequestsValidateOutput = {
     active: boolean;
     capabilities: Array<string>;
     email: string;
+    emailVerified: boolean;
     identity: { identityId: string; provider: string; subject: string };
     image?: string;
     lastAuth: string;

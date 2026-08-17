@@ -644,6 +644,7 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
       origin: session.identity.provider,
       id: session.identity.subject,
       email: session.email,
+      emailVerified: session.emailVerified ?? false,
       name: session.name,
       ...(session.image ? { image: session.image } : {}),
       contractId: session.contractId,
@@ -738,6 +739,7 @@ export function createAuthHttpRouteContext(opts: AuthHttpRouteOptions) {
         subject: args.resolution.identitySubject,
       },
       email: args.resolution.userEmail,
+      emailVerified: args.resolution.emailVerified ?? false,
       name: args.resolution.userName,
       image: args.pendingValue.user.image,
       participantKind: requireUserParticipantKind(

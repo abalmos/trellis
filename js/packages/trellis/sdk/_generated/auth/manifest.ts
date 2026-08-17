@@ -3,7 +3,7 @@ import type { TrellisContractV1 } from "../../../contracts.ts";
 
 export const CONTRACT_ID = "trellis.auth@v1" as const;
 export const CONTRACT_DIGEST =
-  "li4JAKPNat2wbdqv-oKo1eTF_8RQq2WFT3PYy_QI9nc" as const;
+  "PysARDoaMUQkiQfBfqghy1eopQh0efFGj9pU-zu2Z2E" as const;
 export const CONTRACT: TrellisContractV1 = {
   "capabilities": {
     "trellis.auth::device.review": {
@@ -6435,6 +6435,7 @@ export const CONTRACT: TrellisContractV1 = {
                 "type": "array",
               },
               "email": { "type": "string" },
+              "emailVerified": { "type": "boolean" },
               "identity": {
                 "properties": {
                   "identityId": { "minLength": 1, "type": "string" },
@@ -6464,6 +6465,7 @@ export const CONTRACT: TrellisContractV1 = {
               "active",
               "name",
               "email",
+              "emailVerified",
               "capabilities",
               "lastAuth",
             ],
@@ -7215,6 +7217,7 @@ export const CONTRACT: TrellisContractV1 = {
                 "type": "array",
               },
               "email": { "type": "string" },
+              "emailVerified": { "type": "boolean" },
               "identity": {
                 "properties": {
                   "identityId": { "minLength": 1, "type": "string" },
@@ -7244,6 +7247,7 @@ export const CONTRACT: TrellisContractV1 = {
               "active",
               "name",
               "email",
+              "emailVerified",
               "capabilities",
               "lastAuth",
             ],

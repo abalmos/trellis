@@ -88,7 +88,7 @@ export function registerFlowRoutes(
   context: AuthHttpRouteContext,
 ): void {
   const { config, opts } = context;
-  const { pendingAuthKV } = opts.runtimeDeps;
+  const { logger, pendingAuthKV } = opts.runtimeDeps;
 
   app.get("/auth/flow/:flowId", async (c) => {
     const totalStartedAt = performance.now();
@@ -360,6 +360,7 @@ export function registerFlowRoutes(
   app.post("/auth/flow/:flowId/bind", async (c) => {
     const totalStartedAt = performance.now();
     const flowId = c.req.param("flowId");
+    const flowIdHash = await hashKey(flowId);
     const loadStartedAt = performance.now();
     const flow = await context.loadBrowserFlow(flowId);
     recordTrellisDuration(
@@ -368,6 +369,10 @@ export function registerFlowRoutes(
       { phase: "bind" },
     );
     if (!flow || !flow.authToken) {
+      logger.warn(
+        { flowIdHash, outcome: "flow_expired" },
+        "Auth flow bind failed",
+      );
       recordTrellisDuration(
         "trellis.auth.flow.duration",
         performance.now() - totalStartedAt,
@@ -378,10 +383,18 @@ export function registerFlowRoutes(
 
     const bodyResult = await AsyncResult.try(() => c.req.json());
     if (bodyResult.isErr()) {
+      logger.warn(
+        { flowIdHash, outcome: "invalid_request" },
+        "Auth flow bind failed",
+      );
       return c.json({ error: "Invalid JSON body" }, 400);
     }
     const body = bodyResult.take();
     if (!Value.Check(FlowBindRequestSchema, body)) {
+      logger.warn(
+        { flowIdHash, outcome: "invalid_request" },
+        "Auth flow bind failed",
+      );
       return c.json({ error: "Invalid bind request" }, 400);
     }
 
@@ -395,6 +408,10 @@ export function registerFlowRoutes(
       { phase: "bind" },
     );
     if (isErr(pendingEntry)) {
+      logger.warn(
+        { flowIdHash, outcome: "pending_auth_expired" },
+        "Auth flow bind failed",
+      );
       recordTrellisDuration(
         "trellis.auth.flow.duration",
         performance.now() - totalStartedAt,
@@ -406,9 +423,17 @@ export function registerFlowRoutes(
     const pendingValue = pending.value as PendingAuth;
 
     if (pendingValue.sessionKey !== sessionKey) {
+      logger.warn(
+        { flowIdHash, outcome: "session_key_mismatch" },
+        "Auth flow bind failed",
+      );
       throw new HTTPException(400, { message: "Session key mismatch" });
     }
     if (!(await verifyDomainSig(sessionKey, "bind-flow", flowId, sig))) {
+      logger.warn(
+        { flowIdHash, outcome: "invalid_signature" },
+        "Auth flow bind failed",
+      );
       throw new HTTPException(400, { message: "Invalid signature" });
     }
 
@@ -427,6 +452,10 @@ export function registerFlowRoutes(
       "trellis.auth.flow.duration",
       performance.now() - totalStartedAt,
       { phase: "bind" },
+    );
+    logger.info(
+      { flowIdHash, outcome: result.status },
+      "Auth flow bind completed",
     );
     return c.json(result);
   });

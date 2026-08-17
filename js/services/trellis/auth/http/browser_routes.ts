@@ -83,12 +83,14 @@ async function createPendingAuthForIdentity(args: {
     provider: string;
     subject: string;
     email: string | null;
+    emailVerified: boolean;
     displayName: string | null;
   };
   user: {
     id: string;
     origin: string;
     email?: string;
+    emailVerified: boolean;
     name?: string;
     image?: string;
   };
@@ -111,6 +113,7 @@ async function createPendingAuthForIdentity(args: {
       origin: args.user.origin,
       id: args.user.id,
       ...(email ? { email } : {}),
+      emailVerified: args.user.emailVerified,
       ...(name ? { name } : {}),
       ...(args.user.image ? { image: args.user.image } : {}),
     },
@@ -523,7 +526,11 @@ export function registerBrowserAuthRoutes(
       flow: { ...flow, sessionKey: flow.sessionKey },
       account,
       identity,
-      user: { origin: "local", id: identity.subject },
+      user: {
+        origin: "local",
+        id: identity.subject,
+        emailVerified: false,
+      },
       provider: "local",
       pendingAuthKV,
       logger,
@@ -611,7 +618,11 @@ export function registerBrowserAuthRoutes(
       flow: { ...flow, sessionKey: flow.sessionKey },
       account: result.account,
       identity: result.identity,
-      user: { origin: "local", id: result.identity.subject },
+      user: {
+        origin: "local",
+        id: result.identity.subject,
+        emailVerified: false,
+      },
       provider: "local",
       pendingAuthKV,
       logger,
@@ -645,6 +656,7 @@ export function registerBrowserAuthRoutes(
       throw new HTTPException(400, { message: "Invalid or expired state" });
     }
     const oauthEntry = oauthStateEntry as OAuthStateEntry;
+    const flowIdHash = await hashKey(oauthEntry.value.flowId);
     if (oauthEntry.value.provider !== providerId) {
       throw new HTTPException(400, { message: "OAuth provider mismatch" });
     }
@@ -670,7 +682,7 @@ export function registerBrowserAuthRoutes(
       const message = oauthAuthorizationErrorMessage(error);
       if (!message) throw error;
       logger.warn(
-        { error, provider: providerId },
+        { flowIdHash, outcome: "provider_rejected", provider: providerId },
         "OAuth provider rejected authorization response",
       );
       if (oauthEntry.value.kind === "browser_login") {
@@ -690,7 +702,10 @@ export function registerBrowserAuthRoutes(
     if (user.provider !== providerId) {
       throw new HTTPException(400, { message: "OAuth provider mismatch" });
     }
-    logger.debug({ user: user.id }, "Authentication successful.");
+    logger.info(
+      { flowIdHash, outcome: "identity_authenticated", provider: providerId },
+      "OAuth identity authenticated",
+    );
 
     if (oauthEntry.value.kind === "account_flow") {
       const result = await completeAccountFlowOAuth({
@@ -771,6 +786,7 @@ export function registerBrowserAuthRoutes(
       ...linkedUser.identity,
       displayName: user.name ?? linkedUser.identity.displayName,
       email: user.email ?? linkedUser.identity.email,
+      emailVerified: user.emailVerified,
       lastLoginAt: new Date().toISOString(),
     });
 
@@ -794,12 +810,18 @@ export function registerBrowserAuthRoutes(
         origin: providerId,
         id: user.id,
         email: user.email,
+        emailVerified: user.emailVerified,
         name: user.name,
         image: user.picture,
       },
       pendingAuthKV,
       logger,
     });
+
+    logger.info(
+      { flowIdHash, outcome: "pending_auth_created", provider: providerId },
+      "OAuth login callback completed",
+    );
 
     const resolution = await context.requireApprovalResolution(pending);
     if (

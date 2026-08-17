@@ -393,6 +393,9 @@ Deno.test("HTTP session logout redirect mode returns 303", async () => {
 
   assertEquals(response.status, 303);
   assertEquals(response.headers.get("location"), returnTo);
+
+  // Connection kicks are deferred until after the logout response can flush.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 });
 
 Deno.test("HTTP session logout returns modeled malformed input errors", async () => {

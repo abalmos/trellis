@@ -209,6 +209,7 @@ function operationContext(
       active: true,
       name: "Ada Lovelace",
       email: "ada@example.com",
+      emailVerified: false,
       capabilities: ["Auth.DeviceUserAuthorities.Resolve"],
       lastAuth: new Date(baseTimeMs).toISOString(),
     },

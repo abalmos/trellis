@@ -610,6 +610,7 @@ Deno.test("PendingAuthSchema validates explicit app identity", () => {
       origin: "github",
       id: "123",
       email: "user@example.com",
+      emailVerified: false,
       name: "User",
     },
     sessionKey,

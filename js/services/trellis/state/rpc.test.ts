@@ -54,6 +54,7 @@ const userCaller = {
   active: true,
   name: "Test User",
   email: "user@example.com",
+  emailVerified: false,
   capabilities: [],
   lastAuth: "2026-01-01T00:00:00.000Z",
 };

@@ -484,6 +484,7 @@ function formatCaller(
     active: principal.active,
     name: session.name,
     email: session.email,
+    emailVerified: session.emailVerified ?? false,
     image: session.image,
     capabilities: principal.capabilities,
     lastAuth: iso(session.lastAuth),

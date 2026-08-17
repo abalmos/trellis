@@ -255,6 +255,7 @@ const adminCaller = {
   active: true,
   name: "Admin",
   email: "admin@example.com",
+  emailVerified: false,
   capabilities: ["admin"],
   lastAuth: new Date().toISOString(),
 };

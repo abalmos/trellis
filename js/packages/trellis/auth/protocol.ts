@@ -1059,6 +1059,7 @@ export const CallerViewSchema = Type.Union([
     active: Type.Boolean(),
     name: Type.String(),
     email: Type.String(),
+    emailVerified: Type.Boolean(),
     image: Type.Optional(Type.String()),
     capabilities: Type.Array(Type.String()),
     lastAuth: IsoDateStringSchema,
