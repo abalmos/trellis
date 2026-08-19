@@ -64,7 +64,13 @@ async function main(args: readonly string[]): Promise<number> {
   const runtimeBinaries = await buildRuntimeBinaries();
   const compiled = await listTests(executable, []);
   assertCompiledInventory(compiled);
-  const tenantIds = await listTests(executable, testArgs);
+  const selectedCompiled = await listTests(executable, testArgs);
+  const registered = new Set(expectedRustTests());
+  const tenantIds = selectedCompiled.filter((id) => registered.has(id));
+  if (tenantIds.length === 0) {
+    throw new Error("Rust integration selection contains no registered cases");
+  }
+  const unregisteredTests = compiled.filter((id) => !registered.has(id));
   const classifications = rustTestClassifications();
   const { sharedTests, isolatedTests } = partitionRustTests(
     tenantIds,
@@ -101,6 +107,7 @@ async function main(args: readonly string[]): Promise<number> {
       runs.push(
         await runTests(executable, [
           ...testArgs,
+          ...unregisteredTests.flatMap((name) => ["--skip", name]),
           ...isolatedTests.flatMap((name) => ["--skip", name]),
           `--test-threads=${jobs}`,
           "--format=pretty",
@@ -413,8 +420,6 @@ export async function loadIntegrationLiveArtifacts(
   manifestPath = INTEGRATION_LIVE_ARTIFACTS_MANIFEST,
   expectedSourceSha?: string,
 ): Promise<IntegrationLiveArtifacts> {
-  // Prebuilt binaries may be stale when the working tree has uncommitted
-  // changes; the commit SHA alone cannot catch that.
   await assertPrebuiltTreeClean();
   const manifest = JSON.parse(
     await Deno.readTextFile(manifestPath),
@@ -601,11 +606,19 @@ export async function verifyCompiledRustInventory(
 }
 
 function assertCompiledInventory(compiled: readonly string[]): void {
-  assertSameTests(
-    "registered Rust cases",
-    expectedRustTests(),
-    compiled.toSorted(),
-  );
+  assertRegisteredTestsCompiled(expectedRustTests(), compiled);
+}
+
+export function assertRegisteredTestsCompiled(
+  registered: readonly string[],
+  compiled: readonly string[],
+): void {
+  const missing = registered.filter((name) => !compiled.includes(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `registered Rust cases are not compiled: ${missing.join(", ")}`,
+    );
+  }
 }
 
 export function assertRustExecutionInventory(

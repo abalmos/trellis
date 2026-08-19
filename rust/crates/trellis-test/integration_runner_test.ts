@@ -7,6 +7,7 @@ import {
 import { isAbsolute, join, relative } from "@std/path";
 import { defaultLiveJobs } from "../../../ts/packages/trellis-test/src/integration/concurrency.ts";
 import {
+  assertRegisteredTestsCompiled,
   assertRustExecutionInventory,
   buildIntegrationTest,
   buildRuntimeBinaries,
@@ -32,6 +33,18 @@ Deno.test("Rust integration runner parses worker and libtest arguments", () => {
     () => parseIntegrationRunnerArgs(["--jobs=0"]),
     Error,
     "positive integer",
+  );
+});
+
+Deno.test("Rust integration inventory requires registered cases but allows helpers", () => {
+  assertRegisteredTestsCompiled(
+    ["rpc::one", "rpc::two"],
+    ["helper::setup", "rpc::one", "rpc::two"],
+  );
+  assertThrows(
+    () => assertRegisteredTestsCompiled(["rpc::one", "rpc::two"], ["rpc::one"]),
+    Error,
+    "rpc::two",
   );
 });
 
