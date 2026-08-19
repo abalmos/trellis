@@ -4,6 +4,7 @@ version = "0.12.0"
 edition = "2021"
 publish = false
 
+[workspace]
 
 [dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
