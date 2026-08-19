@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - rs
+      - "agent/**"
   pull_request:
 
 permissions:
