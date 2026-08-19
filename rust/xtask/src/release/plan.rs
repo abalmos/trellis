@@ -188,7 +188,13 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
             CommandSpec::new("rustup", ["target", "add", "wasm32-unknown-unknown"]),
             CommandSpec::new(
                 "cargo",
-                ["run", "--manifest-path", "rust/xtask/Cargo.toml", "--", "prepare"],
+                [
+                    "run",
+                    "--manifest-path",
+                    "rust/xtask/Cargo.toml",
+                    "--",
+                    "prepare",
+                ],
             ),
             CommandSpec::new("deno", ["task", "-c", "ts/deno.json", "packages:build:npm"]),
             CommandSpec::new(
