@@ -44,7 +44,10 @@ async function main(args: readonly string[]): Promise<number> {
     Deno.env.get("TRELLIS_TEST_KEEP_WORKDIR") === "1";
   const typescriptOnly = args.includes("--typescript-only");
   const inventoryOnly = args.includes("--inventory-only");
-  const jobs = positiveInteger(optionValue(args, "--jobs") ?? "8", "--jobs");
+  const jobs = positiveInteger(
+    optionValue(args, "--jobs") ?? String(defaultLiveJobs()),
+    "--jobs",
+  );
   const typescriptCases = selectTypeScriptCases(
     clientMatrix.cases,
     typescriptCase,
@@ -199,6 +202,15 @@ export type WorkerLane = {
   readonly name: string;
   readonly run: (jobs: number) => Promise<number>;
 };
+
+export function defaultLiveJobs(
+  logicalCpus = navigator.hardwareConcurrency,
+): number {
+  const cpus = Number.isFinite(logicalCpus)
+    ? Math.max(1, Math.floor(logicalCpus))
+    : 1;
+  return Math.max(1, Math.ceil(cpus / 2));
+}
 
 export function selectTypeScriptCases<
   T extends {

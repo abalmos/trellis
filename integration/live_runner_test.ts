@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   allocateWorkers,
+  defaultLiveJobs,
   orchestrateWorkerLanes,
   selectTypeScriptCases,
   type WorkerLane,
@@ -22,6 +23,14 @@ Deno.test("live runner rejects empty TypeScript parent filters", () => {
     Error,
     "selects no implemented TypeScript cases",
   );
+});
+
+Deno.test("live jobs default to half the logical CPUs", () => {
+  assertEquals(defaultLiveJobs(1), 1);
+  assertEquals(defaultLiveJobs(2), 1);
+  assertEquals(defaultLiveJobs(3), 2);
+  assertEquals(defaultLiveJobs(22), 11);
+  assertEquals(defaultLiveJobs(0), 1);
 });
 
 Deno.test("live worker allocation shares one global budget", () => {
