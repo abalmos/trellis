@@ -73,6 +73,7 @@ Deno.test("OIDC provider maps userinfo claims using sub as stable id", async () 
     assertEquals(user.email, "ada@example.com");
     assertEquals(user.emailVerified, true);
     assertEquals(user.picture, "https://example.com/avatar.png");
+    assertEquals(user.updated, "2026-03-26T00:00:00.000Z");
   } finally {
     restore();
   }

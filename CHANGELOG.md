@@ -8,6 +8,13 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.11.0-rc.11] - 2026-08-19
+
+### Fixed
+
+- Accepted the OpenID Connect standard numeric `updated_at` user-info claim and
+  normalized it to the ISO timestamp used by Trellis user identities.
+
 ## [0.11.0-rc.10] - 2026-08-17
 
 ### Changed
