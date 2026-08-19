@@ -1,0 +1,254 @@
+name: Agent fault cleanup
+
+on:
+  push:
+    branches:
+      - agent/rs-fault-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  edit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/rs-fault-cleanup
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Remove synthetic provider failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_exact(text, old, new, count=1):
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"expected {count} occurrence(s), found {actual}: {old[:80]!r}")
+              return text.replace(old, new)
+
+          provider_path = Path("rust/crates/trellis/src/client/authorization/provider_cache.rs")
+          provider = provider_path.read_text()
+          provider = replace_exact(
+              provider,
+              '#[cfg(feature = "integration-test-scoping")]\nuse std::sync::atomic::AtomicBool;\n',
+              '',
+          )
+          provider = replace_exact(
+              provider,
+              '    #[cfg(feature = "integration-test-scoping")]\n    fail_next_context_read: Arc<AtomicBool>,\n    #[cfg(feature = "integration-test-scoping")]\n    fail_next_readiness_check: Arc<AtomicBool>,\n',
+              '',
+          )
+          provider = replace_exact(
+              provider,
+              '            #[cfg(feature = "integration-test-scoping")]\n            fail_next_context_read: Arc::new(AtomicBool::new(false)),\n            #[cfg(feature = "integration-test-scoping")]\n            fail_next_readiness_check: Arc::new(AtomicBool::new(false)),\n',
+              '',
+              3,
+          )
+          provider, n = re.subn(
+              r'    /// Fail the next exact context registry read for live redelivery coverage\.\n.*?\n    fn set_healthy',
+              '    fn set_healthy',
+              provider,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"expected provider test-method block once, found {n}")
+          provider = replace_exact(
+              provider,
+              '        #[cfg(feature = "integration-test-scoping")]\n        if self.fail_next_context_read.swap(false, Ordering::Relaxed) {\n            return Err(TrellisClientError::NatsRequest(\n                "injected authorization context read failure".into(),\n            ));\n        }\n',
+              '',
+          )
+          provider_path.write_text(provider)
+
+          validator_path = Path("rust/crates/trellis/src/service/local_validator.rs")
+          validator = validator_path.read_text()
+          validator = replace_exact(
+              validator,
+              '        #[cfg(feature = "integration-test-scoping")]\n        if provider.integration_test_take_readiness_failure() {\n            return Err(EventVerificationFailure::retryable(format!(\n                "local authorization context unavailable for {subject}"\n            )));\n        }\n',
+              '',
+          )
+          validator_path.write_text(validator)
+
+          events_path = Path("rust/crates/trellis/tests/integration/event_consumers.rs")
+          events = events_path.read_text()
+          replacement = r'''#[tokio::test]
+          async fn event_consumers_invalid_authorization_proof_terms_event() {
+              assert_runtime_case_registered(
+                  "event-consumers.invalid-authorization-proof-terms-event",
+                  "event-consumers",
+                  "event_consumers",
+              );
+
+              let (runtime, bootstrap_url, mut admin) = start_runtime().await;
+              let source_contract = test_contract(SOURCE_API_SOURCE_JSON);
+              admin
+                  .provision_service_instance(&bootstrap_url, &source_contract, Some("source"), None)
+                  .await
+                  .expect("approve source contract");
+              let consumer = connect_consumer(
+                  &mut admin,
+                  runtime.trellis_url(),
+                  &bootstrap_url,
+                  PARALLEL_DEPENDENCY_CONSUMER_JSON,
+                  "event-consumers-invalid-auth-rust",
+              )
+              .await;
+              let ack_observer = runtime
+                  .start_jetstream_ack_observer()
+                  .await
+                  .expect("start JetStream ACK observer");
+              let observed = Arc::new(Mutex::new(Vec::<String>::new()));
+              let listener = consumer
+                  .listen_event_with_api_id::<SourcePingedEvent, _, _>(
+                      SOURCE_CONTRACT_ID,
+                      {
+                          let observed = Arc::clone(&observed);
+                          move |event, _context| {
+                              let observed = Arc::clone(&observed);
+                              async move {
+                                  observed.lock().await.push(event.id);
+                                  Ok(())
+                              }
+                          }
+                      },
+                      ServiceEventListenOptions {
+                          mode: ServiceEventListenerMode::Durable,
+                          group: Some("ingest".to_owned()),
+                          durable_name: None,
+                          concurrency: 1,
+                      },
+                  )
+                  .await
+                  .expect("start authorization listener");
+              wait_for_waiting_count(&runtime, SourcePingedEvent::SUBJECT, 1).await;
+              let durable = matching_consumers(&runtime, SourcePingedEvent::SUBJECT)
+                  .await
+                  .remove(0);
+              let durable_name = consumer_name(&durable).to_owned();
+              let mut raw_events = consumer
+                  .integration_test_nats()
+                  .subscribe(durable.filter_subjects[0].clone())
+                  .await
+                  .expect("subscribe to raw test events");
+
+              let publisher = admin
+                  .connect_client(&bootstrap_url, &publisher_contract())
+                  .await
+                  .expect("connect event publisher");
+              publisher
+                  .publish::<SourcePingedEvent>(&EventRecord {
+                      id: "rust-event-auth-valid".into(),
+                      value: "valid".into(),
+                  })
+                  .await
+                  .expect("publish valid event");
+              let raw = tokio::time::timeout(Duration::from_secs(5), raw_events.next())
+                  .await
+                  .expect("timed out waiting for raw event")
+                  .expect("raw event subscription ended");
+              wait_for_observed_vec_id(&observed, "rust-event-auth-valid").await;
+
+              let mut headers = raw.headers.expect("published event headers");
+              headers.insert("proof", "invalid-event-proof");
+              headers.insert("Nats-Msg-Id", format!("evt_invalid_{}", ulid::Ulid::new()));
+              publisher
+                  .integration_test_nats()
+                  .publish_with_headers(raw.subject, headers, raw.payload)
+                  .await
+                  .expect("publish cryptographically invalid event");
+              wait_for_ack_payload(&ack_observer, &durable_name, "+TERM").await;
+              assert_eq!(observed.lock().await.len(), 1);
+
+              listener.abort();
+              let _ = listener.await;
+              ack_observer.stop().await;
+          }
+
+          async fn wait_for_observed_vec_id'''
+          events, n = re.subn(
+              r'#\[tokio::test\]\nasync fn event_consumers_authorization_failures_redeliver_or_term\(\) \{.*?\n\}\n\nasync fn wait_for_observed_vec_id',
+              replacement,
+              events,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"expected authorization failure live test once, found {n}")
+          events_path.write_text(events)
+
+          matrix_path = Path("integration/rust-runtime-test-matrix.json")
+          matrix = matrix_path.read_text()
+          matrix = replace_exact(
+              matrix,
+              '"id": "event-consumers.authorization-failures-redeliver-or-term"',
+              '"id": "event-consumers.invalid-authorization-proof-terms-event"',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"title": "Authorization availability redelivers and invalid proofs terminate"',
+              '"title": "Invalid authorization proofs terminate durable events"',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"description": "Proves provider readiness and one-shot context-read failures NAK durable events for redelivery while an invalid event proof is permanently terminated."',
+              '"description": "A durable event carrying an invalid authorization proof is permanently terminated without invoking the handler."',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"Provider readiness or one exact context read fails, then recovers, and a separate event carries an invalid proof."',
+              '"A valid signed event is observed, then the same payload is published with an invalid proof."',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"Transient failures NAK and redeliver the same message; the invalid proof is TERMed without handler invocation."',
+              '"The valid event reaches the handler and the invalid proof is TERMed without another handler invocation."',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"authorization",\n        "redelivery",\n        "nak",\n        "term"',
+              '"authorization",\n        "term"',
+          )
+          matrix = replace_exact(
+              matrix,
+              '"function": "event_consumers_authorization_failures_redeliver_or_term"',
+              '"function": "event_consumers_invalid_authorization_proof_terms_event"',
+          )
+          matrix_path.write_text(matrix)
+
+          for path in [provider_path, validator_path, events_path]:
+              data = path.read_text()
+              if "fail_next_context_read" in data or "fail_next_readiness" in data:
+                  raise SystemExit(f"synthetic provider failure hook remains in {path}")
+          PY
+
+      - name: Format and compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt --edition 2021 \
+            rust/crates/trellis/src/client/authorization/provider_cache.rs \
+            rust/crates/trellis/src/service/local_validator.rs \
+            rust/crates/trellis/tests/integration/event_consumers.rs
+          cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+          cargo check --manifest-path rust/Cargo.toml -p trellis-rs --all-targets --features integration-test-scoping
+          git diff --check
+
+      - name: Commit verified cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/agent-fault-cleanup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/crates/trellis/src/client/authorization/provider_cache.rs \
+            rust/crates/trellis/src/service/local_validator.rs \
+            rust/crates/trellis/tests/integration/event_consumers.rs \
+            integration/rust-runtime-test-matrix.json
+          git commit -m "Remove synthetic provider fault injection"
+          git push origin HEAD:agent/rs-fault-cleanup
