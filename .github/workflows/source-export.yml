@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/rs-source-export
+  pull_request:
 
 permissions:
   contents: read
