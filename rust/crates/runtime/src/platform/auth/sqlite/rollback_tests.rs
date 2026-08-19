@@ -9,7 +9,12 @@ use crate::platform::auth::{
 
 const NOW: i64 = 1_700_000_000_000;
 
-fn idempotency(scope: char, purpose: &str, request_id: &str, digest: char) -> IdempotencyResultRecord {
+fn idempotency(
+    scope: char,
+    purpose: &str,
+    request_id: &str,
+    digest: char,
+) -> IdempotencyResultRecord {
     IdempotencyResultRecord {
         scope_key: scope.to_string().repeat(43),
         purpose: purpose.to_owned(),
