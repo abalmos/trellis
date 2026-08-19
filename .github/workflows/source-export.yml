@@ -1,0 +1,24 @@
+name: Source export
+
+on:
+  push:
+    branches:
+      - agent/rs-source-export
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rs-source-export
+          path: |
+            integration/rust-runtime-test-matrix.json
+            rust/crates/trellis-test/src/lib.rs
+            rust/crates/runtime/src/platform/auth/sqlite/common.rs
+            rust/crates/runtime/src/platform/auth_post_commit.rs
+            rust/crates/trellis/tests/integration/auth.rs
