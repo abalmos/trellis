@@ -5,6 +5,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { isAbsolute, join, relative } from "@std/path";
+import { defaultLiveJobs } from "../../../ts/packages/trellis-test/src/integration/concurrency.ts";
 import {
   assertRustExecutionInventory,
   buildIntegrationTest,
@@ -17,6 +18,10 @@ import {
   testNamesFromList,
   writeIntegrationLiveArtifacts,
 } from "./integration_runner.ts";
+
+Deno.test("Rust integration runner uses the shared live worker default", () => {
+  assertEquals(parseIntegrationRunnerArgs([]).jobs, defaultLiveJobs());
+});
 
 Deno.test("Rust integration runner parses worker and libtest arguments", () => {
   assertEquals(
@@ -142,7 +147,6 @@ Deno.test("allow-dirty override skips the tree check", async () => {
     await Deno.writeTextFile(manifestPath, "{}");
     Deno.env.set("TRELLIS_TEST_PREBUILT_ONLY", "1");
     Deno.env.set("TRELLIS_TEST_ALLOW_DIRTY_PREBUILT", "1");
-    // The dirty gate is skipped, so the manifest itself is validated instead.
     await assertRejects(
       () => loadIntegrationLiveArtifacts(manifestPath),
       Error,

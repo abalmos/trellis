@@ -5,6 +5,7 @@ import clientMatrix from "../../../integration/client-test-matrix.json" with {
 import runtimeMatrix from "../../../integration/rust-runtime-test-matrix.json" with {
   type: "json",
 };
+import { defaultLiveJobs } from "../../../ts/packages/trellis-test/src/integration/concurrency.ts";
 import {
   summarizeTrellisTestDurations,
   summarizeTrellisTestProcessStarts,
@@ -182,7 +183,7 @@ export function parseIntegrationRunnerArgs(args: readonly string[]): {
   readonly jobs: number;
   readonly testArgs: readonly string[];
 } {
-  let jobs = 4;
+  let jobs = defaultLiveJobs();
   const testArgs: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];

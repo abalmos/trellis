@@ -1,4 +1,5 @@
 import { fromFileUrl } from "@std/path";
+import { defaultLiveJobs } from "../ts/packages/trellis-test/src/integration/concurrency.ts";
 import { startTrellisIntegrationSharedRuntimeHost } from "../ts/packages/trellis-test/src/integration/shared_runtime_host.ts";
 import {
   summarizeTrellisTestDurations,
@@ -15,6 +16,8 @@ import {
   verifyCompiledRustInventory,
 } from "../rust/crates/trellis-test/integration_runner.ts";
 import clientMatrix from "./client-test-matrix.json" with { type: "json" };
+
+export { defaultLiveJobs };
 
 const repoRoot = fromFileUrl(new URL("../", import.meta.url));
 const PREBUILT_ONLY_ENV = "TRELLIS_TEST_PREBUILT_ONLY";
@@ -202,15 +205,6 @@ export type WorkerLane = {
   readonly name: string;
   readonly run: (jobs: number) => Promise<number>;
 };
-
-export function defaultLiveJobs(
-  logicalCpus = navigator.hardwareConcurrency,
-): number {
-  const cpus = Number.isFinite(logicalCpus)
-    ? Math.max(1, Math.floor(logicalCpus))
-    : 1;
-  return Math.max(1, Math.ceil(cpus / 2));
-}
 
 export function selectTypeScriptCases<
   T extends {
