@@ -37,7 +37,7 @@ jobs:
         run: cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
 
       - name: Test runtime ownership
-        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime runtime_ownership --lib
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime ownership::tests:: --lib
 
   typescript:
     name: Test integration runners

@@ -5,8 +5,11 @@ Short-lived tracker for the `rs` cleanup before the first stable release. Delete
 - [ ] **Fast feedback** — make live-test concurrency machine-adaptive; simplify `test`, `check`, and `release`; remove redundant live inventory/governance work; record a current timing baseline.
 - [ ] **Real tests only** — remove synthetic fault injection and production test hooks; use real bad inputs, real process/NATS failures, or narrow real-SQLite integration tests where failure behavior matters.
 - [ ] **First-release protocol** — remove unpublished compatibility/history; make the current wire formats the first public versions; stop carrying `V1`/`V2` in ordinary implementation names when only one version exists.
-- [ ] **Clear ownership** — fix durable listener registration/cleanup; give runtime leases single task ownership; simplify authorization cache consistency and Jobs references without introducing a generic actor framework.
-- [ ] **Smaller public/internal APIs** — remove invalid test-only runtime states, collapse combinatorial callback APIs and redundant constructor inputs, shorten names through module context, and fix Clippy causes instead of suppressing them.
+- [ ] **Clear ownership** — fix durable listener registration/cleanup; keep runtime leases single-owner; simplify authorization cache consistency and Jobs references without introducing a generic actor framework.
+- [ ] **Runtime composition** — split oversized startup/facade responsibilities where one module currently owns unrelated lifecycle, routing, resource, and bootstrap work; do not add a DI/framework layer.
+- [ ] **Production/test boundary** — remove invalid test-only runtime states, `runtime-internals` leakage, integration-test scoping that changes normal semantics, and raw test methods on production facades.
+- [ ] **Jobs and constructors** — collapse the Jobs wrapper ladder and callback machinery; remove redundant generated-contract inputs from long service/device constructors.
+- [ ] **Names and lints** — shorten names through module context; fix repeated `too_many_arguments`, `result_large_err`, `module_inception`, and test-only `dead_code` causes instead of expanding Clippy suppressions.
 - [ ] **Final gate** — run one understandable production-semantics live suite plus the small pure checks and release-only packaging/docs checks; update docs and delete this tracker.
 
 ## Working rules
