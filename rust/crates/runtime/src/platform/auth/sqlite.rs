@@ -12,6 +12,8 @@ pub(super) mod outbox;
 mod policy;
 mod principals;
 mod provisioning;
+#[cfg(test)]
+mod rollback_tests;
 mod sessions;
 pub(in crate::platform::auth) mod validation;
 use common::SqliteConnectionPool;

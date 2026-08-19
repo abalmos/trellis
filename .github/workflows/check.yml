@@ -43,6 +43,9 @@ jobs:
       - name: Test runtime ownership
         run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime ownership::tests:: --lib
 
+      - name: Test Auth SQLite rollback
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime rollback_tests:: --lib
+
   typescript:
     name: Test integration runners
     runs-on: ubuntu-latest
