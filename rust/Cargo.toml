@@ -17,6 +17,7 @@ members = [
   "crates/cli",
   "crates/runtime",
 ]
+exclude = ["tools/generate"]
 default-members = [
   "crates/trellis",
   "crates/local-bootstrap",
