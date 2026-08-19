@@ -49,7 +49,13 @@ pub(super) fn run_verify(
         repo_root,
         &CommandSpec::new(
             "cargo",
-            ["run", "--manifest-path", "xtask/Cargo.toml", "--", "prepare"],
+            [
+                "run",
+                "--manifest-path",
+                "xtask/Cargo.toml",
+                "--",
+                "prepare",
+            ],
         ),
         "repository preparation failed",
     )?;
@@ -60,7 +66,11 @@ pub(super) fn run_verify(
     }
 
     let lanes = if skip_integration {
-        vec![ReleaseLane::Static, ReleaseLane::Rust, ReleaseLane::TypeScript]
+        vec![
+            ReleaseLane::Static,
+            ReleaseLane::Rust,
+            ReleaseLane::TypeScript,
+        ]
     } else {
         vec![
             ReleaseLane::Static,

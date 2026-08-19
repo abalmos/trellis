@@ -235,8 +235,8 @@ mod tests {
         version_base, ReleaseVersion,
     };
     use super::{parse_release_command, ReleaseCommand, ReleaseLane};
-    use std::time::Duration;
     use std::fs;
+    use std::time::Duration;
 
     #[test]
     fn parse_release_bump_command() {
@@ -258,8 +258,12 @@ mod tests {
     #[test]
     fn parse_release_prepare_command() {
         assert_eq!(
-            parse_release_command(["prepare", "--tag", "v0.9.0-rc.1"].into_iter().map(str::to_string))
-                .expect("parse release prepare"),
+            parse_release_command(
+                ["prepare", "--tag", "v0.9.0-rc.1"]
+                    .into_iter()
+                    .map(str::to_string)
+            )
+            .expect("parse release prepare"),
             ReleaseCommand::Prepare {
                 tag: Some("v0.9.0-rc.1".to_string())
             }
@@ -269,8 +273,12 @@ mod tests {
     #[test]
     fn parse_release_pretag_check_defaults_ref() {
         assert_eq!(
-            parse_release_command(["pretag-check", "--tag", "v0.9.0-rc.1"].into_iter().map(str::to_string))
-                .expect("parse release pretag-check"),
+            parse_release_command(
+                ["pretag-check", "--tag", "v0.9.0-rc.1"]
+                    .into_iter()
+                    .map(str::to_string)
+            )
+            .expect("parse release pretag-check"),
             ReleaseCommand::PretagCheck {
                 tag: "v0.9.0-rc.1".to_string(),
                 git_ref: "main".to_string(),
