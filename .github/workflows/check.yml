@@ -1,0 +1,64 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - rs
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DENO_VERSION: 2.9.4
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust compile and focused tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Check Rust workspace
+        run: cargo check --manifest-path rust/Cargo.toml --workspace --all-targets
+
+      - name: Test runtime ownership
+        run: cargo test --manifest-path rust/Cargo.toml -p trellis-runtime runtime_ownership --lib
+
+  typescript:
+    name: Test integration runners
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+
+      - name: Check integration runners
+        run: >-
+          deno check -c ts/deno.json
+          integration/live_runner.ts
+          rust/crates/trellis-test/integration_runner.ts
+
+      - name: Test integration runners
+        run: >-
+          deno test -A -c ts/deno.json
+          integration/live_runner_test.ts
+          rust/crates/trellis-test/integration_runner_test.ts
