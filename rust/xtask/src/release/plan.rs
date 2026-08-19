@@ -672,8 +672,6 @@ fn command_specs(
             "--prebuilt-only".to_string(),
             "--artifacts-manifest".to_string(),
             INTEGRATION_LIVE_ARTIFACTS_MANIFEST.to_string(),
-            "--jobs".to_string(),
-            "20".to_string(),
         ];
         if keep_workdir {
             live_args.insert(0, "deno".to_string());
