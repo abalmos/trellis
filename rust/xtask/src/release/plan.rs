@@ -56,7 +56,7 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
                 "cargo",
                 ["fmt", "--manifest-path", "rust/xtask/Cargo.toml", "--check"],
             ),
-            CommandSpec::new("actionlint", Vec::<String>::new()),
+            CommandSpec::new("actionlint", ["-shellcheck="]),
             CommandSpec::new(
                 "deno",
                 [
@@ -185,6 +185,11 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
             CommandSpec::new("cargo", ["test", "--manifest-path", "xtask/Cargo.toml"]),
         ],
         ReleaseLane::TypeScript => vec![
+            CommandSpec::new("rustup", ["target", "add", "wasm32-unknown-unknown"]),
+            CommandSpec::new(
+                "cargo",
+                ["run", "--manifest-path", "rust/xtask/Cargo.toml", "--", "prepare"],
+            ),
             CommandSpec::new("deno", ["task", "-c", "ts/deno.json", "packages:build:npm"]),
             CommandSpec::new(
                 "deno",
@@ -249,7 +254,12 @@ pub(super) fn lane_command_specs(lane: ReleaseLane, keep_workdir: bool) -> Vec<C
                 args.extend(live.into_iter().map(str::to_string));
                 vec![CommandSpec::new("env", args)]
             } else {
-                vec![CommandSpec::new("deno", live)]
+                let mut args = vec![
+                    "TRELLIS_TEST_ALLOW_DIRTY_PREBUILT=1".to_string(),
+                    "deno".to_string(),
+                ];
+                args.extend(live.into_iter().map(str::to_string));
+                vec![CommandSpec::new("env", args)]
             }
         }
     }
