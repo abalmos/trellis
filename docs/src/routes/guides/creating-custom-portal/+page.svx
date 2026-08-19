@@ -31,8 +31,10 @@ Some flows may also pause for administrative review before the final step is all
 For device-user authority resolution, a required review is still part of the
 original `Auth.DeviceUserAuthorities.Resolve` operation. The custom portal
 should keep watching or waiting on that operation; the admin review decision
-completes the same operation with either the activated output or a rejected
-terminal result.
+completes the same operation only when required user delegation is already
+present. Approval of an unclaimed delegated review remains waiting until the
+confirming user claims it. Rejected and expired reviews are terminal, operation
+wait is event-driven, and cancellation is unsupported.
 
 Trellis trusts a portal because a Trellis admin registered its URL. A portal
 record is routing configuration, not a `portal` contract kind. If the portal also

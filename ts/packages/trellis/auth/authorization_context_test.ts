@@ -75,7 +75,7 @@ async function providerContextCache(
 }
 
 function providerRevocation(revokedAt = 1_150): Record<string, unknown> {
-  return { revokedAt };
+  return { revokedAt, futureField: true };
 }
 
 function providerNats(
@@ -104,6 +104,7 @@ function providerNats(
     JSON.stringify({
       generation,
       digest: chain.manifestDigest,
+      futureField: true,
     }),
   );
   put("trust", `manifest.${generation}`, chain.manifestCanonicalJson);

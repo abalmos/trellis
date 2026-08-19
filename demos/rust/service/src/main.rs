@@ -1,19 +1,20 @@
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use bytes::Bytes;
 use clap::Parser;
 use futures_util::future::BoxFuture;
-use futures_util::{stream, Stream, StreamExt};
+use futures_util::stream;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use trellis_participant_demo_service::jobs::RefreshSiteSummaryQueueClient;
 use trellis_participant_demo_service::owned::Publisher;
 use trellis_participant_demo_service::{
     ConnectedService, ServiceConnectOptions, ServiceHandlerContext,
 };
+use trellis_rs::client::MemoryAuthorizationContextStore;
 use trellis_rs::jobs;
 use trellis_rs::service::{
     AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime, KvHandle,
@@ -37,6 +38,11 @@ use trellis_sdk_demo_service::types::{
     SitesListResponseEntriesItem, SitesRefreshInput, SitesRefreshOutput, SitesRefreshOutputSite,
     SitesRefreshProgress, SitesRefreshedEvent,
 };
+
+#[cfg(any())]
+use std::pin::Pin;
+#[cfg(any())]
+use futures_util::Stream;
 
 const SERVICE_NAME: &str = "rust-field-ops-demo";
 const FIXED_NOW: &str = "2026-05-02T00:00:00.000Z";
@@ -68,11 +74,19 @@ struct Args {
     /// Base64url service instance seed for authenticated bootstrap.
     #[arg(long, env = "TRELLIS_SEED")]
     seed: Option<String>,
+
+    /// Provisioned service deployment id.
+    #[arg(long, env = "TRELLIS_DEPLOYMENT_ID")]
+    deployment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RuntimeMode {
-    Authenticated { trellis_url: String, seed: String },
+    Authenticated {
+        trellis_url: String,
+        deployment_id: String,
+        seed: String,
+    },
     Idle,
 }
 
@@ -343,16 +357,6 @@ impl EvidenceStore {
     }
 }
 
-#[cfg(any())]
-async fn demo_pause(_ms: u64) {
-    tokio::time::sleep(Duration::from_millis(1)).await;
-}
-
-#[cfg(not(test))]
-async fn demo_pause(ms: u64) {
-    tokio::time::sleep(Duration::from_millis(ms)).await;
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_logging();
@@ -360,16 +364,20 @@ async fn main() -> anyhow::Result<()> {
     if args.contract {
         println!(
             "{} {}",
-            trellis_sdk_demo_service::CONTRACT_ID,
-            trellis_sdk_demo_service::CONTRACT_DIGEST
+            trellis_participant_demo_service::contract::CONTRACT_ID,
+            trellis_participant_demo_service::contract::CONTRACT_DIGEST
         );
         return Ok(());
     }
 
     match runtime_mode(&args)? {
-        RuntimeMode::Authenticated { trellis_url, seed } => {
+        RuntimeMode::Authenticated {
+            trellis_url,
+            deployment_id,
+            seed,
+        } => {
             tracing::info!(trellis_url = %trellis_url, "starting authenticated Rust demo service");
-            run_authenticated_service(&trellis_url, &seed).await?
+            run_authenticated_service(&trellis_url, &deployment_id, &seed).await?
         }
         RuntimeMode::Idle => {
             println!(
@@ -393,7 +401,7 @@ fn init_logging() {
 }
 
 fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
-    if args.trellis_url.is_some() || args.seed.is_some() {
+    if args.trellis_url.is_some() || args.deployment_id.is_some() || args.seed.is_some() {
         let trellis_url = args
             .trellis_url
             .clone()
@@ -402,15 +410,43 @@ fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
             .seed
             .clone()
             .ok_or_else(|| anyhow::anyhow!("--seed is required for authenticated mode"))?;
-        return Ok(RuntimeMode::Authenticated { trellis_url, seed });
+        let deployment_id = args
+            .deployment_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("--deployment-id is required for authenticated mode"))?;
+        return Ok(RuntimeMode::Authenticated {
+            trellis_url,
+            deployment_id,
+            seed,
+        });
     }
 
     Ok(RuntimeMode::Idle)
 }
 
-async fn run_authenticated_service(trellis_url: &str, seed: &str) -> anyhow::Result<()> {
-    let options = ServiceConnectOptions::new(trellis_url, SERVICE_NAME, seed)
-        .with_timeout_ms(REQUEST_TIMEOUT_MS);
+async fn run_authenticated_service(
+    trellis_url: &str,
+    deployment_id: &str,
+    seed: &str,
+) -> anyhow::Result<()> {
+    let session_seed =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+    let options = ServiceConnectOptions::new(
+        trellis_url,
+        SERVICE_NAME,
+        deployment_id,
+        trellis_participant_demo_service::contract::CONTRACT_ID,
+        trellis_participant_demo_service::contract::CONTRACT_DIGEST,
+        trellis_participant_demo_service::contract::PARTICIPANT_NEEDS_DIGEST,
+        trellis_participant_demo_service::contract::PARTICIPANT,
+        trellis_participant_demo_service::contract::API_JSON,
+        trellis_participant_demo_service::contract::API_DIGEST,
+        trellis_participant_demo_service::contract::REFERENCED_API_ARTIFACTS,
+        seed,
+        &session_seed,
+        Arc::new(MemoryAuthorizationContextStore::default()),
+    )
+    .with_timeout_ms(REQUEST_TIMEOUT_MS);
     let mut service = trellis_participant_demo_service::connect(options).await?;
     let site_summaries = SiteSummaryStore(service.kv().site_summaries().await?);
     site_summaries.seed_missing_sample_sites().await?;
@@ -1281,9 +1317,11 @@ async fn run_sites_refresh(
         .await?;
     let job = context
         .refresh_jobs
-        .submit(trellis_sdk_demo_service::RefreshSiteSummaryJobPayload {
-            site_id: input.site_id,
-        })
+        .submit(
+            trellis_participant_demo_service::jobs::SiteRefreshJobPayload {
+                site_id: input.site_id,
+            },
+        )
         .await
         .map_err(job_wait_error)?;
     let terminal = job.wait().await.map_err(job_wait_error)?;
@@ -1545,7 +1583,8 @@ async fn evidence_upload_start(
         let metadata = input.metadata.clone().unwrap_or_default();
         let file_name = metadata
             .get("fileName")
-            .cloned()
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string)
             .or_else(|| input.key.rsplit('/').next().map(ToString::to_string));
         let evidence_id = if let Some(existing) = state
             .evidence
@@ -1561,7 +1600,8 @@ async fn evidence_upload_start(
         } else {
             let evidence_id = metadata
                 .get("evidenceId")
-                .cloned()
+                .and_then(serde_json::Value::as_str)
+                .map(ToString::to_string)
                 .unwrap_or_else(|| allocate_evidence_id(&mut state));
             state.evidence.push(Evidence {
                 evidence_id: evidence_id.clone(),
@@ -1590,7 +1630,16 @@ async fn evidence_upload_start(
             TRANSFER_CHUNK_BYTES,
             Some(MAX_UPLOAD_BYTES as u64),
             input.content_type.as_deref(),
-            metadata,
+            metadata
+                .into_iter()
+                .map(|(key, value)| {
+                    let value = value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| value.to_string());
+                    (key, value)
+                })
+                .collect(),
         )?;
 
         let accepted = accepted_with_transfer_state(
@@ -1681,82 +1730,6 @@ where
         }
         tokio::time::sleep(Duration::from_millis(OPERATION_WAIT_POLL_MS)).await;
     }
-}
-
-fn operation_watch<TProgress, TOutput>(
-    state: SharedState,
-    operation_id: String,
-) -> Pin<Box<dyn Stream<Item = Result<OperationSnapshot<TProgress, TOutput>, ServerError>> + Send>>
-where
-    TProgress: DeserializeOwned + Send + 'static,
-    TOutput: DeserializeOwned + Send + 'static,
-{
-    let deadline = Instant::now() + Duration::from_millis(OPERATION_WAIT_TIMEOUT_MS);
-    tracing::debug!(operation_id = %operation_id, "operation watch started");
-    Box::pin(futures_util::stream::unfold(
-        (state, operation_id, 0_u64, false, deadline),
-        |(state, operation_id, last_revision, done, deadline)| async move {
-            if done {
-                return None;
-            }
-
-            loop {
-                let next: Result<Option<OperationSnapshot<TProgress, TOutput>>, ServerError> = {
-                    let state_guard = state.lock().expect("demo state lock");
-                    if let Some(history) = state_guard.operation_history.get(&operation_id) {
-                        history
-                            .iter()
-                            .find_map(|value| {
-                                let snapshot: OperationSnapshot<TProgress, TOutput> =
-                                    serde_json::from_value(value.clone()).ok()?;
-                                (snapshot.revision > last_revision).then_some(snapshot)
-                            })
-                            .map_or(Ok(None), |snapshot| Ok(Some(snapshot)))
-                    } else {
-                        Err(ServerError::OperationNotFound {
-                            operation_id: operation_id.clone(),
-                        })
-                    }
-                };
-
-                let next = match next {
-                    Ok(next) => next,
-                    Err(error) => {
-                        return Some((
-                            Err(error),
-                            (state, operation_id, last_revision, true, deadline),
-                        ))
-                    }
-                };
-
-                if let Some(snapshot) = next {
-                    let revision = snapshot.revision;
-                    let terminal = snapshot.state.is_terminal();
-                    if terminal {
-                        tracing::debug!(
-                            operation_id = %operation_id,
-                            revision,
-                            "operation watch terminal frame"
-                        );
-                    }
-                    return Some((
-                        Ok(snapshot),
-                        (state, operation_id, revision, terminal, deadline),
-                    ));
-                }
-
-                if Instant::now() >= deadline {
-                    tracing::debug!(
-                        operation_id = %operation_id,
-                        "operation watch timeout closing non-terminal stream"
-                    );
-                    return None;
-                }
-
-                tokio::time::sleep(Duration::from_millis(OPERATION_WAIT_POLL_MS)).await;
-            }
-        },
-    ))
 }
 
 async fn operation_cancel<TProgress, TOutput>(
@@ -2096,7 +2069,12 @@ fn download_transfer_to_response(grant: DownloadTransferGrant) -> EvidenceDownlo
             updated_at: grant.info.updated_at,
             digest: grant.info.digest,
             content_type: grant.info.content_type,
-            metadata: grant.info.metadata,
+            metadata: grant
+                .info
+                .metadata
+                .into_iter()
+                .map(|(key, value)| (key, serde_json::Value::String(value)))
+                .collect(),
         },
     }
 }

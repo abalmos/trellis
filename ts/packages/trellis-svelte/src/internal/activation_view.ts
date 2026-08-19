@@ -18,7 +18,6 @@ export type DeviceActivationView =
     instanceId: string;
     deploymentId: string;
     activatedAt: string;
-    confirmationCode?: string;
   }
   | { mode: "rejected"; flowId: string; reason?: string }
   | { mode: "expired"; flowId: string; reason: string }
@@ -107,7 +106,6 @@ export function mapDeviceActivationOutput(
       activatedAt: isoString(
         result.review.decidedAt ?? result.device.updatedAt,
       ),
-      confirmationCode: result.review.confirmationCode,
     };
   }
 

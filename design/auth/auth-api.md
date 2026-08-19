@@ -215,9 +215,11 @@ and reruns current issuance before generating a new JWT.
 
 `Auth.DeviceUserAuthorities.Resolve` is the caller-visible activation operation.
 Its input identifies the durable review only; deployment and instance identity
-are resolved from the locked review record. Start, get, wait, and cancel use the
-standard authenticated operation router. Approval commits activation and
-delegation evidence atomically before the operation reports completion.
+are resolved from the locked review record. Start owns the proof-bound claim and
+may mutate; get is read-only, and wait uses a process-local notifier before
+rereading durable state. Cancellation is explicitly unsupported. Approval makes
+the device ready only when required user delegation is absent or active, and
+`Resolved(active)` is emitted only after that coherent transaction commits.
 
 The online device wait remains a deliberate bounded pre-auth setup product
 requirement. It is identity/proof-bound to the device activation flow and exact

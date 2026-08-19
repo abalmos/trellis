@@ -98,7 +98,7 @@ type SnapshotCapableDeviceActivationOperationRef =
 
 export type DeviceActivationClient = {
   activateDevice(
-    input: { flowId: string },
+    input: { flowId: string; confirmationCode: string },
   ): Promise<DeviceActivationOperationRef>;
 };
 
@@ -108,6 +108,7 @@ export type DeviceActivationState = {
   authError: string | null;
   view: DeviceActivationView | null;
   flowId: string | null;
+  confirmationCode: string;
 };
 
 function errorMessage(error: unknown): string {
@@ -152,6 +153,7 @@ export function createInitialDeviceActivationState(): DeviceActivationState {
     authError: null,
     view: null,
     flowId: null,
+    confirmationCode: "",
   };
 }
 
@@ -199,6 +201,14 @@ export class DeviceActivationControllerCore {
 
   get flowId(): string | null {
     return this.state.flowId;
+  }
+
+  get confirmationCode(): string {
+    return this.state.confirmationCode;
+  }
+
+  set confirmationCode(value: string) {
+    this.state.confirmationCode = value;
   }
 
   async load(): Promise<void> {
@@ -312,7 +322,8 @@ export class DeviceActivationControllerCore {
 
   async requestActivation(): Promise<void> {
     const flowId = this.state.flowId;
-    if (!flowId || !this.#client) return;
+    const confirmationCode = this.state.confirmationCode.trim();
+    if (!flowId || !confirmationCode || !this.#client) return;
 
     this.stop();
     const runId = this.#observationRunId;
@@ -320,7 +331,10 @@ export class DeviceActivationControllerCore {
     this.state.authError = null;
 
     try {
-      const operation = await this.#client.activateDevice({ flowId });
+      const operation = await this.#client.activateDevice({
+        flowId,
+        confirmationCode,
+      });
       if (hasOperationSnapshot(operation)) {
         const snapshot = await operation.get().match({
           ok: (value) => value,

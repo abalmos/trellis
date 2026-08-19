@@ -136,16 +136,12 @@ Notes:
 - `--review-mode required` enables the device-review gate instead of immediate activation
 - registered devices connect only when the presented contract evidence fits enabled device deployment authority
 
-If the device deployment uses `--review-mode required`, portal completion does not activate the device immediately. Instead, a service or user with `trellis.auth::device.review` capabilities or an admin must first approve the activation.
-
-Admin-reviewed setup access is for devices that need deployment-owned runtime
-authority before a user delegates authority through activation. In that mode,
-`checkDeviceActivation(...)` can receive ready connect info for a registered
-device, and the returned connect info carries
-`auth.authority: "admin_reviewed"`. After activation, the same device connects
-with `auth.authority: "user_delegated"`. Trellis keeps those authorities
-separate and does not create or mutate activation records for admin-reviewed
-runtime sessions.
+If the device deployment uses `--review-mode required`, portal completion does
+not activate the device immediately. A service or user with
+`trellis.auth::device.review`, or an admin, must approve the activation. When the
+deployment also requires user delegation, approval alone does not make an
+unclaimed device ready: the user must submit the device-displayed confirmation
+code and become the review's claimant. Only that user can complete delegation.
 
 An admin can approve or reject a pending activation review in Console. Open
 **Admin → Devices**, select the deployment, switch to **Reviews**, and choose
@@ -161,16 +157,17 @@ trellis dev my-device.standard reviews list
 trellis dev my-device.standard reviews approve dar_123456789
 ```
 
-After approval or rejection, Trellis completes the original
-`Auth.DeviceUserAuthorities.Resolve` operation that the portal started. Devices
-and portals should continue watching or waiting on that operation rather than
-polling a separate review-status RPC.
-Internally, the activation handler records `pending_review` progress and returns
-`op.defer()` so the handler can settle while the durable operation remains open
-for the later review decision. The review job resumes the operation with the
-public operation-scoped service control helper, using only the stored
-`operationId`, and then completes or fails the same operation record. It does not
-depend on a private runtime handle surviving the original handler or process.
+`POST /bootstrap/device` creates or resumes the durable activation review, and
+the authenticated portal starts `Auth.DeviceUserAuthorities.Resolve` with the
+device confirmation code to claim it. Portals should use the operation's
+event-driven `wait()` or `watch()` surfaces; operation cancellation is
+unsupported. Devices wait separately by repeating proof-bound
+`POST /bootstrap/device` requests until Trellis returns ready evidence.
+
+Reviews have an authoritative server-owned `expiresAt`. Claim and decision
+transactions reject expired reviews, and expired pending reviews become stable
+terminal operation results. A later device bootstrap can create a new review;
+clients report that replacement instead of silently following it.
 
 ## 5. Provision a device instance
 

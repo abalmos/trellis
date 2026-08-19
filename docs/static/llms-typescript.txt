@@ -42,6 +42,10 @@ Rules:
   `@qlever-llc/trellis` root. Keep service runtime, device activation,
   browser-auth, telemetry, generated SDK, and advanced contract tooling imports on
   their explicit subpaths.
+- Device activation wait repeats `/bootstrap/device` with a fresh proof and uses
+  `expiresAt - serverNow` as a monotonic duration. A changed review id is an
+  explicit expired/replaced review, not a review to follow silently. Resolve
+  cancellation is unsupported.
 - `deno.json` should expose Trellis generation through `deno task prepare`
 - service-boundary integration tests can use
   `@qlever-llc/trellis-test/integration` and

@@ -836,7 +836,6 @@ function parseJsonRecord(
 function parseRevocation(value: Uint8Array): number {
   const record = parseJsonRecord(value, "authorization context revocation");
   if (
-    Object.keys(record).length !== 1 ||
     typeof record.revokedAt !== "number" ||
     !Number.isSafeInteger(record.revokedAt) ||
     record.revokedAt <= 0

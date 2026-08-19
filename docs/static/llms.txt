@@ -49,8 +49,9 @@ commands.
   is restart recovery, atomically renews it with the verified context, and
   returns route/session/NATS metadata plus its exact expiry. Clients retain the
   session/trust floor and send `currentContextDigest: null` for proof-bound
-  recovery after context or route-JWT expiry. The proof-bound device activation
-  wait remains a deliberately bounded pre-auth setup exception.
+  recovery after context or route-JWT expiry. Pending devices retry
+  `/bootstrap/device` with fresh request proofs; there is no separate activation
+  wait or connect-info route.
 - Bootstrap and refresh return server time in milliseconds. Clients use a request
   midpoint offset for validity and refresh scheduling; same-digest refresh success
   still reschedules. `maximumContextBytes` means canonical complete signed-context
@@ -101,6 +102,11 @@ commands.
   compliant clients to refresh and reconnect after eligible authority returns.
 - Bootstrap replay revalidates current authority and mints a fresh credential;
   public errors never expose internal storage, crypto, provider, or topology causes.
+- Device activation uses repeated fresh proof-bound `POST /bootstrap/device`
+  requests. `Auth.DeviceUserAuthorities.Resolve` claims the durable expiring
+  review for one user; administrative approval cannot complete missing required
+  delegation, server-side operation wait is event-driven, and cancellation is
+  unsupported.
 - Caller-visible communication is contract-driven and runs through generated
   RPC, event, feed, and operation surfaces. Resources, state, files, and jobs are
   contract-declared runtime surfaces; jobs are service-private background work.

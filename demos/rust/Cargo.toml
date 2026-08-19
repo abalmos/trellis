@@ -9,13 +9,14 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 publish = false
 
 [workspace.dependencies]
 anyhow = "1.0.100"
 async-nats = "0.47.0"
+base64 = "0.22.1"
 bytes = "1.11.1"
 clap = { version = "4.6.0", features = ["derive", "env"] }
 futures-util = "0.3.32"

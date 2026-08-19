@@ -123,9 +123,22 @@
               Trellis shows the verified deployment and device details here.
             </p>
           </div>
+          <label class="form-control w-full">
+            <span class="label-text mb-2 text-sm font-medium">Confirmation code</span>
+            <input
+              class="input input-bordered w-full font-mono uppercase tracking-[0.14em]"
+              autocomplete="one-time-code"
+              maxlength="8"
+              placeholder="8-character code"
+              bind:value={controller.confirmationCode}
+            />
+            <span class="label-text-alt mt-2 text-base-content/60">
+              Enter the code shown by the device or CLI.
+            </span>
+          </label>
           <button
             class="btn btn-primary btn-block"
-            disabled={controller.requestPending}
+            disabled={controller.requestPending || !controller.confirmationCode.trim()}
             onclick={() => void controller.requestActivation()}
           >
             {#if controller.requestPending}
@@ -154,24 +167,6 @@
             <span>Approval complete.</span>
           </div>
 
-          {#if controller.view.confirmationCode}
-            <div
-              class="portal-subtle-panel rounded-box p-5 text-center"
-            >
-              <p class="portal-section-label">
-                Confirmation code
-              </p>
-              <p
-                class="mono mt-3 break-all text-3xl font-semibold tracking-[0.18em] text-base-content sm:text-4xl"
-              >
-                {controller.view.confirmationCode}
-              </p>
-              <p class="portal-copy mt-3 text-xs">
-                Return this code to the device or CLI if it is waiting for one.
-              </p>
-            </div>
-          {/if}
-
           {@render technicalDetails([
             { label: "Deployment id", value: controller.view.deploymentId },
             { label: "Device id", value: controller.view.instanceId },
@@ -195,15 +190,15 @@
           <div class="alert alert-error text-sm leading-6">
             <span>{controller.view.reason}</span>
           </div>
-          <a class="btn btn-outline btn-block" href={trellisUrl}
-            >Return to app</a
+          <button class="btn btn-outline btn-block" onclick={() => location.assign(trellisUrl)}
+            >Return to app</button
           >
         {:else if controller.view?.mode === "invalid_flow"}
           <div class="alert alert-error text-sm leading-6">
             <span>{controller.view.reason}</span>
           </div>
-          <a class="btn btn-outline btn-block" href={trellisUrl}
-            >Return to app</a
+          <button class="btn btn-outline btn-block" onclick={() => location.assign(trellisUrl)}
+            >Return to app</button
           >
         {/if}
       {/if}

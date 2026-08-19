@@ -39,6 +39,7 @@ resulting authority update is approved:
 ```sh
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-service -- \
   --trellis-url http://localhost:3000 \
+  --deployment-id <deployment-id> \
   --seed <instance-seed>
 ```
 
@@ -48,13 +49,14 @@ Enable request, operation, job, and transfer diagnostics with `RUST_LOG`:
 RUST_LOG=trellis_rust_demo_service=debug,trellis_service=debug,trellis_jobs=debug \
   cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-service -- \
   --trellis-url http://localhost:3000 \
+  --deployment-id <deployment-id> \
   --seed <instance-seed>
 ```
 
-Use the `instanceSeed` field from
+Use the `deploymentId` and `instanceSeed` fields from
 `trellis --format json deploy provision
-svc/demo.field-ops` as
-`<instance-seed>`.
+svc/demo.field-ops` as `<deployment-id>`
+and `<instance-seed>`.
 
 Authenticated mode does not need `--nats-url`; Trellis returns the runtime NATS
 servers during bootstrap. The authenticated service opens the resolved
@@ -70,51 +72,22 @@ Run the wizard with offline sample data:
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device
 ```
 
-Run with existing user/session credentials:
+Run as a preregistered device through the generated device bootstrap path:
 
 ```sh
 cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device -- \
-  --nats-url nats://127.0.0.1:4222 \
-  --sentinel-jwt <sentinel-jwt> \
-  --sentinel-seed <sentinel-seed> \
-  --session-key-seed <session-key-seed>
-```
-
-Run through the service-bootstrap helper path:
-
-```sh
-cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device -- \
-  --service-bootstrap \
+  --device \
   --trellis-url http://localhost:3000 \
-  --session-key-seed <session-key-seed>
+  --device-deployment-id <deployment-id> \
+  --device-instance-id <instance-id> \
+  --device-root-secret <root-secret>
 ```
 
-Run through the demo-local activated-device flow:
-
-```sh
-cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device -- \
-  --device \
-  --trellis-url http://localhost:3000
-```
-
-The first run creates a private JSON store at `.trellis-demo-device.json`,
-starts device activation, and prints the activation URL, public identity key,
-and local confirmation code. Unless the deployment routes device activation to a
-custom portal, the URL opens the Trellis-owned `trellis.portal.activation@v1`
-portal. After approval, rerun with the confirmation code to mark the local state
-activated and connect:
-
-```sh
-cargo run --manifest-path demos/rust/Cargo.toml -p trellis-rust-demo-device -- \
-  --device \
-  --device-confirm-code <confirmation-code>
-```
-
-Later `--device` runs reuse the stored root secret and refresh connect info from
-Trellis. The store intentionally persists only the root secret, Trellis URL, and
-activation state; sentinel credentials and NATS topology are refreshed in
-memory. Use `--device-store <path>` or `TRELLIS_DEVICE_STORE` for a different
-file.
+Use the deployment id, instance id, and one-time `rootSecret` returned by
+`trellis --format json deploy provision <device-deployment-id>`. The client
+derives the provisioned identity and obtains current NATS routing and
+authorization material from `POST /bootstrap/device`; it does not persist
+sentinel credentials or runtime topology.
 
 The Rust device CLI uses the generated participant facade for online `fieldOps`
 RPCs and operations, generated state helpers for `selectedSite` and

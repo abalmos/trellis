@@ -147,7 +147,11 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
   route JWT with the verified context and returns route/session/NATS metadata plus
   its exact expiry. Clients whose context or route JWT expired retain the
   session/trust floor and send proof-bound `currentContextDigest: null` recovery
-  rather than restarting enrollment. Pending devices retry `/bootstrap/device`.
+  rather than restarting enrollment. Pending devices retry `/bootstrap/device`
+  with fresh proofs; there is no separate wait or connect-info endpoint. Rust
+  uses `DeviceActivationOptions`, `check_device_activation`, and
+  `wait_for_device_activation`, then hands ready evidence to pure
+  `connect_device`.
 - Bootstrap and refresh return server time in milliseconds. Clients estimate a
   request-midpoint offset and use corrected time for validity, reconnect,
   UI state, and scheduling. Same-digest refresh success still reschedules.
@@ -249,6 +253,12 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms.txt
 
 Prefer source, generated SDKs, and generated API docs for exact signatures. Guides
 show patterns; generated packages define the current callable surface.
+
+Device activation uses repeated fresh proof-bound `POST /bootstrap/device`
+requests. `Auth.DeviceUserAuthorities.Resolve` claims the durable expiring review
+for one user; administrative approval cannot complete missing required
+delegation, server-side operation wait is event-driven, and cancellation is
+unsupported.
 
 ## Service repository setup
 

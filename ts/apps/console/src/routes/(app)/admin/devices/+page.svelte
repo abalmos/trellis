@@ -323,6 +323,7 @@
                     </div>
                     <div class="mt-1 text-xs text-base-content/60">{activeDevices.length}/{deploymentDeviceInstances.length} activated instances</div>
                     <div class="mt-1 flex flex-wrap gap-1">
+                      <span class="badge badge-outline badge-xs">review {deployment.reviewMode}</span>
                       <span class="badge badge-outline badge-xs">delegation {deployment.requiresDeviceDelegation ? "required" : "none"}</span>
                       {#if pendingReviewCount > 0}<span class="badge badge-warning badge-xs">{pendingReviewCount} review</span>{/if}
                       {#if trackedAuthority}<span class="badge badge-outline badge-xs">authority {trackedAuthority.state}</span>{/if}
@@ -355,7 +356,10 @@
                     <h2 class="trellis-identifier truncate text-lg font-semibold">{selectedDeployment.deploymentId}</h2>
                     <StatusBadge label={selectedDeployment.state === "disabled" ? "Disabled" : "Enabled"} status={deploymentStatus()} />
                   </div>
-                  <div class="mt-1 text-sm text-base-content/60">Delegation: <span class="badge badge-outline badge-sm">{selectedDeployment.requiresDeviceDelegation ? "required" : "none"}</span></div>
+                  <div class="mt-1 flex flex-wrap gap-1 text-sm text-base-content/60">
+                    <span>Review: <span class="badge badge-outline badge-sm">{selectedDeployment.reviewMode}</span></span>
+                    <span>Delegation: <span class="badge badge-outline badge-sm">{selectedDeployment.requiresDeviceDelegation ? "required" : "none"}</span></span>
+                  </div>
                 </div>
               </div>
               <div class="flex flex-wrap gap-2">

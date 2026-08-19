@@ -30,7 +30,14 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-full.
   proof-bound restart recovery, and portal assets. Connected control,
   including auth control, uses generated RPC, operation, and event APIs over
   NATS; there is no HTTP context, revocation, logout, or client-bootstrap API.
-  Pending devices retry `/bootstrap/device`; there is no separate wait endpoint.
+  Pending devices retry `/bootstrap/device`; there is no separate wait or
+  connect-info endpoint. Use `DeviceActivationOptions`,
+  `check_device_activation`, and `wait_for_device_activation`, then hand the
+  returned ready session into the separate pure `connect_device` entry point.
+  Pending activation retains `server_now` and `expires_at` and derives a
+  monotonic deadline from their difference. A changed review id is an explicit
+  expired/replaced review. `Auth.DeviceUserAuthorities.Resolve` cancellation is
+  unsupported.
 - The participant facade embeds its canonical API and participant artifacts and
   their exact digests.
 - Service connect options carry the immutable provisioned identity binding.

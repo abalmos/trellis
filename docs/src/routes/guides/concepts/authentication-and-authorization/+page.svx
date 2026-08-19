@@ -89,11 +89,16 @@ from the exact built-in administration participant artifact.
 Device provisioning binds an immutable identity key to a deployment and
 principal. A one-time provisioning secret is stored only as a hash and consumed
 atomically. Devices requiring activation remain pending and receive no usable
-credential until the activation review is approved.
+credential until the durable review is unexpired, administratively approved
+when required, and any required user delegation is active.
 
 `POST /bootstrap/device` is the shared initial and reconnect boundary. The
 `Auth.DeviceUserAuthorities.Resolve` operation owns the caller-visible activation
 workflow; private execution remains a job concern, not an operation.
+Resolve start proof-binds one claiming user. Get is read-only, wait is
+event-driven, and cancellation is unsupported. Devices observe readiness by
+repeating fresh proof-bound `/bootstrap/device` requests until the server returns
+the retained session and runtime evidence.
 
 ## Revocation and connections
 

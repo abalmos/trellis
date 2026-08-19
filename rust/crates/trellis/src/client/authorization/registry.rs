@@ -316,7 +316,7 @@ pub(crate) fn parse_api_authoring_source_pointer(
     value: &[u8],
 ) -> Result<ManifestPointer, TrellisClientError> {
     #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase")]
     struct Pointer {
         generation: u64,
         digest: String,
@@ -372,13 +372,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn manifest_pointer_has_exact_wire_shape() {
-        let pointer =
-            parse_api_authoring_source_pointer(br#"{"generation":7,"digest":"manifest-digest"}"#)
-                .expect("exact pointer");
+    fn manifest_pointer_is_additively_tolerant() {
+        let pointer = parse_api_authoring_source_pointer(
+            br#"{"generation":7,"digest":"manifest-digest","future":true}"#,
+        )
+        .expect("extended pointer");
         assert_eq!(pointer.generation, 7);
         assert!(parse_api_authoring_source_pointer(
-            br#"{"format":"legacy","generation":7,"digest":"manifest-digest"}"#
+            br#"{"generation":0,"digest":"manifest-digest","future":true}"#
         )
         .is_err());
     }

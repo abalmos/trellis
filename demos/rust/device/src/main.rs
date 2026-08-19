@@ -1,19 +1,23 @@
-use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use clap::Parser;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
 use trellis_participant_demo_device::contract as device_contract;
 use trellis_participant_demo_device::state::{DraftInspectionState, SelectedSiteState};
-use trellis_participant_demo_device::{connect, ConnectOptions, ConnectedClient};
+use trellis_participant_demo_device::ConnectedClient;
 use trellis_rs::{
     auth::{
-        derive_device_identity, start_device_activation_request, DeviceActivationLocalState,
-        DeviceActivationSession, DeviceActivationSessionBuilder, DeviceActivationStatus,
+        check_device_activation, derive_device_identity, wait_for_device_activation,
+        DeviceActivationOptions, DeviceActivationStatus,
     },
-    client::download_transfer_grant_from_value,
+    client::{
+        download_transfer_grant_from_value, DeviceConnectOptions,
+        MemoryAuthorizationContextStore,
+    },
 };
 use trellis_sdk_demo_service::types::{
     AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
@@ -21,7 +25,6 @@ use trellis_sdk_demo_service::types::{
 };
 
 const DEMO_TIMESTAMP: &str = "2026-04-30T16:00:00.000Z";
-const DEFAULT_DEVICE_STORE: &str = ".trellis-demo-device.json";
 const LIST_LIMIT: i64 = 50;
 const LIST_OFFSET: i64 = 0;
 
@@ -35,27 +38,24 @@ struct Args {
     #[arg(long, env = "TRELLIS_DEMO_DEVICE")]
     device: bool,
 
-    /// JSON file for demo-local device root secret and activation state.
-    #[arg(long, env = "TRELLIS_DEVICE_STORE")]
-    device_store: Option<PathBuf>,
+    /// Provisioned device deployment id.
+    #[arg(long, env = "TRELLIS_DEVICE_DEPLOYMENT_ID")]
+    device_deployment_id: Option<String>,
 
-    /// Local confirmation code to accept for a pending activated device.
-    #[arg(long, env = "TRELLIS_DEVICE_CONFIRM_CODE")]
-    device_confirm_code: Option<String>,
-}
+    /// Provisioned device instance id.
+    #[arg(long, env = "TRELLIS_DEVICE_INSTANCE_ID")]
+    device_instance_id: Option<String>,
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-struct PersistedDeviceState {
-    trellis_url: String,
-    device_root_secret: [u8; 32],
-    local_state: DeviceActivationLocalState,
+    /// Base64url device root secret printed by `trellis deploy provision`.
+    #[arg(long, env = "TRELLIS_DEVICE_ROOT_SECRET")]
+    device_root_secret: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     println!("Rust Field Device Demo");
-    println!("Activation helper: demo-local activated-device persistence enabled.");
+    println!("Activation helper: preregistered device bootstrap enabled.");
     println!("State helper: generated device/state facade enabled.");
 
     let client = connect_if_configured(&args).await?;
@@ -76,137 +76,56 @@ async fn connect_if_configured(args: &Args) -> anyhow::Result<Option<ConnectedCl
 }
 
 async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<ConnectedClient>> {
-    let store_path = device_store_path(args);
-    let persisted = load_device_state(&store_path)?;
-    let mut persisted = if let Some(persisted) = persisted {
-        persisted
-    } else {
-        let Some(trellis_url) = args.trellis_url.as_deref() else {
-            anyhow::bail!("--device requires --trellis-url when no persisted device state exists");
-        };
-        let persisted = start_and_persist_device_activation(trellis_url, &store_path).await?;
-        print_pending_activation(&persisted.local_state);
-        println!(
-            "Local confirmation code: {}",
-            pending_confirmation_code(&persisted)?
-        );
-        println!("Device activation started; rerun after approval with --device-confirm-code.");
-        return Ok(None);
-    };
-
-    let mut session = DeviceActivationSession::from_local_state(
-        &persisted.trellis_url,
-        &persisted.device_root_secret,
-        device_contract::CONTRACT_DIGEST,
-        persisted.local_state.clone(),
+    let trellis_url = args
+        .trellis_url
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--device requires --trellis-url"))?;
+    let deployment_id = args
+        .device_deployment_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--device requires --device-deployment-id"))?;
+    let instance_id = args
+        .device_instance_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--device requires --device-instance-id"))?;
+    let root_secret = URL_SAFE_NO_PAD.decode(
+        args.device_root_secret
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--device requires --device-root-secret"))?,
     )?;
-
-    if session.local_state().status == DeviceActivationStatus::Pending {
-        print_pending_activation(session.local_state());
-        if let Some(confirm_code) = args.device_confirm_code.as_deref() {
-            session.accept_confirmation_code(confirm_code)?;
-            persisted.local_state = session.local_state().clone();
-            save_device_state(&store_path, &persisted)?;
-            println!("Device activation confirmed locally; connecting as activated device.");
-        } else {
-            println!("Pending activation; pass --device-confirm-code after approval to connect.");
-            return Ok(None);
-        }
-    }
-
-    let identity = derive_device_identity(&persisted.device_root_secret)?;
-    Ok(Some(
-        connect(ConnectOptions::new(
-            &persisted.trellis_url,
-            &persisted.local_state.public_identity_key,
+    let identity = derive_device_identity(&root_secret)?;
+    let session_seed = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+    let activation = DeviceActivationOptions::new(
+        DeviceConnectOptions::new(
+            trellis_url,
+            deployment_id,
+            instance_id,
+            device_contract::CONTRACT_ID,
+            device_contract::CONTRACT_DIGEST,
+            device_contract::PARTICIPANT_NEEDS_DIGEST,
+            device_contract::PARTICIPANT,
+            device_contract::API_JSON,
+            device_contract::API_DIGEST,
+            device_contract::REFERENCED_API_ARTIFACTS,
+            &identity.public_identity_key,
             &identity.identity_seed_base64url,
+            &session_seed,
             10_000,
-        ))
-        .await?,
-    ))
-}
-
-async fn start_and_persist_device_activation(
-    trellis_url: &str,
-    store_path: &Path,
-) -> anyhow::Result<PersistedDeviceState> {
-    let device_root_secret: [u8; 32] = rand::random();
-    let nonce_bytes: [u8; 32] = rand::random();
-    let nonce = hex_lower(&nonce_bytes);
-    let builder = DeviceActivationSessionBuilder::new(&device_root_secret, nonce)?;
-    let start_response = start_device_activation_request(trellis_url, builder.payload()).await?;
-    let session = builder.pending_session(
-        trellis_url,
-        device_contract::CONTRACT_DIGEST,
-        start_response,
-    )?;
-    let persisted = PersistedDeviceState {
-        trellis_url: session.trellis_url().to_string(),
-        device_root_secret,
-        local_state: session.local_state().clone(),
+            Arc::new(MemoryAuthorizationContextStore::default()),
+        ),
+        &identity.activation_key_base64url,
+    );
+    let session = match check_device_activation(&activation).await? {
+        DeviceActivationStatus::Ready(session) => session,
+        DeviceActivationStatus::Pending(pending) => {
+            println!("Activation URL: {}", pending.activation_url);
+            println!("Confirmation code: {}", pending.confirmation_code);
+            wait_for_device_activation(&activation, &pending, Duration::from_secs(300)).await?
+        }
     };
-    save_device_state(store_path, &persisted)?;
-    Ok(persisted)
-}
-
-fn device_store_path(args: &Args) -> PathBuf {
-    args.device_store
-        .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_DEVICE_STORE))
-}
-
-fn load_device_state(path: &Path) -> anyhow::Result<Option<PersistedDeviceState>> {
-    match fs::read_to_string(path) {
-        Ok(contents) => Ok(Some(serde_json::from_str(&contents)?)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn save_device_state(path: &Path, state: &PersistedDeviceState) -> anyhow::Result<()> {
-    let contents = serde_json::to_vec_pretty(state)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(&contents)?;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(not(unix))]
-    {
-        fs::write(path, contents)?;
-    }
-    Ok(())
-}
-
-fn print_pending_activation(local_state: &DeviceActivationLocalState) {
-    println!("Activation URL: {}", local_state.activation_url);
-    println!("Public identity key: {}", local_state.public_identity_key);
-}
-
-fn pending_confirmation_code(state: &PersistedDeviceState) -> anyhow::Result<String> {
-    let session = DeviceActivationSession::from_local_state(
-        &state.trellis_url,
-        &state.device_root_secret,
-        device_contract::CONTRACT_DIGEST,
-        state.local_state.clone(),
-    )?;
-    Ok(session.confirmation_code().to_string())
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
+    Ok(Some(
+        ConnectedClient::connect_activated(activation, session).await?,
+    ))
 }
 
 async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
@@ -540,67 +459,4 @@ fn offline_sites() -> Vec<SitesListResponseEntriesItem> {
         latest_status: "attention".to_string(),
         last_report_at: DEMO_TIMESTAMP.to_string(),
     }]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn persisted_device_state_roundtrips_as_json() {
-        let state = sample_persisted_device_state();
-
-        let json = serde_json::to_string(&state).expect("serialize state");
-        let decoded: PersistedDeviceState = serde_json::from_str(&json).expect("decode state");
-
-        assert_eq!(decoded, state);
-    }
-
-    #[test]
-    fn load_device_state_returns_none_for_missing_path() {
-        let path = std::env::temp_dir().join(format!(
-            "trellis-demo-device-missing-{}-{}.json",
-            std::process::id(),
-            rand::random::<u64>()
-        ));
-
-        let state = load_device_state(&path).expect("load missing state");
-
-        assert!(state.is_none());
-    }
-
-    #[test]
-    fn save_and_load_device_state_uses_requested_path() {
-        let path = std::env::temp_dir().join(format!(
-            "trellis-demo-device-{}-{}.json",
-            std::process::id(),
-            rand::random::<u64>()
-        ));
-        let state = sample_persisted_device_state();
-
-        save_device_state(&path, &state).expect("save state");
-        let decoded = load_device_state(&path)
-            .expect("load state")
-            .expect("state exists");
-        let _ = fs::remove_file(&path);
-
-        assert_eq!(decoded, state);
-    }
-
-    fn sample_persisted_device_state() -> PersistedDeviceState {
-        PersistedDeviceState {
-            trellis_url: "http://127.0.0.1:3000".to_string(),
-            device_root_secret: [7u8; 32],
-            local_state: DeviceActivationLocalState {
-                status: DeviceActivationStatus::Pending,
-                contract_digest: device_contract::CONTRACT_DIGEST.to_string(),
-                public_identity_key: "public-key".to_string(),
-                flow_id: "flow-1".to_string(),
-                instance_id: "instance-1".to_string(),
-                deployment_id: "deployment-1".to_string(),
-                nonce: "nonce-1".to_string(),
-                activation_url: "http://127.0.0.1:3000/activate/flow-1".to_string(),
-            },
-        }
-    }
 }

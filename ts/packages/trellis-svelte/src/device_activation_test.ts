@@ -64,7 +64,7 @@ function activatedOutput(
       version: 2,
     },
     review: {
-      confirmationCode: "1234",
+      activatedByUserPrincipalId: "usr_123",
       decidedAt,
       decidedBy: "usr_admin",
       deploymentId: "reader.default",
@@ -324,13 +324,13 @@ Deno.test("DeviceActivationController restores callback flow and maps activation
     "https://auth.example.com/_trellis/portal/devices/activate?flowId=device-flow#confirm",
   );
 
+  controller.confirmationCode = "HMHF9MKZ";
   await controller.requestActivation();
 
   assertEquals(activateFlowId, "device-flow");
   assertEquals(controller.view, {
     mode: "activated",
     flowId: "device-flow",
-    confirmationCode: "1234",
     instanceId: "dev_123",
     deploymentId: "reader.default",
     activatedAt: "2026-04-21T12:34:56.000Z",
@@ -411,6 +411,7 @@ Deno.test("DeviceActivationController shows pending review from operation progre
   });
 
   await controller.load();
+  controller.confirmationCode = "HMHF9MKZ";
 
   const activationRequest = controller.requestActivation();
   await progressReached;
@@ -428,7 +429,6 @@ Deno.test("DeviceActivationController shows pending review from operation progre
   assertEquals(controller.view, {
     mode: "activated",
     flowId: "device-flow",
-    confirmationCode: "1234",
     instanceId: "dev_123",
     deploymentId: "reader.default",
     activatedAt: "2026-04-21T12:00:03.000Z",

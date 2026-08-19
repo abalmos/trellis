@@ -36,6 +36,7 @@
         participantId: null,
         portalId: null,
         requiresDeviceDelegation: false,
+        reviewMode: null,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Service deployment ${nextDeploymentId} created.`, "Created");

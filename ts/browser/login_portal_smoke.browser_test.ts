@@ -2026,7 +2026,7 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { flowId } = await fixture.setupActivationRequest(
+      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
         runtime,
         admin,
         deploymentId,
@@ -2055,6 +2055,7 @@ withLivePortalPage(
         password: liveDeviceActivationPassword,
       });
       await waitForHeading(page, "Approve this device");
+      await page.getByLabel("Confirmation code").fill(confirmationCode);
       await page.getByRole("button", { name: "Approve device" }).click();
       await page.getByRole("heading", { name: "Device approved" }).waitFor();
       await page.getByText("Approval complete.").waitFor();
@@ -2132,7 +2133,7 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { flowId } = await fixture.setupActivationRequest(
+      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
         runtime,
         admin,
         deploymentId,
@@ -2162,6 +2163,7 @@ withLivePortalPage(
         password: liveDeviceActivationPendingPassword,
       });
       await waitForHeading(page, "Approve this device");
+      await page.getByLabel("Confirmation code").fill(confirmationCode);
       await waitForDeviceActivationReview({
         admin,
         runtime,
@@ -2196,6 +2198,7 @@ withLivePortalPage(
     const fixture = liveDeviceActivationRejectedFixture;
     const { admin, deploymentId } = await fixture.setupDeviceDeployment(
       runtime,
+      "required",
     );
     const loginAdmin = await liveDeviceActivationRejectedLoginFixture
       .setupSessionAdmin(runtime);
@@ -2204,7 +2207,7 @@ withLivePortalPage(
     try {
       const { identity, rootSecret, provisioned } = await fixture
         .setupProvisionedDevice(admin, deploymentId);
-      const { flowId } = await fixture.setupActivationRequest(
+      const { confirmationCode, flowId } = await fixture.setupActivationRequest(
         runtime,
         admin,
         deploymentId,
@@ -2249,6 +2252,7 @@ withLivePortalPage(
         password: liveDeviceActivationRejectedPassword,
       });
       await waitForHeading(page, "Approve this device");
+      await page.getByLabel("Confirmation code").fill(confirmationCode);
       await page.getByRole("button", { name: "Approve device" }).click();
       await waitForHeading(page, "Request denied");
       await page.getByText(rejectionReason).waitFor();

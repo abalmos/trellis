@@ -101,10 +101,10 @@ publicIdentityKey  = Ed25519Public(identityPrivateKey)
 Rules:
 
 - `identityPrivateKey` is the real online credential for activated devices
-- `activationKey` is used only for QR MACs and optional offline confirmation
-- Trellis may store `activationKey` for provisioning-time verification and
-  confirmation-code derivation, but it does not need the device root secret or
-  `identitySeed`
+- `activationKey` derives device-display confirmation evidence and may also be
+  used by the client-only offline QR helpers
+- Trellis stores the activation evidence needed to verify the confirmation code,
+  but it does not need the device root secret or `identitySeed`
 - if Trellis needs a stable instance id, it derives that id from
   `publicIdentityKey`
 - clients do not pass a separate user-chosen instance identifier in the normal
@@ -146,6 +146,10 @@ Rules:
   falling back to another digest in the deployment
 - `reviewMode: "required"` means portal completion creates or resumes a pending
   review rather than activating immediately
+- device deployments require `reviewMode: "none" | "required"`; service
+  deployments require `reviewMode: null`
+- `requiresDeviceDelegation` independently controls user delegation and does not
+  imply or bypass administrative review
 - there is no separate rollout-target digest field
 
 ### 4) Activated devices may not request resources for now
@@ -197,7 +201,8 @@ sequenceDiagram
     U->>P: Open /_trellis/portal/devices/activate?flowId=...
     U->>P: Authenticate and complete portal business logic
     P->>T: Activate known device instance
-    T-->>W: Bounded proof-bound wait resolves with activated status
+    W->>T: Retry POST /bootstrap/device with fresh request proof
+    T-->>W: Return ready session/context/NATS evidence
 ```
 
 If portal-side business logic is long-running, the portal may still use its own
@@ -216,7 +221,16 @@ pending-review step:
   decides the review through auth RPCs
 - the built-in portal and custom portals observe review and completion through
   the operation's `progress`, `watch()`, and `wait()` semantics until it becomes
-  `activated` or `rejected`
+  `activated`, `rejected`, or `expired`
+- `/bootstrap/device` creates or resumes the durable review; the authenticated
+  `Resolve` start transition verifies the device confirmation code and claims
+  the review for exactly one user
+- administrative approval of an unclaimed review does not create required user
+  delegation or make the device ready; the claiming user completes that
+  transition later
+- `Resolve` get and snapshot projection are read-only, server-side `wait()` is
+  notifier-driven rather than a SQLite polling loop, and operation cancellation
+  is unsupported
 
 ### 7) Device records
 
@@ -295,6 +309,7 @@ Rules:
   "deploymentId": "reader.default",
   "state": "pending",
   "requestedAt": "2026-04-05T12:03:00Z",
+  "expiresAt": "2026-04-05T12:18:00Z",
   "decidedAt": null,
   "reason": null
 }
@@ -323,9 +338,10 @@ surface that user later.
 }
 ```
 
-### 8) Outbound activation payload
+### 8) Offline QR enrollment is not a server route
 
-The QR payload is the outbound setup payload from device to auth.
+The client libraries retain helpers for constructing and validating this
+device-authored payload:
 
 ```json
 {
@@ -336,60 +352,58 @@ The QR payload is the outbound setup payload from device to auth.
 }
 ```
 
-Rules:
+Trellis 0.12 has no server endpoint that accepts this QR payload or verifies its
+MAC. Offline QR enrollment is future work. The current online workflow starts
+with the device's proof-bound `POST /bootstrap/device` request and uses the
+returned activation URL, durable review id, and device-derived confirmation
+code. Do not add or call the retired activation-request endpoint.
 
-- Trellis derives `instanceId` from `publicIdentityKey`
-- the payload does not need caller-provided type or instance identifiers
-- the QR MAC prevents tampering between the device and the browser flow
-- Trellis verifies `qrMac` using the stored `activationKey` before creating a
-  short-lived `kind: "device_activation"` browser flow
-- the returned browser flow id is the continuation handle for both portal UX and
-  online device waiting; the QR payload remains a bearer setup artifact guarded
-  by the MAC
+### 9) Online activation wait
 
-### 9) Online wait and optional offline confirmation
-
-Before a device is activated it cannot use normal authenticated RPCs, but an
-online device may still wait for activation completion by calling the auth wait
-endpoint with an identity-key proof. This bounded wait is deliberately retained
-as a pre-auth setup requirement; it is not a general control or bootstrap
-replacement.
+Before activation, a device cannot use authenticated RPCs. Device-side wait
+helpers therefore repeat `POST /bootstrap/device`, creating a fresh request id,
+timestamp, session proof, and session key on every attempt. There is no separate
+activation wait route.
 
 Response model:
 
 ```ts
-type WaitForDeviceActivationResponse =
-  | { status: "pending" }
+type DeviceBootstrapResponse =
   | {
-    status: "activated";
-    activatedAt: string;
-    confirmationCode?: string;
-    connectInfo: DeviceConnectInfo;
+    state: "activation_pending";
+    serverNow: number;
+    activation: {
+      state: "pending";
+      reviewId: string;
+      activationUrl: string;
+      expiresAt: number;
+      retryAfterMs: number;
+    };
   }
   | {
-    status: "rejected";
-    reason?: string;
+    state: "ready";
+    serverNow: number;
+    // exact retained bootstrap session, context, routes, and runtime evidence
   };
 ```
 
 Rules:
 
-- online devices use the wait endpoint to learn that activation completed
-- online wait requests include the `flowId` returned when the activation request
-  was created; Trellis loads that browser flow directly and verifies it matches
-  the signed device identity and nonce
-- wait proof construction and verification are canonical only in
+- each bootstrap response projects the authoritative review `expiresAt`; clients
+  derive a monotonic deadline from `expiresAt - serverNow`
+- claim, administrative decision, and delegation-completion transactions reject
+  expired reviews using server time; public review boundaries durably project
+  due pending reviews as `expired`
+- a later bootstrap may create a replacement review with a new review id and
+  confirmation evidence; callers do not silently follow that replacement
+- bootstrap proof construction and verification are canonical only in
   [auth-protocol.md](./auth-protocol.md); this document intentionally does not
   duplicate the algorithm
-- offline devices may receive a confirmation code from the portal flow out of
-  band and verify it locally with `activationKey`
-- when activation completes, Trellis derives the same confirmation code from the
-  stored `activationKey` and may return or display it even for online flows
-- local confirmation is separate from later online Trellis auth
-- Deno's high-level `checkDeviceActivation(...)` helper treats both online wait
-  completion and offline confirmation as internal transitions to later
-  `activated` status; it does not attempt a runtime connection until the caller
-  later invokes `TrellisDevice.connect(...)`
+- the locally derived confirmation code proves device-display possession to the
+  authenticated user who starts `Auth.DeviceUserAuthorities.Resolve`
+- a `ready` response is retained for the separate pure `connect_device` or
+  `TrellisDevice.connect(...)` handoff; clients do not bootstrap a second
+  session
 
 ### 10) Connect info is server-provided
 
@@ -433,11 +447,10 @@ Rules:
 ### 11) Runtime auth presents a contract
 
 Runtime auth happens after bootstrap returns `ready`. Device runtime is gated by
-registration, lifecycle state, and a presented contract proposal whose requested
-needs fit enabled device deployment authority and have converged into
-materialized authority. Activation is the user-delegated authority path; admin
-review can grant setup authority, but neither path replaces the runtime
-authority check.
+registration, active lifecycle state, any required administrative review and
+user delegation, and a presented contract proposal whose requested needs fit
+enabled device deployment authority and have converged into materialized
+authority. Deployment authority never substitutes for activation readiness.
 
 At connect time the device presents:
 
@@ -447,18 +460,16 @@ At connect time the device presents:
 Auth validates:
 
 1. the known device instance by public identity key
-2. lifecycle state allows runtime connection: either activation state is
-   `activated`, or no activation exists and the instance is still `registered`
-   under an admin/review-approved setup flow
+2. lifecycle state and activation policy allow runtime connection, including an
+   active delegation when the deployment requires one
 3. the device deployment is present and enabled
 4. the presented contract proposal derives requested needs that fit device
    deployment authority and are present in materialized authority
 
-This keeps validation explicit while separating authority fit from
-implementation offer liveness. Activation is not the runtime gate by itself:
-registration, lifecycle state, and materialized authority remain mandatory.
-Admin/review-approved setup sessions do not create or mutate activation records;
-activation remains the separate step that adds user-delegated authority.
+This keeps validation explicit while separating authority fit from activation
+and implementation offer liveness. Administrative approval, required user
+delegation, registration, lifecycle state, and materialized authority are
+independent fail-closed inputs.
 
 Lifecycle events are:
 
@@ -482,13 +493,12 @@ Rules:
 - activation helpers SHOULD build, encode, parse, and verify activation payloads
   and confirmation codes rather than forcing app code to reimplement byte
   layouts locally
-- wait helpers own the polling loop for the auth wait endpoint and return once
-  activation is ready
-- if the wait endpoint returns `{ status: "rejected" }`, TypeScript wait helpers
-  should throw rather than returning a rejected union branch to the caller; Rust
-  helpers should surface the failure through their normal `Result` error path
-- connect-info helpers own the identity-key proof/signature step and return the
-  auth-owned ready/connect-info response
+- wait helpers own bounded polling through repeated `/bootstrap/device`
+  requests, with a fresh request ID, timestamp, and proof on every attempt
+- terminal rejected, expired, and disabled responses are errors; Rust surfaces
+  them through typed `DeviceActivationError` variants
+- activation helpers retain the exact ready bootstrap response for the separate
+  pure runtime connection step instead of issuing a second device session
 - portal and admin browser apps SHOULD prefer a typed device-activation client
   wrapper over manually spelling auth RPC method names and payload shapes
 - authenticated portal-side activation starts the
@@ -505,8 +515,8 @@ Rules:
   convention as service runtime helpers and should log distinct NATS lifecycle
   events for disconnect, reconnect attempts, reconnect success, stale
   connections, and connection errors
-- device runtime helpers SHOULD fetch current connect info on startup rather
-  than persisting stale connect info across restarts
+- device runtime helpers SHOULD use current proof-bound bootstrap evidence on
+  startup rather than persisting stale session evidence across restarts
 - the TypeScript runtime connect helper publishes baseline samples automatically
   through its exact Auth-granted private health subject and exposes the same
   callback-based `health` helper surface used by services for enriching those
@@ -519,13 +529,12 @@ Rules:
 - Deno file-backed activation persistence stays internal to that
   activation-status helper, with storage-location overrides when the runtime
   needs to control the storage location
-- online activation waiting and offline confirmation actions resolve
-  user-delegated authority; they do not enable device-owned runtime access
+- online activation waiting observes server-owned review and delegation state;
+  client-only offline QR helpers do not enable runtime access
 - Rust activated-device code SHOULD use the Rust helpers for deterministic
-  identity derivation, activation payload and URL construction, wait-request
-  signing, activation wait, connect-info retrieval, runtime connection, and
-  confirmation-code verification rather than hand-written HKDF, HMAC,
-  wait-proof, connect-info, or connection logic
+  identity derivation, confirmation-code construction, proof-bound activation
+  status/wait, ready-evidence handoff, and runtime connection rather than
+  hand-written HKDF, HMAC, bootstrap-proof, or connection logic
 - Rust callers may use lower-level generated SDK surfaces for authenticated
   portal-side activation until a small typed convenience wrapper is available,
   but those calls still follow the `Auth.DeviceUserAuthorities.Resolve`
@@ -536,14 +545,14 @@ Rules:
 
 Implementation status:
 
-- TypeScript currently provides the full activated-device connection path
-  through `checkDeviceActivation(...)` and `TrellisDevice.connect(...)`
-- Rust currently has deterministic identity, activation payload, wait signing,
-  wait polling, confirmation-code helpers, connect-info retrieval, and an
-  activated-device runtime connect facade through
-  `TrellisClient::connect_device(...)`
-- generated Rust device/state participant facades are still pending, so Rust
-  demos may use lower-level session or offline flows until those facades exist
+- TypeScript provides the activated-device path through
+  `checkDeviceActivation(...)`, its bounded wait helper, and the separate
+  `TrellisDevice.connect(...)` runtime entry point
+- Rust provides `DeviceActivationOptions`, `check_device_activation(...)`,
+  `wait_for_device_activation(...)`, typed pending/session/error projections,
+  and the separate pure `TrellisClient::connect_device(...)` runtime entry point
+- both clients use only `/bootstrap/device`; neither launches a browser or calls
+  a retired activation-request, wait, or connect-info route
 
 ### Minimal activated device example
 
@@ -601,9 +610,9 @@ Those helpers SHOULD own:
 - deriving the identity seed, public identity key, and activation key from the
   device root secret
 - building and parsing the activation payload
-- signing wait requests and polling until activation resolves
+- signing fresh bootstrap requests and polling until activation resolves
 - deriving and verifying the short confirmation code when used
-- fetching and refreshing `DeviceConnectInfo`
+- retaining the ready bootstrap response for the connection handoff
 - wrapping the low-level HTTP and RPC surfaces into small typed convenience
   methods
 

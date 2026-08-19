@@ -1,6 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
   import type { AuthDeploymentsCreateInput } from "@qlever-llc/trellis/sdk/auth";
+  import { resolve } from "$app/paths";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
@@ -15,6 +16,7 @@
   let pending = $state(false);
   let deploymentId = $state("");
   let reviewMode = $state<"none" | "required">("none");
+  let requiresDeviceDelegation = $state(false);
 
   async function createDeployment() {
     pending = true;
@@ -27,7 +29,8 @@
         kind: "device",
         participantId: null,
         portalId: null,
-        requiresDeviceDelegation: reviewMode === "required",
+        requiresDeviceDelegation,
+        reviewMode,
       };
 
       const response = await trellis.authDeploymentsCreate(input).take();
@@ -35,6 +38,7 @@
       notifications.success(`Device deployment ${response.deployment.deploymentId} created.`, "Created");
       deploymentId = "";
       reviewMode = "none";
+      requiresDeviceDelegation = false;
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -46,7 +50,7 @@
 <section class="space-y-4">
   <PageToolbar title="Create device deployment" description="Create a deployment that controls device activation review requirements.">
     {#snippet actions()}
-      <a class="btn btn-ghost btn-sm" href="/admin/devices">Back to devices</a>
+      <a class="btn btn-ghost btn-sm" href={resolve("/admin/devices")}>Back to devices</a>
     {/snippet}
   </PageToolbar>
 
@@ -67,6 +71,16 @@
           <option value="none">No review</option>
           <option value="required">Review required</option>
         </select>
+      </label>
+
+      <label class="form-control gap-1 lg:col-span-2">
+        <span class="label cursor-pointer justify-start gap-3 rounded-box border border-base-300 px-3 py-2">
+          <input class="checkbox checkbox-sm" type="checkbox" bind:checked={requiresDeviceDelegation} />
+          <span>
+            <span class="label-text text-sm">Require user delegation</span>
+            <span class="block text-xs text-base-content/60">Require an activating user to grant device authority. Administrative review remains controlled separately above.</span>
+          </span>
+        </span>
       </label>
 
       <div class="flex items-end justify-end lg:col-span-2">

@@ -518,7 +518,7 @@ mod tests {
         ));
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
+            "deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json --jobs 20"
         );
         assert!(commands.contains(&"deno run -A -c ts/deno.json integration/live_runner.ts --build-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
         assert!(commands.contains(&"deno run -A -c ts/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json".to_string()));
@@ -706,7 +706,7 @@ mod tests {
 
         assert_eq!(
             commands.last().expect("last release verify command"),
-            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json"
+            "env TRELLIS_TEST_KEEP_WORKDIR=1 deno run -A -c ts/deno.json integration/live_runner.ts --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json --jobs 20"
         );
     }
 

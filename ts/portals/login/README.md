@@ -68,7 +68,8 @@ PUBLIC_TRELLIS_URL=http://localhost:3000 deno task build
 NATS WebSocket still defaults to `ws://localhost:8080`. NATS is required for
 `/_trellis/portal/devices/activate` because that route starts and watches the
 `Auth.DeviceUserAuthorities.Resolve` operation over the Trellis runtime. Device
-connect info is served separately by `POST /auth/devices/connect-info`.
+activation and ready session evidence both use proof-bound
+`POST /bootstrap/device` requests; there is no separate connect-info route.
 
 Portal approval and activation copy should describe exact-digest authorization.
 User approvals are for the delegated app or agent contract digest shown in the

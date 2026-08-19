@@ -567,6 +567,9 @@ fn participant_alias_mappings(
         .collect::<Vec<_>>();
     let mut mappings = Vec::new();
     for (alias, use_ref) in &uses {
+        if !trellis_codegen_rust::participant_use_requires_mapping(&loaded, alias, use_ref) {
+            continue;
+        }
         if let Some(mapped) = plan
             .iter()
             .find(|candidate| candidate.contract_id == use_ref.api && candidate.cargo_out.is_some())
@@ -585,10 +588,6 @@ fn participant_alias_mappings(
                 crate_path: mapped.cargo_out.clone(),
                 cargo_dependency: None,
             });
-            continue;
-        }
-
-        if !trellis_codegen_rust::participant_use_requires_mapping(&loaded, alias, use_ref) {
             continue;
         }
 

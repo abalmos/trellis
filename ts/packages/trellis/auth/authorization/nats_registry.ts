@@ -155,7 +155,7 @@ export class AuthorizationRegistryReader {
   }
 }
 
-/** Parse and validate the signed manifest pointer without verifying signatures. */
+/** Parse and validate the current manifest pointer. */
 export function parseManifestPointer(value: Uint8Array): {
   generation: number;
   digest: string;
@@ -164,11 +164,7 @@ export function parseManifestPointer(value: Uint8Array): {
   if (!isRecord(parsed)) {
     throw new Error("current issuer manifest pointer is invalid");
   }
-  const keys = Object.keys(parsed).sort();
   if (
-    keys.length !== 2 ||
-    keys[0] !== "digest" ||
-    keys[1] !== "generation" ||
     typeof parsed.generation !== "number" ||
     !Number.isSafeInteger(parsed.generation) ||
     parsed.generation <= 0 ||

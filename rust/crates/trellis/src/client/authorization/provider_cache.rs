@@ -473,6 +473,7 @@ impl AuthorizationProviderCache {
         drop(revocations);
         if let Some(own) = self.own.as_ref() {
             if own.context_digest().is_ok_and(|current| current == digest) {
+                own.clear()?;
                 own.request_refresh();
             }
         }
@@ -819,6 +820,7 @@ impl AuthorizationProviderCache {
         drop(revocations);
         if let Some(own) = self.own.as_ref() {
             if own.context_digest().is_ok_and(|current| current == digest) {
+                own.clear()?;
                 own.request_refresh();
             }
         }
@@ -1303,7 +1305,7 @@ fn classify_event_resolution_failure(
 /// Parse and validate a revocation record.
 fn parse_revocation_record(value: &[u8]) -> Result<i64, TrellisClientError> {
     #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
+    #[serde(rename_all = "camelCase")]
     struct Record {
         revoked_at: i64,
     }
@@ -1329,11 +1331,16 @@ mod wire_tests {
     use super::parse_revocation_record;
 
     #[test]
-    fn revocation_has_exact_wire_shape() {
+    fn revocation_is_additively_tolerant() {
         assert_eq!(
             parse_revocation_record(br#"{"revokedAt":123}"#).expect("exact revocation"),
             123
         );
-        assert!(parse_revocation_record(br#"{"revokedAt":123,"digest":"legacy"}"#).is_err());
+        assert_eq!(
+            parse_revocation_record(br#"{"revokedAt":123,"future":true}"#)
+                .expect("extended revocation"),
+            123
+        );
+        assert!(parse_revocation_record(br#"{"revokedAt":0,"future":true}"#).is_err());
     }
 }
