@@ -4,6 +4,9 @@ use trellis_contracts::{
     ContractStateKind, ContractsError,
 };
 
+#[path = "service.rs"]
+mod service;
+
 /// Build the Rust-authored Field Device demo native API.
 pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
     ApiBuilder::authoring(
@@ -63,11 +66,8 @@ pub fn api_artifact() -> Result<ApiArtifactV1, ContractsError> {
 }
 
 /// Build the device's native API and participant artifacts.
-pub fn contract_artifacts(
-) -> Result<ContractArtifacts, ContractsError> {
-    let service_api: Value = serde_json::from_str(include_str!(
-        "../../ts/generated/protocol/apis/trellis.demo-service@v1.json"
-    ))?;
+pub fn contract_artifacts() -> Result<ContractArtifacts, ContractsError> {
+    let service_api = service::api_artifact()?.normalized_value()?;
     let state_api: Value = serde_json::from_str(include_str!(
         "../../../generated/protocol/apis/trellis.state@v1.json"
     ))?;
