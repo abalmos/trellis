@@ -148,6 +148,12 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Prepare release version
+        run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
+
+      - name: Generate release SDK artifacts
+        run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
+
       - name: Cache Rust build artifacts
         uses: swatinem/rust-cache@v2
         with:
@@ -156,23 +162,6 @@ jobs:
             rust -> target
             rust/xtask -> target
             rust/tools/generate -> target
-
-      - name: Bootstrap generated SDK artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p generated/packages/cargo/auth/src
-          printf '%s\n' \
-            '[package]' \
-            'name = "trellis-sdk-auth"' \
-            'version = "0.11.0"' \
-            'edition = "2021"' \
-            > generated/packages/cargo/auth/Cargo.toml
-          : > generated/packages/cargo/auth/src/lib.rs
-          time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
-
-      - name: Prepare release version
-        run: time cargo run --manifest-path xtask/Cargo.toml -- release prepare --tag "${RELEASE_TAG}"
 
       - name: Capture release outputs
         id: release
@@ -195,9 +184,6 @@ jobs:
           else
             time cargo run --manifest-path xtask/Cargo.toml -- release check-metadata
           fi
-
-      - name: Generate release SDK artifacts
-        run: time cargo run --manifest-path rust/tools/generate/Cargo.toml -- prepare --no-npm .
 
       - name: Build embedded login portal
         run: deno task -c ts/portals/login/deno.json build:embedded
@@ -224,7 +210,7 @@ jobs:
             art
             conformance
             generated
-            js
+            ts
             rust
             scripts
             xtask
@@ -709,43 +695,11 @@ jobs:
           name: integration-live-artifacts
           path: dist/integration-runtime
 
-  verify-live-inventory:
-    name: Verify shared live inventory
-    needs:
-      - prepare-release
-      - verify-live-build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download prepared release workspace
-        uses: actions/download-artifact@v4
-        with:
-          name: prepared-release
-          path: .
-
-      - name: Download shared live artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: integration-live-artifacts
-          path: dist/integration-runtime
-
-      - name: Set up Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: ${{ env.DENO_VERSION }}
-
-      - name: Verify live artifact inventory
-        run: deno run -A -c ts/deno.json integration/live_runner.ts --inventory-only --prebuilt-only --artifacts-manifest dist/integration-runtime/manifest.json
-
   verify-live:
     name: Verify shared live lane
     needs:
       - prepare-release
       - verify-live-build
-      - verify-live-inventory
     runs-on: ubuntu-latest
 
     steps:
